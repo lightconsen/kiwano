@@ -1,0 +1,7 @@
+[package]
+name = "kiwano-gateway"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]

@@ -1,2 +1,21 @@
 # 本地工作文档，不纳入版本管理
 tech.md
+
+# Node / Vite
+node_modules
+dist
+dist-ssr
+*.local
+logs
+*.log
+pnpm-debug.log*
+
+# Rust
+target/
+src-tauri/gen/schemas
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json

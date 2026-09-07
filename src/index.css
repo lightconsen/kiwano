@@ -1,0 +1,51 @@
+/* Kiwano design tokens — mirrored from design/index.html (SSOT), see tech.md §4.8.
+   Colors are plain CSS vars so inline styles can use var(--kiwi) etc. directly;
+   @theme inline maps them to Tailwind utilities (bg-kiwi, text-mut, border-line …). */
+
+:root {
+  --bg: oklch(0.15 0.008 260);
+  --surface: oklch(0.185 0.01 260);
+  --surface2: oklch(0.225 0.012 260);
+  --line: oklch(0.27 0.012 260);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --kiwi-dim: oklch(0.55 0.14 132);
+  /* status colors (design.md §5) */
+  --blue: oklch(0.72 0.13 245);
+  --amber: oklch(0.78 0.15 80);
+  --red: oklch(0.65 0.2 25);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-mut: var(--mut);
+  --color-kiwi: var(--kiwi);
+  --color-kiwi-soft: var(--kiwi-soft);
+  --color-kiwi-dim: var(--kiwi-dim);
+  --color-blue: var(--blue);
+  --color-amber: var(--amber);
+  --color-red: var(--red);
+  --font-sans: "Inter Variable", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}

@@ -49,3 +49,172 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
+
+/* ── 原型组件类（design/index.html <style> 的移植，SSOT 为设计稿） ── */
+
+.navtab {
+  position: relative;
+  transition: color 0.15s;
+}
+.navtab::after {
+  content: "";
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.navtab.active {
+  color: var(--kiwi);
+}
+.navtab.active::after {
+  background: var(--kiwi);
+}
+.navtab:hover:not(.active) {
+  color: var(--ink);
+}
+
+.row {
+  transition: background 0.12s;
+}
+.row:hover {
+  background: var(--surface);
+}
+.row.current {
+  background: var(--kiwi-soft);
+  box-shadow: inset 2px 0 0 var(--kiwi);
+}
+
+.chip {
+  transition: all 0.15s;
+  cursor: pointer;
+}
+.chip.active {
+  background: var(--surface2);
+  color: var(--ink);
+}
+
+.seg.active {
+  background: var(--surface2);
+  color: var(--ink);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+.btn-primary:hover {
+  filter: brightness(1.1);
+}
+.btn-ghost:hover {
+  background: var(--surface2);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.logo-c {
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+  flex: none;
+}
+
+.achip {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex: none;
+}
+
+.billtag {
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+  flex: none;
+  line-height: 14px;
+}
+.bill-payg {
+  background: oklch(0.62 0.14 250 / 0.16);
+  color: oklch(0.72 0.12 250);
+}
+.bill-plan {
+  background: oklch(0.62 0.16 300 / 0.2);
+  color: oklch(0.78 0.12 300);
+}
+.bill-unl {
+  background: var(--surface2);
+  color: var(--mut);
+}
+
+.tswitch {
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s;
+  flex: none;
+}
+.tswitch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--mut);
+  transition: all 0.18s;
+}
+.tswitch.on {
+  background: var(--kiwi-dim);
+  border-color: var(--kiwi-dim);
+}
+.tswitch.on::after {
+  left: 16px;
+  background: oklch(0.13 0.01 260);
+}
+
+.pcard {
+  transition: border-color 0.15s;
+}
+.pcard:hover {
+  border-color: oklch(0.36 0.02 260);
+}
+
+select,
+input {
+  outline: none;
+}
+select:focus,
+input:focus {
+  border-color: var(--kiwi-dim) !important;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface2);
+  border-radius: 8px;
+}
+

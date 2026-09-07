@@ -946,11 +946,15 @@ pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
 
 // ── Settings ──
 
-pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
-    let mut s: SettingsVm = aux
-        .load_settings_json()
+/// 读取 UI 设置（托盘/自启等 Rust 侧逻辑用；`build_settings` 的无 store 部分）。
+pub(crate) fn ui_settings(aux: &Aux) -> SettingsVm {
+    aux.load_settings_json()
         .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
+    let mut s: SettingsVm = ui_settings(aux);
     s.takeovers = AGENTS
         .iter()
         .map(|(agent, label)| {

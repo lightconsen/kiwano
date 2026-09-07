@@ -114,6 +114,49 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
     });
 }
 
+// ── Tray / autostart (tech.md §三 P1：托盘 + 关闭到托盘 + 开机自启) ──
+
+/// 把持久化的 autostart 设置同步到系统登录项（幂等，失败静默——下次启动再对齐）。
+fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let mgr = app.autolaunch();
+    let _ = if enabled { mgr.enable() } else { mgr.disable() };
+}
+
+fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::TrayIconBuilder;
+
+    let open = MenuItem::with_id(app, "open", "打开 Kiwano", true, None::<&str>)?;
+    let gw = MenuItem::with_id(
+        app,
+        "gateway",
+        format!("网关 :{data_port}"),
+        false,
+        None::<&str>,
+    )?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 Kiwano", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &gw, &sep, &quit])?;
+
+    TrayIconBuilder::with_id("kiwano-tray")
+        .icon(app.default_window_icon().expect("bundle icon").clone())
+        .tooltip(format!("Kiwano — 本地网关 :{data_port}"))
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+            "quit" => app.exit(0), // 守护进程不随 GUI 退出（tech.md §2.4 B）
+            _ => {}
+        })
+        .build(app)?;
+    Ok(())
+}
+
 #[tauri::command]
 fn get_gateway_status(state: State<AppState>) -> vm::GatewayStatusVm {
     vm::GatewayStatusVm {
@@ -181,10 +224,16 @@ fn get_settings(state: State<AppState>) -> Result<vm::SettingsVm, String> {
 
 #[tauri::command]
 fn update_settings(
+    app: tauri::AppHandle,
     state: State<AppState>,
     patch: serde_json::Value,
 ) -> Result<vm::SettingsVm, String> {
-    vm::update_settings(&state.store, &state.aux, &patch)
+    let vm = vm::update_settings(&state.store, &state.aux, &patch)?;
+    // autostart 变更实时同步到系统登录项
+    if let Some(v) = patch.get("autostart").and_then(|v| v.as_bool()) {
+        sync_autostart(&app, v);
+    }
+    Ok(vm)
 }
 
 #[tauri::command]
@@ -253,6 +302,7 @@ pub fn run() {
                 }
             };
 
+            let ui = vm::ui_settings(&aux);
             app.manage(AppState {
                 store,
                 aux,
@@ -261,6 +311,14 @@ pub fn run() {
                 data_port,
             });
             spawn_watchdog(app.handle().clone());
+
+            // 托盘 + 登录项（设置里的 autostart/close_to_tray 从此真实生效）
+            app.handle().plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))?;
+            setup_tray(app, data_port)?;
+            sync_autostart(app.handle(), ui.autostart);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -279,6 +337,16 @@ pub fn run() {
             get_footer_stats,
             import_cc_switch,
         ])
+        .on_window_event(|window, event| {
+            // 关闭到托盘：拦截 CloseRequested，隐藏窗口而非退出（设置可关）
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.app_handle().state::<AppState>();
+                if vm::ui_settings(&state.aux).close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, _event| {

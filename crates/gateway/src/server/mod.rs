@@ -53,7 +53,10 @@ impl GatewayState {
 
     /// Current route table snapshot (cheap `Arc` clone).
     pub fn route_table(&self) -> Arc<RouteTable> {
-        self.route_table.read().expect("route table lock poisoned").clone()
+        self.route_table
+            .read()
+            .expect("route table lock poisoned")
+            .clone()
     }
 
     /// Rebuild the route table from SQLite; returns the number of agents
@@ -145,15 +148,27 @@ mod tests {
         assert_eq!(extract_placeholder_key(&headers), None);
 
         headers.insert("x-api-key", HeaderValue::from_static("kw-ag-claude-1"));
-        assert_eq!(extract_placeholder_key(&headers).as_deref(), Some("kw-ag-claude-1"));
+        assert_eq!(
+            extract_placeholder_key(&headers).as_deref(),
+            Some("kw-ag-claude-1")
+        );
 
         let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer kw-ag-codex-2"));
-        assert_eq!(extract_placeholder_key(&headers).as_deref(), Some("kw-ag-codex-2"));
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer kw-ag-codex-2"),
+        );
+        assert_eq!(
+            extract_placeholder_key(&headers).as_deref(),
+            Some("kw-ag-codex-2")
+        );
 
         let mut headers = HeaderMap::new();
         headers.insert("x-goog-api-key", HeaderValue::from_static("kw-ag-gemini-3"));
-        assert_eq!(extract_placeholder_key(&headers).as_deref(), Some("kw-ag-gemini-3"));
+        assert_eq!(
+            extract_placeholder_key(&headers).as_deref(),
+            Some("kw-ag-gemini-3")
+        );
 
         // Bearer without a token or blank values are ignored.
         let mut headers = HeaderMap::new();

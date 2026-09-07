@@ -42,12 +42,18 @@ mod tests {
 
     #[test]
     fn classifies_anthropic_paths() {
-        assert_eq!(classify_path("/v1/messages"), PathProtocol::Fixed(Protocol::Anthropic));
+        assert_eq!(
+            classify_path("/v1/messages"),
+            PathProtocol::Fixed(Protocol::Anthropic)
+        );
         assert_eq!(
             classify_path("/v1/messages/count_tokens"),
             PathProtocol::Fixed(Protocol::Anthropic)
         );
-        assert_eq!(classify_path("/v1/complete"), PathProtocol::Fixed(Protocol::Anthropic));
+        assert_eq!(
+            classify_path("/v1/complete"),
+            PathProtocol::Fixed(Protocol::Anthropic)
+        );
     }
 
     #[test]
@@ -56,10 +62,22 @@ mod tests {
             classify_path("/v1/chat/completions"),
             PathProtocol::Fixed(Protocol::OpenAI)
         );
-        assert_eq!(classify_path("/v1/responses"), PathProtocol::Fixed(Protocol::OpenAI));
-        assert_eq!(classify_path("/v1/responses/input"), PathProtocol::Fixed(Protocol::OpenAI));
-        assert_eq!(classify_path("/v1/completions"), PathProtocol::Fixed(Protocol::OpenAI));
-        assert_eq!(classify_path("/v1/embeddings"), PathProtocol::Fixed(Protocol::OpenAI));
+        assert_eq!(
+            classify_path("/v1/responses"),
+            PathProtocol::Fixed(Protocol::OpenAI)
+        );
+        assert_eq!(
+            classify_path("/v1/responses/input"),
+            PathProtocol::Fixed(Protocol::OpenAI)
+        );
+        assert_eq!(
+            classify_path("/v1/completions"),
+            PathProtocol::Fixed(Protocol::OpenAI)
+        );
+        assert_eq!(
+            classify_path("/v1/embeddings"),
+            PathProtocol::Fixed(Protocol::OpenAI)
+        );
     }
 
     #[test]

@@ -388,9 +388,7 @@ impl Store {
                     period_limit, reset_period, enabled, created_at, updated_at
              FROM providers WHERE id = ?1",
         )?;
-        let provider = stmt
-            .query_row(params![id], provider_from_row)
-            .optional()?;
+        let provider = stmt.query_row(params![id], provider_from_row).optional()?;
         Ok(provider)
     }
 
@@ -447,7 +445,12 @@ impl Store {
 
     // ---- strategies & bindings (tech.md §4.7) ---------------------------
 
-    pub fn upsert_strategy(&self, agent: &str, kind: StrategyType, config: Option<&str>) -> Result<()> {
+    pub fn upsert_strategy(
+        &self,
+        agent: &str,
+        kind: StrategyType,
+        config: Option<&str>,
+    ) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO agent_strategies (agent, type, config) VALUES (?1, ?2, ?3)
@@ -459,8 +462,8 @@ impl Store {
 
     pub fn get_strategy(&self, agent: &str) -> Result<Option<Strategy>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn
-            .prepare("SELECT agent, type, config FROM agent_strategies WHERE agent = ?1")?;
+        let mut stmt =
+            conn.prepare("SELECT agent, type, config FROM agent_strategies WHERE agent = ?1")?;
         let s = stmt
             .query_row(params![agent], |row| {
                 let type_str: String = row.get(1)?;
@@ -579,8 +582,9 @@ impl Store {
 
     pub fn list_placeholder_keys(&self) -> Result<Vec<PlaceholderKey>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT key, agent, created_at FROM placeholder_keys ORDER BY created_at ASC")?;
+        let mut stmt = conn.prepare(
+            "SELECT key, agent, created_at FROM placeholder_keys ORDER BY created_at ASC",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok(PlaceholderKey {
                 key: row.get(0)?,
@@ -793,9 +797,7 @@ impl Store {
 
     pub fn metrics(&self) -> Result<StoreMetrics> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let count = |sql: &str| -> Result<i64> {
-            Ok(conn.query_row(sql, [], |row| row.get(0))?)
-        };
+        let count = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |row| row.get(0))?) };
         Ok(StoreMetrics {
             providers: count("SELECT COUNT(*) FROM providers")?,
             bindings: count("SELECT COUNT(*) FROM agent_bindings")?,
@@ -877,7 +879,9 @@ mod tests {
     fn migration_creates_tables_and_wal() {
         let (_dir, store) = temp_store();
         let conn = store.conn.lock().unwrap();
-        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
 
         let journal: String = conn
@@ -942,10 +946,16 @@ mod tests {
     #[test]
     fn strategy_and_binding_selection() {
         let (_dir, store) = temp_store();
-        store.insert_provider(&sample_provider("a", Protocol::Anthropic)).unwrap();
-        store.insert_provider(&sample_provider("b", Protocol::OpenAI)).unwrap();
+        store
+            .insert_provider(&sample_provider("a", Protocol::Anthropic))
+            .unwrap();
+        store
+            .insert_provider(&sample_provider("b", Protocol::OpenAI))
+            .unwrap();
 
-        store.upsert_strategy("claude", StrategyType::Single, None).unwrap();
+        store
+            .upsert_strategy("claude", StrategyType::Single, None)
+            .unwrap();
         let s = store.get_strategy("claude").unwrap().unwrap();
         assert_eq!(s.kind, StrategyType::Single);
         assert_eq!(s.agent, "claude");
@@ -1004,7 +1014,9 @@ mod tests {
     #[test]
     fn deleting_provider_cascades_bindings() {
         let (_dir, store) = temp_store();
-        store.insert_provider(&sample_provider("p", Protocol::Anthropic)).unwrap();
+        store
+            .insert_provider(&sample_provider("p", Protocol::Anthropic))
+            .unwrap();
         store
             .upsert_binding(&Binding {
                 agent: "claude".into(),
@@ -1023,8 +1035,12 @@ mod tests {
     #[test]
     fn placeholder_key_lookup() {
         let (_dir, store) = temp_store();
-        store.upsert_placeholder_key("kw-ag-claude-abc123", "claude").unwrap();
-        store.upsert_placeholder_key("kw-ag-codex-xyz789", "codex").unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-claude-abc123", "claude")
+            .unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-codex-xyz789", "codex")
+            .unwrap();
 
         assert_eq!(
             store.agent_for_key("kw-ag-claude-abc123").unwrap(),
@@ -1037,7 +1053,9 @@ mod tests {
         assert_eq!(store.agent_for_key("kw-ag-unknown").unwrap(), None);
 
         // Upsert rebinds the agent.
-        store.upsert_placeholder_key("kw-ag-claude-abc123", "gemini").unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-claude-abc123", "gemini")
+            .unwrap();
         assert_eq!(
             store.agent_for_key("kw-ag-claude-abc123").unwrap(),
             Some("gemini".to_string())
@@ -1064,9 +1082,15 @@ mod tests {
             status: "ok".to_string(),
         };
 
-        store.record_usage(&mk("2026-09-06T10:00:00+00:00", "p1", 100, 200)).unwrap();
-        store.record_usage(&mk("2026-09-06T11:00:00+00:00", "p1", 10, 20)).unwrap();
-        store.record_usage(&mk("2026-09-07T10:00:00+00:00", "p2", 7, 3)).unwrap();
+        store
+            .record_usage(&mk("2026-09-06T10:00:00+00:00", "p1", 100, 200))
+            .unwrap();
+        store
+            .record_usage(&mk("2026-09-06T11:00:00+00:00", "p1", 10, 20))
+            .unwrap();
+        store
+            .record_usage(&mk("2026-09-07T10:00:00+00:00", "p2", 7, 3))
+            .unwrap();
         store
             .record_usage(&UsageRecord {
                 ts: "2026-09-07T12:00:00+00:00".into(),
@@ -1093,7 +1117,9 @@ mod tests {
         assert_eq!(agent_totals.requests, 3);
         assert_eq!(agent_totals.input_tokens, 117);
 
-        let since_totals = store.usage_totals(None, Some("2026-09-07T00:00:00+00:00")).unwrap();
+        let since_totals = store
+            .usage_totals(None, Some("2026-09-07T00:00:00+00:00"))
+            .unwrap();
         assert_eq!(since_totals.requests, 2);
 
         let by_provider = store.usage_by_provider(Some("claude"), None).unwrap();
@@ -1116,7 +1142,9 @@ mod tests {
     #[test]
     fn health_upsert_and_get() {
         let (_dir, store) = temp_store();
-        store.insert_provider(&sample_provider("p1", Protocol::OpenAI)).unwrap();
+        store
+            .insert_provider(&sample_provider("p1", Protocol::OpenAI))
+            .unwrap();
 
         assert!(store.get_health("p1").unwrap().is_none());
 
@@ -1150,8 +1178,12 @@ mod tests {
     #[test]
     fn metrics_counts() {
         let (_dir, store) = temp_store();
-        store.insert_provider(&sample_provider("p1", Protocol::Anthropic)).unwrap();
-        store.upsert_placeholder_key("kw-ag-claude-abc", "claude").unwrap();
+        store
+            .insert_provider(&sample_provider("p1", Protocol::Anthropic))
+            .unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-claude-abc", "claude")
+            .unwrap();
         store
             .upsert_binding(&Binding {
                 agent: "claude".into(),

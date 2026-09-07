@@ -164,7 +164,10 @@ impl RouteTable {
                 "strategy not implemented yet (MVP); degrading to primary binding"
             );
         }
-        route.candidates.first().ok_or_else(|| GatewayError::NoBinding(agent.to_string()))
+        route
+            .candidates
+            .first()
+            .ok_or_else(|| GatewayError::NoBinding(agent.to_string()))
     }
 }
 
@@ -197,7 +200,7 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{now_rfc3339, Binding, Billing, Provider};
+    use crate::store::{now_rfc3339, Billing, Binding, Provider};
 
     fn provider(id: &str, protocol: Protocol, enabled: bool) -> Provider {
         Provider {
@@ -231,21 +234,45 @@ mod tests {
     /// Seed a store inside a caller-owned TempDir (kept alive for the test).
     fn seeded_store(dir: &tempfile::TempDir) -> Store {
         let store = Store::open(dir.path().join("t.db")).unwrap();
-        store.insert_provider(&provider("p-ant", Protocol::Anthropic, true)).unwrap();
-        store.insert_provider(&provider("p-oai", Protocol::OpenAI, true)).unwrap();
-        store.insert_provider(&provider("p-backup", Protocol::Anthropic, true)).unwrap();
-        store.insert_provider(&provider("p-off", Protocol::Anthropic, false)).unwrap();
+        store
+            .insert_provider(&provider("p-ant", Protocol::Anthropic, true))
+            .unwrap();
+        store
+            .insert_provider(&provider("p-oai", Protocol::OpenAI, true))
+            .unwrap();
+        store
+            .insert_provider(&provider("p-backup", Protocol::Anthropic, true))
+            .unwrap();
+        store
+            .insert_provider(&provider("p-off", Protocol::Anthropic, false))
+            .unwrap();
 
-        store.upsert_strategy("claude", StrategyType::Single, None).unwrap();
-        store.upsert_strategy("codex", StrategyType::Single, None).unwrap();
+        store
+            .upsert_strategy("claude", StrategyType::Single, None)
+            .unwrap();
+        store
+            .upsert_strategy("codex", StrategyType::Single, None)
+            .unwrap();
 
-        store.upsert_binding(&binding("claude", "p-ant", 0, true)).unwrap();
-        store.upsert_binding(&binding("claude", "p-backup", 1, true)).unwrap();
-        store.upsert_binding(&binding("claude", "p-off", 0, true)).unwrap();
-        store.upsert_binding(&binding("codex", "p-oai", 0, true)).unwrap();
+        store
+            .upsert_binding(&binding("claude", "p-ant", 0, true))
+            .unwrap();
+        store
+            .upsert_binding(&binding("claude", "p-backup", 1, true))
+            .unwrap();
+        store
+            .upsert_binding(&binding("claude", "p-off", 0, true))
+            .unwrap();
+        store
+            .upsert_binding(&binding("codex", "p-oai", 0, true))
+            .unwrap();
 
-        store.upsert_placeholder_key("kw-ag-claude-abc123", AGENT_CLAUDE).unwrap();
-        store.upsert_placeholder_key("kw-ag-codex-xyz789", AGENT_CODEX).unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-claude-abc123", AGENT_CLAUDE)
+            .unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-codex-xyz789", AGENT_CODEX)
+            .unwrap();
         store
     }
 
@@ -255,7 +282,10 @@ mod tests {
         let store = seeded_store(&dir);
         let table = RouteTable::load(&store).unwrap();
 
-        assert_eq!(table.agent_for_key("kw-ag-claude-abc123"), Some(AGENT_CLAUDE));
+        assert_eq!(
+            table.agent_for_key("kw-ag-claude-abc123"),
+            Some(AGENT_CLAUDE)
+        );
         assert_eq!(table.agent_for_key("kw-ag-codex-xyz789"), Some(AGENT_CODEX));
         assert_eq!(table.agent_for_key("unknown"), None);
 
@@ -277,17 +307,27 @@ mod tests {
         let store = seeded_store(&dir);
         let table = RouteTable::load(&store).unwrap();
 
-        let routed =
-            resolve(&table, Some(Protocol::Anthropic), Some("kw-ag-claude-abc123")).unwrap();
+        let routed = resolve(
+            &table,
+            Some(Protocol::Anthropic),
+            Some("kw-ag-claude-abc123"),
+        )
+        .unwrap();
         assert_eq!(routed.agent, AGENT_CLAUDE);
         assert_eq!(routed.attribution, Attribution::PlaceholderKey);
         assert_eq!(routed.provider.id, "p-ant");
 
         // Disabling the primary promotes the backup on the next reload.
-        store.upsert_binding(&binding("claude", "p-ant", 0, false)).unwrap();
+        store
+            .upsert_binding(&binding("claude", "p-ant", 0, false))
+            .unwrap();
         let table = RouteTable::load(&store).unwrap();
-        let routed =
-            resolve(&table, Some(Protocol::Anthropic), Some("kw-ag-claude-abc123")).unwrap();
+        let routed = resolve(
+            &table,
+            Some(Protocol::Anthropic),
+            Some("kw-ag-claude-abc123"),
+        )
+        .unwrap();
         assert_eq!(routed.provider.id, "p-backup");
     }
 
@@ -323,7 +363,9 @@ mod tests {
         assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_CLAUDE));
 
         // Key registered but agent has no bindings → same clean failure.
-        store.upsert_placeholder_key("kw-ag-gemini-1", AGENT_GEMINI).unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-gemini-1", AGENT_GEMINI)
+            .unwrap();
         let table = RouteTable::load(&store).unwrap();
         let err = resolve(&table, None, Some("kw-ag-gemini-1")).unwrap_err();
         assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_GEMINI));
@@ -331,8 +373,14 @@ mod tests {
 
     #[test]
     fn fallback_agent_mapping() {
-        assert_eq!(RouteTable::fallback_agent(Some(Protocol::Anthropic)), AGENT_CLAUDE);
-        assert_eq!(RouteTable::fallback_agent(Some(Protocol::OpenAI)), AGENT_CODEX);
+        assert_eq!(
+            RouteTable::fallback_agent(Some(Protocol::Anthropic)),
+            AGENT_CLAUDE
+        );
+        assert_eq!(
+            RouteTable::fallback_agent(Some(Protocol::OpenAI)),
+            AGENT_CODEX
+        );
         assert_eq!(RouteTable::fallback_agent(None), AGENT_CLAUDE);
     }
 }

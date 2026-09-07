@@ -89,7 +89,7 @@ async fn reload(State(state): State<Arc<GatewayState>>) -> Response {
 mod tests {
     use super::*;
     use crate::server::data_plane_router;
-    use crate::store::{now_rfc3339, Binding, Billing, Protocol, Provider, Store};
+    use crate::store::{now_rfc3339, Billing, Binding, Protocol, Provider, Store};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt; // oneshot
@@ -221,9 +221,8 @@ mod tests {
         // End-to-end wiring sanity inside one process: unknown path 404s with
         // the gateway error shape; /v1/messages with no binding 503s.
         let dir = tempfile::tempdir().unwrap();
-        let state = Arc::new(
-            GatewayState::new(Store::open(dir.path().join("t.db")).unwrap()).unwrap(),
-        );
+        let state =
+            Arc::new(GatewayState::new(Store::open(dir.path().join("t.db")).unwrap()).unwrap());
 
         let response = data_plane_router(state.clone())
             .oneshot(
@@ -238,12 +237,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
         let response = data_plane_router(state.clone())
-            .oneshot(
-                Request::builder()
-                    .uri("/nope")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/nope").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);

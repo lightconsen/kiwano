@@ -92,7 +92,10 @@ fn build_upstream_headers(
     }
 
     let key = provider.api_key.clone().ok_or_else(|| {
-        GatewayError::Upstream(format!("provider `{}` has no API key configured", provider.id))
+        GatewayError::Upstream(format!(
+            "provider `{}` has no API key configured",
+            provider.id
+        ))
     })?;
     match provider.protocol {
         Protocol::Anthropic => {
@@ -448,7 +451,10 @@ mod tests {
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("text/event-stream"),
         );
-        src.insert(axum::http::header::CONTENT_LENGTH, HeaderValue::from_static("123"));
+        src.insert(
+            axum::http::header::CONTENT_LENGTH,
+            HeaderValue::from_static("123"),
+        );
         src.insert(
             axum::http::header::TRANSFER_ENCODING,
             HeaderValue::from_static("chunked"),
@@ -507,8 +513,7 @@ mod tests {
         );
 
         let mut out: Vec<Bytes> = Vec::new();
-        while let Some(item) =
-            std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
+        while let Some(item) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
         {
             out.push(item.expect("stream error"));
         }

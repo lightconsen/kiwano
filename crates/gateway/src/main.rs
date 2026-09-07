@@ -28,7 +28,9 @@ fn env_port(name: &str, default: u16) -> u16 {
 
 fn default_db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(DEFAULT_DB_SUBDIR).join(DEFAULT_DB_FILE)
+    PathBuf::from(home)
+        .join(DEFAULT_DB_SUBDIR)
+        .join(DEFAULT_DB_FILE)
 }
 
 fn db_path_from_env() -> PathBuf {

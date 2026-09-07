@@ -110,7 +110,10 @@ impl UsageScanner {
         if let Some(n) = get("completion_tokens") {
             self.usage.output_tokens = n;
         }
-        if let Some(n) = u.pointer("/prompt_tokens_details/cached_tokens").and_then(Value::as_i64) {
+        if let Some(n) = u
+            .pointer("/prompt_tokens_details/cached_tokens")
+            .and_then(Value::as_i64)
+        {
             self.usage.cache_read_tokens = n;
         }
     }
@@ -219,7 +222,9 @@ mod tests {
         s.feed_line(r#"data: {"type":"message_start","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":25,"output_tokens":1,"cache_read_input_tokens":11,"cache_creation_input_tokens":3}}}"#);
         s.feed_line("");
         s.feed_line(r#"event: content_block_delta"#);
-        s.feed_line(r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}"#);
+        s.feed_line(
+            r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}"#,
+        );
         s.feed_line(r#"event: message_delta"#);
         s.feed_line(r#"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":171}}"#);
         s.feed_line("data: [DONE]");

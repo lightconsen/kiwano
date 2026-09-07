@@ -159,11 +159,17 @@ mod tests {
             "https://api.anthropic.com/v1/messages"
         );
         assert_eq!(
-            upstream_url(&prov("https://api.deepseek.com/", Some("/anthropic")), "/v1/messages"),
+            upstream_url(
+                &prov("https://api.deepseek.com/", Some("/anthropic")),
+                "/v1/messages"
+            ),
             "https://api.deepseek.com/anthropic/v1/messages"
         );
         assert_eq!(
-            upstream_url(&prov("https://api.x.com", Some("anthropic")), "/v1/messages"),
+            upstream_url(
+                &prov("https://api.x.com", Some("anthropic")),
+                "/v1/messages"
+            ),
             "https://api.x.com/anthropic/v1/messages"
         );
     }

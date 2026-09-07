@@ -358,18 +358,9 @@ pub fn run() {
             setup_tray(app, data_port)?;
             sync_autostart(app.handle(), ui.autostart);
 
-            // 启动时 best-effort 同步 Hub 目录（失败静默：静态 catalog.json 兜底）
-            {
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    let Some(state) = handle.try_state::<AppState>() else { return };
-                    let url = vm::ui_settings(&state.aux).hub_url;
-                    if let Err(e) = sync::sync_from_hub(&state.aux, &url) {
-                        println!("kiwano: hub sync skipped: {e}");
-                    }
-                });
-            }
+            // Hub 目录暂用本地 JSON（bundled catalog.json + hub_cache）；
+            // 网络同步协议 v0 已实现（sync.rs / sync_hub 命令）但停用，
+            // 待真实 Hub 上线后恢复启动同步与设置页入口。
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

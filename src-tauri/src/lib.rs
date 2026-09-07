@@ -10,7 +10,7 @@ mod vm;
 use std::sync::Mutex;
 
 use kiwano_gateway::store::Store;
-use tauri::{Manager, RunEvent, State};
+use tauri::{Manager, State};
 
 use vm::Aux;
 
@@ -43,6 +43,73 @@ fn db_path() -> std::path::PathBuf {
 
 fn after_mutation(state: &State<AppState>) {
     sidecar::notify_reload(state.admin_port);
+}
+
+// ── Daemon lifecycle (tech.md §2.4 B / §4.6) ──
+//
+// The gateway is a resident daemon, not a child of the GUI: the app must NOT
+// kill it on exit, must adopt an already-running instance at startup, and a
+// watchdog must respawn it after a crash. `/status` pings (below) are the
+// reconnect mechanism.
+
+/// Watchdog decision for one tick, factored out for testing.
+#[derive(Debug, PartialEq, Eq)]
+enum WatchdogAction {
+    /// Child running (or adopted instance healthy) — nothing to do.
+    None,
+    /// Child process exited but an instance answers on the admin port
+    /// (e.g. started manually) — drop the stale handle, adopt externally.
+    ClearChild,
+    /// No usable gateway — spawn one.
+    Respawn,
+}
+
+fn watchdog_decision(child_exited: Option<bool>, admin_alive: bool) -> WatchdogAction {
+    match (child_exited, admin_alive) {
+        // no handle: healthy iff admin answers
+        (None, true) => WatchdogAction::None,
+        (None, false) => WatchdogAction::Respawn,
+        // handle present: exited status decides
+        (Some(false), _) => WatchdogAction::None,
+        (Some(true), true) => WatchdogAction::ClearChild,
+        (Some(true), false) => WatchdogAction::Respawn,
+    }
+}
+
+fn spawn_watchdog(handle: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let Some(state) = handle.try_state::<AppState>() else { return };
+        let child_exited = {
+            let Ok(mut child) = state.child.lock() else { return };
+            child.as_mut().map(|c| c.try_wait().map(|st| st.is_some()).unwrap_or(true))
+        };
+        let admin_alive = sidecar::ping_admin(state.admin_port);
+        match watchdog_decision(child_exited, admin_alive) {
+            WatchdogAction::None => {}
+            WatchdogAction::ClearChild => {
+                if let Ok(mut child) = state.child.lock() {
+                    *child = None;
+                }
+            }
+            WatchdogAction::Respawn => {
+                // Re-check under the lock to avoid double-spawn races; the
+                // ping is repeated because the admin may have come up since.
+                let Ok(mut child) = state.child.lock() else { return };
+                if sidecar::ping_admin(state.admin_port) {
+                    *child = None;
+                    continue;
+                }
+                match sidecar::spawn() {
+                    Ok(c) => {
+                        println!("kiwano: gateway respawned by watchdog");
+                        *child = Some(c);
+                    }
+                    Err(e) => eprintln!("kiwano: watchdog respawn failed: {e}"),
+                }
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -143,16 +210,23 @@ pub fn run() {
             let data_port = env_port("KIWANO_DATA_PORT", 8317);
             let admin_port = env_port("KIWANO_ADMIN_PORT", 8310);
 
-            // Sidecar lifecycle (tech.md §4.6): spawn best-effort; the status
-            // chip reflects reality via admin pings. Env override supported.
-            let child = match sidecar::spawn() {
-                Ok(c) => {
-                    println!("kiwano: gateway sidecar spawned");
-                    Some(c)
-                }
-                Err(e) => {
-                    eprintln!("kiwano: gateway sidecar unavailable: {e}");
-                    None
+            // Sidecar lifecycle (tech.md §4.6): adopt an already-running
+            // daemon first; only spawn when the admin port is silent. The
+            // watchdog then keeps it alive for the GUI's lifetime.
+            let already_running = sidecar::ping_admin(admin_port);
+            let child = if already_running {
+                println!("kiwano: adopting running gateway on admin :{admin_port}");
+                None
+            } else {
+                match sidecar::spawn() {
+                    Ok(c) => {
+                        println!("kiwano: gateway sidecar spawned");
+                        Some(c)
+                    }
+                    Err(e) => {
+                        eprintln!("kiwano: gateway sidecar unavailable: {e}");
+                        None
+                    }
                 }
             };
 
@@ -163,6 +237,7 @@ pub fn run() {
                 admin_port,
                 data_port,
             });
+            spawn_watchdog(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -182,15 +257,28 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    if let Ok(mut child) = state.child.lock() {
-                        if let Some(c) = child.as_mut() {
-                            let _ = c.kill();
-                        }
-                    }
-                }
-            }
+        .run(|_app_handle, _event| {
+            // Deliberately no kill-on-exit: the gateway daemon outlives the
+            // GUI (tech.md §2.4 B). The next launch adopts it via admin ping.
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{watchdog_decision, WatchdogAction};
+
+    #[test]
+    fn watchdog_matrix() {
+        // healthy child → nothing
+        assert_eq!(watchdog_decision(Some(false), true), WatchdogAction::None);
+        assert_eq!(watchdog_decision(Some(false), false), WatchdogAction::None);
+        // crashed child
+        assert_eq!(watchdog_decision(Some(true), false), WatchdogAction::Respawn);
+        // crashed child but external instance answers → adopt, drop handle
+        assert_eq!(watchdog_decision(Some(true), true), WatchdogAction::ClearChild);
+        // adopted instance (no handle)
+        assert_eq!(watchdog_decision(None, true), WatchdogAction::None);
+        // spawn failed at startup → retry
+        assert_eq!(watchdog_decision(None, false), WatchdogAction::Respawn);
+    }
 }

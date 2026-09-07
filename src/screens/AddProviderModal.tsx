@@ -8,6 +8,7 @@ import {
   type ApiKeyEntry,
   type Billing,
   type CatalogEntry,
+  type Protocol,
   type Provider,
 } from "../api/types";
 
@@ -15,6 +16,12 @@ const BILL_OPTIONS: { id: Billing; label: string }[] = [
   { id: "plan", label: "订阅套餐" },
   { id: "payg", label: "按量付费" },
   { id: "unl", label: "不限额" },
+];
+
+const PROTOCOL_OPTIONS: { id: Protocol; label: string }[] = [
+  { id: "openai", label: "OpenAI 兼容" },
+  { id: "anthropic", label: "Anthropic" },
+  { id: "gemini", label: "Gemini API" },
 ];
 
 export default function AddProviderModal({
@@ -32,6 +39,7 @@ export default function AddProviderModal({
 }) {
   const [mode, setMode] = useState<"shelf" | "custom">("shelf");
   const [name, setName] = useState("");
+  const [protocol, setProtocol] = useState<Protocol>("openai");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [endpoint, setEndpoint] = useState("");
@@ -59,6 +67,7 @@ export default function AddProviderModal({
     if (edit) {
       setMode("custom");
       setName(edit.name);
+      setProtocol(edit.protocol);
       setApiKey(""); // 留空 = 保持原 Key
       setEndpoint(edit.endpoint);
       setModel("");
@@ -73,6 +82,7 @@ export default function AddProviderModal({
     }
     setMode(preset ? "shelf" : "custom");
     setName(preset?.name ?? "");
+    setProtocol("openai"); // 货架目录均为 OpenAI 兼容端点
     setApiKey(preset ? "sk-9f3e21a7c8d4b6e05a12" : "");
     setEndpoint(preset?.endpoint ?? "");
     setModel(preset?.models[0] ?? "");
@@ -121,7 +131,7 @@ export default function AddProviderModal({
         name: name.trim(),
         api_key: apiKey,
         endpoint: endpoint.trim(),
-        protocol: "openai" as const,
+        protocol,
         model_default: model,
         billing,
         billing_config: {
@@ -183,6 +193,15 @@ export default function AddProviderModal({
             <div>
               <label className="text-[11px] font-medium text-mut">名称</label>
               <input className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-mut">协议</label>
+              <select className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]" value={protocol} onChange={(e) => setProtocol(e.target.value as Protocol)}>
+                {PROTOCOL_OPTIONS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
             </div>
 
             <div>

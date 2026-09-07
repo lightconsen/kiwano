@@ -22,6 +22,14 @@ import type {
   ApiKeyEntry,
 } from "./types";
 
+function protocolNote(protocol: NewProviderInput["protocol"]): string {
+  return protocol === "openai"
+    ? "OpenAI 兼容"
+    : protocol === "gemini"
+      ? "Gemini API"
+      : "Anthropic";
+}
+
 const CATALOG_TOTAL = 42;
 
 const providers: Provider[] = [
@@ -410,7 +418,7 @@ export const mockApi: KiwanoApi = {
       logo_char: input.name.charAt(0).toUpperCase(),
       logo_color: "#555555",
       endpoint: input.endpoint.replace(/^https?:\/\//, ""),
-      endpoint_note: input.protocol === "openai" ? "OpenAI 兼容" : "Anthropic",
+      endpoint_note: protocolNote(input.protocol),
       protocol: input.protocol,
       billing: input.billing,
       enabled: true,
@@ -433,7 +441,7 @@ export const mockApi: KiwanoApi = {
     t.name = input.name.trim();
     t.endpoint = input.endpoint.replace(/^https?:\/\//, "");
     t.protocol = input.protocol;
-    t.endpoint_note = input.protocol === "openai" ? "OpenAI 兼容" : "Anthropic";
+    t.endpoint_note = protocolNote(input.protocol);
     t.billing = input.billing;
     t.agents = [...input.agents];
     t.is_current = t.agents.length > 0 && t.is_current;

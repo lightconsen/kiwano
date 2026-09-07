@@ -123,7 +123,7 @@ fn parse_providers_add(mut words: Vec<String>) -> Result<AddArgs, String> {
     let key = take1(&mut words, "--key")?.filter(|k| !k.trim().is_empty());
     let protocol = match take1(&mut words, "--protocol")? {
         Some(v) => Protocol::from_str(&v)
-            .ok_or_else(|| format!("invalid --protocol: {v} (openai|anthropic)"))?,
+            .ok_or_else(|| format!("invalid --protocol: {v} (openai|anthropic|gemini)"))?,
         None => Protocol::OpenAI,
     };
     let billing = match take1(&mut words, "--billing")? {
@@ -886,7 +886,7 @@ COMMANDS:
     status                        gateway + store summary (exit 1 when gateway is down)
     reload                        hot-reload the running gateway's route table
     providers list [--agent A]    list providers (primary marked *)
-    providers add --name N --endpoint URL [--key K] [--protocol openai|anthropic]
+    providers add --name N --endpoint URL [--key K] [--protocol openai|anthropic|gemini]
                  [--billing subscription|metered|unlimited] [--limit N --unit U]
                  [--reset monthly|weekly|yearly|none] [--bind AGENT]...
     providers use <ID> --agent A  make the provider the primary for an agent

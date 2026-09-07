@@ -4,6 +4,7 @@
 
 export type AgentId = "claude" | "codex" | "gemini";
 export type Billing = "plan" | "payg" | "unl";
+export type Protocol = "openai" | "anthropic" | "gemini";
 
 export interface AgentMeta {
   id: AgentId;
@@ -57,7 +58,7 @@ export interface Provider {
   logo_color: string;
   logo_border?: boolean;
   endpoint: string;
-  protocol: "openai" | "anthropic";
+  protocol: Protocol;
   /** 端点副标题后半段：OpenAI 兼容 / qwen3:32b 等 */
   endpoint_note: string;
   billing: Billing;
@@ -80,7 +81,7 @@ export interface NewProviderInput {
   name: string;
   api_key: string;
   endpoint: string;
-  protocol: "openai" | "anthropic";
+  protocol: Protocol;
   model_default: string;
   billing: Billing;
   billing_config: {

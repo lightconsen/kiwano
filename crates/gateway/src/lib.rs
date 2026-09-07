@@ -5,6 +5,8 @@
 //! (usage capture), `main.rs` (binary entry).
 
 pub mod error;
+pub mod forward;
+pub mod meter;
 pub mod protocol;
 pub mod router;
 pub mod server;

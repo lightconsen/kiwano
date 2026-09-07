@@ -5,9 +5,8 @@
 //! strategy), then forward transparently. The forward leg lives in
 //! [`crate::forward`].
 
-use axum::body::Bytes;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
@@ -16,7 +15,6 @@ use std::sync::Arc;
 use crate::protocol::{classify_path, PathProtocol};
 use crate::router::resolve;
 use crate::server::{error_into_response, error_response, GatewayState, MAX_BODY_BYTES};
-use crate::store::Protocol;
 
 /// Data-plane router: the paths agents actually call.
 pub fn data_plane_router(state: Arc<GatewayState>) -> Router {
@@ -102,29 +100,17 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     // protocol (conversion is cc-adapters territory, wired in later phases).
     // Ambiguous paths (GET /v1/models) forward natively to the provider.
     // Query strings are forwarded untouched by the forward leg.
-
-    forward_or_stub(state, method, path, query, inbound_headers, body_bytes, routed, inbound).await
-}
-
-/// Forward leg. Committed as a skeleton in the routing commit and replaced by
-/// the reqwest forward + SSE passthrough module.
-async fn forward_or_stub(
-    _state: Arc<GatewayState>,
-    _method: Method,
-    _path: String,
-    _query: Option<String>,
-    _headers: HeaderMap,
-    _body: Bytes,
-    routed: crate::router::RoutedRequest,
-    inbound: Option<Protocol>,
-) -> Response {
-    let _ = routed;
-    error_response(
+    crate::forward::forward(
+        state,
+        method,
+        path,
+        query,
+        inbound_headers,
+        body_bytes,
+        routed,
         inbound,
-        StatusCode::NOT_IMPLEMENTED,
-        "not_implemented",
-        "kiwano-gateway: upstream forwarding lands with the proxy module",
     )
+    .await
 }
 
 /// Build the upstream URL for a provider and inbound path.

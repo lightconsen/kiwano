@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kiwano — UI 原型 v0.2</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg: 'var(--bg)', surface: 'var(--surface)', surface2: 'var(--surface2)',
+        line: 'var(--line)', ink: 'var(--ink)', mut: 'var(--mut)',
+        kiwi: { DEFAULT: 'var(--kiwi)', soft: 'var(--kiwi-soft)', dim: 'var(--kiwi-dim)' },
+      },
+      fontFamily: {
+        sans: ['Inter', '"Noto Sans SC"', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
+    }
+  }
+}
+</script>
+<style>
+:root {
+  --bg: oklch(0.15 0.008 260);
+  --surface: oklch(0.185 0.01 260);
+  --surface2: oklch(0.225 0.012 260);
+  --line: oklch(0.27 0.012 260);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --kiwi-dim: oklch(0.55 0.14 132);
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: oklch(0.10 0.008 260);
+  font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+.screen { display: none; }
+.screen.active { display: block; }
+#modal { display: none; }
+.navtab { position: relative; transition: color .15s; }
+.navtab::after { content: ''; position: absolute; left: 25%; right: 25%; bottom: -1px; height: 2px; border-radius: 2px; background: transparent; transition: background .15s; }
+.navtab.active { color: var(--kiwi); }
+.navtab.active::after { background: var(--kiwi); }
+.navtab:hover:not(.active) { color: var(--ink); }
+.row { transition: background .12s; }
+.row:hover { background: var(--surface); }
+.row.current { background: var(--kiwi-soft); box-shadow: inset 2px 0 0 var(--kiwi); }
+.chip { transition: all .15s; cursor: pointer; }
+.chip.active { background: var(--surface2); color: var(--ink); }
+.seg.active { background: var(--surface2); color: var(--ink); }
+.btn:active { transform: scale(.98); }
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-ghost:hover { background: var(--surface2); }
+.dot { width: 6px; height: 6px; border-radius: 999px; flex: none; }
+.dot.ok { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / .5); }
+.dot.idle { background: oklch(0.55 0.12 250); }
+.dot.off { background: oklch(0.42 0.01 260); }
+.logo-c { border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; flex: none; }
+.achip { width: 18px; height: 18px; border-radius: 5px; font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; flex: none; }
+.billtag { font-size: 9.5px; padding: 1px 5px; border-radius: 4px; font-weight: 600; flex: none; line-height: 14px; }
+.bill-payg { background: oklch(0.62 0.14 250 / .16); color: oklch(0.72 0.12 250); }
+.bill-plan { background: oklch(0.62 0.16 300 / .2); color: oklch(0.78 0.12 300); }
+.bill-unl { background: var(--surface2); color: var(--mut); }
+.tswitch { width: 32px; height: 18px; border-radius: 999px; background: var(--surface2); border: 1px solid var(--line); position: relative; cursor: pointer; transition: background .18s; flex: none; }
+.tswitch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 999px; background: var(--mut); transition: all .18s; }
+.tswitch.on { background: var(--kiwi-dim); border-color: var(--kiwi-dim); }
+.tswitch.on::after { left: 16px; background: oklch(0.13 0.01 260); }
+.pcard { transition: border-color .15s; }
+.pcard:hover { border-color: oklch(0.36 0.02 260); }
+select, input { outline: none; }
+select:focus, input:focus { border-color: var(--kiwi-dim) !important; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 8px; }
+</style>
+</head>
+
+<body>
+<div class="w-[1000px] h-[650px] flex flex-col overflow-hidden rounded-xl border border-line shadow-2xl relative" style="background:var(--bg)">
+
+  <!-- ══ 顶部：Overlay 标题栏 + 导航 ══ -->
+  <header class="h-[46px] flex items-center gap-4 px-4 border-b border-line select-none" style="background:var(--surface)">
+    <div class="flex gap-2 -ml-1 mr-1">
+      <span class="w-3 h-3 rounded-full" style="background:oklch(0.65 0.2 25)"></span>
+      <span class="w-3 h-3 rounded-full" style="background:oklch(0.75 0.15 90)"></span>
+      <span class="w-3 h-3 rounded-full" style="background:oklch(0.7 0.17 150)"></span>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <div class="w-[22px] h-[22px] rounded-[7px] flex items-center justify-center font-bold text-[11px]" style="background:var(--kiwi);color:oklch(0.18 0.03 132)">K</div>
+      <span class="text-[13px] font-semibold">Kiwano</span>
+    </div>
+    <nav class="flex items-center h-full ml-2 gap-1">
+      <button class="navtab active h-full px-3 text-[12.5px] font-medium text-mut" data-nav="providers" onclick="show('providers')">我的供应商</button>
+      <button class="navtab h-full px-3 text-[12.5px] font-medium text-mut" data-nav="shelf" onclick="show('shelf')">货架</button>
+      <button class="navtab h-full px-3 text-[12.5px] font-medium text-mut" data-nav="dashboard" onclick="show('dashboard')">仪表盘</button>
+      <button class="navtab h-full px-3 text-[12.5px] font-medium text-mut" data-nav="settings" onclick="show('settings')">设置</button>
+    </nav>
+    <div class="ml-auto flex items-center gap-2.5">
+      <span class="flex items-center gap-1.5 text-[11.5px] text-mut"><span class="dot ok"></span>网关 <span class="font-mono">:8317</span></span>
+      <button class="btn btn-ghost p-1.5 rounded-md text-mut"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i></button>
+    </div>
+  </header>
+
+  <!-- ══ 主内容 ══ -->
+  <main class="flex-1 min-h-0 overflow-y-auto">
+
+    <!-- ════ 首屏：我的供应商（列表）════ -->
+    <section class="screen active" id="s-providers">
+      <div class="flex items-center gap-2 px-4 h-11 border-b border-line">
+        <div class="flex rounded-lg border border-line overflow-hidden text-[12px]">
+          <button class="seg active px-3 h-7 text-mut" data-agent="all" onclick="seg(this)">全部</button>
+          <button class="seg px-3 h-7 text-mut border-l border-line" data-agent="claude" onclick="seg(this)">Claude Code</button>
+          <button class="seg px-3 h-7 text-mut border-l border-line" data-agent="codex" onclick="seg(this)">Codex</button>
+          <button class="seg px-3 h-7 text-mut border-l border-line" data-agent="gemini" onclick="seg(this)">Gemini CLI</button>
+        </div>
+        <span class="text-[11.5px] text-mut ml-1.5">4 个供应商 · 2 个 Agent 已绑定</span>
+        <button class="btn btn-primary ml-auto flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)" onclick="modal(1)">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>添加供应商
+        </button>
+      </div>
+
+      <!-- 列表头 -->
+      <div class="flex items-center px-4 h-7 text-[10.5px] text-mut border-b border-line" style="background:var(--surface)">
+        <span class="w-[34%]">供应商</span>
+        <span class="w-[22%]">绑定的 Agent</span>
+        <span class="w-[22%]">用量 / 额度</span>
+        <span class="w-[14%]">状态</span>
+        <span class="flex-1 text-right">操作</span>
+      </div>
+
+      <!-- 行 1：当前使用 -->
+      <div class="row current flex items-center px-4 h-[58px] border-b border-line" data-agents="claude codex">
+        <div class="w-[34%] flex items-center gap-2.5 min-w-0">
+          <div class="logo-c w-8 h-8 text-[13px]" style="background:#4D6BFE">D</div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[13px] font-semibold">DeepSeek</span>
+              <span class="text-[10px] px-1.5 py-px rounded font-medium" style="background:var(--kiwi);color:oklch(0.18 0.03 132)">使用中</span>
+            </div>
+            <div class="text-[11px] text-mut font-mono truncate mt-0.5">api.deepseek.com · OpenAI 兼容</div>
+          </div>
+        </div>
+        <div class="w-[22%] flex items-center gap-1">
+          <span class="achip" style="background:#D97757" title="Claude Code">C</span>
+          <span class="achip" style="background:#0F0F0F;border:1px solid var(--line)" title="Codex CLI">C</span>
+          <span class="text-[11px] text-mut ml-1">2 个 Agent</span>
+        </div>
+        <div class="w-[22%] flex items-center gap-2" title="Pay as you go · 本期 ¥28.6 / ¥50（57%）· 输入 5.4M（缓存 4.3M，按 1/10 计价）· 输出 0.8M · 延迟 1.1s">
+          <svg viewBox="0 0 28 28" class="w-7 h-7 flex-none">
+            <circle cx="14" cy="14" r="12" fill="none" stroke="var(--surface2)" stroke-width="3"/>
+            <circle cx="14" cy="14" r="12" fill="none" stroke="var(--kiwi)" stroke-width="3" stroke-linecap="round" stroke-dasharray="43 75.4" transform="rotate(-90 14 14)"/>
+            <text x="14" y="17" text-anchor="middle" font-size="8" font-family="JetBrains Mono" fill="var(--ink)">57%</text>
+          </svg>
+          <div class="min-w-0">
+            <div class="text-[12.5px] font-mono flex items-center gap-1.5"><span class="billtag bill-payg">按量</span>¥28.6 <span class="text-mut font-normal">/ ¥50 限额</span></div>
+            <div class="text-[10.5px] text-mut mt-0.5">6.2M tokens · 延迟 1.1s</div>
+          </div>
+        </div>
+        <div class="w-[14%]"><span class="flex items-center gap-1.5 text-[11.5px]" style="color:var(--kiwi)"><span class="dot ok"></span>健康 312ms</span></div>
+        <div class="flex-1 flex items-center justify-end gap-1.5">
+          <button class="btn btn-ghost text-[11.5px] px-2.5 h-7 rounded-md border border-line whitespace-nowrap">编辑</button>
+          <button class="btn btn-ghost text-[11.5px] px-1.5 h-7 rounded-md border border-line text-mut"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+        </div>
+      </div>
+
+      <!-- 行 2 -->
+      <div class="row flex items-center px-4 h-[58px] border-b border-line" data-agents="claude">
+        <div class="w-[34%] flex items-center gap-2.5 min-w-0">
+          <div class="logo-c w-8 h-8 text-[13px] border border-line" style="background:#111">K</div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[13px] font-semibold">Kimi (Moonshot)</span>
+              <span class="text-[10px] px-1.5 py-px rounded font-medium text-mut" style="background:var(--surface2)">备用 #1</span>
+            </div>
+            <div class="text-[11px] text-mut font-mono truncate mt-0.5">api.moonshot.cn · OpenAI 兼容</div>
+          </div>
+        </div>
+        <div class="w-[22%] flex items-center gap-1">
+          <span class="achip" style="background:#D97757" title="Claude Code">C</span>
+          <span class="text-[11px] text-mut ml-1">故障转移队列</span>
+        </div>
+        <div class="w-[22%] flex items-center gap-2" title="订阅套餐 ¥49/月 · 本期 295/460 请求（64%）· 09-30 重置 · 输入 1.6M · 输出 0.3M">
+          <svg viewBox="0 0 28 28" class="w-7 h-7 flex-none">
+            <circle cx="14" cy="14" r="12" fill="none" stroke="var(--surface2)" stroke-width="3"/>
+            <circle cx="14" cy="14" r="12" fill="none" stroke="oklch(0.78 0.12 300)" stroke-width="3" stroke-linecap="round" stroke-dasharray="48.3 75.4" transform="rotate(-90 14 14)"/>
+            <text x="14" y="17" text-anchor="middle" font-size="8" font-family="JetBrains Mono" fill="var(--ink)">64%</text>
+          </svg>
+          <div class="min-w-0">
+            <div class="text-[12.5px] font-mono flex items-center gap-1.5"><span class="billtag bill-plan">订阅</span>295/460 <span class="text-mut font-normal">请求</span></div>
+            <div class="text-[10.5px] text-mut mt-0.5">¥49/月 · 09-30 重置</div>
+          </div>
+        </div>
+        <div class="w-[14%]"><span class="flex items-center gap-1.5 text-[11.5px] text-mut"><span class="dot idle"></span>287ms</span></div>
+        <div class="flex-1 flex items-center justify-end gap-1.5">
+          <button class="btn text-[11.5px] px-2.5 h-7 rounded-md font-semibold whitespace-nowrap" style="background:var(--kiwi-soft);color:var(--kiwi);border:1px solid var(--kiwi-dim)">启用</button>
+          <button class="btn btn-ghost text-[11.5px] px-1.5 h-7 rounded-md border border-line text-mut"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+        </div>
+      </div>
+
+      <!-- 行 3 -->
+      <div class="row flex items-center px-4 h-[58px] border-b border-line" data-agents="">
+        <div class="w-[34%] flex items-center gap-2.5 min-w-0">
+          <div class="logo-c w-8 h-8 text-[13px]" style="background:#3859FF">G</div>
+          <div class="min-w-0">
+            <span class="text-[13px] font-semibold">GLM (智谱)</span>
+            <div class="text-[11px] text-mut font-mono truncate mt-0.5">open.bigmodel.cn · OpenAI 兼容</div>
+          </div>
+        </div>
+        <div class="w-[22%] flex items-center gap-1">
+          <span class="text-[11px] text-mut">未绑定</span>
+        </div>
+        <div class="w-[22%]">
+          <div class="text-[12.5px] font-mono flex items-center gap-1.5"><span class="billtag bill-payg">按量</span>¥6.7 <span class="text-mut font-normal">· 77 次</span></div>
+          <span class="block w-20 mt-1" title="Pay as you go · 未设限额 · 近 7 日用量趋势"><svg viewBox="0 0 80 14" class="w-20 h-3.5"><polyline points="0,11 13,9 26,10 39,6 52,8 65,4 80,5" fill="none" stroke="oklch(0.62 0.14 250)" stroke-width="1.5"/></svg></span>
+        </div>
+        <div class="w-[14%]"><span class="flex items-center gap-1.5 text-[11.5px] text-mut"><span class="dot off"></span>未启用</span></div>
+        <div class="flex-1 flex items-center justify-end gap-1.5">
+          <button class="btn text-[11.5px] px-2.5 h-7 rounded-md font-semibold whitespace-nowrap" style="background:var(--kiwi-soft);color:var(--kiwi);border:1px solid var(--kiwi-dim)">启用</button>
+          <button class="btn btn-ghost text-[11.5px] px-1.5 h-7 rounded-md border border-line text-mut"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+        </div>
+      </div>
+
+      <!-- 行 4：本地 -->
+      <div class="row flex items-center px-4 h-[58px] border-b border-line" data-agents="gemini">
+        <div class="w-[34%] flex items-center gap-2.5 min-w-0">
+          <div class="logo-c w-8 h-8 text-[13px] border border-line" style="background:#1c1c1e">O</div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[13px] font-semibold">Ollama</span>
+              <span class="text-[10px] px-1.5 py-px rounded font-medium text-mut" style="background:var(--surface2)">本地</span>
+            </div>
+            <div class="text-[11px] text-mut font-mono truncate mt-0.5">localhost:11434 · qwen3:32b</div>
+          </div>
+        </div>
+        <div class="w-[22%] flex items-center gap-1">
+          <span class="achip" style="background:#1E6FEB" title="Gemini CLI">G</span>
+          <span class="text-[11px] text-mut ml-1">1 个 Agent</span>
+        </div>
+        <div class="w-[22%]" title="本地推理 · 不计量费用 · 离线可用">
+          <div class="text-[12.5px] font-mono flex items-center gap-1.5"><span class="billtag bill-unl">不限</span>31 次 <span class="text-mut font-normal">· 0.2M tok</span></div>
+          <div class="text-[10.5px] text-mut mt-0.5">入 0.15M · 出 0.05M</div>
+        </div>
+        <div class="w-[14%]"><span class="flex items-center gap-1.5 text-[11.5px] text-mut"><span class="dot off"></span>未运行</span></div>
+        <div class="flex-1 flex items-center justify-end gap-1.5">
+          <button class="btn text-[11.5px] px-2.5 h-7 rounded-md font-semibold whitespace-nowrap" style="background:var(--kiwi-soft);color:var(--kiwi);border:1px solid var(--kiwi-dim)">启用</button>
+          <button class="btn btn-ghost text-[11.5px] px-1.5 h-7 rounded-md border border-line text-mut"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+        </div>
+      </div>
+
+      <div id="empty-agents" style="display:none" class="px-4 py-8 text-center text-[12px] text-mut">该 Agent 尚未绑定 Provider — <button class="font-semibold" style="color:var(--kiwi)" onclick="modal(1)">添加供应商</button></div>
+      <div class="px-4 py-3 text-[10.5px] text-mut">切换即时生效（Agent 已接管至本地网关，切换仅改路由）· API Key 存于本机系统钥匙串 · 请求不经 Kiwano 云端</div>
+    </section>
+
+    <!-- ════ 货架（次级）════ -->
+    <section class="screen" id="s-shelf">
+      <div class="flex items-center gap-2 px-4 h-11 border-b border-line">
+        <span class="text-[12px] text-mut">来自 Kiwano Hub · <span class="font-mono">42</span> 个供应商</span>
+        <div class="flex gap-1.5 ml-3">
+          <button class="chip active text-[11.5px] px-2.5 h-6.5 rounded-full border border-line" style="height:26px">全部</button>
+          <button class="chip text-[11.5px] px-2.5 rounded-full border border-line text-mut" style="height:26px" onclick="chip(this)">官方</button>
+          <button class="chip text-[11.5px] px-2.5 rounded-full border border-line text-mut" style="height:26px" onclick="chip(this)">聚合</button>
+          <button class="chip text-[11.5px] px-2.5 rounded-full border border-line text-mut" style="height:26px" onclick="chip(this)">有免费额度</button>
+        </div>
+        <div class="relative ml-auto">
+          <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-mut"></i>
+          <input class="w-[190px] h-7 rounded-md border border-line pl-7 pr-2 text-[12px] bg-surface" style="padding-left:28px" placeholder="搜索供应商…">
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-2.5 p-4">
+        <!-- 紧凑卡片 ×6 -->
+        <div class="pcard rounded-lg border border-line bg-surface p-3">
+          <div class="flex items-center gap-2">
+            <div class="logo-c w-7 h-7 text-[12px]" style="background:#4D6BFE">D</div>
+            <span class="text-[12.5px] font-semibold">DeepSeek</span>
+            <span class="text-[10px] px-1.5 rounded" style="background:var(--kiwi-soft);color:var(--kiwi)">官方</span>
+            <span class="ml-auto text-[11px] text-mut flex items-center gap-1"><i data-lucide="star" class="w-3 h-3" style="color:oklch(0.8 0.15 85)"></i>4.8</span>
+          </div>
+          <div class="mt-2 text-[11.5px] font-mono flex items-center gap-2">¥4 <span class="text-[10px] text-mut">/M入</span> · ¥16 <span class="text-[10px] text-mut">/M出</span><span class="ml-auto billtag bill-payg">按量</span></div>
+          <div class="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between">
+            <span class="text-[10.5px] text-mut">12.4k 人在用</span>
+            <span class="text-[10.5px] text-mut px-1.5 py-0.5 rounded border border-line">已添加</span>
+          </div>
+        </div>
+        <div class="pcard rounded-lg border border-line bg-surface p-3">
+          <div class="flex items-center gap-2">
+            <div class="logo-c w-7 h-7 text-[12px] border border-line" style="background:#111">K</div>
+            <span class="text-[12.5px] font-semibold">Kimi</span>
+            <span class="text-[10px] px-1.5 rounded" style="background:var(--kiwi-soft);color:var(--kiwi)">官方</span>
+            <span class="ml-auto text-[11px] text-mut flex items-center gap-1"><i data-lucide="star" class="w-3 h-3" style="color:oklch(0.8 0.15 85)"></i>4.6</span>
+          </div>
+          <div class="mt-2 text-[11.5px] font-mono flex items-center gap-2">¥49 <span class="text-[10px] text-mut">/月套餐</span><span class="ml-auto billtag bill-plan">订阅</span></div>
+          <div class="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between">
+            <span class="text-[10.5px] text-mut">8.1k 人在用</span>
+            <button class="btn text-[10.5px] px-2 py-0.5 rounded font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)" onclick="modal(0)">+ 添加</button>
+          </div>
+        </div>
+        <div class="pcard rounded-lg border border-line bg-surface p-3">
+          <div class="flex items-center gap-2">
+            <div class="logo-c w-7 h-7 text-[12px]" style="background:#615CED">Q</div>
+            <span class="text-[12.5px] font-semibold">Qwen</span>
+            <span class="text-[10px] px-1.5 rounded" style="background:oklch(0.8 0.15 85 / .12);color:oklch(0.82 0.13 85)">免费额度</span>
+            <span class="ml-auto text-[11px] text-mut flex items-center gap-1"><i data-lucide="star" class="w-3 h-3" style="color:oklch(0.8 0.15 85)"></i>4.5</span>
+          </div>
+          <div class="mt-2 text-[11.5px] font-mono flex items-center gap-2">¥2 <span class="text-[10px] text-mut">/M入</span> · ¥6 <span class="text-[10px] text-mut">/M出</span><span class="ml-auto billtag bill-payg">按量</span></div>
+          <div class="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between">
+            <span class="text-[10.5px] text-mut">新用户 100 万 tokens</span>
+            <button class="btn text-[10.5px] px-2 py-0.5 rounded font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)" onclick="modal(0)">+ 添加</button>
+          </div>
+        </div>
+        <div class="pcard rounded-lg border border-line bg-surface p-3">
+          <div class="flex items-center gap-2">
+            <div class="logo-c w-7 h-7 text-[12px]" style="background:#F55036">G</div>
+            <span class="text-[12.5px] font-semibold">Groq</span>
+            <span class="text-[10px] px-1.5 rounded" style="background:oklch(0.8 0.15 85 / .12);color:oklch(0.82 0.13 85)">免费</span>
+            <span class="ml-auto text-[11px] text-mut flex items-center gap-1"><i data-lucide="star" class="w-3 h-3" style="color:oklch(0.8 0.15 85)"></i>4.7</span>
+          </div>
+          <div class="mt-2 text-[11.5px] font-mono" style="color:var(--kiwi)">Free</div>
+          <div class="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between">
+            <span class="text-[10.5px] text-mut">Llama · 极速推理</span>
+            <button class="btn text-[10.5px] px-2 py-0.5 rounded font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)" onclick="modal(0)">+ 添加</button>
+          </div>
+        </div>
+        <div class="pcard rounded-lg border border-line bg-surface p-3">
+          <div class="flex items-center gap-2">
+            <div class="logo-c w-7 h-7 text-[12px]" style="background:#6467F2">O</div>
+            <span class="text-[12.5px] font-semibold">OpenRouter</span>
+            <span class="text-[10px] px-1.5 rounded" style="background:oklch(0.62 0.16 300 / .18);color:oklch(0.75 0.14 300)">聚合</span>
+            <span class="ml-auto text-[11px] text-mut flex items-center gap-1"><i data-lucide="star" class="w-3 h-3" style="color:oklch(0.8 0.15 85)"></i>4.3</span>
+          </div>
+          <div class="mt-2 text-[11.5px] font-mono flex items-center gap-2">上游价 <span class="text-[10px] text-mut">+5.5%</span><span class="ml-auto billtag bill-payg">按量</span></div>
+          <div class="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between">
+            <span class="text-[10.5px] text-mut">500+ 模型一把 Key</span>
+            <button class="btn text-[10.5px] px-2 py-0.5 rounded font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)" onclick="modal(0)">+ 添加</button>
+          </div>
+        </div>
+        <div class="pcard rounded-lg border border-line bg-surface p-3">
+          <div class="flex items-center gap-2">
+            <div class="logo-c w-7 h-7 text-[12px] border border-line" style="background:#1c1c1e">O</div>
+            <span class="text-[12.5px] font-semibold">Ollama</span>
+            <span class="text-[10px] px-1.5 rounded" style="background:var(--surface2);color:var(--mut)">本地</span>
+            <span class="ml-auto text-[11px] text-mut flex items-center gap-1"><i data-lucide="star" class="w-3 h-3" style="color:oklch(0.8 0.15 85)"></i>4.9</span>
+          </div>
+          <div class="mt-2 text-[11.5px] font-mono flex items-center gap-2" style="color:var(--kiwi)">本地运行<span class="ml-auto billtag bill-unl">不限</span></div>
+          <div class="mt-2.5 pt-2.5 border-t border-line flex items-center justify-between">
+            <span class="text-[10.5px] text-mut">完全离线</span>
+            <button class="btn text-[10.5px] px-2 py-0.5 rounded font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)" onclick="modal(0)">+ 连接</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ 仪表盘 ════ -->
+    <section class="screen" id="s-dashboard">
+      <div class="flex items-center gap-2 px-4 h-11 border-b border-line">
+        <div class="flex rounded-lg border border-line overflow-hidden text-[12px]">
+          <button class="seg px-3 h-7 text-mut">今天</button>
+          <button class="seg active px-3 h-7 border-l border-line">近 7 天</button>
+          <button class="seg px-3 h-7 text-mut border-l border-line">近 30 天</button>
+        </div>
+        <select class="h-7 rounded-md border border-line bg-surface text-[12px] px-2 text-mut"><option>全部供应商</option><option>DeepSeek</option></select>
+        <select class="h-7 rounded-md border border-line bg-surface text-[12px] px-2 text-mut"><option>全部 Agent</option><option>Claude Code</option></select>
+        <span class="ml-auto text-[11px] text-mut">数据仅存本地 SQLite</span>
+      </div>
+      <div class="p-4">
+        <div class="flex rounded-lg border border-line bg-surface divide-x divide-[var(--line)]">
+          <div class="flex-1 p-3">
+            <div class="text-[10.5px] text-mut flex items-center gap-1"><i data-lucide="send" class="w-3 h-3"></i>请求数</div>
+            <div class="font-mono text-[19px] font-semibold mt-1">1,284 <span class="text-[10.5px] font-normal" style="color:var(--kiwi)">↑12%</span></div>
+          </div>
+          <div class="flex-1 p-3">
+            <div class="text-[10.5px] text-mut flex items-center gap-1"><i data-lucide="coins" class="w-3 h-3"></i>Tokens</div>
+            <div class="font-mono text-[19px] font-semibold mt-1" title="输入 7.5M（缓存命中 4.3M，按 1/10 计价）· 输出 1.3M">8.8M <span class="text-[10.5px] font-normal text-mut">入7.5M/出1.3M</span></div>
+          </div>
+          <div class="flex-1 p-3">
+            <div class="text-[10.5px] text-mut flex items-center gap-1"><i data-lucide="circle-dollar-sign" class="w-3 h-3"></i>估算费用</div>
+            <div class="font-mono text-[19px] font-semibold mt-1">¥46.20 <span class="text-[10.5px] font-normal text-mut">按 Hub 价</span></div>
+          </div>
+          <div class="flex-1 p-3">
+            <div class="text-[10.5px] text-mut flex items-center gap-1"><i data-lucide="timer" class="w-3 h-3"></i>平均延迟</div>
+            <div class="font-mono text-[19px] font-semibold mt-1">1.2s <span class="text-[10.5px] font-normal" style="color:var(--kiwi)">↓9%</span></div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-line bg-surface p-3.5 mt-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-[12.5px] font-semibold">请求趋势</h3>
+            <div class="flex items-center gap-3 text-[10.5px] text-mut">
+              <span class="flex items-center gap-1"><span class="w-2 h-1 rounded-full" style="background:var(--kiwi)"></span>请求数</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-1 rounded-full" style="background:oklch(0.62 0.14 250)"></span>Tokens(×10k)</span>
+            </div>
+          </div>
+          <svg viewBox="0 0 900 130" class="w-full mt-2" style="height:118px">
+            <defs><linearGradient id="gk" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="oklch(0.8 0.19 132)" stop-opacity="0.22"/><stop offset="100%" stop-color="oklch(0.8 0.19 132)" stop-opacity="0"/>
+            </linearGradient></defs>
+            <g stroke="oklch(0.27 0.012 260)" stroke-dasharray="3 4"><line x1="0" y1="32" x2="900" y2="32"/><line x1="0" y1="65" x2="900" y2="65"/><line x1="0" y1="98" x2="900" y2="98"/></g>
+            <path d="M20,88 C90,80 120,50 190,56 C260,62 290,38 360,42 C430,46 460,68 530,62 C600,56 630,28 700,32 C770,36 820,42 880,30 L880,120 L20,120 Z" fill="url(#gk)"/>
+            <path d="M20,88 C90,80 120,50 190,56 C260,62 290,38 360,42 C430,46 460,68 530,62 C600,56 630,28 700,32 C770,36 820,42 880,30" fill="none" stroke="oklch(0.8 0.19 132)" stroke-width="1.8"/>
+            <path d="M20,100 C120,98 220,90 340,92 C460,94 600,82 720,76 C800,72 850,70 880,68" fill="none" stroke="oklch(0.62 0.14 250)" stroke-width="1.3" stroke-dasharray="5 4"/>
+            <circle cx="700" cy="32" r="3" fill="oklch(0.8 0.19 132)" stroke="oklch(0.13 0.01 260)" stroke-width="1.5"/>
+            <g fill="oklch(0.58 0.01 260)" font-size="9.5" font-family="JetBrains Mono">
+              <text x="10" y="126">09-01</text><text x="148" y="126">09-02</text><text x="286" y="126">09-03</text><text x="424" y="126">09-04</text><text x="562" y="126">09-05</text><text x="700" y="126">09-06</text><text x="838" y="126">09-07</text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div class="rounded-lg border border-line bg-surface p-3.5">
+            <h3 class="text-[12.5px] font-semibold">供应商分布</h3>
+            <div class="mt-2.5 space-y-2.5">
+              <div>
+                <div class="flex items-center justify-between text-[11.5px]"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-sm" style="background:#4D6BFE"></span>DeepSeek</span><span class="font-mono text-mut">62% · ¥28.6</span></div>
+                <div class="h-1 rounded-full mt-1" style="background:var(--surface2)"><div class="h-full rounded-full" style="width:62%;background:#4D6BFE"></div></div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between text-[11.5px]"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-sm" style="background:#555"></span>Kimi</span><span class="font-mono text-mut">23% · ¥10.9</span></div>
+                <div class="h-1 rounded-full mt-1" style="background:var(--surface2)"><div class="h-full rounded-full" style="width:23%;background:#555"></div></div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between text-[11.5px]"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-sm" style="background:#3859FF"></span>GLM</span><span class="font-mono text-mut">15% · ¥6.7</span></div>
+                <div class="h-1 rounded-full mt-1" style="background:var(--surface2)"><div class="h-full rounded-full" style="width:15%;background:#3859FF"></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-lg border border-line bg-surface p-3.5">
+            <h3 class="text-[12.5px] font-semibold">Agent 分布</h3>
+            <table class="w-full mt-2 text-[11.5px]">
+              <thead><tr class="text-mut text-[10px] text-left"><th class="font-medium pb-1.5">Agent</th><th class="font-medium pb-1.5 text-right">请求</th><th class="font-medium pb-1.5 text-right">Tokens</th><th class="font-medium pb-1.5 text-right">费用</th></tr></thead>
+              <tbody class="font-mono">
+                <tr class="border-t border-line"><td class="py-1.5 font-sans">Claude Code</td><td class="text-right">943</td><td class="text-right">6.2M</td><td class="text-right">¥33.4</td></tr>
+                <tr class="border-t border-line"><td class="py-1.5 font-sans">Codex CLI</td><td class="text-right">264</td><td class="text-right">1.9M</td><td class="text-right">¥9.8</td></tr>
+                <tr class="border-t border-line"><td class="py-1.5 font-sans">Gemini CLI</td><td class="text-right">77</td><td class="text-right">0.5M</td><td class="text-right">¥3.0</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ 设置 ════ -->
+    <section class="screen" id="s-settings">
+      <div class="p-4 space-y-3">
+        <div class="rounded-lg border border-line bg-surface p-4">
+          <h3 class="text-[12.5px] font-semibold mb-3">通用</h3>
+          <div class="space-y-2.5 text-[12.5px]">
+            <div class="flex items-center justify-between"><span>语言</span><select class="h-7 w-[130px] rounded-md border border-line bg-surface2 text-[11.5px] px-2"><option>简体中文</option><option>English</option></select></div>
+            <div class="flex items-center justify-between"><span>主题</span><select class="h-7 w-[130px] rounded-md border border-line bg-surface2 text-[11.5px] px-2"><option>深色</option><option>浅色</option></select></div>
+            <div class="flex items-center justify-between"><span>开机自启</span><div class="tswitch on" onclick="this.classList.toggle('on')"></div></div>
+            <div class="flex items-center justify-between"><span>关闭时最小化到托盘</span><div class="tswitch on" onclick="this.classList.toggle('on')"></div></div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-line bg-surface p-4">
+          <h3 class="text-[12.5px] font-semibold mb-3">本地网关</h3>
+          <div class="space-y-2.5 text-[12.5px]">
+            <div class="flex items-center justify-between"><span>监听地址</span><input class="h-7 w-[130px] rounded-md border border-line bg-surface2 text-[11.5px] px-2 font-mono" value="127.0.0.1:8317"></div>
+            <div class="pt-1 pb-0.5 text-[11px] font-medium text-mut">Agent 接管 <span class="font-normal">· 指向本地网关后切换即热切</span></div>
+            <div class="flex items-center justify-between"><span class="flex items-center gap-2">Claude Code <span class="font-mono text-[10px] text-mut" title="网关分配的占位 Key，用于请求归因">kw-ag-claude-a1b2</span></span><span class="flex items-center gap-2"><span class="text-[10.5px]" style="color:var(--kiwi)">已接管</span><div class="tswitch on" onclick="this.classList.toggle('on')"></div></span></div>
+            <div class="flex items-center justify-between"><span class="flex items-center gap-2">Codex <span class="font-mono text-[10px] text-mut" title="网关分配的占位 Key，用于请求归因">kw-ag-codex-c3d4</span></span><span class="flex items-center gap-2"><span class="text-[10.5px]" style="color:var(--kiwi)">已接管</span><div class="tswitch on" onclick="this.classList.toggle('on')"></div></span></div>
+            <div class="flex items-center justify-between"><span class="flex items-center gap-2">Gemini CLI <span class="font-mono text-[10px] text-mut">—</span></span><span class="flex items-center gap-2"><span class="text-[10.5px] text-mut">未接管</span><div class="tswitch" onclick="this.classList.toggle('on')"></div></span></div>
+            <div class="flex items-center justify-between"><span>自动故障转移 <span class="text-[10.5px] text-mut">主供应商失败时切备用</span></span><div class="tswitch on" onclick="this.classList.toggle('on')"></div></div>
+            <div class="flex items-center justify-between"><span>请求日志留存 <span class="text-[10.5px] text-mut">仅本地 · 30 天</span></span><div class="tswitch on" onclick="this.classList.toggle('on')"></div></div>
+          </div>
+        </div>
+        <div class="rounded-lg border p-4" style="background:var(--kiwi-soft);border-color:var(--kiwi-dim)">
+          <h3 class="text-[12.5px] font-semibold mb-3 flex items-center gap-1.5" style="color:var(--kiwi)"><i data-lucide="shield-check" class="w-3.5 h-3.5"></i>隐私（Kiwano 承诺）</h3>
+          <div class="space-y-2.5 text-[12.5px]">
+            <div class="flex items-center justify-between"><span>匿名用量上报 <span class="text-[10.5px]" style="color:var(--mut)">默认关闭 · 仅脱敏统计</span></span><div class="tswitch" onclick="this.classList.toggle('on')"></div></div>
+            <div class="text-[10.5px] space-y-1" style="color:var(--mut)">
+              <div class="flex items-center gap-1.5"><i data-lucide="check" class="w-3 h-3" style="color:var(--kiwi)"></i>API 请求内容永不经过 Kiwano 云端</div>
+              <div class="flex items-center gap-1.5"><i data-lucide="check" class="w-3 h-3" style="color:var(--kiwi)"></i>API Key 永不离开用户设备</div>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-line bg-surface p-4">
+          <h3 class="text-[12.5px] font-semibold mb-3">Kiwano Hub 与配置</h3>
+          <div class="flex items-center justify-between text-[12.5px]">
+            <div class="flex items-center gap-2"><div class="w-6 h-6 rounded-full flex items-center justify-center" style="background:var(--surface2)"><i data-lucide="user" class="w-3.5 h-3.5 text-mut"></i></div>未登录<span class="text-[10.5px] text-mut">登录后同步配置、参与评分</span></div>
+            <div class="flex gap-2">
+              <button class="btn btn-ghost h-7 px-3 rounded-md border border-line text-[11.5px]">从 CC Switch 导入</button>
+              <button class="btn btn-primary h-7 px-3 rounded-md text-[11.5px] font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)">登录</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ══ 底部状态栏 ══ -->
+  <footer class="h-[26px] flex items-center px-4 border-t border-line text-[10.5px] text-mut gap-4" style="background:var(--surface)">
+    <span>今日 <span class="font-mono text-ink">1,284</span> 请求 · <span class="font-mono text-ink">¥46.2</span></span>
+    <span class="flex items-center gap-1"><span class="dot ok" style="width:5px;height:5px"></span>Hub 刚刚同步</span>
+    <span class="ml-auto">v0.1.0 · MVP</span>
+  </footer>
+</div>
+
+<!-- ══ 添加供应商 弹窗（参考 cc-switch AddProviderDialog）══ -->
+<div id="modal" class="fixed inset-0 z-50 items-center justify-center" style="background:oklch(0.08 0.01 260 / .65);backdrop-filter:blur(3px)">
+  <div class="w-[480px] max-h-[600px] overflow-y-auto rounded-xl border border-line shadow-2xl" style="background:var(--surface)">
+    <div class="flex items-center justify-between px-4 h-11 border-b border-line">
+      <h2 class="text-[13px] font-semibold">添加供应商</h2>
+      <button class="btn btn-ghost p-1 rounded-md text-mut" onclick="modal(0)"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+    </div>
+    <div class="px-4 py-3.5">
+      <div class="flex rounded-md border border-line overflow-hidden text-[11.5px]">
+        <div class="flex-1 h-8 flex items-center justify-center gap-1 font-medium" style="background:var(--kiwi-soft);color:var(--kiwi)"><i data-lucide="store" class="w-3 h-3"></i>从货架：DeepSeek</div>
+        <div class="flex-1 h-8 flex items-center justify-center text-mut cursor-pointer hover:bg-surface2 btn">自定义</div>
+      </div>
+      <div class="space-y-3 mt-3">
+        <div>
+          <label class="text-[11px] font-medium text-mut">名称</label>
+          <input class="mt-1 w-full h-8 rounded-md border border-line bg-bg px-2.5 text-[12px]" value="DeepSeek">
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-mut">API Key <span class="text-[10px] ml-1" style="color:var(--kiwi)">仅存本机钥匙串</span></label>
+          <div class="relative mt-1">
+            <input id="keyinput" type="password" class="w-full h-8 rounded-md border border-line bg-bg pl-2.5 pr-8 text-[12px] font-mono" value="sk-9f3e21a7c8d4b6e05a12">
+            <button class="absolute right-2 top-1/2 -translate-y-1/2 text-mut" onclick="key()"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+          </div>
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-mut">请求地址</label>
+          <div class="flex gap-1.5 mt-1">
+            <input class="flex-1 h-8 rounded-md border border-line bg-bg px-2.5 text-[12px] font-mono" value="https://api.deepseek.com">
+            <button class="btn btn-ghost h-8 px-2.5 rounded-md border border-line text-[11px] flex items-center gap-1"><i data-lucide="gauge" class="w-3 h-3"></i>测速 <span class="font-mono" style="color:var(--kiwi)">312ms</span></button>
+          </div>
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-mut">默认模型</label>
+          <select class="mt-1 w-full h-8 rounded-md border border-line bg-bg px-2.5 text-[12px]"><option>deepseek-chat (V3)</option><option>deepseek-reasoner (R1)</option></select>
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-mut">计费方式</label>
+          <div class="grid grid-cols-3 gap-1.5 mt-1">
+            <button class="h-8 rounded-md border border-line text-[11.5px] cursor-pointer text-mut" data-bill="plan" onclick="bill(this)">订阅套餐</button>
+            <button class="h-8 rounded-md border border-line text-[11.5px] cursor-pointer" data-bill="payg" onclick="bill(this)" style="border-color:var(--kiwi-dim);background:var(--kiwi-soft);color:var(--kiwi)">按量付费</button>
+            <button class="h-8 rounded-md border border-line text-[11.5px] cursor-pointer text-mut" data-bill="unl" onclick="bill(this)">不限额</button>
+          </div>
+        </div>
+        <div id="bill-plan" style="display:none">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-[11px] font-medium text-mut">每期上限</label>
+              <div class="flex gap-1.5 mt-1">
+                <input class="flex-1 min-w-0 h-8 rounded-md border border-line bg-bg px-2.5 text-[12px] font-mono" value="460">
+                <select class="h-8 rounded-md border border-line bg-bg px-1.5 text-[12px]"><option>请求</option><option>万 tokens</option><option>¥ 金额</option></select>
+              </div>
+            </div>
+            <div>
+              <label class="text-[11px] font-medium text-mut">重置周期</label>
+              <select class="mt-1 w-full h-8 rounded-md border border-line bg-bg px-2.5 text-[12px]"><option>每月</option><option>每周</option><option>每年</option><option>不重置</option></select>
+            </div>
+          </div>
+        </div>
+        <div id="bill-payg">
+          <label class="text-[11px] font-medium text-mut">消费限额 <span class="text-[10px]" style="color:var(--kiwi)">选填 · 留空则显示用量趋势</span></label>
+          <input class="mt-1 w-full h-8 rounded-md border border-line bg-bg px-2.5 text-[12px] font-mono" value="¥50">
+        </div>
+        <div id="bill-unl" class="flex items-center gap-1.5 h-8 text-[11.5px] text-mut" style="display:none">
+          <i data-lucide="infinity" class="w-3.5 h-3.5"></i>无需额度配置 · 列表中不显示用量信息
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-mut">保存后绑定到 Agent</label>
+          <div class="grid grid-cols-3 gap-1.5 mt-1">
+            <label class="flex items-center gap-1.5 h-8 px-2 rounded-md border text-[11.5px] cursor-pointer" style="border-color:var(--kiwi-dim);background:var(--kiwi-soft)"><input type="checkbox" checked style="accent-color:var(--kiwi)">Claude Code</label>
+            <label class="flex items-center gap-1.5 h-8 px-2 rounded-md border text-[11.5px] cursor-pointer" style="border-color:var(--kiwi-dim);background:var(--kiwi-soft)"><input type="checkbox" checked style="accent-color:var(--kiwi)">Codex</label>
+            <label class="flex items-center gap-1.5 h-8 px-2 rounded-md border border-line text-[11.5px] cursor-pointer text-mut"><input type="checkbox">Gemini CLI</label>
+          </div>
+        </div>
+        <button class="w-full flex items-center justify-between h-8 px-2.5 rounded-md border border-line text-[11.5px] text-mut btn btn-ghost">
+          <span class="flex items-center gap-1.5"><i data-lucide="sliders-horizontal" class="w-3 h-3"></i>高级配置（超时 / 重试 / 请求头）</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 px-4 py-3 border-t border-line">
+      <button class="btn btn-ghost h-8 px-3.5 rounded-md border border-line text-[12px]" onclick="modal(0)">取消</button>
+      <button class="btn btn-primary h-8 px-4 rounded-md text-[12px] font-semibold" style="background:var(--kiwi);color:oklch(0.18 0.03 132)">保存并启用</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-' + id).classList.add('active');
+  document.querySelectorAll('.navtab').forEach(n => n.classList.toggle('active', n.dataset.nav === id));
+  if (history.replaceState) history.replaceState(null, '', '#' + id);
+}
+const _hash = location.hash.slice(1);
+if (_hash && document.getElementById('s-' + _hash)) show(_hash);
+function modal(open) { document.getElementById('modal').style.display = open ? 'flex' : 'none'; }
+function key() { const el = document.getElementById('keyinput'); el.type = el.type === 'password' ? 'text' : 'password'; }
+function chip(el) { el.classList.toggle('active'); el.classList.toggle('text-mut'); }
+function bill(el) {
+  [...el.parentElement.children].forEach(c => { c.style.borderColor = ''; c.style.background = ''; c.style.color = ''; c.classList.add('text-mut'); });
+  el.classList.remove('text-mut');
+  el.style.borderColor = 'var(--kiwi-dim)'; el.style.background = 'var(--kiwi-soft)'; el.style.color = 'var(--kiwi)';
+  const b = el.dataset.bill;
+  document.getElementById('bill-plan').style.display = b === 'plan' ? '' : 'none';
+  document.getElementById('bill-payg').style.display = b === 'payg' ? '' : 'none';
+  document.getElementById('bill-unl').style.display = b === 'unl' ? '' : 'none';
+}
+function seg(el) {
+  [...el.parentElement.children].forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const a = el.dataset.agent;
+  if (!a) return; // 非过滤用途（仪表盘时间范围等）
+  let any = false;
+  document.querySelectorAll('#s-providers .row').forEach(r => {
+    const hit = a === 'all' || (r.dataset.agents || '').split(' ').filter(Boolean).includes(a);
+    r.style.display = hit ? 'flex' : 'none';
+    if (hit) any = true;
+  });
+  document.getElementById('empty-agents').style.display = any ? 'none' : 'block';
+}
+document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') modal(0); });
+lucide.createIcons();
+</script>
+</body>
+</html>

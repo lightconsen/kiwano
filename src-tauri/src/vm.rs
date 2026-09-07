@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwano_gateway::store::{
-    Billing, Binding, HealthRecord, Provider, Store, StrategyType, UsageTotals,
+    Billing, Binding, HealthRecord, Provider, Store, Strategy, StrategyType, UsageTotals,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -629,6 +629,113 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         .collect();
 
     Ok(vms)
+}
+
+// ── Agent 策略视图（tech.md §4.7：策略类型 + 候选排序）──
+
+/// agent_strategies + agent_bindings 的 UI 投影。
+#[derive(Serialize)]
+pub struct BindingVm {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub logo_char: String,
+    pub logo_color: String,
+    pub priority: i64,
+    pub weight: i64,
+    pub enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct AgentRouteVm {
+    pub agent: String,
+    /// single | failover | roundrobin | timewindow | quota
+    pub strategy: String,
+    /// 策略 JSON 载荷（quota: {"limit","unit"}；其余 null）
+    pub config: Option<String>,
+    /// 候选按优先级升序（下标 0 = 主选）
+    pub bindings: Vec<BindingVm>,
+}
+
+/// 每个 Agent 一行（仅有绑定的 Agent），策略缺省为 single。
+pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
+    let providers: HashMap<String, Provider> = store
+        .list_providers()
+        .map_err(e2s)?
+        .into_iter()
+        .map(|p| (p.id.clone(), p))
+        .collect();
+
+    let mut routes = Vec::new();
+    for agent in store.bound_agents().map_err(e2s)? {
+        let strategy = store.get_strategy(&agent).map_err(e2s)?.unwrap_or(Strategy {
+            agent: agent.clone(),
+            kind: StrategyType::Single,
+            config: None,
+        });
+        let bindings = store
+            .bindings_for_agent(&agent)
+            .map_err(e2s)?
+            .into_iter()
+            .map(|b| {
+                let name = providers
+                    .get(&b.provider_id)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| b.provider_id.clone());
+                BindingVm {
+                    logo_char: logo_char(&name),
+                    logo_color: palette_color(&name).to_string(),
+                    provider_name: name,
+                    provider_id: b.provider_id,
+                    priority: b.priority,
+                    weight: b.weight,
+                    enabled: b.enabled,
+                }
+            })
+            .collect();
+        routes.push(AgentRouteVm {
+            strategy: strategy.kind.as_str().to_string(),
+            config: strategy.config,
+            agent,
+            bindings,
+        });
+    }
+    Ok(routes)
+}
+
+/// 更新 Agent 策略类型（+ 可选 JSON config）；未知类型报错。
+pub fn set_agent_strategy(
+    store: &Store,
+    agent: &str,
+    strategy: &str,
+    config: Option<&str>,
+) -> Result<(), String> {
+    let kind = StrategyType::from_str(strategy)
+        .ok_or_else(|| format!("unknown strategy type: {strategy}"))?;
+    store.upsert_strategy(agent, kind, config).map_err(e2s)?;
+    Ok(())
+}
+
+/// 候选重排：给定 provider_id 顺序 → 重写 priority 0..n（weight/窗口/启用位保留）。
+/// 未列出的绑定不动；未知的 provider_id 报错。
+pub fn reorder_agent_bindings(
+    store: &Store,
+    agent: &str,
+    provider_ids: &[String],
+) -> Result<(), String> {
+    let existing: HashMap<String, Binding> = store
+        .bindings_for_agent(agent)
+        .map_err(e2s)?
+        .into_iter()
+        .map(|b| (b.provider_id.clone(), b))
+        .collect();
+    for (i, pid) in provider_ids.iter().enumerate() {
+        let Some(mut b) = existing.get(pid).cloned() else {
+            return Err(format!("provider {pid} is not bound to {agent}"));
+        };
+        b.priority = i as i64;
+        store.upsert_binding(&b).map_err(e2s)?;
+    }
+    Ok(())
 }
 
 fn e2s(e: impl std::fmt::Display) -> String {
@@ -1477,5 +1584,45 @@ mod tests {
         assert_eq!(day_key(0), "1970-01-01");
         assert_eq!(mmdd("2026-09-07"), "09-07");
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn agent_routes_roundtrip_strategy_and_reorder() {
+        let s = store();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Metered)).unwrap();
+        for (pid, pr) in [("a1", 0), ("b1", 1)] {
+            s.upsert_binding(&Binding { agent: "claude".into(), provider_id: pid.into(), priority: pr, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        }
+
+        // 缺省策略为 single
+        let routes = build_agent_routes(&s).unwrap();
+        assert_eq!(routes.len(), 1);
+        let r = &routes[0];
+        assert_eq!(r.agent, "claude");
+        assert_eq!(r.strategy, "single");
+        assert_eq!(r.bindings.len(), 2);
+        assert_eq!(r.bindings[0].provider_name, "Alpha");
+        assert_eq!(r.bindings[0].logo_char, "A");
+
+        // 改策略 + 重排 → priority 重写、weight 保留
+        set_agent_strategy(&s, "claude", "failover", None).unwrap();
+        assert!(set_agent_strategy(&s, "claude", "bogus", None).is_err());
+        reorder_agent_bindings(&s, "claude", &["b1".into(), "a1".into()]).unwrap();
+        assert!(reorder_agent_bindings(&s, "claude", &["nope".into()]).is_err());
+
+        let routes = build_agent_routes(&s).unwrap();
+        let r = &routes[0];
+        assert_eq!(r.strategy, "failover");
+        assert_eq!(r.bindings[0].provider_id, "b1");
+        assert_eq!(r.bindings[0].priority, 0);
+        assert_eq!(r.bindings[1].provider_id, "a1");
+        assert_eq!(r.bindings[1].priority, 1);
+
+        // quota config 透传
+        set_agent_strategy(&s, "claude", "quota", Some(r#"{"limit":50,"unit":"requests"}"#)).unwrap();
+        let r = &build_agent_routes(&s).unwrap()[0];
+        assert_eq!(r.strategy, "quota");
+        assert_eq!(r.config.as_deref(), Some(r#"{"limit":50,"unit":"requests"}"#));
     }
 }

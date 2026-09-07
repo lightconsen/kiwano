@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentId,
+  AgentRoute,
   AppSettings,
   CatalogList,
   DashboardData,
@@ -14,6 +15,7 @@ import type {
   KiwanoApi,
   NewProviderInput,
   Provider,
+  StrategyKind,
 } from "./types";
 
 export const tauriApi: KiwanoApi = {
@@ -49,6 +51,14 @@ export const tauriApi: KiwanoApi = {
     invoke<void>("set_agent_takeover", { agent, enabled }),
 
   importCcSwitch: () => invoke<ImportReport>("import_cc_switch"),
+
+  getAgentRoutes: () => invoke<AgentRoute[]>("get_agent_routes"),
+
+  updateAgentStrategy: (agent: AgentId, strategy: StrategyKind, config?: string | null) =>
+    invoke<void>("update_agent_strategy", { agent, strategy, config: config ?? null }),
+
+  reorderAgentBindings: (agent: AgentId, providerIds: string[]) =>
+    invoke<void>("reorder_agent_bindings", { agent, providerIds }),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
 };

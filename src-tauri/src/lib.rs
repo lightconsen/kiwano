@@ -253,6 +253,36 @@ fn get_footer_stats(state: State<AppState>) -> Result<vm::FooterStatsVm, String>
     vm::build_footer_stats(&state.store, &state.aux)
 }
 
+// ── Agent 策略（tech.md §4.7：策略类型 / 候选排序）──
+
+#[tauri::command]
+fn get_agent_routes(state: State<AppState>) -> Result<Vec<vm::AgentRouteVm>, String> {
+    vm::build_agent_routes(&state.store)
+}
+
+#[tauri::command]
+fn update_agent_strategy(
+    state: State<AppState>,
+    agent: String,
+    strategy: String,
+    config: Option<String>,
+) -> Result<(), String> {
+    vm::set_agent_strategy(&state.store, &agent, &strategy, config.as_deref())?;
+    after_mutation(&state);
+    Ok(())
+}
+
+#[tauri::command]
+fn reorder_agent_bindings(
+    state: State<AppState>,
+    agent: String,
+    provider_ids: Vec<String>,
+) -> Result<(), String> {
+    vm::reorder_agent_bindings(&state.store, &agent, &provider_ids)?;
+    after_mutation(&state);
+    Ok(())
+}
+
 /// Hub 目录同步（网络 IO → async 命令线程执行，不阻塞 UI）。
 #[tauri::command(async)]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
@@ -358,6 +388,9 @@ pub fn run() {
             get_footer_stats,
             sync_hub,
             import_cc_switch,
+            get_agent_routes,
+            update_agent_strategy,
+            reorder_agent_bindings,
         ])
         .on_window_event(|window, event| {
             // 关闭到托盘：拦截 CloseRequested，隐藏窗口而非退出（设置可关）

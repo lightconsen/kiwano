@@ -194,6 +194,28 @@ export interface ImportReport {
   detail: string[];
 }
 
+export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
+
+/** Agent 策略候选（agent_bindings 行投影，按优先级升序，0 = 主选） */
+export interface StrategyBinding {
+  provider_id: string;
+  provider_name: string;
+  logo_char: string;
+  logo_color: string;
+  priority: number;
+  weight: number;
+  enabled: boolean;
+}
+
+/** Agent 路由策略（agent_strategies + agent_bindings，tech.md §4.7） */
+export interface AgentRoute {
+  agent: AgentId;
+  strategy: StrategyKind;
+  /** 策略 JSON 载荷（quota: {"limit","unit"}；其余 null） */
+  config: string | null;
+  bindings: StrategyBinding[];
+}
+
 export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
@@ -215,5 +237,11 @@ export interface KiwanoApi {
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
   /** 从 CC Switch 导入配置（自动探测 ~/.cc-switch 数据源） */
   importCcSwitch(): Promise<ImportReport>;
+  /** Agent 路由策略表（仅有绑定的 Agent） */
+  getAgentRoutes(): Promise<AgentRoute[]>;
+  /** 更新 Agent 策略类型（config 仅 quota 需要：{"limit","unit"}） */
+  updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void>;
+  /** 候选重排：provider_id 顺序 → priority 0..n */
+  reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void>;
   getFooterStats(): Promise<FooterStats>;
 }

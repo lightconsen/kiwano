@@ -2,6 +2,7 @@
 // 集成阶段由 src/api/client.ts 切换为 Tauri invoke 实现，本文件退役。
 import type {
   AgentId,
+  AgentRoute,
   AppSettings,
   CatalogEntry,
   CatalogList,
@@ -14,6 +15,8 @@ import type {
   KiwanoApi,
   NewProviderInput,
   Provider,
+  StrategyBinding,
+  StrategyKind,
 } from "./types";
 
 const CATALOG_TOTAL = 42;
@@ -337,6 +340,46 @@ async function delay(ms = 120) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ── Agent 路由策略（tech.md §4.7）──
+
+function bind(pid: string, priority: number): StrategyBinding {
+  const p = providers.find((x) => x.id === pid)!;
+  return {
+    provider_id: pid,
+    provider_name: p.name,
+    logo_char: p.logo_char,
+    logo_color: p.logo_color,
+    priority,
+    weight: 1,
+    enabled: p.enabled,
+  };
+}
+
+const agentRoutes: AgentRoute[] = [
+  {
+    agent: "claude",
+    strategy: "failover",
+    config: null,
+    bindings: [bind("deepseek", 0), bind("kimi", 1)],
+  },
+  {
+    agent: "codex",
+    strategy: "single",
+    config: null,
+    bindings: [bind("deepseek", 0)],
+  },
+  {
+    agent: "gemini",
+    strategy: "quota",
+    config: '{"limit":500,"unit":"requests"}',
+    bindings: [bind("ollama", 0)],
+  },
+];
+
+function strategyOf(agent: AgentId): AgentRoute {
+  return agentRoutes.find((r) => r.agent === agent)!;
+}
+
 export const mockApi: KiwanoApi = {
   async getGatewayStatus(): Promise<GatewayStatus> {
     await delay();
@@ -474,6 +517,28 @@ export const mockApi: KiwanoApi = {
       synced_at: new Date().toISOString(),
       hub_url: settings.hub_url,
     };
+  },
+
+  async getAgentRoutes(): Promise<AgentRoute[]> {
+    await delay();
+    return agentRoutes.map((r) => ({ ...r, bindings: r.bindings.map((b) => ({ ...b })) }));
+  },
+
+  async updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void> {
+    await delay();
+    strategyOf(agent).strategy = strategy;
+    strategyOf(agent).config = config ?? null;
+  },
+
+  async reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void> {
+    await delay();
+    const route = strategyOf(agent);
+    route.bindings = providerIds
+      .map((pid, i) => {
+        const b = route.bindings.find((x) => x.provider_id === pid)!;
+        return { ...b, priority: i };
+      })
+      .sort((a, b) => a.priority - b.priority);
   },
 
   async getFooterStats(): Promise<FooterStats> {

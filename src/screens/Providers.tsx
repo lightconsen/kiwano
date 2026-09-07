@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { api } from "../api/client";
 import { AGENTS, type AgentId, type Provider } from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
+import StrategyPanel from "../components/StrategyPanel";
 import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
 const SEGMENTS: { id: AgentId | "all"; label: string }[] = [
@@ -280,6 +281,8 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
           </button>
         </div>
       )}
+
+      <StrategyPanel />
 
       <div className="px-4 py-3 text-[10.5px] text-mut">
         切换即时生效（Agent 已接管至本地网关，切换仅改路由）· API Key 存于本机系统钥匙串 · 请求不经 Kiwano 云端

@@ -1,0 +1,1175 @@
+//! SQLite persistence for the Kiwano gateway (tech.md §2.3 / §4.7).
+//!
+//! SQLite is the single source of truth (tech.md §4.2): the Tauri app writes
+//! provider/binding configuration, the gateway reads it and writes usage.
+//! The database file is opened in WAL mode so both processes can share it;
+//! `busy_timeout` guards against transient cross-process lock contention.
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use chrono::Utc;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
+
+/// Current schema version tracked via `PRAGMA user_version`.
+pub const SCHEMA_VERSION: i32 = 1;
+
+const MIGRATION_V1: &str = r#"
+CREATE TABLE IF NOT EXISTS providers (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    protocol     TEXT NOT NULL DEFAULT 'anthropic'
+                 CHECK (protocol IN ('anthropic','openai')),
+    base_url     TEXT NOT NULL,
+    api_path     TEXT,
+    api_key      TEXT,
+    billing      TEXT NOT NULL DEFAULT 'metered'
+                 CHECK (billing IN ('subscription','metered','unlimited')),
+    period_limit REAL,
+    reset_period TEXT
+                 CHECK (reset_period IS NULL OR reset_period IN ('monthly','weekly','yearly')),
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_strategies (
+    agent  TEXT PRIMARY KEY,
+    type   TEXT NOT NULL DEFAULT 'single'
+           CHECK (type IN ('single','failover','roundrobin','timewindow','quota')),
+    config TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_bindings (
+    agent       TEXT NOT NULL,
+    provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    priority    INTEGER NOT NULL DEFAULT 0,
+    weight      INTEGER NOT NULL DEFAULT 1,
+    win_start   TEXT,
+    win_end     TEXT,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (agent, provider_id)
+);
+
+CREATE TABLE IF NOT EXISTS placeholder_keys (
+    key        TEXT PRIMARY KEY,
+    agent      TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                    TEXT NOT NULL,
+    agent                 TEXT NOT NULL,
+    provider_id           TEXT NOT NULL,
+    model                 TEXT,
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms            INTEGER,
+    status                TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok','error'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_ts            ON usage(ts);
+CREATE INDEX IF NOT EXISTS idx_usage_provider_ts   ON usage(provider_id, ts);
+CREATE INDEX IF NOT EXISTS idx_usage_agent_ts      ON usage(agent, ts);
+
+CREATE TABLE IF NOT EXISTS provider_health (
+    provider_id          TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
+    status               TEXT NOT NULL DEFAULT 'unknown'
+                         CHECK (status IN ('healthy','degraded','down','unknown')),
+    last_latency_ms      INTEGER,
+    last_check_at        TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0
+);
+"#;
+
+/// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Protocol {
+    Anthropic,
+    OpenAI,
+}
+
+impl Protocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Protocol::Anthropic => "anthropic",
+            Protocol::OpenAI => "openai",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "anthropic" => Some(Protocol::Anthropic),
+            "openai" => Some(Protocol::OpenAI),
+            _ => None,
+        }
+    }
+}
+
+/// Billing model of a provider (tech.md §2.4 A).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Billing {
+    Subscription,
+    Metered,
+    Unlimited,
+}
+
+impl Billing {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Billing::Subscription => "subscription",
+            Billing::Metered => "metered",
+            Billing::Unlimited => "unlimited",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "subscription" => Some(Billing::Subscription),
+            "metered" => Some(Billing::Metered),
+            "unlimited" => Some(Billing::Unlimited),
+            _ => None,
+        }
+    }
+}
+
+/// Agent strategy type (tech.md §4.7.1). MVP only activates `Single`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StrategyType {
+    Single,
+    Failover,
+    Roundrobin,
+    Timewindow,
+    Quota,
+}
+
+impl StrategyType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StrategyType::Single => "single",
+            StrategyType::Failover => "failover",
+            StrategyType::Roundrobin => "roundrobin",
+            StrategyType::Timewindow => "timewindow",
+            StrategyType::Quota => "quota",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "single" => Some(StrategyType::Single),
+            "failover" => Some(StrategyType::Failover),
+            "roundrobin" => Some(StrategyType::Roundrobin),
+            "timewindow" => Some(StrategyType::Timewindow),
+            "quota" => Some(StrategyType::Quota),
+            _ => None,
+        }
+    }
+}
+
+/// A configured upstream provider.
+///
+/// `api_key` holds the upstream credential for MVP (P1 plan: value lives in
+/// the system keychain and this column keeps only a reference marker).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Provider {
+    pub id: String,
+    pub name: String,
+    pub protocol: Protocol,
+    pub base_url: String,
+    /// Optional upstream path prefix, e.g. `/anthropic` for compatible endpoints.
+    pub api_path: Option<String>,
+    pub api_key: Option<String>,
+    pub billing: Billing,
+    /// User-entered spending/period cap used for the ring percentage estimate.
+    pub period_limit: Option<f64>,
+    pub reset_period: Option<String>,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Per-agent strategy row (tech.md §4.7.2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Strategy {
+    pub agent: String,
+    pub kind: StrategyType,
+    /// JSON payload: roundrobin weights, timewindow timezone, quota thresholds, ...
+    pub config: Option<String>,
+}
+
+/// Candidate binding of a provider for an agent (tech.md §4.7.2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Binding {
+    pub agent: String,
+    pub provider_id: String,
+    /// 0 = primary, 1/2 = backup #1/#2 (failover order).
+    pub priority: i64,
+    pub weight: i64,
+    pub win_start: Option<String>,
+    pub win_end: Option<String>,
+    pub enabled: bool,
+}
+
+/// Placeholder key `kw-ag-<agent>-<rand>` mapped to an agent (tech.md §4.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaceholderKey {
+    pub key: String,
+    pub agent: String,
+    pub created_at: String,
+}
+
+/// One metered request (tech.md §4.3 request flow, usage capture).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageRecord {
+    /// RFC3339 UTC timestamp of the request.
+    pub ts: String,
+    pub agent: String,
+    pub provider_id: String,
+    pub model: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub latency_ms: Option<i64>,
+    pub status: String,
+}
+
+/// Aggregated token/request totals.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageTotals {
+    pub requests: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+}
+
+impl UsageTotals {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(UsageTotals {
+            requests: row.get(0)?,
+            input_tokens: row.get(1)?,
+            output_tokens: row.get(2)?,
+            cache_read_tokens: row.get(3)?,
+            cache_creation_tokens: row.get(4)?,
+        })
+    }
+}
+
+/// Per-provider aggregation result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderUsage {
+    pub provider_id: String,
+    pub totals: UsageTotals,
+}
+
+/// Per-day aggregation result (sparkline / dashboard, tech.md §2.4 A).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DailyUsage {
+    pub day: String,
+    pub totals: UsageTotals,
+}
+
+/// Health probe state of a provider (table prepared for the P1 failover engine).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HealthRecord {
+    pub provider_id: String,
+    /// healthy | degraded | down | unknown
+    pub status: String,
+    pub last_latency_ms: Option<i64>,
+    pub last_check_at: Option<String>,
+    pub consecutive_failures: i64,
+}
+
+/// Row counts surfaced by the admin `/status` endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoreMetrics {
+    pub providers: i64,
+    pub bindings: i64,
+    pub placeholder_keys: i64,
+    pub usage_rows: i64,
+}
+
+pub fn now_rfc3339() -> String {
+    Utc::now().to_rfc3339()
+}
+
+/// Thin handle around a SQLite connection (WAL, shared with the Tauri app).
+pub struct Store {
+    conn: Mutex<Connection>,
+    #[allow(dead_code)]
+    path: Option<PathBuf>,
+}
+
+impl Store {
+    /// Open (creating if needed) and migrate a database file.
+    pub fn open(path: impl AsRef<Path>) -> Result<Store> {
+        let conn = Connection::open(path.as_ref())?;
+        let store = Store {
+            conn: Mutex::new(conn),
+            path: Some(path.as_ref().to_path_buf()),
+        };
+        store.configure_and_migrate()?;
+        Ok(store)
+    }
+
+    /// In-memory store, mainly for quick experiments (tests use tempfile files
+    /// so WAL behaviour matches production).
+    pub fn open_in_memory() -> Result<Store> {
+        let conn = Connection::open_in_memory()?;
+        let store = Store {
+            conn: Mutex::new(conn),
+            path: None,
+        };
+        store.configure_and_migrate()?;
+        Ok(store)
+    }
+
+    fn configure_and_migrate(&self) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
+        self.migrate(&conn)?;
+        Ok(())
+    }
+
+    /// Idempotent schema migration using `PRAGMA user_version`.
+    fn migrate(&self, conn: &Connection) -> Result<()> {
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < 1 {
+            conn.execute_batch(MIGRATION_V1)?;
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
+        Ok(())
+    }
+
+    // ---- providers ------------------------------------------------------
+
+    pub fn insert_provider(&self, p: &Provider) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
+                                    billing, period_limit, reset_period, enabled,
+                                    created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                p.id,
+                p.name,
+                p.protocol.as_str(),
+                p.base_url,
+                p.api_path,
+                p.api_key,
+                p.billing.as_str(),
+                p.period_limit,
+                p.reset_period,
+                p.enabled as i64,
+                p.created_at,
+                p.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_provider(&self, id: &str) -> Result<Option<Provider>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, protocol, base_url, api_path, api_key, billing,
+                    period_limit, reset_period, enabled, created_at, updated_at
+             FROM providers WHERE id = ?1",
+        )?;
+        let provider = stmt
+            .query_row(params![id], provider_from_row)
+            .optional()?;
+        Ok(provider)
+    }
+
+    pub fn list_providers(&self) -> Result<Vec<Provider>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, protocol, base_url, api_path, api_key, billing,
+                    period_limit, reset_period, enabled, created_at, updated_at
+             FROM providers ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], provider_from_row)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Update an existing provider; refreshes `updated_at`.
+    pub fn update_provider(&self, p: &Provider) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = if p.updated_at.is_empty() {
+            now_rfc3339()
+        } else {
+            p.updated_at.clone()
+        };
+        conn.execute(
+            "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
+                    api_key = ?6, billing = ?7, period_limit = ?8, reset_period = ?9,
+                    enabled = ?10, updated_at = ?11
+             WHERE id = ?1",
+            params![
+                p.id,
+                p.name,
+                p.protocol.as_str(),
+                p.base_url,
+                p.api_path,
+                p.api_key,
+                p.billing.as_str(),
+                p.period_limit,
+                p.reset_period,
+                p.enabled as i64,
+                updated,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_provider(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute("DELETE FROM providers WHERE id = ?1", params![id])?;
+        Ok(n > 0)
+    }
+
+    // ---- strategies & bindings (tech.md §4.7) ---------------------------
+
+    pub fn upsert_strategy(&self, agent: &str, kind: StrategyType, config: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO agent_strategies (agent, type, config) VALUES (?1, ?2, ?3)
+             ON CONFLICT(agent) DO UPDATE SET type = ?2, config = ?3",
+            params![agent, kind.as_str(), config],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_strategy(&self, agent: &str) -> Result<Option<Strategy>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT agent, type, config FROM agent_strategies WHERE agent = ?1")?;
+        let s = stmt
+            .query_row(params![agent], |row| {
+                let type_str: String = row.get(1)?;
+                Ok(Strategy {
+                    agent: row.get(0)?,
+                    kind: StrategyType::from_str(&type_str).unwrap_or(StrategyType::Single),
+                    config: row.get(2)?,
+                })
+            })
+            .optional()?;
+        Ok(s)
+    }
+
+    pub fn upsert_binding(&self, b: &Binding) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO agent_bindings (agent, provider_id, priority, weight,
+                                         win_start, win_end, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(agent, provider_id) DO UPDATE SET
+                priority = ?3, weight = ?4, win_start = ?5, win_end = ?6, enabled = ?7",
+            params![
+                b.agent,
+                b.provider_id,
+                b.priority,
+                b.weight,
+                b.win_start,
+                b.win_end,
+                b.enabled as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Ordered candidate list for an agent (priority asc, enabled first).
+    pub fn bindings_for_agent(&self, agent: &str) -> Result<Vec<Binding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT agent, provider_id, priority, weight, win_start, win_end, enabled
+             FROM agent_bindings WHERE agent = ?1
+             ORDER BY enabled DESC, priority ASC, provider_id ASC",
+        )?;
+        let rows = stmt.query_map(params![agent], binding_from_row)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// The provider id chosen under the `single` strategy (primary binding).
+    pub fn primary_provider_id(&self, agent: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let id = conn
+            .query_row(
+                "SELECT provider_id FROM agent_bindings
+                 WHERE agent = ?1 AND enabled = 1
+                 ORDER BY priority ASC, provider_id ASC LIMIT 1",
+                params![agent],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(id)
+    }
+
+    pub fn delete_binding(&self, agent: &str, provider_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "DELETE FROM agent_bindings WHERE agent = ?1 AND provider_id = ?2",
+            params![agent, provider_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    // ---- placeholder keys (tech.md §4.6) --------------------------------
+
+    pub fn upsert_placeholder_key(&self, key: &str, agent: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO placeholder_keys (key, agent, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET agent = ?2",
+            params![key, agent, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    pub fn agent_for_key(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let agent = conn
+            .query_row(
+                "SELECT agent FROM placeholder_keys WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(agent)
+    }
+
+    pub fn delete_placeholder_key(&self, key: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute("DELETE FROM placeholder_keys WHERE key = ?1", params![key])?;
+        Ok(n > 0)
+    }
+
+    pub fn list_placeholder_keys(&self) -> Result<Vec<PlaceholderKey>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt =
+            conn.prepare("SELECT key, agent, created_at FROM placeholder_keys ORDER BY created_at ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PlaceholderKey {
+                key: row.get(0)?,
+                agent: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    // ---- usage -----------------------------------------------------------
+
+    pub fn record_usage(&self, u: &UsageRecord) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
+                                cache_read_tokens, cache_creation_tokens, latency_ms, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                u.ts,
+                u.agent,
+                u.provider_id,
+                u.model,
+                u.input_tokens,
+                u.output_tokens,
+                u.cache_read_tokens,
+                u.cache_creation_tokens,
+                u.latency_ms,
+                u.status,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Aggregated totals, optionally filtered by agent and/or a start timestamp.
+    pub fn usage_totals(&self, agent: Option<&str>, since: Option<&str>) -> Result<UsageTotals> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0)
+             FROM usage WHERE 1=1{}{}",
+            agent.map_or(String::new(), |_| " AND agent = ?1".to_string()),
+            since.map_or(String::new(), |_| format!(
+                " AND ts >= ?{}",
+                if agent.is_some() { 2 } else { 1 }
+            )),
+        ))?;
+
+        let map_row = |row: &rusqlite::Row<'_>| UsageTotals::from_row(row);
+        let totals = match (agent, since) {
+            (Some(a), Some(s)) => stmt.query_row(params![a, s], map_row)?,
+            (Some(a), None) => stmt.query_row(params![a], map_row)?,
+            (None, Some(s)) => stmt.query_row(params![s], map_row)?,
+            (None, None) => stmt.query_row([], map_row)?,
+        };
+        Ok(totals)
+    }
+
+    /// Totals grouped by provider, optionally filtered by agent/since.
+    pub fn usage_by_provider(
+        &self,
+        agent: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<ProviderUsage>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT provider_id, COUNT(*), COALESCE(SUM(input_tokens),0),
+                    COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+                    COALESCE(SUM(cache_creation_tokens),0)
+             FROM usage WHERE 1=1{}{}
+             GROUP BY provider_id ORDER BY COUNT(*) DESC",
+            agent.map_or(String::new(), |_| " AND agent = ?1".to_string()),
+            since.map_or(String::new(), |_| format!(
+                " AND ts >= ?{}",
+                if agent.is_some() { 2 } else { 1 }
+            )),
+        ))?;
+
+        let map_row = |row: &rusqlite::Row<'_>| {
+            Ok(ProviderUsage {
+                provider_id: row.get(0)?,
+                totals: UsageTotals {
+                    requests: row.get(1)?,
+                    input_tokens: row.get(2)?,
+                    output_tokens: row.get(3)?,
+                    cache_read_tokens: row.get(4)?,
+                    cache_creation_tokens: row.get(5)?,
+                },
+            })
+        };
+        let mut out = Vec::new();
+        match (agent, since) {
+            (Some(a), Some(s)) => {
+                for row in stmt.query_map(params![a, s], map_row)? {
+                    out.push(row?);
+                }
+            }
+            (Some(a), None) => {
+                for row in stmt.query_map(params![a], map_row)? {
+                    out.push(row?);
+                }
+            }
+            (None, Some(s)) => {
+                for row in stmt.query_map(params![s], map_row)? {
+                    out.push(row?);
+                }
+            }
+            (None, None) => {
+                for row in stmt.query_map([], map_row)? {
+                    out.push(row?);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Daily aggregation (UTC day = first 10 chars of the RFC3339 ts).
+    pub fn usage_daily(&self, agent: Option<&str>, since: Option<&str>) -> Result<Vec<DailyUsage>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT SUBSTR(ts, 1, 10) AS day, COUNT(*), COALESCE(SUM(input_tokens),0),
+                    COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+                    COALESCE(SUM(cache_creation_tokens),0)
+             FROM usage WHERE 1=1{}{}
+             GROUP BY day ORDER BY day ASC",
+            agent.map_or(String::new(), |_| " AND agent = ?1".to_string()),
+            since.map_or(String::new(), |_| format!(
+                " AND ts >= ?{}",
+                if agent.is_some() { 2 } else { 1 }
+            )),
+        ))?;
+
+        let map_row = |row: &rusqlite::Row<'_>| {
+            Ok(DailyUsage {
+                day: row.get(0)?,
+                totals: UsageTotals {
+                    requests: row.get(1)?,
+                    input_tokens: row.get(2)?,
+                    output_tokens: row.get(3)?,
+                    cache_read_tokens: row.get(4)?,
+                    cache_creation_tokens: row.get(5)?,
+                },
+            })
+        };
+        let mut out = Vec::new();
+        match (agent, since) {
+            (Some(a), Some(s)) => {
+                for row in stmt.query_map(params![a, s], map_row)? {
+                    out.push(row?);
+                }
+            }
+            (Some(a), None) => {
+                for row in stmt.query_map(params![a], map_row)? {
+                    out.push(row?);
+                }
+            }
+            (None, Some(s)) => {
+                for row in stmt.query_map(params![s], map_row)? {
+                    out.push(row?);
+                }
+            }
+            (None, None) => {
+                for row in stmt.query_map([], map_row)? {
+                    out.push(row?);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    // ---- provider health (P1 failover groundwork) ------------------------
+
+    pub fn upsert_health(&self, h: &HealthRecord) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_health (provider_id, status, last_latency_ms,
+                                          last_check_at, consecutive_failures)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider_id) DO UPDATE SET
+                status = ?2, last_latency_ms = ?3, last_check_at = ?4,
+                consecutive_failures = ?5",
+            params![
+                h.provider_id,
+                h.status,
+                h.last_latency_ms,
+                h.last_check_at,
+                h.consecutive_failures,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_health(&self, provider_id: &str) -> Result<Option<HealthRecord>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider_id, status, last_latency_ms, last_check_at, consecutive_failures
+             FROM provider_health WHERE provider_id = ?1",
+        )?;
+        let h = stmt
+            .query_row(params![provider_id], health_from_row)
+            .optional()?;
+        Ok(h)
+    }
+
+    // ---- metrics ---------------------------------------------------------
+
+    pub fn metrics(&self) -> Result<StoreMetrics> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let count = |sql: &str| -> Result<i64> {
+            Ok(conn.query_row(sql, [], |row| row.get(0))?)
+        };
+        Ok(StoreMetrics {
+            providers: count("SELECT COUNT(*) FROM providers")?,
+            bindings: count("SELECT COUNT(*) FROM agent_bindings")?,
+            placeholder_keys: count("SELECT COUNT(*) FROM placeholder_keys")?,
+            usage_rows: count("SELECT COUNT(*) FROM usage")?,
+        })
+    }
+}
+
+fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
+    let protocol_str: String = row.get(2)?;
+    let billing_str: String = row.get(6)?;
+    Ok(Provider {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        protocol: Protocol::from_str(&protocol_str).unwrap_or(Protocol::Anthropic),
+        base_url: row.get(3)?,
+        api_path: row.get(4)?,
+        api_key: row.get(5)?,
+        billing: Billing::from_str(&billing_str).unwrap_or(Billing::Metered),
+        period_limit: row.get(7)?,
+        reset_period: row.get(8)?,
+        enabled: row.get::<_, i64>(9)? != 0,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
+fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Binding> {
+    Ok(Binding {
+        agent: row.get(0)?,
+        provider_id: row.get(1)?,
+        priority: row.get(2)?,
+        weight: row.get(3)?,
+        win_start: row.get(4)?,
+        win_end: row.get(5)?,
+        enabled: row.get::<_, i64>(6)? != 0,
+    })
+}
+
+fn health_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HealthRecord> {
+    Ok(HealthRecord {
+        provider_id: row.get(0)?,
+        status: row.get(1)?,
+        last_latency_ms: row.get(2)?,
+        last_check_at: row.get(3)?,
+        consecutive_failures: row.get(4)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_provider(id: &str, protocol: Protocol) -> Provider {
+        Provider {
+            id: id.to_string(),
+            name: format!("prov-{id}"),
+            protocol,
+            base_url: "https://api.example.com".to_string(),
+            api_path: None,
+            api_key: Some("sk-upstream".to_string()),
+            billing: Billing::Metered,
+            period_limit: Some(50.0),
+            reset_period: Some("monthly".to_string()),
+            enabled: true,
+            created_at: now_rfc3339(),
+            updated_at: now_rfc3339(),
+        }
+    }
+
+    fn temp_store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("kiwano.db")).expect("open store");
+        (dir, store)
+    }
+
+    #[test]
+    fn migration_creates_tables_and_wal() {
+        let (_dir, store) = temp_store();
+        let conn = store.conn.lock().unwrap();
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let journal: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(journal, "wal");
+
+        let tables: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+            rows.map(|r| r.unwrap()).collect()
+        };
+        for expected in [
+            "providers",
+            "agent_strategies",
+            "agent_bindings",
+            "placeholder_keys",
+            "usage",
+            "provider_health",
+        ] {
+            assert!(tables.iter().any(|t| t == expected), "missing {expected}");
+        }
+
+        // Migration must be idempotent.
+        drop(conn);
+        let (_dir2, store2) = temp_store();
+        store2.metrics().expect("re-migrate ok");
+    }
+
+    #[test]
+    fn provider_crud_roundtrip() {
+        let (_dir, store) = temp_store();
+        let p = sample_provider("p1", Protocol::Anthropic);
+        store.insert_provider(&p).unwrap();
+
+        let got = store.get_provider("p1").unwrap().expect("exists");
+        assert_eq!(got, p);
+
+        let mut updated = p.clone();
+        updated.name = "renamed".to_string();
+        updated.enabled = false;
+        updated.updated_at = String::new(); // triggers fresh updated_at
+        store.update_provider(&updated).unwrap();
+        let got = store.get_provider("p1").unwrap().unwrap();
+        assert_eq!(got.name, "renamed");
+        assert!(!got.enabled);
+        assert_ne!(got.updated_at, p.updated_at);
+
+        let all = store.list_providers().unwrap();
+        assert_eq!(all.len(), 1);
+
+        // Duplicate insert must fail (primary key).
+        assert!(store.insert_provider(&p).is_err());
+
+        assert!(store.delete_provider("p1").unwrap());
+        assert!(store.get_provider("p1").unwrap().is_none());
+        assert!(!store.delete_provider("p1").unwrap());
+    }
+
+    #[test]
+    fn strategy_and_binding_selection() {
+        let (_dir, store) = temp_store();
+        store.insert_provider(&sample_provider("a", Protocol::Anthropic)).unwrap();
+        store.insert_provider(&sample_provider("b", Protocol::OpenAI)).unwrap();
+
+        store.upsert_strategy("claude", StrategyType::Single, None).unwrap();
+        let s = store.get_strategy("claude").unwrap().unwrap();
+        assert_eq!(s.kind, StrategyType::Single);
+        assert_eq!(s.agent, "claude");
+
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "b".into(),
+                priority: 1,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "a".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+
+        // Single strategy picks the priority-0 primary.
+        assert_eq!(store.primary_provider_id("claude").unwrap().unwrap(), "a");
+
+        let bindings = store.bindings_for_agent("claude").unwrap();
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].provider_id, "a");
+
+        // Disabling the primary demotes it; next candidate takes over.
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "a".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: false,
+            })
+            .unwrap();
+        assert_eq!(store.primary_provider_id("claude").unwrap().unwrap(), "b");
+
+        assert!(store.delete_binding("claude", "a").unwrap());
+        assert!(!store.delete_binding("claude", "a").unwrap());
+
+        // Unknown agent has no binding.
+        assert!(store.primary_provider_id("codex").unwrap().is_none());
+    }
+
+    #[test]
+    fn deleting_provider_cascades_bindings() {
+        let (_dir, store) = temp_store();
+        store.insert_provider(&sample_provider("p", Protocol::Anthropic)).unwrap();
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "p".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        store.delete_provider("p").unwrap();
+        assert!(store.bindings_for_agent("claude").unwrap().is_empty());
+    }
+
+    #[test]
+    fn placeholder_key_lookup() {
+        let (_dir, store) = temp_store();
+        store.upsert_placeholder_key("kw-ag-claude-abc123", "claude").unwrap();
+        store.upsert_placeholder_key("kw-ag-codex-xyz789", "codex").unwrap();
+
+        assert_eq!(
+            store.agent_for_key("kw-ag-claude-abc123").unwrap(),
+            Some("claude".to_string())
+        );
+        assert_eq!(
+            store.agent_for_key("kw-ag-codex-xyz789").unwrap(),
+            Some("codex".to_string())
+        );
+        assert_eq!(store.agent_for_key("kw-ag-unknown").unwrap(), None);
+
+        // Upsert rebinds the agent.
+        store.upsert_placeholder_key("kw-ag-claude-abc123", "gemini").unwrap();
+        assert_eq!(
+            store.agent_for_key("kw-ag-claude-abc123").unwrap(),
+            Some("gemini".to_string())
+        );
+
+        assert_eq!(store.list_placeholder_keys().unwrap().len(), 2);
+        assert!(store.delete_placeholder_key("kw-ag-claude-abc123").unwrap());
+        assert!(!store.delete_placeholder_key("kw-ag-claude-abc123").unwrap());
+    }
+
+    #[test]
+    fn usage_record_and_aggregates() {
+        let (_dir, store) = temp_store();
+        let mk = |ts: &str, provider: &str, input: i64, output: i64| UsageRecord {
+            ts: ts.to_string(),
+            agent: "claude".to_string(),
+            provider_id: provider.to_string(),
+            model: Some("claude-sonnet-4-5".to_string()),
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: Some(120),
+            status: "ok".to_string(),
+        };
+
+        store.record_usage(&mk("2026-09-06T10:00:00+00:00", "p1", 100, 200)).unwrap();
+        store.record_usage(&mk("2026-09-06T11:00:00+00:00", "p1", 10, 20)).unwrap();
+        store.record_usage(&mk("2026-09-07T10:00:00+00:00", "p2", 7, 3)).unwrap();
+        store
+            .record_usage(&UsageRecord {
+                ts: "2026-09-07T12:00:00+00:00".into(),
+                agent: "codex".into(),
+                provider_id: "p1".into(),
+                model: None,
+                input_tokens: 5,
+                output_tokens: 5,
+                cache_read_tokens: 40,
+                cache_creation_tokens: 2,
+                latency_ms: None,
+                status: "error".into(),
+            })
+            .unwrap();
+
+        let totals = store.usage_totals(None, None).unwrap();
+        assert_eq!(totals.requests, 4);
+        assert_eq!(totals.input_tokens, 122);
+        assert_eq!(totals.output_tokens, 228);
+        assert_eq!(totals.cache_read_tokens, 40);
+        assert_eq!(totals.cache_creation_tokens, 2);
+
+        let agent_totals = store.usage_totals(Some("claude"), None).unwrap();
+        assert_eq!(agent_totals.requests, 3);
+        assert_eq!(agent_totals.input_tokens, 117);
+
+        let since_totals = store.usage_totals(None, Some("2026-09-07T00:00:00+00:00")).unwrap();
+        assert_eq!(since_totals.requests, 2);
+
+        let by_provider = store.usage_by_provider(Some("claude"), None).unwrap();
+        assert_eq!(by_provider.len(), 2);
+        assert_eq!(by_provider[0].provider_id, "p1");
+        assert_eq!(by_provider[0].totals.requests, 2);
+        assert_eq!(by_provider[0].totals.output_tokens, 220);
+
+        let daily = store.usage_daily(Some("claude"), None).unwrap();
+        assert_eq!(daily.len(), 2);
+        assert_eq!(daily[0].day, "2026-09-06");
+        assert_eq!(daily[1].day, "2026-09-07");
+        assert_eq!(daily[1].totals.requests, 1);
+
+        let empty = store.usage_totals(Some("gemini"), None).unwrap();
+        assert_eq!(empty.requests, 0);
+        assert_eq!(empty.input_tokens, 0);
+    }
+
+    #[test]
+    fn health_upsert_and_get() {
+        let (_dir, store) = temp_store();
+        store.insert_provider(&sample_provider("p1", Protocol::OpenAI)).unwrap();
+
+        assert!(store.get_health("p1").unwrap().is_none());
+
+        store
+            .upsert_health(&HealthRecord {
+                provider_id: "p1".into(),
+                status: "healthy".into(),
+                last_latency_ms: Some(88),
+                last_check_at: Some(now_rfc3339()),
+                consecutive_failures: 0,
+            })
+            .unwrap();
+        let h = store.get_health("p1").unwrap().unwrap();
+        assert_eq!(h.status, "healthy");
+        assert_eq!(h.last_latency_ms, Some(88));
+
+        store
+            .upsert_health(&HealthRecord {
+                provider_id: "p1".into(),
+                status: "down".into(),
+                last_latency_ms: None,
+                last_check_at: Some(now_rfc3339()),
+                consecutive_failures: 3,
+            })
+            .unwrap();
+        let h = store.get_health("p1").unwrap().unwrap();
+        assert_eq!(h.status, "down");
+        assert_eq!(h.consecutive_failures, 3);
+    }
+
+    #[test]
+    fn metrics_counts() {
+        let (_dir, store) = temp_store();
+        store.insert_provider(&sample_provider("p1", Protocol::Anthropic)).unwrap();
+        store.upsert_placeholder_key("kw-ag-claude-abc", "claude").unwrap();
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "p1".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        store
+            .record_usage(&UsageRecord {
+                ts: now_rfc3339(),
+                agent: "claude".into(),
+                provider_id: "p1".into(),
+                model: None,
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+            })
+            .unwrap();
+
+        let m = store.metrics().unwrap();
+        assert_eq!(m.providers, 1);
+        assert_eq!(m.bindings, 1);
+        assert_eq!(m.placeholder_keys, 1);
+        assert_eq!(m.usage_rows, 1);
+    }
+}

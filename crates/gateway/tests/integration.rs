@@ -22,6 +22,9 @@ const REAL_KEY: &str = "sk-real-provider-key";
 /// Captured auth headers from mock upstreams (placeholder key must never leak).
 type Captured = Arc<Mutex<Vec<(String, String)>>>;
 
+/// Captured request bodies from mock upstreams (used by conversion tests).
+type CapturedBodies = Arc<Mutex<Vec<Value>>>;
+
 fn capture(state: &Captured, headers: &HeaderMap, name: &str) {
     if let Some(v) = headers.get(name).and_then(|v| v.to_str().ok()) {
         state
@@ -51,24 +54,38 @@ async fn mock_anthropic(response: MockReply) -> (String, Captured) {
     (spawn(app).await, captured)
 }
 
-/// Spawn a mock OpenAI upstream on 127.0.0.1:0.
+/// Spawn a mock OpenAI upstream on 127.0.0.1:0 (bodies not captured).
 async fn mock_openai(response: MockReply) -> (String, Captured) {
+    let (url, captured, _) = mock_openai_capturing_body(response).await;
+    (url, captured)
+}
+
+/// Spawn a mock OpenAI upstream that also records the JSON request bodies it
+/// receives (lets conversion tests assert the converted request shape).
+async fn mock_openai_capturing_body(response: MockReply) -> (String, Captured, CapturedBodies) {
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
+    let bodies: CapturedBodies = Arc::new(Mutex::new(Vec::new()));
     let app = Router::new()
         .route(
             "/v1/chat/completions",
             post(
-                move |AxumState(c): AxumState<Captured>, headers: HeaderMap| {
+                move |AxumState((c, b)): AxumState<(Captured, CapturedBodies)>,
+                      headers: HeaderMap,
+                      body: axum::body::Bytes| {
                     let reply = response.clone();
                     async move {
                         capture(&c, &headers, "authorization");
+                        if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                            b.lock().unwrap().push(v);
+                        }
                         mock_response(&reply)
                     }
                 },
             ),
         )
-        .with_state(captured.clone());
-    (spawn(app).await, captured)
+        .with_state((captured.clone(), bodies.clone()));
+    let url = spawn(app).await;
+    (url, captured, bodies)
 }
 
 #[derive(Clone)]
@@ -439,13 +456,59 @@ async fn admin_reload_switches_provider_without_restart() {
 }
 
 #[tokio::test]
-async fn protocol_mismatch_fails_cleanly_without_forwarding() {
+async fn openai_inbound_to_anthropic_provider_still_fails_cleanly() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
-    // claude bound to an OpenAI provider while the inbound path is Anthropic:
-    // MVP has no conversion (cc-adapters phase), so this must not forward.
-    let (upstream_url, captured) = mock_openai(MockReply::Json(json!({"ok": true}))).await;
+    // codex (OpenAI inbound) bound to an Anthropic provider: the only
+    // conversion path implemented is Anthropic -> OpenAI, so this must not
+    // forward.
+    let (upstream_url, captured) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["error"]["type"], "protocol_mismatch");
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "nothing may reach the upstream"
+    );
+}
+
+/// Anthropic `/v1/messages` on an OpenAI-compatible provider: non-streaming
+/// request converted by cc-adapters, response converted back, usage metered.
+#[tokio::test]
+async fn anthropic_inbound_converts_non_streaming_to_openai_upstream() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let upstream_body = json!({
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "model": "gpt-4o",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi from openai"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 42, "completion_tokens": 7,
+                  "prompt_tokens_details": {"cached_tokens": 32}, "total_tokens": 49}
+    });
+    let (upstream_url, captured, bodies) =
+        mock_openai_capturing_body(MockReply::Json(upstream_body)).await;
+
     store
         .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
         .unwrap();
@@ -461,16 +524,141 @@ async fn protocol_mismatch_fails_cleanly_without_forwarding() {
         &app,
         "/v1/messages",
         Some("kw-ag-claude-test"),
-        r#"{"model":"m"}"#,
+        r#"{"model":"claude-sonnet-4-5","max_tokens":128,"stream":false,
+            "messages":[{"role":"user","content":"hello"}]}"#,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Response is a valid Anthropic message converted from the OpenAI body.
+    // cc-adapters conserves cache tokens: input_tokens excludes the cached
+    // 32 (input + cache_read == prompt_tokens).
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(body["error"]["type"], "protocol_mismatch");
-    assert!(
-        captured.lock().unwrap().is_empty(),
-        "nothing may reach the upstream"
+    assert_eq!(body["type"], "message");
+    assert_eq!(body["id"], "chatcmpl-1");
+    assert_eq!(body["content"][0]["text"], "hi from openai");
+    assert_eq!(body["usage"]["input_tokens"], 10);
+    assert_eq!(body["usage"]["cache_read_input_tokens"], 32);
+    assert_eq!(body["usage"]["output_tokens"], 7);
+
+    // The upstream saw a converted OpenAI chat request with Bearer auth.
+    assert_eq!(
+        captured
+            .lock()
+            .unwrap()
+            .last()
+            .map(|(k, v)| (k.as_str(), v.as_str())),
+        Some(("authorization", format!("Bearer {REAL_KEY}").as_str()))
     );
+    let sent = bodies.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["model"], "claude-sonnet-4-5");
+    assert!(sent[0]["messages"].is_array());
+    // Anthropic-only fields must not leak through the conversion.
+    assert!(sent[0].get("max_tokens").is_none() || sent[0]["max_tokens"].is_number());
+    assert!(sent[0].get("system").is_none());
+
+    // Usage metered from the upstream OpenAI usage block.
+    let totals = state.store.usage_totals(Some("claude"), None).unwrap();
+    assert_eq!(totals.requests, 1);
+    assert_eq!(totals.input_tokens, 42);
+    assert_eq!(totals.output_tokens, 7);
+    assert_eq!(totals.cache_read_tokens, 32);
+}
+
+/// Anthropic `/v1/messages` (stream) on an OpenAI-compatible provider: the
+/// OpenAI chunk stream is converted into an Anthropic event stream and usage
+/// is captured from the converted events.
+#[tokio::test]
+async fn anthropic_inbound_converts_openai_sse_stream_to_anthropic_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // OpenAI chat chunks with usage on the final (choices-less) chunk.
+    let chunks = vec![
+        "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+        "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"}}]}\n\n",
+        "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":4,\"prompt_tokens_details\":{\"cached_tokens\":5}}}\n\n",
+        "data: [DONE]\n\n",
+    ];
+    let (upstream_url, _captured, bodies) =
+        mock_openai_capturing_body(MockReply::Sse(chunks)).await;
+
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,
+            "messages":[{"role":"user","content":"hello"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("text/event-stream"));
+
+    let body = response_body(response).await;
+    let text = String::from_utf8(body.to_vec()).unwrap();
+
+    // The client sees a genuine Anthropic event stream.
+    assert!(text.contains("event: message_start"), "got:\n{text}");
+    assert!(text.contains("event: content_block_start"));
+    assert!(text.contains("\"text_delta\""), "got:\n{text}");
+    assert!(text.contains("event: message_delta"));
+    assert!(text.contains("\"stop_reason\":\"end_turn\""));
+    assert!(text.contains("event: message_stop"));
+
+    // message_start opens the stream; OpenAI upstreams only attach usage to
+    // the final chunk, so the full metered usage lands on message_delta
+    // (cache-conserved: input = prompt 11 - cached 5).
+    let events: Vec<Value> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("data: "))
+        .map(|payload| serde_json::from_str::<Value>(payload).unwrap())
+        .collect();
+    assert!(events
+        .iter()
+        .any(|e| e["type"] == "message_start" && e["message"]["usage"]["input_tokens"] == 0));
+    let delta = events
+        .iter()
+        .find(|e| e["type"] == "message_delta")
+        .expect("converted stream must end with message_delta");
+    assert_eq!(delta["usage"]["input_tokens"], 6);
+    assert_eq!(delta["usage"]["cache_read_input_tokens"], 5);
+    assert_eq!(delta["usage"]["output_tokens"], 4);
+
+    // The upstream saw a converted streaming OpenAI request that asks for
+    // usage in the stream (cc-adapters injects stream_options.include_usage).
+    let sent = bodies.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["stream"], true);
+    assert_eq!(
+        sent[0]["stream_options"]["include_usage"], true,
+        "usage capture depends on include_usage injection"
+    );
+
+    // Usage metered from the converted Anthropic usage events
+    // (cache-conserved values, matching what the client observed).
+    let totals = wait_for_usage(&state, "claude", 1).await;
+    assert_eq!(totals.input_tokens, 6);
+    assert_eq!(totals.output_tokens, 4);
+    assert_eq!(totals.cache_read_tokens, 5);
 }
 
 #[tokio::test]

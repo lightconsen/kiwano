@@ -3,8 +3,13 @@
 //! Non-SSE upstream responses are buffered and metered inline. SSE responses
 //! are piped through byte-for-byte while a scanning stream watches the events
 //! for usage fields; the metered sample is persisted after the stream ends.
-//! Protocol conversion (Anthropic↔OpenAI) belongs to `cc-adapters` and is not
-//! part of this MVP leg — a mismatching binding fails with a clean error.
+//!
+//! Protocol conversion (tech.md §4.3 / cc-adapters phase): an Anthropic
+//! inbound request (`POST /v1/messages`) bound to an OpenAI-compatible
+//! provider is converted with the `kiwano-cc-adapters` sublayer — request via
+//! `anthropic_to_openai` (model via `model_mapper`), response (JSON + SSE)
+//! back via `openai_to_anthropic` / the streaming converter — and metered
+//! from the upstream OpenAI usage fields.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,7 +20,14 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use futures_core::Stream;
+use futures_util::StreamExt;
 use tokio::sync::mpsc;
+
+use kiwano_cc_adapters::proxy::model_mapper::strip_one_m_suffix_for_upstream_from_body;
+use kiwano_cc_adapters::proxy::providers::streaming::create_anthropic_sse_stream;
+use kiwano_cc_adapters::proxy::providers::transform::{
+    anthropic_to_openai, inject_openai_stream_include_usage, openai_to_anthropic,
+};
 
 use crate::error::GatewayError;
 use crate::meter::{parse_response_usage, request_model, Usage, UsageScanner};
@@ -143,15 +155,32 @@ pub async fn forward(
     let started = Instant::now();
     let provider = &routed.provider;
 
-    // MVP is transparent-forward only: provider protocol must match inbound.
+    // Anthropic inbound on an OpenAI-compatible provider → convert via
+    // cc-adapters. Legacy Anthropic paths other than `/v1/messages` have no
+    // OpenAI equivalent and still fail cleanly.
     if let Some(inbound_proto) = inbound {
         if inbound_proto != provider.protocol {
+            if inbound_proto == Protocol::Anthropic
+                && provider.protocol == Protocol::OpenAI
+                && path == "/v1/messages"
+            {
+                return forward_anthropic_via_openai(
+                    state,
+                    method,
+                    inbound_headers,
+                    body,
+                    routed,
+                    inbound,
+                    started,
+                )
+                .await;
+            }
             return error_response(
                 inbound,
                 StatusCode::BAD_GATEWAY,
                 "protocol_mismatch",
                 &format!(
-                    "provider `{}` speaks `{}` but path `{}` is `{}`; protocol conversion (cc-adapters) is not enabled in this build",
+                    "provider `{}` speaks `{}` but path `{}` is `{}`; only Anthropic `/v1/messages` -> OpenAI conversion is supported",
                     provider.id,
                     provider.protocol.as_str(),
                     path,
@@ -217,7 +246,7 @@ pub async fn forward(
         let (tx, rx) = mpsc::channel::<UsageSample>(1);
         tokio::spawn(record_pending_usage(state.clone(), rx));
         let stream = SseUsageStream::new(
-            Box::pin(upstream.bytes_stream()),
+            Box::pin(upstream.bytes_stream().map(|r| r.map_err(BoxError::from))),
             tx,
             UsageSample {
                 agent: routed.agent.clone(),
@@ -262,6 +291,208 @@ pub async fn forward(
     }
 }
 
+/// Forward an Anthropic `/v1/messages` request to an OpenAI-compatible
+/// provider with protocol conversion (cc-adapters sublayer).
+///
+/// Request: `anthropic_to_openai` + `stream_options.include_usage` injection +
+/// `model_mapper` 1M-context marker stripping. Response: non-SSE bodies go
+/// through `openai_to_anthropic`; SSE streams are converted to the Anthropic
+/// event stream by `create_anthropic_sse_stream` (whose emitted
+/// `message_start`/`message_delta` usage is what the metering scanner sees).
+/// Upstream error bodies are passed through unconverted.
+async fn forward_anthropic_via_openai(
+    state: Arc<GatewayState>,
+    method: Method,
+    inbound_headers: HeaderMap,
+    body: Bytes,
+    routed: RoutedRequest,
+    inbound: Option<Protocol>,
+    started: Instant,
+) -> Response {
+    let provider = &routed.provider;
+
+    // The requested Anthropic model is authoritative for metering.
+    let model = request_model(&body);
+
+    // Conversion failure is a client-shape problem (422) or an internal one.
+    let converted_body = match serde_json::from_slice::<serde_json::Value>(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(
+                inbound,
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &format!("kiwano-gateway: inbound body is not valid JSON: {e}"),
+            );
+        }
+    };
+    let mut openai_body = match anthropic_to_openai(converted_body) {
+        Ok(v) => v,
+        Err(e) => return proxy_error_into_response(e, inbound),
+    };
+    inject_openai_stream_include_usage(&mut openai_body);
+    let openai_body = strip_one_m_suffix_for_upstream_from_body(openai_body);
+    tracing::info!(
+        provider = %provider.id,
+        agent = %routed.agent,
+        model = model.as_deref().unwrap_or("<none>"),
+        "converting Anthropic request to OpenAI chat completions"
+    );
+    let openai_bytes = match serde_json::to_vec(&openai_body) {
+        Ok(b) => b,
+        Err(e) => {
+            return error_into_response(
+                GatewayError::Upstream(format!("serializing converted body failed: {e}")),
+                inbound,
+            );
+        }
+    };
+
+    let url = upstream_url(provider, "/v1/chat/completions");
+    // Query strings are meaningless across protocol conversion; drop them.
+    let headers = match build_upstream_headers(&inbound_headers, provider) {
+        Ok(h) => h,
+        Err(e) => return error_into_response(e, inbound),
+    };
+
+    let upstream = match state
+        .http
+        .request(method, &url)
+        .headers(headers)
+        .body(openai_bytes)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return error_into_response(
+                GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
+                inbound,
+            );
+        }
+    };
+
+    let status = upstream.status();
+    let is_sse = upstream
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.contains("text/event-stream"));
+
+    tracing::info!(
+        url = %url,
+        provider = %provider.id,
+        agent = %routed.agent,
+        upstream_status = status.as_u16(),
+        sse = is_sse,
+        "upstream responded to converted request"
+    );
+
+    let response_headers = copy_response_headers(upstream.headers());
+
+    if is_sse {
+        // Convert the OpenAI chunk stream into an Anthropic event stream; the
+        // metering scanner then reads the converted Anthropic usage events.
+        let (tx, rx) = mpsc::channel::<UsageSample>(1);
+        tokio::spawn(record_pending_usage(state.clone(), rx));
+        let converted = create_anthropic_sse_stream(Box::pin(upstream.bytes_stream()));
+        let stream = SseUsageStream::new(
+            Box::pin(converted.map(|r| r.map_err(|e| Box::new(e) as BoxError))),
+            tx,
+            UsageSample {
+                agent: routed.agent.clone(),
+                provider_id: provider.id.clone(),
+                model,
+                usage: Usage::default(),
+                latency_ms: 0,
+                status: "ok",
+            },
+            started,
+        );
+        let mut response = Response::new(Body::from_stream(stream));
+        *response.status_mut() = status;
+        *response.headers_mut() = response_headers;
+        response
+    } else {
+        let bytes = match upstream.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return error_into_response(
+                    GatewayError::Upstream(format!("reading upstream body failed: {e}")),
+                    inbound,
+                );
+            }
+        };
+        let latency_ms = started.elapsed().as_millis() as i64;
+        let (usage, upstream_model) = parse_response_usage(Protocol::OpenAI, &bytes);
+        let sample = UsageSample {
+            agent: routed.agent.clone(),
+            provider_id: provider.id.clone(),
+            model: model.or(upstream_model),
+            usage: usage.unwrap_or_default(),
+            latency_ms,
+            status: if status.is_success() { "ok" } else { "error" },
+        };
+        record_sample(&state, sample);
+
+        if !status.is_success() {
+            // Pass upstream error bodies through unconverted (error shapes
+            // are not chat.completion objects; converting would corrupt them).
+            let mut response = Response::new(Body::from(bytes));
+            *response.status_mut() = status;
+            *response.headers_mut() = response_headers;
+            return response;
+        }
+
+        let anthropic = match serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|e| GatewayError::Upstream(format!("upstream body is not JSON: {e}")))
+            .and_then(|v| {
+                openai_to_anthropic(v)
+                    .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
+            }) {
+            Ok(v) => v,
+            Err(e) => return error_into_response(e, inbound),
+        };
+        let out = match serde_json::to_vec(&anthropic) {
+            Ok(b) => b,
+            Err(e) => {
+                return error_into_response(
+                    GatewayError::Upstream(format!("serializing converted response failed: {e}")),
+                    inbound,
+                );
+            }
+        };
+
+        let mut response = Response::new(Body::from(out));
+        *response.status_mut() = status;
+        // The upstream headers were snapshotted for an OpenAI payload; the
+        // converted body is always JSON.
+        *response.headers_mut() = response_headers;
+        if let Ok(ct) = HeaderValue::from_str("application/json") {
+            response
+                .headers_mut()
+                .insert(axum::http::header::CONTENT_TYPE, ct);
+        }
+        response
+    }
+}
+
+/// Map a cc-adapters `ProxyError` onto a gateway error response.
+fn proxy_error_into_response(
+    e: kiwano_cc_adapters::proxy::ProxyError,
+    inbound: Option<Protocol>,
+) -> Response {
+    use kiwano_cc_adapters::proxy::error_mapper::map_proxy_error_to_status;
+    let status =
+        StatusCode::from_u16(map_proxy_error_to_status(&e)).unwrap_or(StatusCode::BAD_GATEWAY);
+    error_response(
+        inbound,
+        status,
+        "conversion_failed",
+        &format!("kiwano-gateway: cc-adapters conversion failed: {e}"),
+    )
+}
+
 async fn record_pending_usage(state: Arc<GatewayState>, mut rx: mpsc::Receiver<UsageSample>) {
     if let Some(sample) = rx.recv().await {
         record_sample(&state, sample);
@@ -292,7 +523,7 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
 /// Bytes are forwarded unchanged: complete `\n`-terminated lines are emitted
 /// as they arrive, the trailing partial line is flushed at stream end.
 struct SseUsageStream {
-    inner: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
+    inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>,
     buffer: Vec<u8>,
     scanner: UsageScanner,
     sample: UsageSample,
@@ -303,7 +534,7 @@ struct SseUsageStream {
 
 impl SseUsageStream {
     fn new(
-        inner: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
+        inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>,
         tx: mpsc::Sender<UsageSample>,
         sample: UsageSample,
         started: Instant,
@@ -363,7 +594,7 @@ impl Stream for SseUsageStream {
                 Poll::Ready(Some(Err(e))) => {
                     self.inner_ended = true;
                     self.finish();
-                    return Poll::Ready(Some(Err(Box::new(e))));
+                    return Poll::Ready(Some(Err(e)));
                 }
                 Poll::Ready(None) => {
                     self.inner_ended = true;
@@ -468,11 +699,11 @@ mod tests {
     /// Synthetic chunk source with awkward boundaries (a usage event split in
     /// half, no trailing newline).
     struct ChunksStream {
-        chunks: vec::IntoIter<reqwest::Result<Bytes>>,
+        chunks: vec::IntoIter<Result<Bytes, BoxError>>,
     }
 
     impl Stream for ChunksStream {
-        type Item = reqwest::Result<Bytes>;
+        type Item = Result<Bytes, BoxError>;
 
         fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             Poll::Ready(self.chunks.next())
@@ -481,7 +712,7 @@ mod tests {
 
     #[tokio::test]
     async fn sse_stream_forwards_bytes_and_scans_usage() {
-        let chunks: Vec<reqwest::Result<Bytes>> = vec![
+        let chunks: Vec<Result<Bytes, BoxError>> = vec![
             Ok(Bytes::from_static(
                 b"data: {\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"us",
             )),
@@ -492,7 +723,7 @@ mod tests {
                 b"age_delta\",\"usage\":{\"output_tokens\":9}}\n\ndata: [DONE]",
             )),
         ];
-        let inner: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>> =
+        let inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>> =
             Box::pin(ChunksStream {
                 chunks: chunks.into_iter(),
             });

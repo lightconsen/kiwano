@@ -29,6 +29,11 @@ pub struct UpstreamProvider {
     /// Optional upstream path prefix, e.g. `/anthropic` on compatible endpoints.
     pub api_path: Option<String>,
     pub api_key: Option<String>,
+    /// roundrobin 权重（tech.md §4.7：默认 1）。
+    pub weight: i64,
+    /// timewindow 本地窗口 `HH:MM`（agent_bindings 透传）。
+    pub win_start: Option<String>,
+    pub win_end: Option<String>,
 }
 
 /// Routing configuration for one agent.
@@ -36,6 +41,8 @@ pub struct UpstreamProvider {
 pub struct AgentRoute {
     pub agent: String,
     pub strategy: StrategyType,
+    /// 策略 config 原始 JSON（quota 阈值等，agent_strategies.config 透传）。
+    pub config: Option<String>,
     /// Ordered candidates: priority 0 (primary) first, backups after.
     pub candidates: Vec<UpstreamProvider>,
 }
@@ -89,10 +96,12 @@ impl RouteTable {
 
         let mut routes = HashMap::new();
         for agent in agents {
-            let strategy = store
-                .get_strategy(&agent)?
+            let strategy_row = store.get_strategy(&agent)?;
+            let strategy = strategy_row
+                .as_ref()
                 .map(|s| s.kind)
                 .unwrap_or(StrategyType::Single);
+            let config = strategy_row.and_then(|s| s.config);
             let mut candidates = Vec::new();
             for b in store.bindings_for_agent(&agent)? {
                 if !b.enabled {
@@ -106,6 +115,9 @@ impl RouteTable {
                         base_url: p.base_url.clone(),
                         api_path: p.api_path.clone(),
                         api_key: p.api_key.clone(),
+                        weight: b.weight,
+                        win_start: b.win_start,
+                        win_end: b.win_end,
                     }),
                     Some(_) => tracing::warn!(
                         agent = %agent,
@@ -124,6 +136,7 @@ impl RouteTable {
                 AgentRoute {
                     agent,
                     strategy,
+                    config,
                     candidates,
                 },
             );
@@ -149,21 +162,14 @@ impl RouteTable {
 
     /// Select the upstream provider for an agent under its strategy.
     ///
-    /// MVP: only `single` is active — always the first (primary) candidate.
-    /// Non-single strategies degrade to the primary with a warning until the
-    /// P1 engine lands.
+    /// Single/legacy path: always the first (primary) candidate. The live
+    /// data plane uses [`resolve_via_engine`] instead; this stays for
+    /// attribution-only callers and tests.
     pub fn select(&self, agent: &str) -> Result<&UpstreamProvider> {
         let route = self
             .routes
             .get(agent)
             .ok_or_else(|| GatewayError::NoBinding(agent.to_string()))?;
-        if route.strategy != StrategyType::Single {
-            tracing::warn!(
-                agent = %agent,
-                strategy = route.strategy.as_str(),
-                "strategy not implemented yet (MVP); degrading to primary binding"
-            );
-        }
         route
             .candidates
             .first()
@@ -171,12 +177,13 @@ impl RouteTable {
     }
 }
 
-/// Resolve agent attribution + provider selection for one inbound request.
-pub fn resolve(
-    table: &RouteTable,
+/// Attribute an inbound request to an agent (placeholder key, fallback by
+/// path protocol) and return its route.
+fn route_agent<'t>(
+    table: &'t RouteTable,
     protocol_hint: Option<Protocol>,
     placeholder_key: Option<&str>,
-) -> Result<RoutedRequest> {
+) -> Result<(&'t AgentRoute, Attribution)> {
     let (agent, attribution) = match placeholder_key.and_then(|k| table.agent_for_key(k)) {
         Some(a) => (a.to_string(), Attribution::PlaceholderKey),
         None => {
@@ -189,9 +196,43 @@ pub fn resolve(
             (fb.to_string(), Attribution::PathFallback)
         }
     };
-    let provider = table.select(&agent)?.clone();
+    let route = table
+        .routes
+        .get(&agent)
+        .ok_or_else(|| GatewayError::NoBinding(agent))?;
+    Ok((route, attribution))
+}
+
+/// Resolve agent attribution + provider selection for one inbound request
+/// via the strategy engine (tech.md §4.7: the live data-plane path).
+pub async fn resolve_via_engine(
+    table: &RouteTable,
+    engine: &crate::strategy::StrategyEngine,
+    store: &crate::store::Store,
+    protocol_hint: Option<Protocol>,
+    placeholder_key: Option<&str>,
+    session: Option<&str>,
+) -> Result<RoutedRequest> {
+    let (route, attribution) = route_agent(table, protocol_hint, placeholder_key)?;
+    let provider = engine.select(store, route, session).await?;
     Ok(RoutedRequest {
-        agent,
+        agent: route.agent.clone(),
+        attribution,
+        provider,
+    })
+}
+
+/// Attribution-only resolution with single-strategy selection (kept for
+/// tests and tooling; the data plane routes through the strategy engine).
+pub fn resolve(
+    table: &RouteTable,
+    protocol_hint: Option<Protocol>,
+    placeholder_key: Option<&str>,
+) -> Result<RoutedRequest> {
+    let (route, attribution) = route_agent(table, protocol_hint, placeholder_key)?;
+    let provider = table.select(&route.agent)?.clone();
+    Ok(RoutedRequest {
+        agent: route.agent.clone(),
         attribution,
         provider,
     })

@@ -211,6 +211,7 @@ pub async fn forward(
     {
         Ok(r) => r,
         Err(e) => {
+            state.engine.record(&routed.agent, &provider.id, false).await;
             return error_into_response(
                 GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
                 inbound,
@@ -219,6 +220,11 @@ pub async fn forward(
     };
 
     let status = upstream.status();
+    // 熔断回写（tech.md §4.7）：按响应头时刻的成功/失败计——流中断不追溯。
+    state
+        .engine
+        .record(&routed.agent, &provider.id, status.is_success())
+        .await;
     let is_sse = upstream
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -365,6 +371,7 @@ async fn forward_anthropic_via_openai(
     {
         Ok(r) => r,
         Err(e) => {
+            state.engine.record(&routed.agent, &provider.id, false).await;
             return error_into_response(
                 GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
                 inbound,
@@ -373,6 +380,10 @@ async fn forward_anthropic_via_openai(
     };
 
     let status = upstream.status();
+    state
+        .engine
+        .record(&routed.agent, &provider.id, status.is_success())
+        .await;
     let is_sse = upstream
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -626,6 +637,9 @@ mod tests {
             base_url: "https://up.example.com".into(),
             api_path: api_path.map(Into::into),
             api_key: Some("sk-real-key".into()),
+            weight: 1,
+            win_start: None,
+            win_end: None,
         }
     }
 

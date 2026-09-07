@@ -13,7 +13,7 @@ use axum::Router;
 use std::sync::Arc;
 
 use crate::protocol::{classify_path, PathProtocol};
-use crate::router::resolve;
+use crate::router::resolve_via_engine;
 use crate::server::{error_into_response, error_response, GatewayState, MAX_BODY_BYTES};
 
 /// Data-plane router: the paths agents actually call.
@@ -79,9 +79,19 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         }
     };
 
-    // Attribution + single-strategy provider selection.
+    // Attribution + strategy-engine provider selection (tech.md §4.7).
     let table = state.route_table();
-    let routed = match resolve(&table, inbound, key.as_deref()) {
+    let session = session_hint(&parts.headers, &body_bytes);
+    let routed = match resolve_via_engine(
+        &table,
+        &state.engine,
+        &state.store,
+        inbound,
+        key.as_deref(),
+        session.as_deref(),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => return error_into_response(e, inbound),
     };
@@ -111,6 +121,25 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         inbound,
     )
     .await
+}
+
+/// Roundrobin 会话标识（tech.md §4.7：会话粒度轮转以保住上游 prompt
+/// cache）：显式 `x-kw-session` 头优先，其次 Anthropic body 的
+/// `metadata.user_id`，再退到 body 顶层 `session_id`。
+pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<String> {
+    if let Some(v) = headers.get("x-kw-session").and_then(|v| v.to_str().ok()) {
+        let v = v.trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
+        }
+    }
+    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    v.pointer("/metadata/user_id")
+        .or_else(|| v.get("session_id"))
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }
 
 /// Build the upstream URL for a provider and inbound path.
@@ -149,7 +178,35 @@ mod tests {
             base_url: base.into(),
             api_path: api_path.map(Into::into),
             api_key: None,
+            weight: 1,
+            win_start: None,
+            win_end: None,
         }
+    }
+
+    #[test]
+    fn session_hint_prefers_header_then_body() {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("x-kw-session", axum::http::HeaderValue::from_static("s-1"));
+        assert_eq!(
+            session_hint(&h, br#"{"metadata":{"user_id":"u-9"}}"#).as_deref(),
+            Some("s-1")
+        );
+
+        let empty = axum::http::HeaderMap::new();
+        assert_eq!(
+            session_hint(&empty, br#"{"metadata":{"user_id":"user_acct__session_xyz"}}"#).as_deref(),
+            Some("user_acct__session_xyz")
+        );
+        assert_eq!(
+            session_hint(&empty, br#"{"session_id":"abc"}"#).as_deref(),
+            Some("abc")
+        );
+        assert_eq!(session_hint(&empty, b"not json"), None);
+        assert_eq!(
+            session_hint(&empty, br#"{"metadata":{"user_id":42}}"#),
+            None
+        );
     }
 
     #[test]

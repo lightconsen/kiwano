@@ -265,6 +265,17 @@ impl UsageTotals {
     }
 }
 
+/// One health-probe verdict (prober → `provider_health` 表).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHealth {
+    pub provider_id: String,
+    /// healthy | degraded | down | unknown
+    pub status: String,
+    pub last_latency_ms: Option<i64>,
+    pub last_check_at: Option<String>,
+    pub consecutive_failures: i64,
+}
+
 /// Per-provider aggregation result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderUsage {
@@ -645,6 +656,80 @@ impl Store {
             (None, None) => stmt.query_row([], map_row)?,
         };
         Ok(totals)
+    }
+
+    /// Aggregated totals for one provider, optionally since a timestamp.
+    /// Quota 策略（tech.md §4.7 quota）读取。
+    pub fn usage_totals_for_provider(
+        &self,
+        provider_id: &str,
+        since: Option<&str>,
+    ) -> Result<UsageTotals> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0)
+             FROM usage WHERE provider_id = ?1 AND (?2 IS NULL OR ts >= ?2)",
+        )?;
+        Ok(stmt.query_row(params![provider_id, since], UsageTotals::from_row)?)
+    }
+
+    /// Upsert one health-probe verdict (prober, tech.md §4.7 failover).
+    pub fn upsert_provider_health(
+        &self,
+        provider_id: &str,
+        status: &str,
+        last_latency_ms: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_health (provider_id, status, last_latency_ms, last_check_at, consecutive_failures)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider_id) DO UPDATE SET
+                status = ?2,
+                last_latency_ms = ?3,
+                last_check_at = ?4,
+                consecutive_failures = ?5",
+            params![
+                provider_id,
+                status,
+                last_latency_ms,
+                now_rfc3339(),
+                if status == "down" {
+                    // 连击计数在同一事务里自增：读旧值 +1（down）或清零（healthy）
+                    conn.query_row(
+                        "SELECT COALESCE((SELECT consecutive_failures FROM provider_health WHERE provider_id = ?1), 0) + 1",
+                        params![provider_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(1)
+                } else {
+                    0
+                },
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Current health rows (UI 展示与诊断用)。
+    pub fn list_provider_health(&self) -> Result<Vec<ProviderHealth>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider_id, status, last_latency_ms, last_check_at, consecutive_failures
+             FROM provider_health ORDER BY provider_id",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ProviderHealth {
+                    provider_id: row.get(0)?,
+                    status: row.get(1)?,
+                    last_latency_ms: row.get(2)?,
+                    last_check_at: row.get(3)?,
+                    consecutive_failures: row.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// Totals grouped by provider, optionally filtered by agent/since.

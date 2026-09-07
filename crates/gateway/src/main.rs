@@ -107,6 +107,12 @@ async fn main() {
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
+    // 后台健康探测（tech.md §4.7 failover 地基）：30s 一轮，写 provider_health。
+    tokio::spawn(kiwano_gateway::strategy::prober::run(
+        state.store.clone(),
+        kiwano_gateway::strategy::prober::PROBE_INTERVAL,
+    ));
+
     let data_app = data_plane_router(state.clone());
     let admin_app = admin_plane_router(state.clone());
 

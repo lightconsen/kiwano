@@ -27,8 +27,9 @@ pub const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Shared gateway state for both planes.
 pub struct GatewayState {
-    pub store: Store,
+    pub store: Arc<Store>,
     pub http: reqwest::Client,
+    pub engine: crate::strategy::StrategyEngine,
     route_table: RwLock<Arc<RouteTable>>,
     pub started_at: Instant,
     pub version: &'static str,
@@ -43,8 +44,9 @@ impl GatewayState {
             .pool_idle_timeout(Duration::from_secs(90))
             .build()?;
         Ok(GatewayState {
-            store,
+            store: Arc::new(store),
             http,
+            engine: crate::strategy::StrategyEngine::new(),
             route_table: RwLock::new(route_table),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),

@@ -19,6 +19,7 @@ import type {
   StrategyBinding,
   StrategyKind,
   UsageAlert,
+  ApiKeyEntry,
 } from "./types";
 
 const CATALOG_TOTAL = 42;
@@ -339,6 +340,11 @@ const settings: AppSettings = {
 };
 
 let idSeq = 100;
+
+// 轮询 Key mock 存储（spec §4.1 P1 多 Key 轮询）
+type MockApiKeyRow = ApiKeyEntry & { provider_id: string };
+const mockApiKeys: MockApiKeyRow[] = [];
+
 async function delay(ms = 120) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -525,6 +531,31 @@ export const mockApi: KiwanoApi = {
   async checkUsageAlerts(): Promise<UsageAlert[]> {
     await delay();
     return [];
+  },
+
+  async listApiKeys(providerId: string): Promise<ApiKeyEntry[]> {
+    await delay();
+    return mockApiKeys.filter((k) => k.provider_id === providerId);
+  },
+
+  async addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry> {
+    await delay();
+    const row: ApiKeyEntry & { provider_id: string } = {
+      id: ++idSeq,
+      provider_id: providerId,
+      api_key: apiKey.trim(),
+      label: label?.trim() || undefined,
+      enabled: true,
+      created_at: new Date().toISOString(),
+    };
+    mockApiKeys.push(row);
+    return row;
+  },
+
+  async deleteApiKey(id: number): Promise<void> {
+    await delay();
+    const i = mockApiKeys.findIndex((k) => k.id === id);
+    if (i >= 0) mockApiKeys.splice(i, 1);
   },
 
   async getAgentRoutes(): Promise<AgentRoute[]> {

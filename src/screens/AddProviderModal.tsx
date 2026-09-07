@@ -1,8 +1,15 @@
 // 添加/编辑供应商弹窗（design/index.html #modal，cc-switch AddProviderDialog 模式）
 import { useEffect, useState } from "react";
-import { Eye, Gauge, Infinity as InfinityIcon, Store, X } from "lucide-react";
+import { Eye, Gauge, Infinity as InfinityIcon, Plus, Store, X } from "lucide-react";
 import { api } from "../api/client";
-import { AGENTS, type AgentId, type Billing, type CatalogEntry, type Provider } from "../api/types";
+import {
+  AGENTS,
+  type AgentId,
+  type ApiKeyEntry,
+  type Billing,
+  type CatalogEntry,
+  type Provider,
+} from "../api/types";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
   { id: "plan", label: "订阅套餐" },
@@ -37,11 +44,18 @@ export default function AddProviderModal({
   const [testing, setTesting] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  // 轮询 Key 管理（spec §4.1 P1 多 Key 轮询；编辑态可用）
+  const [pollKeys, setPollKeys] = useState<ApiKeyEntry[]>([]);
+  const [newKey, setNewKey] = useState("");
+  const [newKeyLabel, setNewKeyLabel] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setShowKey(false);
     setLatency(null);
+    setNewKey("");
+    setNewKeyLabel("");
     if (edit) {
       setMode("custom");
       setName(edit.name);
@@ -54,6 +68,7 @@ export default function AddProviderModal({
       setLimitUnit(q?.unit === "requests" ? "requests" : "cny");
       setResetPeriod("monthly");
       setAgents([...edit.agents]);
+      api.listApiKeys(edit.id).then(setPollKeys).catch(() => setPollKeys([]));
       return;
     }
     setMode(preset ? "shelf" : "custom");
@@ -71,6 +86,32 @@ export default function AddProviderModal({
   if (!open) return null;
 
   const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
+
+  const maskKey = (k: string) => (k.length > 12 ? `${k.slice(0, 6)}…${k.slice(-4)}` : k);
+
+  const addPollKey = async () => {
+    if (!edit || !newKey.trim() || keyBusy) return;
+    setKeyBusy(true);
+    try {
+      const row = await api.addApiKey(edit.id, newKey.trim(), newKeyLabel.trim() || undefined);
+      setPollKeys((ks) => [...ks, row]);
+      setNewKey("");
+      setNewKeyLabel("");
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const removePollKey = async (id: number) => {
+    if (keyBusy) return;
+    setKeyBusy(true);
+    try {
+      await api.deleteApiKey(id);
+      setPollKeys((ks) => ks.filter((k) => k.id !== id));
+    } finally {
+      setKeyBusy(false);
+    }
+  };
 
   const save = async () => {
     if (!canSave) return;
@@ -318,6 +359,60 @@ export default function AddProviderModal({
                 })}
               </div>
             </div>
+
+            {/* 轮询 Key（编辑态：多 Key 自动轮换，spec §4.1 P1） */}
+            {edit && (
+              <div>
+                <label className="text-[11px] font-medium text-mut">
+                  轮询 Key{" "}
+                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                    与主 Key 轮换 · 避免限流
+                  </span>
+                </label>
+                <div className="mt-1 space-y-1">
+                  {pollKeys.map((k) => (
+                    <div
+                      key={k.id}
+                      className="flex h-8 items-center justify-between rounded-md border border-line px-2.5"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="font-mono text-[11.5px]">{maskKey(k.api_key)}</span>
+                        {k.label && <span className="text-[10.5px] text-mut">{k.label}</span>}
+                      </span>
+                      <button
+                        className="btn btn-ghost rounded-md p-1 text-mut"
+                        aria-label="删除 Key"
+                        onClick={() => removePollKey(k.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex gap-1.5">
+                    <input
+                      className="h-8 min-w-0 flex-1 rounded-md border border-line bg-bg px-2.5 font-mono text-[12px]"
+                      value={newKey}
+                      onChange={(e) => setNewKey(e.target.value)}
+                      placeholder="sk-… 追加 Key"
+                    />
+                    <input
+                      className="h-8 w-[84px] rounded-md border border-line bg-bg px-2.5 text-[11.5px]"
+                      value={newKeyLabel}
+                      onChange={(e) => setNewKeyLabel(e.target.value)}
+                      placeholder="备注"
+                    />
+                    <button
+                      className="btn btn-ghost flex h-8 items-center gap-1 rounded-md border border-line px-2.5 text-[11px]"
+                      disabled={!newKey.trim() || keyBusy}
+                      onClick={addPollKey}
+                    >
+                      <Plus className="h-3 w-3" />
+                      添加
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <button className="btn btn-ghost flex h-8 w-full items-center justify-between rounded-md border border-line px-2.5 text-[11.5px] text-mut">
               <span className="flex items-center gap-1.5">

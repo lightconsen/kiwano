@@ -203,6 +203,15 @@ export interface ConfigShareReport {
   routes_applied: number;
 }
 
+/** Provider 的轮询 Key（spec §4.1 P1 多 Key 轮询；主 Key 存 Provider 上） */
+export interface ApiKeyEntry {
+  id: number;
+  api_key: string;
+  label?: string;
+  enabled: boolean;
+  created_at: string;
+}
+
 /** 费用预警命中项（后端已按周期去重，前端转系统通知即可） */
 export interface UsageAlert {
   provider_id: string;
@@ -254,6 +263,11 @@ export interface KiwanoApi {
   syncHub(): Promise<HubSyncReport>;
   /** 费用预警巡检（后端 KV 去重：每 Provider 每重置周期最多返回一次） */
   checkUsageAlerts(): Promise<UsageAlert[]>;
+  /** 某 Provider 的轮询 Key 列表（主 Key 之外） */
+  listApiKeys(providerId: string): Promise<ApiKeyEntry[]>;
+  /** 追加轮询 Key（网关 Key 池即时热更新） */
+  addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry>;
+  deleteApiKey(id: number): Promise<void>;
   /** Agent 接管开关（占位 Key 的生成/删除，P1 起含配置改写） */
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
   /** 从 CC Switch 导入配置（自动探测 ~/.cc-switch 数据源） */

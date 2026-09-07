@@ -18,6 +18,7 @@ import type {
   Provider,
   StrategyKind,
   UsageAlert,
+  ApiKeyEntry,
 } from "./types";
 
 export const tauriApi: KiwanoApi = {
@@ -47,6 +48,14 @@ export const tauriApi: KiwanoApi = {
   syncHub: () => invoke<HubSyncReport>("sync_hub"),
 
   checkUsageAlerts: () => invoke<UsageAlert[]>("check_usage_alerts"),
+
+  listApiKeys: (providerId: string) => invoke<ApiKeyEntry[]>("list_api_keys", { providerId }),
+
+  addApiKey: (providerId: string, apiKey: string, label?: string) =>
+    invoke<ApiKeyEntry>("add_api_key", { providerId, apiKey, label: label ?? null }),
+
+  deleteApiKey: (id: number) =>
+    invoke<boolean>("delete_api_key", { id }).then(() => undefined),
 
   updateSettings: (patch: Partial<AppSettings>) =>
     invoke<AppSettings>("update_settings", { patch }),

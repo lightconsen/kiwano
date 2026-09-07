@@ -311,10 +311,7 @@ fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
 
 /// 某 Provider 的轮询 Key 列表（主 Key 之外的部分）。
 #[tauri::command]
-fn list_api_keys(
-    state: State<AppState>,
-    provider_id: String,
-) -> Result<Vec<vm::ApiKeyVm>, String> {
+fn list_api_keys(state: State<AppState>, provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
     vm::list_api_keys(&state.store, &provider_id)
 }
 

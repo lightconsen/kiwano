@@ -11,8 +11,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwano_gateway::store::{
-    Billing, Binding, HealthRecord, Provider, Store, Strategy, StrategyType, UsageRecord,
-    UsageTotals,
+    Billing, Binding, HealthRecord, Provider, Store, Strategy, StrategyType, UsageTotals,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -1387,12 +1386,19 @@ pub fn add_api_key(
         .map_err(e2s)?
         .ok_or_else(|| format!("provider `{provider_id}` not found"))?;
     let id = store
-        .insert_api_key(provider_id, key, label.map(str::trim).filter(|s| !s.is_empty()))
+        .insert_api_key(
+            provider_id,
+            key,
+            label.map(str::trim).filter(|s| !s.is_empty()),
+        )
         .map_err(e2s)?;
     Ok(ApiKeyVm {
         id,
         api_key: key.to_string(),
-        label: label.map(str::trim).filter(|s| !s.is_empty()).map(String::from),
+        label: label
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from),
         enabled: true,
         created_at: rfc3339(unix_now()),
     })
@@ -1609,6 +1615,7 @@ pub fn load_catalog(aux: &Aux) -> CatalogListVm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kiwano_gateway::store::UsageRecord;
 
     fn store() -> Store {
         Store::open_in_memory().expect("in-memory store")

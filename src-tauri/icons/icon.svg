@@ -1,0 +1,45 @@
+<!-- Kiwano app icon source (Dock / 托盘 / 窗口图标；pnpm tauri icon src-tauri/icons/icon.svg)。
+     与 src/assets/kiwano-logo.svg（应用内品牌标，透明背景）的差异：此文件同样透明背景，
+     但果体相对刺更放大，填充画布 ~92%。 -->
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="body" cx="0.38" cy="0.32" r="0.85">
+      <stop offset="0%" stop-color="#96EE73"/>
+      <stop offset="55%" stop-color="#7FE05A"/>
+      <stop offset="100%" stop-color="#5CC93F"/>
+    </radialGradient>
+    <linearGradient id="spike" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8CE968"/>
+      <stop offset="100%" stop-color="#5CC93F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 刺（8 根，绕果实中心旋转；基部埋入放大的果体内） -->
+  <g fill="url(#spike)" stroke="#3F8F2F" stroke-width="3" stroke-linejoin="round">
+    <path transform="rotate(0   256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(45  256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(90  256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(135 256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(180 256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(225 256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(270 256 256)" d="M230 116 L256 24 L282 116 Z"/>
+    <path transform="rotate(315 256 256)" d="M230 116 L256 24 L282 116 Z"/>
+  </g>
+
+  <!-- 果体（rx 208 / ry 164，占画布 ~81%） -->
+  <ellipse cx="256" cy="256" rx="208" ry="164" fill="url(#body)" stroke="#3F8F2F" stroke-width="4"/>
+
+  <!-- 高光 -->
+  <ellipse cx="190" cy="193" rx="80" ry="45" fill="#FFFFFF" opacity="0.22"
+           transform="rotate(-18 190 193)"/>
+
+  <!-- 果皮斑点 -->
+  <g fill="#D8FBC4" opacity="0.55">
+    <circle cx="320" cy="206" r="10"/>
+    <circle cx="362" cy="274" r="7.5"/>
+    <circle cx="270" cy="306" r="9.5"/>
+    <circle cx="196" cy="288" r="7"/>
+    <circle cx="232" cy="214" r="6"/>
+    <circle cx="334" cy="332" r="6"/>
+  </g>
+</svg>

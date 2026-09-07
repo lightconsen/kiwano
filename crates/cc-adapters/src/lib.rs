@@ -12,12 +12,14 @@
 //! - [`gemini_config`]: Gemini env/settings file management
 //! - [`grok_config`]: Grok TOML live-config management
 //! - [`opencode_config`]: OpenCode opencode.json management
+//! - [`codex_config`]: Codex config write core (Tier C, function-level port)
 //! - [`proxy`]: protocol conversion sublayer (Tier B) — Anthropic ↔ OpenAI
 //!   request/response/SSE conversion extracted from cc-switch's proxy
 //!
 //! Global settings-override hooks from cc-switch are replaced here by
 //! explicit parameter injection or local stubs; nothing else was restructured.
 
+pub mod codex_config;
 pub mod config;
 pub mod error;
 pub mod gemini_config;

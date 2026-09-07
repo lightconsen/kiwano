@@ -97,11 +97,9 @@ export default function Settings() {
                 </span>
                 <Toggle
                   on={t.enabled}
-                  onChange={(v) =>
-                    patch({
-                      takeovers: s.takeovers.map((x) => (x.agent === t.agent ? { ...x, enabled: v } : x)),
-                    })
-                  }
+                  onChange={(v) => {
+                    api.setTakeover(t.agent, v).then(() => api.getSettings().then(setS));
+                  }}
                 />
               </span>
             </div>

@@ -1,6 +1,11 @@
-// UI 数据访问唯一入口。M0 阶段由 mock.ts 提供实现；
-// 集成阶段（任务 #8）替换为 Tauri invoke 版本，组件零改动。
+// UI 数据访问唯一入口。
+// - Tauri WebView 内 → tauriApi（真实 SQLite + gateway sidecar）
+// - 纯浏览器 dev（pnpm dev 无 Tauri）→ mockApi（与原型逐字一致的数据）
+// 组件层不感知差异；集成后组件零改动。
 import type { KiwanoApi } from "./types";
 import { mockApi } from "./mock";
+import { tauriApi } from "./tauri";
 
-export const api: KiwanoApi = mockApi;
+const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export const api: KiwanoApi = inTauri ? tauriApi : mockApi;

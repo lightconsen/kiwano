@@ -189,5 +189,7 @@ export interface KiwanoApi {
   getDashboard(window: DashboardWindow): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /** Agent 接管开关（占位 Key 的生成/删除，P1 起含配置改写） */
+  setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
   getFooterStats(): Promise<FooterStats>;
 }

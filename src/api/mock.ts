@@ -415,6 +415,20 @@ export const mockApi: KiwanoApi = {
     return settings;
   },
 
+  async setTakeover(agent: AgentId, enabled: boolean): Promise<void> {
+    await delay();
+    const t = settings.takeovers.find((x) => x.agent === agent);
+    if (!t) return;
+    if (enabled) {
+      const suffix = Math.random().toString(16).slice(2, 6);
+      t.placeholder_key = `kw-ag-${agent}-${suffix}`;
+      t.enabled = true;
+    } else {
+      t.placeholder_key = null;
+      t.enabled = false;
+    }
+  },
+
   async getFooterStats(): Promise<FooterStats> {
     await delay();
     return {

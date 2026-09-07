@@ -51,8 +51,9 @@ function UsageCell({ p }: { p: Provider }) {
             {u.quota.used}/{u.quota.limit} <span className="font-normal text-mut">请求</span>
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
-            {p.plan_price ? `${p.plan_price} · ` : ""}
-            {u.quota.resets_at?.slice(5)} 重置
+            {[p.plan_price, u.quota.resets_at ? `${u.quota.resets_at.slice(5)} 重置` : null]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
         </div>
       </div>

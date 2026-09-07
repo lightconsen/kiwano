@@ -13,7 +13,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use futures_core::Stream;
 use kiwano_gateway::server::{admin_plane_router, data_plane_router, GatewayState};
-use kiwano_gateway::store::{now_rfc3339, Binding, Billing, Protocol, Provider, Store};
+use kiwano_gateway::store::{now_rfc3339, Billing, Binding, Protocol, Provider, Store};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -24,7 +24,10 @@ type Captured = Arc<Mutex<Vec<(String, String)>>>;
 
 fn capture(state: &Captured, headers: &HeaderMap, name: &str) {
     if let Some(v) = headers.get(name).and_then(|v| v.to_str().ok()) {
-        state.lock().unwrap().push((name.to_string(), v.to_string()));
+        state
+            .lock()
+            .unwrap()
+            .push((name.to_string(), v.to_string()));
     }
 }
 
@@ -34,13 +37,15 @@ async fn mock_anthropic(response: MockReply) -> (String, Captured) {
     let app = Router::new()
         .route(
             "/v1/messages",
-            post(move |AxumState(c): AxumState<Captured>, headers: HeaderMap| {
-                let reply = response.clone();
-                async move {
-                    capture(&c, &headers, "x-api-key");
-                    mock_response(&reply)
-                }
-            }),
+            post(
+                move |AxumState(c): AxumState<Captured>, headers: HeaderMap| {
+                    let reply = response.clone();
+                    async move {
+                        capture(&c, &headers, "x-api-key");
+                        mock_response(&reply)
+                    }
+                },
+            ),
         )
         .with_state(captured.clone());
     (spawn(app).await, captured)
@@ -52,13 +57,15 @@ async fn mock_openai(response: MockReply) -> (String, Captured) {
     let app = Router::new()
         .route(
             "/v1/chat/completions",
-            post(move |AxumState(c): AxumState<Captured>, headers: HeaderMap| {
-                let reply = response.clone();
-                async move {
-                    capture(&c, &headers, "authorization");
-                    mock_response(&reply)
-                }
-            }),
+            post(
+                move |AxumState(c): AxumState<Captured>, headers: HeaderMap| {
+                    let reply = response.clone();
+                    async move {
+                        capture(&c, &headers, "authorization");
+                        mock_response(&reply)
+                    }
+                },
+            ),
         )
         .with_state(captured.clone());
     (spawn(app).await, captured)
@@ -72,7 +79,12 @@ enum MockReply {
 
 fn mock_response(reply: &MockReply) -> Response {
     match reply {
-        MockReply::Json(v) => (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], Json(v.clone())).into_response(),
+        MockReply::Json(v) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Json(v.clone()),
+        )
+            .into_response(),
         MockReply::Sse(chunks) => {
             let chunks: Vec<Result<Bytes, std::convert::Infallible>> = chunks
                 .iter()
@@ -149,17 +161,28 @@ async fn post_json(app: &Router, path: &str, key: Option<&str>, body: &str) -> R
         builder = builder.header("x-api-key", k);
     }
     app.clone()
-        .oneshot(builder.header("content-type", "application/json").body(Body::from(body.to_string())).unwrap())
+        .oneshot(
+            builder
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
         .await
         .unwrap()
 }
 
 async fn response_body(response: Response) -> Bytes {
-    axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024).await.unwrap()
+    axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
+        .await
+        .unwrap()
 }
 
 /// Wait for the async stream-usage recorder to land the row.
-async fn wait_for_usage(state: &GatewayState, agent: &str, expected: i64) -> kiwano_gateway::store::UsageTotals {
+async fn wait_for_usage(
+    state: &GatewayState,
+    agent: &str,
+    expected: i64,
+) -> kiwano_gateway::store::UsageTotals {
     for _ in 0..60 {
         let totals = state.store.usage_totals(Some(agent), None).unwrap();
         if totals.requests >= expected {
@@ -190,9 +213,13 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
     });
     let (upstream_url, captured) = mock_anthropic(MockReply::Json(upstream_body.clone())).await;
 
-    store.insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url)).unwrap();
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
-    store.upsert_placeholder_key("kw-ag-claude-test", "claude").unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -244,9 +271,13 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     ];
     let (upstream_url, captured) = mock_anthropic(MockReply::Sse(chunks.clone())).await;
 
-    store.insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url)).unwrap();
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
-    store.upsert_placeholder_key("kw-ag-claude-test", "claude").unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -295,14 +326,22 @@ async fn openai_path_without_key_falls_back_to_codex_agent() {
     });
     let (upstream_url, captured) = mock_openai(MockReply::Json(upstream_body)).await;
 
-    store.insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url)).unwrap();
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
     store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
 
     // No auth header at all: tech.md §4.6 fallback attributes by path protocol.
-    let response = post_json(&app, "/v1/chat/completions", None, r#"{"model":"gpt-4o","messages":[]}"#).await;
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        None,
+        r#"{"model":"gpt-4o","messages":[]}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["object"], "chat.completion");
@@ -331,24 +370,42 @@ async fn admin_reload_switches_provider_without_restart() {
     let (url_a, captured_a) = mock_anthropic(MockReply::Json(json!({"id": "from-a"}))).await;
     let (url_b, captured_b) = mock_anthropic(MockReply::Json(json!({"id": "from-b"}))).await;
 
-    store.insert_provider(&provider("p-a", Protocol::Anthropic, url_a)).unwrap();
-    store.insert_provider(&provider("p-b", Protocol::Anthropic, url_b)).unwrap();
+    store
+        .insert_provider(&provider("p-a", Protocol::Anthropic, url_a))
+        .unwrap();
+    store
+        .insert_provider(&provider("p-b", Protocol::Anthropic, url_b))
+        .unwrap();
     store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
-    store.upsert_placeholder_key("kw-ag-claude-test", "claude").unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let data = data_plane_router(state.clone());
     let admin = admin_plane_router(state.clone());
 
     // First request hits provider A.
-    let response = post_json(&data, "/v1/messages", Some("kw-ag-claude-test"), r#"{"model":"m"}"#).await;
+    let response = post_json(
+        &data,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["id"], "from-a");
 
     // App demotes A, promotes B, then hot-reloads the route table.
-    state.store.upsert_binding(&bind("claude", "p-a", 1)).unwrap();
-    state.store.upsert_binding(&bind("claude", "p-b", 0)).unwrap();
+    state
+        .store
+        .upsert_binding(&bind("claude", "p-a", 1))
+        .unwrap();
+    state
+        .store
+        .upsert_binding(&bind("claude", "p-b", 0))
+        .unwrap();
     let response = admin
         .clone()
         .oneshot(
@@ -366,7 +423,13 @@ async fn admin_reload_switches_provider_without_restart() {
     assert_eq!(v["agents_routed"], 1);
 
     // Next request reaches provider B; no restart happened.
-    let response = post_json(&data, "/v1/messages", Some("kw-ag-claude-test"), r#"{"model":"m"}"#).await;
+    let response = post_json(
+        &data,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["id"], "from-b");
@@ -383,18 +446,31 @@ async fn protocol_mismatch_fails_cleanly_without_forwarding() {
     // claude bound to an OpenAI provider while the inbound path is Anthropic:
     // MVP has no conversion (cc-adapters phase), so this must not forward.
     let (upstream_url, captured) = mock_openai(MockReply::Json(json!({"ok": true}))).await;
-    store.insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url)).unwrap();
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
     store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
-    store.upsert_placeholder_key("kw-ag-claude-test", "claude").unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
 
-    let response = post_json(&app, "/v1/messages", Some("kw-ag-claude-test"), r#"{"model":"m"}"#).await;
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["error"]["type"], "protocol_mismatch");
-    assert!(captured.lock().unwrap().is_empty(), "nothing may reach the upstream");
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "nothing may reach the upstream"
+    );
 }
 
 #[tokio::test]
@@ -403,13 +479,21 @@ async fn unknown_key_on_anthropic_path_falls_back_to_claude() {
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
     let (upstream_url, captured) = mock_anthropic(MockReply::Json(json!({"id": "x"}))).await;
-    store.insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url)).unwrap();
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
 
-    let response = post_json(&app, "/v1/messages", Some("sk-some-foreign-key"), r#"{"model":"m"}"#).await;
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("sk-some-foreign-key"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
 
     // Fallback attribution still meters to the claude agent.

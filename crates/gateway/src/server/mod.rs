@@ -3,7 +3,11 @@
 //! Both servers share one [`GatewayState`]: the SQLite store (SSOT) and the
 //! in-memory route table that `/reload` swaps atomically.
 
+pub mod admin;
 pub mod data;
+
+pub use admin::admin_plane_router;
+pub use data::data_plane_router;
 
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};

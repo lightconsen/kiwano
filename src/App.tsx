@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { api } from "./api/client";
 import type { CatalogEntry, FooterStats, GatewayStatus, Provider } from "./api/types";
 import { Dot } from "./components/bits";
+import logoUrl from "./assets/kiwano-logo.svg";
 import Providers from "./screens/Providers";
 import Shelf from "./screens/Shelf";
 import Dashboard from "./screens/Dashboard";
@@ -63,12 +64,7 @@ export default function App() {
         style={{ background: "var(--surface)" }}
       >
         <div className="flex items-center gap-1.5">
-          <div
-            className="flex h-[22px] w-[22px] items-center justify-center rounded-[7px] text-[11px] font-bold"
-            style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}
-          >
-            K
-          </div>
+          <img src={logoUrl} alt="Kiwano" className="h-[22px] w-[22px] rounded-[6px]" />
           <span className="text-[13px] font-semibold">Kiwano</span>
         </div>
         <nav className="ml-2 flex h-full items-center gap-1">

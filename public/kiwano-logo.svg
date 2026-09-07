@@ -1,0 +1,47 @@
+<!-- Kiwano logo mark — 刺角瓜几何标（品牌色 kiwi 绿 oklch(0.80 0.19 132) ≈ #7FE05A） -->
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="body" cx="0.38" cy="0.32" r="0.85">
+      <stop offset="0%" stop-color="#96EE73"/>
+      <stop offset="55%" stop-color="#7FE05A"/>
+      <stop offset="100%" stop-color="#5CC93F"/>
+    </radialGradient>
+    <linearGradient id="spike" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8CE968"/>
+      <stop offset="100%" stop-color="#5CC93F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 深色圆角底（与 app 背景变量 bg token oklch(0.15 0.008 260) ≈ #16171D 一致） -->
+  <rect width="512" height="512" rx="116" fill="#16171D"/>
+  <rect x="1" y="1" width="510" height="510" rx="115" stroke="#2A2C35" stroke-width="2" fill="none"/>
+
+  <!-- 刺（8 根，绕果实中心旋转；三角基部埋入果体内） -->
+  <g fill="url(#spike)" stroke="#3F8F2F" stroke-width="3" stroke-linejoin="round">
+    <path transform="rotate(0   256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(45  256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(90  256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(135 256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(180 256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(225 256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(270 256 268)" d="M242 176 L256 124 L270 176 Z"/>
+    <path transform="rotate(315 256 268)" d="M242 176 L256 124 L270 176 Z"/>
+  </g>
+
+  <!-- 果体 -->
+  <ellipse cx="256" cy="268" rx="120" ry="95" fill="url(#body)" stroke="#3F8F2F" stroke-width="4"/>
+
+  <!-- 高光 -->
+  <ellipse cx="216" cy="230" rx="46" ry="26" fill="#FFFFFF" opacity="0.22"
+           transform="rotate(-18 216 230)"/>
+
+  <!-- 果皮斑点 -->
+  <g fill="#D8FBC4" opacity="0.55">
+    <circle cx="292" cy="238" r="6"/>
+    <circle cx="318" cy="278" r="4.5"/>
+    <circle cx="262" cy="296" r="5.5"/>
+    <circle cx="216" cy="286" r="4"/>
+    <circle cx="240" cy="242" r="3.5"/>
+    <circle cx="300" cy="312" r="3.5"/>
+  </g>
+</svg>

@@ -6,6 +6,7 @@
 
 mod import;
 mod sidecar;
+mod takeover;
 mod vm;
 
 use std::sync::Mutex;
@@ -187,8 +188,14 @@ fn update_settings(
 }
 
 #[tauri::command]
-fn set_agent_takeover(state: State<AppState>, agent: String, enabled: bool) -> Result<(), String> {
-    vm::set_agent_takeover(&state.store, &agent, enabled)
+fn set_agent_takeover(
+    state: State<AppState>,
+    agent: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let data_port = state.data_port;
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    vm::set_agent_takeover(&state.store, &state.aux, &agent, enabled, data_port, &std::path::PathBuf::from(home))
 }
 
 #[tauri::command]

@@ -100,6 +100,18 @@ impl Aux {
     pub fn open(path: impl AsRef<std::path::Path>) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        Self::init_tables(&conn)?;
+        Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    #[cfg(test)]
+    pub fn open_in_memory() -> rusqlite::Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        Self::init_tables(&conn)?;
+        Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS app_settings (
                  key   TEXT PRIMARY KEY,
@@ -107,17 +119,46 @@ impl Aux {
              )",
             [],
         )?;
-        Ok(Self { conn: Mutex::new(conn) })
-    }
-
-    #[cfg(test)]
-    pub fn open_in_memory() -> rusqlite::Result<Self> {
-        let conn = Connection::open_in_memory()?;
+        // 接管备份（tech.md §4.3-3）：files = JSON [[path, content], ...]
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS takeover_backups (
+                 agent         TEXT PRIMARY KEY,
+                 files         TEXT NOT NULL,
+                 backed_up_at  TEXT NOT NULL
+             )",
             [],
         )?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(())
+    }
+
+    pub fn save_takeover_backup(&self, agent: &str, files: &[(String, String)]) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        let json = serde_json::to_string(files).expect("serialize backup files");
+        conn.execute(
+            "INSERT INTO takeover_backups (agent, files, backed_up_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(agent) DO UPDATE SET files = ?2, backed_up_at = ?3",
+            rusqlite::params![agent, json, rfc3339(unix_now())],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_takeover_backup(&self, agent: &str) -> Option<(String, Vec<(String, String)>)> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        let (ts, json) = conn
+            .query_row(
+                "SELECT backed_up_at, files FROM takeover_backups WHERE agent = ?1",
+                [agent],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .ok()?;
+        let files: Vec<(String, String)> = serde_json::from_str(&json).ok()?;
+        Some((ts, files))
+    }
+
+    pub fn delete_takeover_backup(&self, agent: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.execute("DELETE FROM takeover_backups WHERE agent = ?1", [agent])?;
+        Ok(())
     }
 
     pub fn load_settings_json(&self) -> Option<serde_json::Value> {
@@ -946,18 +987,28 @@ pub fn update_settings(
     build_settings(store, aux)
 }
 
-pub fn set_agent_takeover(store: &Store, agent: &str, enabled: bool) -> Result<(), String> {
+pub fn set_agent_takeover(
+    store: &Store,
+    aux: &Aux,
+    agent: &str,
+    enabled: bool,
+    data_port: u16,
+    home: &std::path::Path,
+) -> Result<(), String> {
     if !AGENTS.iter().any(|(a, _)| *a == agent) {
         return Err(format!("unknown agent: {agent}"));
     }
     if enabled {
-        // MVP: record the placeholder key. Rewriting the agent's own config
-        // (base_url + key injection) is the P1 takeover milestone.
         let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
-        store
-            .upsert_placeholder_key(&format!("kw-ag-{agent}-{rand}"), agent)
-            .map_err(e2s)?;
+        let key = format!("kw-ag-{agent}-{rand}");
+        store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
+        // 改写 Agent 配置（备份→base_url→占位 Key）；失败回滚 Key 登记保持一致
+        if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, &home) {
+            let _ = store.delete_placeholder_key(&key);
+            return Err(e);
+        }
     } else {
+        crate::takeover::disable(aux, agent, &home)?;
         for k in store.list_placeholder_keys().map_err(e2s)? {
             if k.agent == agent {
                 store.delete_placeholder_key(&k.key).map_err(e2s)?;
@@ -1285,13 +1336,24 @@ mod tests {
         // takeovers untouched by patch
         assert!(v1.takeovers.iter().all(|t| !t.enabled));
 
-        // takeover appears in settings and persists
-        set_agent_takeover(&s, "claude", true).unwrap();
+        // takeover appears in settings and persists（tmp home，不碰真实配置）
+        let tmp = tempfile::tempdir().unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap_err(); // 无 ~/.claude/settings.json → 拒绝且不留 Key
+        assert!(s.list_placeholder_keys().unwrap().iter().all(|k| k.agent != "claude"));
+
+        let settings = tmp.path().join(".claude").join("settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, "{}").unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
         let v2 = build_settings(&s, &aux).unwrap();
         let claude = v2.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(claude.enabled);
         assert!(claude.placeholder_key.as_deref().unwrap_or_default().starts_with("kw-ag-claude-"));
-        set_agent_takeover(&s, "claude", false).unwrap();
+        // 配置被真实改写 + 还原逃生门
+        let env: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
         let v3 = build_settings(&s, &aux).unwrap();
         assert!(!v3.takeovers.iter().find(|t| t.agent == "claude").unwrap().enabled);
     }

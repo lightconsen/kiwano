@@ -75,6 +75,7 @@ mod tests {
             api_key: None,
             billing: Billing::Metered,
             period_limit: None,
+            limit_unit: None,
             reset_period: None,
             enabled: true,
             created_at: now_rfc3339(),

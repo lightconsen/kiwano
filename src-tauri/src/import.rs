@@ -96,6 +96,7 @@ pub fn run_import(
             api_key: raw.api_key.clone(),
             billing: kiwano_gateway::store::Billing::Metered,
             period_limit: None,
+            limit_unit: None,
             reset_period: None,
             enabled: true,
             created_at: now.clone(),

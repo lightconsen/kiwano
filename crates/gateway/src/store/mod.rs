@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -86,6 +86,13 @@ CREATE TABLE IF NOT EXISTS provider_health (
     last_check_at        TEXT,
     consecutive_failures INTEGER NOT NULL DEFAULT 0
 );
+"#;
+
+/// v2: unit for the user-entered period cap (费用预警 / 环形百分比，tech.md §2.4 A).
+/// NULL rows predate the column and are read as 'requests'.
+const MIGRATION_V2: &str = r#"
+ALTER TABLE providers ADD COLUMN limit_unit TEXT
+    CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens','cny'));
 "#;
 
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
@@ -191,6 +198,10 @@ pub struct Provider {
     pub billing: Billing,
     /// User-entered spending/period cap used for the ring percentage estimate.
     pub period_limit: Option<f64>,
+    /// Unit of `period_limit`: requests | wan_tokens | cny (NULL reads as requests).
+    /// `default` keeps v1 export files deserializable (config share, share.rs).
+    #[serde(default)]
+    pub limit_unit: Option<String>,
     pub reset_period: Option<String>,
     pub enabled: bool,
     pub created_at: String,
@@ -360,6 +371,11 @@ impl Store {
         let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < 1 {
             conn.execute_batch(MIGRATION_V1)?;
+        }
+        if version < 2 {
+            conn.execute_batch(MIGRATION_V2)?;
+        }
+        if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         Ok(())
@@ -371,9 +387,9 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
-                                    billing, period_limit, reset_period, enabled,
-                                    created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                    billing, period_limit, limit_unit, reset_period,
+                                    enabled, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 p.id,
                 p.name,
@@ -383,6 +399,7 @@ impl Store {
                 p.api_key,
                 p.billing.as_str(),
                 p.period_limit,
+                p.limit_unit,
                 p.reset_period,
                 p.enabled as i64,
                 p.created_at,
@@ -396,7 +413,7 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, reset_period, enabled, created_at, updated_at
+                    period_limit, limit_unit, reset_period, enabled, created_at, updated_at
              FROM providers WHERE id = ?1",
         )?;
         let provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -407,7 +424,7 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, reset_period, enabled, created_at, updated_at
+                    period_limit, limit_unit, reset_period, enabled, created_at, updated_at
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -428,8 +445,8 @@ impl Store {
         };
         conn.execute(
             "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
-                    api_key = ?6, billing = ?7, period_limit = ?8, reset_period = ?9,
-                    enabled = ?10, updated_at = ?11
+                    api_key = ?6, billing = ?7, period_limit = ?8, limit_unit = ?9,
+                    reset_period = ?10, enabled = ?11, updated_at = ?12
              WHERE id = ?1",
             params![
                 p.id,
@@ -440,6 +457,7 @@ impl Store {
                 p.api_key,
                 p.billing.as_str(),
                 p.period_limit,
+                p.limit_unit,
                 p.reset_period,
                 p.enabled as i64,
                 updated,
@@ -904,10 +922,11 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         api_key: row.get(5)?,
         billing: Billing::from_str(&billing_str).unwrap_or(Billing::Metered),
         period_limit: row.get(7)?,
-        reset_period: row.get(8)?,
-        enabled: row.get::<_, i64>(9)? != 0,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        limit_unit: row.get(8)?,
+        reset_period: row.get(9)?,
+        enabled: row.get::<_, i64>(10)? != 0,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -947,6 +966,7 @@ mod tests {
             api_key: Some("sk-upstream".to_string()),
             billing: Billing::Metered,
             period_limit: Some(50.0),
+            limit_unit: None,
             reset_period: Some("monthly".to_string()),
             enabled: true,
             created_at: now_rfc3339(),

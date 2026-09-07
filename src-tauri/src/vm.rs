@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwano_gateway::store::{
-    Billing, Binding, HealthRecord, Provider, Store, Strategy, StrategyType, UsageTotals,
+    Billing, Binding, HealthRecord, Provider, Store, Strategy, StrategyType, UsageRecord,
+    UsageTotals,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -99,6 +100,32 @@ fn day_key(epoch_secs: i64) -> String {
 /// `MM-DD` label for the dashboard trend axis.
 fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
+}
+
+/// 当前重置周期的起点（RFC3339 UTC，供 `ts >= ?` 过滤）与去重键。
+/// 返回 (since, period_key)；reset_period NULL = 不重置 → (None, "all")。
+/// 因子说明：1970-01-01 是周四，`(days + 3) % 7 == 0` 即周一。
+fn period_start(epoch_secs: i64, reset_period: Option<&str>) -> (Option<String>, String) {
+    let days = epoch_secs.div_euclid(86_400);
+    let (y, m, _) = civil_from_days(days);
+    match reset_period {
+        None => (None, "all".into()),
+        Some("weekly") => {
+            let monday = days - (days + 3).rem_euclid(7);
+            let (wy, wm, wd) = civil_from_days(monday);
+            let key = format!("{wy:04}-{wm:02}-{wd:02}");
+            (Some(format!("{key}T00:00:00Z")), key)
+        }
+        Some("yearly") => {
+            let key = format!("{y:04}");
+            (Some(format!("{key}-01-01T00:00:00Z")), key)
+        }
+        // monthly 与其他意外值一律按月
+        _ => {
+            let key = format!("{y:04}-{m:02}");
+            (Some(format!("{key}-01T00:00:00Z")), key)
+        }
+    }
 }
 
 // ── Auxiliary connection (same DB file, GUI-scoped tables + extra reads) ──
@@ -206,6 +233,27 @@ impl Aux {
             "INSERT INTO app_settings (key, value) VALUES ('ui', ?1)
              ON CONFLICT(key) DO UPDATE SET value = ?1",
             [v.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// 通用 KV 读取（app_settings 表，费用预警去重等用）。
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .ok()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            [key, value],
         )?;
         Ok(())
     }
@@ -446,6 +494,9 @@ pub struct SettingsVm {
     pub auto_failover: bool,
     pub request_logs: bool,
     pub telemetry: bool,
+    /// 费用预警开关（spec §4.1 P1）：用量达每期上限时系统通知
+    #[serde(default = "default_true")]
+    pub cost_alert: bool,
     pub hub_logged_in: bool,
     #[serde(default = "default_hub_url")]
     pub hub_url: String,
@@ -467,10 +518,15 @@ impl Default for SettingsVm {
             auto_failover: true,
             request_logs: true,
             telemetry: false,
+            cost_alert: true,
             hub_logged_in: false,
             hub_url: default_hub_url(),
         }
     }
+}
+
+pub(crate) fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize)]
@@ -828,6 +884,22 @@ fn derive_health(p: &Provider, latency: Option<i64>) -> HealthVm {
     }
 }
 
+/// 归一化用户录入的每期上限单位（tech.md §2.4 A）。设定了上限而未选单位时
+/// 兼容旧行为按“请求”计；未设上限则单位无意义，落 NULL。
+fn normalize_limit_unit(unit: Option<&str>, has_limit: bool) -> Option<String> {
+    if !has_limit {
+        return None;
+    }
+    Some(
+        match unit {
+            Some("wan_tokens") => "wan_tokens",
+            Some("cny") => "cny",
+            _ => "requests",
+        }
+        .to_string(),
+    )
+}
+
 fn usage_vm(
     aux: &Aux,
     p: &Provider,
@@ -835,12 +907,26 @@ fn usage_vm(
     since7: &str,
 ) -> Option<UsageVm> {
     let t = totals?;
-    let quota = match p.billing {
-        Billing::Subscription => p.period_limit.map(|limit| QuotaVm {
-            used: t.requests,
-            limit,
-            unit: "requests".into(),
-            resets_at: None, // reset-cycle tracking lands with the quota strategy (P2)
+    let quota = match (p.billing, p.limit_unit.as_deref()) {
+        // ¥ 金额上限暂无价目表可估算（Hub 价格表落地后接入），环不展示
+        (Billing::Subscription, Some("cny")) => None,
+        (Billing::Subscription, unit) => p.period_limit.map(|limit| {
+            let used = match unit {
+                Some("wan_tokens") => {
+                    (t.input_tokens
+                        + t.output_tokens
+                        + t.cache_read_tokens
+                        + t.cache_creation_tokens) as f64
+                        / 10_000.0
+                }
+                _ => t.requests as f64,
+            };
+            QuotaVm {
+                used: used as i64,
+                limit,
+                unit: unit.unwrap_or("requests").to_string(),
+                resets_at: None, // reset-cycle tracking lands with the quota strategy (P2)
+            }
         }),
         _ => None,
     };
@@ -909,6 +995,10 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         api_key: Some(input.api_key.clone()),
         billing: billing_to_db(&input.billing),
         period_limit: input.billing_config.limit_value,
+        limit_unit: normalize_limit_unit(
+            input.billing_config.limit_unit.as_deref(),
+            input.billing_config.limit_value.is_some(),
+        ),
         reset_period,
         enabled: true,
         created_at: now.clone(),
@@ -1047,6 +1137,10 @@ pub fn update_provider(
         .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
     p.billing = billing_to_db(&input.billing);
     p.period_limit = input.billing_config.limit_value;
+    p.limit_unit = normalize_limit_unit(
+        input.billing_config.limit_unit.as_deref(),
+        input.billing_config.limit_value.is_some(),
+    );
     p.reset_period = match input.billing_config.reset_period.as_deref() {
         Some("monthly") | Some("weekly") | Some("yearly") => {
             input.billing_config.reset_period.clone()
@@ -1247,6 +1341,72 @@ pub fn set_agent_takeover(
     Ok(())
 }
 
+// ── 费用预警（spec §4.1 P1：用量达每期上限推送通知）──
+
+#[derive(Serialize)]
+pub struct UsageAlertVm {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub used: i64,
+    pub limit: f64,
+    /// requests | wan_tokens
+    pub unit: String,
+}
+
+/// 检查启用中 Provider 的本期用量是否达到用户设定的每期上限（period_limit）。
+/// 命中且本周期尚未通知过的写入去重键并返回（前端转系统通知）。
+/// ¥ 金额上限暂无价目表（Hub 价格表 P1），跳过不误报。
+pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>, String> {
+    if !ui_settings(aux).cost_alert {
+        return Ok(Vec::new());
+    }
+    let now = unix_now();
+    let mut alerts = Vec::new();
+    for p in store.list_providers().map_err(e2s)? {
+        let (Some(limit), _) = (p.period_limit, p.limit_unit.as_deref()) else {
+            continue;
+        };
+        if !p.enabled || limit <= 0.0 {
+            continue;
+        }
+        let unit = match p.limit_unit.as_deref() {
+            Some("wan_tokens") => "wan_tokens",
+            Some("cny") => continue,
+            // NULL 归一化为 requests（与环形百分比同源，兼容 v1 行）
+            _ => "requests",
+        };
+        let (since, period_key) = period_start(now, p.reset_period.as_deref());
+        let t = store
+            .usage_totals_for_provider(&p.id, since.as_deref())
+            .map_err(e2s)?;
+        let used = match unit {
+            "wan_tokens" => {
+                (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                    as f64
+                    / 10_000.0
+            }
+            _ => t.requests as f64,
+        };
+        if used < limit {
+            continue;
+        }
+        // 每个重置周期只通知一次（app_settings KV 去重）
+        let dedup_key = format!("alert_sent:{}", p.id);
+        if aux.get_setting(&dedup_key).as_deref() == Some(period_key.as_str()) {
+            continue;
+        }
+        aux.set_setting(&dedup_key, &period_key).map_err(e2s)?;
+        alerts.push(UsageAlertVm {
+            provider_id: p.id,
+            provider_name: p.name,
+            used: used as i64,
+            limit,
+            unit: unit.to_string(),
+        });
+    }
+    Ok(alerts)
+}
+
 // ── Dashboard ──
 
 pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<DashboardVm, String> {
@@ -1403,6 +1563,7 @@ mod tests {
             api_key: Some("sk-test".into()),
             billing,
             period_limit: None,
+            limit_unit: None,
             reset_period: None,
             enabled: true,
             created_at: "2026-09-07T00:00:00Z".into(),
@@ -1861,5 +2022,97 @@ mod tests {
             r.config.as_deref(),
             Some(r#"{"limit":50,"unit":"requests"}"#)
         );
+    }
+
+    fn usage_row(provider_id: &str) -> UsageRecord {
+        UsageRecord {
+            ts: rfc3339(unix_now()),
+            agent: "claude".into(),
+            provider_id: provider_id.into(),
+            model: None,
+            input_tokens: 1_000,
+            output_tokens: 100,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: None,
+            status: "ok".into(),
+        }
+    }
+
+    #[test]
+    fn cost_alert_fires_once_per_period_and_respects_toggle() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("kimi-1", "Kimi", Billing::Subscription);
+        p.period_limit = Some(100.0);
+        p.limit_unit = Some("requests".into());
+        p.reset_period = Some("monthly".into());
+        s.insert_provider(&p).unwrap();
+
+        // 40/100 → 未达阈值
+        for _ in 0..40 {
+            s.record_usage(&usage_row("kimi-1")).unwrap();
+        }
+        assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
+
+        // 100/100 → 命中
+        for _ in 0..60 {
+            s.record_usage(&usage_row("kimi-1")).unwrap();
+        }
+        let alerts = check_usage_alerts(&s, &aux).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].provider_id, "kimi-1");
+        assert_eq!(alerts[0].unit, "requests");
+
+        // 同周期去重：第二次检查不再返回
+        assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
+
+        // 关闭开关 → 静默
+        let patch = serde_json::json!({ "cost_alert": false });
+        update_settings(&s, &aux, &patch).unwrap();
+        assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
+    }
+
+    #[test]
+    fn cost_alert_skips_unlimited_rows_and_cny_unit() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+
+        let mut payg = provider("ds-1", "DeepSeek", Billing::Metered);
+        payg.period_limit = Some(5.0); // NULL unit 归一化为 requests
+        s.insert_provider(&payg).unwrap();
+
+        let mut cny = provider("glm-1", "GLM", Billing::Subscription);
+        cny.period_limit = Some(50.0);
+        cny.limit_unit = Some("cny".into()); // 无价目表，不估算
+        s.insert_provider(&cny).unwrap();
+
+        // 各 6 次请求：payg 达阈值触发；cny 跳过
+        for _ in 0..6 {
+            s.record_usage(&usage_row("ds-1")).unwrap();
+            s.record_usage(&usage_row("glm-1")).unwrap();
+        }
+        let alerts = check_usage_alerts(&s, &aux).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].provider_id, "ds-1");
+    }
+
+    #[test]
+    fn period_start_keys() {
+        // 2026-09-07T12:34:56Z（周一）
+        let t = 1_788_784_496_i64;
+        let (since, key) = period_start(t, Some("monthly"));
+        assert_eq!(since.as_deref(), Some("2026-09-01T00:00:00Z"));
+        assert_eq!(key, "2026-09");
+        let (since, key) = period_start(t, Some("weekly"));
+        assert_eq!(since.as_deref(), Some("2026-09-07T00:00:00Z"));
+        assert_eq!(key, "2026-09-07");
+        let (since, key) = period_start(t, Some("yearly"));
+        assert_eq!(since.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(key, "2026");
+        // 不重置 → 全量累计
+        let (since, key) = period_start(t, None);
+        assert_eq!(since, None);
+        assert_eq!(key, "all");
     }
 }

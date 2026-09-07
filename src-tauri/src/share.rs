@@ -126,6 +126,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
                     api_key: sp.api_key.clone(),
                     billing: sp.billing,
                     period_limit: sp.period_limit,
+                    limit_unit: sp.limit_unit.clone(),
                     reset_period: sp.reset_period.clone(),
                     enabled: sp.enabled,
                     created_at: now.clone(),
@@ -184,6 +185,7 @@ mod tests {
             api_key: api_key.map(Into::into),
             billing: Billing::Metered,
             period_limit: None,
+            limit_unit: None,
             reset_period: None,
             enabled: true,
             created_at: now_stamp(),
@@ -198,10 +200,20 @@ mod tests {
     #[test]
     fn export_roundtrip_and_merge_by_identity() {
         let src = Store::open_in_memory().unwrap();
-        src.insert_provider(&provider("p1", "Alpha", "https://a.example.com", Some("sk-a")))
-            .unwrap();
-        src.insert_provider(&provider("p2", "Beta", "https://b.example.com", Some("sk-b")))
-            .unwrap();
+        src.insert_provider(&provider(
+            "p1",
+            "Alpha",
+            "https://a.example.com",
+            Some("sk-a"),
+        ))
+        .unwrap();
+        src.insert_provider(&provider(
+            "p2",
+            "Beta",
+            "https://b.example.com",
+            Some("sk-b"),
+        ))
+        .unwrap();
         src.upsert_strategy("claude", StrategyType::Failover, None)
             .unwrap();
         for (pid, pr) in [("p1", 0), ("p2", 1)] {
@@ -228,7 +240,10 @@ mod tests {
         assert!(dst.primary_provider_id("claude").unwrap().is_some());
         let bs = dst.bindings_for_agent("claude").unwrap();
         assert_eq!(bs.len(), 2);
-        assert_eq!(dst.get_strategy("claude").unwrap().unwrap().kind, StrategyType::Failover);
+        assert_eq!(
+            dst.get_strategy("claude").unwrap().unwrap().kind,
+            StrategyType::Failover
+        );
 
         // 带本地同名同端点（无 Key）导入 → 保留本地 + 回填 Key
         let dst2 = Store::open_in_memory().unwrap();

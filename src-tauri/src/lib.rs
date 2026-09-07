@@ -307,6 +307,14 @@ fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     sync::sync_from_hub(&state.aux, &hub_url)
 }
 
+// ── 费用预警（spec §4.1 P1：用量达每期上限推送通知）──
+
+/// 前端定时轮询；命中且未通知过的返回给前端转系统通知（KV 去重防重发）。
+#[tauri::command]
+fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, String> {
+    vm::check_usage_alerts(&state.store, &state.aux)
+}
+
 // ── 配置分享（spec §4.1 P1：导出/导入一键配置方案 JSON）──
 
 /// 前端先用 dialog 插件选好目标路径，这里写文件（文件 IO → async）。
@@ -314,7 +322,11 @@ fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
 fn export_config(state: State<AppState>, path: String) -> Result<usize, String> {
     let json = share::export_config(&state.store)?;
     std::fs::write(&path, &json).map_err(|e| e.to_string())?;
-    Ok(state.store.list_providers().map_err(|e| e.to_string())?.len())
+    Ok(state
+        .store
+        .list_providers()
+        .map_err(|e| e.to_string())?
+        .len())
 }
 
 #[tauri::command(async)]
@@ -343,6 +355,7 @@ fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -414,6 +427,7 @@ pub fn run() {
             set_agent_takeover,
             get_footer_stats,
             sync_hub,
+            check_usage_alerts,
             import_cc_switch,
             get_agent_routes,
             update_agent_strategy,

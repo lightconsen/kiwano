@@ -153,6 +153,7 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         api_key: Some(REAL_KEY.to_string()),
         billing: Billing::Metered,
         period_limit: None,
+        limit_unit: None,
         reset_period: None,
         enabled: true,
         created_at: now_rfc3339(),

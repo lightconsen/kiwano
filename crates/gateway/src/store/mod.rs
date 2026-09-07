@@ -535,6 +535,18 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Distinct agents that have at least one binding row.
+    pub fn bound_agents(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT DISTINCT agent FROM agent_bindings ORDER BY agent")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     // ---- placeholder keys (tech.md §4.6) --------------------------------
 
     pub fn upsert_placeholder_key(&self, key: &str, agent: &str) -> Result<()> {

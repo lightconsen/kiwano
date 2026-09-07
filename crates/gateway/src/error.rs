@@ -24,6 +24,9 @@ pub enum GatewayError {
     #[error("upstream request failed: {0}")]
     Upstream(String),
 
+    #[error("http client error: {0}")]
+    Http(#[from] reqwest::Error),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

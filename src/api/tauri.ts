@@ -9,6 +9,7 @@ import type {
   DashboardWindow,
   FooterStats,
   GatewayStatus,
+  ImportReport,
   KiwanoApi,
   NewProviderInput,
   Provider,
@@ -44,6 +45,8 @@ export const tauriApi: KiwanoApi = {
 
   setTakeover: (agent: AgentId, enabled: boolean) =>
     invoke<void>("set_agent_takeover", { agent, enabled }),
+
+  importCcSwitch: () => invoke<ImportReport>("import_cc_switch"),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
 };

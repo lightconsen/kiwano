@@ -19,6 +19,7 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 
 export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSettings().then(setS);
@@ -146,9 +147,32 @@ export default function Settings() {
             </div>
             {s.hub_logged_in ? "已登录" : "未登录"}
             <span className="text-[10.5px] text-mut">登录后同步配置、参与评分</span>
+            {importMsg && importMsg !== "导入中…" && (
+              <span className="text-[10.5px]" style={{ color: "var(--kiwi)" }}>
+                {importMsg}
+              </span>
+            )}
           </div>
           <div className="flex gap-2">
-            <button className="btn btn-ghost h-7 rounded-md border border-line px-3 text-[11.5px]">从 CC Switch 导入</button>
+            <button
+              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+              disabled={importMsg === "导入中…"}
+              title={importMsg ?? undefined}
+              onClick={() => {
+                setImportMsg("导入中…");
+                api
+                  .importCcSwitch()
+                  .then((r) =>
+                    setImportMsg(
+                      `已导入 ${r.imported} · 跳过 ${r.skipped}${r.detail.length ? ` · ${r.detail[0]}` : ""}`,
+                    ),
+                  )
+                  .catch(() => setImportMsg("导入失败"))
+                  .finally(() => setTimeout(() => setImportMsg(null), 4000));
+              }}
+            >
+              从 CC Switch 导入
+            </button>
             <button
               className="btn btn-primary h-7 rounded-md px-3 text-[11.5px] font-semibold"
               style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}

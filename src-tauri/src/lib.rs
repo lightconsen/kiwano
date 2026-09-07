@@ -4,6 +4,7 @@
 //! (same SQLite file the sidecar reads) → `POST :8310/reload` hot-swaps the
 //! gateway route table. The gateway process itself is spawned in `setup`.
 
+mod import;
 mod sidecar;
 mod vm;
 
@@ -195,6 +196,21 @@ fn get_footer_stats(state: State<AppState>) -> Result<vm::FooterStatsVm, String>
     vm::build_footer_stats(&state.store)
 }
 
+#[tauri::command]
+fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let home = std::path::PathBuf::from(home).join(".cc-switch");
+    let report = import::run_import(
+        &state.store,
+        Some(&home.join("cc-switch.db")),
+        Some(&home.join("config.json")),
+    );
+    if report.imported > 0 {
+        after_mutation(&state);
+    }
+    report
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -254,6 +270,7 @@ pub fn run() {
             update_settings,
             set_agent_takeover,
             get_footer_stats,
+            import_cc_switch,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

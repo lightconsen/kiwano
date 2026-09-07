@@ -178,6 +178,13 @@ export interface FooterStats {
   version: string;
 }
 
+/** CC Switch 导入结果（tech.md §4.5：仅 v3.x） */
+export interface ImportReport {
+  imported: number;
+  skipped: number;
+  detail: string[];
+}
+
 export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
@@ -195,5 +202,7 @@ export interface KiwanoApi {
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   /** Agent 接管开关（占位 Key 的生成/删除，P1 起含配置改写） */
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
+  /** 从 CC Switch 导入配置（自动探测 ~/.cc-switch 数据源） */
+  importCcSwitch(): Promise<ImportReport>;
   getFooterStats(): Promise<FooterStats>;
 }

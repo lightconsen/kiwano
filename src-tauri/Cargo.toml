@@ -26,4 +26,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 kiwano-gateway = { path = "../crates/gateway" }
 
+[dev-dependencies]
+tempfile = "3"
+
 # Release profile lives at the workspace root (Cargo ignores per-package profiles).

@@ -52,7 +52,7 @@ pub fn fmt_tokens(v: i64) -> String {
 // ── UTC date helpers (no chrono dependency; RFC3339 UTC keeps lexicographic
 //    ordering, which is exactly what the store's `ts >= ?` filters expect) ──
 
-fn unix_now() -> i64 {
+pub(crate) fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -73,7 +73,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-fn rfc3339(epoch_secs: i64) -> String {
+pub(crate) fn rfc3339(epoch_secs: i64) -> String {
     let days = epoch_secs.div_euclid(86_400);
     let secs = epoch_secs.rem_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
@@ -621,7 +621,7 @@ fn usage_vm(aux: &Aux, p: &Provider, totals: Option<&UsageTotals>, since7: &str)
 
 // ── Mutations (called from commands; each ends with an admin /reload) ──
 
-fn slug(name: &str) -> String {
+pub(crate) fn slug(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })

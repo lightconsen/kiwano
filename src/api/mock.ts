@@ -9,6 +9,7 @@ import type {
   DashboardWindow,
   FooterStats,
   GatewayStatus,
+  ImportReport,
   KiwanoApi,
   NewProviderInput,
   Provider,
@@ -448,6 +449,20 @@ export const mockApi: KiwanoApi = {
       t.placeholder_key = null;
       t.enabled = false;
     }
+  },
+
+  async importCcSwitch(): Promise<ImportReport> {
+    await delay(600);
+    return {
+      imported: 2,
+      skipped: 1,
+      detail: [
+        "source: ~/.cc-switch/config.json (3 rows)",
+        "import ccs-claude-default: DeepSeek (anthropic)",
+        "import ccs-codex-default: Groq (openai)",
+        "skip claude/claude-official: 缺少端点或 Key",
+      ],
+    };
   },
 
   async getFooterStats(): Promise<FooterStats> {

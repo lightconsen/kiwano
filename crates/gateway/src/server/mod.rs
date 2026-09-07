@@ -115,8 +115,8 @@ pub fn extract_placeholder_key(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// Build a protocol-flavored JSON error response: Anthropic shape on
-/// Anthropic-flavored paths, OpenAI shape on OpenAI-flavored paths.
+/// Build a protocol-flavored JSON error response: native shape per inbound
+/// protocol family (Anthropic / OpenAI / Gemini).
 pub fn error_response(
     inbound: Option<Protocol>,
     status: StatusCode,
@@ -129,6 +129,13 @@ pub fn error_response(
                 "message": message,
                 "type": kind,
                 "code": status.as_u16(),
+            }
+        }),
+        Some(Protocol::Gemini) => json!({
+            "error": {
+                "code": status.as_u16(),
+                "message": message,
+                "status": kind,
             }
         }),
         _ => json!({

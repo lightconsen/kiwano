@@ -27,6 +27,11 @@ pub fn data_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/v1/completions", post(proxy))
         .route("/v1/embeddings", post(proxy))
         .route("/v1/models", get(proxy))
+        // Gemini API (Gemini CLI): list models + `{model}:{method}` actions
+        // (generateContent / streamGenerateContent / countTokens), all one
+        // path segment so a single param route covers them.
+        .route("/v1beta/models", get(proxy))
+        .route("/v1beta/models/{model_method}", post(proxy))
         .fallback(not_found)
         .with_state(state)
 }

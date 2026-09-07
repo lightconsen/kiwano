@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -109,12 +109,49 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider_id);
 "#;
 
+/// v4: Gemini protocol flavor (P1 Gemini CLI 接管). CHECK constraints can't be
+/// altered in place, so `providers` is rebuilt with the widened protocol set;
+/// bindings/keys survive via named-column copy (FKs off during the swap).
+const MIGRATION_V4: &str = r#"
+PRAGMA foreign_keys=OFF;
+CREATE TABLE providers_new (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    protocol     TEXT NOT NULL DEFAULT 'anthropic'
+                 CHECK (protocol IN ('anthropic','openai','gemini')),
+    base_url     TEXT NOT NULL,
+    api_path     TEXT,
+    api_key      TEXT,
+    billing      TEXT NOT NULL DEFAULT 'metered'
+                 CHECK (billing IN ('subscription','metered','unlimited')),
+    period_limit REAL,
+    limit_unit   TEXT
+                 CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens','cny')),
+    reset_period TEXT
+                 CHECK (reset_period IS NULL OR reset_period IN ('monthly','weekly','yearly')),
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+INSERT INTO providers_new (id, name, protocol, base_url, api_path, api_key,
+                           billing, period_limit, limit_unit, reset_period,
+                           enabled, created_at, updated_at)
+    SELECT id, name, protocol, base_url, api_path, api_key,
+           billing, period_limit, limit_unit, reset_period,
+           enabled, created_at, updated_at
+    FROM providers;
+DROP TABLE providers;
+ALTER TABLE providers_new RENAME TO providers;
+PRAGMA foreign_keys=ON;
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Anthropic,
     OpenAI,
+    Gemini,
 }
 
 impl Protocol {
@@ -122,6 +159,7 @@ impl Protocol {
         match self {
             Protocol::Anthropic => "anthropic",
             Protocol::OpenAI => "openai",
+            Protocol::Gemini => "gemini",
         }
     }
 
@@ -129,6 +167,7 @@ impl Protocol {
         match s {
             "anthropic" => Some(Protocol::Anthropic),
             "openai" => Some(Protocol::OpenAI),
+            "gemini" => Some(Protocol::Gemini),
             _ => None,
         }
     }
@@ -403,6 +442,9 @@ impl Store {
         }
         if version < 3 {
             conn.execute_batch(MIGRATION_V3)?;
+        }
+        if version < 4 {
+            conn.execute_batch(MIGRATION_V4)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -1092,6 +1134,46 @@ mod tests {
         drop(conn);
         let (_dir2, store2) = temp_store();
         store2.metrics().expect("re-migrate ok");
+    }
+
+    /// v3 → v4 rebuild: existing providers/bindings survive, gemini accepted.
+    #[test]
+    fn migration_v4_rebuilds_providers_with_gemini_protocol() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v3 database (pre-Gemini CHECK) with data in it.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(MIGRATION_V1).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute_batch(MIGRATION_V3).unwrap();
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
+                 VALUES ('p-ant', 'Old', 'anthropic', 'https://api.anthropic.com', 'metered', 't0', 't0');
+                 INSERT INTO agent_bindings (agent, provider_id, priority, weight, enabled)
+                 VALUES ('claude', 'p-ant', 0, 1, 1);
+                 INSERT INTO api_keys (provider_id, api_key, enabled, created_at)
+                 VALUES ('p-ant', 'sk-x', 1, 't0');
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let got = store.get_provider("p-ant").unwrap().expect("provider kept");
+        assert_eq!(got.protocol, Protocol::Anthropic);
+        assert_eq!(got.limit_unit, None);
+        assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 1);
+        assert_eq!(store.list_api_keys("p-ant").unwrap().len(), 1);
+
+        // v4 widened the CHECK: gemini providers are accepted now.
+        let gem = sample_provider("p-gem", Protocol::Gemini);
+        store.insert_provider(&gem).unwrap();
+        assert_eq!(
+            store.get_provider("p-gem").unwrap().unwrap().protocol,
+            Protocol::Gemini
+        );
     }
 
     #[test]

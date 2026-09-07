@@ -176,11 +176,12 @@ impl RouteTable {
     }
 
     /// Fallback attribution when the key is missing/unknown (tech.md §4.6):
-    /// Anthropic paths → Claude Code, OpenAI paths → Codex. Ambiguous paths
-    /// default to the primary (Claude) agent.
+    /// Anthropic paths → Claude Code, OpenAI paths → Codex, Gemini paths →
+    /// Gemini CLI. Ambiguous paths default to the primary (Claude) agent.
     pub fn fallback_agent(protocol: Option<Protocol>) -> &'static str {
         match protocol {
             Some(Protocol::OpenAI) => AGENT_CODEX,
+            Some(Protocol::Gemini) => AGENT_GEMINI,
             _ => AGENT_CLAUDE,
         }
     }
@@ -447,6 +448,10 @@ mod tests {
         assert_eq!(
             RouteTable::fallback_agent(Some(Protocol::OpenAI)),
             AGENT_CODEX
+        );
+        assert_eq!(
+            RouteTable::fallback_agent(Some(Protocol::Gemini)),
+            AGENT_GEMINI
         );
         assert_eq!(RouteTable::fallback_agent(None), AGENT_CLAUDE);
     }

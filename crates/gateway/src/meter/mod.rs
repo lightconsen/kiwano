@@ -83,6 +83,14 @@ impl UsageScanner {
                 if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
                     self.merge_usage(u);
                 }
+                // Gemini streamGenerateContent (alt=sse) chunks: cumulative
+                // usageMetadata + modelVersion on every event.
+                if let Some(u) = v.get("usageMetadata").filter(|u| u.is_object()) {
+                    self.merge_usage(u);
+                }
+                if let Some(m) = v.get("modelVersion").and_then(Value::as_str) {
+                    self.model = Some(m.to_string());
+                }
             }
         }
     }
@@ -116,6 +124,16 @@ impl UsageScanner {
         {
             self.usage.cache_read_tokens = n;
         }
+        // Gemini flavor (generateContent / streamGenerateContent).
+        if let Some(n) = get("promptTokenCount") {
+            self.usage.input_tokens = n;
+        }
+        if let Some(n) = get("candidatesTokenCount") {
+            self.usage.output_tokens = n;
+        }
+        if let Some(n) = get("cachedContentTokenCount") {
+            self.usage.cache_read_tokens = n;
+        }
     }
 
     /// Model seen in the stream (message_start / response.completed).
@@ -137,7 +155,7 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
     let Ok(v) = serde_json::from_slice::<Value>(body) else {
         return (None, None);
     };
-    let model = v.get("model").and_then(Value::as_str).map(str::to_string);
+    let mut model = v.get("model").and_then(Value::as_str).map(str::to_string);
     let mut scanner = UsageScanner::new();
     match protocol {
         Protocol::Anthropic => {
@@ -150,6 +168,16 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
             // chat.completion / response objects carry usage at top level.
             if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
                 scanner.merge_usage(u);
+            }
+        }
+        Protocol::Gemini => {
+            // generateContent responses report usageMetadata; the model lives
+            // in `modelVersion` (no `model` field exists).
+            if let Some(u) = v.get("usageMetadata").filter(|u| u.is_object()) {
+                scanner.merge_usage(u);
+            }
+            if let Some(m) = v.get("modelVersion").and_then(Value::as_str) {
+                model = Some(m.to_string());
             }
         }
     }
@@ -203,6 +231,32 @@ mod tests {
         assert_eq!(u.output_tokens, 7);
         assert_eq!(u.cache_read_tokens, 32);
         assert_eq!(model.as_deref(), Some("gpt-4o"));
+    }
+
+    #[test]
+    fn parses_gemini_non_stream() {
+        let body = br#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],
+            "modelVersion":"gemini-2.5-pro",
+            "usageMetadata":{"promptTokenCount":88,"candidatesTokenCount":31,
+                             "cachedContentTokenCount":12,"totalTokenCount":119}}"#;
+        let (usage, model) = parse_response_usage(Protocol::Gemini, body);
+        let u = usage.unwrap();
+        assert_eq!(u.input_tokens, 88);
+        assert_eq!(u.output_tokens, 31);
+        assert_eq!(u.cache_read_tokens, 12);
+        assert_eq!(model.as_deref(), Some("gemini-2.5-pro"));
+    }
+
+    #[test]
+    fn scans_gemini_sse_stream() {
+        let mut scanner = UsageScanner::new();
+        // 首个 chunk 只有 prompt 侧计数；后续 chunk 累计覆盖。
+        scanner.feed_line(r#"data: {"candidates":[],"usageMetadata":{"promptTokenCount":88},"modelVersion":"gemini-2.5-flash"}"#);
+        scanner.feed_line(r#"data: {"candidates":[{"content":{"parts":[{"text":"x"}]}}],"usageMetadata":{"promptTokenCount":88,"candidatesTokenCount":9,"cachedContentTokenCount":12},"modelVersion":"gemini-2.5-flash"}"#);
+        assert_eq!(scanner.usage().input_tokens, 88);
+        assert_eq!(scanner.usage().output_tokens, 9);
+        assert_eq!(scanner.usage().cache_read_tokens, 12);
+        assert_eq!(scanner.model(), Some("gemini-2.5-flash"));
     }
 
     #[test]

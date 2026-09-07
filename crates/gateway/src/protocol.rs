@@ -29,6 +29,11 @@ pub fn classify_path(path: &str) -> PathProtocol {
         || path == "/v1/embeddings"
     {
         PathProtocol::Fixed(Protocol::OpenAI)
+    } else if path == "/v1beta/models" || path.starts_with("/v1beta/models/") {
+        // Gemini API (Gemini CLI): `GET /v1beta/models` list plus
+        // `POST /v1beta/models/{model}:generateContent` and friends — the
+        // `{model}:{method}` segment lives in one path component.
+        PathProtocol::Fixed(Protocol::Gemini)
     } else if path == "/v1/models" {
         PathProtocol::Ambiguous
     } else {
@@ -77,6 +82,26 @@ mod tests {
         assert_eq!(
             classify_path("/v1/embeddings"),
             PathProtocol::Fixed(Protocol::OpenAI)
+        );
+    }
+
+    #[test]
+    fn classifies_gemini_paths() {
+        assert_eq!(
+            classify_path("/v1beta/models"),
+            PathProtocol::Fixed(Protocol::Gemini)
+        );
+        assert_eq!(
+            classify_path("/v1beta/models/gemini-2.5-pro:generateContent"),
+            PathProtocol::Fixed(Protocol::Gemini)
+        );
+        assert_eq!(
+            classify_path("/v1beta/models/gemini-2.5-flash:streamGenerateContent"),
+            PathProtocol::Fixed(Protocol::Gemini)
+        );
+        assert_eq!(
+            classify_path("/v1beta/models/gemini-2.5-pro:countTokens"),
+            PathProtocol::Fixed(Protocol::Gemini)
         );
     }
 

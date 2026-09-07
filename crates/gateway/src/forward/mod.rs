@@ -136,6 +136,11 @@ fn build_upstream_headers(
                 .map_err(|e| GatewayError::Upstream(e.to_string()))?;
             out.insert(axum::http::header::AUTHORIZATION, value);
         }
+        Protocol::Gemini => {
+            let value =
+                HeaderValue::from_str(&key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
+            out.insert("x-goog-api-key", value);
+        }
     }
     Ok(out)
 }

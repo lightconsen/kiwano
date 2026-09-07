@@ -2369,6 +2369,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kiwano-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "kiwano-gateway",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "kiwano-gateway"
 version = "0.1.0"
 dependencies = [

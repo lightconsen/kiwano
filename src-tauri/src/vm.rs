@@ -835,6 +835,7 @@ fn endpoint_note(p: &Provider) -> String {
     match p.protocol {
         kiwano_gateway::store::Protocol::OpenAI => "OpenAI 兼容".to_string(),
         kiwano_gateway::store::Protocol::Anthropic => "Anthropic".to_string(),
+        kiwano_gateway::store::Protocol::Gemini => "Gemini API".to_string(),
     }
 }
 

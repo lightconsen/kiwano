@@ -5,8 +5,8 @@
 //! （逃生门）。备份语义：已接管时再次 enable 不覆盖最初备份，保证
 //! 无论连续接管多少次都能还原到用户原始配置。
 //!
-//! MVP 覆盖 claude（settings.json）与 codex（config.toml + auth.json）；
-//! gemini 接管为 P1（tech.md §2.4 B：入站协议多一种，与原型状态一致）。
+//! MVP 覆盖 claude（settings.json）、codex（config.toml + auth.json）与
+//! gemini（~/.gemini/.env；入站协议见 gateway protocol.rs 的 /v1beta 分支）。
 
 use std::path::Path;
 
@@ -24,7 +24,8 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
             home.join(".codex").join("config.toml"),
             home.join(".codex").join("auth.json"),
         ]),
-        other => Err(format!("`{other}` 接管为 P1（Gemini 入站协议未支持）")),
+        "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
+        other => Err(format!("unknown agent: {other}")),
     }
 }
 
@@ -44,8 +45,8 @@ pub fn enable(
     for p in &paths {
         let content = match std::fs::read_to_string(p) {
             Ok(c) => c,
-            // codex 的 auth.json 允许不存在（视为空对象）
-            Err(_) if p.ends_with("auth.json") => String::new(),
+            // codex 的 auth.json / gemini 的 .env 允许不存在（视为空文件）
+            Err(_) if p.ends_with("auth.json") || p.ends_with(".env") => String::new(),
             Err(_) => {
                 return Err(format!(
                     "未找到 {} —— 请先运行过 {} 再接管",
@@ -77,6 +78,10 @@ pub fn enable(
     }
 
     for (path, content) in &rewritten {
+        // .env 首次接管时 ~/.gemini 可能整个不存在，先补父目录
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         atomic_write(std::path::Path::new(path), content)?;
     }
     Ok(())
@@ -108,6 +113,7 @@ fn rewrite(
         "claude" => rewrite_claude(original, base, data_port, key),
         "codex" if path.ends_with("config.toml") => rewrite_codex_toml(original, base, data_port),
         "codex" => rewrite_codex_auth(original, key),
+        "gemini" => rewrite_gemini_env(original, base, data_port, key),
         _ => Err("unsupported agent".into()),
     }
 }
@@ -169,6 +175,43 @@ fn rewrite_codex_auth(original: &str, key: &str) -> Result<String, String> {
     let obj = v.as_object_mut().ok_or("auth.json 顶层不是对象")?;
     obj.insert("OPENAI_API_KEY".into(), Value::String(key.into()));
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
+}
+
+/// .env（dotenv）：改写 GOOGLE_GEMINI_BASE_URL + GEMINI_API_KEY 两行，
+/// 保留其余行与注释；缺失的变量追加到尾部；文件不存在视为空（首次接管
+/// 会连同 ~/.gemini 目录一起创建）。值不加引号——两个值都不含空白。
+fn rewrite_gemini_env(original: &str, base: &str, port: u16, key: &str) -> Result<String, String> {
+    let target = format!("{base}:{port}");
+    let mut found_base = false;
+    let mut found_key = false;
+    let mut out = Vec::with_capacity(original.lines().count() + 2);
+    for line in original.lines() {
+        let trimmed = line.trim_start();
+        let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim_start();
+        let key_of = after_export.split_once('=').map(|(k, _)| k.trim());
+        match key_of {
+            Some("GOOGLE_GEMINI_BASE_URL") if !found_base => {
+                found_base = true;
+                out.push(format!("GOOGLE_GEMINI_BASE_URL={target}"));
+            }
+            Some("GEMINI_API_KEY") if !found_key => {
+                found_key = true;
+                out.push(format!("GEMINI_API_KEY={key}"));
+            }
+            _ => out.push(line.to_string()),
+        }
+    }
+    if !found_base {
+        out.push(format!("GOOGLE_GEMINI_BASE_URL={target}"));
+    }
+    if !found_key {
+        out.push(format!("GEMINI_API_KEY={key}"));
+    }
+    let mut s = out.join("\n");
+    if original.is_empty() || original.ends_with('\n') {
+        s.push('\n');
+    }
+    Ok(s)
 }
 
 /// 原子写：先写 `*.kiwano-tmp` 再 rename，避免半写状态。
@@ -306,12 +349,52 @@ mod tests {
     }
 
     #[test]
-    fn missing_claude_config_errors_and_gemini_unsupported() {
+    fn missing_claude_config_errors() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         assert!(enable(&aux, "claude", "k", 8317, &home).is_err());
-        assert!(enable(&aux, "gemini", "k", 8317, &home).is_err());
         // 未接管时 disable 幂等成功
         assert!(disable(&aux, "claude", &home).is_ok());
+    }
+
+    #[test]
+    fn gemini_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let gemini_dir = home.join(".gemini");
+        std::fs::create_dir_all(&gemini_dir).unwrap();
+        std::fs::write(
+            gemini_dir.join(".env"),
+            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# 代理注释\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n",
+        )
+        .unwrap();
+
+        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
+        let env = std::fs::read_to_string(gemini_dir.join(".env")).unwrap();
+        assert!(env.contains("GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\n"));
+        assert!(env.contains("GEMINI_API_KEY=kw-ag-gemini-abcd\n"));
+        assert!(env.contains("GOOGLE_GENAI_USE_VERTEXAI=false")); // 其余行不动
+        assert!(env.contains("# 代理注释")); // 注释保留
+
+        // 还原 = 逐字节写回
+        disable(&aux, "gemini", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(gemini_dir.join(".env")).unwrap(),
+            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# 代理注释\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n"
+        );
+        assert!(aux.load_takeover_backup("gemini").is_none());
+    }
+
+    #[test]
+    fn gemini_takeover_creates_missing_env() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        // ~/.gemini/.env 整个不存在也能接管（目录 + 文件自动创建）
+        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
+        let env = std::fs::read_to_string(home.join(".gemini").join(".env")).unwrap();
+        assert_eq!(
+            env,
+            "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\nGEMINI_API_KEY=kw-ag-gemini-abcd\n"
+        );
     }
 }

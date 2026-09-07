@@ -1,6 +1,11 @@
 // App 壳：Overlay 标题栏 + 顶部导航 + hash 路由 + 底部状态栏（design/index.html 骨架）
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
 import type { CatalogEntry, FooterStats, GatewayStatus, Provider } from "./api/types";
 import { Dot } from "./components/bits";
@@ -49,6 +54,33 @@ export default function App() {
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  // 费用预警巡检（spec §4.1 P1）：每 60s 轮询；后端按周期去重，
+  // 返回即为本周期首次命中，直接转系统通知。
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const alerts = await api.checkUsageAlerts();
+        for (const a of alerts) {
+          if (!(await isPermissionGranted())) {
+            const st = await requestPermission();
+            if (st !== "granted") return;
+          }
+          const used =
+            a.unit === "wan_tokens" ? `${a.used} 万 tokens` : `${a.used.toLocaleString()} 次`;
+          sendNotification({
+            title: "Kiwano 费用预警",
+            body: `${a.provider_name} 本期用量 ${used}，已达上限 ${a.limit}，请注意控制消费`,
+          });
+        }
+      } catch {
+        // mock 模式 / 网关未起：静默
+      }
+    };
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const nav = (id: Route) => {
     setRoute(id);

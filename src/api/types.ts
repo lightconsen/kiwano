@@ -163,6 +163,8 @@ export interface AppSettings {
   auto_failover: boolean;
   request_logs: boolean;
   telemetry: boolean;
+  /** 费用预警（spec §4.1 P1）：用量达每期上限时系统通知 */
+  cost_alert: boolean;
   hub_logged_in: boolean;
   /** Hub 目录同步端点（协议 v0：静态 JSON） */
   hub_url: string;
@@ -199,6 +201,16 @@ export interface ConfigShareReport {
   providers_added: number;
   providers_kept: number;
   routes_applied: number;
+}
+
+/** 费用预警命中项（后端已按周期去重，前端转系统通知即可） */
+export interface UsageAlert {
+  provider_id: string;
+  provider_name: string;
+  used: number;
+  limit: number;
+  /** requests | wan_tokens */
+  unit: string;
 }
 
 export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
@@ -240,6 +252,8 @@ export interface KiwanoApi {
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   /** 从 Hub 拉取 Provider 目录并落本地缓存（货架缓存优先、静态兜底） */
   syncHub(): Promise<HubSyncReport>;
+  /** 费用预警巡检（后端 KV 去重：每 Provider 每重置周期最多返回一次） */
+  checkUsageAlerts(): Promise<UsageAlert[]>;
   /** Agent 接管开关（占位 Key 的生成/删除，P1 起含配置改写） */
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
   /** 从 CC Switch 导入配置（自动探测 ~/.cc-switch 数据源） */

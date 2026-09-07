@@ -17,6 +17,7 @@ import type {
   NewProviderInput,
   Provider,
   StrategyKind,
+  UsageAlert,
 } from "./types";
 
 export const tauriApi: KiwanoApi = {
@@ -44,6 +45,8 @@ export const tauriApi: KiwanoApi = {
 
   getSettings: () => invoke<AppSettings>("get_settings"),
   syncHub: () => invoke<HubSyncReport>("sync_hub"),
+
+  checkUsageAlerts: () => invoke<UsageAlert[]>("check_usage_alerts"),
 
   updateSettings: (patch: Partial<AppSettings>) =>
     invoke<AppSettings>("update_settings", { patch }),

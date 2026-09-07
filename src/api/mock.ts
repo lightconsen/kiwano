@@ -18,6 +18,7 @@ import type {
   Provider,
   StrategyBinding,
   StrategyKind,
+  UsageAlert,
 } from "./types";
 
 const CATALOG_TOTAL = 42;
@@ -332,6 +333,7 @@ const settings: AppSettings = {
   auto_failover: true,
   request_logs: true,
   telemetry: false,
+  cost_alert: true,
   hub_logged_in: false,
   hub_url: "https://hub.kiwano.app/catalog.json",
 };
@@ -518,6 +520,11 @@ export const mockApi: KiwanoApi = {
       synced_at: new Date().toISOString(),
       hub_url: settings.hub_url,
     };
+  },
+
+  async checkUsageAlerts(): Promise<UsageAlert[]> {
+    await delay();
+    return [];
   },
 
   async getAgentRoutes(): Promise<AgentRoute[]> {

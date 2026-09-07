@@ -150,6 +150,9 @@ export default function Settings() {
           <Row label="请求日志留存" note="仅本地 · 30 天">
             <Toggle on={s.request_logs} onChange={(v) => patch({ request_logs: v })} />
           </Row>
+          <Row label="费用预警" note="用量达每期上限时系统通知">
+            <Toggle on={s.cost_alert} onChange={(v) => patch({ cost_alert: v })} />
+          </Row>
         </div>
       </div>
 

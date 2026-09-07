@@ -1,6 +1,7 @@
 // 首屏：我的供应商（design/index.html #s-providers）
 import { useCallback, useEffect, useState } from "react";
-import { Ellipsis, Plus } from "lucide-react";
+
+import { Plus, Trash2 } from "lucide-react";
 import { api } from "../api/client";
 import { AGENTS, type AgentId, type Provider } from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
@@ -107,7 +108,24 @@ function UsageCell({ p }: { p: Provider }) {
   );
 }
 
-function ProviderRow({ p, onEnable }: { p: Provider; onEnable: (id: string) => void }) {
+function ProviderRow({
+  p,
+  onEnable,
+  onEdit,
+  onDelete,
+}: {
+  p: Provider;
+  onEnable: (id: string) => void;
+  onEdit: (p: Provider) => void;
+  onDelete: (p: Provider) => void;
+}) {
+  // 删除为两步确认：第一次点击进入确认态，3 秒内再次点击才真删
+  const [confirmDel, setConfirmDel] = useState(false);
+  useEffect(() => {
+    if (!confirmDel) return;
+    const t = setTimeout(() => setConfirmDel(false), 3000);
+    return () => clearTimeout(t);
+  }, [confirmDel]);
   return (
     <div className={`row flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <div className="flex min-w-0 w-[34%] items-center gap-2.5">
@@ -162,7 +180,12 @@ function ProviderRow({ p, onEnable }: { p: Provider; onEnable: (id: string) => v
 
       <div className="flex flex-1 items-center justify-end gap-1.5">
         {p.is_current ? (
-          <button className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-2.5 text-[11.5px]">编辑</button>
+          <button
+            className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-2.5 text-[11.5px]"
+            onClick={() => onEdit(p)}
+          >
+            编辑
+          </button>
         ) : (
           <button
             className="btn h-7 whitespace-nowrap rounded-md px-2.5 text-[11.5px] font-semibold"
@@ -172,15 +195,21 @@ function ProviderRow({ p, onEnable }: { p: Provider; onEnable: (id: string) => v
             启用
           </button>
         )}
-        <button className="btn btn-ghost h-7 rounded-md border border-line px-1.5 text-mut" aria-label="更多操作">
-          <Ellipsis className="h-3.5 w-3.5" />
+        <button
+          className={`btn btn-ghost h-7 whitespace-nowrap rounded-md border px-1.5 text-[10.5px]${confirmDel ? "" : " text-mut"}`}
+          style={confirmDel ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
+          aria-label="删除"
+          title={confirmDel ? "再次点击确认删除" : "删除供应商"}
+          onClick={() => (confirmDel ? onDelete(p) : setConfirmDel(true))}
+        >
+          {confirmDel ? "确认删除" : <Trash2 className="h-3.5 w-3.5" />}
         </button>
       </div>
     </div>
   );
 }
 
-export default function Providers({ onAdd }: { onAdd: () => void }) {
+export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit: (p: Provider) => void }) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [seg, setSeg] = useState<AgentId | "all">("all");
 
@@ -191,6 +220,11 @@ export default function Providers({ onAdd }: { onAdd: () => void }) {
 
   const onEnable = async (id: string) => {
     await api.enableProvider(id);
+    refetch();
+  };
+
+  const onDelete = async (p: Provider) => {
+    await api.deleteProvider(p.id);
     refetch();
   };
 
@@ -235,7 +269,7 @@ export default function Providers({ onAdd }: { onAdd: () => void }) {
       </div>
 
       {filtered.map((p) => (
-        <ProviderRow key={p.id} p={p} onEnable={onEnable} />
+        <ProviderRow key={p.id} p={p} onEnable={onEnable} onEdit={onEdit} onDelete={onDelete} />
       ))}
 
       {filtered.length === 0 && (

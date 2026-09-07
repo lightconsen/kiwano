@@ -371,6 +371,27 @@ export const mockApi: KiwanoApi = {
     return p;
   },
 
+  async updateProvider(id: string, input: NewProviderInput): Promise<Provider> {
+    await delay();
+    const t = providers.find((p) => p.id === id);
+    if (!t) throw new Error(`provider ${id} not found`);
+    t.name = input.name.trim();
+    t.endpoint = input.endpoint.replace(/^https?:\/\//, "");
+    t.protocol = input.protocol;
+    t.endpoint_note = input.protocol === "openai" ? "OpenAI 兼容" : "Anthropic";
+    t.billing = input.billing;
+    t.agents = [...input.agents];
+    t.is_current = t.agents.length > 0 && t.is_current;
+    t.agents_note = t.agents.length ? `${t.agents.length} 个 Agent` : undefined;
+    return t;
+  },
+
+  async deleteProvider(id: string): Promise<void> {
+    await delay();
+    const i = providers.findIndex((p) => p.id === id);
+    if (i >= 0) providers.splice(i, 1);
+  },
+
   async enableProvider(id: string): Promise<void> {
     await delay();
     const target = providers.find((p) => p.id === id);

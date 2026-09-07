@@ -182,6 +182,10 @@ export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
   addProvider(input: NewProviderInput): Promise<Provider>;
+  /** 更新供应商（api_key 留空表示保持原 Key） */
+  updateProvider(id: string, input: NewProviderInput): Promise<Provider>;
+  /** 删除供应商；若为某 Agent 主选则自动提升下一个候选 */
+  deleteProvider(id: string): Promise<void>;
   /** 启用 = 将该 Provider 设为其绑定 Agent 的当前路由 */
   enableProvider(id: string): Promise<void>;
   testLatency(endpoint: string): Promise<number>;

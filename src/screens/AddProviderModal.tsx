@@ -1,8 +1,8 @@
-// 添加供应商弹窗（design/index.html #modal，cc-switch AddProviderDialog 模式）
+// 添加/编辑供应商弹窗（design/index.html #modal，cc-switch AddProviderDialog 模式）
 import { useEffect, useState } from "react";
 import { Eye, Gauge, Infinity as InfinityIcon, Store, X } from "lucide-react";
 import { api } from "../api/client";
-import { AGENTS, type AgentId, type Billing, type CatalogEntry } from "../api/types";
+import { AGENTS, type AgentId, type Billing, type CatalogEntry, type Provider } from "../api/types";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
   { id: "plan", label: "订阅套餐" },
@@ -13,11 +13,13 @@ const BILL_OPTIONS: { id: Billing; label: string }[] = [
 export default function AddProviderModal({
   open,
   preset,
+  edit,
   onClose,
   onSaved,
 }: {
   open: boolean;
   preset: CatalogEntry | null;
+  edit: Provider | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -40,6 +42,20 @@ export default function AddProviderModal({
     if (!open) return;
     setShowKey(false);
     setLatency(null);
+    if (edit) {
+      setMode("custom");
+      setName(edit.name);
+      setApiKey(""); // 留空 = 保持原 Key
+      setEndpoint(edit.endpoint);
+      setModel("");
+      setBilling(edit.billing);
+      const q = edit.usage?.quota;
+      setLimitValue(q ? String(q.limit) : "");
+      setLimitUnit(q?.unit === "requests" ? "requests" : "cny");
+      setResetPeriod("monthly");
+      setAgents([...edit.agents]);
+      return;
+    }
     setMode(preset ? "shelf" : "custom");
     setName(preset?.name ?? "");
     setApiKey(preset ? "sk-9f3e21a7c8d4b6e05a12" : "");
@@ -50,7 +66,7 @@ export default function AddProviderModal({
     setLimitUnit("cny");
     setResetPeriod("monthly");
     setAgents(preset?.id === "deepseek" ? ["claude", "codex"] : []);
-  }, [open, preset]);
+  }, [open, preset, edit]);
 
   if (!open) return null;
 
@@ -60,11 +76,11 @@ export default function AddProviderModal({
     if (!canSave) return;
     setSaving(true);
     try {
-      await api.addProvider({
+      const input = {
         name: name.trim(),
         api_key: apiKey,
         endpoint: endpoint.trim(),
-        protocol: "openai",
+        protocol: "openai" as const,
         model_default: model,
         billing,
         billing_config: {
@@ -73,7 +89,12 @@ export default function AddProviderModal({
           reset_period: billing === "plan" ? resetPeriod : undefined,
         },
         agents,
-      });
+      };
+      if (edit) {
+        await api.updateProvider(edit.id, input);
+      } else {
+        await api.addProvider(input);
+      }
       onSaved();
       onClose();
     } finally {
@@ -89,31 +110,33 @@ export default function AddProviderModal({
     >
       <div className="max-h-[600px] w-[480px] overflow-y-auto rounded-xl border border-line shadow-2xl" style={{ background: "var(--surface)" }}>
         <div className="flex h-11 items-center justify-between border-b border-line px-4">
-          <h2 className="text-[13px] font-semibold">添加供应商</h2>
+          <h2 className="text-[13px] font-semibold">{edit ? "编辑供应商" : "添加供应商"}</h2>
           <button className="btn btn-ghost rounded-md p-1 text-mut" onClick={onClose} aria-label="关闭">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
 
         <div className="px-4 py-3.5">
-          {/* 模式切换 */}
-          <div className="flex overflow-hidden rounded-md border border-line text-[11.5px]">
-            <div
-              className="btn flex h-8 flex-1 cursor-pointer items-center justify-center gap-1 font-medium"
-              style={mode === "shelf" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
-              onClick={() => preset && setMode("shelf")}
-            >
-              <Store className="h-3 w-3" />
-              从货架{preset ? `：${preset.name}` : "（先在货架选择）"}
+          {/* 模式切换（编辑态隐藏：不涉及货架） */}
+          {!edit && (
+            <div className="flex overflow-hidden rounded-md border border-line text-[11.5px]">
+              <div
+                className="btn flex h-8 flex-1 cursor-pointer items-center justify-center gap-1 font-medium"
+                style={mode === "shelf" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
+                onClick={() => preset && setMode("shelf")}
+              >
+                <Store className="h-3 w-3" />
+                从货架{preset ? `：${preset.name}` : "（先在货架选择）"}
+              </div>
+              <div
+                className="btn flex h-8 flex-1 cursor-pointer items-center justify-center"
+                style={mode === "custom" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
+                onClick={() => setMode("custom")}
+              >
+                自定义
+              </div>
             </div>
-            <div
-              className="btn flex h-8 flex-1 cursor-pointer items-center justify-center"
-              style={mode === "custom" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
-              onClick={() => setMode("custom")}
-            >
-              自定义
-            </div>
-          </div>
+          )}
 
           <div className="mt-3 space-y-3">
             <div>
@@ -123,13 +146,17 @@ export default function AddProviderModal({
 
             <div>
               <label className="text-[11px] font-medium text-mut">
-                API Key <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>仅存本机钥匙串</span>
+                API Key{" "}
+                <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                  {edit ? "留空则保持原 Key" : "仅存本机钥匙串"}
+                </span>
               </label>
               <div className="relative mt-1">
                 <input
                   type={showKey ? "text" : "password"}
                   className="h-8 w-full rounded-md border border-line bg-bg pl-2.5 pr-8 font-mono text-[12px]"
                   value={apiKey}
+                  placeholder={edit ? "••••••••" : ""}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
                 <button className="absolute right-2 top-1/2 -translate-y-1/2 text-mut" onClick={() => setShowKey(!showKey)} aria-label="显示/隐藏">
@@ -174,7 +201,7 @@ export default function AddProviderModal({
 
             <div>
               <label className="text-[11px] font-medium text-mut">默认模型</label>
-              {mode === "shelf" && preset ? (
+              {!edit && mode === "shelf" && preset ? (
                 <select className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]" value={model} onChange={(e) => setModel(e.target.value)}>
                   {preset.models.map((m) => (
                     <option key={m}>{m}</option>
@@ -312,7 +339,7 @@ export default function AddProviderModal({
             disabled={!canSave}
             onClick={save}
           >
-            {saving ? "保存中…" : "保存并启用"}
+            {saving ? "保存中…" : edit ? "保存" : "保存并启用"}
           </button>
         </div>
       </div>

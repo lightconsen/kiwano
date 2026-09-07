@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "./api/client";
-import type { CatalogEntry, FooterStats, GatewayStatus } from "./api/types";
+import type { CatalogEntry, FooterStats, GatewayStatus, Provider } from "./api/types";
 import { Dot } from "./components/bits";
 import Providers from "./screens/Providers";
 import Shelf from "./screens/Shelf";
@@ -29,9 +29,10 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const [gw, setGw] = useState<GatewayStatus | null>(null);
   const [footer, setFooter] = useState<FooterStats | null>(null);
-  const [modal, setModal] = useState<{ open: boolean; preset: CatalogEntry | null }>({
+  const [modal, setModal] = useState<{ open: boolean; preset: CatalogEntry | null; edit: Provider | null }>({
     open: false,
     preset: null,
+    edit: null,
   });
 
   useEffect(() => {
@@ -94,9 +95,13 @@ export default function App() {
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         {route === "providers" && (
-          <Providers key={`p${tick}`} onAdd={() => setModal({ open: true, preset: null })} />
+          <Providers
+            key={`p${tick}`}
+            onAdd={() => setModal({ open: true, preset: null, edit: null })}
+            onEdit={(p) => setModal({ open: true, preset: null, edit: p })}
+          />
         )}
-        {route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset })} />}
+        {route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset, edit: null })} />}
         {route === "dashboard" && <Dashboard key={`d${tick}`} />}
         {route === "settings" && <Settings key={`c${tick}`} />}
       </main>
@@ -123,7 +128,8 @@ export default function App() {
       <AddProviderModal
         open={modal.open}
         preset={modal.preset}
-        onClose={() => setModal({ open: false, preset: null })}
+        edit={modal.edit}
+        onClose={() => setModal({ open: false, preset: null, edit: null })}
         onSaved={refresh}
       />
     </div>

@@ -771,6 +771,138 @@ pub fn enable_provider(store: &Store, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 更新供应商：改 providers 行 + 重绑 agents（新集合 = 主选，被移除的解绑）。
+/// api_key 留空表示保持原 Key 不变。返回刷新后的 VM（重新聚合，保证徽章/备注一致）。
+pub fn update_provider(
+    store: &Store,
+    aux: &Aux,
+    id: &str,
+    input: &NewProviderInput,
+) -> Result<ProviderVm, String> {
+    let mut p = store
+        .get_provider(id)
+        .map_err(e2s)?
+        .ok_or_else(|| format!("provider `{id}` not found"))?;
+
+    p.name = input.name.trim().to_string();
+    p.base_url = input.endpoint.trim().to_string();
+    p.protocol = kiwano_gateway::store::Protocol::from_str(&input.protocol)
+        .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
+    p.billing = billing_to_db(&input.billing);
+    p.period_limit = input.billing_config.limit_value;
+    p.reset_period = match input.billing_config.reset_period.as_deref() {
+        Some("monthly") | Some("weekly") | Some("yearly") => {
+            input.billing_config.reset_period.clone()
+        }
+        _ => None,
+    };
+    if !input.api_key.trim().is_empty() {
+        p.api_key = Some(input.api_key.clone());
+    }
+    p.updated_at = rfc3339(unix_now());
+    store.update_provider(&p).map_err(e2s)?;
+
+    // 重绑：旧集合中不在新集合的解绑；新集合走 add 同款主选逻辑
+    let new_set: std::collections::HashSet<&str> =
+        input.agents.iter().map(String::as_str).collect();
+    let old_agents: Vec<String> = store
+        .bound_agents()
+        .map_err(e2s)?
+        .into_iter()
+        .filter(|a| {
+            store
+                .bindings_for_agent(a)
+                .map(|bs| bs.iter().any(|b| b.provider_id == id))
+                .unwrap_or(false)
+        })
+        .collect();
+    for agent in &old_agents {
+        if !new_set.contains(agent.as_str()) {
+            store.delete_binding(agent, id).map_err(e2s)?;
+        }
+    }
+    for agent in &input.agents {
+        store.upsert_strategy(agent, StrategyType::Single, None).map_err(e2s)?;
+        let prev = store.primary_provider_id(agent).map_err(e2s)?;
+        store
+            .upsert_binding(&Binding {
+                agent: agent.clone(),
+                provider_id: id.to_string(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .map_err(e2s)?;
+        if let Some(prev) = prev {
+            if prev != id {
+                store
+                    .upsert_binding(&Binding {
+                        agent: agent.clone(),
+                        provider_id: prev,
+                        priority: 1,
+                        weight: 1,
+                        win_start: None,
+                        win_end: None,
+                        enabled: true,
+                    })
+                    .map_err(e2s)?;
+            }
+        }
+    }
+
+    let vms = build_provider_vms(store, aux)?;
+    vms.into_iter()
+        .find(|v| v.id == id)
+        .ok_or_else(|| "provider vanished after update".to_string())
+}
+
+/// 删除供应商。若它是某 Agent 的主选，自动把该 Agent 候选集中最优的下一个提升为主选。
+pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
+    let mut affected: Vec<String> = Vec::new();
+    for a in store.bound_agents().map_err(e2s)? {
+        if store.primary_provider_id(&a).map_err(e2s)?.as_deref() == Some(id) {
+            affected.push(a);
+        }
+    }
+    let deleted = store.delete_provider(id).map_err(e2s)?;
+    if !deleted {
+        return Ok(false);
+    }
+    for agent in affected {
+        let remaining = store.bindings_for_agent(&agent).map_err(e2s)?;
+        if let Some(next) = remaining.first() {
+            let next_id = next.provider_id.clone();
+            store
+                .upsert_binding(&Binding {
+                    agent: agent.clone(),
+                    provider_id: next_id.clone(),
+                    priority: 0,
+                    weight: 1,
+                    win_start: None,
+                    win_end: None,
+                    enabled: true,
+                })
+                .map_err(e2s)?;
+            for (i, b) in remaining.iter().filter(|b| b.provider_id != next_id).enumerate() {
+                store
+                    .upsert_binding(&Binding {
+                        agent: agent.clone(),
+                        provider_id: b.provider_id.clone(),
+                        priority: i as i64 + 1,
+                        weight: b.weight,
+                        win_start: b.win_start.clone(),
+                        win_end: b.win_end.clone(),
+                        enabled: b.enabled,
+                    })
+                    .map_err(e2s)?;
+            }
+        }
+    }
+    Ok(true)
+}
+
 // ── Settings ──
 
 pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
@@ -1080,6 +1212,62 @@ mod tests {
         // plan + limit → request-unit quota
         let s2_quota = serde_json::to_value(&vm).unwrap();
         assert!(s2_quota["is_current"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn update_provider_rebinds_and_keeps_key_when_blank() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        s.insert_provider(&provider("p1", "P One", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("p2", "P Two", Billing::Metered)).unwrap();
+        for id in ["p1", "p2"] {
+            s.upsert_binding(&Binding { agent: "claude".into(), provider_id: id.into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        }
+        s.upsert_binding(&Binding { agent: "claude".into(), provider_id: "p2".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+
+        let input = NewProviderInput {
+            name: "P One Renamed".into(),
+            api_key: "".into(), // blank = keep existing key
+            endpoint: "https://p1.example.com/v2".into(),
+            protocol: "openai".into(),
+            model_default: String::new(),
+            billing: "unl".into(),
+            billing_config: BillingConfigInput { limit_value: None, limit_unit: None, reset_period: None },
+            agents: vec!["codex".into()], // rebind: claude dropped
+        };
+        let vm = update_provider(&s, &aux, "p1", &input).unwrap();
+        assert_eq!(vm.name, "P One Renamed");
+        assert_eq!(vm.billing, "unl");
+
+        let p = s.get_provider("p1").unwrap().unwrap();
+        assert_eq!(p.api_key.as_deref(), Some("sk-test")); // kept
+        assert_eq!(s.primary_provider_id("codex").unwrap().as_deref(), Some("p1"));
+        // claude binding removed; claude's primary falls back to p2
+        assert_eq!(s.primary_provider_id("claude").unwrap().as_deref(), Some("p2"));
+        assert!(!s.bindings_for_agent("claude").unwrap().iter().any(|b| b.provider_id == "p1"));
+    }
+
+    #[test]
+    fn delete_provider_promotes_next_candidate() {
+        let s = store();
+        s.insert_provider(&provider("main", "Main", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("backup", "Backup", Billing::Metered)).unwrap();
+        s.upsert_binding(&Binding { agent: "codex".into(), provider_id: "main".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        s.upsert_binding(&Binding { agent: "codex".into(), provider_id: "backup".into(), priority: 1, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+
+        assert!(delete_provider(&s, "main").unwrap());
+        assert_eq!(s.get_provider("main").unwrap(), None);
+        // backup promoted to primary
+        assert_eq!(s.primary_provider_id("codex").unwrap().as_deref(), Some("backup"));
+        let bs = s.bindings_for_agent("codex").unwrap();
+        assert_eq!(bs.len(), 1);
+        assert_eq!(bs[0].priority, 0);
+    }
+
+    #[test]
+    fn delete_unknown_provider_is_noop() {
+        let s = store();
+        assert!(!delete_provider(&s, "nope").unwrap());
     }
 
     #[test]

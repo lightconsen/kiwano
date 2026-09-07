@@ -72,6 +72,24 @@ fn enable_provider(state: State<AppState>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn update_provider(
+    state: State<AppState>,
+    id: String,
+    input: vm::NewProviderInput,
+) -> Result<vm::ProviderVm, String> {
+    let vm = vm::update_provider(&state.store, &state.aux, &id, &input)?;
+    after_mutation(&state);
+    Ok(vm)
+}
+
+#[tauri::command]
+fn delete_provider(state: State<AppState>, id: String) -> Result<bool, String> {
+    let ok = vm::delete_provider(&state.store, &id)?;
+    after_mutation(&state);
+    Ok(ok)
+}
+
 #[tauri::command(async)]
 fn test_latency(endpoint: String) -> Result<u64, String> {
     sidecar::measure_latency(&endpoint)
@@ -151,6 +169,8 @@ pub fn run() {
             get_gateway_status,
             list_providers,
             add_provider,
+            update_provider,
+            delete_provider,
             enable_provider,
             test_latency,
             list_catalog,

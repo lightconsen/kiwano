@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 /* Kiwano design tokens — mirrored from design/index.html (SSOT), see tech.md §4.8.
    Colors are plain CSS vars so inline styles can use var(--kiwi) etc. directly;
    @theme inline maps them to Tailwind utilities (bg-kiwi, text-mut, border-line …). */

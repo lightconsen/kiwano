@@ -38,12 +38,13 @@ function TrendChart({ data }: { data: DashboardData }) {
   const right = 880;
   const n = data.trend.length;
   const x = (i: number) => left + (i * (right - left)) / Math.max(1, n - 1);
+  // 空库时 max=0，除零产生 NaN → SVG 报错；用 max(1, ·) 兜底
   const yReq = (v: number) => {
-    const max = Math.max(...data.trend.map((t) => t.requests));
+    const max = Math.max(1, ...data.trend.map((t) => t.requests));
     return bottom - (v / max) * (bottom - top);
   };
   const yTok = (v: number) => {
-    const max = Math.max(...data.trend.map((t) => t.tokens));
+    const max = Math.max(1, ...data.trend.map((t) => t.tokens));
     return bottom - (v / max) * (bottom - top);
   };
   const reqPts = data.trend.map((t, i) => [x(i), yReq(t.requests)] as [number, number]);

@@ -46,6 +46,8 @@ export function BillTag({ billing }: { billing: Billing }) {
 /** 28px 用量圆环（design.md §8：订阅=紫 / 按量=kiwi，≥80% amber，≥95% red） */
 export function Ring({ pct, color }: { pct: number; color?: string }) {
   const stroke = color ?? "var(--kiwi)";
+  // quota.limit=0 等异常输入 → NaN/Infinity，钳到 [0,100]
+  const safe = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
   return (
     <svg viewBox="0 0 28 28" className="h-7 w-7 flex-none">
       <circle cx="14" cy="14" r="12" fill="none" stroke="var(--surface2)" strokeWidth="3" />
@@ -57,11 +59,11 @@ export function Ring({ pct, color }: { pct: number; color?: string }) {
         stroke={stroke}
         strokeWidth="3"
         strokeLinecap="round"
-        strokeDasharray={`${(pct / 100) * 75.4} 75.4`}
+        strokeDasharray={`${(safe / 100) * 75.4} 75.4`}
         transform="rotate(-90 14 14)"
       />
       <text x="14" y="17" textAnchor="middle" fontSize="8" fontFamily="JetBrains Mono" fill="var(--ink)">
-        {pct}%
+        {safe}%
       </text>
     </svg>
   );

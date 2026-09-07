@@ -1,8 +1,25 @@
-//! cc-adapters — extraction layer for code ported from cc-switch.
+//! cc-adapters — extraction layer for code ported from cc-switch
+//! (https://github.com/farion1231/cc-switch, MIT License).
 //!
-//! Reserved for the Tier A/B extractions described in tech.md §1.4/§1.6:
-//! agent config adapters, provider model, protocol conversion sublayer.
+//! This crate hosts the Tier A modules extracted from cc-switch (with the
+//! file-header attribution required by tech.md §1.7) so Kiwano can reuse
+//! their provider/config management semantics:
 //!
-//! Attribution rule (tech.md §1.7): every file ported/copied from cc-switch
-//! must carry the file-header declaration block; self-developed files must
-//! NOT carry it. Nothing ported yet — this placeholder is self-developed.
+//! - [`error`]: shared `AppError` type
+//! - [`config`]: home-dir resolution + atomic file writes
+//! - [`provider`]: provider model, manager and metadata
+//! - [`model_capabilities`]: image-input capability resolution
+//! - [`gemini_config`]: Gemini env/settings file management
+//! - [`grok_config`]: Grok TOML live-config management
+//! - [`opencode_config`]: OpenCode opencode.json management
+//!
+//! Global settings-override hooks from cc-switch are replaced here by
+//! explicit parameter injection or local stubs; nothing else was restructured.
+
+pub mod config;
+pub mod error;
+pub mod gemini_config;
+pub mod grok_config;
+pub mod model_capabilities;
+pub mod opencode_config;
+pub mod provider;

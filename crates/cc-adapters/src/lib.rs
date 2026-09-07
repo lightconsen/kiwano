@@ -12,6 +12,8 @@
 //! - [`gemini_config`]: Gemini env/settings file management
 //! - [`grok_config`]: Grok TOML live-config management
 //! - [`opencode_config`]: OpenCode opencode.json management
+//! - [`proxy`]: protocol conversion sublayer (Tier B) — Anthropic ↔ OpenAI
+//!   request/response/SSE conversion extracted from cc-switch's proxy
 //!
 //! Global settings-override hooks from cc-switch are replaced here by
 //! explicit parameter injection or local stubs; nothing else was restructured.
@@ -23,3 +25,4 @@ pub mod grok_config;
 pub mod model_capabilities;
 pub mod opencode_config;
 pub mod provider;
+pub mod proxy;

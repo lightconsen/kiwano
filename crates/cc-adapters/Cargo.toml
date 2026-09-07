@@ -16,6 +16,11 @@ toml_edit = "0.22"
 indexmap = { version = "2", features = ["serde"] }
 json5 = "0.4"
 http = "1"
+bytes = "1.5"
+futures = "0.3"
+async-stream = "0.3"
+tokio = { version = "1", features = ["macros", "rt"] }
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -26,3 +31,4 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
+base64 = "0.22"

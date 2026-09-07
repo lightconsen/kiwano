@@ -1341,6 +1341,67 @@ pub fn set_agent_takeover(
     Ok(())
 }
 
+// ── 多 Key 轮询（spec §4.1 P1：同 Provider 多 API Key 自动轮换）──
+
+#[derive(Serialize)]
+pub struct ApiKeyVm {
+    pub id: i64,
+    /// 完整 Key（本地应用，前端负责掩码展示）
+    pub api_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub enabled: bool,
+    pub created_at: String,
+}
+
+pub fn list_api_keys(store: &Store, provider_id: &str) -> Result<Vec<ApiKeyVm>, String> {
+    store
+        .list_api_keys(provider_id)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| ApiKeyVm {
+                    id: r.id,
+                    api_key: r.api_key,
+                    label: r.label,
+                    enabled: r.enabled,
+                    created_at: r.created_at,
+                })
+                .collect()
+        })
+        .map_err(e2s)
+}
+
+/// 追加轮询 Key（providers.api_key 为主 Key，恒在池首位）。
+pub fn add_api_key(
+    store: &Store,
+    provider_id: &str,
+    api_key: &str,
+    label: Option<&str>,
+) -> Result<ApiKeyVm, String> {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err("API Key 不能为空".into());
+    }
+    store
+        .get_provider(provider_id)
+        .map_err(e2s)?
+        .ok_or_else(|| format!("provider `{provider_id}` not found"))?;
+    let id = store
+        .insert_api_key(provider_id, key, label.map(str::trim).filter(|s| !s.is_empty()))
+        .map_err(e2s)?;
+    Ok(ApiKeyVm {
+        id,
+        api_key: key.to_string(),
+        label: label.map(str::trim).filter(|s| !s.is_empty()).map(String::from),
+        enabled: true,
+        created_at: rfc3339(unix_now()),
+    })
+}
+
+pub fn delete_api_key(store: &Store, id: i64) -> Result<bool, String> {
+    store.delete_api_key(id).map_err(e2s)
+}
+
 // ── 费用预警（spec §4.1 P1：用量达每期上限推送通知）──
 
 #[derive(Serialize)]

@@ -31,6 +31,10 @@ pub struct GatewayState {
     pub http: reqwest::Client,
     pub engine: crate::strategy::StrategyEngine,
     route_table: RwLock<Arc<RouteTable>>,
+    /// Per-provider rotating cursor for multi-key round-robin
+    /// (spec §4.1 P1 多 Key 轮询). In-memory only; a gateway restart
+    /// simply restarts each pool at its primary.
+    key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     pub started_at: Instant,
     pub version: &'static str,
 }
@@ -48,6 +52,7 @@ impl GatewayState {
             http,
             engine: crate::strategy::StrategyEngine::new(),
             route_table: RwLock::new(route_table),
+            key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         })
@@ -59,6 +64,19 @@ impl GatewayState {
             .read()
             .expect("route table lock poisoned")
             .clone()
+    }
+
+    /// Next index into a provider's key pool (round-robin, spec §4.1 P1).
+    /// Pools of size <= 1 always answer 0 and never touch the map.
+    pub fn next_key_index(&self, provider_id: &str, pool_len: usize) -> usize {
+        if pool_len <= 1 {
+            return 0;
+        }
+        let mut cursors = self.key_cursors.lock().expect("key cursors poisoned");
+        let cursor = cursors.entry(provider_id.to_string()).or_default();
+        let idx = *cursor % pool_len;
+        *cursor = cursor.wrapping_add(1);
+        idx
     }
 
     /// Rebuild the route table from SQLite; returns the number of agents

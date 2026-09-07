@@ -178,6 +178,7 @@ mod tests {
             base_url: base.into(),
             api_path: api_path.map(Into::into),
             api_key: None,
+            extra_keys: Vec::new(),
             weight: 1,
             win_start: None,
             win_end: None,

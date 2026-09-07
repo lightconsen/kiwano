@@ -29,6 +29,8 @@ pub struct UpstreamProvider {
     /// Optional upstream path prefix, e.g. `/anthropic` on compatible endpoints.
     pub api_path: Option<String>,
     pub api_key: Option<String>,
+    /// Extra API keys rotating after the primary (spec §4.1 P1 多 Key 轮询).
+    pub extra_keys: Vec<String>,
     /// roundrobin 权重（tech.md §4.7：默认 1）。
     pub weight: i64,
     /// timewindow 本地窗口 `HH:MM`（agent_bindings 透传）。
@@ -74,6 +76,23 @@ pub struct RoutedRequest {
     pub provider: UpstreamProvider,
 }
 
+impl UpstreamProvider {
+    /// Credential pool for per-request rotation: primary first, then extras
+    /// (order preserved, duplicates of the primary dropped).
+    pub fn key_pool(&self) -> Vec<&str> {
+        let mut pool = Vec::with_capacity(1 + self.extra_keys.len());
+        if let Some(k) = self.api_key.as_deref() {
+            pool.push(k);
+        }
+        for k in &self.extra_keys {
+            if !pool.contains(&k.as_str()) {
+                pool.push(k.as_str());
+            }
+        }
+        pool
+    }
+}
+
 impl RouteTable {
     /// Rebuild the route table from the SQLite SSOT.
     pub fn load(store: &Store) -> Result<RouteTable> {
@@ -115,6 +134,12 @@ impl RouteTable {
                         base_url: p.base_url.clone(),
                         api_path: p.api_path.clone(),
                         api_key: p.api_key.clone(),
+                        extra_keys: store
+                            .list_api_keys(&p.id)?
+                            .into_iter()
+                            .filter(|k| k.enabled)
+                            .map(|k| k.api_key)
+                            .collect(),
                         weight: b.weight,
                         win_start: b.win_start,
                         win_end: b.win_end,

@@ -82,12 +82,31 @@ impl UsageSample {
     }
 }
 
+/// Pick the credential for one upstream request: the provider's key pool is
+/// `[primary, extras…]`; pools with more than one entry rotate per request
+/// (spec §4.1 P1 多 Key 轮询，避免单 Key 触发上游限流).
+fn select_upstream_key(
+    state: &crate::server::GatewayState,
+    provider: &UpstreamProvider,
+) -> Result<String, GatewayError> {
+    let pool = provider.key_pool();
+    if pool.is_empty() {
+        return Err(GatewayError::Upstream(format!(
+            "provider `{}` has no API key configured",
+            provider.id
+        )));
+    }
+    let idx = state.next_key_index(&provider.id, pool.len());
+    Ok(pool[idx].to_string())
+}
+
 /// Build upstream request headers: copy the inbound set (minus hop-by-hop and
 /// local auth headers), then inject the provider's real credential in its
 /// native auth style.
 fn build_upstream_headers(
     inbound: &HeaderMap,
     provider: &UpstreamProvider,
+    key: &str,
 ) -> Result<HeaderMap, GatewayError> {
     let mut out = HeaderMap::new();
     for (k, v) in inbound {
@@ -103,12 +122,6 @@ fn build_upstream_headers(
         out.insert(k, v.clone());
     }
 
-    let key = provider.api_key.clone().ok_or_else(|| {
-        GatewayError::Upstream(format!(
-            "provider `{}` has no API key configured",
-            provider.id
-        ))
-    })?;
     match provider.protocol {
         Protocol::Anthropic => {
             let value =
@@ -196,7 +209,11 @@ pub async fn forward(
         url.push_str(q);
     }
 
-    let headers = match build_upstream_headers(&inbound_headers, provider) {
+    let api_key = match select_upstream_key(&state, provider) {
+        Ok(k) => k,
+        Err(e) => return error_into_response(e, inbound),
+    };
+    let headers = match build_upstream_headers(&inbound_headers, provider, &api_key) {
         Ok(h) => h,
         Err(e) => return error_into_response(e, inbound),
     };
@@ -356,7 +373,11 @@ async fn forward_anthropic_via_openai(
 
     let url = upstream_url(provider, "/v1/chat/completions");
     // Query strings are meaningless across protocol conversion; drop them.
-    let headers = match build_upstream_headers(&inbound_headers, provider) {
+    let api_key = match select_upstream_key(&state, provider) {
+        Ok(k) => k,
+        Err(e) => return error_into_response(e, inbound),
+    };
+    let headers = match build_upstream_headers(&inbound_headers, provider, &api_key) {
         Ok(h) => h,
         Err(e) => return error_into_response(e, inbound),
     };
@@ -637,6 +658,7 @@ mod tests {
             base_url: "https://up.example.com".into(),
             api_path: api_path.map(Into::into),
             api_key: Some("sk-real-key".into()),
+            extra_keys: Vec::new(),
             weight: 1,
             win_start: None,
             win_end: None,
@@ -658,9 +680,12 @@ mod tests {
 
     #[test]
     fn anthropic_upstream_headers_replace_local_auth() {
-        let headers =
-            build_upstream_headers(&inbound_headers(), &provider(Protocol::Anthropic, None))
-                .unwrap();
+        let headers = build_upstream_headers(
+            &inbound_headers(),
+            &provider(Protocol::Anthropic, None),
+            "sk-real-key",
+        )
+        .unwrap();
         assert_eq!(headers.get("x-api-key").unwrap(), "sk-real-key");
         assert_eq!(headers.get("anthropic-version").unwrap(), "2023-06-01");
         assert_eq!(headers.get("user-agent").unwrap(), "claude-code/1.0");
@@ -671,8 +696,12 @@ mod tests {
 
     #[test]
     fn openai_upstream_headers_use_bearer() {
-        let headers =
-            build_upstream_headers(&inbound_headers(), &provider(Protocol::OpenAI, None)).unwrap();
+        let headers = build_upstream_headers(
+            &inbound_headers(),
+            &provider(Protocol::OpenAI, None),
+            "sk-real-key",
+        )
+        .unwrap();
         assert_eq!(
             headers.get(axum::http::header::AUTHORIZATION).unwrap(),
             "Bearer sk-real-key"
@@ -685,8 +714,37 @@ mod tests {
     fn missing_provider_key_fails_cleanly() {
         let mut p = provider(Protocol::Anthropic, None);
         p.api_key = None;
-        let err = build_upstream_headers(&inbound_headers(), &p).unwrap_err();
+        let state = crate::server::GatewayState::new(
+            crate::store::Store::open_in_memory().expect("store"),
+        )
+        .expect("state");
+        let err = select_upstream_key(&state, &p).unwrap_err();
         assert!(matches!(err, GatewayError::Upstream(_)));
+    }
+
+    #[test]
+    fn multi_key_pool_rotates_per_request() {
+        let state = crate::server::GatewayState::new(
+            crate::store::Store::open_in_memory().expect("store"),
+        )
+        .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.extra_keys = vec!["sk-two".into(), "sk-three".into()];
+
+        // 单 Key 池恒取主 Key
+        let mut single = provider(Protocol::OpenAI, None);
+        single.extra_keys.clear();
+        for _ in 0..3 {
+            assert_eq!(select_upstream_key(&state, &single).unwrap(), "sk-real-key");
+        }
+
+        // 多 Key 池：主 Key → 附加 Key 依次轮转，再回到主 Key
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            seen.push(select_upstream_key(&state, &p).unwrap());
+        }
+        assert_eq!(seen, vec!["sk-real-key", "sk-two", "sk-three"]);
+        assert_eq!(select_upstream_key(&state, &p).unwrap(), "sk-real-key");
     }
 
     #[test]

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -93,6 +93,20 @@ CREATE TABLE IF NOT EXISTS provider_health (
 const MIGRATION_V2: &str = r#"
 ALTER TABLE providers ADD COLUMN limit_unit TEXT
     CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens','cny'));
+"#;
+
+/// v3: extra API keys per provider (spec §4.1 P1 多 Key 轮询).
+/// providers.api_key stays the primary key of the pool; these rotate after it.
+const MIGRATION_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS api_keys (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    api_key     TEXT NOT NULL,
+    label       TEXT,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider_id);
 "#;
 
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
@@ -238,6 +252,18 @@ pub struct PlaceholderKey {
     pub created_at: String,
 }
 
+/// One extra API key of a provider (spec §4.1 P1 多 Key 轮询).
+/// `providers.api_key` is the pool's primary; these rotate after it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApiKeyRow {
+    pub id: i64,
+    pub provider_id: String,
+    pub api_key: String,
+    pub label: Option<String>,
+    pub enabled: bool,
+    pub created_at: String,
+}
+
 /// One metered request (tech.md §4.3 request flow, usage capture).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsageRecord {
@@ -374,6 +400,9 @@ impl Store {
         }
         if version < 2 {
             conn.execute_batch(MIGRATION_V2)?;
+        }
+        if version < 3 {
+            conn.execute_batch(MIGRATION_V3)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -626,6 +655,53 @@ impl Store {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    // ---- extra API keys (spec §4.1 P1 多 Key 轮询) -----------------------
+
+    pub fn list_api_keys(&self, provider_id: &str) -> Result<Vec<ApiKeyRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, provider_id, api_key, label, enabled, created_at
+             FROM api_keys WHERE provider_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![provider_id], |row| {
+            Ok(ApiKeyRow {
+                id: row.get(0)?,
+                provider_id: row.get(1)?,
+                api_key: row.get(2)?,
+                label: row.get(3)?,
+                enabled: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Insert an extra key; returns its row id.
+    pub fn insert_api_key(
+        &self,
+        provider_id: &str,
+        api_key: &str,
+        label: Option<&str>,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO api_keys (provider_id, api_key, label, enabled, created_at)
+             VALUES (?1, ?2, ?3, 1, ?4)",
+            params![provider_id, api_key, label, now_rfc3339()],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn delete_api_key(&self, id: i64) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute("DELETE FROM api_keys WHERE id = ?1", params![id])?;
+        Ok(n > 0)
     }
 
     // ---- usage -----------------------------------------------------------

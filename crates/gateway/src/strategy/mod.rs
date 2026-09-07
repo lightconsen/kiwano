@@ -335,6 +335,7 @@ mod tests {
             base_url: format!("https://{id}.example.com"),
             api_path: None,
             api_key: Some(format!("sk-{id}")),
+            extra_keys: Vec::new(),
             weight,
             win_start: win.map(|w| w.0.into()),
             win_end: win.map(|w| w.1.into()),
@@ -505,7 +506,6 @@ mod tests {
 
     #[tokio::test]
     async fn timewindow_supports_overnight_window() {
-        let engine = StrategyEngine::new();
         let now = local_hhmm();
         let now_min = hhmm_minutes(&now).unwrap();
         // 跨零点窗口 [23:00, 06:00]：now 在 23:00 后或 06:00 前必命中

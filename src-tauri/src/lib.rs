@@ -307,6 +307,37 @@ fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     sync::sync_from_hub(&state.aux, &hub_url)
 }
 
+// ── 多 Key 轮询（spec §4.1 P1）──
+
+/// 某 Provider 的轮询 Key 列表（主 Key 之外的部分）。
+#[tauri::command]
+fn list_api_keys(
+    state: State<AppState>,
+    provider_id: String,
+) -> Result<Vec<vm::ApiKeyVm>, String> {
+    vm::list_api_keys(&state.store, &provider_id)
+}
+
+/// 追加轮询 Key；触发 /reload 使网关 Key 池即时生效。
+#[tauri::command]
+fn add_api_key(
+    state: State<AppState>,
+    provider_id: String,
+    api_key: String,
+    label: Option<String>,
+) -> Result<vm::ApiKeyVm, String> {
+    let vm = vm::add_api_key(&state.store, &provider_id, &api_key, label.as_deref())?;
+    after_mutation(&state);
+    Ok(vm)
+}
+
+#[tauri::command]
+fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
+    let ok = vm::delete_api_key(&state.store, id)?;
+    after_mutation(&state);
+    Ok(ok)
+}
+
 // ── 费用预警（spec §4.1 P1：用量达每期上限推送通知）──
 
 /// 前端定时轮询；命中且未通知过的返回给前端转系统通知（KV 去重防重发）。
@@ -428,6 +459,9 @@ pub fn run() {
             get_footer_stats,
             sync_hub,
             check_usage_alerts,
+            list_api_keys,
+            add_api_key,
+            delete_api_key,
             import_cc_switch,
             get_agent_routes,
             update_agent_strategy,

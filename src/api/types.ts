@@ -194,6 +194,13 @@ export interface ImportReport {
   detail: string[];
 }
 
+/** 一键配置方案导入结果（spec §4.1 P1 配置分享） */
+export interface ConfigShareReport {
+  providers_added: number;
+  providers_kept: number;
+  routes_applied: number;
+}
+
 export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
 
 /** Agent 策略候选（agent_bindings 行投影，按优先级升序，0 = 主选） */
@@ -243,5 +250,9 @@ export interface KiwanoApi {
   updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void>;
   /** 候选重排：provider_id 顺序 → priority 0..n */
   reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void>;
+  /** 导出配置方案到指定路径（含 API Key），返回 Provider 数 */
+  exportConfig(path: string): Promise<number>;
+  /** 从文件导入配置方案（按 name+base_url 合并），返回计数报告 */
+  importConfig(path: string): Promise<ConfigShareReport>;
   getFooterStats(): Promise<FooterStats>;
 }

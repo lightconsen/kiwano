@@ -34,7 +34,8 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
     let list = parse_catalog(&body)?;
     let payload = serde_json::to_string(&list).map_err(|e| e.to_string())?;
     let synced_at = vm::rfc3339(vm::unix_now());
-    aux.save_hub_cache(&payload, &synced_at).map_err(|e| e.to_string())?;
+    aux.save_hub_cache(&payload, &synced_at)
+        .map_err(|e| e.to_string())?;
     Ok(vm::SyncReportVm {
         fetched: list.entries.len() as i64,
         synced_at,
@@ -80,7 +81,8 @@ mod tests {
             entries: vec![fallback.entries[0].clone()],
         })
         .unwrap();
-        aux.save_hub_cache(&payload, "2026-09-07T00:00:00Z").unwrap();
+        aux.save_hub_cache(&payload, "2026-09-07T00:00:00Z")
+            .unwrap();
         let cached = vm::load_catalog(&aux);
         assert_eq!(cached.total, 1);
     }
@@ -92,7 +94,8 @@ mod tests {
         // 未同步 → false
         assert!(!vm::build_footer_stats(&store, &aux).unwrap().hub_synced);
         // 刚同步（时间戳用与生产一致的 now）→ true
-        aux.save_hub_cache("{}", &vm::rfc3339(vm::unix_now())).unwrap();
+        aux.save_hub_cache("{}", &vm::rfc3339(vm::unix_now()))
+            .unwrap();
         assert!(vm::build_footer_stats(&store, &aux).unwrap().hub_synced);
     }
 }

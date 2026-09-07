@@ -6,6 +6,7 @@ import type {
   AgentRoute,
   AppSettings,
   CatalogList,
+  ConfigShareReport,
   DashboardData,
   DashboardWindow,
   FooterStats,
@@ -59,6 +60,11 @@ export const tauriApi: KiwanoApi = {
 
   reorderAgentBindings: (agent: AgentId, providerIds: string[]) =>
     invoke<void>("reorder_agent_bindings", { agent, providerIds }),
+
+  exportConfig: (path: string) => invoke<number>("export_config", { path }),
+
+  importConfig: (path: string) =>
+    invoke<ConfigShareReport>("import_config", { path }),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
 };

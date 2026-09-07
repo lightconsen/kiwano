@@ -4,6 +4,7 @@ import type {
   AgentId,
   AgentRoute,
   AppSettings,
+  ConfigShareReport,
   CatalogEntry,
   CatalogList,
   DashboardData,
@@ -539,6 +540,16 @@ export const mockApi: KiwanoApi = {
         return { ...b, priority: i };
       })
       .sort((a, b) => a.priority - b.priority);
+  },
+
+  async exportConfig(_path: string): Promise<number> {
+    await delay(300);
+    return providers.length;
+  },
+
+  async importConfig(_path: string): Promise<ConfigShareReport> {
+    await delay(400);
+    return { providers_added: 1, providers_kept: 2, routes_applied: 1 };
   },
 
   async getFooterStats(): Promise<FooterStats> {

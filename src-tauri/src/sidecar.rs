@@ -36,7 +36,10 @@ pub fn spawn() -> std::io::Result<Child> {
         ));
     };
     Command::new(&bin).spawn().inspect_err(|e| {
-        eprintln!("kiwano: cannot spawn gateway sidecar {}: {e}", bin.display());
+        eprintln!(
+            "kiwano: cannot spawn gateway sidecar {}: {e}",
+            bin.display()
+        );
     })
 }
 
@@ -55,7 +58,9 @@ fn loopback_http(port: u16, request: &str) -> Option<String> {
 pub fn ping_admin(admin_port: u16) -> bool {
     loopback_http(
         admin_port,
-        &format!("GET /status HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nConnection: close\r\n\r\n"),
+        &format!(
+            "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nConnection: close\r\n\r\n"
+        ),
     )
     .is_some_and(|l| l.contains("200"))
 }

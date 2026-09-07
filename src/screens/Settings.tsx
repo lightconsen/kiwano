@@ -1,9 +1,12 @@
 // 设置（design/index.html #s-settings）
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, ShieldCheck, SlidersHorizontal, User } from "lucide-react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { api } from "../api/client";
 import type { AppSettings } from "../api/types";
 import { Toggle } from "../components/bits";
+
+const CONFIG_FILE_FILTERS = [{ name: "Kiwano 配置", extensions: ["json"] }];
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
   return (
@@ -20,6 +23,42 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
+
+  const onExport = () => {
+    save({
+      defaultPath: "kiwano-config.json",
+      filters: CONFIG_FILE_FILTERS,
+    })
+      .then((path) => {
+        if (!path) return;
+        setShareMsg("导出中…");
+        api
+          .exportConfig(path)
+          .then((n) => setShareMsg(`已导出 ${n} 个 Provider（含 API Key，请妥善保管）`))
+          .catch((e) => setShareMsg(`导出失败: ${String(e).slice(0, 60)}`))
+          .finally(() => setTimeout(() => setShareMsg(null), 5000));
+      })
+      .catch(() => {});
+  };
+
+  const onImport = () => {
+    open({ multiple: false, filters: CONFIG_FILE_FILTERS })
+      .then((path) => {
+        if (!path || Array.isArray(path)) return;
+        setShareMsg("导入中…");
+        api
+          .importConfig(path)
+          .then((r) =>
+            setShareMsg(
+              `已导入：新增 ${r.providers_added} · 复用 ${r.providers_kept} · 路由 ${r.routes_applied}`,
+            ),
+          )
+          .catch((e) => setShareMsg(`导入失败: ${String(e).slice(0, 60)}`))
+          .finally(() => setTimeout(() => setShareMsg(null), 5000));
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     api.getSettings().then(setS);
@@ -152,8 +191,27 @@ export default function Settings() {
                 {importMsg}
               </span>
             )}
+            {shareMsg && shareMsg !== "导入中…" && shareMsg !== "导出中…" && (
+              <span className="text-[10.5px]" style={{ color: "var(--kiwi)" }}>
+                {shareMsg}
+              </span>
+            )}
           </div>
           <div className="flex gap-2">
+            <button
+              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+              onClick={onExport}
+              title="导出 Provider 与路由方案为 JSON（含 API Key）"
+            >
+              导出方案
+            </button>
+            <button
+              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+              onClick={onImport}
+              title="导入一键配置方案（同名同端点合并）"
+            >
+              导入方案
+            </button>
             <button
               className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
               disabled={importMsg === "导入中…"}

@@ -61,7 +61,10 @@ pub fn enable(
     let rewritten: Files = originals
         .iter()
         .map(|(path, original)| {
-            Ok((path.clone(), rewrite(agent, path, original, placeholder_key, data_port)?))
+            Ok((
+                path.clone(),
+                rewrite(agent, path, original, placeholder_key, data_port)?,
+            ))
         })
         .collect::<Result<Files, String>>()?;
 
@@ -88,7 +91,8 @@ pub fn disable(aux: &Aux, agent: &str, home: &Path) -> Result<(), String> {
     for (path, content) in &files {
         atomic_write(std::path::Path::new(path), content)?;
     }
-    aux.delete_takeover_backup(agent).map_err(|e| e.to_string())?;
+    aux.delete_takeover_backup(agent)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -181,7 +185,9 @@ fn copy_files(agent: &str, home: &Path, files: &Files) {
         return; // 副本失败不影响接管（SQLite 里已有）
     }
     for (path, content) in files {
-        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned());
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
         if let Some(name) = name {
             let _ = std::fs::write(dir.join(name), content);
         }
@@ -204,7 +210,11 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         let settings = home.join(".claude").join("settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-        std::fs::write(&settings, r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}"#).unwrap();
+        std::fs::write(
+            &settings,
+            r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}"#,
+        )
+        .unwrap();
 
         enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home).unwrap();
         let rewritten = std::fs::read_to_string(&settings).unwrap();
@@ -216,7 +226,10 @@ mod tests {
         // 还原 = 逐字节写回
         disable(&aux, "claude", &home).unwrap();
         let restored = std::fs::read_to_string(&settings).unwrap();
-        assert_eq!(restored, r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}"#);
+        assert_eq!(
+            restored,
+            r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}"#
+        );
         assert!(aux.load_takeover_backup("claude").is_none());
     }
 
@@ -234,7 +247,10 @@ mod tests {
         assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "kw-ag-claude-2222");
 
         disable(&aux, "claude", &home).unwrap();
-        assert_eq!(std::fs::read_to_string(&settings).unwrap(), r#"{"original":true}"#);
+        assert_eq!(
+            std::fs::read_to_string(&settings).unwrap(),
+            r#"{"original":true}"#
+        );
     }
 
     #[test]
@@ -248,19 +264,30 @@ mod tests {
             "model = \"m\"\n[model_provider.custom]\nname = \"x\"\nbase_url = \"https://api.deepseek.com/v1\"\nwire_api = \"responses\"\n",
         )
         .unwrap();
-        std::fs::write(codex_dir.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-old"}"#).unwrap();
+        std::fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"OPENAI_API_KEY":"sk-old"}"#,
+        )
+        .unwrap();
 
         enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap();
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
         assert!(toml.contains("wire_api = \"responses\"")); // 其余行不动
-        let auth: Value = serde_json::from_str(&std::fs::read_to_string(codex_dir.join("auth.json")).unwrap()).unwrap();
+        let auth: Value =
+            serde_json::from_str(&std::fs::read_to_string(codex_dir.join("auth.json")).unwrap())
+                .unwrap();
         assert_eq!(auth["OPENAI_API_KEY"], "kw-ag-codex-abcd");
 
         disable(&aux, "codex", &home).unwrap();
-        assert!(std::fs::read_to_string(codex_dir.join("config.toml")).unwrap().contains("https://api.deepseek.com/v1"));
+        assert!(std::fs::read_to_string(codex_dir.join("config.toml"))
+            .unwrap()
+            .contains("https://api.deepseek.com/v1"));
         assert_eq!(
-            serde_json::from_str::<Value>(&std::fs::read_to_string(codex_dir.join("auth.json")).unwrap()).unwrap()["OPENAI_API_KEY"],
+            serde_json::from_str::<Value>(
+                &std::fs::read_to_string(codex_dir.join("auth.json")).unwrap()
+            )
+            .unwrap()["OPENAI_API_KEY"],
             "sk-old"
         );
     }

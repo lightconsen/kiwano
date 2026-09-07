@@ -5,6 +5,7 @@
 //! gateway route table. The gateway process itself is spawned in `setup`.
 
 mod import;
+mod share;
 mod sidecar;
 mod sync;
 mod takeover;
@@ -34,7 +35,9 @@ fn env_port(name: &str, default: u16) -> u16 {
 
 fn default_db_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join(".kiwano").join("kiwano.db")
+    std::path::PathBuf::from(home)
+        .join(".kiwano")
+        .join("kiwano.db")
 }
 
 fn db_path() -> std::path::PathBuf {
@@ -82,10 +85,16 @@ fn watchdog_decision(child_exited: Option<bool>, admin_alive: bool) -> WatchdogA
 fn spawn_watchdog(handle: tauri::AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        let Some(state) = handle.try_state::<AppState>() else { return };
+        let Some(state) = handle.try_state::<AppState>() else {
+            return;
+        };
         let child_exited = {
-            let Ok(mut child) = state.child.lock() else { return };
-            child.as_mut().map(|c| c.try_wait().map(|st| st.is_some()).unwrap_or(true))
+            let Ok(mut child) = state.child.lock() else {
+                return;
+            };
+            child
+                .as_mut()
+                .map(|c| c.try_wait().map(|st| st.is_some()).unwrap_or(true))
         };
         let admin_alive = sidecar::ping_admin(state.admin_port);
         match watchdog_decision(child_exited, admin_alive) {
@@ -98,7 +107,9 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
             WatchdogAction::Respawn => {
                 // Re-check under the lock to avoid double-spawn races; the
                 // ping is repeated because the admin may have come up since.
-                let Ok(mut child) = state.child.lock() else { return };
+                let Ok(mut child) = state.child.lock() else {
+                    return;
+                };
                 if sidecar::ping_admin(state.admin_port) {
                     *child = None;
                     continue;
@@ -172,7 +183,10 @@ fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, String>
 }
 
 #[tauri::command]
-fn add_provider(state: State<AppState>, input: vm::NewProviderInput) -> Result<vm::ProviderVm, String> {
+fn add_provider(
+    state: State<AppState>,
+    input: vm::NewProviderInput,
+) -> Result<vm::ProviderVm, String> {
     let vm = vm::add_provider(&state.store, &input)?;
     after_mutation(&state);
     Ok(vm)
@@ -238,14 +252,17 @@ fn update_settings(
 }
 
 #[tauri::command]
-fn set_agent_takeover(
-    state: State<AppState>,
-    agent: String,
-    enabled: bool,
-) -> Result<(), String> {
+fn set_agent_takeover(state: State<AppState>, agent: String, enabled: bool) -> Result<(), String> {
     let data_port = state.data_port;
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    vm::set_agent_takeover(&state.store, &state.aux, &agent, enabled, data_port, &std::path::PathBuf::from(home))
+    vm::set_agent_takeover(
+        &state.store,
+        &state.aux,
+        &agent,
+        enabled,
+        data_port,
+        &std::path::PathBuf::from(home),
+    )
 }
 
 #[tauri::command]
@@ -290,6 +307,24 @@ fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     sync::sync_from_hub(&state.aux, &hub_url)
 }
 
+// ── 配置分享（spec §4.1 P1：导出/导入一键配置方案 JSON）──
+
+/// 前端先用 dialog 插件选好目标路径，这里写文件（文件 IO → async）。
+#[tauri::command(async)]
+fn export_config(state: State<AppState>, path: String) -> Result<usize, String> {
+    let json = share::export_config(&state.store)?;
+    std::fs::write(&path, &json).map_err(|e| e.to_string())?;
+    Ok(state.store.list_providers().map_err(|e| e.to_string())?.len())
+}
+
+#[tauri::command(async)]
+fn import_config(state: State<AppState>, path: String) -> Result<share::ImportReport, String> {
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let report = share::import_config(&state.store, &json)?;
+    after_mutation(&state);
+    Ok(report)
+}
+
 #[tauri::command]
 fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -308,6 +343,7 @@ fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let path = db_path();
@@ -382,6 +418,8 @@ pub fn run() {
             get_agent_routes,
             update_agent_strategy,
             reorder_agent_bindings,
+            export_config,
+            import_config,
         ])
         .on_window_event(|window, event| {
             // 关闭到托盘：拦截 CloseRequested，隐藏窗口而非退出（设置可关）
@@ -411,9 +449,15 @@ mod tests {
         assert_eq!(watchdog_decision(Some(false), true), WatchdogAction::None);
         assert_eq!(watchdog_decision(Some(false), false), WatchdogAction::None);
         // crashed child
-        assert_eq!(watchdog_decision(Some(true), false), WatchdogAction::Respawn);
+        assert_eq!(
+            watchdog_decision(Some(true), false),
+            WatchdogAction::Respawn
+        );
         // crashed child but external instance answers → adopt, drop handle
-        assert_eq!(watchdog_decision(Some(true), true), WatchdogAction::ClearChild);
+        assert_eq!(
+            watchdog_decision(Some(true), true),
+            WatchdogAction::ClearChild
+        );
         // adopted instance (no handle)
         assert_eq!(watchdog_decision(None, true), WatchdogAction::None);
         // spawn failed at startup → retry

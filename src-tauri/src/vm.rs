@@ -22,7 +22,9 @@ pub const AGENTS: [(&str, &str); 3] = [
     ("gemini", "Gemini CLI"),
 ];
 
-const PALETTE: [&str; 6] = ["#4D6BFE", "#615CED", "#3859FF", "#F55036", "#6467F2", "#0F9D58"];
+const PALETTE: [&str; 6] = [
+    "#4D6BFE", "#615CED", "#3859FF", "#F55036", "#6467F2", "#0F9D58",
+];
 
 fn palette_color(name: &str) -> &'static str {
     let h: u64 = name.bytes().map(|b| (b as u64).wrapping_mul(31)).sum();
@@ -30,7 +32,11 @@ fn palette_color(name: &str) -> &'static str {
 }
 
 fn logo_char(name: &str) -> String {
-    name.chars().next().unwrap_or('?').to_uppercase().to_string()
+    name.chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string()
 }
 
 /// Token formatting, mirroring `src/lib/format.ts`.
@@ -77,7 +83,12 @@ pub(crate) fn rfc3339(epoch_secs: i64) -> String {
     let days = epoch_secs.div_euclid(86_400);
     let secs = epoch_secs.rem_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", secs / 3600, secs / 60 % 60, secs % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        secs / 3600,
+        secs / 60 % 60,
+        secs % 60
+    )
 }
 
 fn day_key(epoch_secs: i64) -> String {
@@ -101,14 +112,18 @@ impl Aux {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         Self::init_tables(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> rusqlite::Result<Self> {
         let conn = Connection::open_in_memory()?;
         Self::init_tables(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
@@ -140,7 +155,11 @@ impl Aux {
         Ok(())
     }
 
-    pub fn save_takeover_backup(&self, agent: &str, files: &[(String, String)]) -> rusqlite::Result<()> {
+    pub fn save_takeover_backup(
+        &self,
+        agent: &str,
+        files: &[(String, String)],
+    ) -> rusqlite::Result<()> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         let json = serde_json::to_string(files).expect("serialize backup files");
         conn.execute(
@@ -222,9 +241,8 @@ impl Aux {
         to: Option<&str>,
     ) -> Option<i64> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
-        let mut sql = String::from(
-            "SELECT AVG(latency_ms) FROM usage WHERE latency_ms IS NOT NULL",
-        );
+        let mut sql =
+            String::from("SELECT AVG(latency_ms) FROM usage WHERE latency_ms IS NOT NULL");
         if provider.is_some() {
             sql.push_str(" AND provider_id = ?1");
         }
@@ -593,7 +611,9 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 }
             }
             agents.sort();
-            let is_current = agents.iter().any(|a| primary.get(a).map(String::as_str) == Some(&p.id));
+            let is_current = agents
+                .iter()
+                .any(|a| primary.get(a).map(String::as_str) == Some(&p.id));
 
             let note = if backup_for_any {
                 Some("故障转移队列".to_string())
@@ -667,11 +687,14 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
 
     let mut routes = Vec::new();
     for agent in store.bound_agents().map_err(e2s)? {
-        let strategy = store.get_strategy(&agent).map_err(e2s)?.unwrap_or(Strategy {
-            agent: agent.clone(),
-            kind: StrategyType::Single,
-            config: None,
-        });
+        let strategy = store
+            .get_strategy(&agent)
+            .map_err(e2s)?
+            .unwrap_or(Strategy {
+                agent: agent.clone(),
+                kind: StrategyType::Single,
+                config: None,
+            });
         let bindings = store
             .bindings_for_agent(&agent)
             .map_err(e2s)?
@@ -763,10 +786,26 @@ fn endpoint_note(p: &Provider) -> String {
 fn health_vm(store: &Store, p: &Provider) -> HealthVm {
     let rec = store.get_health(&p.id).ok().flatten();
     match rec {
-        Some(HealthRecord { status, last_latency_ms, .. }) => match status.as_str() {
-            "healthy" => HealthVm { state: "ok".into(), latency_ms: last_latency_ms, note: None },
-            "degraded" => HealthVm { state: "idle".into(), latency_ms: last_latency_ms, note: None },
-            "down" => HealthVm { state: "off".into(), latency_ms: last_latency_ms, note: Some("故障".into()) },
+        Some(HealthRecord {
+            status,
+            last_latency_ms,
+            ..
+        }) => match status.as_str() {
+            "healthy" => HealthVm {
+                state: "ok".into(),
+                latency_ms: last_latency_ms,
+                note: None,
+            },
+            "degraded" => HealthVm {
+                state: "idle".into(),
+                latency_ms: last_latency_ms,
+                note: None,
+            },
+            "down" => HealthVm {
+                state: "off".into(),
+                latency_ms: last_latency_ms,
+                note: Some("故障".into()),
+            },
             _ => derive_health(p, last_latency_ms),
         },
         None => derive_health(p, None),
@@ -775,13 +814,26 @@ fn health_vm(store: &Store, p: &Provider) -> HealthVm {
 
 fn derive_health(p: &Provider, latency: Option<i64>) -> HealthVm {
     if p.enabled {
-        HealthVm { state: "idle".into(), latency_ms: latency, note: None }
+        HealthVm {
+            state: "idle".into(),
+            latency_ms: latency,
+            note: None,
+        }
     } else {
-        HealthVm { state: "off".into(), latency_ms: None, note: Some("未启用".into()) }
+        HealthVm {
+            state: "off".into(),
+            latency_ms: None,
+            note: Some("未启用".into()),
+        }
     }
 }
 
-fn usage_vm(aux: &Aux, p: &Provider, totals: Option<&UsageTotals>, since7: &str) -> Option<UsageVm> {
+fn usage_vm(
+    aux: &Aux,
+    p: &Provider,
+    totals: Option<&UsageTotals>,
+    since7: &str,
+) -> Option<UsageVm> {
     let t = totals?;
     let quota = match p.billing {
         Billing::Subscription => p.period_limit.map(|limit| QuotaVm {
@@ -818,10 +870,20 @@ fn usage_vm(aux: &Aux, p: &Provider, totals: Option<&UsageTotals>, since7: &str)
 pub(crate) fn slug(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = s.trim_matches('-');
-    if trimmed.is_empty() { "provider".into() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        "provider".into()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderVm, String> {
@@ -863,7 +925,9 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     let vm_health = derive_health(&provider, None);
 
     for agent in &input.agents {
-        store.upsert_strategy(agent, StrategyType::Single, None).map_err(e2s)?;
+        store
+            .upsert_strategy(agent, StrategyType::Single, None)
+            .map_err(e2s)?;
         // "保存并启用" → becomes the primary for the chosen agents; the
         // previous primary is demoted to 备用 #1.
         let prev = store.primary_provider_id(agent).map_err(e2s)?;
@@ -909,8 +973,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         agents: input.agents.clone(),
         is_current: !input.agents.is_empty(),
         status_badge: None,
-        agents_note: (!input.agents.is_empty())
-            .then(|| format!("{} 个 Agent", input.agents.len())),
+        agents_note: (!input.agents.is_empty()).then(|| format!("{} 个 Agent", input.agents.len())),
         health: vm_health,
         usage: None,
     })
@@ -1016,7 +1079,9 @@ pub fn update_provider(
         }
     }
     for agent in &input.agents {
-        store.upsert_strategy(agent, StrategyType::Single, None).map_err(e2s)?;
+        store
+            .upsert_strategy(agent, StrategyType::Single, None)
+            .map_err(e2s)?;
         let prev = store.primary_provider_id(agent).map_err(e2s)?;
         store
             .upsert_binding(&Binding {
@@ -1079,7 +1144,11 @@ pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
                     enabled: true,
                 })
                 .map_err(e2s)?;
-            for (i, b) in remaining.iter().filter(|b| b.provider_id != next_id).enumerate() {
+            for (i, b) in remaining
+                .iter()
+                .filter(|b| b.provider_id != next_id)
+                .enumerate()
+            {
                 store
                     .upsert_binding(&Binding {
                         agent: agent.clone(),
@@ -1112,7 +1181,10 @@ pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
         .iter()
         .map(|(agent, label)| {
             let keys = store.list_placeholder_keys().map_err(e2s)?;
-            let key = keys.iter().find(|k| k.agent == *agent).map(|k| k.key.clone());
+            let key = keys
+                .iter()
+                .find(|k| k.agent == *agent)
+                .map(|k| k.key.clone());
             Ok(TakeoverVm {
                 agent: agent.to_string(),
                 label: label.to_string(),
@@ -1187,8 +1259,10 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
 
     let cur = store.usage_totals(None, Some(&since)).map_err(e2s)?;
     let providers = store.list_providers().map_err(e2s)?;
-    let name_by_id: HashMap<String, String> =
-        providers.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+    let name_by_id: HashMap<String, String> = providers
+        .iter()
+        .map(|p| (p.id.clone(), p.name.clone()))
+        .collect();
 
     // trend: daily totals zero-filled over the window (30d buckets by 5 days)
     let mut daily: HashMap<String, UsageTotals> = HashMap::new();
@@ -1198,7 +1272,11 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
     let mut trend = Vec::new();
     if window == "today" {
         let t = daily.get(&day_key(now)).cloned().unwrap_or_default();
-        trend.push(TrendVm { date: mmdd(&day_key(now)), requests: t.requests, tokens: t.input_tokens + t.output_tokens });
+        trend.push(TrendVm {
+            date: mmdd(&day_key(now)),
+            requests: t.requests,
+            tokens: t.input_tokens + t.output_tokens,
+        });
     } else {
         let bucket = if window == "30d" { 5 } else { 1 };
         let today_days = now.div_euclid(86_400);
@@ -1211,7 +1289,11 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
             b_tok += t.input_tokens + t.output_tokens;
             let is_bucket_end = (days - 1 - i) % bucket == bucket - 1 || i == 0;
             if is_bucket_end {
-                trend.push(TrendVm { date: mmdd(&key), requests: b_req, tokens: b_tok });
+                trend.push(TrendVm {
+                    date: mmdd(&key),
+                    requests: b_req,
+                    tokens: b_tok,
+                });
                 b_req = 0;
                 b_tok = 0;
             }
@@ -1226,7 +1308,10 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
         .map(|pu| {
-            let name = name_by_id.get(&pu.provider_id).cloned().unwrap_or(pu.provider_id.clone());
+            let name = name_by_id
+                .get(&pu.provider_id)
+                .cloned()
+                .unwrap_or(pu.provider_id.clone());
             ProviderDistVm {
                 name,
                 color: palette_color(&pu.provider_id).to_string(),
@@ -1344,8 +1429,10 @@ mod tests {
     #[test]
     fn provider_vm_maps_catalog_shape() {
         let s = store();
-        s.insert_provider(&provider("deepseek-1", "DeepSeek", Billing::Metered)).unwrap();
-        s.upsert_strategy("claude", StrategyType::Single, None).unwrap();
+        s.insert_provider(&provider("deepseek-1", "DeepSeek", Billing::Metered))
+            .unwrap();
+        s.upsert_strategy("claude", StrategyType::Single, None)
+            .unwrap();
         s.upsert_binding(&Binding {
             agent: "claude".into(),
             provider_id: "deepseek-1".into(),
@@ -1373,10 +1460,30 @@ mod tests {
     #[test]
     fn backup_binding_gets_badge_and_note() {
         let s = store();
-        s.insert_provider(&provider("a1", "Alpha", Billing::Metered)).unwrap();
-        s.insert_provider(&provider("b1", "Beta", Billing::Subscription)).unwrap();
-        s.upsert_binding(&Binding { agent: "claude".into(), provider_id: "a1".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
-        s.upsert_binding(&Binding { agent: "claude".into(), provider_id: "b1".into(), priority: 1, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Subscription))
+            .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "a1".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "b1".into(),
+            priority: 1,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
         let aux = Aux::open_in_memory().unwrap();
         let vms = build_provider_vms(&s, &aux).unwrap();
         let alpha = vms.iter().find(|v| v.id == "a1").unwrap();
@@ -1390,13 +1497,36 @@ mod tests {
     #[test]
     fn enable_provider_promotes_to_primary() {
         let s = store();
-        s.insert_provider(&provider("a1", "Alpha", Billing::Metered)).unwrap();
-        s.insert_provider(&provider("b1", "Beta", Billing::Metered)).unwrap();
-        s.upsert_binding(&Binding { agent: "claude".into(), provider_id: "a1".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
-        s.upsert_binding(&Binding { agent: "claude".into(), provider_id: "b1".into(), priority: 1, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Metered))
+            .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "a1".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "b1".into(),
+            priority: 1,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
 
         enable_provider(&s, "b1").unwrap();
-        assert_eq!(s.primary_provider_id("claude").unwrap().as_deref(), Some("b1"));
+        assert_eq!(
+            s.primary_provider_id("claude").unwrap().as_deref(),
+            Some("b1")
+        );
         // Alpha demoted, still bound (failover groundwork)
         let bs = s.bindings_for_agent("claude").unwrap();
         let alpha = bs.iter().find(|b| b.provider_id == "a1").unwrap();
@@ -1406,8 +1536,18 @@ mod tests {
     #[test]
     fn add_provider_becomes_primary_and_demotes_prev() {
         let s = store();
-        s.insert_provider(&provider("old1", "Old", Billing::Metered)).unwrap();
-        s.upsert_binding(&Binding { agent: "codex".into(), provider_id: "old1".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        s.insert_provider(&provider("old1", "Old", Billing::Metered))
+            .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "codex".into(),
+            provider_id: "old1".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
 
         let input = NewProviderInput {
             name: "New Guy".into(),
@@ -1424,7 +1564,10 @@ mod tests {
             agents: vec!["codex".into()],
         };
         let vm = add_provider(&s, &input).unwrap();
-        assert_eq!(s.primary_provider_id("codex").unwrap().as_deref(), Some(vm.id.as_str()));
+        assert_eq!(
+            s.primary_provider_id("codex").unwrap().as_deref(),
+            Some(vm.id.as_str())
+        );
         assert_eq!(vm.billing, "plan");
         let bs = s.bindings_for_agent("codex").unwrap();
         let old = bs.iter().find(|b| b.provider_id == "old1").unwrap();
@@ -1438,12 +1581,32 @@ mod tests {
     fn update_provider_rebinds_and_keeps_key_when_blank() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
-        s.insert_provider(&provider("p1", "P One", Billing::Metered)).unwrap();
-        s.insert_provider(&provider("p2", "P Two", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("p1", "P One", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("p2", "P Two", Billing::Metered))
+            .unwrap();
         for id in ["p1", "p2"] {
-            s.upsert_binding(&Binding { agent: "claude".into(), provider_id: id.into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+            s.upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: id.into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
         }
-        s.upsert_binding(&Binding { agent: "claude".into(), provider_id: "p2".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "p2".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
 
         let input = NewProviderInput {
             name: "P One Renamed".into(),
@@ -1452,7 +1615,11 @@ mod tests {
             protocol: "openai".into(),
             model_default: String::new(),
             billing: "unl".into(),
-            billing_config: BillingConfigInput { limit_value: None, limit_unit: None, reset_period: None },
+            billing_config: BillingConfigInput {
+                limit_value: None,
+                limit_unit: None,
+                reset_period: None,
+            },
             agents: vec!["codex".into()], // rebind: claude dropped
         };
         let vm = update_provider(&s, &aux, "p1", &input).unwrap();
@@ -1461,24 +1628,57 @@ mod tests {
 
         let p = s.get_provider("p1").unwrap().unwrap();
         assert_eq!(p.api_key.as_deref(), Some("sk-test")); // kept
-        assert_eq!(s.primary_provider_id("codex").unwrap().as_deref(), Some("p1"));
+        assert_eq!(
+            s.primary_provider_id("codex").unwrap().as_deref(),
+            Some("p1")
+        );
         // claude binding removed; claude's primary falls back to p2
-        assert_eq!(s.primary_provider_id("claude").unwrap().as_deref(), Some("p2"));
-        assert!(!s.bindings_for_agent("claude").unwrap().iter().any(|b| b.provider_id == "p1"));
+        assert_eq!(
+            s.primary_provider_id("claude").unwrap().as_deref(),
+            Some("p2")
+        );
+        assert!(!s
+            .bindings_for_agent("claude")
+            .unwrap()
+            .iter()
+            .any(|b| b.provider_id == "p1"));
     }
 
     #[test]
     fn delete_provider_promotes_next_candidate() {
         let s = store();
-        s.insert_provider(&provider("main", "Main", Billing::Metered)).unwrap();
-        s.insert_provider(&provider("backup", "Backup", Billing::Metered)).unwrap();
-        s.upsert_binding(&Binding { agent: "codex".into(), provider_id: "main".into(), priority: 0, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
-        s.upsert_binding(&Binding { agent: "codex".into(), provider_id: "backup".into(), priority: 1, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+        s.insert_provider(&provider("main", "Main", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("backup", "Backup", Billing::Metered))
+            .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "codex".into(),
+            provider_id: "main".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "codex".into(),
+            provider_id: "backup".into(),
+            priority: 1,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
 
         assert!(delete_provider(&s, "main").unwrap());
         assert_eq!(s.get_provider("main").unwrap(), None);
         // backup promoted to primary
-        assert_eq!(s.primary_provider_id("codex").unwrap().as_deref(), Some("backup"));
+        assert_eq!(
+            s.primary_provider_id("codex").unwrap().as_deref(),
+            Some("backup")
+        );
         let bs = s.bindings_for_agent("codex").unwrap();
         assert_eq!(bs.len(), 1);
         assert_eq!(bs[0].priority, 0);
@@ -1498,7 +1698,8 @@ mod tests {
         assert_eq!(v0.language, "zh-CN");
         assert!(v0.takeovers.iter().all(|t| !t.enabled));
 
-        let patch = serde_json::json!({ "language": "en", "telemetry": true, "takeovers": "ignored" });
+        let patch =
+            serde_json::json!({ "language": "en", "telemetry": true, "takeovers": "ignored" });
         let v1 = update_settings(&s, &aux, &patch).unwrap();
         assert_eq!(v1.language, "en");
         assert!(v1.telemetry);
@@ -1508,7 +1709,11 @@ mod tests {
         // takeover appears in settings and persists（tmp home，不碰真实配置）
         let tmp = tempfile::tempdir().unwrap();
         set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap_err(); // 无 ~/.claude/settings.json → 拒绝且不留 Key
-        assert!(s.list_placeholder_keys().unwrap().iter().all(|k| k.agent != "claude"));
+        assert!(s
+            .list_placeholder_keys()
+            .unwrap()
+            .iter()
+            .all(|k| k.agent != "claude"));
 
         let settings = tmp.path().join(".claude").join("settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -1517,21 +1722,33 @@ mod tests {
         let v2 = build_settings(&s, &aux).unwrap();
         let claude = v2.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(claude.enabled);
-        assert!(claude.placeholder_key.as_deref().unwrap_or_default().starts_with("kw-ag-claude-"));
+        assert!(claude
+            .placeholder_key
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("kw-ag-claude-"));
         // 配置被真实改写 + 还原逃生门
-        let env: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        let env: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
         set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
         let v3 = build_settings(&s, &aux).unwrap();
-        assert!(!v3.takeovers.iter().find(|t| t.agent == "claude").unwrap().enabled);
+        assert!(
+            !v3.takeovers
+                .iter()
+                .find(|t| t.agent == "claude")
+                .unwrap()
+                .enabled
+        );
     }
 
     #[test]
     fn dashboard_shape_with_usage() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
-        s.insert_provider(&provider("p1", "Prov", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("p1", "Prov", Billing::Metered))
+            .unwrap();
         let now = rfc3339(unix_now());
         s.record_usage(&kiwano_gateway::store::UsageRecord {
             ts: now.clone(),
@@ -1589,10 +1806,21 @@ mod tests {
     #[test]
     fn agent_routes_roundtrip_strategy_and_reorder() {
         let s = store();
-        s.insert_provider(&provider("a1", "Alpha", Billing::Metered)).unwrap();
-        s.insert_provider(&provider("b1", "Beta", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Metered))
+            .unwrap();
         for (pid, pr) in [("a1", 0), ("b1", 1)] {
-            s.upsert_binding(&Binding { agent: "claude".into(), provider_id: pid.into(), priority: pr, weight: 1, win_start: None, win_end: None, enabled: true }).unwrap();
+            s.upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: pid.into(),
+                priority: pr,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
         }
 
         // 缺省策略为 single
@@ -1620,9 +1848,18 @@ mod tests {
         assert_eq!(r.bindings[1].priority, 1);
 
         // quota config 透传
-        set_agent_strategy(&s, "claude", "quota", Some(r#"{"limit":50,"unit":"requests"}"#)).unwrap();
+        set_agent_strategy(
+            &s,
+            "claude",
+            "quota",
+            Some(r#"{"limit":50,"unit":"requests"}"#),
+        )
+        .unwrap();
         let r = &build_agent_routes(&s).unwrap()[0];
         assert_eq!(r.strategy, "quota");
-        assert_eq!(r.config.as_deref(), Some(r#"{"limit":50,"unit":"requests"}"#));
+        assert_eq!(
+            r.config.as_deref(),
+            Some(r#"{"limit":50,"unit":"requests"}"#)
+        );
     }
 }

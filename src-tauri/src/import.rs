@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use kiwano_gateway::store::{Binding, Protocol, Provider, StrategyType, Store};
+use kiwano_gateway::store::{Binding, Protocol, Provider, Store, StrategyType};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -38,7 +38,11 @@ struct RawProvider {
 }
 
 /// 默认导入入口：显式传入候选路径，避免测试读到真实用户数据。
-pub fn run_import(store: &Store, db_path: Option<&Path>, json_path: Option<&Path>) -> ImportReportVm {
+pub fn run_import(
+    store: &Store,
+    db_path: Option<&Path>,
+    json_path: Option<&Path>,
+) -> ImportReportVm {
     let (mut raws, mut detail) = (Vec::new(), Vec::new());
     if let Some(p) = db_path {
         match read_db(p) {
@@ -62,7 +66,11 @@ pub fn run_import(store: &Store, db_path: Option<&Path>, json_path: Option<&Path
     }
     if raws.is_empty() {
         detail.push("未找到可导入的 CC Switch 数据".into());
-        return ImportReportVm { imported: 0, skipped: 0, detail };
+        return ImportReportVm {
+            imported: 0,
+            skipped: 0,
+            detail,
+        };
     }
 
     let (mut imported, mut skipped) = (0usize, 0usize);
@@ -93,7 +101,12 @@ pub fn run_import(store: &Store, db_path: Option<&Path>, json_path: Option<&Path
             created_at: now.clone(),
             updated_at: now,
         };
-        let existed = store.get_provider(&id).map_err(|e| e.to_string()).ok().flatten().is_some();
+        let existed = store
+            .get_provider(&id)
+            .map_err(|e| e.to_string())
+            .ok()
+            .flatten()
+            .is_some();
         let up = if existed {
             store.update_provider(&provider)
         } else {
@@ -113,7 +126,10 @@ pub fn run_import(store: &Store, db_path: Option<&Path>, json_path: Option<&Path
         ));
         if raw.is_current {
             let agent = raw.app; // claude→claude, codex→codex
-            if store.upsert_strategy(agent, StrategyType::Single, None).is_ok() {
+            if store
+                .upsert_strategy(agent, StrategyType::Single, None)
+                .is_ok()
+            {
                 let prev = store.primary_provider_id(agent).ok().flatten();
                 let _ = store.upsert_binding(&Binding {
                     agent: agent.to_string(),
@@ -141,7 +157,11 @@ pub fn run_import(store: &Store, db_path: Option<&Path>, json_path: Option<&Path
         }
     }
     detail.truncate(30);
-    ImportReportVm { imported, skipped, detail }
+    ImportReportVm {
+        imported,
+        skipped,
+        detail,
+    }
 }
 
 /// origin + 首段路径拆分：`https://api.deepseek.com/anthropic` →
@@ -184,7 +204,9 @@ fn codex_creds(v: &Value) -> (String, Option<String>) {
     let toml_src = v.get("config").and_then(Value::as_str).unwrap_or("");
     let mut base = String::new();
     for line in toml_src.lines() {
-        let Some((k, val)) = line.trim().split_once('=') else { continue };
+        let Some((k, val)) = line.trim().split_once('=') else {
+            continue;
+        };
         if k.trim() != "base_url" {
             continue;
         }
@@ -197,7 +219,13 @@ fn codex_creds(v: &Value) -> (String, Option<String>) {
     (base, (!key.is_empty()).then_some(key))
 }
 
-fn raw_from(app: &'static str, cc_id: &str, name: &str, sc: &Value, is_current: bool) -> RawProvider {
+fn raw_from(
+    app: &'static str,
+    cc_id: &str,
+    name: &str,
+    sc: &Value,
+    is_current: bool,
+) -> RawProvider {
     let (url, key) = match app {
         "claude" => claude_creds(sc),
         _ => codex_creds(sc),
@@ -206,7 +234,11 @@ fn raw_from(app: &'static str, cc_id: &str, name: &str, sc: &Value, is_current: 
     RawProvider {
         cc_id: cc_id.to_string(),
         app,
-        name: if name.is_empty() { cc_id.to_string() } else { name.to_string() },
+        name: if name.is_empty() {
+            cc_id.to_string()
+        } else {
+            name.to_string()
+        },
         base_url,
         api_path,
         api_key: key,
@@ -215,11 +247,9 @@ fn raw_from(app: &'static str, cc_id: &str, name: &str, sc: &Value, is_current: 
 }
 
 fn read_db(path: &Path) -> Result<Vec<RawProvider>, String> {
-    let conn = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("{}: {e}", path.display()))?;
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut stmt = conn
         .prepare("SELECT id, app_type, name, settings_config, is_current FROM providers")
         .map_err(|e| e.to_string())?;
@@ -242,7 +272,9 @@ fn read_db(path: &Path) -> Result<Vec<RawProvider>, String> {
             "codex" => "codex",
             _ => continue, // claude-desktop / gemini 等 MVP 不支持
         };
-        let Ok(sc) = serde_json::from_str::<Value>(&sc) else { continue };
+        let Ok(sc) = serde_json::from_str::<Value>(&sc) else {
+            continue;
+        };
         out.push(raw_from(app, &cc_id, &name, &sc, current));
     }
     Ok(out)
@@ -257,9 +289,13 @@ fn read_json(path: &Path) -> Result<Vec<RawProvider>, String> {
     for app in ["claude", "codex"] {
         let Some(mgr) = root.get(app) else { continue };
         let current = mgr.get("current").and_then(Value::as_str).unwrap_or("");
-        let Some(providers) = mgr.get("providers").and_then(Value::as_object) else { continue };
+        let Some(providers) = mgr.get("providers").and_then(Value::as_object) else {
+            continue;
+        };
         for (cc_id, p) in providers {
-            let Some(sc) = p.get("settingsConfig") else { continue };
+            let Some(sc) = p.get("settingsConfig") else {
+                continue;
+            };
             let name = p.get("name").and_then(Value::as_str).unwrap_or("");
             out.push(raw_from(app, cc_id, name, sc, cc_id == current));
         }
@@ -339,8 +375,14 @@ mod tests {
         assert_eq!(p.api_path.as_deref(), Some("/anthropic"));
         assert_eq!(p.api_key.as_deref(), Some("sk-a"));
         // is_current → 主选绑定
-        assert_eq!(store.primary_provider_id("claude").unwrap().as_deref(), Some("ccs-claude-p1"));
-        assert_eq!(store.primary_provider_id("codex").unwrap().as_deref(), Some("ccs-codex-c1"));
+        assert_eq!(
+            store.primary_provider_id("claude").unwrap().as_deref(),
+            Some("ccs-claude-p1")
+        );
+        assert_eq!(
+            store.primary_provider_id("codex").unwrap().as_deref(),
+            Some("ccs-codex-c1")
+        );
         // 重复导入 → 更新而非报错
         let again = run_import(&store, None, Some(&path));
         assert_eq!(again.imported, 2);

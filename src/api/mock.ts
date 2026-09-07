@@ -8,6 +8,7 @@ import type {
   DashboardData,
   DashboardWindow,
   FooterStats,
+  HubSyncReport,
   GatewayStatus,
   ImportReport,
   KiwanoApi,
@@ -328,6 +329,7 @@ const settings: AppSettings = {
   request_logs: true,
   telemetry: false,
   hub_logged_in: false,
+  hub_url: "https://hub.kiwano.app/catalog.json",
 };
 
 let idSeq = 100;
@@ -462,6 +464,15 @@ export const mockApi: KiwanoApi = {
         "import ccs-codex-default: Groq (openai)",
         "skip claude/claude-official: 缺少端点或 Key",
       ],
+    };
+  },
+
+  async syncHub(): Promise<HubSyncReport> {
+    await delay(500);
+    return {
+      fetched: 42,
+      synced_at: new Date().toISOString(),
+      hub_url: settings.hub_url,
     };
   },
 

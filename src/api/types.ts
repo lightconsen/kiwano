@@ -164,6 +164,15 @@ export interface AppSettings {
   request_logs: boolean;
   telemetry: boolean;
   hub_logged_in: boolean;
+  /** Hub 目录同步端点（协议 v0：静态 JSON） */
+  hub_url: string;
+}
+
+/** Hub 目录同步结果（tech.md §三 Hub 同步协议） */
+export interface HubSyncReport {
+  fetched: number;
+  synced_at: string;
+  hub_url: string;
 }
 
 export interface GatewayStatus {
@@ -200,6 +209,8 @@ export interface KiwanoApi {
   getDashboard(window: DashboardWindow): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /** 从 Hub 拉取 Provider 目录并落本地缓存（货架缓存优先、静态兜底） */
+  syncHub(): Promise<HubSyncReport>;
   /** Agent 接管开关（占位 Key 的生成/删除，P1 起含配置改写） */
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
   /** 从 CC Switch 导入配置（自动探测 ~/.cc-switch 数据源） */

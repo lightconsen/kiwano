@@ -128,6 +128,15 @@ impl Aux {
              )",
             [],
         )?;
+        // Hub 目录缓存（tech.md §三 Hub 同步）：单行缓存，payload = CatalogListVm JSON
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS hub_cache (
+                 id        INTEGER PRIMARY KEY CHECK (id = 1),
+                 payload   TEXT NOT NULL,
+                 synced_at TEXT NOT NULL
+             )",
+            [],
+        )?;
         Ok(())
     }
 
@@ -180,6 +189,28 @@ impl Aux {
             [v.to_string()],
         )?;
         Ok(())
+    }
+
+    /// Hub 目录缓存：单行 upsert（RFC3339 synced_at）。
+    pub fn save_hub_cache(&self, payload: &str, synced_at: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.execute(
+            "INSERT INTO hub_cache (id, payload, synced_at) VALUES (1, ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET payload = ?1, synced_at = ?2",
+            rusqlite::params![payload, synced_at],
+        )?;
+        Ok(())
+    }
+
+    /// `(payload, synced_at)`；从未同步过则 None。
+    pub fn load_hub_cache(&self) -> Option<(String, String)> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.query_row(
+            "SELECT payload, synced_at FROM hub_cache WHERE id = 1",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .ok()
     }
 
     /// Average `latency_ms` over a window, optionally per provider.
@@ -300,13 +331,13 @@ pub struct ProviderVm {
     pub usage: Option<UsageVm>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CatalogEntryVm {
     pub id: String,
     pub name: String,
     pub logo_char: String,
     pub logo_color: String,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logo_border: bool,
     pub tag: String,
     pub tag_label: String,
@@ -324,10 +355,18 @@ pub struct CatalogEntryVm {
     pub models: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CatalogListVm {
     pub total: i64,
     pub entries: Vec<CatalogEntryVm>,
+}
+
+/// 手动/启动时 Hub 同步的结果（UI 反馈用）。
+#[derive(Serialize)]
+pub struct SyncReportVm {
+    pub fetched: i64,
+    pub synced_at: String,
+    pub hub_url: String,
 }
 
 #[derive(Serialize)]
@@ -390,6 +429,12 @@ pub struct SettingsVm {
     pub request_logs: bool,
     pub telemetry: bool,
     pub hub_logged_in: bool,
+    #[serde(default = "default_hub_url")]
+    pub hub_url: String,
+}
+
+pub(crate) fn default_hub_url() -> String {
+    crate::sync::DEFAULT_HUB_URL.into()
 }
 
 impl Default for SettingsVm {
@@ -405,6 +450,7 @@ impl Default for SettingsVm {
             request_logs: true,
             telemetry: false,
             hub_logged_in: false,
+            hub_url: default_hub_url(),
         }
     }
 }
@@ -1117,18 +1163,30 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
     })
 }
 
-pub fn build_footer_stats(store: &Store) -> Result<FooterStatsVm, String> {
-    let since = format!("{}T00:00:00Z", day_key(unix_now()));
+pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, String> {
+    let today = day_key(unix_now());
+    let since = format!("{today}T00:00:00Z");
     let t = store.usage_totals(None, Some(&since)).map_err(e2s)?;
+    // hub_synced = 今天同步过目录（缓存时间戳前 10 位即日期）
+    let hub_synced = aux
+        .load_hub_cache()
+        .map(|(_, ts)| ts.starts_with(&today))
+        .unwrap_or(false);
     Ok(FooterStatsVm {
         today_requests: t.requests,
         today_cost: 0.0,
-        hub_synced: false, // Hub sync is not part of the MVP
+        hub_synced,
         version: "v0.1.0 · MVP".into(),
     })
 }
 
-pub fn load_catalog() -> CatalogListVm {
+/// 货架目录：Hub 缓存优先，未同步/解析失败时回退随包静态 catalog.json。
+pub fn load_catalog(aux: &Aux) -> CatalogListVm {
+    if let Some((payload, _)) = aux.load_hub_cache() {
+        if let Ok(list) = serde_json::from_str::<CatalogListVm>(&payload) {
+            return list;
+        }
+    }
     let entries: Vec<CatalogEntryVm> =
         serde_json::from_str(include_str!("catalog.json")).expect("catalog.json is valid");
     // Hub total (42) is the catalog listing size; bundled set is the top picks.

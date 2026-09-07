@@ -6,6 +6,7 @@
 
 mod import;
 mod sidecar;
+mod sync;
 mod takeover;
 mod vm;
 
@@ -208,8 +209,8 @@ fn test_latency(endpoint: String) -> Result<u64, String> {
 }
 
 #[tauri::command]
-fn list_catalog() -> vm::CatalogListVm {
-    vm::load_catalog()
+fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
+    vm::load_catalog(&state.aux)
 }
 
 #[tauri::command]
@@ -249,7 +250,14 @@ fn set_agent_takeover(
 
 #[tauri::command]
 fn get_footer_stats(state: State<AppState>) -> Result<vm::FooterStatsVm, String> {
-    vm::build_footer_stats(&state.store)
+    vm::build_footer_stats(&state.store, &state.aux)
+}
+
+/// Hub 目录同步（网络 IO → async 命令线程执行，不阻塞 UI）。
+#[tauri::command(async)]
+fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
+    let hub_url = vm::ui_settings(&state.aux).hub_url;
+    sync::sync_from_hub(&state.aux, &hub_url)
 }
 
 #[tauri::command]
@@ -319,6 +327,19 @@ pub fn run() {
             ))?;
             setup_tray(app, data_port)?;
             sync_autostart(app.handle(), ui.autostart);
+
+            // 启动时 best-effort 同步 Hub 目录（失败静默：静态 catalog.json 兜底）
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let Some(state) = handle.try_state::<AppState>() else { return };
+                    let url = vm::ui_settings(&state.aux).hub_url;
+                    if let Err(e) = sync::sync_from_hub(&state.aux, &url) {
+                        println!("kiwano: hub sync skipped: {e}");
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -335,6 +356,7 @@ pub fn run() {
             update_settings,
             set_agent_takeover,
             get_footer_stats,
+            sync_hub,
             import_cc_switch,
         ])
         .on_window_event(|window, event| {

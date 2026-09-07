@@ -20,6 +20,7 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSettings().then(setS);
@@ -152,8 +153,28 @@ export default function Settings() {
                 {importMsg}
               </span>
             )}
+            {syncMsg && syncMsg !== "同步中…" && (
+              <span className="text-[10.5px]" style={{ color: "var(--kiwi)" }}>
+                {syncMsg}
+              </span>
+            )}
           </div>
           <div className="flex gap-2">
+            <button
+              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+              disabled={syncMsg === "同步中…"}
+              title={syncMsg ?? undefined}
+              onClick={() => {
+                setSyncMsg("同步中…");
+                api
+                  .syncHub()
+                  .then((r) => setSyncMsg(`已同步 ${r.fetched} 个 Provider`))
+                  .catch((e) => setSyncMsg(String(e).slice(0, 80)))
+                  .finally(() => setTimeout(() => setSyncMsg(null), 4000));
+              }}
+            >
+              同步目录
+            </button>
             <button
               className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
               disabled={importMsg === "导入中…"}

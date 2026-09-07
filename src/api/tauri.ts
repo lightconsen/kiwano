@@ -9,6 +9,7 @@ import type {
   DashboardWindow,
   FooterStats,
   GatewayStatus,
+  HubSyncReport,
   ImportReport,
   KiwanoApi,
   NewProviderInput,
@@ -39,6 +40,7 @@ export const tauriApi: KiwanoApi = {
   getDashboard: (window: DashboardWindow) => invoke<DashboardData>("get_dashboard", { window }),
 
   getSettings: () => invoke<AppSettings>("get_settings"),
+  syncHub: () => invoke<HubSyncReport>("sync_hub"),
 
   updateSettings: (patch: Partial<AppSettings>) =>
     invoke<AppSettings>("update_settings", { patch }),

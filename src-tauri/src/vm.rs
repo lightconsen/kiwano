@@ -1359,6 +1359,34 @@ pub fn set_agent_takeover(
         return Err(format!("unknown agent: {agent}"));
     }
     if enabled {
+        // First-takeover import: pick up the provider the agent is currently
+        // using and bind it as the agent's sole candidate, so the gateway has
+        // a route on day one (official-login/blank configs yield no creds —
+        // the onboarding guide steers those users to manual entry). Import or
+        // binding failures never block the takeover itself.
+        if let Some(creds) = crate::creds::read_current_creds(agent, home) {
+            match import_current_provider(store, &creds) {
+                Ok(provider_id) => {
+                    if store.bindings_for_agent(agent).map_err(e2s)?.is_empty() {
+                        store
+                            .upsert_strategy(agent, StrategyType::Single, None)
+                            .map_err(e2s)?;
+                        store
+                            .upsert_binding(&Binding {
+                                agent: agent.to_string(),
+                                provider_id,
+                                priority: 0,
+                                weight: 1,
+                                win_start: None,
+                                win_end: None,
+                                enabled: true,
+                            })
+                            .map_err(e2s)?;
+                    }
+                }
+                Err(e) => eprintln!("kiwano: current-provider import skipped: {e}"),
+            }
+        }
         let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
         let key = format!("kw-ag-{agent}-{rand}");
         store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
@@ -1377,6 +1405,43 @@ pub fn set_agent_takeover(
         }
     }
     Ok(())
+}
+
+/// Find-or-create a provider for the agent's current credentials: dedup by
+/// base_url (trailing slash ignored) reuses the existing row — that shared
+/// provider then also serves other agents; otherwise insert a new PAYG row
+/// named after the config's provider key (or the URL host).
+fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) -> Result<String, String> {
+    let base = creds.base_url.trim().trim_end_matches('/');
+    for p in store.list_providers().map_err(e2s)? {
+        if p.base_url.trim().trim_end_matches('/') == base {
+            return Ok(p.id);
+        }
+    }
+    let now = rfc3339(unix_now());
+    let name = creds.name.clone().unwrap_or_else(|| {
+        let host = crate::creds::host_of(&creds.base_url);
+        if host.is_empty() { "Imported provider".into() } else { host }
+    });
+    let provider = Provider {
+        id: format!("{}-{}", slug(&name), &uuid::Uuid::new_v4().simple().to_string()[..6]),
+        name,
+        protocol: kiwano_gateway::store::Protocol::from_str(creds.protocol)
+            .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
+        base_url: base.to_string(),
+        api_path: None,
+        api_key: Some(creds.api_key.clone()),
+        billing: kiwano_gateway::store::Billing::Metered,
+        period_limit: None,
+        limit_unit: None,
+        reset_period: None,
+        enabled: true,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let id = provider.id.clone();
+    store.insert_provider(&provider).map_err(e2s)?;
+    Ok(id)
 }
 
 // ── Multi-key rotation (spec §4.1 P1: auto-rotate multiple API keys per provider) ──
@@ -1699,6 +1764,30 @@ mod tests {
         assert_eq!(billing_to_ui(billing_to_db("plan")), "plan");
         assert_eq!(billing_to_ui(billing_to_db("payg")), "payg");
         assert_eq!(billing_to_ui(billing_to_db("unl")), "unl");
+    }
+
+    #[test]
+    fn import_current_provider_dedups_by_base_url() {
+        let s = store();
+        let creds = |base: &str, name: Option<&str>| crate::creds::CurrentCreds {
+            base_url: base.into(),
+            api_key: "sk-x".into(),
+            name: name.map(String::from),
+            protocol: "openai",
+        };
+        // trailing-slash variants dedup to one row
+        let id1 = import_current_provider(&s, &creds("https://api.deepseek.com/v1/", Some("deepseek"))).unwrap();
+        let id2 = import_current_provider(&s, &creds("https://api.deepseek.com/v1", Some("deepseek"))).unwrap();
+        assert_eq!(id1, id2);
+        let list = s.list_providers().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "deepseek");
+        assert_eq!(list[0].api_key.as_deref(), Some("sk-x"));
+        // no declared name → URL host
+        let id3 = import_current_provider(&s, &creds("https://api.x.ai/v1", None)).unwrap();
+        let p = s.get_provider(&id3).unwrap().unwrap();
+        assert_eq!(p.name, "api.x.ai");
+        assert_ne!(id1, id3);
     }
 
     #[test]

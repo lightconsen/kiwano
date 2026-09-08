@@ -4,6 +4,7 @@
 //! (same SQLite file the sidecar reads) → `POST :8310/reload` hot-swaps the
 //! gateway route table. The gateway process itself is spawned in `setup`.
 
+mod creds;
 mod detect;
 mod import;
 mod share;
@@ -265,7 +266,10 @@ fn set_agent_takeover(state: State<AppState>, agent: String, enabled: bool) -> R
         enabled,
         data_port,
         &std::path::PathBuf::from(home),
-    )
+    )?;
+    // enabling may import a provider and bind it → the route table changed
+    after_mutation(&state);
+    Ok(())
 }
 
 #[tauri::command]

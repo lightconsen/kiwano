@@ -30,6 +30,77 @@ function segmentLabel(id: AgentId | "all"): string {
   return AGENTS.find((a) => a.id === id)?.label ?? id;
 }
 
+const SEGMENT_ICON: Partial<Record<AgentId, string>> = Object.fromEntries(
+  SEGMENTS.filter((s) => s.icon).map((s) => [s.id, s.icon!]),
+);
+
+/** First-touch state for an agent tab with no bound providers: one click to
+    back up + take over (importing the provider the agent already uses), or
+    manual entry. When already taken over but unbound, steer to manual add. */
+function AgentOnboarding({
+  agent,
+  installed,
+  takenOver,
+  busy,
+  onTakeover,
+  onAdd,
+}: {
+  agent: AgentId;
+  installed: boolean;
+  takenOver: boolean;
+  busy: boolean;
+  onTakeover: () => void;
+  onAdd: () => void;
+}) {
+  const meta = AGENTS.find((m) => m.id === agent)!;
+  return (
+    <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+      <ProviderLogo icon={SEGMENT_ICON[agent]} name={meta.label} size={36} />
+      {takenOver ? (
+        <>
+          <div className="text-[13px] font-semibold">{meta.label} is taken over</div>
+          <div className="max-w-[430px] text-[12px] text-mut">
+            The local gateway routes this agent's requests, but no provider is bound yet — add one so
+            requests have somewhere to go.
+          </div>
+          <Button size="sm" className="h-7 gap-1 px-3 text-[12px] font-semibold" onClick={onAdd}>
+            <Plus className="h-3.5 w-3.5" />
+            Add provider
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="text-[13px] font-semibold">Start managing {meta.label} with Kiwano</div>
+          <div className="max-w-[460px] text-[12px] text-mut">
+            Kiwano backs up the current config (one-click restore later), imports the provider{" "}
+            {meta.label} already uses (shared with other agents), and routes it through the local
+            gateway — same upstream, instant switching afterwards.
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="h-7 px-3 text-[12px] font-semibold"
+              disabled={busy}
+              onClick={onTakeover}
+            >
+              {busy ? "Enabling…" : "Enable Kiwano"}
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 px-3 text-[12px]" onClick={onAdd}>
+              Add provider first
+            </Button>
+          </div>
+          {installed && (
+            <div className="max-w-[470px] text-[11px] text-mut">
+              Signed in with an official subscription (Claude / Gemini login, Codex ChatGPT)? Official
+              OAuth can't be proxied yet — add a provider manually first.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ringColor(billing: Provider["billing"], pct: number): string {
   if (billing === "plan") return "oklch(0.78 0.12 300)";
   if (pct >= 95) return "var(--red)";
@@ -245,9 +316,16 @@ export default function Providers({
 }) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [seg, setSeg] = useState<AgentId | "all">("all");
+  const [takenOver, setTakenOver] = useState<Set<AgentId> | null>(null);
+  const [enabling, setEnabling] = useState(false);
 
   const refetch = useCallback(() => {
     api.listProviders().then(setProviders);
+    // Takeover state drives the per-agent onboarding panel
+    api
+      .getSettings()
+      .then((s) => setTakenOver(new Set(s.takeovers.filter((t) => t.enabled).map((t) => t.agent))))
+      .catch(() => {});
   }, []);
   useEffect(refetch, [refetch]);
 
@@ -274,6 +352,16 @@ export default function Providers({
   const onDelete = async (p: Provider) => {
     await api.deleteProvider(p.id);
     refetch();
+  };
+
+  const onTakeover = async (agent: AgentId) => {
+    setEnabling(true);
+    try {
+      await api.setTakeover(agent, true);
+    } finally {
+      setEnabling(false);
+      refetch();
+    }
   };
 
   if (!providers) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
@@ -326,9 +414,22 @@ export default function Providers({
         <ProviderRow key={p.id} p={p} onEnable={onEnable} onEdit={onEdit} onDelete={onDelete} />
       ))}
 
-      {filtered.length === 0 && (
+      {filtered.length === 0 && seg !== "all" && (
+        <AgentOnboarding
+          agent={seg}
+          installed={
+            agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
+          }
+          takenOver={takenOver?.has(seg) ?? false}
+          busy={enabling}
+          onTakeover={() => onTakeover(seg)}
+          onAdd={onAdd}
+        />
+      )}
+
+      {filtered.length === 0 && seg === "all" && (
         <div className="px-4 py-8 text-center text-[12px] text-mut">
-          No provider bound to this agent —{" "}
+          No providers yet —{" "}
           <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
             Add provider
           </button>

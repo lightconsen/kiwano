@@ -5,6 +5,8 @@ export interface IconMetadata {
   name: string;
   displayName: string;
   defaultColor: string;
+  /** Artwork is near-black: render on a light tile for dark surfaces */
+  darkMark?: boolean;
 }
 
 export const iconMetadata: Record<string, IconMetadata> = {
@@ -16,8 +18,8 @@ export const iconMetadata: Record<string, IconMetadata> = {
   "aigocode": { name: "aigocode", displayName: "AIGoCode", defaultColor: "#5B7FFF" },
   "apikeyfun": { name: "apikeyfun", displayName: "APIKEY.FUN", defaultColor: "#9C3F00" },
   "apinebula": { name: "apinebula", displayName: "APINebula", defaultColor: "#C86F49" },
-  "atlascloud": { name: "atlascloud", displayName: "AtlasCloud", defaultColor: "#111111" },
-  "sudocode": { name: "sudocode", displayName: "SudoCode.chat", defaultColor: "#111111" },
+  "atlascloud": { name: "atlascloud", displayName: "AtlasCloud", defaultColor: "#111111" , darkMark: true },
+  "sudocode": { name: "sudocode", displayName: "SudoCode.chat", defaultColor: "#111111" , darkMark: true },
   "sudocode-us": { name: "sudocode-us", displayName: "SudoCode.us", defaultColor: "#111111" },
   "alibaba": { name: "alibaba", displayName: "Alibaba", defaultColor: "#FF6A00" },
   "amux": { name: "amux", displayName: "Amux", defaultColor: "#000000" },
@@ -39,9 +41,9 @@ export const iconMetadata: Record<string, IconMetadata> = {
   "cohere": { name: "cohere", displayName: "Cohere", defaultColor: "#39594D" },
   "copilot": { name: "copilot", displayName: "copilot", defaultColor: "currentColor" },
   "etok": { name: "etok", displayName: "ETok", defaultColor: "#F97316" },
-  "fenno": { name: "fenno", displayName: "FennoAI", defaultColor: "#000000" },
-  "zetaapi": { name: "zetaapi", displayName: "ZetaAPI", defaultColor: "#000000" },
-  "teamorouter": { name: "teamorouter", displayName: "TeamoRouter", defaultColor: "#000000" },
+  "fenno": { name: "fenno", displayName: "FennoAI", defaultColor: "#000000" , darkMark: true },
+  "zetaapi": { name: "zetaapi", displayName: "ZetaAPI", defaultColor: "#000000" , darkMark: true },
+  "teamorouter": { name: "teamorouter", displayName: "TeamoRouter", defaultColor: "#000000" , darkMark: true },
   "cubence": { name: "cubence", displayName: "Cubence", defaultColor: "#4B5563" },
   "deepseek": { name: "deepseek", displayName: "DeepSeek", defaultColor: "#1E88E5" },
   "doubao": { name: "doubao", displayName: "doubao", defaultColor: "currentColor" },
@@ -64,10 +66,10 @@ export const iconMetadata: Record<string, IconMetadata> = {
   "nekocode": { name: "nekocode", displayName: "NekoCode", defaultColor: "#A64BC4" },
   "newapi": { name: "newapi", displayName: "newapi", defaultColor: "currentColor" },
   "notion": { name: "notion", displayName: "notion", defaultColor: "currentColor" },
-  "ollama": { name: "ollama", displayName: "ollama", defaultColor: "currentColor" },
+  "ollama": { name: "ollama", displayName: "ollama", defaultColor: "currentColor" , darkMark: true },
   "openai": { name: "openai", displayName: "OpenAI", defaultColor: "currentColor" },
   "openclaw": { name: "openclaw", displayName: "OpenClaw", defaultColor: "#ff4f40" },
-  "hermes": { name: "hermes", displayName: "Hermes", defaultColor: "#000000" },
+  "hermes": { name: "hermes", displayName: "Hermes", defaultColor: "#000000" , darkMark: true },
   "packycode": { name: "packycode", displayName: "PackyCode", defaultColor: "currentColor" },
   "pateway": { name: "pateway", displayName: "PatewayAI", defaultColor: "currentColor" },
   "perplexity": { name: "perplexity", displayName: "Perplexity", defaultColor: "#20808D" },
@@ -77,7 +79,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   "unity2": { name: "unity2", displayName: "Unity2.ai", defaultColor: "#000000" },
   "vercel": { name: "vercel", displayName: "vercel", defaultColor: "currentColor" },
   "wenxin": { name: "wenxin", displayName: "wenxin", defaultColor: "currentColor" },
-  "xai": { name: "xai", displayName: "xai", defaultColor: "currentColor" },
+  "xai": { name: "xai", displayName: "xai", defaultColor: "currentColor" , darkMark: true },
   "yi": { name: "yi", displayName: "yi", defaultColor: "currentColor" },
   "zeroone": { name: "zeroone", displayName: "zeroone", defaultColor: "currentColor" },
   "zhipu": { name: "zhipu", displayName: "Zhipu AI", defaultColor: "#0F62FE" },
@@ -91,11 +93,12 @@ export const iconMetadata: Record<string, IconMetadata> = {
   "modelscope": { name: "modelscope", displayName: "ModelScope", defaultColor: "#624AFF" },
   "aihubmix": { name: "aihubmix", displayName: "AiHubMix", defaultColor: "#006FFB" },
   "xiaomimimo": { name: "xiaomimimo", displayName: "Xiaomi MiMo", defaultColor: "#000000" },
-  "novita": { name: "novita", displayName: "Novita AI", defaultColor: "#000000" },
+  sssaicode: { name: "sssaicode", displayName: "SSSAiCode", defaultColor: "#08080e", darkMark: true },
+  "novita": { name: "novita", displayName: "Novita AI", defaultColor: "#000000" , darkMark: true },
   "nvidia": { name: "nvidia", displayName: "NVIDIA", defaultColor: "#74B71B" },
   "stepfun": { name: "stepfun", displayName: "StepFun", defaultColor: "#005AFF" },
   "ppio": { name: "ppio", displayName: "PPIO", defaultColor: "#2874FF" },
-  "jiekou": { name: "jiekou", displayName: "JieKou AI", defaultColor: "#000000" },
+  "jiekou": { name: "jiekou", displayName: "JieKou AI", defaultColor: "#000000" , darkMark: true },
   "xycai": { name: "xycai", displayName: "XycAi", defaultColor: "#1E88E5" },
 };
 

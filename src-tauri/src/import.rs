@@ -1,16 +1,18 @@
-//! CC Switch 配置导入（tech.md §4.5：仅 v3.x）。
+//! CC Switch config import (tech.md §4.5: v3.x only).
 //!
-//! 数据源按序尝试：`~/.cc-switch/cc-switch.db`（v3.20+ SQLite，只读）、
-//! `~/.cc-switch/config.json`（旧 v3.x JSON）。映射规则：
-//! - app_type claude → protocol anthropic，取 env.ANTHROPIC_BASE_URL /
-//!   ANTHROPIC_AUTH_TOKEN（兼容 ANTHROPIC_API_KEY）
-//! - app_type codex  → protocol openai，取 auth.OPENAI_API_KEY + config TOML
-//!   里的 base_url 行
-//! - base_url 拆为 origin（base_url）+ 首段路径（api_path），与网关
-//!   upstream_url 的拼接约定一致
-//! - cc-switch 的 is_current → 对应 Agent 的主选绑定（claude→claude、
-//!   codex→codex），实现「零成本迁移」承诺（spec §10.1）
-//! - 官方占位/空配置（无 base_url 或无 Key）跳过
+//! Data sources are tried in order: `~/.cc-switch/cc-switch.db` (v3.20+
+//! SQLite, read-only) and `~/.cc-switch/config.json` (older v3.x JSON).
+//! Mapping rules:
+//! - app_type claude → protocol anthropic, using env.ANTHROPIC_BASE_URL /
+//!   ANTHROPIC_AUTH_TOKEN (ANTHROPIC_API_KEY also accepted)
+//! - app_type codex  → protocol openai, using auth.OPENAI_API_KEY plus the
+//!   base_url line in the config TOML
+//! - base_url is split into origin (base_url) + first path segment
+//!   (api_path), matching the gateway's upstream_url composition convention
+//! - cc-switch's is_current → primary binding of the matching Agent
+//!   (claude→claude, codex→codex), delivering the "zero-cost migration"
+//!   promise (spec §10.1)
+//! - official placeholder / empty configs (no base_url or no key) are skipped
 
 use std::path::Path;
 
@@ -37,7 +39,7 @@ struct RawProvider {
     is_current: bool,
 }
 
-/// 默认导入入口：显式传入候选路径，避免测试读到真实用户数据。
+/// Default import entry: pass candidate paths explicitly so tests never read real user data.
 pub fn run_import(
     store: &Store,
     db_path: Option<&Path>,
@@ -79,7 +81,7 @@ pub fn run_import(
             "claude" => (raw.name.clone(), Protocol::Anthropic),
             _ => (raw.name.clone(), Protocol::OpenAI),
         };
-        // 跳过官方占位/空配置
+        // Skip official placeholders / empty configs
         if raw.base_url.is_empty() || raw.api_key.as_deref().unwrap_or("").is_empty() {
             skipped += 1;
             detail.push(format!("skip {}/{}: 缺少端点或 Key", raw.app, raw.cc_id));
@@ -165,8 +167,8 @@ pub fn run_import(
     }
 }
 
-/// origin + 首段路径拆分：`https://api.deepseek.com/anthropic` →
-/// (`https://api.deepseek.com`, Some(`/anthropic`))。
+/// origin + first-path-segment split: `https://api.deepseek.com/anthropic` →
+/// (`https://api.deepseek.com`, Some(`/anthropic`)).
 fn split_url(url: &str) -> (String, Option<String>) {
     let url = url.trim_end_matches('/');
     let Some(scheme_end) = url.find("://") else {
@@ -198,8 +200,8 @@ fn claude_creds(v: &Value) -> (String, Option<String>) {
     (base, key)
 }
 
-/// codex settings_config：`auth.OPENAI_API_KEY` + config TOML 里的
-/// `base_url = "…"` 行（按行扫描，避免引入 toml 依赖）。
+/// codex settings_config: `auth.OPENAI_API_KEY` plus the `base_url = "…"`
+/// line in the config TOML (scanned line by line to avoid a toml dependency).
 fn codex_creds(v: &Value) -> (String, Option<String>) {
     let key = str_at(v.get("auth").and_then(|a| a.get("OPENAI_API_KEY")));
     let toml_src = v.get("config").and_then(Value::as_str).unwrap_or("");
@@ -271,7 +273,7 @@ fn read_db(path: &Path) -> Result<Vec<RawProvider>, String> {
         let app: &'static str = match app_type.as_str() {
             "claude" => "claude",
             "codex" => "codex",
-            _ => continue, // claude-desktop / gemini 等 MVP 不支持
+            _ => continue, // claude-desktop / gemini etc. not supported in the MVP
         };
         let Ok(sc) = serde_json::from_str::<Value>(&sc) else {
             continue;
@@ -281,8 +283,8 @@ fn read_db(path: &Path) -> Result<Vec<RawProvider>, String> {
     Ok(out)
 }
 
-/// 旧版 v3.x JSON：MultiAppConfig，apps 以 flatten 形式在顶层
-/// `{ "claude": { "providers": { id: {...} }, "current": id }, ... }`。
+/// Older v3.x JSON: MultiAppConfig with apps flattened at the top level as
+/// `{ "claude": { "providers": { id: {...} }, "current": id }, ... }`.
 fn read_json(path: &Path) -> Result<Vec<RawProvider>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let root: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
@@ -369,13 +371,13 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let report = run_import(&store, None, Some(&path));
         assert_eq!(report.imported, 2, "detail={:?}", report.detail);
-        assert_eq!(report.skipped, 1); // 官方空配置
+        assert_eq!(report.skipped, 1); // official empty config
 
         let p = store.get_provider("ccs-claude-p1").unwrap().unwrap();
         assert_eq!(p.base_url, "https://api.deepseek.com");
         assert_eq!(p.api_path.as_deref(), Some("/anthropic"));
         assert_eq!(p.api_key.as_deref(), Some("sk-a"));
-        // is_current → 主选绑定
+        // is_current → primary binding
         assert_eq!(
             store.primary_provider_id("claude").unwrap().as_deref(),
             Some("ccs-claude-p1")
@@ -384,7 +386,7 @@ mod tests {
             store.primary_provider_id("codex").unwrap().as_deref(),
             Some("ccs-codex-c1")
         );
-        // 重复导入 → 更新而非报错
+        // re-import → update, not an error
         let again = run_import(&store, None, Some(&path));
         assert_eq!(again.imported, 2);
         assert!(again.detail.iter().any(|d| d.contains("已更新")));

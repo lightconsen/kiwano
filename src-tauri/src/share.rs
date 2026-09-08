@@ -1,14 +1,18 @@
-//! 配置分享（spec §4.1 P1 配置分享）：一键配置方案的导出/导入。
+//! Config sharing (spec §4.1 P1): one-click export/import of a config scheme.
 //!
-//! 文件格式 kiwano-config v1：
-//! `providers`（gateway Provider 全行，含 api_key——本机备份/跨设备迁移用，
-//! 分享给他人前请自行脱敏）+ `routes`（每 Agent 的策略与候选顺序）。
+//! File format kiwano-config v1:
+//! `providers` (full gateway Provider rows, including api_key — for local
+//! backup / cross-device migration; redact before sharing with others)
+//! + `routes` (per-Agent strategy and candidate order).
 //!
-//! 导入语义（合并而非覆盖）：按 `(name, base_url)` 匹配已有 Provider ——
-//! 命中则本地行保留，仅在本地无 Key 且方案带 Key 时回填；未命中则新建
-//! （id 重新生成，避免与本地冲突）。绑定经 导出 id → 最终 id 重映射后
-//! 按序 upsert（priority = 顺序），策略行直接 upsert；未涉及的 Agent
-//! 绑定不动。调用方负责触发 admin /reload。
+//! Import semantics (merge, not overwrite): match existing providers by
+//! `(name, base_url)` — on a hit the local row is kept and the key is only
+//! backfilled when the local row has no key and the scheme carries one; on a
+//! miss a new provider is created (id regenerated to avoid clashing with
+//! local ids). Bindings are remapped from exported id → final id and
+//! upserted in order (priority = order); strategy rows are upserted
+//! directly; bindings of untouched agents are left alone. The caller is
+//! responsible for triggering admin /reload.
 
 use std::collections::HashMap;
 
@@ -33,11 +37,11 @@ struct ShareRoute {
     agent: String,
     strategy: String,
     config: Option<String>,
-    /// 导出时的 provider id 顺序（即优先级）。
+    /// Provider id order at export time (i.e. the priority).
     candidates: Vec<String>,
 }
 
-/// 导入结果（前端提示用）。
+/// Import result (for the frontend to display).
 #[derive(Serialize)]
 pub struct ImportReport {
     pub providers_added: usize,
@@ -45,7 +49,7 @@ pub struct ImportReport {
     pub routes_applied: usize,
 }
 
-/// 导出当前全部 Provider 与 Agent 路由方案为可分享 JSON。
+/// Export all providers and per-Agent route schemes as shareable JSON.
 pub fn export_config(store: &Store) -> Result<String, String> {
     let providers = store.list_providers().map_err(|e| e.to_string())?;
     let mut routes = Vec::new();
@@ -77,7 +81,7 @@ pub fn export_config(store: &Store) -> Result<String, String> {
     serde_json::to_string_pretty(&share).map_err(|e| e.to_string())
 }
 
-/// 导入方案（语义见模块注释）；返回计数报告。
+/// Import a scheme (semantics in the module doc); returns a count report.
 pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> {
     let share: ConfigShare =
         serde_json::from_str(json).map_err(|e| format!("不是有效的 Kiwano 配置文件: {e}"))?;
@@ -86,7 +90,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
     }
 
     let now = vm::rfc3339(vm::unix_now());
-    // (name, base_url) → 本地 id
+    // (name, base_url) → local id
     let mut by_identity: HashMap<(String, String), String> = HashMap::new();
     for p in store.list_providers().map_err(|e| e.to_string())? {
         by_identity.insert((p.name.clone(), p.base_url.clone()), p.id.clone());
@@ -98,7 +102,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
     for sp in &share.providers {
         let key = (sp.name.clone(), sp.base_url.clone());
         if let Some(local_id) = by_identity.get(&key).cloned() {
-            // 本地已有：仅回填缺失 Key（其余字段以本地为准）
+            // Already exists locally: only backfill a missing key (all other fields stay local)
             if sp.api_key.as_deref().is_some_and(|k| !k.is_empty()) {
                 if let Some(mut local) = store.get_provider(&local_id).map_err(|e| e.to_string())? {
                     if local.api_key.as_deref().unwrap_or("").is_empty() {
@@ -147,7 +151,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
             .map_err(|e| e.to_string())?;
         for (i, pid) in r.candidates.iter().enumerate() {
             let Some(final_id) = remap.get(pid) else {
-                continue; // 方案引用了文件外的 Provider → 跳过该候选
+                continue; // Scheme references a provider outside the file → skip this candidate
             };
             store
                 .upsert_binding(&Binding {
@@ -231,7 +235,7 @@ mod tests {
         let json = export_config(&src).unwrap();
         assert!(json.contains("kiwano_config"));
 
-        // 空库导入 → 全部新建 + 路由重映射生效
+        // Import into an empty DB → everything is created fresh + route remapping takes effect
         let dst = Store::open_in_memory().unwrap();
         let report = import_config(&dst, &json).unwrap();
         assert_eq!(report.providers_added, 2);
@@ -245,7 +249,7 @@ mod tests {
             StrategyType::Failover
         );
 
-        // 带本地同名同端点（无 Key）导入 → 保留本地 + 回填 Key
+        // Import with a local same-name/same-endpoint provider (no key) → keep local + backfill key
         let dst2 = Store::open_in_memory().unwrap();
         dst2.insert_provider(&provider("local-1", "Alpha", "https://a.example.com", None))
             .unwrap();
@@ -254,7 +258,7 @@ mod tests {
         assert_eq!(report2.providers_added, 1);
         let local = dst2.get_provider("local-1").unwrap().unwrap();
         assert_eq!(local.api_key.as_deref(), Some("sk-a"));
-        // claude 主选映射到本地 id
+        // claude primary maps to the local id
         assert_eq!(
             dst2.primary_provider_id("claude").unwrap().as_deref(),
             Some("local-1")

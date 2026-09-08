@@ -75,7 +75,7 @@ pub fn notify_reload(admin_port: u16) {
 }
 
 /// TCP connect-time probe of an endpoint (host or URL). Measures the
-/// handshake only — enough for the inline 测速 readout in the add dialog.
+/// handshake only — enough for the inline latency readout in the add dialog.
 pub fn measure_latency(endpoint: &str) -> Result<u64, String> {
     use std::net::ToSocketAddrs;
 

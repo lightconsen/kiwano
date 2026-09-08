@@ -1,12 +1,15 @@
-//! Agent 接管/还原（tech.md §4.3-3 接管流、§2.4 B 要点三）。
+//! Agent takeover/restore (tech.md §4.3-3 takeover flow, §2.4 B key point 3).
 //!
-//! 接管 = 备份原配置（SQLite `takeover_backups` 表 + 文件副本）→ 改写
-//! base_url 指向本地网关 + 注入该 Agent 专属占位 Key；还原 = 写回备份
-//! （逃生门）。备份语义：已接管时再次 enable 不覆盖最初备份，保证
-//! 无论连续接管多少次都能还原到用户原始配置。
+//! Takeover = back up the original config (SQLite `takeover_backups` table +
+//! file copies) → rewrite base_url to point at the local gateway + inject an
+//! Agent-specific placeholder key; restore = write the backup back (the
+//! escape hatch). Backup semantics: re-enabling while already taken over
+//! never overwrites the first backup, so the user's original config can be
+//! restored no matter how many takeovers happen in a row.
 //!
-//! MVP 覆盖 claude（settings.json）、codex（config.toml + auth.json）与
-//! gemini（~/.gemini/.env；入站协议见 gateway protocol.rs 的 /v1beta 分支）。
+//! The MVP covers claude (settings.json), codex (config.toml + auth.json),
+//! and gemini (~/.gemini/.env; inbound protocol in the gateway's
+//! protocol.rs /v1beta branch).
 
 use std::path::Path;
 
@@ -14,7 +17,7 @@ use serde_json::Value;
 
 use crate::vm::Aux;
 
-/// 备份的文件集合：`(绝对路径, 原始内容)`。
+/// The set of backed-up files: `(absolute path, original content)`.
 type Files = Vec<(String, String)>;
 
 fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, String> {
@@ -31,8 +34,8 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
 
 const GATEWAY_HOST: &str = "http://127.0.0.1";
 
-/// 接管：读原文件 → 内存中完成全部改写（可整体失败、零副作用）→
-/// 备份 → 原子写盘。
+/// Takeover: read the original files → perform all rewrites in memory
+/// (can fail as a whole, zero side effects) → back up → atomic write.
 pub fn enable(
     aux: &Aux,
     agent: &str,
@@ -45,7 +48,7 @@ pub fn enable(
     for p in &paths {
         let content = match std::fs::read_to_string(p) {
             Ok(c) => c,
-            // codex 的 auth.json / gemini 的 .env 允许不存在（视为空文件）
+            // codex's auth.json / gemini's .env are allowed to be missing (treated as empty files)
             Err(_) if p.ends_with("auth.json") || p.ends_with(".env") => String::new(),
             Err(_) => {
                 return Err(format!(
@@ -58,7 +61,8 @@ pub fn enable(
         originals.push((p.to_string_lossy().into_owned(), content));
     }
 
-    // 全部改写成功才落备份/写盘；任一失败即整体失败，不污染逃生门
+    // Back up / write to disk only after every rewrite succeeds; any failure
+    // fails the whole thing and keeps the escape hatch clean
     let rewritten: Files = originals
         .iter()
         .map(|(path, original)| {
@@ -69,7 +73,8 @@ pub fn enable(
         })
         .collect::<Result<Files, String>>()?;
 
-    // 首次接管才落备份；重复 enable 保持最初原文（逃生门语义）
+    // Back up only on first takeover; repeated enable keeps the original
+    // text (escape-hatch semantics)
     let first_time = aux.load_takeover_backup(agent).is_none();
     if first_time {
         aux.save_takeover_backup(agent, &originals)
@@ -78,7 +83,7 @@ pub fn enable(
     }
 
     for (path, content) in &rewritten {
-        // .env 首次接管时 ~/.gemini 可能整个不存在，先补父目录
+        // On first takeover ~/.gemini may not exist at all, so create the parent dir first
         if let Some(parent) = std::path::Path::new(path).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -87,12 +92,12 @@ pub fn enable(
     Ok(())
 }
 
-/// 还原：写回备份原文并注销备份。
+/// Restore: write the backup back verbatim and deregister it.
 pub fn disable(aux: &Aux, agent: &str, home: &Path) -> Result<(), String> {
     let Some((_, files)) = aux.load_takeover_backup(agent) else {
-        return Ok(()); // 未接管过 → 幂等成功
+        return Ok(()); // never taken over → idempotent success
     };
-    let _ = takeover_paths(agent, home)?; // 校验 agent 合法性
+    let _ = takeover_paths(agent, home)?; // validate the agent name
     for (path, content) in &files {
         atomic_write(std::path::Path::new(path), content)?;
     }
@@ -118,7 +123,7 @@ fn rewrite(
     }
 }
 
-/// settings.json：合并 env.ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN，保留其余字段。
+/// settings.json: merge env.ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN, keeping all other fields.
 fn rewrite_claude(original: &str, base: &str, port: u16, key: &str) -> Result<String, String> {
     let mut v: Value = if original.trim().is_empty() {
         Value::Object(serde_json::Map::new())
@@ -138,8 +143,9 @@ fn rewrite_claude(original: &str, base: &str, port: u16, key: &str) -> Result<St
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
 
-/// config.toml：把已有 model_provider 的 base_url 行改指向网关（/v1）。
-/// 没有可改的 base_url 时拒绝接管（不盲目生成 codex 配置）。
+/// config.toml: point the existing model_provider's base_url line at the
+/// gateway (/v1). Refuse the takeover when there is no base_url to rewrite
+/// (never fabricate codex config blindly).
 fn rewrite_codex_toml(original: &str, base: &str, port: u16) -> Result<String, String> {
     let target = format!("{base}:{port}/v1");
     let mut found = false;
@@ -165,7 +171,7 @@ fn rewrite_codex_toml(original: &str, base: &str, port: u16) -> Result<String, S
     Ok(s)
 }
 
-/// auth.json：合并 OPENAI_API_KEY，保留其余字段；空文件视为 {}。
+/// auth.json: merge OPENAI_API_KEY, keeping all other fields; an empty file is treated as {}.
 fn rewrite_codex_auth(original: &str, key: &str) -> Result<String, String> {
     let mut v: Value = if original.trim().is_empty() {
         Value::Object(serde_json::Map::new())
@@ -177,9 +183,11 @@ fn rewrite_codex_auth(original: &str, key: &str) -> Result<String, String> {
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
 
-/// .env（dotenv）：改写 GOOGLE_GEMINI_BASE_URL + GEMINI_API_KEY 两行，
-/// 保留其余行与注释；缺失的变量追加到尾部；文件不存在视为空（首次接管
-/// 会连同 ~/.gemini 目录一起创建）。值不加引号——两个值都不含空白。
+/// .env (dotenv): rewrite the GOOGLE_GEMINI_BASE_URL and GEMINI_API_KEY
+/// lines, keeping all other lines and comments; missing variables are
+/// appended at the end; a missing file is treated as empty (a first
+/// takeover creates the ~/.gemini directory along with it). Values are not
+/// quoted — neither value contains whitespace.
 fn rewrite_gemini_env(original: &str, base: &str, port: u16, key: &str) -> Result<String, String> {
     let target = format!("{base}:{port}");
     let mut found_base = false;
@@ -214,18 +222,18 @@ fn rewrite_gemini_env(original: &str, base: &str, port: u16, key: &str) -> Resul
     Ok(s)
 }
 
-/// 原子写：先写 `*.kiwano-tmp` 再 rename，避免半写状态。
+/// Atomic write: write to `*.kiwano-tmp` first, then rename, avoiding half-written states.
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let tmp = path.with_extension("kiwano-tmp");
     std::fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("rename {}: {e}", tmp.display()))
 }
 
-/// 文件副本兜底：`~/.kiwano/backups/<agent>/<文件名>`（SQLite 之外的逃生门）。
+/// File-copy fallback: `~/.kiwano/backups/<agent>/<filename>` (an escape hatch beyond SQLite).
 fn copy_files(agent: &str, home: &Path, files: &Files) {
     let dir = home.join(".kiwano").join("backups").join(agent);
     if std::fs::create_dir_all(&dir).is_err() {
-        return; // 副本失败不影响接管（SQLite 里已有）
+        return; // a copy failure does not break the takeover (SQLite already has it)
     }
     for (path, content) in files {
         let name = std::path::Path::new(path)
@@ -262,11 +270,11 @@ mod tests {
         enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home).unwrap();
         let rewritten = std::fs::read_to_string(&settings).unwrap();
         let v: Value = serde_json::from_str(&rewritten).unwrap();
-        assert_eq!(v["model"], "opus"); // 其余字段保留
+        assert_eq!(v["model"], "opus"); // other fields preserved
         assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
         assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "kw-ag-claude-abcd");
 
-        // 还原 = 逐字节写回
+        // restore = write back byte for byte
         disable(&aux, "claude", &home).unwrap();
         let restored = std::fs::read_to_string(&settings).unwrap();
         assert_eq!(
@@ -316,7 +324,7 @@ mod tests {
         enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap();
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
-        assert!(toml.contains("wire_api = \"responses\"")); // 其余行不动
+        assert!(toml.contains("wire_api = \"responses\"")); // other lines untouched
         let auth: Value =
             serde_json::from_str(&std::fs::read_to_string(codex_dir.join("auth.json")).unwrap())
                 .unwrap();
@@ -344,7 +352,7 @@ mod tests {
         std::fs::write(codex_dir.join("config.toml"), "model = \"m\"\n").unwrap();
         std::fs::write(codex_dir.join("auth.json"), "{}").unwrap();
         assert!(enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).is_err());
-        // 失败后不留备份（逃生门不被污染）
+        // no backup left behind on failure (escape hatch stays clean)
         assert!(aux.load_takeover_backup("codex").is_none());
     }
 
@@ -353,7 +361,7 @@ mod tests {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         assert!(enable(&aux, "claude", "k", 8317, &home).is_err());
-        // 未接管时 disable 幂等成功
+        // disable before any takeover succeeds idempotently
         assert!(disable(&aux, "claude", &home).is_ok());
     }
 
@@ -373,10 +381,10 @@ mod tests {
         let env = std::fs::read_to_string(gemini_dir.join(".env")).unwrap();
         assert!(env.contains("GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\n"));
         assert!(env.contains("GEMINI_API_KEY=kw-ag-gemini-abcd\n"));
-        assert!(env.contains("GOOGLE_GENAI_USE_VERTEXAI=false")); // 其余行不动
-        assert!(env.contains("# 代理注释")); // 注释保留
+        assert!(env.contains("GOOGLE_GENAI_USE_VERTEXAI=false")); // other lines untouched
+        assert!(env.contains("# 代理注释")); // comment preserved
 
-        // 还原 = 逐字节写回
+        // restore = write back byte for byte
         disable(&aux, "gemini", &home).unwrap();
         assert_eq!(
             std::fs::read_to_string(gemini_dir.join(".env")).unwrap(),
@@ -389,7 +397,7 @@ mod tests {
     fn gemini_takeover_creates_missing_env() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
-        // ~/.gemini/.env 整个不存在也能接管（目录 + 文件自动创建）
+        // takeover works even when ~/.gemini/.env is missing entirely (dir + file are created automatically)
         enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
         let env = std::fs::read_to_string(home.join(".gemini").join(".env")).unwrap();
         assert_eq!(

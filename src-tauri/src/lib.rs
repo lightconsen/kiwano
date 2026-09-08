@@ -126,9 +126,10 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
     });
 }
 
-// ── Tray / autostart (tech.md §三 P1：托盘 + 关闭到托盘 + 开机自启) ──
+// ── Tray / autostart (tech.md §3 P1: tray + close-to-tray + launch at login) ──
 
-/// 把持久化的 autostart 设置同步到系统登录项（幂等，失败静默——下次启动再对齐）。
+/// Sync the persisted autostart setting to the OS login items (idempotent;
+/// failures are silent — realigned on next launch).
 fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
     use tauri_plugin_autostart::ManagerExt;
     let mgr = app.autolaunch();
@@ -162,7 +163,7 @@ fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
                     let _ = w.set_focus();
                 }
             }
-            "quit" => app.exit(0), // 守护进程不随 GUI 退出（tech.md §2.4 B）
+            "quit" => app.exit(0), // the daemon outlives the GUI (tech.md §2.4 B)
             _ => {}
         })
         .build(app)?;
@@ -244,7 +245,7 @@ fn update_settings(
     patch: serde_json::Value,
 ) -> Result<vm::SettingsVm, String> {
     let vm = vm::update_settings(&state.store, &state.aux, &patch)?;
-    // autostart 变更实时同步到系统登录项
+    // apply autostart changes to the OS login items immediately
     if let Some(v) = patch.get("autostart").and_then(|v| v.as_bool()) {
         sync_autostart(&app, v);
     }
@@ -270,7 +271,7 @@ fn get_footer_stats(state: State<AppState>) -> Result<vm::FooterStatsVm, String>
     vm::build_footer_stats(&state.store, &state.aux)
 }
 
-// ── Agent 策略（tech.md §4.7：策略类型 / 候选排序）──
+// ── Agent strategies (tech.md §4.7: strategy types / candidate ordering) ──
 
 #[tauri::command]
 fn get_agent_routes(state: State<AppState>) -> Result<Vec<vm::AgentRouteVm>, String> {
@@ -300,22 +301,22 @@ fn reorder_agent_bindings(
     Ok(())
 }
 
-/// Hub 目录同步（网络 IO → async 命令线程执行，不阻塞 UI）。
+/// Hub catalog sync (network IO → runs on the async command thread, no UI blocking).
 #[tauri::command(async)]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     let hub_url = vm::ui_settings(&state.aux).hub_url;
     sync::sync_from_hub(&state.aux, &hub_url)
 }
 
-// ── 多 Key 轮询（spec §4.1 P1）──
+// ── Multi-key rotation (spec §4.1 P1) ──
 
-/// 某 Provider 的轮询 Key 列表（主 Key 之外的部分）。
+/// A provider's rotation keys (the ones besides the primary key).
 #[tauri::command]
 fn list_api_keys(state: State<AppState>, provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
     vm::list_api_keys(&state.store, &provider_id)
 }
 
-/// 追加轮询 Key；触发 /reload 使网关 Key 池即时生效。
+/// Append a rotation key; triggers /reload so the gateway key pool picks it up immediately.
 #[tauri::command]
 fn add_api_key(
     state: State<AppState>,
@@ -335,17 +336,18 @@ fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
     Ok(ok)
 }
 
-// ── 费用预警（spec §4.1 P1：用量达每期上限推送通知）──
+// ── Cost alerts (spec §4.1 P1: notify when usage hits the per-period limit) ──
 
-/// 前端定时轮询；命中且未通知过的返回给前端转系统通知（KV 去重防重发）。
+/// Polled periodically by the frontend; hits not yet notified are returned so
+/// the frontend can raise a system notification (KV dedup prevents repeats).
 #[tauri::command]
 fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, String> {
     vm::check_usage_alerts(&state.store, &state.aux)
 }
 
-// ── 配置分享（spec §4.1 P1：导出/导入一键配置方案 JSON）──
+// ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──
 
-/// 前端先用 dialog 插件选好目标路径，这里写文件（文件 IO → async）。
+/// The frontend picks the target path via the dialog plugin first; this writes the file (file IO → async).
 #[tauri::command(async)]
 fn export_config(state: State<AppState>, path: String) -> Result<usize, String> {
     let json = share::export_config(&state.store)?;
@@ -427,7 +429,7 @@ pub fn run() {
             });
             spawn_watchdog(app.handle().clone());
 
-            // 托盘 + 登录项（设置里的 autostart/close_to_tray 从此真实生效）
+            // Tray + login items (the autostart/close_to_tray settings become real from here on)
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
@@ -435,9 +437,10 @@ pub fn run() {
             setup_tray(app, data_port)?;
             sync_autostart(app.handle(), ui.autostart);
 
-            // Hub 目录暂用本地 JSON（bundled catalog.json + hub_cache）；
-            // 网络同步协议 v0 已实现（sync.rs / sync_hub 命令）但停用，
-            // 待真实 Hub 上线后恢复启动同步与设置页入口。
+            // Hub catalog uses local JSON for now (bundled catalog.json +
+            // hub_cache); network sync protocol v0 is implemented (sync.rs /
+            // sync_hub command) but disabled — startup sync and the
+            // settings-page entry return once a real Hub is live.
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -467,7 +470,8 @@ pub fn run() {
             import_config,
         ])
         .on_window_event(|window, event| {
-            // 关闭到托盘：拦截 CloseRequested，隐藏窗口而非退出（设置可关）
+            // Close-to-tray: intercept CloseRequested and hide the window
+            // instead of quitting (toggleable in settings)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<AppState>();
                 if vm::ui_settings(&state.aux).close_to_tray {

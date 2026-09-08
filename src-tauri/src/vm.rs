@@ -101,9 +101,10 @@ fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
 }
 
-/// 当前重置周期的起点（RFC3339 UTC，供 `ts >= ?` 过滤）与去重键。
-/// 返回 (since, period_key)；reset_period NULL = 不重置 → (None, "all")。
-/// 因子说明：1970-01-01 是周四，`(days + 3) % 7 == 0` 即周一。
+/// Start of the current reset period (RFC3339 UTC, for `ts >= ?` filters)
+/// plus a dedup key. Returns (since, period_key); reset_period NULL = no
+/// reset → (None, "all"). Day math: 1970-01-01 was a Thursday, so
+/// `(days + 3) % 7 == 0` lands on Monday.
 fn period_start(epoch_secs: i64, reset_period: Option<&str>) -> (Option<String>, String) {
     let days = epoch_secs.div_euclid(86_400);
     let (y, m, _) = civil_from_days(days);
@@ -119,7 +120,7 @@ fn period_start(epoch_secs: i64, reset_period: Option<&str>) -> (Option<String>,
             let key = format!("{y:04}");
             (Some(format!("{key}-01-01T00:00:00Z")), key)
         }
-        // monthly 与其他意外值一律按月
+        // monthly and any unexpected values all fall back to monthly
         _ => {
             let key = format!("{y:04}-{m:02}");
             (Some(format!("{key}-01T00:00:00Z")), key)
@@ -160,7 +161,7 @@ impl Aux {
              )",
             [],
         )?;
-        // 接管备份（tech.md §4.3-3）：files = JSON [[path, content], ...]
+        // takeover backups (tech.md §4.3-3): files = JSON [[path, content], ...]
         conn.execute(
             "CREATE TABLE IF NOT EXISTS takeover_backups (
                  agent         TEXT PRIMARY KEY,
@@ -169,7 +170,7 @@ impl Aux {
              )",
             [],
         )?;
-        // Hub 目录缓存（tech.md §三 Hub 同步）：单行缓存，payload = CatalogListVm JSON
+        // Hub catalog cache (tech.md §3 Hub sync): single-row cache, payload = CatalogListVm JSON
         conn.execute(
             "CREATE TABLE IF NOT EXISTS hub_cache (
                  id        INTEGER PRIMARY KEY CHECK (id = 1),
@@ -236,7 +237,7 @@ impl Aux {
         Ok(())
     }
 
-    /// 通用 KV 读取（app_settings 表，费用预警去重等用）。
+    /// Generic KV read (app_settings table; used for cost-alert dedup etc.).
     pub fn get_setting(&self, key: &str) -> Option<String> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         conn.query_row(
@@ -257,7 +258,7 @@ impl Aux {
         Ok(())
     }
 
-    /// Hub 目录缓存：单行 upsert（RFC3339 synced_at）。
+    /// Hub catalog cache: single-row upsert (RFC3339 synced_at).
     pub fn save_hub_cache(&self, payload: &str, synced_at: &str) -> rusqlite::Result<()> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         conn.execute(
@@ -268,7 +269,7 @@ impl Aux {
         Ok(())
     }
 
-    /// `(payload, synced_at)`；从未同步过则 None。
+    /// `(payload, synced_at)`; None when never synced.
     pub fn load_hub_cache(&self) -> Option<(String, String)> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         conn.query_row(
@@ -426,7 +427,7 @@ pub struct CatalogListVm {
     pub entries: Vec<CatalogEntryVm>,
 }
 
-/// 手动/启动时 Hub 同步的结果（UI 反馈用）。
+/// Result of a manual/startup Hub sync (for UI feedback).
 #[derive(Serialize)]
 pub struct SyncReportVm {
     pub fetched: i64,
@@ -493,7 +494,7 @@ pub struct SettingsVm {
     pub auto_failover: bool,
     pub request_logs: bool,
     pub telemetry: bool,
-    /// 费用预警开关（spec §4.1 P1）：用量达每期上限时系统通知
+    /// Cost-alert toggle (spec §4.1 P1): system notification when usage hits the per-period limit
     #[serde(default = "default_true")]
     pub cost_alert: bool,
     pub hub_logged_in: bool,
@@ -622,7 +623,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         }
     }
 
-    // agent → bindings (to read priorities for 备用 #N badges)
+    // agent → bindings (to read priorities for the backup #N badges)
     let mut bindings_by_agent: HashMap<String, Vec<Binding>> = HashMap::new();
     for agent in primary.keys() {
         if let Ok(bs) = store.bindings_for_agent(agent) {
@@ -706,9 +707,9 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
     Ok(vms)
 }
 
-// ── Agent 策略视图（tech.md §4.7：策略类型 + 候选排序）──
+// ── Agent strategy views (tech.md §4.7: strategy types + candidate ordering) ──
 
-/// agent_strategies + agent_bindings 的 UI 投影。
+/// UI projection of agent_strategies + agent_bindings.
 #[derive(Serialize)]
 pub struct BindingVm {
     pub provider_id: String,
@@ -725,13 +726,13 @@ pub struct AgentRouteVm {
     pub agent: String,
     /// single | failover | roundrobin | timewindow | quota
     pub strategy: String,
-    /// 策略 JSON 载荷（quota: {"limit","unit"}；其余 null）
+    /// Strategy JSON payload (quota: {"limit","unit"}; null otherwise)
     pub config: Option<String>,
-    /// 候选按优先级升序（下标 0 = 主选）
+    /// Candidates in ascending priority order (index 0 = primary)
     pub bindings: Vec<BindingVm>,
 }
 
-/// 每个 Agent 一行（仅有绑定的 Agent），策略缺省为 single。
+/// One row per Agent (only agents with bindings); strategy defaults to single.
 pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
     let providers: HashMap<String, Provider> = store
         .list_providers()
@@ -780,7 +781,7 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
     Ok(routes)
 }
 
-/// 更新 Agent 策略类型（+ 可选 JSON config）；未知类型报错。
+/// Update an Agent's strategy type (+ optional JSON config); unknown types error.
 pub fn set_agent_strategy(
     store: &Store,
     agent: &str,
@@ -793,8 +794,9 @@ pub fn set_agent_strategy(
     Ok(())
 }
 
-/// 候选重排：给定 provider_id 顺序 → 重写 priority 0..n（weight/窗口/启用位保留）。
-/// 未列出的绑定不动；未知的 provider_id 报错。
+/// Candidate reorder: given a provider_id order → rewrite priority 0..n
+/// (weight/window/enabled bits preserved). Unlisted bindings stay; unknown
+/// provider_ids error.
 pub fn reorder_agent_bindings(
     store: &Store,
     agent: &str,
@@ -884,8 +886,9 @@ fn derive_health(p: &Provider, latency: Option<i64>) -> HealthVm {
     }
 }
 
-/// 归一化用户录入的每期上限单位（tech.md §2.4 A）。设定了上限而未选单位时
-/// 兼容旧行为按“请求”计；未设上限则单位无意义，落 NULL。
+/// Normalize the user-entered per-period limit unit (tech.md §2.4 A). With a
+/// limit set but no unit chosen, fall back to the legacy behavior of counting
+/// "requests"; with no limit the unit is meaningless and stored as NULL.
 fn normalize_limit_unit(unit: Option<&str>, has_limit: bool) -> Option<String> {
     if !has_limit {
         return None;
@@ -908,7 +911,8 @@ fn usage_vm(
 ) -> Option<UsageVm> {
     let t = totals?;
     let quota = match (p.billing, p.limit_unit.as_deref()) {
-        // ¥ 金额上限暂无价目表可估算（Hub 价格表落地后接入），环不展示
+        // CNY amount limits can't be estimated without a price table (wired
+        // up when Hub price tables land); ring not shown
         (Billing::Subscription, Some("cny")) => None,
         (Billing::Subscription, unit) => p.period_limit.map(|limit| {
             let used = match unit {
@@ -1018,8 +1022,8 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         store
             .upsert_strategy(agent, StrategyType::Single, None)
             .map_err(e2s)?;
-        // "保存并启用" → becomes the primary for the chosen agents; the
-        // previous primary is demoted to 备用 #1.
+        // "Save & Enable" → becomes the primary for the chosen agents; the
+        // previous primary is demoted to backup #1.
         let prev = store.primary_provider_id(agent).map_err(e2s)?;
         store
             .upsert_binding(&Binding {
@@ -1069,7 +1073,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     })
 }
 
-/// 启用 = make this provider the primary of every agent it is bound to.
+/// Enable = make this provider the primary of every agent it is bound to.
 pub fn enable_provider(store: &Store, id: &str) -> Result<(), String> {
     let agents: Vec<String> = store
         .bound_agents()
@@ -1118,8 +1122,10 @@ pub fn enable_provider(store: &Store, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 更新供应商：改 providers 行 + 重绑 agents（新集合 = 主选，被移除的解绑）。
-/// api_key 留空表示保持原 Key 不变。返回刷新后的 VM（重新聚合，保证徽章/备注一致）。
+/// Update provider: rewrite the providers row + rebind agents (the new set
+/// becomes primary; removed ones are unbound). An empty api_key means keep
+/// the existing key. Returns the refreshed VM (re-aggregated so badges and
+/// notes stay consistent).
 pub fn update_provider(
     store: &Store,
     aux: &Aux,
@@ -1153,7 +1159,8 @@ pub fn update_provider(
     p.updated_at = rfc3339(unix_now());
     store.update_provider(&p).map_err(e2s)?;
 
-    // 重绑：旧集合中不在新集合的解绑；新集合走 add 同款主选逻辑
+    // Rebind: unbind old agents not in the new set; new agents use the same
+    // primary logic as add
     let new_set: std::collections::HashSet<&str> =
         input.agents.iter().map(String::as_str).collect();
     let old_agents: Vec<String> = store
@@ -1211,7 +1218,8 @@ pub fn update_provider(
         .ok_or_else(|| "provider vanished after update".to_string())
 }
 
-/// 删除供应商。若它是某 Agent 的主选，自动把该 Agent 候选集中最优的下一个提升为主选。
+/// Delete a provider. If it is some Agent's primary, the next-best candidate
+/// in that Agent's list is promoted automatically.
 pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
     let mut affected: Vec<String> = Vec::new();
     for a in store.bound_agents().map_err(e2s)? {
@@ -1262,7 +1270,8 @@ pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
 
 // ── Settings ──
 
-/// 读取 UI 设置（托盘/自启等 Rust 侧逻辑用；`build_settings` 的无 store 部分）。
+/// Read UI settings (used by Rust-side logic like tray/autostart; the
+/// store-free part of `build_settings`).
 pub(crate) fn ui_settings(aux: &Aux) -> SettingsVm {
     aux.load_settings_json()
         .and_then(|v| serde_json::from_value(v).ok())
@@ -1325,7 +1334,8 @@ pub fn set_agent_takeover(
         let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
         let key = format!("kw-ag-{agent}-{rand}");
         store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
-        // 改写 Agent 配置（备份→base_url→占位 Key）；失败回滚 Key 登记保持一致
+        // Rewrite the Agent config (backup → base_url → placeholder key); on
+        // failure roll back the key registration to stay consistent
         if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, &home) {
             let _ = store.delete_placeholder_key(&key);
             return Err(e);
@@ -1341,12 +1351,12 @@ pub fn set_agent_takeover(
     Ok(())
 }
 
-// ── 多 Key 轮询（spec §4.1 P1：同 Provider 多 API Key 自动轮换）──
+// ── Multi-key rotation (spec §4.1 P1: auto-rotate multiple API keys per provider) ──
 
 #[derive(Serialize)]
 pub struct ApiKeyVm {
     pub id: i64,
-    /// 完整 Key（本地应用，前端负责掩码展示）
+    /// Full key (local app; the frontend handles masking)
     pub api_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -1371,7 +1381,7 @@ pub fn list_api_keys(store: &Store, provider_id: &str) -> Result<Vec<ApiKeyVm>, 
         .map_err(e2s)
 }
 
-/// 追加轮询 Key（providers.api_key 为主 Key，恒在池首位）。
+/// Append a rotation key (providers.api_key is the primary key, always first in the pool).
 pub fn add_api_key(
     store: &Store,
     provider_id: &str,
@@ -1409,7 +1419,7 @@ pub fn delete_api_key(store: &Store, id: i64) -> Result<bool, String> {
     store.delete_api_key(id).map_err(e2s)
 }
 
-// ── 费用预警（spec §4.1 P1：用量达每期上限推送通知）──
+// ── Cost alerts (spec §4.1 P1: notify when usage hits the per-period limit) ──
 
 #[derive(Serialize)]
 pub struct UsageAlertVm {
@@ -1421,9 +1431,11 @@ pub struct UsageAlertVm {
     pub unit: String,
 }
 
-/// 检查启用中 Provider 的本期用量是否达到用户设定的每期上限（period_limit）。
-/// 命中且本周期尚未通知过的写入去重键并返回（前端转系统通知）。
-/// ¥ 金额上限暂无价目表（Hub 价格表 P1），跳过不误报。
+/// Check whether enabled providers' usage this period has reached the
+/// user-set per-period limit (period_limit). Hits not yet notified this
+/// period are recorded under a dedup key and returned (the frontend turns
+/// them into system notifications). CNY amount limits have no price table
+/// yet (Hub price tables, P1) and are skipped to avoid false positives.
 pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>, String> {
     if !ui_settings(aux).cost_alert {
         return Ok(Vec::new());
@@ -1440,7 +1452,7 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         let unit = match p.limit_unit.as_deref() {
             Some("wan_tokens") => "wan_tokens",
             Some("cny") => continue,
-            // NULL 归一化为 requests（与环形百分比同源，兼容 v1 行）
+            // NULL normalizes to requests (same source as the ring percentage, compatible with v1 rows)
             _ => "requests",
         };
         let (since, period_key) = period_start(now, p.reset_period.as_deref());
@@ -1458,7 +1470,7 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         if used < limit {
             continue;
         }
-        // 每个重置周期只通知一次（app_settings KV 去重）
+        // Notify at most once per reset period (app_settings KV dedup)
         let dedup_key = format!("alert_sent:{}", p.id);
         if aux.get_setting(&dedup_key).as_deref() == Some(period_key.as_str()) {
             continue;
@@ -1587,7 +1599,8 @@ pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, Str
     let today = day_key(unix_now());
     let since = format!("{today}T00:00:00Z");
     let t = store.usage_totals(None, Some(&since)).map_err(e2s)?;
-    // hub_synced = 今天同步过目录（缓存时间戳前 10 位即日期）
+    // hub_synced = catalog synced today (first 10 chars of the cache
+    // timestamp are the date)
     let hub_synced = aux
         .load_hub_cache()
         .map(|(_, ts)| ts.starts_with(&today))
@@ -1600,7 +1613,8 @@ pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, Str
     })
 }
 
-/// 货架目录：Hub 缓存优先，未同步/解析失败时回退随包静态 catalog.json。
+/// Catalog shelf: Hub cache first; fall back to the bundled static
+/// catalog.json when never synced or on parse failure.
 pub fn load_catalog(aux: &Aux) -> CatalogListVm {
     if let Some((payload, _)) = aux.load_hub_cache() {
         if let Ok(list) = serde_json::from_str::<CatalogListVm>(&payload) {
@@ -1936,9 +1950,9 @@ mod tests {
         // takeovers untouched by patch
         assert!(v1.takeovers.iter().all(|t| !t.enabled));
 
-        // takeover appears in settings and persists（tmp home，不碰真实配置）
+        // takeover appears in settings and persists (tmp home, real config untouched)
         let tmp = tempfile::tempdir().unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap_err(); // 无 ~/.claude/settings.json → 拒绝且不留 Key
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap_err(); // no ~/.claude/settings.json → rejected and no key left behind
         assert!(s
             .list_placeholder_keys()
             .unwrap()
@@ -1957,7 +1971,7 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .starts_with("kw-ag-claude-"));
-        // 配置被真实改写 + 还原逃生门
+        // config actually rewritten + restored via the escape hatch
         let env: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
@@ -2053,7 +2067,7 @@ mod tests {
             .unwrap();
         }
 
-        // 缺省策略为 single
+        // default strategy is single
         let routes = build_agent_routes(&s).unwrap();
         assert_eq!(routes.len(), 1);
         let r = &routes[0];
@@ -2063,7 +2077,7 @@ mod tests {
         assert_eq!(r.bindings[0].provider_name, "Alpha");
         assert_eq!(r.bindings[0].logo_char, "A");
 
-        // 改策略 + 重排 → priority 重写、weight 保留
+        // change strategy + reorder → priorities rewritten, weights preserved
         set_agent_strategy(&s, "claude", "failover", None).unwrap();
         assert!(set_agent_strategy(&s, "claude", "bogus", None).is_err());
         reorder_agent_bindings(&s, "claude", &["b1".into(), "a1".into()]).unwrap();
@@ -2077,7 +2091,7 @@ mod tests {
         assert_eq!(r.bindings[1].provider_id, "a1");
         assert_eq!(r.bindings[1].priority, 1);
 
-        // quota config 透传
+        // quota config passes through
         set_agent_strategy(
             &s,
             "claude",
@@ -2118,13 +2132,13 @@ mod tests {
         p.reset_period = Some("monthly".into());
         s.insert_provider(&p).unwrap();
 
-        // 40/100 → 未达阈值
+        // 40/100 → below threshold
         for _ in 0..40 {
             s.record_usage(&usage_row("kimi-1")).unwrap();
         }
         assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
 
-        // 100/100 → 命中
+        // 100/100 → threshold hit
         for _ in 0..60 {
             s.record_usage(&usage_row("kimi-1")).unwrap();
         }
@@ -2133,10 +2147,10 @@ mod tests {
         assert_eq!(alerts[0].provider_id, "kimi-1");
         assert_eq!(alerts[0].unit, "requests");
 
-        // 同周期去重：第二次检查不再返回
+        // same-period dedup: the second check returns nothing
         assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
 
-        // 关闭开关 → 静默
+        // toggle off → silent
         let patch = serde_json::json!({ "cost_alert": false });
         update_settings(&s, &aux, &patch).unwrap();
         assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
@@ -2148,15 +2162,15 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
 
         let mut payg = provider("ds-1", "DeepSeek", Billing::Metered);
-        payg.period_limit = Some(5.0); // NULL unit 归一化为 requests
+        payg.period_limit = Some(5.0); // NULL unit normalizes to requests
         s.insert_provider(&payg).unwrap();
 
         let mut cny = provider("glm-1", "GLM", Billing::Subscription);
         cny.period_limit = Some(50.0);
-        cny.limit_unit = Some("cny".into()); // 无价目表，不估算
+        cny.limit_unit = Some("cny".into()); // no price table, no estimate
         s.insert_provider(&cny).unwrap();
 
-        // 各 6 次请求：payg 达阈值触发；cny 跳过
+        // 6 requests each: payg hits the threshold and alerts; cny is skipped
         for _ in 0..6 {
             s.record_usage(&usage_row("ds-1")).unwrap();
             s.record_usage(&usage_row("glm-1")).unwrap();
@@ -2168,7 +2182,7 @@ mod tests {
 
     #[test]
     fn period_start_keys() {
-        // 2026-09-07T12:34:56Z（周一）
+        // 2026-09-07T12:34:56Z (Monday)
         let t = 1_788_784_496_i64;
         let (since, key) = period_start(t, Some("monthly"));
         assert_eq!(since.as_deref(), Some("2026-09-01T00:00:00Z"));
@@ -2179,7 +2193,7 @@ mod tests {
         let (since, key) = period_start(t, Some("yearly"));
         assert_eq!(since.as_deref(), Some("2026-01-01T00:00:00Z"));
         assert_eq!(key, "2026");
-        // 不重置 → 全量累计
+        // no reset → all-time totals
         let (since, key) = period_start(t, None);
         assert_eq!(since, None);
         assert_eq!(key, "all");

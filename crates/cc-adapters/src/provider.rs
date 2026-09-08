@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-// SSOT 模式：不再写供应商副本文件
+// SSOT mode: provider copy files are no longer written
 
-/// 自定义端点条目（按 URL 去重存储）。
+/// Custom endpoint entry (stored deduplicated by URL).
 ///
 /// Kiwano: inlined from cc-switch `crate::settings::CustomEndpoint` so this
 /// crate does not depend on the settings module.
@@ -25,7 +25,7 @@ pub struct CustomEndpoint {
     pub last_used: Option<i64>,
 }
 
-/// 供应商结构体
+/// Provider struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -43,27 +43,27 @@ pub struct Provider {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "sortIndex")]
     pub sort_index: Option<usize>,
-    /// 备注信息
+    /// Notes
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// 供应商元数据（不写入 live 配置，仅存于 ~/.cc-switch/config.json）
+    /// Provider metadata (not written to live config; stored only in ~/.cc-switch/config.json)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<ProviderMeta>,
-    /// 图标名称（如 "openai", "anthropic"）
+    /// Icon name (e.g. "openai", "anthropic")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 图标颜色（Hex 格式，如 "#00A67E"）
+    /// Icon color (hex, e.g. "#00A67E")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "iconColor")]
     pub icon_color: Option<String>,
-    /// 是否加入故障转移队列
+    /// Whether the provider joins the failover queue
     #[serde(default)]
     #[serde(rename = "inFailoverQueue")]
     pub in_failover_queue: bool,
 }
 
 impl Provider {
-    /// 从现有ID创建供应商
+    /// Create a provider with an existing ID
     pub fn with_id(
         id: String,
         name: String,
@@ -155,14 +155,14 @@ impl Provider {
     }
 }
 
-/// 供应商管理器
+/// Provider manager
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderManager {
     pub providers: IndexMap<String, Provider>,
     pub current: String,
 }
 
-/// 用量查询脚本配置
+/// Usage query script config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageScript {
     pub enabled: bool,
@@ -170,53 +170,53 @@ pub struct UsageScript {
     pub code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
-    /// 用量查询专用的 API Key（通用模板使用）
+    /// API key dedicated to usage queries (used by the generic template)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
-    /// 用量查询专用的 Base URL（通用和 NewAPI 模板使用）
+    /// Base URL dedicated to usage queries (used by the generic and NewAPI templates)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
-    /// 访问令牌（用于需要登录的接口，NewAPI 模板使用）
+    /// Access token (for endpoints that require login; used by the NewAPI template)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "accessToken")]
     pub access_token: Option<String>,
-    /// 用户ID（用于需要用户标识的接口，NewAPI 模板使用）
+    /// User ID (for endpoints that need a user identifier; used by the NewAPI template)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "userId")]
     pub user_id: Option<String>,
-    /// 模板类型（用于后端判断验证规则）
+    /// Template type (lets the backend decide validation rules)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "templateType")]
     pub template_type: Option<String>,
-    /// 自动查询间隔（单位：分钟，0 表示禁用自动查询）
+    /// Auto-query interval (minutes; 0 disables auto queries)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "autoQueryInterval")]
     pub auto_query_interval: Option<u64>,
-    /// Coding Plan 供应商标识（如 "kimi", "zhipu", "minimax"）
+    /// Coding Plan provider identifier (e.g. "kimi", "zhipu", "minimax")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "codingPlanProvider")]
     pub coding_plan_provider: Option<String>,
-    /// 火山方舟控制面 OpenAPI 的 AccessKey ID（用量查询签名用，与推理 Key 是两套凭据）
+    /// Volcano Ark control-plane OpenAPI AccessKey ID (signs usage queries; separate credential from the inference key)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "accessKeyId")]
     pub access_key_id: Option<String>,
-    /// 火山方舟控制面 OpenAPI 的 SecretAccessKey（同上）
+    /// Volcano Ark control-plane OpenAPI SecretAccessKey (same as above)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "secretAccessKey")]
     pub secret_access_key: Option<String>,
-    /// 智谱团队套餐（Team Plan）的组织 ID（用量查询请求头 bigmodel-organization）
+    /// Zhipu Team Plan organization ID (usage query header bigmodel-organization)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "teamOrganizationId")]
     pub team_organization_id: Option<String>,
-    /// 智谱团队套餐（Team Plan）的项目 ID（用量查询请求头 bigmodel-project）
+    /// Zhipu Team Plan project ID (usage query header bigmodel-project)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "teamProjectId")]
     pub team_project_id: Option<String>,
 }
 
-/// 用量数据
+/// Usage data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageData {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,42 +240,42 @@ pub struct UsageData {
     pub unit: Option<String>,
 }
 
-/// 用量查询结果（支持多套餐）
+/// Usage query result (supports multiple plans)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageResult {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Vec<UsageData>>, // 支持返回多个套餐
+    pub data: Option<Vec<UsageData>>, // supports returning multiple plans
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// 认证绑定来源
+/// Auth binding source
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthBindingSource {
-    /// 从 provider 自身配置读取认证信息（默认）
+    /// Read credentials from the provider's own config (default)
     #[default]
     ProviderConfig,
-    /// 使用托管账号认证（如 GitHub Copilot OAuth）
+    /// Use managed-account auth (e.g. GitHub Copilot OAuth)
     ManagedAccount,
 }
 
-/// 通用认证绑定
+/// Generic auth binding
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthBinding {
-    /// 认证来源
+    /// Auth source
     #[serde(default)]
     pub source: AuthBindingSource,
-    /// 托管认证供应商标识（如 github_copilot）
+    /// Managed auth provider identifier (e.g. github_copilot)
     #[serde(rename = "authProvider", skip_serializing_if = "Option::is_none")]
     pub auth_provider: Option<String>,
-    /// 托管账号 ID；为空表示跟随该认证供应商的默认账号
+    /// Managed account ID; empty means follow the auth provider's default account
     #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
 }
 
-/// Claude Desktop 3P 写入模式。
+/// Claude Desktop 3P write mode.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ClaudeDesktopMode {
@@ -283,21 +283,21 @@ pub enum ClaudeDesktopMode {
     Proxy,
 }
 
-/// Claude Desktop 本地路由模式下暴露给 Desktop 的安全模型路由。
+/// Claude-safe model routes exposed to Desktop in local-routing mode.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeDesktopModelRoute {
-    /// 真实上游模型名，只保存在 CC Switch 内部，不写入 Claude Desktop profile。
+    /// Real upstream model name; kept internal to CC Switch, never written to the Claude Desktop profile.
     pub model: String,
-    /// Claude Desktop 模型菜单显示名；写入 profile 的 `labelOverride`。
+    /// Display name for the Claude Desktop model menu; written to the profile's `labelOverride`.
     #[serde(rename = "labelOverride", skip_serializing_if = "Option::is_none")]
     pub label_override: Option<String>,
-    /// Claude Desktop 3P 识别的 1M 上下文能力标记。
+    /// 1M-context capability marker recognized by Claude Desktop 3P.
     #[serde(rename = "supports1m", skip_serializing_if = "Option::is_none")]
     pub supports_1m: Option<bool>,
 }
 
-/// Codex Responses -> Chat Completions 的 reasoning 能力描述。
+/// Reasoning capability description for Codex Responses -> Chat Completions.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct CodexChatReasoningConfig {
     #[serde(rename = "supportsThinking", skip_serializing_if = "Option::is_none")]
@@ -310,15 +310,19 @@ pub struct CodexChatReasoningConfig {
     pub effort_param: Option<String>,
     #[serde(rename = "effortValueMode", skip_serializing_if = "Option::is_none")]
     pub effort_value_mode: Option<String>,
-    /// 声明性字段：标注上游 reasoning 的回传位置（reasoning_content / reasoning /
-    /// reasoning_details / think_tags）。当前响应侧 `extract_reasoning_field_text`
-    /// 靠穷举字段提取、并不读取本字段；保留作文档说明与未来按格式分发（如 think_tags）的预留。
+    /// Declarative field: marks where upstream reasoning is returned
+    /// (reasoning_content / reasoning / reasoning_details / think_tags). The
+    /// response-side `extract_reasoning_field_text` currently extracts by
+    /// trying fields exhaustively and does not read this field; it is kept as
+    /// documentation and reserved for future per-format dispatch (e.g. think_tags).
     #[serde(rename = "outputFormat", skip_serializing_if = "Option::is_none")]
     pub output_format: Option<String>,
-    /// 运行时字段（不持久化、不进 meta）：当前请求模型在平台侧声明的合法 effort
-    /// 档位，由 resolve 按请求模型从供应商 `settings_config.modelCatalog` 的
-    /// `reasoningLevels`（逐模型声明，见 #6228）查表填充。仅 "zen" 值映射消费：
-    /// Some → 钳到合法档；None → 不发 effort 字段（模型未收录或为 toggle 型）。
+    /// Runtime field (not persisted, not part of meta): the valid effort tiers
+    /// the current request's model declares platform-side, looked up by resolve
+    /// per request model from the provider `settings_config.modelCatalog`
+    /// `reasoningLevels` (declared per model, see #6228). Only the "zen" value
+    /// mapping consumes it: Some → clamp to a valid tier; None → omit the
+    /// effort field (model not listed, or a toggle-style model).
     #[serde(skip)]
     pub effort_levels: Option<Vec<String>>,
 }
@@ -338,70 +342,70 @@ impl LocalProxyRequestOverrides {
     }
 }
 
-/// 供应商元数据
+/// Provider metadata
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderMeta {
-    /// 自定义端点列表（按 URL 去重存储）
+    /// Custom endpoint list (deduplicated by URL)
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub custom_endpoints: HashMap<String, CustomEndpoint>,
-    /// 是否在写入 live 时应用通用配置片段
+    /// Whether to apply the common config snippet when writing live config
     #[serde(
         rename = "commonConfigEnabled",
         skip_serializing_if = "Option::is_none"
     )]
     pub common_config_enabled: Option<bool>,
-    /// Claude Desktop 3P 写入模式：direct（直连）或 proxy（预留）
+    /// Claude Desktop 3P write mode: direct or proxy (reserved)
     #[serde(rename = "claudeDesktopMode", skip_serializing_if = "Option::is_none")]
     pub claude_desktop_mode: Option<ClaudeDesktopMode>,
-    /// Claude Desktop proxy 模式的模型路由映射：Claude-safe route -> upstream model。
+    /// Model route map for Claude Desktop proxy mode: Claude-safe route -> upstream model.
     #[serde(
         default,
         rename = "claudeDesktopModelRoutes",
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub claude_desktop_model_routes: HashMap<String, ClaudeDesktopModelRoute>,
-    /// 用量查询脚本配置
+    /// Usage query script config
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_script: Option<UsageScript>,
-    /// 请求地址管理：测速后自动选择最佳端点
+    /// Endpoint management: auto-select the best endpoint after speed testing
     #[serde(rename = "endpointAutoSelect", skip_serializing_if = "Option::is_none")]
     pub endpoint_auto_select: Option<bool>,
-    /// 合作伙伴标记（前端使用 isPartner，保持字段名一致）
+    /// Partner flag (frontend uses isPartner; field name kept in sync)
     #[serde(rename = "isPartner", skip_serializing_if = "Option::is_none")]
     pub is_partner: Option<bool>,
-    /// 合作伙伴促销 key，用于识别 PackyCode 等特殊供应商
+    /// Partner promotion key, used to identify special providers such as PackyCode
     #[serde(
         rename = "partnerPromotionKey",
         skip_serializing_if = "Option::is_none"
     )]
     pub partner_promotion_key: Option<String>,
-    /// 成本倍数（用于计算实际成本）
+    /// Cost multiplier (used to compute actual cost)
     #[serde(rename = "costMultiplier", skip_serializing_if = "Option::is_none")]
     pub cost_multiplier: Option<String>,
-    /// 计费模式来源（response/request）
+    /// Pricing model source (response/request)
     #[serde(rename = "pricingModelSource", skip_serializing_if = "Option::is_none")]
     pub pricing_model_source: Option<String>,
-    /// 每日消费限额（USD）
+    /// Daily spend limit (USD)
     #[serde(rename = "limitDailyUsd", skip_serializing_if = "Option::is_none")]
     pub limit_daily_usd: Option<String>,
-    /// 每月消费限额（USD）
+    /// Monthly spend limit (USD)
     #[serde(rename = "limitMonthlyUsd", skip_serializing_if = "Option::is_none")]
     pub limit_monthly_usd: Option<String>,
-    /// Claude API 格式（仅 Claude 供应商使用）
-    /// - "anthropic": 原生 Anthropic Messages API，直接透传
-    /// - "openai_chat": OpenAI Chat Completions 格式，需要转换
-    /// - "openai_responses": OpenAI Responses API 格式，需要转换
+    /// Claude API format (Claude providers only)
+    /// - "anthropic": native Anthropic Messages API, passed through as-is
+    /// - "openai_chat": OpenAI Chat Completions format, requires conversion
+    /// - "openai_responses": OpenAI Responses API format, requires conversion
     #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
-    /// 通用认证绑定（provider_config / managed_account）
+    /// Generic auth binding (provider_config / managed_account)
     ///
-    /// 新代码应只写入该字段；githubAccountId 仅保留兼容读取。
+    /// New code should write only this field; githubAccountId remains readable for compatibility.
     #[serde(rename = "authBinding", skip_serializing_if = "Option::is_none")]
     pub auth_binding: Option<AuthBinding>,
-    /// Claude 认证字段名（"ANTHROPIC_AUTH_TOKEN" 或 "ANTHROPIC_API_KEY"）
+    /// Claude auth field name ("ANTHROPIC_AUTH_TOKEN" or "ANTHROPIC_API_KEY")
     #[serde(rename = "apiKeyField", skip_serializing_if = "Option::is_none")]
     pub api_key_field: Option<String>,
-    /// 是否将 base_url 视为完整 API 端点（不拼接 endpoint 路径）
+    /// Whether base_url is a complete API endpoint (no endpoint path appended)
     #[serde(rename = "isFullUrl", skip_serializing_if = "Option::is_none")]
     pub is_full_url: Option<bool>,
     /// Prompt cache key for OpenAI Responses-compatible endpoints.
@@ -449,35 +453,41 @@ pub struct ProviderMeta {
         skip_serializing_if = "Option::is_none"
     )]
     pub local_proxy_request_overrides: Option<LocalProxyRequestOverrides>,
-    /// 累加模式应用中，该 provider 是否已写入 live config。
-    /// `None` 表示旧数据/未知状态，`Some(false)` 表示明确仅存在于数据库中。
+    /// In additive-apply mode, whether this provider has been written to live config.
+    /// `None` means legacy data/unknown state; `Some(false)` means it explicitly
+    /// exists only in the database.
     #[serde(rename = "liveConfigManaged", skip_serializing_if = "Option::is_none")]
     pub live_config_managed: Option<bool>,
-    /// 供应商类型标识（用于特殊供应商检测）
-    /// - "github_copilot": GitHub Copilot 供应商
+    /// Provider type identifier (used for special-provider detection)
+    /// - "github_copilot": GitHub Copilot provider
     #[serde(rename = "providerType", skip_serializing_if = "Option::is_none")]
     pub provider_type: Option<String>,
-    /// GitHub Copilot 关联账号 ID（仅 github_copilot 供应商使用）
-    /// 用于多账号支持，关联到特定的 GitHub 账号
+    /// GitHub Copilot linked account ID (github_copilot providers only)
+    /// Supports multiple accounts by linking to a specific GitHub account
     #[serde(rename = "githubAccountId", skip_serializing_if = "Option::is_none")]
     pub github_account_id: Option<String>,
 }
 
-/// 解析 Provider 级自定义 User-Agent 字符串（单一真理来源）。
+/// Parse the provider-level custom User-Agent string (single source of truth).
 ///
-/// 转发（forwarder）、流式检测（stream_check）、获取模型列表（model_fetch）三条路径
-/// 共用同一口径，避免出现"某条路径用了 UA、另一条没用 / 报错"的不一致。
+/// The forwarder, stream check, and model-list fetch paths all share the same
+/// semantics, avoiding inconsistencies like "one path sends the UA while
+/// another doesn't / errors out".
 ///
-/// 合法性由 `http::HeaderValue::from_str` 按**字节**判定（`b >= 32 && b != 127 || b == '\t'`），
-/// 与前端 `src/lib/userAgent.ts::isValidUserAgentHeader` 严格一致：
-/// - `Ok(None)`：未设置或纯空白（trim 后为空）。
-/// - `Ok(Some(hv))`：合法。制表符、可见 ASCII（0x20–0x7E）、以及任意非 ASCII 字符
-///   （UTF-8 字节均 ≥ 0x80）都合法。
-/// - `Err(_)`：仅含控制字符时——除 `\t` 外的 0x00–0x1F（含换行）与 0x7F（DEL）。
+/// Validity is judged by `http::HeaderValue::from_str` at the **byte** level
+/// (`b >= 32 && b != 127 || b == '\t'`), strictly matching the frontend
+/// `src/lib/userAgent.ts::isValidUserAgentHeader`:
+/// - `Ok(None)`: unset or whitespace-only (empty after trim).
+/// - `Ok(Some(hv))`: valid. Tabs, visible ASCII (0x20-0x7E), and any non-ASCII
+///   characters (UTF-8 bytes are all >= 0x80) are valid.
+/// - `Err(_)`: control characters only — 0x00-0x1F excluding `\t` (newlines
+///   included) and 0x7F (DEL).
 ///
-/// 非法值的处理：三条运行时路径**均静默忽略**（`.ok().flatten()`，绝不让某条路径报错而
-/// 另一条放行）；前端在输入框处给出非阻断提示。当前**不在保存时阻断**——deeplink 导入等
-/// 非表单路径应宽容，运行时静默忽略即为安全网。
+/// Invalid values are handled by **silently ignoring them on all three runtime
+/// paths** (`.ok().flatten()`; one path must never error out while another
+/// passes). The frontend shows a non-blocking hint at the input field.
+/// Saving is currently **not blocked** — non-form paths such as deeplink
+/// imports should be lenient, and the runtime silent-ignore is the safety net.
 pub fn parse_custom_user_agent(
     raw: Option<&str>,
 ) -> Result<Option<HeaderValue>, InvalidHeaderValue> {
@@ -488,20 +498,22 @@ pub fn parse_custom_user_agent(
 }
 
 impl ProviderMeta {
-    /// Codex OAuth FAST mode 是否启用。默认关闭，因为 `service_tier="priority"`
-    /// 会按更高速率消耗 ChatGPT 订阅配额，用户需显式开启以换取更低延迟。
+    /// Whether Codex OAuth FAST mode is enabled. Off by default, because
+    /// `service_tier="priority"` burns the ChatGPT subscription quota at a
+    /// higher rate; users must opt in explicitly in exchange for lower latency.
     pub fn codex_fast_mode_enabled(&self) -> bool {
         self.codex_fast_mode.unwrap_or(false)
     }
 
-    /// 经校验的 Provider 级自定义 User-Agent。见 [`parse_custom_user_agent`]。
+    /// The validated provider-level custom User-Agent. See [`parse_custom_user_agent`].
     pub fn custom_user_agent_header(&self) -> Result<Option<HeaderValue>, InvalidHeaderValue> {
         parse_custom_user_agent(self.custom_user_agent.as_deref())
     }
 
-    /// 解析指定托管认证供应商绑定的账号 ID。
+    /// Resolve the account ID bound to the given managed auth provider.
     ///
-    /// 新版优先读取 authBinding，旧版继续兼容 githubAccountId。
+    /// Newer data reads authBinding first; legacy data falls back to
+    /// githubAccountId.
     pub fn managed_account_id_for(&self, auth_provider: &str) -> Option<String> {
         if let Some(binding) = self.auth_binding.as_ref() {
             if binding.source == AuthBindingSource::ManagedAccount
@@ -520,17 +532,17 @@ impl ProviderMeta {
 }
 
 impl ProviderManager {
-    /// 获取所有供应商
+    /// Get all providers
     pub fn get_all_providers(&self) -> &IndexMap<String, Provider> {
         &self.providers
     }
 }
 
 // ============================================================================
-// 统一供应商（Universal Provider）- 跨应用共享配置
+// Universal Provider - config shared across apps
 // ============================================================================
 
-/// 统一供应商的应用启用状态
+/// Per-app enablement state of a universal provider
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UniversalProviderApps {
     #[serde(default)]
@@ -541,47 +553,47 @@ pub struct UniversalProviderApps {
     pub gemini: bool,
 }
 
-/// Claude 模型配置
+/// Claude model config
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClaudeModelConfig {
-    /// 主模型
+    /// Primary model
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Haiku 默认模型
+    /// Default Haiku model
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "haikuModel")]
     pub haiku_model: Option<String>,
-    /// Sonnet 默认模型
+    /// Default Sonnet model
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "sonnetModel")]
     pub sonnet_model: Option<String>,
-    /// Opus 默认模型
+    /// Default Opus model
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "opusModel")]
     pub opus_model: Option<String>,
 }
 
-/// Codex 模型配置
+/// Codex model config
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CodexModelConfig {
-    /// 模型名称
+    /// Model name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// 推理强度
+    /// Reasoning effort
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "reasoningEffort")]
     pub reasoning_effort: Option<String>,
 }
 
-/// Gemini 模型配置
+/// Gemini model config
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GeminiModelConfig {
-    /// 模型名称
+    /// Model name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 }
 
-/// 各应用的模型配置
+/// Per-app model config
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UniversalProviderModels {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -592,56 +604,56 @@ pub struct UniversalProviderModels {
     pub gemini: Option<GeminiModelConfig>,
 }
 
-/// 统一供应商（跨应用共享配置）
+/// Universal provider (config shared across apps)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UniversalProvider {
-    /// 唯一标识
+    /// Unique identifier
     pub id: String,
-    /// 供应商名称
+    /// Provider name
     pub name: String,
-    /// 供应商类型（如 "newapi", "custom"）
+    /// Provider type (e.g. "newapi", "custom")
     #[serde(rename = "providerType")]
     pub provider_type: String,
-    /// 应用启用状态
+    /// App enablement state
     pub apps: UniversalProviderApps,
-    /// API 基础地址
+    /// API base URL
     #[serde(rename = "baseUrl")]
     pub base_url: String,
-    /// API 密钥
+    /// API key
     #[serde(rename = "apiKey")]
     pub api_key: String,
-    /// 各应用的模型配置
+    /// Per-app model config
     #[serde(default)]
     pub models: UniversalProviderModels,
-    /// 网站链接
+    /// Website link
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "websiteUrl")]
     pub website_url: Option<String>,
-    /// 备注信息
+    /// Notes
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// 图标名称
+    /// Icon name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 图标颜色
+    /// Icon color
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "iconColor")]
     pub icon_color: Option<String>,
-    /// 元数据
+    /// Metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<ProviderMeta>,
-    /// 创建时间戳
+    /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "createdAt")]
     pub created_at: Option<i64>,
-    /// 排序索引
+    /// Sort index
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "sortIndex")]
     pub sort_index: Option<usize>,
 }
 
 impl UniversalProvider {
-    /// 创建新的统一供应商
+    /// Create a new universal provider
     pub fn new(
         id: String,
         name: String,
@@ -667,7 +679,7 @@ impl UniversalProvider {
         }
     }
 
-    /// 生成 Claude 供应商配置
+    /// Build the Claude provider config
     pub fn to_claude_provider(&self) -> Option<Provider> {
         if !self.apps.claude {
             return None;
@@ -714,7 +726,7 @@ impl UniversalProvider {
         })
     }
 
-    /// 生成 Codex 供应商配置
+    /// Build the Codex provider config
     pub fn to_codex_provider(&self) -> Option<Provider> {
         if !self.apps.codex {
             return None;
@@ -728,7 +740,8 @@ impl UniversalProvider {
             .and_then(|m| m.reasoning_effort.clone())
             .unwrap_or_else(|| "high".to_string());
 
-        // Codex/OpenAI 的 base_url 既可能是纯 origin（需要补 /v1），也可能包含自定义前缀（不应强行补版本）
+        // A Codex/OpenAI base_url may be a bare origin (needs /v1 appended) or
+        // carry a custom prefix (must not force the version segment)
         let base_trimmed = self.base_url.trim_end_matches('/');
         let origin_only = match base_trimmed.split_once("://") {
             Some((_scheme, rest)) => !rest.contains('/'),
@@ -742,7 +755,7 @@ impl UniversalProvider {
             base_trimmed.to_string()
         };
 
-        // 生成 Codex 的 config.toml 内容
+        // Generate the Codex config.toml content
         let config_toml = format!(
             r#"model_provider = "custom"
 model = "{model}"
@@ -779,7 +792,7 @@ requires_openai_auth = true"#
         })
     }
 
-    /// 生成 Gemini 供应商配置
+    /// Build the Gemini provider config
     pub fn to_gemini_provider(&self) -> Option<Provider> {
         if !self.apps.gemini {
             return None;
@@ -816,13 +829,13 @@ requires_openai_auth = true"#
 }
 
 // ============================================================================
-// OpenCode 供应商配置结构
+// OpenCode provider config structures
 // ============================================================================
 
-/// OpenCode 供应商的 settings_config 结构
+/// OpenCode provider settings_config structure
 ///
-/// OpenCode 使用 AI SDK 包名来指定供应商类型，与其他应用的配置格式不同。
-/// 配置示例：
+/// OpenCode uses AI SDK package names to identify provider types, which differs
+/// from the config formats of other apps. Example config:
 /// ```json
 /// {
 ///   "npm": "@ai-sdk/openai-compatible",
@@ -832,18 +845,18 @@ requires_openai_auth = true"#
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenCodeProviderConfig {
-    /// AI SDK 包名，如 "@ai-sdk/openai-compatible", "@ai-sdk/anthropic"
+    /// AI SDK package name, e.g. "@ai-sdk/openai-compatible", "@ai-sdk/anthropic"
     pub npm: String,
 
-    /// 供应商名称（可选，用于显示）
+    /// Provider name (optional, for display)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
-    /// 供应商选项（API 密钥、基础 URL 等）
+    /// Provider options (API key, base URL, etc.)
     #[serde(default)]
     pub options: OpenCodeProviderOptions,
 
-    /// 模型定义映射
+    /// Model definition map
     #[serde(default)]
     pub models: HashMap<String, OpenCodeModel>,
 }
@@ -859,55 +872,55 @@ impl Default for OpenCodeProviderConfig {
     }
 }
 
-/// OpenCode 供应商选项
+/// OpenCode provider options
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenCodeProviderOptions {
-    /// API 基础 URL
+    /// API base URL
     #[serde(rename = "baseURL", skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
-    /// API 密钥（支持环境变量引用，如 "{env:API_KEY}"）
+    /// API key (supports env var references, e.g. "{env:API_KEY}")
     #[serde(rename = "apiKey", skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
 
-    /// 自定义请求头
+    /// Custom request headers
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
 
-    /// 额外选项（timeout, setCacheKey 等）
-    /// 使用 flatten 捕获所有未明确定义的字段
+    /// Extra options (timeout, setCacheKey, etc.)
+    /// Uses flatten to capture all fields not explicitly defined
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
 }
 
-/// OpenCode 模型定义
+/// OpenCode model definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenCodeModel {
-    /// 模型显示名称
+    /// Model display name
     pub name: String,
 
-    /// 模型限制（上下文和输出 token 数）
+    /// Model limits (context and output token counts)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<OpenCodeModelLimit>,
 
-    /// 模型额外选项（provider 路由等）
+    /// Extra model options (provider routing, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<HashMap<String, Value>>,
 
-    /// 额外字段（cost、modalities、thinking、variants 等）
-    /// 使用 flatten 捕获所有未明确定义的字段
+    /// Extra fields (cost, modalities, thinking, variants, etc.)
+    /// Uses flatten to capture all fields not explicitly defined
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
 }
 
-/// OpenCode 模型限制
+/// OpenCode model limits
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenCodeModelLimit {
-    /// 上下文 token 限制
+    /// Context token limit
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<u64>,
 
-    /// 输出 token 限制
+    /// Output token limit
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<u64>,
 }

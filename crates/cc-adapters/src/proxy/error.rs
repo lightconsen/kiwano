@@ -67,12 +67,12 @@ pub enum ProxyError {
     #[error("超时: {0}")]
     Timeout(String),
 
-    /// 流式响应空闲超时
+    /// Streaming response idle timeout
     #[allow(dead_code)]
     #[error("流式响应空闲超时: {0}秒无数据")]
     StreamIdleTimeout(u64),
 
-    /// 认证错误
+    /// Auth error
     #[error("认证失败: {0}")]
     AuthError(String),
 
@@ -81,13 +81,13 @@ pub enum ProxyError {
     Internal(String),
 }
 
-/// 错误分类
+/// Error category
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCategory {
-    /// 可重试错误（网络问题、5xx）
-    Retryable, // 网络超时、5xx 错误
-    /// 不可重试错误（4xx、认证失败）
-    NonRetryable, // 认证失败、参数错误、4xx 错误
+    /// Retryable errors (network issues, 5xx)
+    Retryable, // network timeouts, 5xx errors
+    /// Non-retryable errors (4xx, auth failures)
+    NonRetryable, // auth failures, bad parameters, 4xx errors
     #[allow(dead_code)]
-    ClientAbort, // 客户端主动中断
+    ClientAbort, // client-initiated abort
 }

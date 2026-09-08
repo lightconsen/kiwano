@@ -73,9 +73,12 @@ fn optional_non_empty_string(table: &toml::value::Table, key: &str) -> Option<St
 
 /// Syntax-only validation for a Grok Build config document (empty allowed).
 ///
-/// 官方条目走 Grok CLI 自带的 xAI OAuth 登录，config.toml 不需要（通常也没有）
-/// 自定义模型表：空文档合法，非空只要求 TOML 语法合法。live 层的读写与官方
-/// 快照校验都用它；"必须有完整自定义模型表"的强校验见 `validate_config_toml`。
+/// Official entries use the Grok CLI's built-in xAI OAuth login, so
+/// config.toml does not need (and usually has no) custom model tables: an
+/// empty document is valid, and a non-empty one only needs syntactically
+/// valid TOML. Used by live-layer reads/writes and official snapshot checks;
+/// the strict "must have a full custom model table" validation is
+/// `validate_config_toml`.
 pub fn validate_config_toml_syntax(config_toml: &str) -> Result<(), AppError> {
     if config_toml.trim().is_empty() {
         return Ok(());
@@ -94,10 +97,12 @@ pub fn validate_config_toml_syntax(config_toml: &str) -> Result<(), AppError> {
 
 /// Whether a live config document represents the official login state.
 ///
-/// 官方态 = 语法合法且完全没有自定义模型痕迹（无 `[models]` 也无 `[model.*]`，
-/// 允许 `[mcp_servers]` 等其它内容）。只要出现过任一自定义键就返回 false，
-/// 让残缺的自定义配置继续走 `validate_config_toml` 报出真实错误，
-/// 而不是被误判成官方态静默吞掉。语法不合法同样返回 false。
+/// Official state = syntactically valid with no trace of custom models
+/// (no `[models]` and no `[model.*]`; `[mcp_servers]` and other content are
+/// allowed). If any custom key is present, return false so an incomplete
+/// custom config keeps failing `validate_config_toml` with the real error
+/// instead of being silently swallowed as official state. Also returns false
+/// when the TOML is invalid.
 pub fn is_official_live_config(config_toml: &str) -> bool {
     let Ok(document) = config_toml.parse::<toml::Value>() else {
         return false;
@@ -357,9 +362,10 @@ pub fn strip_grok_mcp_servers_from_settings(settings: &mut Value) -> Result<(), 
 
 /// Read the live `~/.grok/config.toml` as a provider settings snapshot.
 ///
-/// 只做 TOML 语法校验：live 处于官方态（无自定义模型表）时同样需要能被
-/// 读取，供切换回填与界面展示使用。需要"完整自定义模型配置"的导入路径
-/// 由调用方自行叠加 `validate_config_toml`。
+/// Syntax validation only: a live file in official state (no custom model
+/// tables) must still be readable, for switch backfill and UI display.
+/// Import paths that need a "complete custom model config" layer
+/// `validate_config_toml` on top themselves.
 pub fn read_grok_live_settings() -> Result<Value, AppError> {
     let path = get_grok_config_path();
     if !path.exists() {
@@ -394,9 +400,11 @@ pub fn write_grok_provider_live(provider: &Provider) -> Result<(), AppError> {
             )
         })?;
 
-    // 官方条目不注入自定义模型表：按快照原样写回（首次为空文件），
-    // Grok CLI 回落到官方内置模型 + 自带 OAuth 登录；MCP 投影随后由
-    // 切换流程重新补写。非官方供应商必须携带完整的自定义模型配置。
+    // Official entries do not inject custom model tables: write the snapshot
+    // back verbatim (empty file the first time), letting the Grok CLI fall
+    // back to its built-in models + built-in OAuth login; MCP projections are
+    // re-written afterwards by the switch flow. Non-official providers must
+    // carry a complete custom model config.
     if provider.category.as_deref() != Some("official") {
         validate_config_toml(config)?;
     }
@@ -406,8 +414,9 @@ pub fn write_grok_provider_live(provider: &Provider) -> Result<(), AppError> {
 
 /// Raw live-file writer, mirroring `read_grok_live_settings` (syntax-only).
 ///
-/// 代理接管的备份/恢复也走这里：官方态 live（无自定义模型表）必须可以
-/// 原样写回。完整形状校验由 `write_grok_provider_live` 的非官方分支负责。
+/// Proxy-takeover backup/restore also goes through here: official-state live
+/// files (no custom model tables) must be writable verbatim. Full shape
+/// validation is handled by the non-official branch of `write_grok_provider_live`.
 pub fn write_grok_live_settings(settings: &Value) -> Result<(), AppError> {
     let config = settings
         .get("config")
@@ -473,19 +482,20 @@ context_window = 500000
 
     #[test]
     fn official_live_config_detection() {
-        // 官方态：完全没有自定义模型痕迹
+        // Official state: no trace of custom models at all
         assert!(is_official_live_config(""));
         assert!(is_official_live_config("  \n# comment only\n"));
         assert!(is_official_live_config(
             "[mcp_servers.echo]\ncommand = \"echo\"\n"
         ));
 
-        // 出现过任一自定义键（哪怕残缺）都不是官方态，交给强校验报错
+        // Any custom key present (even incomplete) is not official state; let
+        // strict validation report it
         assert!(!is_official_live_config(valid_config()));
         assert!(!is_official_live_config("[models]\ndefault = \"x\"\n"));
         assert!(!is_official_live_config("[model.x]\nmodel = \"x\"\n"));
 
-        // 语法不合法不是官方态
+        // Invalid syntax is not official state
         assert!(!is_official_live_config("not = [valid"));
     }
 
@@ -559,8 +569,9 @@ context_window = 500000
         }
     }
 
-    /// 构造一个 `env_key` 指向未设置环境变量的 config——这是"声明了间接引用但
-    /// 该变量不存在"的场景，修复前会静默兜底到 `XAI_API_KEY`。
+    /// Build a config whose `env_key` points at an unset environment variable —
+    /// the "indirect reference declared but the variable does not exist"
+    /// scenario that used to silently fall back to `XAI_API_KEY`.
     fn env_key_unset_config() -> &'static str {
         r#"[models]
 default = "grok-env"
@@ -578,7 +589,8 @@ context_window = 500000
     #[test]
     #[serial]
     fn does_not_fall_back_to_xai_api_key_when_declared_env_key_is_unset() {
-        // 即使进程里恰好设了 XAI_API_KEY，也不能被静默借用到别的 base_url 上。
+        // Even if XAI_API_KEY happens to be set in the process, it must never
+        // be silently borrowed for another base_url.
         let original_xai = std::env::var_os("XAI_API_KEY");
         let original_unset = std::env::var_os("GROK_TEST_DEFINITELY_UNSET_VAR");
         std::env::set_var("XAI_API_KEY", "xai-secret-should-not-leak");
@@ -625,7 +637,8 @@ context_window = 500000
         let original_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
         std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
 
-        // 官方条目：空 config 可写（清掉自定义模型表，交还 Grok CLI 官方登录）
+        // Official entry: an empty config is writable (clears custom model
+        // tables, hands back to the Grok CLI's official login)
         let mut official = Provider::with_id(
             "grokbuild-official".to_string(),
             "Grok Official".to_string(),
@@ -639,7 +652,8 @@ context_window = 500000
             ""
         );
 
-        // 官方态 live（如 MCP 投影补写后）无自定义模型表，读取与原样写回都必须可用
+        // Official-state live (e.g. after MCP projection re-write) has no
+        // custom model tables; reading and verbatim writing must both work
         let official_live = "[mcp_servers.echo]\ncommand = \"echo\"\n";
         write_grok_live_settings(&json!({ "config": official_live }))
             .expect("official-mode live is writable for backup restore");
@@ -649,7 +663,7 @@ context_window = 500000
             Some(official_live)
         );
 
-        // 非官方供应商仍要求完整的自定义模型配置
+        // Non-official providers still require a complete custom model config
         let custom = Provider::with_id(
             "custom".to_string(),
             "Custom".to_string(),

@@ -13,19 +13,22 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::error::AppError;
 
-/// 获取用户主目录，带回退和日志
+/// Get the user's home directory, with a fallback and logging.
 ///
-/// ## Windows 注意事项
+/// ## Windows notes
 ///
-/// - `dirs::home_dir()` 在 Windows 上使用 `SHGetKnownFolderPath(FOLDERID_Profile)`，
-///   返回的是真实用户目录（类似 `C:\\Users\\Alice`），与 v3.10.2 行为一致。
-/// - 不要直接使用 `HOME` 环境变量：它可能由 Git/Cygwin/MSYS 等第三方工具注入，
-///   且不一定等于用户目录，可能导致 `.cc-switch/cc-switch.db` 路径变化，从而“看起来像数据丢失”。
+/// - On Windows, `dirs::home_dir()` uses `SHGetKnownFolderPath(FOLDERID_Profile)`
+///   and returns the real user profile directory (e.g. `C:\\Users\\Alice`),
+///   matching the v3.10.2 behavior.
+/// - Do not read the `HOME` environment variable directly: it can be injected by
+///   third-party tools such as Git/Cygwin/MSYS, may not equal the user profile
+///   directory, and could shift the `.cc-switch/cc-switch.db` path so data
+///   "appears to be lost".
 ///
-/// ## 测试隔离
+/// ## Test isolation
 ///
-/// 为了让 Windows CI/本地测试能稳定隔离真实用户数据，可通过 `CC_SWITCH_TEST_HOME`
-/// 显式覆盖 home dir（仅用于测试/调试场景）。
+/// So that Windows CI/local tests can reliably isolate real user data, the home
+/// dir can be explicitly overridden via `CC_SWITCH_TEST_HOME` (test/debug use only).
 pub fn get_home_dir() -> PathBuf {
     if let Ok(home) = std::env::var("CC_SWITCH_TEST_HOME") {
         let trimmed = home.trim();
@@ -40,7 +43,7 @@ pub fn get_home_dir() -> PathBuf {
     })
 }
 
-/// 获取 Claude Code 配置目录路径
+/// Get the Claude Code config directory path
 ///
 /// Kiwano: the cc-switch global settings override hook is replaced by explicit
 /// parameter injection — callers pass their own override directory (if any).
@@ -52,7 +55,7 @@ pub fn get_claude_config_dir(override_dir: Option<&Path>) -> PathBuf {
     get_home_dir().join(".claude")
 }
 
-/// 默认 Claude MCP 配置文件路径 (~/.claude.json)
+/// Default Claude MCP config file path (~/.claude.json)
 pub fn get_default_claude_mcp_path() -> PathBuf {
     get_home_dir().join(".claude.json")
 }
@@ -183,7 +186,7 @@ fn derive_mcp_path_from_override(dir: &Path) -> PathBuf {
     dir.join(".claude.json")
 }
 
-/// 获取 Claude MCP 配置文件路径
+/// Get the Claude MCP config file path
 ///
 /// Kiwano: override directory injected by the caller instead of global state.
 pub fn get_claude_mcp_path(override_dir: Option<&Path>) -> PathBuf {
@@ -196,23 +199,23 @@ pub fn get_claude_mcp_path(override_dir: Option<&Path>) -> PathBuf {
     get_default_claude_mcp_path()
 }
 
-/// 获取 Claude Code 主配置文件路径
+/// Get the Claude Code main settings file path
 pub fn get_claude_settings_path(override_dir: Option<&Path>) -> PathBuf {
     let dir = get_claude_config_dir(override_dir);
     let settings = dir.join("settings.json");
     if settings.exists() {
         return settings;
     }
-    // 兼容旧版命名：若存在旧文件则继续使用
+    // Legacy naming compatibility: keep using the old file if it exists
     let legacy = dir.join("claude.json");
     if legacy.exists() {
         return legacy;
     }
-    // 默认新建：回落到标准文件名 settings.json（不再生成 claude.json）
+    // Default for new setups: fall back to the standard settings.json name (claude.json is no longer generated)
     settings
 }
 
-/// 获取应用配置目录路径 (~/.cc-switch)
+/// Get the app config directory path (~/.cc-switch)
 ///
 /// Kiwano: override directory injected by the caller instead of the
 /// `crate::app_store` global hook.
@@ -223,10 +226,13 @@ pub fn get_app_config_dir(override_dir: Option<&Path>) -> PathBuf {
 
     let default_dir = get_home_dir().join(".cc-switch");
 
-    // 兼容 v3.10.3：当用户环境存在 `HOME` 且与真实用户目录不同，
-    // v3.10.3 可能在 `HOME/.cc-switch/` 下创建/使用了数据库。
-    // 这里仅在“默认位置没有数据库”时回退到旧位置，避免再次出现“供应商消失”问题，
-    // 同时也避免新安装因为 `HOME` 被设置而写入非预期路径。
+    // v3.10.3 compatibility: when the user's environment has a `HOME` that
+    // differs from the real user profile directory, v3.10.3 may have created
+    // or used a database under `HOME/.cc-switch/`. Fall back to the legacy
+    // location only when the default location has no database, avoiding a
+    // recurrence of the "providers disappeared" issue, while also keeping
+    // fresh installs from writing to an unexpected path just because `HOME`
+    // is set.
     #[cfg(windows)]
     {
         let default_db = default_dir.join("cc-switch.db");
@@ -251,12 +257,12 @@ pub fn get_app_config_dir(override_dir: Option<&Path>) -> PathBuf {
     default_dir
 }
 
-/// 获取应用配置文件路径
+/// Get the app config file path
 pub fn get_app_config_path(override_dir: Option<&Path>) -> PathBuf {
     get_app_config_dir(override_dir).join("config.json")
 }
 
-/// 清理供应商名称，确保文件名安全
+/// Sanitize a provider name to make it safe for file names
 #[allow(dead_code)]
 pub fn sanitize_provider_name(name: &str) -> String {
     name.chars()
@@ -268,7 +274,7 @@ pub fn sanitize_provider_name(name: &str) -> String {
         .to_lowercase()
 }
 
-/// 获取供应商配置文件路径
+/// Get the provider config file path
 #[allow(dead_code)]
 pub fn get_provider_config_path(provider_id: &str, provider_name: Option<&str>) -> PathBuf {
     let base_name = provider_name
@@ -278,7 +284,7 @@ pub fn get_provider_config_path(provider_id: &str, provider_name: Option<&str>) 
     get_claude_config_dir(None).join(format!("settings-{base_name}.json"))
 }
 
-/// 读取 JSON 配置文件
+/// Read a JSON config file
 pub fn read_json_file<T: for<'a> Deserialize<'a>>(path: &Path) -> Result<T, AppError> {
     if !path.exists() {
         return Err(AppError::Config(format!("文件不存在: {}", path.display())));
@@ -289,7 +295,7 @@ pub fn read_json_file<T: for<'a> Deserialize<'a>>(path: &Path) -> Result<T, AppE
     serde_json::from_str(&content).map_err(|e| AppError::json(path, e))
 }
 
-/// 递归排序 JSON 对象的键（按字母顺序），确保序列化输出是确定性的
+/// Recursively sort JSON object keys (alphabetically) so serialized output is deterministic
 fn sort_json_keys(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
@@ -306,12 +312,12 @@ fn sort_json_keys(value: &Value) -> Value {
     }
 }
 
-/// 写入 JSON 配置文件并返回实际写入的字节。
+/// Write a JSON config file and return the bytes actually written.
 pub fn write_json_file_with_contents<T: Serialize>(
     path: &Path,
     data: &T,
 ) -> Result<Vec<u8>, AppError> {
-    // 确保目录存在
+    // Ensure the directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
@@ -326,12 +332,12 @@ pub fn write_json_file_with_contents<T: Serialize>(
     Ok(contents)
 }
 
-/// 写入 JSON 配置文件（键按字母排序，确保确定性输出）
+/// Write a JSON config file (keys sorted alphabetically for deterministic output)
 pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
     write_json_file_with_contents(path, data).map(|_| ())
 }
 
-/// 原子写入文本文件（用于 TOML/纯文本）
+/// Atomically write a text file (used for TOML/plain text)
 pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
@@ -339,12 +345,12 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
     atomic_write(path, data.as_bytes())
 }
 
-/// 原子写入：写入临时文件后 rename 替换，避免半写状态
+/// Atomic write: write to a temp file, then rename it into place to avoid a half-written state
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     atomic_write_with_unix_mode(path, data, None)
 }
 
-/// 原子写入包含凭据的文件。Unix 上新文件和替换文件始终使用 0600。
+/// Atomically write a file containing credentials. On Unix, both new and replaced files always use 0600.
 pub fn atomic_write_private(path: &Path, data: &[u8]) -> Result<(), AppError> {
     atomic_write_with_unix_mode(path, data, Some(0o600))
 }
@@ -748,7 +754,8 @@ mod tests {
 
     #[test]
     fn sort_json_keys_produces_identical_output_for_different_insertion_orders() {
-        // 核心保证：同一逻辑配置无论键的插入顺序如何，写出的字节序列必须一致。
+        // Core guarantee: the same logical config must serialize to identical
+        // bytes regardless of key insertion order.
         let mut a = Map::new();
         a.insert("env".to_string(), serde_json::json!({"PATH": "/usr/bin"}));
         a.insert("model".to_string(), serde_json::json!("claude-sonnet-4-5"));
@@ -769,7 +776,7 @@ mod tests {
     }
 }
 
-/// 复制文件
+/// Copy a file
 pub fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
     fs::copy(from, to).map_err(|e| AppError::IoContext {
         context: format!("复制文件失败 ({} -> {})", from.display(), to.display()),
@@ -778,7 +785,7 @@ pub fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 删除文件
+/// Delete a file
 pub fn delete_file(path: &Path) -> Result<(), AppError> {
     if path.exists() {
         fs::remove_file(path).map_err(|e| AppError::io(path, e))?;
@@ -786,14 +793,14 @@ pub fn delete_file(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 检查 Claude Code 配置状态
+/// Claude Code config status
 #[derive(Serialize, Deserialize)]
 pub struct ConfigStatus {
     pub exists: bool,
     pub path: String,
 }
 
-/// 获取 Claude Code 配置状态
+/// Get the Claude Code config status
 pub fn get_claude_config_status(override_dir: Option<&Path>) -> ConfigStatus {
     let path = get_claude_settings_path(override_dir);
     ConfigStatus {

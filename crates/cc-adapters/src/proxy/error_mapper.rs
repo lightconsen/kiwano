@@ -3,72 +3,73 @@
 // Source: src-tauri/src/proxy/error_mapper.rs
 // Copied on 2026-09-07. Modified for Kiwano (unchanged; the trimmed local ProxyError keeps the same variant names).
 
-//! 错误类型到 HTTP 状态码的映射
+//! Mapping of error types to HTTP status codes
 //!
-//! 将 ProxyError 映射到合适的 HTTP 状态码，用于日志记录和手动构建错误响应
+//! Maps ProxyError to the appropriate HTTP status code, for logging and
+//! manually building error responses
 
 use super::ProxyError;
 
-/// 将 ProxyError 映射到 HTTP 状态码
+/// Map a ProxyError to an HTTP status code
 ///
-/// 映射规则：
-/// - 上游错误：直接使用上游返回的状态码
-/// - 超时：504 Gateway Timeout
-/// - 连接失败：502 Bad Gateway
-/// - 无可用 Provider：503 Service Unavailable
-/// - 重试耗尽：503 Service Unavailable
-/// - 认证错误：401 Unauthorized
-/// - 配置/请求错误：400 Bad Request
-/// - 转换错误：422 Unprocessable Entity
-/// - 其他错误：500 Internal Server Error
+/// Mapping rules:
+/// - Upstream error: use the status code returned by upstream as-is
+/// - Timeout: 504 Gateway Timeout
+/// - Connection failure: 502 Bad Gateway
+/// - No available provider: 503 Service Unavailable
+/// - Retries exhausted: 503 Service Unavailable
+/// - Auth error: 401 Unauthorized
+/// - Config/request error: 400 Bad Request
+/// - Transform error: 422 Unprocessable Entity
+/// - Other errors: 500 Internal Server Error
 pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
     match error {
-        // 服务状态错误：与 IntoResponse 保持一致
+        // Service state errors: consistent with IntoResponse
         ProxyError::AlreadyRunning => 409,
         ProxyError::NotRunning => 503,
 
-        // 上游错误：使用实际状态码
+        // Upstream error: use the actual status code
         ProxyError::UpstreamError { status, .. } => *status,
 
-        // 超时错误：504 Gateway Timeout
+        // Timeout errors: 504 Gateway Timeout
         ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => 504,
 
-        // 转发失败/连接失败：502 Bad Gateway
+        // Forward/connection failure: 502 Bad Gateway
         ProxyError::ForwardFailed(_) => 502,
 
-        // 无可用 Provider：503 Service Unavailable
+        // No available provider: 503 Service Unavailable
         ProxyError::NoAvailableProvider => 503,
 
-        // 所有供应商已熔断：503 Service Unavailable
+        // All providers circuit-open: 503 Service Unavailable
         ProxyError::AllProvidersCircuitOpen => 503,
 
-        // 未配置供应商：503 Service Unavailable
+        // No providers configured: 503 Service Unavailable
         ProxyError::NoProvidersConfigured => 503,
 
-        // 重试耗尽：503 Service Unavailable
+        // Retries exhausted: 503 Service Unavailable
         ProxyError::MaxRetriesExceeded => 503,
 
-        // Provider 不健康：503 Service Unavailable
+        // Unhealthy provider: 503 Service Unavailable
         ProxyError::ProviderUnhealthy(_) => 503,
 
-        // 配置错误/无效请求：400 Bad Request
+        // Config error/invalid request: 400 Bad Request
         ProxyError::ConfigError(_) | ProxyError::InvalidRequest(_) => 400,
 
-        // 认证错误：401 Unauthorized
+        // Auth error: 401 Unauthorized
         ProxyError::AuthError(_) => 401,
 
-        // 数据库错误：500 Internal Server Error
+        // Database error: 500 Internal Server Error
         ProxyError::DatabaseError(_) => 500,
 
-        // 转换错误：422 Unprocessable Entity
+        // Transform error: 422 Unprocessable Entity
         ProxyError::TransformError(_) => 422,
 
-        // 其他未知错误：500 Internal Server Error
+        // Other unknown errors: 500 Internal Server Error
         _ => 500,
     }
 }
 
-/// 将 ProxyError 转换为用户友好的错误消息
+/// Convert a ProxyError into a user-friendly error message
 pub fn get_error_message(error: &ProxyError) -> String {
     match error {
         ProxyError::UpstreamError { status, body } => {

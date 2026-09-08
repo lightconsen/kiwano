@@ -3,15 +3,15 @@
 // Source: src-tauri/src/proxy/model_mapper.rs
 // Copied on 2026-09-07. Modified for Kiwano (ONE_M_CONTEXT_MARKER now imported from model_capabilities instead of claude_desktop_config).
 
-//! 模型映射模块
+//! Model mapping module
 //!
-//! 在请求转发前，根据 Provider 配置替换请求中的模型名称
+//! Replaces model names in requests based on Provider config before forwarding
 
 use crate::model_capabilities::ONE_M_CONTEXT_MARKER;
 use crate::provider::Provider;
 use serde_json::Value;
 
-/// 模型映射配置
+/// Model mapping config
 pub struct ModelMapping {
     pub haiku_model: Option<String>,
     pub sonnet_model: Option<String>,
@@ -22,7 +22,7 @@ pub struct ModelMapping {
 }
 
 impl ModelMapping {
-    /// 从 Provider 配置中提取模型映射
+    /// Extract the model mapping from Provider config
     pub fn from_provider(provider: &Provider) -> Self {
         let env = provider.settings_config.get("env");
 
@@ -60,7 +60,7 @@ impl ModelMapping {
         }
     }
 
-    /// 检查是否配置了任何模型映射
+    /// Check whether any model mapping is configured
     pub fn has_mapping(&self) -> bool {
         self.haiku_model.is_some()
             || self.sonnet_model.is_some()
@@ -70,17 +70,19 @@ impl ModelMapping {
             || self.default_model.is_some()
     }
 
-    /// 根据原始模型名称获取映射后的模型
+    /// Get the mapped model for an original model name
     pub fn map_model(&self, original_model: &str) -> String {
         let model_lower = original_model.to_lowercase();
 
-        // 1. 按模型类型匹配
+        // 1. Match by model type
         if model_lower.contains("fable") {
             if let Some(ref m) = self.fable_model {
                 return m.clone();
             }
-            // 未单独配置 fable 档时归入 opus 档，与 Claude Code 官方
-            // 分类器降级方向一致（fable→opus），避免落到 default 失去层级。
+            // When no fable tier is configured, fold it into the opus tier,
+            // matching the Claude Code official classifier's downgrade
+            // direction (fable→opus), so it does not fall to default and
+            // lose the tier.
             if let Some(ref m) = self.opus_model {
                 return m.clone();
             }
@@ -108,32 +110,32 @@ impl ModelMapping {
             }
         }
 
-        // 2. 默认模型
+        // 2. Default model
         if let Some(ref m) = self.default_model {
             return m.clone();
         }
 
-        // 3. 无映射，保持原样
+        // 3. No mapping; keep as-is
         original_model.to_string()
     }
 }
 
-/// 对请求体应用模型映射
+/// Apply model mapping to a request body
 ///
-/// 返回 (映射后的请求体, 原始模型名, 映射后模型名)
+/// Returns (mapped request body, original model name, mapped model name)
 pub fn apply_model_mapping(
     mut body: Value,
     provider: &Provider,
 ) -> (Value, Option<String>, Option<String>) {
     let mapping = ModelMapping::from_provider(provider);
 
-    // 如果没有配置映射，直接返回
+    // If no mapping is configured, return as-is
     if !mapping.has_mapping() {
         let original = body.get("model").and_then(|m| m.as_str()).map(String::from);
         return (body, original, None);
     }
 
-    // 提取原始模型名
+    // Extract the original model name
     let original_model = body.get("model").and_then(|m| m.as_str()).map(String::from);
 
     if let Some(ref original) = original_model {
@@ -149,8 +151,9 @@ pub fn apply_model_mapping(
     (body, original_model, None)
 }
 
-/// Claude Code 通过 `[1M]` 后缀声明 100 万上下文能力；上游 API
-/// 通常不接受这个本地能力标记，转发前需要剥离。
+/// Claude Code declares 1M-context capability via the `[1M]` suffix; upstream
+/// APIs usually do not accept this local capability marker, so it must be
+/// stripped before forwarding.
 pub fn strip_one_m_suffix_for_upstream(model: &str) -> &str {
     let trimmed = model.trim_end();
     let marker = ONE_M_CONTEXT_MARKER.as_bytes();
@@ -262,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_fable_with_one_m_suffix_mapping() {
-        // Claude Code 实际会发 claude-fable-5[1m] 形态（issue #3980）
+        // Claude Code actually sends the claude-fable-5[1m] form (issue #3980)
         let provider = create_provider_with_mapping();
         let body = json!({"model": "claude-fable-5[1m]"});
         let (result, _, mapped) = apply_model_mapping(body, &provider);
@@ -301,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_thinking_does_not_affect_model_mapping() {
-        // Issue #2081: thinking 参数不应影响模型映射
+        // Issue #2081: the thinking parameter must not affect model mapping
         let provider = create_provider_with_mapping();
         let body = json!({
             "model": "claude-sonnet-4-5",
@@ -314,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_thinking_adaptive_does_not_affect_model_mapping() {
-        // Issue #2081: adaptive thinking 也不应影响模型映射
+        // Issue #2081: adaptive thinking must not affect model mapping either
         let provider = create_provider_with_mapping();
         let body = json!({
             "model": "claude-sonnet-4-5",

@@ -3,14 +3,15 @@
 // Source: src-tauri/src/proxy/cache_injector.rs
 // Copied on 2026-09-07. Modified for Kiwano (unchanged; OptimizerConfig moved from the full types.rs into a minimal local types.rs).
 
-//! Cache 断点注入器
+//! Cache breakpoint injector
 //!
-//! 在请求转发前自动注入 cache_control 标记，启用 Bedrock Prompt Caching
+//! Automatically injects cache_control markers before forwarding requests,
+//! enabling Bedrock Prompt Caching
 
 use super::types::OptimizerConfig;
 use serde_json::{json, Value};
 
-/// 在请求体关键位置注入 cache_control 断点
+/// Inject cache_control breakpoints at key positions in the request body
 pub fn inject(body: &mut Value, config: &OptimizerConfig) {
     if !config.enabled || !config.cache_injection {
         return;
@@ -35,7 +36,7 @@ pub fn inject(body: &mut Value, config: &OptimizerConfig) {
 
     let mut injected = Vec::new();
 
-    // (a) tools 末尾
+    // (a) end of tools
     if budget > 0 {
         if let Some(tools) = body.get_mut("tools").and_then(|t| t.as_array_mut()) {
             if let Some(last) = tools.last_mut() {
@@ -50,9 +51,9 @@ pub fn inject(body: &mut Value, config: &OptimizerConfig) {
         }
     }
 
-    // (b) system 末尾
+    // (b) end of system
     if budget > 0 {
-        // 字符串 system → 转为数组
+        // string system → convert to an array
         if let Some(text) = body
             .get("system")
             .and_then(|s| s.as_str())
@@ -74,8 +75,9 @@ pub fn inject(body: &mut Value, config: &OptimizerConfig) {
         }
     }
 
-    // (c) 最后一条可缓存消息的最后一个非 thinking block。工具循环通常以
-    // user/tool_result 结束；只标 assistant 会让最新稳定前缀无法命中缓存。
+    // (c) The last non-thinking block of the last cacheable message. Tool loops
+    // usually end with user/tool_result; marking only assistant messages would
+    // leave the newest stable prefix unable to hit the cache.
     if budget > 0 {
         if let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) {
             for message in messages.iter_mut().rev() {

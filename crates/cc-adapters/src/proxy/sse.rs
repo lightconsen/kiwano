@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn split_multibyte_across_two_chunks() {
-        // "你" = E4 BD A0 (3 bytes)
+        // U+4F60 = E4 BD A0 (3 bytes)
         let bytes = "你".as_bytes();
         assert_eq!(bytes.len(), 3);
 
@@ -208,19 +208,19 @@ mod tests {
 
     #[test]
     fn mixed_ascii_and_split_multibyte() {
-        // "hi你" = 68 69 E4 BD A0
+        // "hi" + U+4F60 = 68 69 E4 BD A0
         let all = "hi你".as_bytes();
         assert_eq!(all.len(), 5);
 
         let mut buf = String::new();
         let mut rem = Vec::new();
 
-        // Chunk 1: "hi" + first byte of "你"
+        // Chunk 1: "hi" + first byte of U+4F60
         append_utf8_safe(&mut buf, &mut rem, &all[..3]);
         assert_eq!(buf, "hi");
         assert_eq!(rem.len(), 1);
 
-        // Chunk 2: remaining 2 bytes of "你"
+        // Chunk 2: remaining 2 bytes of U+4F60
         append_utf8_safe(&mut buf, &mut rem, &all[3..]);
         assert_eq!(buf, "hi你");
         assert!(rem.is_empty());
@@ -267,9 +267,9 @@ mod tests {
         let json_line = "data: {\"text\":\"你好\"}\n\n";
         let bytes = json_line.as_bytes();
 
-        // Find where "你" starts in the byte stream and split there
+        // Find where the CJK char (U+4F60) starts in the byte stream and split there
         let ni_start = bytes.windows(3).position(|w| w == "你".as_bytes()).unwrap();
-        let split_point = ni_start + 1; // split inside "你"
+        let split_point = ni_start + 1; // split inside U+4F60
 
         let mut buf = String::new();
         let mut rem = Vec::new();
@@ -309,7 +309,7 @@ mod tests {
         let mut buf = String::new();
         let mut rem = Vec::new();
 
-        // Prime remainder with an incomplete sequence (first byte of "你")
+        // Prime remainder with an incomplete sequence (first byte of U+4F60)
         append_utf8_safe(&mut buf, &mut rem, &"你".as_bytes()[..1]);
         assert_eq!(rem.len(), 1);
 

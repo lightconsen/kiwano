@@ -70,17 +70,17 @@ pub fn get_opencode_config_path() -> PathBuf {
     get_opencode_dir().join("opencode.json")
 }
 
-/// 获取 OpenCode SQLite 数据库路径
-/// 优先级: OPENCODE_DB 环境变量 > XDG_DATA_HOME > ~/.local/share/opencode
+/// Get the OpenCode SQLite database path.
+/// Priority: OPENCODE_DB env var > XDG_DATA_HOME > ~/.local/share/opencode
 pub fn get_opencode_db_path() -> PathBuf {
-    // 支持 OPENCODE_DB 环境变量覆盖（忽略空字符串）
+    // Support the OPENCODE_DB env var override (empty string ignored)
     if let Ok(custom_path) = std::env::var("OPENCODE_DB") {
         if !custom_path.is_empty() {
             let path = PathBuf::from(&custom_path);
             if path.is_absolute() {
                 return path;
             }
-            // 相对路径基于数据目录
+            // Relative paths resolve against the data directory
             return get_opencode_data_dir().join(path);
         }
     }
@@ -89,15 +89,15 @@ pub fn get_opencode_db_path() -> PathBuf {
 }
 
 fn get_opencode_data_dir() -> PathBuf {
-    // 尊重 XDG_DATA_HOME（按 XDG 规范，空字符串视为未设置）
+    // Honor XDG_DATA_HOME (per the XDG spec, an empty string counts as unset)
     if let Ok(xdg_data) = std::env::var("XDG_DATA_HOME") {
         if !xdg_data.is_empty() {
             return PathBuf::from(xdg_data).join("opencode");
         }
     }
 
-    // OpenCode 使用 xdg-basedir，不遵守 macOS/Windows 平台约定，
-    // 所有平台默认都落在 ~/.local/share/opencode
+    // OpenCode uses xdg-basedir and ignores macOS/Windows platform conventions,
+    // so the default on all platforms is ~/.local/share/opencode
     crate::config::get_home_dir()
         .join(".local")
         .join("share")
@@ -126,12 +126,15 @@ fn read_opencode_config_from_path(path: &Path) -> Result<Value, AppError> {
         ))
     })?;
 
-    // 根节点必须是对象：下游 set_provider / set_mcp_server / add_plugin 都对它做
-    // `config["key"] = …` 索引赋值，而 serde_json 只把 Null 自动升级成对象，
-    // 数组或标量会直接 panic（panic 发生在 Tauri command 内、跨 FFI 展开）。
+    // The root node must be an object: downstream set_provider / set_mcp_server /
+    // add_plugin all do `config["key"] = …` index assignment on it, and serde_json
+    // only auto-upgrades Null into an object — an array or scalar would panic
+    // outright (the panic would happen inside a Tauri command and unwind across FFI).
     //
-    // 这里选择报错而不是重建根节点：opencode.json 里还有 model / theme 等用户自有
-    // 配置，静默重建等于删掉它们。让用户自己修文件，与 read_claude_live 的做法一致。
+    // Here we choose to error instead of rebuilding the root node: opencode.json
+    // also holds user-owned config such as model / theme, and silently rebuilding
+    // it would amount to deleting them. Let the user fix the file themselves,
+    // consistent with read_claude_live.
     if !value.is_object() {
         return Err(AppError::Config(format!(
             "OpenCode 配置文件根节点必须是 JSON 对象: {}",
@@ -170,9 +173,11 @@ pub fn set_provider(id: &str, config: Value) -> Result<(), AppError> {
     let path = get_opencode_config_path();
     let mut full_config = read_opencode_config_from_path(&path)?;
 
-    // 判空要连「存在但不是对象」一起算：否则下面 as_object_mut 拿不到，
-    // 写入会静默失效——界面显示添加成功而文件里没有。provider 段是 cc-switch
-    // 的投影区，归一化不会碰用户自有的 model / theme 等顶层配置。
+    // The emptiness check must also cover "exists but is not an object":
+    // otherwise as_object_mut below yields nothing and the write silently
+    // fails — the UI reports success while the file lacks the entry. The
+    // provider section is cc-switch's projection area; normalization never
+    // touches user-owned top-level config such as model / theme.
     if !full_config.get("provider").is_some_and(Value::is_object) {
         if full_config.get("provider").is_some() {
             log::warn!("opencode.json 的 provider 不是对象，已重置为空对象");
@@ -393,8 +398,9 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let _guard = TestHomeGuard::set(temp.path());
 
-        // 顶层数组/标量会让下游 `config["provider"] = …` 触发 serde_json panic。
-        // 顶层 null 例外——serde_json 会把它自动升级成对象，本来就不炸。
+        // A top-level array/scalar would make downstream `config["provider"] = …`
+        // trigger a serde_json panic. Top-level null is the exception — serde_json
+        // auto-upgrades it into an object, so it never panics.
         for malformed in ["[]", "[{\"a\":1}]", "42", "\"oops\""] {
             write_config(temp.path(), malformed);
             let result = read_opencode_config();
@@ -417,7 +423,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let _guard = TestHomeGuard::set(temp.path());
 
-        // `"mcp": []` 时旧代码的 as_object_mut 返回 None → 写入静默失效
+        // With `"mcp": []`, the old code's as_object_mut returned None → the
+        // write silently failed
         write_config(temp.path(), "{\"model\": \"keep-me\", \"mcp\": []}");
 
         set_mcp_server("echo", json!({"command": "npx"})).expect("set must succeed");

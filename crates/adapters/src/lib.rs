@@ -1,4 +1,4 @@
-//! cc-adapters — extraction layer for code ported from cc-switch
+//! adapters — extraction layer for code ported from cc-switch
 //! (https://github.com/farion1231/cc-switch, MIT License).
 //!
 //! This crate hosts the Tier A modules extracted from cc-switch (with the

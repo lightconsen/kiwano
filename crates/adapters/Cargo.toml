@@ -1,5 +1,5 @@
 [package]
-name = "kiwano-cc-adapters"
+name = "kiwano-adapters"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

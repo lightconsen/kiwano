@@ -8,7 +8,7 @@ cc-switch
 ---------
 - Project: cc-switch (https://github.com/farion1231/cc-switch)
 - License: MIT License
-- Usage: selected modules are copied or ported into `crates/cc-adapters`
+- Usage: selected modules are copied or ported into `crates/adapters`
   (agent config adapters, protocol conversion sublayer).
 - Every ported file carries a header declaration with the upstream source
   path and the copy date; ported functions carry a per-function annotation.

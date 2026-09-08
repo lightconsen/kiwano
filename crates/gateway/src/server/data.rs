@@ -112,7 +112,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     );
 
     // MVP transparent forward requires the provider to speak the inbound
-    // protocol (conversion is cc-adapters territory, wired in later phases).
+    // protocol (conversion is adapters territory, wired in later phases).
     // Ambiguous paths (GET /v1/models) forward natively to the provider.
     // Query strings are forwarded untouched by the forward leg.
     crate::forward::forward(

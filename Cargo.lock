@@ -2327,7 +2327,7 @@ dependencies = [
 name = "kiwano"
 version = "0.1.0"
 dependencies = [
- "kiwano-cc-adapters",
+ "kiwano-adapters",
  "kiwano-gateway",
  "reqwest",
  "rusqlite",
@@ -2345,7 +2345,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kiwano-cc-adapters"
+name = "kiwano-adapters"
 version = "0.1.0"
 dependencies = [
  "async-stream",
@@ -2390,7 +2390,7 @@ dependencies = [
  "chrono",
  "futures-core",
  "futures-util",
- "kiwano-cc-adapters",
+ "kiwano-adapters",
  "reqwest",
  "rusqlite",
  "serde",

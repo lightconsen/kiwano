@@ -6,11 +6,11 @@
 
 use std::fs;
 
-use kiwano_cc_adapters::config::{atomic_write_private, read_json_file, write_json_file};
-use kiwano_cc_adapters::gemini_config::{
+use kiwano_adapters::config::{atomic_write_private, read_json_file, write_json_file};
+use kiwano_adapters::gemini_config::{
     get_gemini_env_path, parse_env_file, serialize_env_file, write_gemini_env_text_atomic,
 };
-use kiwano_cc_adapters::grok_config::{read_grok_live_settings, write_grok_live_settings};
+use kiwano_adapters::grok_config::{read_grok_live_settings, write_grok_live_settings};
 use serde_json::json;
 
 #[test]

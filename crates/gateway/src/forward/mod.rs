@@ -4,9 +4,9 @@
 //! are piped through byte-for-byte while a scanning stream watches the events
 //! for usage fields; the metered sample is persisted after the stream ends.
 //!
-//! Protocol conversion (tech.md §4.3 / cc-adapters phase): an Anthropic
+//! Protocol conversion (tech.md §4.3 / adapters phase): an Anthropic
 //! inbound request (`POST /v1/messages`) bound to an OpenAI-compatible
-//! provider is converted with the `kiwano-cc-adapters` sublayer — request via
+//! provider is converted with the `kiwano-adapters` sublayer — request via
 //! `anthropic_to_openai` (model via `model_mapper`), response (JSON + SSE)
 //! back via `openai_to_anthropic` / the streaming converter — and metered
 //! from the upstream OpenAI usage fields.
@@ -23,9 +23,9 @@ use futures_core::Stream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
-use kiwano_cc_adapters::proxy::model_mapper::strip_one_m_suffix_for_upstream_from_body;
-use kiwano_cc_adapters::proxy::providers::streaming::create_anthropic_sse_stream;
-use kiwano_cc_adapters::proxy::providers::transform::{
+use kiwano_adapters::proxy::model_mapper::strip_one_m_suffix_for_upstream_from_body;
+use kiwano_adapters::proxy::providers::streaming::create_anthropic_sse_stream;
+use kiwano_adapters::proxy::providers::transform::{
     anthropic_to_openai, inject_openai_stream_include_usage, openai_to_anthropic,
 };
 
@@ -174,7 +174,7 @@ pub async fn forward(
     let provider = &routed.provider;
 
     // Anthropic inbound on an OpenAI-compatible provider → convert via
-    // cc-adapters. Legacy Anthropic paths other than `/v1/messages` have no
+    // adapters. Legacy Anthropic paths other than `/v1/messages` have no
     // OpenAI equivalent and still fail cleanly.
     if let Some(inbound_proto) = inbound {
         if inbound_proto != provider.protocol {
@@ -320,7 +320,7 @@ pub async fn forward(
 }
 
 /// Forward an Anthropic `/v1/messages` request to an OpenAI-compatible
-/// provider with protocol conversion (cc-adapters sublayer).
+/// provider with protocol conversion (adapters sublayer).
 ///
 /// Request: `anthropic_to_openai` + `stream_options.include_usage` injection +
 /// `model_mapper` 1M-context marker stripping. Response: non-SSE bodies go
@@ -514,19 +514,19 @@ async fn forward_anthropic_via_openai(
     }
 }
 
-/// Map a cc-adapters `ProxyError` onto a gateway error response.
+/// Map a adapters `ProxyError` onto a gateway error response.
 fn proxy_error_into_response(
-    e: kiwano_cc_adapters::proxy::ProxyError,
+    e: kiwano_adapters::proxy::ProxyError,
     inbound: Option<Protocol>,
 ) -> Response {
-    use kiwano_cc_adapters::proxy::error_mapper::map_proxy_error_to_status;
+    use kiwano_adapters::proxy::error_mapper::map_proxy_error_to_status;
     let status =
         StatusCode::from_u16(map_proxy_error_to_status(&e)).unwrap_or(StatusCode::BAD_GATEWAY);
     error_response(
         inbound,
         status,
         "conversion_failed",
-        &format!("kiwano-gateway: cc-adapters conversion failed: {e}"),
+        &format!("kiwano-gateway: adapters conversion failed: {e}"),
     )
 }
 

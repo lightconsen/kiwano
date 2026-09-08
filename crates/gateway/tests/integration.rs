@@ -493,7 +493,7 @@ async fn openai_inbound_to_anthropic_provider_still_fails_cleanly() {
 }
 
 /// Anthropic `/v1/messages` on an OpenAI-compatible provider: non-streaming
-/// request converted by cc-adapters, response converted back, usage metered.
+/// request converted by adapters, response converted back, usage metered.
 #[tokio::test]
 async fn anthropic_inbound_converts_non_streaming_to_openai_upstream() {
     let dir = tempfile::tempdir().unwrap();
@@ -532,7 +532,7 @@ async fn anthropic_inbound_converts_non_streaming_to_openai_upstream() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Response is a valid Anthropic message converted from the OpenAI body.
-    // cc-adapters conserves cache tokens: input_tokens excludes the cached
+    // adapters conserves cache tokens: input_tokens excludes the cached
     // 32 (input + cache_read == prompt_tokens).
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["type"], "message");
@@ -645,7 +645,7 @@ async fn anthropic_inbound_converts_openai_sse_stream_to_anthropic_events() {
     assert_eq!(delta["usage"]["output_tokens"], 4);
 
     // The upstream saw a converted streaming OpenAI request that asks for
-    // usage in the stream (cc-adapters injects stream_options.include_usage).
+    // usage in the stream (adapters injects stream_options.include_usage).
     let sent = bodies.lock().unwrap();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["stream"], true);

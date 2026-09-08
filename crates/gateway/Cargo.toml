@@ -17,7 +17,7 @@ serde_json = "1"
 reqwest = { version = "0.13", features = ["stream", "json"] }
 futures-core = "0.3.34"
 futures-util = "0.3.34"
-kiwano-cc-adapters = { path = "../cc-adapters" }
+kiwano-adapters = { path = "../adapters" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }

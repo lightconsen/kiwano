@@ -13,9 +13,9 @@
 //! (~/.grok/config.toml, selected model's base_url/api_key/api_backend), the
 //! additive-mode agents opencode/openclaw/hermes/pi — whose takeover upserts
 //! a `kiwano-gateway` provider entry and selects it via
-//! `kiwano_cc_adapters::gateway_takeover` — and claude-desktop (macOS only:
+//! `kiwano_adapters::gateway_takeover` — and claude-desktop (macOS only:
 //! deploymentMode 3p + a gateway profile in the Claude-3p configLibrary via
-//! `kiwano_cc_adapters::claude_desktop_config`). Pre-existing provider
+//! `kiwano_adapters::claude_desktop_config`). Pre-existing provider
 //! entries survive, and disable still restores the original bytes verbatim.
 
 use std::path::Path;
@@ -49,7 +49,7 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
                 threep.join("claude_desktop_config.json"),
                 threep.join("configLibrary").join(format!(
                     "{}.json",
-                    kiwano_cc_adapters::claude_desktop_config::PROFILE_ID
+                    kiwano_adapters::claude_desktop_config::PROFILE_ID
                 )),
                 threep.join("configLibrary").join("_meta.json"),
             ])
@@ -183,40 +183,40 @@ fn rewrite(
         // gateway profile (Kiwano-owned while takeover is active) and register
         // it as the applied configLibrary profile
         "claude-desktop" if path.ends_with("claude_desktop_config.json") => {
-            kiwano_cc_adapters::claude_desktop_config::set_deployment_mode(original, "3p")
+            kiwano_adapters::claude_desktop_config::set_deployment_mode(original, "3p")
         }
         "claude-desktop" if path.ends_with("_meta.json") => {
-            kiwano_cc_adapters::claude_desktop_config::upsert_meta(original)
+            kiwano_adapters::claude_desktop_config::upsert_meta(original)
         }
-        "claude-desktop" => kiwano_cc_adapters::claude_desktop_config::build_gateway_profile(
+        "claude-desktop" => kiwano_adapters::claude_desktop_config::build_gateway_profile(
             &format!("{base}:{data_port}"),
             key,
         ),
         // additive agents: upsert a gateway provider entry and select it;
-        // pre-existing provider entries survive (cc_adapters::gateway_takeover)
-        "opencode" => kiwano_cc_adapters::gateway_takeover::upsert_opencode_gateway(
+        // pre-existing provider entries survive (adapters::gateway_takeover)
+        "opencode" => kiwano_adapters::gateway_takeover::upsert_opencode_gateway(
             original,
             &format!("{base}:{data_port}/v1"),
             key,
         ),
-        "openclaw" => kiwano_cc_adapters::gateway_takeover::upsert_openclaw_gateway(
+        "openclaw" => kiwano_adapters::gateway_takeover::upsert_openclaw_gateway(
             original,
             &format!("{base}:{data_port}"),
             key,
         ),
-        "hermes" => kiwano_cc_adapters::gateway_takeover::upsert_hermes_gateway(
+        "hermes" => kiwano_adapters::gateway_takeover::upsert_hermes_gateway(
             original,
             &format!("{base}:{data_port}"),
             key,
         ),
         "pi" if path.ends_with("models.json") => {
-            kiwano_cc_adapters::gateway_takeover::upsert_pi_models_gateway(
+            kiwano_adapters::gateway_takeover::upsert_pi_models_gateway(
                 original,
                 &format!("{base}:{data_port}/v1"),
                 key,
             )
         }
-        "pi" => kiwano_cc_adapters::gateway_takeover::select_pi_gateway(original),
+        "pi" => kiwano_adapters::gateway_takeover::select_pi_gateway(original),
         _ => Err("unsupported agent".into()),
     }
 }

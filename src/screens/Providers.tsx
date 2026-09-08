@@ -12,13 +12,15 @@ import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
-const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
+const SEGMENTS: { id: AgentId | "all"; icon?: string; char?: string; color?: string }[] = [
   { id: "all" },
   { id: "claude", icon: "claude" },
   { id: "codex", icon: "openai" },
   { id: "gemini", icon: "gemini" },
   { id: "grokbuild", icon: "grok" },
-  { id: "claude-desktop", icon: "claude" },
+  // Claude Desktop shares the Claude mark — render the design-system "D"
+  // chip instead, so the two Claude agents stay distinguishable.
+  { id: "claude-desktop", char: "D", color: "#B45E51" },
   { id: "opencode", icon: "opencode" },
   { id: "openclaw", icon: "openclaw" },
   { id: "hermes", icon: "hermes" },
@@ -55,7 +57,7 @@ function AgentOnboarding({
   const meta = AGENTS.find((m) => m.id === agent)!;
   return (
     <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-      <ProviderLogo icon={SEGMENT_ICON[agent]} name={meta.label} size={36} />
+      <ProviderLogo icon={SEGMENT_ICON[agent]} char={meta.chip_char} name={meta.label} size={36} />
       {takenOver ? (
         <>
           <div className="text-[13px] font-semibold">{meta.label} is taken over</div>
@@ -384,10 +386,10 @@ export default function Providers({
                 className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
                 onClick={() => setSeg(s.id)}
               >
-                {s.icon ? (
-                  <ProviderLogo icon={s.icon} name={label} size={15} />
-                ) : (
+                {s.id === "all" ? (
                   <span className="text-[12px] text-mut">{label}</span>
+                ) : (
+                  <ProviderLogo icon={s.icon} char={s.char} color={s.color} name={label} size={15} />
                 )}
               </button>
             );

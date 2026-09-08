@@ -27,12 +27,15 @@ export function ProviderLogo({
   icon,
   name,
   color,
+  char,
   size = 24,
   className = "",
 }: {
   icon?: string | null;
   name: string;
   color?: string;
+  /** Fallback letter override (claude-desktop renders "D", not "C") */
+  char?: string;
   size?: number;
   className?: string;
 }) {
@@ -54,12 +57,16 @@ export function ProviderLogo({
     }
     const meta = getIconMetadata(icon);
     const tint = color || (meta && meta.defaultColor !== "currentColor" ? meta.defaultColor : "") || "var(--ink)";
+    // The ported SVGs carry their own <title> (e.g. "Claude"), which the
+    // browser shows as a native tooltip overriding ours — strip it; this
+    // component already exposes the name via aria-label.
+    const svg = getIcon(icon).replace(/<title>[\s\S]*?<\/title>/g, "");
     return (
       <span
         aria-label={name}
         className={`inline-flex shrink-0 items-center justify-center ${className}`}
         style={{ ...box, fontSize: size, color: tint }}
-        dangerouslySetInnerHTML={{ __html: getIcon(icon) }}
+        dangerouslySetInnerHTML={{ __html: svg }}
       />
     );
   }
@@ -68,11 +75,14 @@ export function ProviderLogo({
     <div
       className={`${FALLBACK_CLASS} ${className}`}
       style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(10, Math.round(size * 0.45)),
         background: color || "var(--surface2)",
         border: "1px solid var(--line)",
       }}
     >
-      {name.slice(0, 1).toUpperCase()}
+      {(char ?? name.slice(0, 1)).toUpperCase()}
     </div>
   );
 }

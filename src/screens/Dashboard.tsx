@@ -11,6 +11,7 @@ import {
 import { api } from "../api/client";
 import type { DashboardData, DashboardWindow } from "../api/types";
 import { fmtCny, fmtTokens } from "../lib/format";
+import RequestLogs from "./RequestLogs";
 
 const WINDOWS: { id: DashboardWindow; label: string }[] = [
   { id: "today", label: "Today" },
@@ -257,6 +258,9 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+
+        {/* Full data-plane request log (gateway audit trail) */}
+        <RequestLogs />
       </div>
     </section>
   );

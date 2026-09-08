@@ -1,5 +1,6 @@
-// Request logs (data-plane audit trail captured by the gateway, migration V5):
-// paged metadata list + expandable detail with redacted headers and bodies.
+// Request logs (data-plane audit trail captured by the gateway, migration V5),
+// rendered as the trailing card section of the Dashboard: paged metadata list
+// with status filter, expandable detail (redacted headers + bodies), clear-all.
 import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -149,13 +150,14 @@ export default function RequestLogs() {
   };
 
   return (
-    <section>
-      <div className="flex h-11 items-center gap-2 border-b border-line px-4">
+    <div className="mt-3 rounded-lg border border-line bg-surface">
+      <div className="flex items-center gap-3 border-b border-line px-3.5 py-2.5">
+        <h3 className="text-[12.5px] font-semibold">Requests</h3>
         <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
           {FILTERS.map((f, i) => (
             <button
               key={f.id}
-              className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${filter === f.id ? " active" : ""}`}
+              className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${filter === f.id ? " active" : ""}`}
               onClick={() => {
                 setFilter(f.id);
                 setPage(1);
@@ -175,8 +177,8 @@ export default function RequestLogs() {
         </span>
       </div>
 
-      <div className="p-4">
-        <div className="overflow-hidden rounded-lg border border-line bg-surface">
+      <div>
+        <div className="overflow-hidden">
           <table className="w-full text-[11.5px]">
             <thead>
               <tr className="border-b border-line text-left text-[10px] text-mut">
@@ -236,7 +238,7 @@ export default function RequestLogs() {
         </div>
 
         {pages > 1 && (
-          <div className="mt-3 flex items-center justify-center gap-3 text-[11.5px] text-mut">
+          <div className="flex items-center justify-center gap-3 pb-3 text-[11.5px] text-mut">
             <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px]" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               Prev
             </Button>
@@ -249,6 +251,6 @@ export default function RequestLogs() {
           </div>
         )}
       </div>
-    </section>
+    </div>
   );
 }

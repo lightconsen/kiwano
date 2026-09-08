@@ -21,17 +21,15 @@ import logoUrl from "./assets/kiwano-logo.svg";
 import Providers from "./screens/Providers";
 import Shelf from "./screens/Shelf";
 import Dashboard from "./screens/Dashboard";
-import RequestLogs from "./screens/RequestLogs";
 import Settings from "./screens/Settings";
 import AddProviderModal from "./screens/AddProviderModal";
 
-type Route = "providers" | "shelf" | "dashboard" | "logs" | "settings";
+type Route = "providers" | "shelf" | "dashboard" | "settings";
 
 const NAV: { id: Route; label: string }[] = [
   { id: "providers", label: "Apps" },
   { id: "shelf", label: "Models" },
   { id: "dashboard", label: "Dashboard" },
-  { id: "logs", label: "Logs" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -164,7 +162,6 @@ export default function App() {
         )}
         {route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset, edit: null })} />}
         {route === "dashboard" && <Dashboard key={`d${tick}`} />}
-        {route === "logs" && <RequestLogs key={`l${tick}`} />}
         {route === "settings" && <Settings key={`c${tick}`} />}
       </main>
 

@@ -1,10 +1,10 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
-import { AGENTS, type AgentId, type Provider } from "../api/types";
+import { AGENTS, type AgentDetect, type AgentId, type Provider } from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import StrategyPanel from "../components/StrategyPanel";
@@ -230,7 +230,19 @@ function ProviderRow({
   );
 }
 
-export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit: (p: Provider) => void }) {
+export default function Providers({
+  onAdd,
+  onEdit,
+  agentDetect = null,
+  agentVersions = {},
+}: {
+  onAdd: () => void;
+  onEdit: (p: Provider) => void;
+  /** Phase 1 detection result; null = probe unavailable → show every agent */
+  agentDetect?: AgentDetect[] | null;
+  /** Phase 2 versions by agent id (arrive async, tooltip only) */
+  agentVersions?: Partial<Record<AgentId, string>>;
+}) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [seg, setSeg] = useState<AgentId | "all">("all");
 
@@ -238,6 +250,21 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
     api.listProviders().then(setProviders);
   }, []);
   useEffect(refetch, [refetch]);
+
+  // Only agents that phase 1 detected as installed get a segment; a failed
+  // probe (null) keeps every agent visible.
+  const visibleSegments = useMemo(
+    () =>
+      SEGMENTS.filter(
+        (s) => s.id === "all" || !agentDetect || agentDetect.find((d) => d.agent === s.id)?.installed,
+      ),
+    [agentDetect],
+  );
+
+  // Drop a hidden segment if the detection result changed under us.
+  useEffect(() => {
+    if (seg !== "all" && !visibleSegments.some((s) => s.id === seg)) setSeg("all");
+  }, [visibleSegments, seg]);
 
   const onEnable = async (id: string) => {
     await api.enableProvider(id);
@@ -258,12 +285,13 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
     <section>
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
         <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
-          {SEGMENTS.map((s, i) => {
+          {visibleSegments.map((s, i) => {
             const label = segmentLabel(s.id);
+            const ver = s.id === "all" ? undefined : agentVersions[s.id];
             return (
               <button
                 key={s.id}
-                title={label}
+                title={s.id === "all" ? label : ver ? `${label} · v${ver}` : label}
                 aria-label={label}
                 className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
                 onClick={() => setSeg(s.id)}

@@ -2,8 +2,10 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AgentDetect,
   AgentId,
   AgentRoute,
+  AgentVersionEntry,
   AppSettings,
   CatalogList,
   ConfigShareReport,
@@ -77,6 +79,10 @@ export const tauriApi: KiwanoApi = {
 
   importConfig: (path: string) =>
     invoke<ConfigShareReport>("import_config", { path }),
+
+  detectAgents: () => invoke<AgentDetect[]>("detect_agents"),
+
+  probeAgentVersions: () => invoke<AgentVersionEntry[]>("probe_agent_versions"),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
 };

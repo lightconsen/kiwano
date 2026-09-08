@@ -8,7 +8,14 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
-import type { CatalogEntry, FooterStats, GatewayStatus, Provider } from "./api/types";
+import type {
+  AgentDetect,
+  AgentId,
+  CatalogEntry,
+  FooterStats,
+  GatewayStatus,
+  Provider,
+} from "./api/types";
 import { Dot } from "./components/bits";
 import logoUrl from "./assets/kiwano-logo.svg";
 import Providers from "./screens/Providers";
@@ -41,6 +48,8 @@ export default function App() {
     preset: null,
     edit: null,
   });
+  const [agentDetect, setAgentDetect] = useState<AgentDetect[] | null>(null);
+  const [agentVersions, setAgentVersions] = useState<Partial<Record<AgentId, string>>>({});
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -55,6 +64,25 @@ export default function App() {
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  // Agent detection (phase 1 gates the Apps filter; phase 2 versions enrich
+  // tooltips later). Probe failure → null → the Apps tab shows every agent.
+  useEffect(() => {
+    api
+      .detectAgents()
+      .then((list) => {
+        setAgentDetect(list);
+        api
+          .probeAgentVersions()
+          .then((vs) =>
+            setAgentVersions(
+              Object.fromEntries(vs.map((v) => [v.agent, v.version ?? ""])) as Partial<Record<AgentId, string>>,
+            ),
+          )
+          .catch(() => {});
+      })
+      .catch(() => setAgentDetect(null));
+  }, []);
 
   // Cost alert patrol (spec §4.1 P1): poll every 60s; the backend dedupes per period,
   // so a returned alert is the first hit of that period — forward it as a system notification.
@@ -126,6 +154,8 @@ export default function App() {
         {route === "providers" && (
           <Providers
             key={`p${tick}`}
+            agentDetect={agentDetect}
+            agentVersions={agentVersions}
             onAdd={() => setModal({ open: true, preset: null, edit: null })}
             onEdit={(p) => setModal({ open: true, preset: null, edit: p })}
           />

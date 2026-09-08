@@ -21,6 +21,7 @@ import type {
   UsageAlert,
   ApiKeyEntry,
 } from "./types";
+import { AGENTS } from "./types";
 
 function protocolNote(protocol: NewProviderInput["protocol"]): string {
   return protocol === "openai"
@@ -723,5 +724,30 @@ export const devApi: KiwanoApi = {
       hub_synced: true,
       version: "v0.1.0 · MVP",
     };
+  },
+
+  async detectAgents() {
+    await delay(120);
+    // Dev fixture: everything installed so every agent segment stays visible.
+    return AGENTS.map((a) => ({
+      agent: a.id,
+      installed: true,
+      path: `/usr/local/bin/${a.id === "grokbuild" ? "grok" : a.id === "claude-desktop" ? "claude" : a.id}`,
+    }));
+  },
+
+  async probeAgentVersions() {
+    await delay(600);
+    return [
+      { agent: "claude", version: "2.1.83 (Claude Code)" },
+      { agent: "codex", version: "0.42.0" },
+      { agent: "gemini", version: "0.13.0" },
+      { agent: "grokbuild", version: "0.9.4" },
+      { agent: "claude-desktop", version: null },
+      { agent: "opencode", version: "1.0.120" },
+      { agent: "openclaw", version: "0.23.1" },
+      { agent: "hermes", version: "0.8.2" },
+      { agent: "pi", version: "0.5.12" },
+    ];
   },
 };

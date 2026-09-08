@@ -4,6 +4,7 @@
 //! (same SQLite file the sidecar reads) → `POST :8310/reload` hot-swaps the
 //! gateway route table. The gateway process itself is spawned in `setup`.
 
+mod detect;
 mod import;
 mod share;
 mod sidecar;
@@ -16,6 +17,7 @@ use std::sync::Mutex;
 use kiwano_gateway::store::Store;
 use tauri::{Manager, State};
 
+use detect::{detect_agents, probe_agent_versions};
 use vm::Aux;
 
 struct AppState {
@@ -468,6 +470,8 @@ pub fn run() {
             reorder_agent_bindings,
             export_config,
             import_config,
+            detect_agents,
+            probe_agent_versions,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: intercept CloseRequested and hide the window

@@ -251,6 +251,20 @@ export interface UsageAlert {
 
 export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
 
+/** Agent installation detection (phase 1: existence only — one login-shell probe) */
+export interface AgentDetect {
+  agent: AgentId;
+  installed: boolean;
+  /** Resolved CLI binary path; null for claude-desktop */
+  path: string | null;
+}
+
+/** Agent version probe (phase 2: async `--version`; null when the probe failed) */
+export interface AgentVersionEntry {
+  agent: AgentId;
+  version: string | null;
+}
+
 /** Agent strategy candidates (projection of agent_bindings rows, ascending by priority, 0 = primary) */
 export interface StrategyBinding {
   provider_id: string;
@@ -309,5 +323,9 @@ export interface KiwanoApi {
   exportConfig(path: string): Promise<number>;
   /** Import a config plan from a file (merged by name+base_url); returns a count report */
   importConfig(path: string): Promise<ConfigShareReport>;
+  /** Phase 1 agent detection: installed state per agent (fast; null path = probed unavailable) */
+  detectAgents(): Promise<AgentDetect[]>;
+  /** Phase 2 agent versions: slow `--version` probes, fetched after detection; null = probe failed */
+  probeAgentVersions(): Promise<AgentVersionEntry[]>;
   getFooterStats(): Promise<FooterStats>;
 }

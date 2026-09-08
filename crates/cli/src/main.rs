@@ -894,7 +894,11 @@ COMMANDS:
     keys list <PROVIDER_ID>       list rotation keys of a provider
     keys add <PROVIDER_ID> --key K [--label L]
     keys remove <KEY_ID>
-    usage [--days N] [--agent A]  usage totals (default 7 days)"
+    usage [--days N] [--agent A]  usage totals (default 7 days)
+
+AGENTS:
+    claude, claude-desktop, codex, gemini, grokbuild,
+    opencode, openclaw, hermes, pi"
     );
 }
 

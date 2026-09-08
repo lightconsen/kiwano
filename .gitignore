@@ -1,6 +1,4 @@
-# 本地工作文档，不纳入版本管理
-tech.md
-spec.md
+*.local.md
 
 # Node / Vite
 node_modules

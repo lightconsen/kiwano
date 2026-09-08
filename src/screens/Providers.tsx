@@ -330,7 +330,7 @@ export default function Providers({
         <div className="px-4 py-8 text-center text-[12px] text-mut">
           No provider bound to this agent —{" "}
           <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
-            add provider
+            Add provider
           </button>
         </div>
       )}

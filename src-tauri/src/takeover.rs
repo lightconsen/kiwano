@@ -43,7 +43,9 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
             let app_support = home.join("Library").join("Application Support");
             let threep = app_support.join("Claude-3p");
             Ok(vec![
-                app_support.join("Claude").join("claude_desktop_config.json"),
+                app_support
+                    .join("Claude")
+                    .join("claude_desktop_config.json"),
                 threep.join("claude_desktop_config.json"),
                 threep.join("configLibrary").join(format!(
                     "{}.json",
@@ -53,9 +55,7 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
             ])
         }
         #[cfg(not(target_os = "macos"))]
-        "claude-desktop" => {
-            Err("claude-desktop takeover currently supports macOS only".into())
-        }
+        "claude-desktop" => Err("claude-desktop takeover currently supports macOS only".into()),
         // additive-mode agents: the gateway entry coexists with their native
         // providers, so a missing config is fine (a fresh one gets created)
         "opencode" => Ok(vec![home
@@ -101,8 +101,10 @@ pub fn enable(
             // (treated as empty files — every claude-desktop write normalizes
             // a missing/non-object document to {})
             Err(_)
-                if matches!(agent, "opencode" | "openclaw" | "hermes" | "pi" | "claude-desktop")
-                    || p.ends_with("auth.json")
+                if matches!(
+                    agent,
+                    "opencode" | "openclaw" | "hermes" | "pi" | "claude-desktop"
+                ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
                 String::new()
@@ -192,13 +194,11 @@ fn rewrite(
         ),
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (cc_adapters::gateway_takeover)
-        "opencode" => {
-            kiwano_cc_adapters::gateway_takeover::upsert_opencode_gateway(
-                original,
-                &format!("{base}:{data_port}/v1"),
-                key,
-            )
-        }
+        "opencode" => kiwano_cc_adapters::gateway_takeover::upsert_opencode_gateway(
+            original,
+            &format!("{base}:{data_port}/v1"),
+            key,
+        ),
         "openclaw" => kiwano_cc_adapters::gateway_takeover::upsert_openclaw_gateway(
             original,
             &format!("{base}:{data_port}"),
@@ -293,7 +293,10 @@ fn rewrite_gemini_env(original: &str, base: &str, port: u16, key: &str) -> Resul
     let mut out = Vec::with_capacity(original.lines().count() + 2);
     for line in original.lines() {
         let trimmed = line.trim_start();
-        let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim_start();
+        let after_export = trimmed
+            .strip_prefix("export ")
+            .unwrap_or(trimmed)
+            .trim_start();
         let key_of = after_export.split_once('=').map(|(k, _)| k.trim());
         match key_of {
             Some("GOOGLE_GEMINI_BASE_URL") if !found_base => {
@@ -720,13 +723,22 @@ base_url = "https://relay.example.com/v1"
             serde_json::from_str(&std::fs::read_to_string(dir.join("opencode.json")).unwrap())
                 .unwrap();
         assert_eq!(v["model"], "kiwano-gateway/deepseek-chat");
-        assert_eq!(v["provider"]["kiwano-gateway"]["options"]["baseURL"], "http://127.0.0.1:8317/v1");
-        assert_eq!(v["provider"]["kiwano-gateway"]["options"]["apiKey"], "kw-ag-opencode-abcd");
+        assert_eq!(
+            v["provider"]["kiwano-gateway"]["options"]["baseURL"],
+            "http://127.0.0.1:8317/v1"
+        );
+        assert_eq!(
+            v["provider"]["kiwano-gateway"]["options"]["apiKey"],
+            "kw-ag-opencode-abcd"
+        );
         assert!(v["provider"]["deepseek"].is_object()); // additive: entry survives
 
         disable(&aux, "opencode", &home).unwrap();
         // restore = write back byte for byte
-        assert_eq!(std::fs::read_to_string(dir.join("opencode.json")).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("opencode.json")).unwrap(),
+            original
+        );
         assert!(aux.load_takeover_backup("opencode").is_none());
     }
 
@@ -737,26 +749,33 @@ base_url = "https://relay.example.com/v1"
         // pi's files may not exist yet (agent dir is created on takeover)
         enable(&aux, "pi", "kw-ag-pi-abcd", 8317, &home).unwrap();
         let agent = home.join(".pi").join("agent");
-        let models: Value = serde_json::from_str(
-            &std::fs::read_to_string(agent.join("models.json")).unwrap(),
-        )
-        .unwrap();
+        let models: Value =
+            serde_json::from_str(&std::fs::read_to_string(agent.join("models.json")).unwrap())
+                .unwrap();
         assert_eq!(
             models["providers"]["kiwano-gateway"]["baseUrl"],
             "http://127.0.0.1:8317/v1"
         );
-        assert_eq!(models["providers"]["kiwano-gateway"]["apiKey"], "kw-ag-pi-abcd");
-        let settings: Value = serde_json::from_str(
-            &std::fs::read_to_string(agent.join("settings.json")).unwrap(),
-        )
-        .unwrap();
+        assert_eq!(
+            models["providers"]["kiwano-gateway"]["apiKey"],
+            "kw-ag-pi-abcd"
+        );
+        let settings: Value =
+            serde_json::from_str(&std::fs::read_to_string(agent.join("settings.json")).unwrap())
+                .unwrap();
         assert_eq!(settings["defaultProvider"], "kiwano-gateway");
 
         disable(&aux, "pi", &home).unwrap();
         // originals were missing → restored as empty files (backup-verbatim
         // semantics, same as gemini's .env); the CLI recreates its own state
-        assert_eq!(std::fs::read_to_string(agent.join("models.json")).unwrap(), "");
-        assert_eq!(std::fs::read_to_string(agent.join("settings.json")).unwrap(), "");
+        assert_eq!(
+            std::fs::read_to_string(agent.join("models.json")).unwrap(),
+            ""
+        );
+        assert_eq!(
+            std::fs::read_to_string(agent.join("settings.json")).unwrap(),
+            ""
+        );
         assert!(aux.load_takeover_backup("pi").is_none());
     }
 
@@ -778,7 +797,10 @@ base_url = "https://relay.example.com/v1"
         assert_eq!(providers.len(), 2);
 
         disable(&aux, "hermes", &home).unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("config.yaml")).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.yaml")).unwrap(),
+            original
+        );
         assert!(aux.load_takeover_backup("hermes").is_none());
     }
 
@@ -788,14 +810,23 @@ base_url = "https://relay.example.com/v1"
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let app_support = home.join("Library").join("Application Support");
-        let normal_config = app_support.join("Claude").join("claude_desktop_config.json");
+        let normal_config = app_support
+            .join("Claude")
+            .join("claude_desktop_config.json");
         std::fs::create_dir_all(normal_config.parent().unwrap()).unwrap();
         let original = r#"{"deploymentMode":"1p","autoUpdater":true}"#;
         std::fs::write(&normal_config, original).unwrap();
         // Claude-3p side (config, profile, _meta.json) is absent: takeover
         // must create it from scratch
 
-        enable(&aux, "claude-desktop", "kw-ag-claude-desktop-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "claude-desktop",
+            "kw-ag-claude-desktop-abcd",
+            8317,
+            &home,
+        )
+        .unwrap();
 
         let normal: Value =
             serde_json::from_str(&std::fs::read_to_string(&normal_config).unwrap()).unwrap();
@@ -804,7 +835,9 @@ base_url = "https://relay.example.com/v1"
 
         let threep: Value = serde_json::from_str(
             &std::fs::read_to_string(
-                app_support.join("Claude-3p").join("claude_desktop_config.json"),
+                app_support
+                    .join("Claude-3p")
+                    .join("claude_desktop_config.json"),
             )
             .unwrap(),
         )
@@ -823,27 +856,32 @@ base_url = "https://relay.example.com/v1"
         .unwrap();
         assert_eq!(profile["inferenceProvider"], "gateway");
         assert_eq!(profile["inferenceGatewayBaseUrl"], "http://127.0.0.1:8317");
-        assert_eq!(profile["inferenceGatewayApiKey"], "kw-ag-claude-desktop-abcd");
+        assert_eq!(
+            profile["inferenceGatewayApiKey"],
+            "kw-ag-claude-desktop-abcd"
+        );
         assert_eq!(profile["inferenceModels"].as_array().unwrap().len(), 4);
 
         let meta: Value = serde_json::from_str(
             &std::fs::read_to_string(
-                app_support.join("Claude-3p").join("configLibrary").join("_meta.json"),
+                app_support
+                    .join("Claude-3p")
+                    .join("configLibrary")
+                    .join("_meta.json"),
             )
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            meta["appliedId"],
-            "00000000-0000-4000-8000-000000157210"
-        );
+        assert_eq!(meta["appliedId"], "00000000-0000-4000-8000-000000157210");
 
         disable(&aux, "claude-desktop", &home).unwrap();
         // restore = write back byte for byte (absent originals → empty files)
         assert_eq!(std::fs::read_to_string(&normal_config).unwrap(), original);
         assert_eq!(
             std::fs::read_to_string(
-                app_support.join("Claude-3p").join("claude_desktop_config.json")
+                app_support
+                    .join("Claude-3p")
+                    .join("claude_desktop_config.json")
             )
             .unwrap(),
             ""

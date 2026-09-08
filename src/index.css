@@ -22,8 +22,6 @@
   --kiwi: oklch(0.80 0.19 132);
   --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
   --kiwi-dim: oklch(0.55 0.14 132);
-  /* light backing tile for near-black brand marks (metadata.darkMark) */
-  --logo-tile: oklch(0.985 0 0);
   /* status colors (design.md §5) */
   --blue: oklch(0.72 0.13 245);
   --amber: oklch(0.78 0.15 80);

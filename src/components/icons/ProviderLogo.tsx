@@ -2,12 +2,26 @@
 // Icons come from the registry ported from cc-switch (see ./index.ts) —
 // inline SVGs size to 1em (set fontSize = box) and use brand fills or
 // currentColor; URL icons are bundled raster/SVG assets.
-// Near-black brand marks (metadata.darkMark) render on a light tile so
-// they stay visible on dark surfaces.
-import { getIcon, getIconUrl, hasIcon, isUrlIcon } from "./index";
+// Near-black marks have a dark-theme variant asset (darkIconUrls): under
+// html.dark the light version renders, otherwise the original.
+import { useEffect, useState } from "react";
+import { getIcon, getIconUrl, getDarkIconUrl, hasDarkVariant, hasIcon, isUrlIcon } from "./index";
 import { getIconMetadata } from "./metadata";
 
 const FALLBACK_CLASS = "logo-c w-6 h-6 text-[11px]";
+
+function useIsDarkTheme(): boolean {
+  const [dark, setDark] = useState(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  );
+  useEffect(() => {
+    const el = document.documentElement;
+    const ob = new MutationObserver(() => setDark(el.classList.contains("dark")));
+    ob.observe(el, { attributes: true, attributeFilter: ["class"] });
+    return () => ob.disconnect();
+  }, []);
+  return dark;
+}
 
 export function ProviderLogo({
   icon,
@@ -22,26 +36,29 @@ export function ProviderLogo({
   size?: number;
   className?: string;
 }) {
+  const dark = useIsDarkTheme();
   const box: React.CSSProperties = { width: size, height: size };
-  const meta = icon ? getIconMetadata(icon) : undefined;
-  const tile: React.CSSProperties | undefined = meta?.darkMark
-    ? { background: "var(--logo-tile)", borderRadius: 5, padding: Math.max(2, size * 0.08) }
-    : undefined;
+  const useDark = dark && !!icon && hasDarkVariant(icon);
 
   if (icon && hasIcon(icon)) {
-    if (isUrlIcon(icon)) {
+    if (isUrlIcon(icon) || useDark) {
+      const src = useDark ? getDarkIconUrl(icon) : getIconUrl(icon);
       return (
-        <span className={`inline-flex shrink-0 ${className}`} style={{ ...box, ...tile }}>
-          <img src={getIconUrl(icon)} alt={name} className="object-contain" style={{ width: "100%", height: "100%" }} />
-        </span>
+        <img
+          src={src}
+          alt={name}
+          className={`shrink-0 rounded-[5px] object-contain ${className}`}
+          style={box}
+        />
       );
     }
+    const meta = getIconMetadata(icon);
     const tint = color || (meta && meta.defaultColor !== "currentColor" ? meta.defaultColor : "") || "var(--ink)";
     return (
       <span
         aria-label={name}
         className={`inline-flex shrink-0 items-center justify-center ${className}`}
-        style={{ ...box, ...tile, fontSize: size, color: tint }}
+        style={{ ...box, fontSize: size, color: tint }}
         dangerouslySetInnerHTML={{ __html: getIcon(icon) }}
       />
     );

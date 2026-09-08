@@ -34,6 +34,20 @@ import _xycai from "./xycai-icon.png";
 import _zetaapi from "./zetaapi-icon.png";
 // Kiwano additions sourced from lobehub/lobe-icons (packages/static-svg)
 import _groq from "./groq.svg?url";
+// Dark-theme variants for near-black brand marks: recolored statics from
+// lobehub/lobe-icons or PIL-inverted rasters (see git history for provenance).
+import _kimiDark from "./kimi-dark.svg?url";
+import _novitaDark from "./novita-dark.svg?url";
+import _ollamaDark from "./ollama-dark.svg?url";
+import _xaiDark from "./xai-dark.svg?url";
+import _jiekouDark from "./jiekou-dark.svg?url";
+import _sssaicodeDark from "./sssaicode-dark.svg?url";
+import _atlascloudDark from "./atlascloud_icon-dark.png";
+import _fennoDark from "./fenno-icon-dark.png";
+import _hermesDark from "./hermes-dark.png";
+import _sudocodeDark from "./sudocode-dark.png";
+import _teamorouterDark from "./teamorouter-dark.png";
+import _zetaapiDark from "./zetaapi-icon-dark.png";
 import _together from "./together.svg?url";
 
 export const icons: Record<string, string> = {
@@ -148,6 +162,29 @@ export const iconUrls: Record<string, string> = {
   xycai: _xycai,
   zetaapi: _zetaapi,
 };
+
+export const darkIconUrls: Record<string, string> = {
+  kimi: _kimiDark,
+  novita: _novitaDark,
+  ollama: _ollamaDark,
+  xai: _xaiDark,
+  jiekou: _jiekouDark,
+  sssaicode: _sssaicodeDark,
+  atlascloud: _atlascloudDark,
+  fenno: _fennoDark,
+  hermes: _hermesDark,
+  sudocode: _sudocodeDark,
+  teamorouter: _teamorouterDark,
+  zetaapi: _zetaapiDark,
+};
+
+export function hasDarkVariant(name: string): boolean {
+  return name.toLowerCase() in darkIconUrls;
+}
+
+export function getDarkIconUrl(name: string): string {
+  return darkIconUrls[name.toLowerCase()] || "";
+}
 
 export const iconList = [
   ...Object.keys(icons),

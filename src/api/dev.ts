@@ -1,4 +1,4 @@
-// Mock data source — numbers match the design/index.html prototype verbatim.
+// Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
 import type {
   AgentId,
@@ -449,9 +449,9 @@ const settings: AppSettings = {
 
 let idSeq = 100;
 
-// Mock storage for rotating keys (spec §4.1 P1 multi-key rotation)
-type MockApiKeyRow = ApiKeyEntry & { provider_id: string };
-const mockApiKeys: MockApiKeyRow[] = [];
+// Dev storage for rotating keys (spec §4.1 P1 multi-key rotation)
+type DevApiKeyRow = ApiKeyEntry & { provider_id: string };
+const devApiKeys: DevApiKeyRow[] = [];
 
 async function delay(ms = 120) {
   return new Promise((r) => setTimeout(r, ms));
@@ -503,7 +503,7 @@ function strategyOf(agent: AgentId): AgentRoute {
   return agentRoutes.find((r) => r.agent === agent)!;
 }
 
-export const mockApi: KiwanoApi = {
+export const devApi: KiwanoApi = {
   async getGatewayStatus(): Promise<GatewayStatus> {
     await delay();
     return { running: true, port: 8317 };
@@ -649,7 +649,7 @@ export const mockApi: KiwanoApi = {
 
   async listApiKeys(providerId: string): Promise<ApiKeyEntry[]> {
     await delay();
-    return mockApiKeys.filter((k) => k.provider_id === providerId);
+    return devApiKeys.filter((k) => k.provider_id === providerId);
   },
 
   async addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry> {
@@ -662,14 +662,14 @@ export const mockApi: KiwanoApi = {
       enabled: true,
       created_at: new Date().toISOString(),
     };
-    mockApiKeys.push(row);
+    devApiKeys.push(row);
     return row;
   },
 
   async deleteApiKey(id: number): Promise<void> {
     await delay();
-    const i = mockApiKeys.findIndex((k) => k.id === id);
-    if (i >= 0) mockApiKeys.splice(i, 1);
+    const i = devApiKeys.findIndex((k) => k.id === id);
+    if (i >= 0) devApiKeys.splice(i, 1);
   },
 
   async getAgentRoutes(): Promise<AgentRoute[]> {

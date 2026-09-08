@@ -1,6 +1,6 @@
 // Kiwano frontend data contract — fields aligned with the SQLite tables (tech.md §2.3/§4.7).
 // The UI accesses data only via KiwanoApi in src/api/client.ts; components must not contain
-// mock literals or Tauri invoke calls.
+// dev literals or Tauri invoke calls.
 
 export type AgentId =
   | "claude"

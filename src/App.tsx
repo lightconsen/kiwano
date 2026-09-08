@@ -75,7 +75,7 @@ export default function App() {
           });
         }
       } catch {
-        // mock mode / gateway not running: stay silent
+        // dev mode / gateway not running: stay silent
       }
     };
     check();

@@ -1,7 +1,7 @@
-// UI 数据访问唯一入口。
-// - Tauri WebView 内 → tauriApi（真实 SQLite + gateway sidecar）
-// - 纯浏览器 dev（pnpm dev 无 Tauri）→ mockApi（与原型逐字一致的数据）
-// 组件层不感知差异；集成后组件零改动。
+// Single entry point for UI data access.
+// - Inside the Tauri WebView → tauriApi (real SQLite + gateway sidecar)
+// - Pure browser dev (pnpm dev without Tauri) → mockApi (data matching the prototype verbatim)
+// The component layer is unaware of the difference; zero component changes after integration.
 import type { KiwanoApi } from "./types";
 import { mockApi } from "./mock";
 import { tauriApi } from "./tauri";

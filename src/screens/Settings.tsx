@@ -1,10 +1,19 @@
-// 设置（design/index.html #s-settings）
+// Settings (design/index.html #s-settings)
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, ShieldCheck, SlidersHorizontal, User } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
 import type { AppSettings } from "../api/types";
-import { Toggle } from "../components/bits";
 
 const CONFIG_FILE_FILTERS = [{ name: "Kiwano 配置", extensions: ["json"] }];
 
@@ -72,46 +81,48 @@ export default function Settings() {
 
   return (
     <section className="space-y-3 p-4">
-      {/* 通用 */}
+      {/* General */}
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">通用</h3>
         <div className="space-y-2.5 text-[12.5px]">
           <Row label="语言">
-            <select
-              className="h-7 w-[130px] rounded-md border border-line bg-surface2 px-2 text-[11.5px]"
-              value={s.language}
-              onChange={(e) => patch({ language: e.target.value })}
-            >
-              <option value="zh-CN">简体中文</option>
-              <option value="en">English</option>
-            </select>
+            <Select value={s.language ?? "zh-CN"} onValueChange={(v) => patch({ language: v ?? "zh-CN" })}>
+              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="zh-CN">简体中文</SelectItem>
+                <SelectItem value="en">English</SelectItem>
+              </SelectContent>
+            </Select>
           </Row>
           <Row label="主题">
-            <select
-              className="h-7 w-[130px] rounded-md border border-line bg-surface2 px-2 text-[11.5px]"
-              value={s.theme}
-              onChange={(e) => patch({ theme: e.target.value })}
-            >
-              <option value="dark">深色</option>
-              <option value="light">浅色</option>
-            </select>
+            <Select value={s.theme ?? "dark"} onValueChange={(v) => patch({ theme: v ?? "dark" })}>
+              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dark">深色</SelectItem>
+                <SelectItem value="light">浅色</SelectItem>
+              </SelectContent>
+            </Select>
           </Row>
           <Row label="开机自启">
-            <Toggle on={s.autostart} onChange={(v) => patch({ autostart: v })} />
+            <Switch checked={s.autostart} onCheckedChange={(v) => patch({ autostart: v })} />
           </Row>
           <Row label="关闭时最小化到托盘">
-            <Toggle on={s.close_to_tray} onChange={(v) => patch({ close_to_tray: v })} />
+            <Switch checked={s.close_to_tray} onCheckedChange={(v) => patch({ close_to_tray: v })} />
           </Row>
         </div>
       </div>
 
-      {/* 本地网关 */}
+      {/* Local gateway */}
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">本地网关</h3>
         <div className="space-y-2.5 text-[12.5px]">
           <Row label="监听地址">
-            <input
-              className="h-7 w-[130px] rounded-md border border-line bg-surface2 px-2 font-mono text-[11.5px]"
+            <Input
+              className="h-7 w-[130px] bg-surface2 font-mono text-[11.5px] dark:bg-surface2"
               value={s.gateway_listen}
               onChange={(e) => patch({ gateway_listen: e.target.value })}
             />
@@ -135,9 +146,9 @@ export default function Settings() {
                 <span className="text-[10.5px]" style={t.enabled ? { color: "var(--kiwi)" } : { color: "var(--mut)" }}>
                   {t.enabled ? "已接管" : "未接管"}
                 </span>
-                <Toggle
-                  on={t.enabled}
-                  onChange={(v) => {
+                <Switch
+                  checked={t.enabled}
+                  onCheckedChange={(v) => {
                     api.setTakeover(t.agent, v).then(() => api.getSettings().then(setS));
                   }}
                 />
@@ -145,18 +156,18 @@ export default function Settings() {
             </div>
           ))}
           <Row label="自动故障转移" note="主供应商失败时切备用">
-            <Toggle on={s.auto_failover} onChange={(v) => patch({ auto_failover: v })} />
+            <Switch checked={s.auto_failover} onCheckedChange={(v) => patch({ auto_failover: v })} />
           </Row>
           <Row label="请求日志留存" note="仅本地 · 30 天">
-            <Toggle on={s.request_logs} onChange={(v) => patch({ request_logs: v })} />
+            <Switch checked={s.request_logs} onCheckedChange={(v) => patch({ request_logs: v })} />
           </Row>
           <Row label="费用预警" note="用量达每期上限时系统通知">
-            <Toggle on={s.cost_alert} onChange={(v) => patch({ cost_alert: v })} />
+            <Switch checked={s.cost_alert} onCheckedChange={(v) => patch({ cost_alert: v })} />
           </Row>
         </div>
       </div>
 
-      {/* 隐私承诺 */}
+      {/* Privacy pledge */}
       <div className="rounded-lg border p-4" style={{ background: "var(--kiwi-soft)", borderColor: "var(--kiwi-dim)" }}>
         <h3 className="mb-3 flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: "var(--kiwi)" }}>
           <ShieldCheck className="h-3.5 w-3.5" />
@@ -164,7 +175,7 @@ export default function Settings() {
         </h3>
         <div className="space-y-2.5 text-[12.5px]">
           <Row label="匿名用量上报" note="默认关闭 · 仅脱敏统计">
-            <Toggle on={s.telemetry} onChange={(v) => patch({ telemetry: v })} />
+            <Switch checked={s.telemetry} onCheckedChange={(v) => patch({ telemetry: v })} />
           </Row>
           <div className="space-y-1 text-[10.5px]" style={{ color: "var(--mut)" }}>
             <div className="flex items-center gap-1.5">
@@ -179,7 +190,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Hub 与配置 */}
+      {/* Hub & config */}
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">Kiwano Hub 与配置</h3>
         <div className="flex items-center justify-between text-[12.5px]">
@@ -201,22 +212,28 @@ export default function Settings() {
             )}
           </div>
           <div className="flex gap-2">
-            <button
-              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 whitespace-nowrap px-3 text-[11.5px]"
               onClick={onExport}
               title="导出 Provider 与路由方案为 JSON（含 API Key）"
             >
               导出方案
-            </button>
-            <button
-              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 whitespace-nowrap px-3 text-[11.5px]"
               onClick={onImport}
               title="导入一键配置方案（同名同端点合并）"
             >
               导入方案
-            </button>
-            <button
-              className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-3 text-[11.5px]"
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 whitespace-nowrap px-3 text-[11.5px]"
               disabled={importMsg === "导入中…"}
               title={importMsg ?? undefined}
               onClick={() => {
@@ -233,25 +250,26 @@ export default function Settings() {
               }}
             >
               从 CC Switch 导入
-            </button>
-            <button
-              className="btn btn-primary h-7 rounded-md px-3 text-[11.5px] font-semibold"
-              style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}
-            >
+            </Button>
+            <Button size="sm" className="h-7 px-3 text-[11.5px] font-semibold">
               登录
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* 高级折叠占位（原型内的 sliders 提示行，随添加弹窗实现） */}
-      <button className="btn btn-ghost flex h-8 w-full items-center justify-between rounded-md border border-line px-2.5 text-[11.5px] text-mut">
+      {/* Advanced collapsible placeholder (the sliders hint row in the prototype, implemented with the add modal) */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-8 w-full justify-between px-2.5 text-[11.5px] text-mut"
+      >
         <span className="flex items-center gap-1.5">
           <SlidersHorizontal className="h-3 w-3" />
           高级配置（超时 / 重试 / 请求头）
         </span>
         <ChevronDown className="h-3.5 w-3.5" />
-      </button>
+      </Button>
     </section>
   );
 }

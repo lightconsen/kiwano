@@ -1,6 +1,13 @@
-// 仪表盘（design/index.html #s-dashboard）
+// Dashboard (design/index.html #s-dashboard)
 import { useEffect, useState } from "react";
 import { CircleDollarSign, Coins, Send, Timer } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../api/client";
 import type { DashboardData, DashboardWindow } from "../api/types";
 import { fmtCny, fmtTokens } from "../lib/format";
@@ -11,7 +18,7 @@ const WINDOWS: { id: DashboardWindow; label: string }[] = [
   { id: "30d", label: "近 30 天" },
 ];
 
-/** Catmull-Rom → 贝塞尔平滑曲线（原型手绘 C 曲线的等价生成） */
+/** Catmull-Rom → Bézier smoothing (programmatic equivalent of the prototype's hand-drawn C curves) */
 function smoothPath(pts: [number, number][]): string {
   if (pts.length < 2) return pts.length ? `M${pts[0][0]},${pts[0][1]}` : "";
   let d = `M${pts[0][0]},${pts[0][1]}`;
@@ -38,7 +45,7 @@ function TrendChart({ data }: { data: DashboardData }) {
   const right = 880;
   const n = data.trend.length;
   const x = (i: number) => left + (i * (right - left)) / Math.max(1, n - 1);
-  // 空库时 max=0，除零产生 NaN → SVG 报错；用 max(1, ·) 兜底
+  // Empty DB gives max=0 → division yields NaN → SVG error; clamp with max(1, ·)
   const yReq = (v: number) => {
     const max = Math.max(1, ...data.trend.map((t) => t.requests));
     return bottom - (v / max) * (bottom - top);
@@ -118,17 +125,27 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
-        <select className="h-7 rounded-md border border-line bg-surface px-2 text-[12px] text-mut">
-          <option>全部供应商</option>
-        </select>
-        <select className="h-7 rounded-md border border-line bg-surface px-2 text-[12px] text-mut">
-          <option>全部 Agent</option>
-        </select>
+        <Select defaultValue="all">
+          <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部供应商</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select defaultValue="all">
+          <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部 Agent</SelectItem>
+          </SelectContent>
+        </Select>
         <span className="ml-auto text-[11px] text-mut">数据仅存本地 SQLite</span>
       </div>
 
       <div className="p-4">
-        {/* 统计条 */}
+        {/* Stats bar */}
         <div className="flex divide-line rounded-lg border border-line bg-surface">
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
@@ -174,7 +191,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 请求趋势 */}
+        {/* Request trend */}
         <div className="mt-3 rounded-lg border border-line bg-surface p-3.5">
           <div className="flex items-center justify-between">
             <h3 className="text-[12.5px] font-semibold">请求趋势</h3>
@@ -193,7 +210,7 @@ export default function Dashboard() {
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">
-          {/* 供应商分布 */}
+          {/* Provider breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
             <h3 className="text-[12.5px] font-semibold">供应商分布</h3>
             <div className="mt-2.5 space-y-2.5">
@@ -215,7 +232,7 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          {/* Agent 分布 */}
+          {/* Agent breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
             <h3 className="text-[12.5px] font-semibold">Agent 分布</h3>
             <table className="mt-2 w-full text-[11.5px]">

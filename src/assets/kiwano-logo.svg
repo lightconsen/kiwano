@@ -1,5 +1,5 @@
-<!-- Kiwano logo mark — 刺角瓜几何标（品牌色 kiwi 绿 oklch(0.80 0.19 132) ≈ #7FE05A）；
-     透明背景，图形占画布 ~90% -->
+<!-- Kiwano logo mark — geometric horned-melon emblem (brand kiwi green oklch(0.80 0.19 132) ≈ #7FE05A);
+     transparent background, artwork covers ~90% of the canvas -->
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <radialGradient id="body" cx="0.38" cy="0.32" r="0.85">
@@ -13,7 +13,7 @@
     </linearGradient>
   </defs>
 
-  <!-- 刺（8 根，绕果实中心旋转；三角基部埋入果体内） -->
+  <!-- Spikes (8, rotated around the fruit center; triangular bases buried in the body) -->
   <g fill="url(#spike)" stroke="#3F8F2F" stroke-width="3" stroke-linejoin="round">
     <path transform="rotate(0   256 256)" d="M234 109 L256 26 L278 109 Z"/>
     <path transform="rotate(45  256 256)" d="M234 109 L256 26 L278 109 Z"/>
@@ -25,14 +25,14 @@
     <path transform="rotate(315 256 256)" d="M234 109 L256 26 L278 109 Z"/>
   </g>
 
-  <!-- 果体 -->
+  <!-- Body -->
   <ellipse cx="256" cy="256" rx="192" ry="152" fill="url(#body)" stroke="#3F8F2F" stroke-width="4"/>
 
-  <!-- 高光 -->
+  <!-- Highlight -->
   <ellipse cx="192" cy="195" rx="74" ry="42" fill="#FFFFFF" opacity="0.22"
            transform="rotate(-18 192 195)"/>
 
-  <!-- 果皮斑点 -->
+  <!-- Skin speckles -->
   <g fill="#D8FBC4" opacity="0.55">
     <circle cx="314" cy="208" r="9.5"/>
     <circle cx="355" cy="272" r="7"/>

@@ -1,5 +1,5 @@
-// KiwanoApi 的 Tauri invoke 实现 —— 命令名与 src-tauri/src/lib.rs 一一对应，
-// 返回的 VM 字段（serde snake_case）与 src/api/types.ts 逐字对齐。
+// Tauri invoke implementation of KiwanoApi — command names map one-to-one to src-tauri/src/lib.rs,
+// and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentId,

@@ -1,6 +1,6 @@
-// Kiwano 前端数据契约 —— 字段与 SQLite 表（tech.md §2.3/§4.7）对齐。
-// UI 只通过 src/api/client.ts 的 KiwanoApi 访问数据；组件内不得出现
-// mock 字面量或 Tauri invoke 调用。
+// Kiwano frontend data contract — fields aligned with the SQLite tables (tech.md §2.3/§4.7).
+// The UI accesses data only via KiwanoApi in src/api/client.ts; components must not contain
+// mock literals or Tauri invoke calls.
 
 export type AgentId = "claude" | "codex" | "gemini";
 export type Billing = "plan" | "payg" | "unl";
@@ -21,33 +21,33 @@ export const AGENTS: AgentMeta[] = [
 ];
 
 export interface ProviderHealth {
-  /** ok=健康(当前) idle=待命 off=未启用/未运行 down=故障 */
+  /** ok=healthy (current) idle=standby off=disabled/not running down=failure */
   state: "ok" | "idle" | "off";
   latency_ms: number | null;
-  /** 状态列尾注：未启用 / 未运行 / …（健康时省略） */
+  /** Status column suffix note: disabled / not running / … (omitted when healthy) */
   note?: string;
 }
 
 export interface QuotaState {
   used: number;
   limit: number;
-  /** requests=按请求计（订阅） cny=按金额计（按量限额） */
+  /** requests=counted by requests (subscription) cny=counted by amount (payg limit) */
   unit: "requests" | "cny";
-  /** 重置日期 YYYY-MM-DD（订阅周期），按量限额为 null */
+  /** Reset date YYYY-MM-DD (subscription period); null for payg limits */
   resets_at: string | null;
 }
 
-/** 近 7 日用量聚合（usage 表聚合结果，tech.md §2.3） */
+/** Last-7-days usage aggregate (aggregated from the usage table, tech.md §2.3) */
 export interface UsageSummary {
   requests: number;
   input_tokens: number;
   cache_read_tokens: number;
   output_tokens: number;
-  /** 估算费用（¥），unl 不计费为 null */
+  /** Estimated cost (¥); null for unl since it is not billed */
   cost: number | null;
   latency_ms: number | null;
   quota: QuotaState | null;
-  /** 近 7 日趋势采样（未设限额的按量型 sparkline），0-14 归一化 y */
+  /** Last-7-days trend samples (sparkline for payg types without a limit), y normalized to 0-14 */
   spark: number[] | null;
 }
 
@@ -59,19 +59,19 @@ export interface Provider {
   logo_border?: boolean;
   endpoint: string;
   protocol: Protocol;
-  /** 端点副标题后半段：OpenAI 兼容 / qwen3:32b 等 */
+  /** Second half of the endpoint subtitle: OpenAI compatible / qwen3:32b etc. */
   endpoint_note: string;
   billing: Billing;
-  /** 订阅型价格行（plan）：¥49/月 */
+  /** Price row for subscription types (plan): ¥49/month */
   plan_price?: string;
   enabled: boolean;
-  /** agent_bindings 派生 */
+  /** Derived from agent_bindings */
   agents: AgentId[];
-  /** 列表排序后当前使用的行（kiwi 左条 + 使用中徽章） */
+  /** The row currently in use after list sorting (kiwi left bar + "in use" badge) */
   is_current: boolean;
-  /** 徽章文案：备用 #1 / 本地 / … */
+  /** Badge text: backup #1 / local / … */
   status_badge?: string;
-  /** Agent 列的补充说明：故障转移队列 / N 个 Agent / 未绑定 */
+  /** Supplementary note for the Agent column: failover queue / N agents / unbound */
   agents_note?: string;
   health: ProviderHealth;
   usage: UsageSummary | null;
@@ -98,27 +98,27 @@ export interface CatalogEntry {
   logo_char: string;
   logo_color: string;
   logo_border?: boolean;
-  /** 卡片右上标签类别（货架 chip 过滤） */
+  /** Tag category shown on the card's top-right label (Models page chip filter) */
   tag: "official" | "aggregate" | "free" | "local";
   tag_label: string;
   rating: number;
-  /** 添加弹窗预填的请求地址 */
+  /** Endpoint pre-filled into the add modal */
   endpoint: string;
-  /** 价格行：¥4 /M入 · ¥16 /M出 等 */
+  /** Price line: ¥4 /M in · ¥16 /M out etc. */
   price_line: string;
   price_note?: string;
   billing: Billing;
   users: string;
   blurb: string;
   added: boolean;
-  /** 有免费额度时的一句话 */
+  /** One-liner shown when a free quota exists */
   free_offer?: string;
-  /** 添加弹窗预置模型选项 */
+  /** Model options pre-populated in the add modal */
   models: string[];
 }
 
 export interface CatalogList {
-  /** Hub 目录总数（货架头部文案） */
+  /** Total count of the Hub catalog (Models page header copy) */
   total: number;
   entries: CatalogEntry[];
 }
@@ -149,7 +149,7 @@ export interface DashboardData {
 export interface TakeoverState {
   agent: AgentId;
   label: string;
-  /** 网关分配的占位 Key；未接管为 null */
+  /** Placeholder key assigned by the gateway; null when not taken over */
   placeholder_key: string | null;
   enabled: boolean;
 }
@@ -164,14 +164,14 @@ export interface AppSettings {
   auto_failover: boolean;
   request_logs: boolean;
   telemetry: boolean;
-  /** 费用预警（spec §4.1 P1）：用量达每期上限时系统通知 */
+  /** Cost alert (spec §4.1 P1): system notification when usage reaches the per-period limit */
   cost_alert: boolean;
   hub_logged_in: boolean;
-  /** Hub 目录同步端点（协议 v0：静态 JSON） */
+  /** Hub catalog sync endpoint (protocol v0: static JSON) */
   hub_url: string;
 }
 
-/** Hub 目录同步结果（tech.md §三 Hub 同步协议） */
+/** Hub catalog sync result (tech.md §3 Hub sync protocol) */
 export interface HubSyncReport {
   fetched: number;
   synced_at: string;
@@ -190,21 +190,21 @@ export interface FooterStats {
   version: string;
 }
 
-/** CC Switch 导入结果（tech.md §4.5：仅 v3.x） */
+/** CC Switch import result (tech.md §4.5: v3.x only) */
 export interface ImportReport {
   imported: number;
   skipped: number;
   detail: string[];
 }
 
-/** 一键配置方案导入结果（spec §4.1 P1 配置分享） */
+/** Config-plan import result (spec §4.1 P1 config sharing) */
 export interface ConfigShareReport {
   providers_added: number;
   providers_kept: number;
   routes_applied: number;
 }
 
-/** Provider 的轮询 Key（spec §4.1 P1 多 Key 轮询；主 Key 存 Provider 上） */
+/** A Provider's rotating keys (spec §4.1 P1 multi-key rotation; the primary key lives on the Provider) */
 export interface ApiKeyEntry {
   id: number;
   api_key: string;
@@ -213,7 +213,7 @@ export interface ApiKeyEntry {
   created_at: string;
 }
 
-/** 费用预警命中项（后端已按周期去重，前端转系统通知即可） */
+/** Cost alert hit (backend already dedupes per period; the frontend just forwards it as a system notification) */
 export interface UsageAlert {
   provider_id: string;
   provider_name: string;
@@ -225,7 +225,7 @@ export interface UsageAlert {
 
 export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
 
-/** Agent 策略候选（agent_bindings 行投影，按优先级升序，0 = 主选） */
+/** Agent strategy candidates (projection of agent_bindings rows, ascending by priority, 0 = primary) */
 export interface StrategyBinding {
   provider_id: string;
   provider_name: string;
@@ -236,11 +236,11 @@ export interface StrategyBinding {
   enabled: boolean;
 }
 
-/** Agent 路由策略（agent_strategies + agent_bindings，tech.md §4.7） */
+/** Agent routing strategy (agent_strategies + agent_bindings, tech.md §4.7) */
 export interface AgentRoute {
   agent: AgentId;
   strategy: StrategyKind;
-  /** 策略 JSON 载荷（quota: {"limit","unit"}；其余 null） */
+  /** Strategy JSON payload (quota: {"limit","unit"}; null otherwise) */
   config: string | null;
   bindings: StrategyBinding[];
 }
@@ -249,39 +249,39 @@ export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
   addProvider(input: NewProviderInput): Promise<Provider>;
-  /** 更新供应商（api_key 留空表示保持原 Key） */
+  /** Update a provider (empty api_key means keep the existing key) */
   updateProvider(id: string, input: NewProviderInput): Promise<Provider>;
-  /** 删除供应商；若为某 Agent 主选则自动提升下一个候选 */
+  /** Delete a provider; if it is the primary for some agent, the next candidate is promoted automatically */
   deleteProvider(id: string): Promise<void>;
-  /** 启用 = 将该 Provider 设为其绑定 Agent 的当前路由 */
+  /** Enable = make this Provider the current route of its bound agents */
   enableProvider(id: string): Promise<void>;
   testLatency(endpoint: string): Promise<number>;
   listCatalog(): Promise<CatalogList>;
   getDashboard(window: DashboardWindow): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
-  /** 从 Hub 拉取 Provider 目录并落本地缓存（货架缓存优先、静态兜底） */
+  /** Fetch the Provider catalog from the Hub into the local cache (Models page prefers cache, falls back to static) */
   syncHub(): Promise<HubSyncReport>;
-  /** 费用预警巡检（后端 KV 去重：每 Provider 每重置周期最多返回一次） */
+  /** Cost alert patrol (backend KV dedupe: returned at most once per Provider per reset period) */
   checkUsageAlerts(): Promise<UsageAlert[]>;
-  /** 某 Provider 的轮询 Key 列表（主 Key 之外） */
+  /** A Provider's list of rotating keys (excluding the primary key) */
   listApiKeys(providerId: string): Promise<ApiKeyEntry[]>;
-  /** 追加轮询 Key（网关 Key 池即时热更新） */
+  /** Append a rotating key (the gateway's key pool hot-reloads immediately) */
   addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry>;
   deleteApiKey(id: number): Promise<void>;
-  /** Agent 接管开关（占位 Key 的生成/删除，P1 起含配置改写） */
+  /** Agent takeover switch (generates/deletes the placeholder key; config rewriting included from P1 on) */
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
-  /** 从 CC Switch 导入配置（自动探测 ~/.cc-switch 数据源） */
+  /** Import config from CC Switch (auto-detects the ~/.cc-switch data source) */
   importCcSwitch(): Promise<ImportReport>;
-  /** Agent 路由策略表（仅有绑定的 Agent） */
+  /** Agent routing strategy table (only agents with bindings) */
   getAgentRoutes(): Promise<AgentRoute[]>;
-  /** 更新 Agent 策略类型（config 仅 quota 需要：{"limit","unit"}） */
+  /** Update an agent's strategy type (config only needed for quota: {"limit","unit"}) */
   updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void>;
-  /** 候选重排：provider_id 顺序 → priority 0..n */
+  /** Reorder candidates: provider_id order → priority 0..n */
   reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void>;
-  /** 导出配置方案到指定路径（含 API Key），返回 Provider 数 */
+  /** Export the config plan to the given path (including API keys); returns the Provider count */
   exportConfig(path: string): Promise<number>;
-  /** 从文件导入配置方案（按 name+base_url 合并），返回计数报告 */
+  /** Import a config plan from a file (merged by name+base_url); returns a count report */
   importConfig(path: string): Promise<ConfigShareReport>;
   getFooterStats(): Promise<FooterStats>;
 }

@@ -1,6 +1,24 @@
-// 添加/编辑供应商弹窗（design/index.html #modal，cc-switch AddProviderDialog 模式）
+// Add/edit provider modal (design/index.html #modal, cc-switch AddProviderDialog pattern)
+// Base controls use shadcn/ui (Dialog/Input/Label/Select/Button); the segmented pills are kept as design language
 import { useEffect, useState } from "react";
-import { Eye, Gauge, Infinity as InfinityIcon, Plus, Store, X } from "lucide-react";
+import { Eye, Gauge, Infinity as InfinityIcon, Plus, Store, XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../api/client";
 import {
   AGENTS,
@@ -52,7 +70,7 @@ export default function AddProviderModal({
   const [testing, setTesting] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  // 轮询 Key 管理（spec §4.1 P1 多 Key 轮询；编辑态可用）
+  // Rotating Key management (spec §4.1 P1 multi-key rotation; available in edit mode)
   const [pollKeys, setPollKeys] = useState<ApiKeyEntry[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("");
@@ -68,7 +86,7 @@ export default function AddProviderModal({
       setMode("custom");
       setName(edit.name);
       setProtocol(edit.protocol);
-      setApiKey(""); // 留空 = 保持原 Key
+      setApiKey(""); // leave empty = keep the existing key
       setEndpoint(edit.endpoint);
       setModel("");
       setBilling(edit.billing);
@@ -82,7 +100,7 @@ export default function AddProviderModal({
     }
     setMode(preset ? "shelf" : "custom");
     setName(preset?.name ?? "");
-    setProtocol("openai"); // 货架目录均为 OpenAI 兼容端点
+    setProtocol("openai"); // catalog entries all use OpenAI-compatible endpoints
     setApiKey(preset ? "sk-9f3e21a7c8d4b6e05a12" : "");
     setEndpoint(preset?.endpoint ?? "");
     setModel(preset?.models[0] ?? "");
@@ -92,8 +110,6 @@ export default function AddProviderModal({
     setResetPeriod("monthly");
     setAgents(preset?.id === "deepseek" ? ["claude", "codex"] : []);
   }, [open, preset, edit]);
-
-  if (!open) return null;
 
   const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
 
@@ -154,21 +170,16 @@ export default function AddProviderModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "oklch(0.08 0.01 260 / .65)", backdropFilter: "blur(3px)" }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="max-h-[600px] w-[480px] overflow-y-auto rounded-xl border border-line shadow-2xl" style={{ background: "var(--surface)" }}>
-        <div className="flex h-11 items-center justify-between border-b border-line px-4">
-          <h2 className="text-[13px] font-semibold">{edit ? "编辑供应商" : "添加供应商"}</h2>
-          <button className="btn btn-ghost rounded-md p-1 text-mut" onClick={onClose} aria-label="关闭">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
+        <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line px-4">
+          <DialogTitle className="text-[13px] font-semibold">
+            {edit ? "编辑供应商" : "添加供应商"}
+          </DialogTitle>
+        </DialogHeader>
 
         <div className="px-4 py-3.5">
-          {/* 模式切换（编辑态隐藏：不涉及货架） */}
+          {/* Mode switch (hidden in edit mode: no models involved) */}
           {!edit && (
             <div className="flex overflow-hidden rounded-md border border-line text-[11.5px]">
               <div
@@ -177,7 +188,7 @@ export default function AddProviderModal({
                 onClick={() => preset && setMode("shelf")}
               >
                 <Store className="h-3 w-3" />
-                从货架{preset ? `：${preset.name}` : "（先在货架选择）"}
+                从模型{preset ? `：${preset.name}` : "（先在模型选择）"}
               </div>
               <div
                 className="btn flex h-8 flex-1 cursor-pointer items-center justify-center"
@@ -191,53 +202,72 @@ export default function AddProviderModal({
 
           <div className="mt-3 space-y-3">
             <div>
-              <label className="text-[11px] font-medium text-mut">名称</label>
-              <input className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]" value={name} onChange={(e) => setName(e.target.value)} />
+              <Label className="text-[11px] font-medium text-mut">名称</Label>
+              <Input
+                className="mt-1 h-8 bg-bg text-[12px] dark:bg-bg"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
 
             <div>
-              <label className="text-[11px] font-medium text-mut">协议</label>
-              <select className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]" value={protocol} onChange={(e) => setProtocol(e.target.value as Protocol)}>
-                {PROTOCOL_OPTIONS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
+              <Label className="text-[11px] font-medium text-mut">协议</Label>
+              <Select value={protocol} onValueChange={(v) => setProtocol(v as Protocol)}>
+                <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROTOCOL_OPTIONS.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
-              <label className="text-[11px] font-medium text-mut">
+              <Label className="text-[11px] font-medium text-mut">
                 API Key{" "}
                 <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
                   {edit ? "留空则保持原 Key" : "仅存本机钥匙串"}
                 </span>
-              </label>
+              </Label>
               <div className="relative mt-1">
-                <input
+                <Input
                   type={showKey ? "text" : "password"}
-                  className="h-8 w-full rounded-md border border-line bg-bg pl-2.5 pr-8 font-mono text-[12px]"
+                  className="h-8 bg-bg pr-8 font-mono text-[12px] dark:bg-bg"
                   value={apiKey}
                   placeholder={edit ? "••••••••" : ""}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
-                <button className="absolute right-2 top-1/2 -translate-y-1/2 text-mut" onClick={() => setShowKey(!showKey)} aria-label="显示/隐藏">
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="absolute top-1/2 right-1 -translate-y-1/2 text-mut"
+                  onClick={() => setShowKey(!showKey)}
+                  aria-label="显示/隐藏"
+                >
                   <Eye className="h-3.5 w-3.5" />
-                </button>
+                </Button>
               </div>
             </div>
 
             <div>
-              <label className="text-[11px] font-medium text-mut">请求地址</label>
+              <Label className="text-[11px] font-medium text-mut">请求地址</Label>
               <div className="mt-1 flex gap-1.5">
-                <input
-                  className="h-8 flex-1 rounded-md border border-line bg-bg px-2.5 font-mono text-[12px]"
+                <Input
+                  className="h-8 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                   value={endpoint}
                   onChange={(e) => {
                     setEndpoint(e.target.value);
                     setLatency(null);
                   }}
                 />
-                <button
-                  className="btn btn-ghost flex h-8 items-center gap-1 rounded-md border border-line px-2.5 text-[11px]"
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1 px-2.5 text-[11px]"
                   disabled={testing}
                   onClick={async () => {
                     setTesting(true);
@@ -255,25 +285,37 @@ export default function AddProviderModal({
                       {latency}ms
                     </span>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
 
             <div>
-              <label className="text-[11px] font-medium text-mut">默认模型</label>
+              <Label className="text-[11px] font-medium text-mut">默认模型</Label>
               {!edit && mode === "shelf" && preset ? (
-                <select className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]" value={model} onChange={(e) => setModel(e.target.value)}>
-                  {preset.models.map((m) => (
-                    <option key={m}>{m}</option>
-                  ))}
-                </select>
+                <Select value={model} onValueChange={(v) => setModel(v ?? "")}>
+                  <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {preset.models.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               ) : (
-                <input className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 font-mono text-[12px]" value={model} onChange={(e) => setModel(e.target.value)} placeholder="model-id" />
+                <Input
+                  className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="model-id"
+                />
               )}
             </div>
 
             <div>
-              <label className="text-[11px] font-medium text-mut">计费方式</label>
+              <Label className="text-[11px] font-medium text-mut">计费方式</Label>
               <div className="mt-1 grid grid-cols-3 gap-1.5">
                 {BILL_OPTIONS.map((b) => {
                   const active = billing === b.id;
@@ -296,47 +338,55 @@ export default function AddProviderModal({
             {billing === "plan" && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[11px] font-medium text-mut">每期上限</label>
+                  <Label className="text-[11px] font-medium text-mut">每期上限</Label>
                   <div className="mt-1 flex gap-1.5">
-                    <input
-                      className="h-8 min-w-0 flex-1 rounded-md border border-line bg-bg px-2.5 font-mono text-[12px]"
+                    <Input
+                      className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                       value={limitValue}
                       onChange={(e) => setLimitValue(e.target.value)}
                     />
-                    <select
-                      className="h-8 rounded-md border border-line bg-bg px-1.5 text-[12px]"
+                    <Select
                       value={limitUnit}
-                      onChange={(e) => setLimitUnit(e.target.value as typeof limitUnit)}
+                      onValueChange={(v) => setLimitUnit(v as typeof limitUnit)}
                     >
-                      <option value="requests">请求</option>
-                      <option value="wan_tokens">万 tokens</option>
-                      <option value="cny">¥ 金额</option>
-                    </select>
+                      <SelectTrigger className="w-[104px] bg-bg text-[12px] dark:bg-bg">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="requests">请求</SelectItem>
+                        <SelectItem value="wan_tokens">万 tokens</SelectItem>
+                        <SelectItem value="cny">¥ 金额</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div>
-                  <label className="text-[11px] font-medium text-mut">重置周期</label>
-                  <select
-                    className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 text-[12px]"
+                  <Label className="text-[11px] font-medium text-mut">重置周期</Label>
+                  <Select
                     value={resetPeriod}
-                    onChange={(e) => setResetPeriod(e.target.value as typeof resetPeriod)}
+                    onValueChange={(v) => setResetPeriod(v as typeof resetPeriod)}
                   >
-                    <option value="monthly">每月</option>
-                    <option value="weekly">每周</option>
-                    <option value="yearly">每年</option>
-                    <option value="none">不重置</option>
-                  </select>
+                    <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">每月</SelectItem>
+                      <SelectItem value="weekly">每周</SelectItem>
+                      <SelectItem value="yearly">每年</SelectItem>
+                      <SelectItem value="none">不重置</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             )}
 
             {billing === "payg" && (
               <div>
-                <label className="text-[11px] font-medium text-mut">
+                <Label className="text-[11px] font-medium text-mut">
                   消费限额 <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>选填 · 留空则显示用量趋势</span>
-                </label>
-                <input
-                  className="mt-1 h-8 w-full rounded-md border border-line bg-bg px-2.5 font-mono text-[12px]"
+                </Label>
+                <Input
+                  className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
                   value={limitValue}
                   onChange={(e) => setLimitValue(e.target.value)}
                   placeholder="¥"
@@ -352,7 +402,7 @@ export default function AddProviderModal({
             )}
 
             <div>
-              <label className="text-[11px] font-medium text-mut">保存后绑定到 Agent</label>
+              <Label className="text-[11px] font-medium text-mut">保存后绑定到 Agent</Label>
               <div className="mt-1 grid grid-cols-3 gap-1.5">
                 {AGENTS.map((a) => {
                   const active = agents.includes(a.id);
@@ -379,15 +429,15 @@ export default function AddProviderModal({
               </div>
             </div>
 
-            {/* 轮询 Key（编辑态：多 Key 自动轮换，spec §4.1 P1） */}
+            {/* Rotating keys (edit mode: multiple keys rotate automatically, spec §4.1 P1) */}
             {edit && (
               <div>
-                <label className="text-[11px] font-medium text-mut">
+                <Label className="text-[11px] font-medium text-mut">
                   轮询 Key{" "}
                   <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
                     与主 Key 轮换 · 避免限流
                   </span>
-                </label>
+                </Label>
                 <div className="mt-1 space-y-1">
                   {pollKeys.map((k) => (
                     <div
@@ -398,65 +448,68 @@ export default function AddProviderModal({
                         <span className="font-mono text-[11.5px]">{maskKey(k.api_key)}</span>
                         {k.label && <span className="text-[10.5px] text-mut">{k.label}</span>}
                       </span>
-                      <button
-                        className="btn btn-ghost rounded-md p-1 text-mut"
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-mut"
                         aria-label="删除 Key"
                         onClick={() => removePollKey(k.id)}
                       >
-                        <X className="h-3 w-3" />
-                      </button>
+                        <XIcon />
+                      </Button>
                     </div>
                   ))}
                   <div className="flex gap-1.5">
-                    <input
-                      className="h-8 min-w-0 flex-1 rounded-md border border-line bg-bg px-2.5 font-mono text-[12px]"
+                    <Input
+                      className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                       value={newKey}
                       onChange={(e) => setNewKey(e.target.value)}
                       placeholder="sk-… 追加 Key"
                     />
-                    <input
-                      className="h-8 w-[84px] rounded-md border border-line bg-bg px-2.5 text-[11.5px]"
+                    <Input
+                      className="h-8 w-[84px] bg-bg text-[11.5px] dark:bg-bg"
                       value={newKeyLabel}
                       onChange={(e) => setNewKeyLabel(e.target.value)}
                       placeholder="备注"
                     />
-                    <button
-                      className="btn btn-ghost flex h-8 items-center gap-1 rounded-md border border-line px-2.5 text-[11px]"
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1 px-2.5 text-[11px]"
                       disabled={!newKey.trim() || keyBusy}
                       onClick={addPollKey}
                     >
                       <Plus className="h-3 w-3" />
                       添加
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
             )}
 
-            <button className="btn btn-ghost flex h-8 w-full items-center justify-between rounded-md border border-line px-2.5 text-[11.5px] text-mut">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-full justify-between text-[11.5px] text-mut"
+            >
               <span className="flex items-center gap-1.5">
                 <Gauge className="h-3 w-3" />
                 高级配置（超时 / 重试 / 请求头）
               </span>
-              <X className="h-3.5 w-3.5 rotate-45" />
-            </button>
+              <XIcon className="h-3.5 w-3.5 rotate-45" />
+            </Button>
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-line px-4 py-3">
-          <button className="btn btn-ghost h-8 rounded-md border border-line px-3.5 text-[12px]" onClick={onClose}>
+        <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">
+          <Button variant="outline" size="sm" onClick={onClose}>
             取消
-          </button>
-          <button
-            className="btn btn-primary h-8 rounded-md px-4 text-[12px] font-semibold disabled:opacity-50"
-            style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}
-            disabled={!canSave}
-            onClick={save}
-          >
+          </Button>
+          <Button size="sm" className="font-semibold" disabled={!canSave} onClick={save}>
             {saving ? "保存中…" : edit ? "保存" : "保存并启用"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

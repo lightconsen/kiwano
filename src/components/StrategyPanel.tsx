@@ -1,8 +1,17 @@
-// Agent 路由策略面板（tech.md §4.7）：策略类型 + 候选排序。
-// 只展示有绑定的 Agent；改动经网关 /reload 即时生效。
+// Agent routing strategy panel (tech.md §4.7): strategy type + candidate ordering.
+// Only agents with bindings are shown; changes take effect immediately via the gateway's /reload.
 import { useCallback, useEffect, useState } from "react";
 
 import { ArrowDown, ArrowUp } from "lucide-react";
+
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import { api } from "../api/client";
 import { AGENTS, type AgentRoute, type StrategyKind } from "../api/types";
@@ -62,40 +71,54 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
     <div className="flex items-center gap-3 border-b border-line px-4 py-2">
       <div className="flex w-[200px] flex-none items-center gap-2">
         <AgentChip meta={meta} />
-        <select
-          className="h-7 rounded-md border border-line bg-transparent px-1.5 text-[11.5px]"
+        <Select
           value={route.strategy}
-          onChange={(e) => setStrategy(e.target.value as StrategyKind)}
-          aria-label={`${meta.label} 策略`}
+          onValueChange={(v) => setStrategy(v as StrategyKind)}
         >
-          {STRATEGIES.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            size="sm"
+            aria-label={`${meta.label} 策略`}
+            className="h-7 min-w-[92px] bg-transparent px-1.5 text-[11.5px] dark:bg-transparent"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STRATEGIES.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[11px] text-mut">
         <span className="truncate">{hint}</span>
         {route.strategy === "quota" && (
           <span className="flex flex-none items-center gap-1">
-            <input
+            <Input
               type="number"
               min={1}
-              className="h-6 w-16 rounded border border-line bg-transparent px-1.5 text-right font-mono text-[11px]"
+              className="h-6 w-16 rounded-md bg-transparent px-1.5 text-right font-mono text-[11px] dark:bg-transparent"
               value={quota.limit || ""}
               placeholder="100"
               onChange={(e) => setQuota({ limit: Number(e.target.value) || 0 })}
             />
-            <select
-              className="h-6 rounded border border-line bg-transparent px-1 text-[11px]"
+            <Select
               value={quota.unit}
-              onChange={(e) => setQuota({ unit: e.target.value as "requests" | "tokens" })}
+              onValueChange={(v) => setQuota({ unit: v as "requests" | "tokens" })}
             >
-              <option value="requests">请求/日</option>
-              <option value="tokens">tokens/日</option>
-            </select>
+              <SelectTrigger
+                size="sm"
+                className="h-6 gap-1 bg-transparent px-1 text-[11px] dark:bg-transparent [&_svg:not([class*='size-'])]:size-3"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="requests">请求/日</SelectItem>
+                <SelectItem value="tokens">tokens/日</SelectItem>
+              </SelectContent>
+            </Select>
           </span>
         )}
       </div>

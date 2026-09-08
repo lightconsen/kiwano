@@ -1,4 +1,4 @@
-// 设计原型的共享原子组件（design/index.html 的 .logo-c/.dot/.billtag/.tswitch 等的 React 版）
+// Shared atomic components from the design prototype (React versions of design/index.html's .logo-c/.dot/.billtag etc.; base controls have moved to shadcn/ui)
 import type { AgentMeta, Billing } from "../api/types";
 
 export function Logo({
@@ -43,10 +43,10 @@ export function BillTag({ billing }: { billing: Billing }) {
   return <span className={`billtag ${t.cls}`}>{t.label}</span>;
 }
 
-/** 28px 用量圆环（design.md §8：订阅=紫 / 按量=kiwi，≥80% amber，≥95% red） */
+/** 28px usage ring (design.md §8: plan=purple / payg=kiwi, ≥80% amber, ≥95% red) */
 export function Ring({ pct, color }: { pct: number; color?: string }) {
   const stroke = color ?? "var(--kiwi)";
-  // quota.limit=0 等异常输入 → NaN/Infinity，钳到 [0,100]
+  // Abnormal input like quota.limit=0 → NaN/Infinity; clamp to [0,100]
   const safe = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
   return (
     <svg viewBox="0 0 28 28" className="h-7 w-7 flex-none">
@@ -88,16 +88,5 @@ export function AgentChip({ meta }: { meta: AgentMeta }) {
     >
       {meta.chip_char}
     </span>
-  );
-}
-
-export function Toggle({ on, onChange }: { on: boolean; onChange?: (next: boolean) => void }) {
-  return (
-    <div
-      className={`tswitch${on ? " on" : ""}`}
-      onClick={() => onChange?.(!on)}
-      role="switch"
-      aria-checked={on}
-    />
   );
 }

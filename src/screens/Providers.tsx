@@ -1,7 +1,8 @@
-// 首屏：我的供应商（design/index.html #s-providers）
+// Home screen: Apps (local provider list, design/index.html #s-providers, formerly "我的供应商")
 import { useCallback, useEffect, useState } from "react";
 
 import { Plus, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import { AGENTS, type AgentId, type Provider } from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
@@ -120,7 +121,7 @@ function ProviderRow({
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
-  // 删除为两步确认：第一次点击进入确认态，3 秒内再次点击才真删
+  // Delete is a two-step confirm: the first click enters the confirm state; a second click within 3 seconds actually deletes
   const [confirmDel, setConfirmDel] = useState(false);
   useEffect(() => {
     if (!confirmDel) return;
@@ -181,30 +182,35 @@ function ProviderRow({
 
       <div className="flex flex-1 items-center justify-end gap-1.5">
         {p.is_current ? (
-          <button
-            className="btn btn-ghost h-7 whitespace-nowrap rounded-md border border-line px-2.5 text-[11.5px]"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 whitespace-nowrap border border-line px-2.5 text-[11.5px]"
             onClick={() => onEdit(p)}
           >
             编辑
-          </button>
+          </Button>
         ) : (
-          <button
-            className="btn h-7 whitespace-nowrap rounded-md px-2.5 text-[11.5px] font-semibold"
-            style={{ background: "var(--kiwi-soft)", color: "var(--kiwi)", border: "1px solid var(--kiwi-dim)" }}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 whitespace-nowrap border-kiwi-dim bg-kiwi-soft font-semibold text-kiwi text-[11.5px] dark:border-kiwi-dim dark:bg-kiwi-soft hover:bg-kiwi-soft dark:hover:bg-kiwi-soft"
             onClick={() => onEnable(p.id)}
           >
             启用
-          </button>
+          </Button>
         )}
-        <button
-          className={`btn btn-ghost h-7 whitespace-nowrap rounded-md border px-1.5 text-[10.5px]${confirmDel ? "" : " text-mut"}`}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px]${confirmDel ? "" : " text-mut"}`}
           style={confirmDel ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
           aria-label="删除"
           title={confirmDel ? "再次点击确认删除" : "删除供应商"}
           onClick={() => (confirmDel ? onDelete(p) : setConfirmDel(true))}
         >
           {confirmDel ? "确认删除" : <Trash2 className="h-3.5 w-3.5" />}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -251,14 +257,10 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
         <span className="ml-1.5 text-[11.5px] text-mut">
           {providers.length} 个供应商 · {agentsBound} 个 Agent 已绑定
         </span>
-        <button
-          className="btn btn-primary ml-auto flex h-7 items-center gap-1 rounded-md px-2.5 text-[12px] font-semibold"
-          style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}
-          onClick={onAdd}
-        >
+        <Button size="sm" className="ml-auto h-7 gap-1 px-2.5 text-[12px] font-semibold" onClick={onAdd}>
           <Plus className="h-3.5 w-3.5" />
           添加供应商
-        </button>
+        </Button>
       </div>
 
       <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>

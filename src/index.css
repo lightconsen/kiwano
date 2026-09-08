@@ -1,10 +1,18 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 /* Kiwano design tokens — mirrored from design/index.html (SSOT), see tech.md §4.8.
-   Colors are plain CSS vars so inline styles can use var(--kiwi) etc. directly;
+   Brand colors are plain CSS variables; inline styles can use var(--kiwi) directly;
+   shadcn/ui semantic variables (--background/--primary/…) map onto the Kiwano palette,
+   dark-only: values are written straight into :root, and .dark on html makes the dark: variants work inside components.
    @theme inline maps them to Tailwind utilities (bg-kiwi, text-mut, border-line …). */
 
 :root {
+  color-scheme: dark;
+
   --bg: oklch(0.15 0.008 260);
   --surface: oklch(0.185 0.01 260);
   --surface2: oklch(0.225 0.012 260);
@@ -18,9 +26,31 @@
   --blue: oklch(0.72 0.13 245);
   --amber: oklch(0.78 0.15 80);
   --red: oklch(0.65 0.2 25);
+
+  /* shadcn/ui semantic vars → Kiwano palette */
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.21 0.012 260); /* dropdown/popover: one level above surface */
+  --popover-foreground: var(--ink);
+  --primary: var(--kiwi);
+  --primary-foreground: oklch(0.18 0.03 132);
+  --secondary: var(--surface2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface2);
+  --muted-foreground: var(--mut);
+  --accent: var(--surface2);
+  --accent-foreground: var(--ink);
+  --destructive: var(--red);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--kiwi-dim);
+  --radius: 0.625rem;
 }
 
 @theme inline {
+  /* Kiwano brand */
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface2: var(--surface2);
@@ -33,8 +63,36 @@
   --color-blue: var(--blue);
   --color-amber: var(--amber);
   --color-red: var(--red);
+  /* shadcn semantic */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* fonts & radius */
   --font-sans: "Inter Variable", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 html,
@@ -49,10 +107,26 @@ body {
   font-family: var(--font-sans);
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
-  user-select: none;
 }
 
-/* ── 原型组件类（design/index.html <style> 的移植，SSOT 为设计稿） ── */
+/* Desktop apps disable text selection: in WKWebView, double-clicking Chinese has no space-based word boundaries,
+   so the selection can expand to the whole sentence and even adjacent blocks; also, user-select:none set only on body
+   gets bypassed as the double-click selection climbs ancestors — it must be disabled on every element;
+   input-like controls are opted back in individually so the gateway address / keys etc. remain selectable and copyable. */
+* {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ── Prototype design-language classes (ported from design/index.html <style>; the design file is the SSOT) ──
+   Nav tabs / segments / filter chips / row cards etc. are design language and are not replaced with shadcn;
+   base controls (button/input/select/switch/dialog) have moved to src/components/ui/*. */
 
 .navtab {
   position: relative;
@@ -107,12 +181,6 @@ body {
 .btn:active {
   transform: scale(0.98);
 }
-.btn-primary:hover {
-  filter: brightness(1.1);
-}
-.btn-ghost:hover {
-  background: var(--surface2);
-}
 
 .dot {
   width: 6px;
@@ -165,51 +233,11 @@ body {
   color: var(--mut);
 }
 
-.tswitch {
-  width: 32px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--surface2);
-  border: 1px solid var(--line);
-  position: relative;
-  cursor: pointer;
-  transition: background 0.18s;
-  flex: none;
-}
-.tswitch::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: var(--mut);
-  transition: all 0.18s;
-}
-.tswitch.on {
-  background: var(--kiwi-dim);
-  border-color: var(--kiwi-dim);
-}
-.tswitch.on::after {
-  left: 16px;
-  background: oklch(0.13 0.01 260);
-}
-
 .pcard {
   transition: border-color 0.15s;
 }
 .pcard:hover {
   border-color: oklch(0.36 0.02 260);
-}
-
-select,
-input {
-  outline: none;
-}
-select:focus,
-input:focus {
-  border-color: var(--kiwi-dim) !important;
 }
 
 ::-webkit-scrollbar {
@@ -220,3 +248,14 @@ input:focus {
   border-radius: 8px;
 }
 
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

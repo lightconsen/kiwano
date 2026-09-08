@@ -1,4 +1,4 @@
-// 数值展示辅助（design.md §7：数值一律 mono、tokens 分层展示）
+// Numeric display helpers (design.md §7: numbers always mono, tokens shown in tiers)
 
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) {

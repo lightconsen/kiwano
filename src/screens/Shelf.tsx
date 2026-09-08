@@ -1,6 +1,7 @@
-// 货架：Kiwano Hub 云端目录（design/index.html #s-shelf）
+// Models: Kiwano Hub cloud catalog (design/index.html #s-shelf)
 import { useEffect, useMemo, useState } from "react";
 import { Search, Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import type { CatalogEntry } from "../api/types";
 import { BillTag, Logo } from "../components/bits";
@@ -51,13 +52,9 @@ function Card({ entry, onAdd }: { entry: CatalogEntry; onAdd: (e: CatalogEntry) 
         {entry.added ? (
           <span className="rounded border border-line px-1.5 py-0.5 text-[10.5px] text-mut">已添加</span>
         ) : (
-          <button
-            className="btn rounded px-2 py-0.5 text-[10.5px] font-semibold"
-            style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}
-            onClick={() => onAdd(entry)}
-          >
+          <Button size="xs" className="rounded px-2 text-[10.5px] font-semibold" onClick={() => onAdd(entry)}>
             {entry.tag === "local" ? "+ 连接" : "+ 添加"}
-          </button>
+          </Button>
         )}
       </div>
     </div>

@@ -1,5 +1,5 @@
-// Mock 数据源 —— 数值与 design/index.html 原型逐字一致。
-// 集成阶段由 src/api/client.ts 切换为 Tauri invoke 实现，本文件退役。
+// Mock data source — numbers match the design/index.html prototype verbatim.
+// During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
 import type {
   AgentId,
   AgentRoute,
@@ -349,7 +349,7 @@ const settings: AppSettings = {
 
 let idSeq = 100;
 
-// 轮询 Key mock 存储（spec §4.1 P1 多 Key 轮询）
+// Mock storage for rotating keys (spec §4.1 P1 multi-key rotation)
 type MockApiKeyRow = ApiKeyEntry & { provider_id: string };
 const mockApiKeys: MockApiKeyRow[] = [];
 
@@ -357,7 +357,7 @@ async function delay(ms = 120) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// ── Agent 路由策略（tech.md §4.7）──
+// ── Agent routing strategies (tech.md §4.7) ──
 
 function bind(pid: string, priority: number): StrategyBinding {
   const p = providers.find((x) => x.id === pid)!;

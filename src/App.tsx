@@ -1,6 +1,7 @@
-// App 壳：Overlay 标题栏 + 顶部导航 + hash 路由 + 底部状态栏（design/index.html 骨架）
+// App shell: overlay title bar + top nav + hash routing + footer status bar (design/index.html skeleton)
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   isPermissionGranted,
   requestPermission,
@@ -19,8 +20,8 @@ import AddProviderModal from "./screens/AddProviderModal";
 type Route = "providers" | "shelf" | "dashboard" | "settings";
 
 const NAV: { id: Route; label: string }[] = [
-  { id: "providers", label: "我的供应商" },
-  { id: "shelf", label: "货架" },
+  { id: "providers", label: "应用" },
+  { id: "shelf", label: "模型" },
   { id: "dashboard", label: "仪表盘" },
   { id: "settings", label: "设置" },
 ];
@@ -55,8 +56,8 @@ export default function App() {
 
   useEffect(refresh, [refresh]);
 
-  // 费用预警巡检（spec §4.1 P1）：每 60s 轮询；后端按周期去重，
-  // 返回即为本周期首次命中，直接转系统通知。
+  // Cost alert patrol (spec §4.1 P1): poll every 60s; the backend dedupes per period,
+  // so a returned alert is the first hit of that period — forward it as a system notification.
   useEffect(() => {
     const check = async () => {
       try {
@@ -74,7 +75,7 @@ export default function App() {
           });
         }
       } catch {
-        // mock 模式 / 网关未起：静默
+        // mock mode / gateway not running: stay silent
       }
     };
     check();
@@ -89,7 +90,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden" style={{ background: "var(--bg)" }}>
-      {/* 标题栏（macOS Overlay：红绿灯由系统绘制，左侧预留 72px） */}
+      {/* Title bar (macOS overlay: traffic lights drawn by the system, 72px reserved on the left) */}
       <header
         data-tauri-drag-region
         className="flex h-[46px] select-none items-center gap-4 border-b border-line pl-[72px] pr-4"
@@ -115,9 +116,9 @@ export default function App() {
             <Dot state={gw?.running ? "ok" : "off"} size="h-[6px] w-[6px]" />
             网关 <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
           </span>
-          <button className="btn btn-ghost rounded-md p-1.5 text-mut" onClick={refresh} aria-label="刷新">
+          <Button variant="ghost" size="icon-sm" className="text-mut" onClick={refresh} aria-label="刷新">
             <RefreshCw className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         </div>
       </header>
 

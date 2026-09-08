@@ -10,7 +10,11 @@
 //! The MVP covered claude (settings.json), codex (config.toml + auth.json),
 //! and gemini (~/.gemini/.env; inbound protocol in the gateway's
 //! protocol.rs /v1beta branch). The expanded registry adds grokbuild
-//! (~/.grok/config.toml, selected model's base_url/api_key/api_backend).
+//! (~/.grok/config.toml, selected model's base_url/api_key/api_backend) and
+//! the additive-mode agents opencode/openclaw/hermes/pi, whose takeover
+//! upserts a `kiwano-gateway` provider entry and selects it via
+//! `kiwano_cc_adapters::gateway_takeover` — pre-existing provider entries
+//! survive, and disable still restores the original bytes verbatim.
 
 use std::path::Path;
 
@@ -30,6 +34,26 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
         ]),
         "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
         "grokbuild" => Ok(vec![home.join(".grok").join("config.toml")]),
+        // additive-mode agents: the gateway entry coexists with their native
+        // providers, so a missing config is fine (a fresh one gets created)
+        "opencode" => Ok(vec![home
+            .join(".config")
+            .join("opencode")
+            .join("opencode.json")]),
+        "openclaw" => Ok(vec![home.join(".openclaw").join("openclaw.json")]),
+        "hermes" => {
+            // HERMES_HOME resolution matches hermes' own get_hermes_home()
+            let dir = std::env::var_os("HERMES_HOME")
+                .map(|v| v.to_string_lossy().trim().to_string())
+                .filter(|v| !v.is_empty())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| home.join(".hermes"));
+            Ok(vec![dir.join("config.yaml")])
+        }
+        "pi" => Ok(vec![
+            home.join(".pi").join("agent").join("models.json"),
+            home.join(".pi").join("agent").join("settings.json"),
+        ]),
         other => Err(format!("unknown agent: {other}")),
     }
 }
@@ -50,8 +74,15 @@ pub fn enable(
     for p in &paths {
         let content = match std::fs::read_to_string(p) {
             Ok(c) => c,
-            // codex's auth.json / gemini's .env are allowed to be missing (treated as empty files)
-            Err(_) if p.ends_with("auth.json") || p.ends_with(".env") => String::new(),
+            // codex's auth.json / gemini's .env, and every additive agent's
+            // config, are allowed to be missing (treated as empty files)
+            Err(_)
+                if matches!(agent, "opencode" | "openclaw" | "hermes" | "pi")
+                    || p.ends_with("auth.json")
+                    || p.ends_with(".env") =>
+            {
+                String::new()
+            }
             Err(_) => {
                 return Err(format!(
                     "未找到 {} —— 请先运行过 {} 再接管",
@@ -122,6 +153,33 @@ fn rewrite(
         "codex" => rewrite_codex_auth(original, key),
         "gemini" => rewrite_gemini_env(original, base, data_port, key),
         "grokbuild" => rewrite_grok_toml(original, base, data_port, key),
+        // additive agents: upsert a gateway provider entry and select it;
+        // pre-existing provider entries survive (cc_adapters::gateway_takeover)
+        "opencode" => {
+            kiwano_cc_adapters::gateway_takeover::upsert_opencode_gateway(
+                original,
+                &format!("{base}:{data_port}/v1"),
+                key,
+            )
+        }
+        "openclaw" => kiwano_cc_adapters::gateway_takeover::upsert_openclaw_gateway(
+            original,
+            &format!("{base}:{data_port}"),
+            key,
+        ),
+        "hermes" => kiwano_cc_adapters::gateway_takeover::upsert_hermes_gateway(
+            original,
+            &format!("{base}:{data_port}"),
+            key,
+        ),
+        "pi" if path.ends_with("models.json") => {
+            kiwano_cc_adapters::gateway_takeover::upsert_pi_models_gateway(
+                original,
+                &format!("{base}:{data_port}/v1"),
+                key,
+            )
+        }
+        "pi" => kiwano_cc_adapters::gateway_takeover::select_pi_gateway(original),
         _ => Err("unsupported agent".into()),
     }
 }
@@ -605,5 +663,85 @@ base_url = "https://relay.example.com/v1"
         assert!(enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).is_err());
         // no backup left behind on failure (escape hatch stays clean)
         assert!(aux.load_takeover_backup("grokbuild").is_none());
+    }
+
+    #[test]
+    fn opencode_takeover_roundtrip_additive() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".config").join("opencode");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = r#"{
+  "theme": "dark",
+  "model": "deepseek/deepseek-chat",
+  "provider": { "deepseek": { "npm": "@ai-sdk/openai", "options": { "apiKey": "sk-old" } } }
+}"#;
+        std::fs::write(dir.join("opencode.json"), original).unwrap();
+
+        enable(&aux, "opencode", "kw-ag-opencode-abcd", 8317, &home).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("opencode.json")).unwrap())
+                .unwrap();
+        assert_eq!(v["model"], "kiwano-gateway/deepseek-chat");
+        assert_eq!(v["provider"]["kiwano-gateway"]["options"]["baseURL"], "http://127.0.0.1:8317/v1");
+        assert_eq!(v["provider"]["kiwano-gateway"]["options"]["apiKey"], "kw-ag-opencode-abcd");
+        assert!(v["provider"]["deepseek"].is_object()); // additive: entry survives
+
+        disable(&aux, "opencode", &home).unwrap();
+        // restore = write back byte for byte
+        assert_eq!(std::fs::read_to_string(dir.join("opencode.json")).unwrap(), original);
+        assert!(aux.load_takeover_backup("opencode").is_none());
+    }
+
+    #[test]
+    fn pi_takeover_roundtrip_writes_both_files() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        // pi's files may not exist yet (agent dir is created on takeover)
+        enable(&aux, "pi", "kw-ag-pi-abcd", 8317, &home).unwrap();
+        let agent = home.join(".pi").join("agent");
+        let models: Value = serde_json::from_str(
+            &std::fs::read_to_string(agent.join("models.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            models["providers"]["kiwano-gateway"]["baseUrl"],
+            "http://127.0.0.1:8317/v1"
+        );
+        assert_eq!(models["providers"]["kiwano-gateway"]["apiKey"], "kw-ag-pi-abcd");
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(agent.join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(settings["defaultProvider"], "kiwano-gateway");
+
+        disable(&aux, "pi", &home).unwrap();
+        // originals were missing → restored as empty files (backup-verbatim
+        // semantics, same as gemini's .env); the CLI recreates its own state
+        assert_eq!(std::fs::read_to_string(agent.join("models.json")).unwrap(), "");
+        assert_eq!(std::fs::read_to_string(agent.join("settings.json")).unwrap(), "");
+        assert!(aux.load_takeover_backup("pi").is_none());
+    }
+
+    #[test]
+    fn hermes_takeover_roundtrip_preserves_untouched_sections() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "agent:\n  max_turns: 50\ncustom_providers:\n  - name: openrouter\n    base_url: https://openrouter.ai/api/v1\n";
+        std::fs::write(dir.join("config.yaml"), original).unwrap();
+
+        enable(&aux, "hermes", "kw-ag-hermes-abcd", 8317, &home).unwrap();
+        let out = std::fs::read_to_string(dir.join("config.yaml")).unwrap();
+        let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(v["model"]["provider"], "kiwano-gateway");
+        assert_eq!(v["agent"]["max_turns"], 50);
+        let providers = v["custom_providers"].as_sequence().unwrap();
+        assert_eq!(providers.len(), 2);
+
+        disable(&aux, "hermes", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("config.yaml")).unwrap(), original);
+        assert!(aux.load_takeover_backup("hermes").is_none());
     }
 }

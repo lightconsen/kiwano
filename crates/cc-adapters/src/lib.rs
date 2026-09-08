@@ -12,6 +12,8 @@
 //! - [`gemini_config`]: Gemini env/settings file management
 //! - [`grok_config`]: Grok TOML live-config management
 //! - [`opencode_config`]: OpenCode opencode.json management
+//! - [`gateway_takeover`]: content→content gateway-entry upserts for the
+//!   additive-mode agents (opencode/openclaw/hermes/pi) used by takeover
 //! - [`codex_config`]: Codex config write core (Tier C, function-level port)
 //! - [`proxy`]: protocol conversion sublayer (Tier B) — Anthropic ↔ OpenAI
 //!   request/response/SSE conversion extracted from cc-switch's proxy
@@ -22,6 +24,7 @@
 pub mod codex_config;
 pub mod config;
 pub mod error;
+pub mod gateway_takeover;
 pub mod gemini_config;
 pub mod grok_config;
 pub mod model_capabilities;

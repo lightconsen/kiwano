@@ -18,6 +18,9 @@ import type {
   KiwanoApi,
   NewProviderInput,
   Provider,
+  RequestLogDetail,
+  RequestLogFilter,
+  RequestLogList,
   StrategyKind,
   UsageAlert,
   ApiKeyEntry,
@@ -83,6 +86,19 @@ export const tauriApi: KiwanoApi = {
   detectAgents: () => invoke<AgentDetect[]>("detect_agents"),
 
   probeAgentVersions: () => invoke<AgentVersionEntry[]>("probe_agent_versions"),
+
+  listRequestLogs: (page: number, pageSize: number, filter?: RequestLogFilter) =>
+    invoke<RequestLogList>("list_request_logs", {
+      page,
+      pageSize,
+      agent: filter?.agent ?? null,
+      providerId: filter?.provider_id ?? null,
+      status: filter?.status ?? null,
+    }),
+
+  getRequestLog: (id: number) => invoke<RequestLogDetail | null>("get_request_log", { id }),
+
+  clearRequestLogs: () => invoke<void>("clear_request_logs"),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
 };

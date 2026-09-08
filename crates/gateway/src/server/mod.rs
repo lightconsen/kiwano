@@ -19,7 +19,7 @@ use serde_json::json;
 
 use crate::error::{GatewayError, Result};
 use crate::router::RouteTable;
-use crate::store::{Protocol, Store};
+use crate::store::{LogConfig, Protocol, Store};
 
 /// Max inbound body size forwarded to upstreams (32 MiB is generous for
 /// long-context agent payloads).
@@ -35,6 +35,8 @@ pub struct GatewayState {
     /// (spec §4.1 P1 multi-key rotation). In-memory only; a gateway restart
     /// simply restarts each pool at its primary.
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// Request-log capture config, refreshed alongside the route table.
+    log_cfg: RwLock<LogConfig>,
     pub started_at: Instant,
     pub version: &'static str,
 }
@@ -42,6 +44,7 @@ pub struct GatewayState {
 impl GatewayState {
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
+        let log_config = store.load_log_config().unwrap_or_default();
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(300))
@@ -53,6 +56,7 @@ impl GatewayState {
             engine: crate::strategy::StrategyEngine::new(),
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
+            log_cfg: RwLock::new(log_config),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         })
@@ -63,6 +67,14 @@ impl GatewayState {
         self.route_table
             .read()
             .expect("route table lock poisoned")
+            .clone()
+    }
+
+    /// Current request-log capture config (cheap clone).
+    pub fn log_config(&self) -> LogConfig {
+        self.log_cfg
+            .read()
+            .expect("log config lock poisoned")
             .clone()
     }
 
@@ -80,11 +92,15 @@ impl GatewayState {
     }
 
     /// Rebuild the route table from SQLite; returns the number of agents
-    /// routed (used by admin `/reload`, tech.md §4.3 flow 2).
+    /// routed (used by admin `/reload`, tech.md §4.3 flow 2). The request-log
+    /// config is refreshed too (best-effort — never blocks a reload).
     pub fn reload_routes(&self) -> Result<usize> {
         let table = Arc::new(RouteTable::load(&self.store)?);
         let agents = table.routes.len();
         *self.route_table.write().expect("route table lock poisoned") = table;
+        if let Ok(cfg) = self.store.load_log_config() {
+            *self.log_cfg.write().expect("log config lock poisoned") = cfg;
+        }
         Ok(agents)
     }
 }

@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwano_gateway::store::{
-    Billing, Binding, HealthRecord, Provider, Store, Strategy, StrategyType, UsageTotals,
+    Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry, RequestLogFilter,
+    Store, Strategy, StrategyType, UsageTotals,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -149,6 +150,9 @@ impl Aux {
     pub fn open(path: impl AsRef<std::path::Path>) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // The gateway sidecar holds the same file with a 5s busy timeout; the
+        // GUI writes settings concurrently, so mirror it to survive lock races.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         Self::init_tables(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -520,6 +524,9 @@ pub struct SettingsVm {
     pub takeovers: Vec<TakeoverVm>,
     pub auto_failover: bool,
     pub request_logs: bool,
+    /// Request-log retention in days (mirrored into gateway_settings for the sidecar).
+    #[serde(default = "default_retain_days")]
+    pub log_retention_days: u32,
     pub telemetry: bool,
     /// Cost-alert toggle (spec §4.1 P1): system notification when usage hits the per-period limit
     #[serde(default = "default_true")]
@@ -544,6 +551,7 @@ impl Default for SettingsVm {
             takeovers: Vec::new(),
             auto_failover: true,
             request_logs: true,
+            log_retention_days: default_retain_days(),
             telemetry: false,
             cost_alert: true,
             hub_logged_in: false,
@@ -554,6 +562,10 @@ impl Default for SettingsVm {
 
 pub(crate) fn default_true() -> bool {
     true
+}
+
+pub(crate) fn default_retain_days() -> u32 {
+    30
 }
 
 #[derive(Serialize)]
@@ -1344,7 +1356,63 @@ pub fn update_settings(
         }
     }
     aux.save_settings_json(&merged).map_err(e2s)?;
+    // Request-log capture config lives in the shared gateway_settings table:
+    // the sidecar reads it at startup and on /reload, so keep both copies in
+    // sync whenever the UI patches one of these keys.
+    if patch.get("request_logs").is_some() || patch.get("log_retention_days").is_some() {
+        let mut cfg = store.load_log_config().unwrap_or_default();
+        if let Some(v) = patch.get("request_logs").and_then(|v| v.as_bool()) {
+            cfg.enabled = v;
+        }
+        if let Some(v) = patch.get("log_retention_days").and_then(|v| v.as_u64()) {
+            if let Ok(days) = u32::try_from(v) {
+                cfg.retain_days = days;
+            }
+        }
+        store.save_log_config(&cfg).map_err(e2s)?;
+    }
     build_settings(store, aux)
+}
+
+// ── Request logs (request_logs + request_bodies, migration V5) ──
+
+#[derive(Serialize)]
+pub struct RequestLogListVm {
+    pub rows: Vec<RequestLogEntry>,
+    pub total: i64,
+}
+
+pub fn list_request_logs(
+    store: &Store,
+    page: i64,
+    page_size: i64,
+    agent: Option<&str>,
+    provider_id: Option<&str>,
+    status: Option<&str>,
+) -> Result<RequestLogListVm, String> {
+    let (rows, total) = store
+        .list_request_logs(
+            page,
+            page_size,
+            RequestLogFilter {
+                agent,
+                provider_id,
+                status,
+            },
+        )
+        .map_err(e2s)?;
+    Ok(RequestLogListVm { rows, total })
+}
+
+/// Detail view (metadata + bodies); re-exported for the command signature.
+pub use kiwano_gateway::store::RequestLogDetail as RequestLogDetailVm;
+
+pub fn get_request_log(store: &Store, id: i64) -> Result<Option<RequestLogDetail>, String> {
+    store.get_request_log(id).map_err(e2s)
+}
+
+pub fn clear_request_logs(store: &Store) -> Result<(), String> {
+    store.clear_request_logs().map_err(e2s).map(drop)
 }
 
 pub fn set_agent_takeover(

@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use std::sync::Arc;
 
+use crate::log_capture::{persist_failure, RequestCapture};
 use crate::protocol::{classify_path, PathProtocol};
 use crate::router::resolve_via_engine;
 use crate::server::{error_into_response, error_response, GatewayState, MAX_BODY_BYTES};
@@ -40,7 +41,29 @@ async fn proxy(State(state): State<Arc<GatewayState>>, req: Request) -> Response
     handle(state, req).await
 }
 
-async fn not_found() -> Response {
+/// Axum-level fallback: paths no route matches never reach `handle`, so this
+/// records the request-log row itself (every data-plane request is audited).
+async fn not_found(State(state): State<Arc<GatewayState>>, req: Request) -> Response {
+    let (parts, _body) = req.into_parts();
+    let path = parts.uri.path().to_string();
+    let query = parts.uri.query().map(|q| q.to_string());
+    let capture = RequestCapture::start(
+        state.log_config().enabled,
+        parts.method.as_str(),
+        &path,
+        query.as_deref(),
+        &parts.headers,
+    );
+    persist_failure(
+        &state.store,
+        capture.as_ref(),
+        None,
+        None,
+        None,
+        StatusCode::NOT_FOUND,
+        "unsupported_path",
+        "kiwano-gateway: unknown data-plane path".to_string(),
+    );
     error_response(
         None,
         StatusCode::NOT_FOUND,
@@ -57,11 +80,31 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     let inbound_headers = parts.headers.clone();
     let query = parts.uri.query().map(|q| q.to_string());
 
+    // Request-log capture starts here so even rejected requests are recorded.
+    let log_cfg = state.log_config();
+    let mut capture = RequestCapture::start(
+        log_cfg.enabled,
+        method.as_str(),
+        &path,
+        query.as_deref(),
+        &inbound_headers,
+    );
+
     let key = crate::server::extract_placeholder_key(&parts.headers);
     let inbound = match classify_path(&path) {
         PathProtocol::Fixed(p) => Some(p),
         PathProtocol::Ambiguous => None, // resolved via agent attribution
         PathProtocol::Unknown => {
+            persist_failure(
+                &state.store,
+                capture.as_ref(),
+                None,
+                None,
+                None,
+                StatusCode::NOT_FOUND,
+                "unsupported_path",
+                format!("kiwano-gateway: no protocol mapping for path `{path}`"),
+            );
             return error_response(
                 None,
                 StatusCode::NOT_FOUND,
@@ -75,6 +118,16 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     let body_bytes = match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
         Ok(b) => b,
         Err(e) => {
+            persist_failure(
+                &state.store,
+                capture.as_ref(),
+                None,
+                None,
+                None,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "body_too_large",
+                format!("kiwano-gateway: failed to read request body: {e}"),
+            );
             return error_response(
                 inbound,
                 StatusCode::PAYLOAD_TOO_LARGE,
@@ -83,10 +136,16 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
             );
         }
     };
+    if let Some(c) = capture.as_mut() {
+        c.set_body(&body_bytes, log_cfg.capture_bodies, log_cfg.max_body_bytes);
+    }
 
     // Attribution + strategy-engine provider selection (tech.md §4.7).
     let table = state.route_table();
     let session = session_hint(&parts.headers, &body_bytes);
+    if let Some(c) = capture.as_mut() {
+        c.session_id = session.clone();
+    }
     let routed = match resolve_via_engine(
         &table,
         &state.engine,
@@ -98,7 +157,25 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     .await
     {
         Ok(r) => r,
-        Err(e) => return error_into_response(e, inbound),
+        Err(e) => {
+            let message = e.to_string();
+            let (agent, kind) = match &e {
+                crate::error::GatewayError::NoBinding(a) => (Some(a.clone()), "no_provider_bound"),
+                _ => (None, "routing_error"),
+            };
+            let resp = error_into_response(e, inbound);
+            persist_failure(
+                &state.store,
+                capture.as_ref(),
+                agent,
+                None,
+                None,
+                resp.status(),
+                kind,
+                message,
+            );
+            return resp;
+        }
     };
 
     tracing::info!(
@@ -124,6 +201,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         body_bytes,
         routed,
         inbound,
+        capture,
     )
     .await
 }

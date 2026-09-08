@@ -161,8 +161,23 @@ export default function Settings() {
           <Row label="Auto failover" note="Switch to a standby when the primary fails">
             <Switch checked={s.auto_failover} onCheckedChange={(v) => patch({ auto_failover: v })} />
           </Row>
-          <Row label="Request log retention" note="Local only · 30 days">
+          <Row label="Request logs" note="Record every request with bodies, local only">
             <Switch checked={s.request_logs} onCheckedChange={(v) => patch({ request_logs: v })} />
+          </Row>
+          <Row label="Log retention" note="Rows older than this are pruned every 6h">
+            <Select
+              value={String(s.log_retention_days ?? 30)}
+              onValueChange={(v) => patch({ log_retention_days: Number(v) })}
+            >
+              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">7 days</SelectItem>
+                <SelectItem value="30">30 days</SelectItem>
+                <SelectItem value="90">90 days</SelectItem>
+              </SelectContent>
+            </Select>
           </Row>
           <Row label="Cost alert" note="System notification when a period limit is reached">
             <Switch checked={s.cost_alert} onCheckedChange={(v) => patch({ cost_alert: v })} />

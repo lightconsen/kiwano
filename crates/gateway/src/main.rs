@@ -113,6 +113,28 @@ async fn main() {
         kiwano_gateway::strategy::prober::PROBE_INTERVAL,
     ));
 
+    // Request-log retention: prune at startup and every 6 hours (bodies make
+    // the log grow fast; the retain_days setting lives in gateway_settings).
+    {
+        let store = state.store.clone();
+        tokio::spawn(async move {
+            loop {
+                let retain = store
+                    .load_log_config()
+                    .map(|c| c.retain_days)
+                    .unwrap_or_default();
+                match store.prune_request_logs(retain) {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(pruned = n, retain_days = retain, "request logs pruned")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "request log prune failed"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+            }
+        });
+    }
+
     let data_app = data_plane_router(state.clone());
     let admin_app = admin_plane_router(state.clone());
 

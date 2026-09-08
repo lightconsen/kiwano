@@ -30,12 +30,13 @@ use kiwano_adapters::proxy::providers::transform::{
 };
 
 use crate::error::GatewayError;
+use crate::log_capture::{cap_body, RequestCapture};
 use crate::meter::{parse_response_usage, request_model, Usage, UsageScanner};
 use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::data::upstream_url;
 use crate::server::{error_into_response, error_response, GatewayState};
 use crate::store::now_rfc3339;
-use crate::store::{Protocol, UsageRecord};
+use crate::store::{Protocol, RequestLogNew, UsageRecord};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -54,7 +55,25 @@ fn is_hop_by_hop(name: &axum::http::HeaderName) -> bool {
     )
 }
 
-/// One metered request, ready for the `usage` table.
+/// Response/request facts for the full request log, gathered by the forward
+/// leg and persisted together with the metered usage sample.
+#[derive(Clone)]
+struct CompletedLog {
+    capture: RequestCapture,
+    attribution: String,
+    status_code: u16,
+    error_kind: Option<String>,
+    error_message: Option<String>,
+    is_streaming: bool,
+    first_token_ms: Option<i64>,
+    /// Client-visible response body (converted stream for the Anthropic path).
+    response_body: Option<String>,
+    response_size: i64,
+    truncated: bool,
+    response_headers: Option<String>,
+}
+
+/// One metered request, ready for the `usage` table (+ full request log).
 #[derive(Clone)]
 struct UsageSample {
     agent: String,
@@ -63,6 +82,8 @@ struct UsageSample {
     usage: Usage,
     latency_ms: i64,
     status: &'static str,
+    /// Full-log payload; None while request logging is disabled.
+    log: Option<CompletedLog>,
 }
 
 impl UsageSample {
@@ -158,8 +179,17 @@ fn copy_response_headers(src: &HeaderMap) -> HeaderMap {
     out
 }
 
+/// How the agent was attributed, as stored in `request_logs.attribution`.
+fn attribution_str(a: crate::router::Attribution) -> String {
+    match a {
+        crate::router::Attribution::PlaceholderKey => "key".to_string(),
+        crate::router::Attribution::PathFallback => "path_fallback".to_string(),
+    }
+}
+
 /// Forward one resolved request to its provider and return the client-facing
-/// response, metering usage on the way.
+/// response, metering usage on the way. `capture` carries the request-side
+/// full-log context (None while request logging is disabled).
 pub async fn forward(
     state: Arc<GatewayState>,
     method: Method,
@@ -169,9 +199,23 @@ pub async fn forward(
     body: Bytes,
     routed: RoutedRequest,
     inbound: Option<Protocol>,
+    capture: Option<RequestCapture>,
 ) -> Response {
     let started = Instant::now();
     let provider = &routed.provider;
+    let mut log = capture.map(|c| CompletedLog {
+        capture: c,
+        attribution: attribution_str(routed.attribution),
+        status_code: 0,
+        error_kind: None,
+        error_message: None,
+        is_streaming: false,
+        first_token_ms: None,
+        response_body: None,
+        response_size: 0,
+        truncated: false,
+        response_headers: None,
+    });
 
     // Anthropic inbound on an OpenAI-compatible provider → convert via
     // adapters. Legacy Anthropic paths other than `/v1/messages` have no
@@ -190,20 +234,32 @@ pub async fn forward(
                     routed,
                     inbound,
                     started,
+                    log,
                 )
                 .await;
             }
+            let message = format!(
+                "provider `{}` speaks `{}` but path `{}` is `{}`; only Anthropic `/v1/messages` -> OpenAI conversion is supported",
+                provider.id,
+                provider.protocol.as_str(),
+                path,
+                inbound_proto.as_str()
+            );
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                StatusCode::BAD_GATEWAY,
+                "protocol_mismatch",
+                message.clone(),
+            );
             return error_response(
                 inbound,
                 StatusCode::BAD_GATEWAY,
                 "protocol_mismatch",
-                &format!(
-                    "provider `{}` speaks `{}` but path `{}` is `{}`; only Anthropic `/v1/messages` -> OpenAI conversion is supported",
-                    provider.id,
-                    provider.protocol.as_str(),
-                    path,
-                    inbound_proto.as_str()
-                ),
+                &message,
             );
         }
     }
@@ -216,11 +272,37 @@ pub async fn forward(
 
     let api_key = match select_upstream_key(&state, provider) {
         Ok(k) => k,
-        Err(e) => return error_into_response(e, inbound),
+        Err(e) => {
+            let resp = error_into_response(e, inbound);
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "upstream_error",
+                format!("selecting upstream key failed"),
+            );
+            return resp;
+        }
     };
     let headers = match build_upstream_headers(&inbound_headers, provider, &api_key) {
         Ok(h) => h,
-        Err(e) => return error_into_response(e, inbound),
+        Err(e) => {
+            let resp = error_into_response(e, inbound);
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "upstream_error",
+                format!("building upstream headers failed"),
+            );
+            return resp;
+        }
     };
 
     let upstream = match state
@@ -234,10 +316,21 @@ pub async fn forward(
         Ok(r) => r,
         Err(e) => {
             state.engine.record(&routed.agent, &provider.id, false).await;
-            return error_into_response(
+            let resp = error_into_response(
                 GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
                 inbound,
             );
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "upstream_error",
+                format!("request to `{url}` failed: {e}"),
+            );
+            return resp;
         }
     };
 
@@ -267,12 +360,19 @@ pub async fn forward(
     // reqwest consumes the Response on bytes()/bytes_stream(), so snapshot
     // the client-facing headers first.
     let response_headers = copy_response_headers(upstream.headers());
+    if let Some(l) = log.as_mut() {
+        l.response_headers = Some(response_headers_text(&response_headers));
+    }
 
     if is_sse {
-        // Streaming passthrough with usage scanning; the sample is persisted
-        // by a side task when the stream finishes.
+        // Streaming passthrough with usage scanning + response capture; the
+        // sample is persisted by a side task when the stream finishes.
         let (tx, rx) = mpsc::channel::<UsageSample>(1);
         tokio::spawn(record_pending_usage(state.clone(), rx));
+        let max_body_bytes = log
+            .as_ref()
+            .map(|_| state.log_config().max_body_bytes)
+            .unwrap_or(0);
         let stream = SseUsageStream::new(
             Box::pin(upstream.bytes_stream().map(|r| r.map_err(BoxError::from))),
             tx,
@@ -283,8 +383,22 @@ pub async fn forward(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
+                log: log.map(|l| CompletedLog {
+                    is_streaming: true,
+                    status_code: status.as_u16(),
+                    response_headers: l.response_headers,
+                    capture: l.capture,
+                    attribution: l.attribution,
+                    error_kind: None,
+                    error_message: None,
+                    first_token_ms: None,
+                    response_body: None,
+                    response_size: 0,
+                    truncated: false,
+                }),
             },
             started,
+            max_body_bytes,
         );
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
@@ -294,14 +408,34 @@ pub async fn forward(
         let bytes = match upstream.bytes().await {
             Ok(b) => b,
             Err(e) => {
-                return error_into_response(
+                let resp = error_into_response(
                     GatewayError::Upstream(format!("reading upstream body failed: {e}")),
                     inbound,
                 );
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    log.as_ref().map(|l| &l.capture),
+                    Some(routed.agent.clone()),
+                    Some(attribution_str(routed.attribution)),
+                    Some(provider.id.clone()),
+                    resp.status(),
+                    "upstream_error",
+                    format!("reading upstream body failed: {e}"),
+                );
+                return resp;
             }
         };
         let latency_ms = started.elapsed().as_millis() as i64;
         let (usage, upstream_model) = parse_response_usage(provider.protocol, &bytes);
+        let log = log.map(|mut l| {
+            let max_body_bytes = state.log_config().max_body_bytes;
+            let (response_body, truncated) = cap_body(&bytes, max_body_bytes);
+            l.response_body = Some(response_body);
+            l.response_size = bytes.len() as i64;
+            l.truncated = truncated;
+            l.status_code = status.as_u16();
+            l
+        });
         let sample = UsageSample {
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
@@ -309,6 +443,7 @@ pub async fn forward(
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: if status.is_success() { "ok" } else { "error" },
+            log,
         };
         record_sample(&state, sample);
 
@@ -317,6 +452,20 @@ pub async fn forward(
         *response.headers_mut() = response_headers;
         response
     }
+}
+
+/// Serialize a response header map for the request log (same redaction as
+/// the request side; `copy_response_headers` output has no credentials).
+fn response_headers_text(headers: &HeaderMap) -> String {
+    let mut map = serde_json::Map::new();
+    for (name, value) in headers.iter() {
+        let v = value
+            .to_str()
+            .map(str::to_string)
+            .unwrap_or_else(|_| "<binary>".to_string());
+        map.insert(name.as_str().to_string(), serde_json::Value::String(v));
+    }
+    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Forward an Anthropic `/v1/messages` request to an OpenAI-compatible
@@ -328,6 +477,7 @@ pub async fn forward(
 /// event stream by `create_anthropic_sse_stream` (whose emitted
 /// `message_start`/`message_delta` usage is what the metering scanner sees).
 /// Upstream error bodies are passed through unconverted.
+#[allow(clippy::too_many_arguments)]
 async fn forward_anthropic_via_openai(
     state: Arc<GatewayState>,
     method: Method,
@@ -336,6 +486,7 @@ async fn forward_anthropic_via_openai(
     routed: RoutedRequest,
     inbound: Option<Protocol>,
     started: Instant,
+    log: Option<CompletedLog>,
 ) -> Response {
     let provider = &routed.provider;
 
@@ -346,17 +497,36 @@ async fn forward_anthropic_via_openai(
     let converted_body = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(
-                inbound,
+            let message = format!("kiwano-gateway: inbound body is not valid JSON: {e}");
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
-                &format!("kiwano-gateway: inbound body is not valid JSON: {e}"),
+                message.clone(),
             );
+            return error_response(inbound, StatusCode::BAD_REQUEST, "invalid_request", &message);
         }
     };
     let mut openai_body = match anthropic_to_openai(converted_body) {
         Ok(v) => v,
-        Err(e) => return proxy_error_into_response(e, inbound),
+        Err(e) => {
+            let resp = proxy_error_into_response(e, inbound);
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "conversion_failed",
+                format!("adapters conversion failed"),
+            );
+            return resp;
+        }
     };
     inject_openai_stream_include_usage(&mut openai_body);
     let openai_body = strip_one_m_suffix_for_upstream_from_body(openai_body);
@@ -369,10 +539,21 @@ async fn forward_anthropic_via_openai(
     let openai_bytes = match serde_json::to_vec(&openai_body) {
         Ok(b) => b,
         Err(e) => {
-            return error_into_response(
+            let resp = error_into_response(
                 GatewayError::Upstream(format!("serializing converted body failed: {e}")),
                 inbound,
             );
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "internal_error",
+                format!("serializing converted body failed: {e}"),
+            );
+            return resp;
         }
     };
 
@@ -380,11 +561,37 @@ async fn forward_anthropic_via_openai(
     // Query strings are meaningless across protocol conversion; drop them.
     let api_key = match select_upstream_key(&state, provider) {
         Ok(k) => k,
-        Err(e) => return error_into_response(e, inbound),
+        Err(e) => {
+            let resp = error_into_response(e, inbound);
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "upstream_error",
+                format!("selecting upstream key failed"),
+            );
+            return resp;
+        }
     };
     let headers = match build_upstream_headers(&inbound_headers, provider, &api_key) {
         Ok(h) => h,
-        Err(e) => return error_into_response(e, inbound),
+        Err(e) => {
+            let resp = error_into_response(e, inbound);
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "upstream_error",
+                format!("building upstream headers failed"),
+            );
+            return resp;
+        }
     };
 
     let upstream = match state
@@ -398,10 +605,21 @@ async fn forward_anthropic_via_openai(
         Ok(r) => r,
         Err(e) => {
             state.engine.record(&routed.agent, &provider.id, false).await;
-            return error_into_response(
+            let resp = error_into_response(
                 GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
                 inbound,
             );
+            crate::log_capture::persist_failure(
+                &state.store,
+                log.as_ref().map(|l| &l.capture),
+                Some(routed.agent.clone()),
+                Some(attribution_str(routed.attribution)),
+                Some(provider.id.clone()),
+                resp.status(),
+                "upstream_error",
+                format!("request to `{url}` failed: {e}"),
+            );
+            return resp;
         }
     };
 
@@ -429,10 +647,12 @@ async fn forward_anthropic_via_openai(
 
     if is_sse {
         // Convert the OpenAI chunk stream into an Anthropic event stream; the
-        // metering scanner then reads the converted Anthropic usage events.
+        // metering scanner then reads the converted Anthropic usage events
+        // and the capture tee records the client-visible stream.
         let (tx, rx) = mpsc::channel::<UsageSample>(1);
         tokio::spawn(record_pending_usage(state.clone(), rx));
         let converted = create_anthropic_sse_stream(Box::pin(upstream.bytes_stream()));
+        let max_body_bytes = state.log_config().max_body_bytes;
         let stream = SseUsageStream::new(
             Box::pin(converted.map(|r| r.map_err(|e| Box::new(e) as BoxError))),
             tx,
@@ -443,8 +663,22 @@ async fn forward_anthropic_via_openai(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
+                log: log.map(|l| CompletedLog {
+                    is_streaming: true,
+                    status_code: status.as_u16(),
+                    response_headers: Some(response_headers_text(&response_headers)),
+                    capture: l.capture,
+                    attribution: l.attribution,
+                    error_kind: None,
+                    error_message: None,
+                    first_token_ms: None,
+                    response_body: None,
+                    response_size: 0,
+                    truncated: false,
+                }),
             },
             started,
+            max_body_bytes,
         );
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
@@ -454,27 +688,49 @@ async fn forward_anthropic_via_openai(
         let bytes = match upstream.bytes().await {
             Ok(b) => b,
             Err(e) => {
-                return error_into_response(
+                let resp = error_into_response(
                     GatewayError::Upstream(format!("reading upstream body failed: {e}")),
                     inbound,
                 );
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    log.as_ref().map(|l| &l.capture),
+                    Some(routed.agent.clone()),
+                    Some(attribution_str(routed.attribution)),
+                    Some(provider.id.clone()),
+                    resp.status(),
+                    "upstream_error",
+                    format!("reading upstream body failed: {e}"),
+                );
+                return resp;
             }
         };
         let latency_ms = started.elapsed().as_millis() as i64;
         let (usage, upstream_model) = parse_response_usage(Protocol::OpenAI, &bytes);
-        let sample = UsageSample {
-            agent: routed.agent.clone(),
-            provider_id: provider.id.clone(),
-            model: model.or(upstream_model),
-            usage: usage.unwrap_or_default(),
-            latency_ms,
-            status: if status.is_success() { "ok" } else { "error" },
-        };
-        record_sample(&state, sample);
 
         if !status.is_success() {
             // Pass upstream error bodies through unconverted (error shapes
             // are not chat.completion objects; converting would corrupt them).
+            let log = log.map(|mut l| {
+                let max_body_bytes = state.log_config().max_body_bytes;
+                let (response_body, truncated) = cap_body(&bytes, max_body_bytes);
+                l.response_body = Some(response_body);
+                l.response_size = bytes.len() as i64;
+                l.truncated = truncated;
+                l.status_code = status.as_u16();
+                l.response_headers = Some(response_headers_text(&response_headers));
+                l
+            });
+            let sample = UsageSample {
+                agent: routed.agent.clone(),
+                provider_id: provider.id.clone(),
+                model: model.or(upstream_model),
+                usage: usage.unwrap_or_default(),
+                latency_ms,
+                status: "error",
+                log,
+            };
+            record_sample(&state, sample);
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = status;
             *response.headers_mut() = response_headers;
@@ -488,17 +744,63 @@ async fn forward_anthropic_via_openai(
                     .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
             }) {
             Ok(v) => v,
-            Err(e) => return error_into_response(e, inbound),
+            Err(e) => {
+                let message = e.to_string();
+                let resp = error_into_response(e, inbound);
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    log.as_ref().map(|l| &l.capture),
+                    Some(routed.agent.clone()),
+                    Some(attribution_str(routed.attribution)),
+                    Some(provider.id.clone()),
+                    resp.status(),
+                    "conversion_failed",
+                    message,
+                );
+                return resp;
+            }
         };
         let out = match serde_json::to_vec(&anthropic) {
             Ok(b) => b,
             Err(e) => {
-                return error_into_response(
+                let resp = error_into_response(
                     GatewayError::Upstream(format!("serializing converted response failed: {e}")),
                     inbound,
                 );
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    log.as_ref().map(|l| &l.capture),
+                    Some(routed.agent.clone()),
+                    Some(attribution_str(routed.attribution)),
+                    Some(provider.id.clone()),
+                    resp.status(),
+                    "internal_error",
+                    format!("serializing converted response failed: {e}"),
+                );
+                return resp;
             }
         };
+
+        let log = log.map(|mut l| {
+            let max_body_bytes = state.log_config().max_body_bytes;
+            let (response_body, truncated) = cap_body(&out, max_body_bytes);
+            l.response_body = Some(response_body);
+            l.response_size = out.len() as i64;
+            l.truncated = truncated;
+            l.status_code = status.as_u16();
+            l.response_headers = Some(response_headers_text(&response_headers));
+            l
+        });
+        let sample = UsageSample {
+            agent: routed.agent.clone(),
+            provider_id: provider.id.clone(),
+            model: model.or(upstream_model),
+            usage: usage.unwrap_or_default(),
+            latency_ms,
+            status: "ok",
+            log,
+        };
+        record_sample(&state, sample);
 
         let mut response = Response::new(Body::from(out));
         *response.status_mut() = status;
@@ -537,6 +839,8 @@ async fn record_pending_usage(state: Arc<GatewayState>, mut rx: mpsc::Receiver<U
 }
 
 fn record_sample(state: &GatewayState, sample: UsageSample) {
+    let mut sample = sample;
+    let log = sample.log.take();
     let record = sample.into_record();
     tracing::info!(
         agent = %record.agent,
@@ -552,13 +856,48 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
     if let Err(e) = state.store.record_usage(&record) {
         tracing::warn!(error = %e, "failed to persist usage record");
     }
+    if let Some(log) = log {
+        let entry = RequestLogNew {
+            ts: log.capture.ts,
+            method: log.capture.method,
+            path: log.capture.path,
+            query: log.capture.query,
+            agent: Some(record.agent),
+            attribution: Some(log.attribution),
+            provider_id: Some(record.provider_id),
+            model: record.model,
+            status_code: log.status_code as i64,
+            error_kind: log.error_kind,
+            error_message: log.error_message,
+            session_id: log.capture.session_id,
+            is_streaming: log.is_streaming,
+            input_tokens: record.input_tokens,
+            output_tokens: record.output_tokens,
+            cache_read_tokens: record.cache_read_tokens,
+            cache_creation_tokens: record.cache_creation_tokens,
+            latency_ms: record.latency_ms,
+            first_token_ms: log.first_token_ms,
+            request_headers: log.capture.request_headers,
+            response_headers: log.response_headers,
+            request_body: log.capture.request_body,
+            response_body: log.response_body,
+            request_size: log.capture.request_size,
+            response_size: log.response_size,
+            truncated: log.capture.truncated || log.truncated,
+        };
+        if let Err(e) = state.store.insert_request_log(&entry) {
+            tracing::warn!(error = %e, "failed to persist request log");
+        }
+    }
 }
 
 /// A byte-preserving SSE passthrough stream that scans complete lines for
 /// usage events and submits the metered sample when the upstream stream ends.
 ///
 /// Bytes are forwarded unchanged: complete `\n`-terminated lines are emitted
-/// as they arrive, the trailing partial line is flushed at stream end.
+/// as they arrive, the trailing partial line is flushed at stream end. While
+/// request logging is on, the same chunks tee into a capture buffer (capped)
+/// that lands in `request_bodies` at stream end.
 struct SseUsageStream {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>,
     buffer: Vec<u8>,
@@ -567,6 +906,12 @@ struct SseUsageStream {
     tx: mpsc::Sender<UsageSample>,
     started: Instant,
     inner_ended: bool,
+    // Response capture (request logging):
+    capture_buf: Vec<u8>,
+    capture_truncated: bool,
+    streamed_bytes: u64,
+    capture_cap: usize,
+    first_chunk: Option<Instant>,
 }
 
 impl SseUsageStream {
@@ -575,6 +920,7 @@ impl SseUsageStream {
         tx: mpsc::Sender<UsageSample>,
         sample: UsageSample,
         started: Instant,
+        capture_cap: usize,
     ) -> Self {
         SseUsageStream {
             inner,
@@ -584,6 +930,11 @@ impl SseUsageStream {
             tx,
             started,
             inner_ended: false,
+            capture_buf: Vec::new(),
+            capture_truncated: false,
+            streamed_bytes: 0,
+            capture_cap,
+            first_chunk: None,
         }
     }
 
@@ -593,6 +944,24 @@ impl SseUsageStream {
         }
     }
 
+    /// Tee a passthrough chunk into the capture buffer (capped).
+    fn capture_chunk(&mut self, chunk: &[u8]) {
+        self.streamed_bytes += chunk.len() as u64;
+        if self.sample.log.is_none() || self.capture_cap == 0 {
+            return;
+        }
+        let remaining = self.capture_cap.saturating_sub(self.capture_buf.len());
+        if remaining == 0 {
+            self.capture_truncated = true;
+            return;
+        }
+        if chunk.len() > remaining {
+            self.capture_truncated = true;
+        }
+        self.capture_buf
+            .extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+
     /// Submit the metered sample (best-effort) once the stream is exhausted.
     fn finish(&mut self) {
         self.sample.usage = self.scanner.usage();
@@ -600,6 +969,14 @@ impl SseUsageStream {
             self.sample.model = self.scanner.model().map(String::from);
         }
         self.sample.latency_ms = self.started.elapsed().as_millis() as i64;
+        if let Some(log) = self.sample.log.as_mut() {
+            log.first_token_ms = self
+                .first_chunk
+                .map(|t| (t - self.started).as_millis() as i64);
+            log.response_body = Some(String::from_utf8_lossy(&self.capture_buf).into_owned());
+            log.response_size = self.streamed_bytes as i64;
+            log.truncated = log.truncated || self.capture_truncated;
+        }
         if let Err(e) = self.tx.try_send(self.sample.clone()) {
             tracing::warn!(error = %e, "usage channel unavailable; stream usage not persisted");
         }
@@ -617,6 +994,10 @@ impl Stream for SseUsageStream {
             }
             match self.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(chunk))) => {
+                    if self.first_chunk.is_none() {
+                        self.first_chunk = Some(Instant::now());
+                    }
+                    self.capture_chunk(&chunk);
                     self.buffer.extend_from_slice(&chunk);
                     // Emit only up to the last complete line; keep the tail.
                     if let Some(split) =
@@ -816,8 +1197,10 @@ mod tests {
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
+                log: None,
             },
             Instant::now(),
+            0,
         );
 
         let mut out: Vec<Bytes> = Vec::new();

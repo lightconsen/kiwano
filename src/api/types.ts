@@ -189,6 +189,8 @@ export interface AppSettings {
   takeovers: TakeoverState[];
   auto_failover: boolean;
   request_logs: boolean;
+  /** Request-log retention in days (gateway prunes older rows every 6h) */
+  log_retention_days: number;
   telemetry: boolean;
   /** Cost alert (spec §4.1 P1): system notification when usage reaches the per-period limit */
   cost_alert: boolean;
@@ -285,6 +287,54 @@ export interface AgentRoute {
   bindings: StrategyBinding[];
 }
 
+/** One data-plane request recorded by the gateway (metadata row; bodies live in the detail view) */
+export interface RequestLogEntry {
+  id: number;
+  ts: string;
+  method: string;
+  path: string;
+  query: string | null;
+  agent: string | null;
+  /** key = placeholder-key attribution · path_fallback = matched by path protocol */
+  attribution: string | null;
+  provider_id: string | null;
+  model: string | null;
+  status_code: number;
+  error_kind: string | null;
+  error_message: string | null;
+  session_id: string | null;
+  is_streaming: boolean;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  latency_ms: number | null;
+  first_token_ms: number | null;
+  /** Redacted header JSON (auth headers stripped at capture time) */
+  request_headers: string | null;
+  response_headers: string | null;
+  request_size: number;
+  response_size: number;
+  truncated: boolean;
+}
+
+/** Detail view: metadata + the captured request/response bodies */
+export interface RequestLogDetail extends RequestLogEntry {
+  request_body: string | null;
+  response_body: string | null;
+}
+
+export interface RequestLogList {
+  rows: RequestLogEntry[];
+  total: number;
+}
+
+export interface RequestLogFilter {
+  agent?: string;
+  provider_id?: string;
+  status?: "ok" | "error";
+}
+
 export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
@@ -327,5 +377,11 @@ export interface KiwanoApi {
   detectAgents(): Promise<AgentDetect[]>;
   /** Phase 2 agent versions: slow `--version` probes, fetched after detection; null = probe failed */
   probeAgentVersions(): Promise<AgentVersionEntry[]>;
+  /** Paged data-plane request log (metadata only; bodies via getRequestLog) */
+  listRequestLogs(page: number, pageSize: number, filter?: RequestLogFilter): Promise<RequestLogList>;
+  /** One request-log row with captured bodies; null when the row was pruned */
+  getRequestLog(id: number): Promise<RequestLogDetail | null>;
+  /** Delete every request-log row (bodies cascade) */
+  clearRequestLogs(): Promise<void>;
   getFooterStats(): Promise<FooterStats>;
 }

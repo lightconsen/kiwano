@@ -252,7 +252,43 @@ fn update_settings(
     if let Some(v) = patch.get("autostart").and_then(|v| v.as_bool()) {
         sync_autostart(&app, v);
     }
+    // The gateway re-reads the log config on /reload; ping it when the
+    // request-log settings changed so the toggle applies without a restart.
+    if patch.get("request_logs").is_some() || patch.get("log_retention_days").is_some() {
+        after_mutation(&state);
+    }
     Ok(vm)
+}
+
+// ── Request logs (full data-plane audit trail, migration V5) ──
+
+#[tauri::command]
+fn list_request_logs(
+    state: State<AppState>,
+    page: i64,
+    page_size: i64,
+    agent: Option<String>,
+    provider_id: Option<String>,
+    status: Option<String>,
+) -> Result<vm::RequestLogListVm, String> {
+    vm::list_request_logs(
+        &state.store,
+        page,
+        page_size,
+        agent.as_deref(),
+        provider_id.as_deref(),
+        status.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn get_request_log(state: State<AppState>, id: i64) -> Result<Option<vm::RequestLogDetailVm>, String> {
+    vm::get_request_log(&state.store, id)
+}
+
+#[tauri::command]
+fn clear_request_logs(state: State<AppState>) -> Result<(), String> {
+    vm::clear_request_logs(&state.store)
 }
 
 #[tauri::command]
@@ -461,6 +497,9 @@ pub fn run() {
             get_dashboard,
             get_settings,
             update_settings,
+            list_request_logs,
+            get_request_log,
+            clear_request_logs,
             set_agent_takeover,
             get_footer_stats,
             sync_hub,

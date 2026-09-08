@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -143,6 +143,55 @@ INSERT INTO providers_new (id, name, protocol, base_url, api_path, api_key,
 DROP TABLE providers;
 ALTER TABLE providers_new RENAME TO providers;
 PRAGMA foreign_keys=ON;
+"#;
+
+/// v5: complete request logging (bodies + metadata) — this is a local tool, so
+/// full captures are kept. Metadata lives in `request_logs`; the (possibly
+/// large) bodies live in a sibling table so list queries never drag blobs.
+/// `gateway_settings` is the gateway-visible KV store (the GUI's `app_settings`
+/// lives in the same file but is GUI-owned; the gateway only reads its own).
+const MIGRATION_V5: &str = r#"
+CREATE TABLE IF NOT EXISTS request_logs (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                    TEXT NOT NULL,
+    method                TEXT NOT NULL,
+    path                  TEXT NOT NULL,
+    query                 TEXT,
+    agent                 TEXT,
+    attribution           TEXT,
+    provider_id           TEXT,
+    model                 TEXT,
+    status_code           INTEGER NOT NULL,
+    error_kind            TEXT,
+    error_message         TEXT,
+    session_id            TEXT,
+    is_streaming          INTEGER NOT NULL DEFAULT 0,
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms            INTEGER,
+    first_token_ms        INTEGER,
+    request_headers       TEXT,
+    response_headers      TEXT,
+    request_size          INTEGER NOT NULL DEFAULT 0,
+    response_size         INTEGER NOT NULL DEFAULT 0,
+    truncated             INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_request_logs_ts          ON request_logs(ts);
+CREATE INDEX IF NOT EXISTS idx_request_logs_agent_ts    ON request_logs(agent, ts);
+CREATE INDEX IF NOT EXISTS idx_request_logs_provider_ts ON request_logs(provider_id, ts);
+
+CREATE TABLE IF NOT EXISTS request_bodies (
+    log_id        INTEGER PRIMARY KEY REFERENCES request_logs(id) ON DELETE CASCADE,
+    request_body  TEXT,
+    response_body TEXT
+);
+
+CREATE TABLE IF NOT EXISTS gateway_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 "#;
 
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
@@ -377,6 +426,133 @@ pub struct HealthRecord {
     pub consecutive_failures: i64,
 }
 
+/// One complete data-plane request awaiting persistence (tech.md: full request
+/// logging). Bodies are optional — disabled capture or oversize truncation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestLogNew {
+    pub ts: String,
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
+    /// Attributed agent; None for failures before attribution (e.g. 404).
+    pub agent: Option<String>,
+    /// Attribution method: `key` / `path_fallback` (see router Attribution).
+    pub attribution: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    /// Status code the client ultimately received.
+    pub status_code: i64,
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
+    pub session_id: Option<String>,
+    pub is_streaming: bool,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub latency_ms: Option<i64>,
+    pub first_token_ms: Option<i64>,
+    /// Header maps serialized as JSON with credential headers redacted.
+    pub request_headers: Option<String>,
+    pub response_headers: Option<String>,
+    /// lossy-UTF8 request body (already truncated to the capture cap).
+    pub request_body: Option<String>,
+    pub response_body: Option<String>,
+    /// Original byte sizes (before any truncation).
+    pub request_size: i64,
+    pub response_size: i64,
+    pub truncated: bool,
+}
+
+/// Metadata row of `request_logs` (list view — never includes bodies).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RequestLogEntry {
+    pub id: i64,
+    pub ts: String,
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
+    pub agent: Option<String>,
+    pub attribution: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    pub status_code: i64,
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
+    pub session_id: Option<String>,
+    pub is_streaming: bool,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub latency_ms: Option<i64>,
+    pub first_token_ms: Option<i64>,
+    pub request_headers: Option<String>,
+    pub response_headers: Option<String>,
+    pub request_size: i64,
+    pub response_size: i64,
+    pub truncated: bool,
+}
+
+/// Detail view: metadata + the captured bodies.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RequestLogDetail {
+    #[serde(flatten)]
+    pub entry: RequestLogEntry,
+    pub request_body: Option<String>,
+    pub response_body: Option<String>,
+}
+
+/// Filter for `list_request_logs`. `status` is "ok" (<400) or "error" (>=400).
+#[derive(Debug, Clone, Default)]
+pub struct RequestLogFilter<'a> {
+    pub agent: Option<&'a str>,
+    pub provider_id: Option<&'a str>,
+    pub status: Option<&'a str>,
+}
+
+/// Gateway-visible log capture configuration (`gateway_settings` JSON blob).
+/// The GUI writes it; the gateway reads it at startup and on /reload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogConfig {
+    /// Master switch: capture data-plane requests at all.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Store request/response bodies (when disabled, metadata only).
+    #[serde(default = "default_true")]
+    pub capture_bodies: bool,
+    /// Rows older than this many days are pruned.
+    #[serde(default = "default_retain_days")]
+    pub retain_days: u32,
+    /// Per-body capture cap in bytes; larger bodies are stored truncated.
+    #[serde(default = "default_max_body_bytes")]
+    pub max_body_bytes: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_retain_days() -> u32 {
+    30
+}
+fn default_max_body_bytes() -> usize {
+    4 * 1024 * 1024
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        LogConfig {
+            enabled: true,
+            capture_bodies: true,
+            retain_days: default_retain_days(),
+            max_body_bytes: default_max_body_bytes(),
+        }
+    }
+}
+
+/// `gateway_settings` key holding the serialized `LogConfig`.
+pub const LOG_CONFIG_KEY: &str = "request_logs";
+
 /// Row counts surfaced by the admin `/status` endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoreMetrics {
@@ -384,6 +560,7 @@ pub struct StoreMetrics {
     pub bindings: i64,
     pub placeholder_keys: i64,
     pub usage_rows: i64,
+    pub request_log_rows: i64,
 }
 
 pub fn now_rfc3339() -> String {
@@ -445,6 +622,9 @@ impl Store {
         }
         if version < 4 {
             conn.execute_batch(MIGRATION_V4)?;
+        }
+        if version < 5 {
+            conn.execute_batch(MIGRATION_V5)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -980,6 +1160,181 @@ impl Store {
         Ok(out)
     }
 
+    // ---- request logs (full captures) ------------------------------------
+
+    /// Persist one completed request: metadata + bodies in a single
+    /// transaction so a list row never appears without its bodies.
+    pub fn insert_request_log(&self, r: &RequestLogNew) -> Result<i64> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO request_logs (ts, method, path, query, agent, attribution,
+                                       provider_id, model, status_code, error_kind,
+                                       error_message, session_id, is_streaming,
+                                       input_tokens, output_tokens, cache_read_tokens,
+                                       cache_creation_tokens, latency_ms, first_token_ms,
+                                       request_headers, response_headers,
+                                       request_size, response_size, truncated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+            params![
+                r.ts,
+                r.method,
+                r.path,
+                r.query,
+                r.agent,
+                r.attribution,
+                r.provider_id,
+                r.model,
+                r.status_code,
+                r.error_kind,
+                r.error_message,
+                r.session_id,
+                r.is_streaming as i64,
+                r.input_tokens,
+                r.output_tokens,
+                r.cache_read_tokens,
+                r.cache_creation_tokens,
+                r.latency_ms,
+                r.first_token_ms,
+                r.request_headers,
+                r.response_headers,
+                r.request_size,
+                r.response_size,
+                r.truncated as i64,
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        if r.request_body.is_some() || r.response_body.is_some() {
+            tx.execute(
+                "INSERT INTO request_bodies (log_id, request_body, response_body)
+                 VALUES (?1, ?2, ?3)",
+                params![id, r.request_body, r.response_body],
+            )?;
+        }
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Paged list (newest first) with optional filters; returns rows + total.
+    /// `filter.status` is "ok" (<400) or "error" (>=400); anything else means all.
+    pub fn list_request_logs(
+        &self,
+        page: i64,
+        page_size: i64,
+        filter: RequestLogFilter<'_>,
+    ) -> Result<(Vec<RequestLogEntry>, i64)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // Fixed positional params keep the SQL simple: absent filters bind NULL.
+        const WHERE: &str = " WHERE (?1 IS NULL OR agent = ?1)
+                             AND (?2 IS NULL OR provider_id = ?2)
+                             AND (?3 IS NULL OR (?3 = 'ok' AND status_code < 400)
+                                              OR (?3 = 'error' AND status_code >= 400))";
+        let total: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM request_logs{WHERE}"),
+            params![filter.agent, filter.provider_id, filter.status],
+            |r| r.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(&format!(
+            "SELECT id, ts, method, path, query, agent, attribution, provider_id, model,
+                    status_code, error_kind, error_message, session_id, is_streaming,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                    latency_ms, first_token_ms, request_headers, response_headers,
+                    request_size, response_size, truncated
+             FROM request_logs{WHERE}
+             ORDER BY id DESC LIMIT ?4 OFFSET ?5",
+        ))?;
+        let offset = (page - 1).max(0) * page_size;
+        let rows = stmt
+            .query_map(
+                params![
+                    filter.agent,
+                    filter.provider_id,
+                    filter.status,
+                    page_size,
+                    offset
+                ],
+                request_log_from_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok((rows, total))
+    }
+
+    /// One request with bodies (detail view); None if the id is unknown.
+    pub fn get_request_log(&self, id: i64) -> Result<Option<RequestLogDetail>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let entry = {
+            let mut stmt = conn.prepare(
+                "SELECT id, ts, method, path, query, agent, attribution, provider_id, model,
+                        status_code, error_kind, error_message, session_id, is_streaming,
+                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                        latency_ms, first_token_ms, request_headers, response_headers,
+                        request_size, response_size, truncated
+                 FROM request_logs WHERE id = ?1",
+            )?;
+            stmt.query_row(params![id], request_log_from_row).optional()?
+        };
+        let Some(entry) = entry else {
+            return Ok(None);
+        };
+        let bodies: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT request_body, response_body FROM request_bodies WHERE log_id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(Some(RequestLogDetail {
+            entry,
+            request_body: bodies.as_ref().and_then(|b| b.0.clone()),
+            response_body: bodies.as_ref().and_then(|b| b.1.clone()),
+        }))
+    }
+
+    /// Delete rows older than `retain_days`; bodies cascade. Returns removed count.
+    pub fn prune_request_logs(&self, retain_days: u32) -> Result<usize> {
+        let cutoff = (Utc::now() - chrono::Duration::days(retain_days as i64)).to_rfc3339();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute("DELETE FROM request_logs WHERE ts < ?1", params![cutoff])?;
+        Ok(n)
+    }
+
+    /// Delete every logged request (GUI "clear log" action).
+    pub fn clear_request_logs(&self) -> Result<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute("DELETE FROM request_logs", [])?)
+    }
+
+    /// Load the log capture config (defaults when the key is absent/corrupt).
+    pub fn load_log_config(&self) -> Result<LogConfig> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT value FROM gateway_settings WHERE key = ?1",
+                params![LOG_CONFIG_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(match value {
+            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            None => LogConfig::default(),
+        })
+    }
+
+    /// Persist the log capture config (also used by the GUI via its own
+    /// connection — same table, so keep the key/format in sync).
+    pub fn save_log_config(&self, cfg: &LogConfig) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let json = serde_json::to_string(cfg)?;
+        conn.execute(
+            "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![LOG_CONFIG_KEY, json],
+        )?;
+        Ok(())
+    }
+
     // ---- provider health (P1 failover groundwork) ------------------------
 
     pub fn upsert_health(&self, h: &HealthRecord) -> Result<()> {
@@ -1024,6 +1379,7 @@ impl Store {
             bindings: count("SELECT COUNT(*) FROM agent_bindings")?,
             placeholder_keys: count("SELECT COUNT(*) FROM placeholder_keys")?,
             usage_rows: count("SELECT COUNT(*) FROM usage")?,
+            request_log_rows: count("SELECT COUNT(*) FROM request_logs")?,
         })
     }
 }
@@ -1067,6 +1423,36 @@ fn health_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HealthRecord> {
         last_latency_ms: row.get(2)?,
         last_check_at: row.get(3)?,
         consecutive_failures: row.get(4)?,
+    })
+}
+
+fn request_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogEntry> {
+    Ok(RequestLogEntry {
+        id: row.get(0)?,
+        ts: row.get(1)?,
+        method: row.get(2)?,
+        path: row.get(3)?,
+        query: row.get(4)?,
+        agent: row.get(5)?,
+        attribution: row.get(6)?,
+        provider_id: row.get(7)?,
+        model: row.get(8)?,
+        status_code: row.get(9)?,
+        error_kind: row.get(10)?,
+        error_message: row.get(11)?,
+        session_id: row.get(12)?,
+        is_streaming: row.get::<_, i64>(13)? != 0,
+        input_tokens: row.get(14)?,
+        output_tokens: row.get(15)?,
+        cache_read_tokens: row.get(16)?,
+        cache_creation_tokens: row.get(17)?,
+        latency_ms: row.get(18)?,
+        first_token_ms: row.get(19)?,
+        request_headers: row.get(20)?,
+        response_headers: row.get(21)?,
+        request_size: row.get(22)?,
+        response_size: row.get(23)?,
+        truncated: row.get::<_, i64>(24)? != 0,
     })
 }
 
@@ -1126,6 +1512,9 @@ mod tests {
             "placeholder_keys",
             "usage",
             "provider_health",
+            "request_logs",
+            "request_bodies",
+            "gateway_settings",
         ] {
             assert!(tables.iter().any(|t| t == expected), "missing {expected}");
         }
@@ -1478,5 +1867,118 @@ mod tests {
         assert_eq!(m.bindings, 1);
         assert_eq!(m.placeholder_keys, 1);
         assert_eq!(m.usage_rows, 1);
+    }
+
+    fn sample_log(ts: &str, agent: Option<&str>, status: i64) -> RequestLogNew {
+        RequestLogNew {
+            ts: ts.to_string(),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: agent.map(str::to_string),
+            attribution: agent.map(|_| "key".to_string()),
+            provider_id: agent.map(|_| "p1".to_string()),
+            model: Some("claude-sonnet-4-5".into()),
+            status_code: status,
+            error_kind: (status >= 400).then(|| "upstream_error".to_string()),
+            error_message: (status >= 400).then(|| "boom".to_string()),
+            session_id: Some("sess-1".into()),
+            is_streaming: false,
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: Some(88),
+            first_token_ms: None,
+            request_headers: Some(r#"{"content-type":"application/json"}"#.into()),
+            response_headers: None,
+            request_body: Some(r#"{"model":"claude-sonnet-4-5"}"#.into()),
+            response_body: Some(r#"{"ok":true}"#.into()),
+            request_size: 28,
+            response_size: 12,
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn request_log_insert_list_detail_roundtrip() {
+        let (_dir, store) = temp_store();
+        store.insert_request_log(&sample_log("2026-09-07T10:00:00+00:00", Some("claude"), 200)).unwrap();
+        store.insert_request_log(&sample_log("2026-09-07T11:00:00+00:00", Some("codex"), 502)).unwrap();
+        // Pre-attribution failure: no agent/provider at all.
+        store.insert_request_log(&sample_log("2026-09-07T12:00:00+00:00", None, 404)).unwrap();
+
+        let (rows, total) = store.list_request_logs(1, 10, RequestLogFilter::default()).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].status_code, 404); // newest first
+
+        let detail = store.get_request_log(rows[0].id).unwrap().unwrap();
+        assert_eq!(detail.entry.status_code, 404);
+        assert_eq!(detail.entry.error_kind.as_deref(), Some("upstream_error"));
+        assert_eq!(detail.request_body.as_deref(), Some(r#"{"model":"claude-sonnet-4-5"}"#));
+        assert_eq!(detail.response_body.as_deref(), Some(r#"{"ok":true}"#));
+
+        // Filters.
+        let (_, n) = store.list_request_logs(1, 10, RequestLogFilter { agent: Some("claude"), ..Default::default() }).unwrap();
+        assert_eq!(n, 1);
+        let (_, n) = store.list_request_logs(1, 10, RequestLogFilter { status: Some("error"), ..Default::default() }).unwrap();
+        assert_eq!(n, 2); // 502 + 404
+        let (_, n) = store.list_request_logs(1, 10, RequestLogFilter { status: Some("ok"), ..Default::default() }).unwrap();
+        assert_eq!(n, 1);
+
+        // Pagination.
+        let (rows, _) = store.list_request_logs(2, 2, RequestLogFilter::default()).unwrap();
+        assert_eq!(rows.len(), 1);
+
+        // Bodyless insert (capture_bodies=false) still lists; detail has no bodies.
+        let mut bodyless = sample_log("2026-09-07T13:00:00+00:00", Some("pi"), 200);
+        bodyless.request_body = None;
+        bodyless.response_body = None;
+        let id = store.insert_request_log(&bodyless).unwrap();
+        let detail = store.get_request_log(id).unwrap().unwrap();
+        assert_eq!(detail.request_body, None);
+        assert_eq!(detail.response_body, None);
+
+        assert!(store.get_request_log(9999).unwrap().is_none());
+    }
+
+    #[test]
+    fn request_log_prune_and_clear() {
+        let (_dir, store) = temp_store();
+        store.insert_request_log(&sample_log("2026-08-01T10:00:00+00:00", Some("claude"), 200)).unwrap();
+        store.insert_request_log(&sample_log(now_rfc3339().as_str(), Some("claude"), 200)).unwrap();
+
+        // Old row (plus its bodies) goes; fresh row stays.
+        assert_eq!(store.prune_request_logs(30).unwrap(), 1);
+        let (rows, total) = store.list_request_logs(1, 10, RequestLogFilter::default()).unwrap();
+        assert_eq!(total, 1);
+        let detail = store.get_request_log(rows[0].id).unwrap().unwrap();
+        assert_eq!(detail.request_body.as_deref(), Some(r#"{"model":"claude-sonnet-4-5"}"#));
+
+        assert_eq!(store.clear_request_logs().unwrap(), 1);
+        assert_eq!(store.list_request_logs(1, 10, RequestLogFilter::default()).unwrap().1, 0);
+    }
+
+    #[test]
+    fn log_config_roundtrip_with_defaults() {
+        let (_dir, store) = temp_store();
+        assert_eq!(store.load_log_config().unwrap(), LogConfig::default());
+
+        store.save_log_config(&LogConfig { enabled: false, capture_bodies: false, retain_days: 7, max_body_bytes: 1024 }).unwrap();
+        assert_eq!(
+            store.load_log_config().unwrap(),
+            LogConfig { enabled: false, capture_bodies: false, retain_days: 7, max_body_bytes: 1024 }
+        );
+
+        // Corrupt JSON falls back to defaults instead of breaking the gateway.
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE gateway_settings SET value = 'not-json' WHERE key = ?1",
+            params![LOG_CONFIG_KEY],
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(store.load_log_config().unwrap(), LogConfig::default());
     }
 }

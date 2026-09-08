@@ -13,7 +13,10 @@ use axum::routing::post;
 use axum::{Json, Router};
 use futures_core::Stream;
 use kiwano_gateway::server::{admin_plane_router, data_plane_router, GatewayState};
-use kiwano_gateway::store::{now_rfc3339, Billing, Binding, Protocol, Provider, Store};
+use kiwano_gateway::store::{
+    now_rfc3339, Billing, Binding, LogConfig, Protocol, Provider, RequestLogEntry,
+    RequestLogFilter, Store,
+};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -209,6 +212,21 @@ async fn wait_for_usage(
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!("usage row for agent `{agent}` not persisted in time");
+}
+
+/// Wait for the async stream recorder to land the request_logs row(s).
+async fn wait_for_log(state: &GatewayState, expected: i64) -> Vec<RequestLogEntry> {
+    for _ in 0..60 {
+        let (rows, total) = state
+            .store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
+        if total >= expected {
+            return rows;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("request log row not persisted in time");
 }
 
 #[tokio::test]
@@ -774,4 +792,251 @@ async fn unknown_key_on_anthropic_path_falls_back_to_claude() {
     let totals = state.store.usage_totals(Some("claude"), None).unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(captured.lock().unwrap().len(), 1);
+}
+
+/// A completed non-streaming request lands a full request_logs row: metadata,
+/// redacted headers, usage tokens, and both bodies via the detail view.
+#[tokio::test]
+async fn request_log_captures_bodies_and_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let upstream_body = json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 2095, "output_tokens": 503,
+                  "cache_creation_input_tokens": 2095, "cache_read_input_tokens": 0}
+    });
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Json(upstream_body.clone())).await;
+
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let request_body = r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#;
+    let response = post_json(&app, "/v1/messages", Some("kw-ag-claude-test"), request_body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_bytes = response_body(response).await;
+
+    let (rows, total) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(total, 1);
+    let row = &rows[0];
+    assert_eq!(row.method, "POST");
+    assert_eq!(row.path, "/v1/messages");
+    assert_eq!(row.agent.as_deref(), Some("claude"));
+    assert_eq!(row.attribution.as_deref(), Some("key"));
+    assert_eq!(row.provider_id.as_deref(), Some("p-ant"));
+    assert_eq!(row.model.as_deref(), Some("claude-sonnet-4-5"));
+    assert_eq!(row.status_code, 200);
+    assert_eq!(row.error_kind, None);
+    assert!(!row.is_streaming);
+    assert_eq!(row.input_tokens, 2095);
+    assert_eq!(row.output_tokens, 503);
+    assert_eq!(row.cache_creation_tokens, 2095);
+    assert!(row.latency_ms.is_some());
+
+    // Headers are redacted: neither the placeholder nor the real key appears.
+    let req_headers = row.request_headers.as_deref().unwrap();
+    assert!(!req_headers.contains("kw-ag-claude-test"));
+    assert!(!req_headers.contains(REAL_KEY));
+    assert!(row
+        .response_headers
+        .as_deref()
+        .unwrap()
+        .contains("application/json"));
+
+    // Bodies round-trip through the detail view (client saw the upstream body).
+    let client_value: Value = serde_json::from_slice(&response_bytes).unwrap();
+    assert_eq!(client_value, upstream_body);
+    let detail = state.store.get_request_log(row.id).unwrap().unwrap();
+    let stored: Value = serde_json::from_str(detail.response_body.as_deref().unwrap()).unwrap();
+    assert_eq!(stored, upstream_body);
+    assert_eq!(detail.request_body.as_deref(), Some(request_body));
+    assert_eq!(detail.entry.request_size, request_body.len() as i64);
+    assert_eq!(detail.entry.response_size, response_bytes.len() as i64);
+    assert!(!row.truncated);
+}
+
+/// Requests that fail before/at forwarding still land request_logs rows with
+/// error metadata and captured request bodies; the usage table is untouched.
+#[tokio::test]
+async fn request_log_records_failures_without_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // codex (OpenAI inbound) bound to an Anthropic provider: protocol mismatch.
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+    // Unknown key on the Anthropic path falls back to claude, which has no
+    // binding: the gateway answers 503 without touching any provider.
+    let response = post_json(&app, "/v1/messages", Some("sk-foreign"), r#"{"model":"m"}"#).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    // Paths with no route at all hit the axum fallback and are audited too.
+    let response = post_json(&app, "/v1/nope", None, r#"{}"#).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let (rows, total) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(total, 3);
+    let unknown = rows.iter().find(|r| r.path == "/v1/nope").unwrap();
+    assert_eq!(unknown.status_code, 404);
+    assert_eq!(unknown.error_kind.as_deref(), Some("unsupported_path"));
+    assert_eq!(unknown.agent, None);
+
+    let mismatch = rows.iter().find(|r| r.status_code == 502).unwrap();
+    assert_eq!(mismatch.error_kind.as_deref(), Some("protocol_mismatch"));
+    assert_eq!(mismatch.agent.as_deref(), Some("codex"));
+    assert_eq!(mismatch.provider_id.as_deref(), Some("p-ant"));
+
+    let unbound = rows.iter().find(|r| r.status_code == 503).unwrap();
+    assert_eq!(unbound.error_kind.as_deref(), Some("no_provider_bound"));
+    assert_eq!(unbound.agent.as_deref(), Some("claude"));
+
+    // Usage metering semantics unchanged: failed requests are not usage.
+    let totals = state.store.usage_totals(None, None).unwrap();
+    assert_eq!(totals.requests, 0);
+
+    // Request bodies are captured even for failed requests.
+    let detail = state.store.get_request_log(mismatch.id).unwrap().unwrap();
+    assert!(detail.request_body.is_some());
+}
+
+/// With log capture disabled, no request_logs rows are written while usage
+/// metering continues unchanged.
+#[tokio::test]
+async fn request_log_disabled_records_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    store
+        .save_log_config(&LogConfig {
+            enabled: false,
+            capture_bodies: true,
+            retain_days: 30,
+            max_body_bytes: 4 * 1024 * 1024,
+        })
+        .unwrap();
+
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Json(json!({"id": "x"}))).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let (_, total) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(total, 0);
+
+    let totals = state.store.usage_totals(Some("claude"), None).unwrap();
+    assert_eq!(totals.requests, 1);
+}
+
+/// The SSE capture records the client-visible stream: byte-exact body,
+/// streaming flag, first-token latency, and the metered usage.
+#[tokio::test]
+async fn request_log_captures_client_visible_sse_stream() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let chunks = vec![
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input_tokens\":25,\"output_tokens\":1,\"cache_read_input_tokens\":11,\"cache_creation_input_tokens\":3}}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":171}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    ];
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Sse(chunks.clone())).await;
+
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+    let expected: String = chunks.concat();
+    assert_eq!(String::from_utf8(body.to_vec()).unwrap(), expected);
+
+    let rows = wait_for_log(&state, 1).await;
+    let row = &rows[0];
+    assert!(row.is_streaming);
+    assert_eq!(row.status_code, 200);
+    assert!(row.first_token_ms.is_some());
+    assert_eq!(row.input_tokens, 25);
+    assert_eq!(row.output_tokens, 171);
+    assert!(row
+        .response_headers
+        .as_deref()
+        .unwrap()
+        .contains("text/event-stream"));
+
+    // The stored body is exactly what the client observed.
+    let detail = state.store.get_request_log(row.id).unwrap().unwrap();
+    assert_eq!(detail.response_body.as_deref(), Some(expected.as_str()));
 }

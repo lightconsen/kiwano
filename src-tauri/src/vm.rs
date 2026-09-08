@@ -16,11 +16,22 @@ use kiwano_gateway::store::{
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-pub const AGENTS: [(&str, &str); 3] = [
+pub const AGENTS: [(&str, &str); 9] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
     ("gemini", "Gemini CLI"),
+    ("grokbuild", "Grok Build"),
+    ("claude-desktop", "Claude Desktop"),
+    ("opencode", "OpenCode"),
+    ("openclaw", "OpenClaw"),
+    ("hermes", "Hermes"),
+    ("pi", "Pi"),
 ];
+
+/// Additive-mode agents: their native config keeps multiple providers
+/// coexisting, so takeover writes a gateway-pointed provider entry and selects
+/// it, instead of replacing an exclusive provider slot like the other five.
+pub const ADDITIVE_AGENTS: [&str; 4] = ["opencode", "openclaw", "hermes", "pi"];
 
 const PALETTE: [&str; 6] = [
     "#4D6BFE", "#615CED", "#3859FF", "#F55036", "#6467F2", "#0F9D58",
@@ -481,6 +492,10 @@ pub struct TakeoverVm {
     pub label: String,
     pub placeholder_key: Option<String>,
     pub enabled: bool,
+    /// Additive-mode agent (config keeps multiple providers; takeover writes a
+    /// gateway entry and selects it) rather than exclusive-switch mode.
+    #[serde(default)]
+    pub additive: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1293,6 +1308,7 @@ pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
                 label: label.to_string(),
                 enabled: key.is_some(),
                 placeholder_key: key,
+                additive: ADDITIVE_AGENTS.contains(agent),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;

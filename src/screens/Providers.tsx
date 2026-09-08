@@ -11,9 +11,15 @@ import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
 const SEGMENTS: { id: AgentId | "all"; label: string }[] = [
   { id: "all", label: "全部" },
-  { id: "claude", label: "Claude Code" },
+  { id: "claude", label: "Claude" },
   { id: "codex", label: "Codex" },
-  { id: "gemini", label: "Gemini CLI" },
+  { id: "gemini", label: "Gemini" },
+  { id: "grokbuild", label: "Grok" },
+  { id: "claude-desktop", label: "Desktop" },
+  { id: "opencode", label: "OpenCode" },
+  { id: "openclaw", label: "OpenClaw" },
+  { id: "hermes", label: "Hermes" },
+  { id: "pi", label: "Pi" },
 ];
 
 function ringColor(billing: Provider["billing"], pct: number): string {
@@ -243,11 +249,11 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
   return (
     <section>
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
-        <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
+        <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
           {SEGMENTS.map((s, i) => (
             <button
               key={s.id}
-              className={`seg h-7 px-3 text-mut${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
+              className={`seg h-7 shrink-0 whitespace-nowrap px-3 text-mut${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
               onClick={() => setSeg(s.id)}
             >
               {s.label}

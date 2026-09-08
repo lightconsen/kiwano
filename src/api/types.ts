@@ -2,7 +2,16 @@
 // The UI accesses data only via KiwanoApi in src/api/client.ts; components must not contain
 // mock literals or Tauri invoke calls.
 
-export type AgentId = "claude" | "codex" | "gemini";
+export type AgentId =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "grokbuild"
+  | "claude-desktop"
+  | "opencode"
+  | "openclaw"
+  | "hermes"
+  | "pi";
 export type Billing = "plan" | "payg" | "unl";
 export type Protocol = "openai" | "anthropic" | "gemini";
 
@@ -14,10 +23,20 @@ export interface AgentMeta {
   chip_border?: boolean;
 }
 
+/** Additive-mode agents: config keeps multiple providers coexisting, takeover
+    writes a gateway entry and selects it (vs exclusive-switch mode). */
+export const ADDITIVE_AGENTS: AgentId[] = ["opencode", "openclaw", "hermes", "pi"];
+
 export const AGENTS: AgentMeta[] = [
   { id: "claude", label: "Claude Code", chip_char: "C", chip_color: "#D97757" },
-  { id: "codex", label: "Codex CLI", chip_char: "C", chip_color: "#0F0F0F", chip_border: true },
+  { id: "codex", label: "Codex", chip_char: "C", chip_color: "#0F0F0F", chip_border: true },
   { id: "gemini", label: "Gemini CLI", chip_char: "G", chip_color: "#1E6FEB" },
+  { id: "grokbuild", label: "Grok Build", chip_char: "X", chip_color: "#1A1A1A", chip_border: true },
+  { id: "claude-desktop", label: "Claude Desktop", chip_char: "D", chip_color: "#B45E51" },
+  { id: "opencode", label: "OpenCode", chip_char: "O", chip_color: "#7C3AED" },
+  { id: "openclaw", label: "OpenClaw", chip_char: "L", chip_color: "#EA580C" },
+  { id: "hermes", label: "Hermes", chip_char: "H", chip_color: "#8B5CF6" },
+  { id: "pi", label: "Pi", chip_char: "P", chip_color: "#DB2777" },
 ];
 
 export interface ProviderHealth {
@@ -152,6 +171,9 @@ export interface TakeoverState {
   /** Placeholder key assigned by the gateway; null when not taken over */
   placeholder_key: string | null;
   enabled: boolean;
+  /** Additive-mode agent (config keeps multiple providers; takeover writes a
+      gateway entry and selects it) rather than exclusive-switch mode */
+  additive: boolean;
 }
 
 export interface AppSettings {

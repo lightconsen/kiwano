@@ -244,7 +244,7 @@ const catalog: CatalogEntry[] = [
 
 const dashboard7d: DashboardData = {
   window: "7d",
-  requests: 1284,
+  requests: 1296,
   requests_delta_pct: 12,
   input_tokens: 7_500_000,
   cache_read_tokens: 4_300_000,
@@ -268,8 +268,9 @@ const dashboard7d: DashboardData = {
   ],
   by_agent: [
     { agent: "claude", label: "Claude Code", requests: 943, tokens: "6.2M", cost: 33.4 },
-    { agent: "codex", label: "Codex CLI", requests: 264, tokens: "1.9M", cost: 9.8 },
+    { agent: "codex", label: "Codex", requests: 264, tokens: "1.9M", cost: 9.8 },
     { agent: "gemini", label: "Gemini CLI", requests: 77, tokens: "0.5M", cost: 3.0 },
+    { agent: "opencode", label: "OpenCode", requests: 12, tokens: "0.1M", cost: 0.4 },
   ],
 };
 
@@ -277,7 +278,7 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
   today: {
     ...dashboard7d,
     window: "today",
-    requests: 284,
+    requests: 288,
     requests_delta_pct: 4,
     input_tokens: 1_600_000,
     cache_read_tokens: 900_000,
@@ -300,8 +301,9 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
     ],
     by_agent: [
       { agent: "claude", label: "Claude Code", requests: 201, tokens: "1.5M", cost: 8.1 },
-      { agent: "codex", label: "Codex CLI", requests: 66, tokens: "0.4M", cost: 2.3 },
+      { agent: "codex", label: "Codex", requests: 66, tokens: "0.4M", cost: 2.3 },
       { agent: "gemini", label: "Gemini CLI", requests: 17, tokens: "0.1M", cost: 0.4 },
+      { agent: "opencode", label: "OpenCode", requests: 4, tokens: "0.02M", cost: 0.1 },
     ],
   },
   "7d": dashboard7d,
@@ -335,9 +337,15 @@ const settings: AppSettings = {
   close_to_tray: true,
   gateway_listen: "127.0.0.1:8317",
   takeovers: [
-    { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true },
-    { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true },
-    { agent: "gemini", label: "Gemini CLI", placeholder_key: null, enabled: false },
+    { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false },
+    { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false },
+    { agent: "gemini", label: "Gemini CLI", placeholder_key: null, enabled: false, additive: false },
+    { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false },
+    { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false },
+    { agent: "opencode", label: "OpenCode", placeholder_key: null, enabled: false, additive: true },
+    { agent: "openclaw", label: "OpenClaw", placeholder_key: null, enabled: false, additive: true },
+    { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true },
+    { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true },
   ],
   auto_failover: true,
   request_logs: true,
@@ -390,6 +398,12 @@ const agentRoutes: AgentRoute[] = [
     strategy: "quota",
     config: '{"limit":500,"unit":"requests"}',
     bindings: [bind("ollama", 0)],
+  },
+  {
+    agent: "opencode",
+    strategy: "single",
+    config: null,
+    bindings: [bind("deepseek", 0)],
   },
 ];
 

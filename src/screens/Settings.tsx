@@ -134,6 +134,9 @@ export default function Settings() {
             <div key={t.agent} className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 {t.label}{" "}
+                {t.additive && (
+                  <span className="text-[10px] text-mut">共存 · 多供应商</span>
+                )}
                 {t.placeholder_key ? (
                   <span className="text-[10px] font-mono text-mut" title="网关分配的占位 Key，用于请求归因">
                     {t.placeholder_key}

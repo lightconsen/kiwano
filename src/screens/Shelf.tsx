@@ -135,7 +135,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
 
   return (
     <section>
-      <div className="flex h-11 items-center gap-2 border-b border-line px-4">
+      <div className="sticky top-0 z-20 flex h-11 items-center gap-2 border-b border-line bg-bg px-4">
         <span className="text-[12px] text-mut">
           来自 Kiwano Hub · <span className="font-mono">{catalog.total}</span> 个供应商
         </span>
@@ -161,7 +161,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         </div>
       </div>
       <table className="w-full border-collapse">
-        <thead className="sticky top-0 z-10 bg-surface">
+        <thead className="sticky top-11 z-10 bg-surface">
           <tr className="border-b border-line">
             {COLUMNS.map((c) => (
               <th

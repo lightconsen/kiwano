@@ -7,11 +7,11 @@ import type { CatalogEntry, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 
 const CHIPS: { id: "all" | CatalogEntry["tag"]; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "official", label: "官方" },
-  { id: "aggregate", label: "聚合" },
-  { id: "third", label: "三方" },
-  { id: "free", label: "有免费额度" },
+  { id: "all", label: "All" },
+  { id: "official", label: "Official" },
+  { id: "aggregate", label: "Aggregator" },
+  { id: "third", label: "Third-party" },
+  { id: "free", label: "Free tier" },
 ];
 
 function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
@@ -46,22 +46,22 @@ const TAG_RANK: Record<CatalogEntry["tag"], number> = {
 type SortKey = "name" | "protocol" | "tag" | "endpoint";
 
 const COLUMNS: { key: SortKey | null; label: string; className: string }[] = [
-  { key: "name", label: "名称", className: "w-[190px]" },
-  { key: "protocol", label: "协议", className: "w-[86px]" },
-  { key: "tag", label: "分类", className: "w-[64px]" },
-  { key: "endpoint", label: "端点", className: "" },
-  { key: null, label: "价格", className: "w-[92px]" },
-  { key: null, label: "操作", className: "w-[70px] text-right" },
+  { key: "name", label: "Name", className: "w-[190px]" },
+  { key: "protocol", label: "Protocol", className: "w-[86px]" },
+  { key: "tag", label: "Category", className: "w-[64px]" },
+  { key: "endpoint", label: "Endpoint", className: "" },
+  { key: null, label: "Price", className: "w-[92px]" },
+  { key: null, label: "Actions", className: "w-[70px] text-right" },
 ];
 
 function compare(key: SortKey, a: CatalogEntry, b: CatalogEntry): number {
   switch (key) {
     case "name":
-      return a.name.localeCompare(b.name, "zh-Hans-CN");
+      return a.name.localeCompare(b.name);
     case "protocol":
-      return a.protocol.localeCompare(b.protocol) || a.name.localeCompare(b.name, "zh-Hans-CN");
+      return a.protocol.localeCompare(b.protocol) || a.name.localeCompare(b.name);
     case "tag":
-      return TAG_RANK[a.tag] - TAG_RANK[b.tag] || a.name.localeCompare(b.name, "zh-Hans-CN");
+      return TAG_RANK[a.tag] - TAG_RANK[b.tag] || a.name.localeCompare(b.name);
     case "endpoint":
       return a.endpoint.localeCompare(b.endpoint);
   }
@@ -96,10 +96,10 @@ function Row({ entry, onAdd }: { entry: CatalogEntry; onAdd: (e: CatalogEntry) =
       <td className="px-2 py-2 text-[11.5px] text-mut">{entry.price_line}</td>
       <td className="px-4 py-2 text-right">
         {entry.added ? (
-          <span className="text-[10.5px] text-mut">已添加</span>
+          <span className="text-[10.5px] text-mut">Added</span>
         ) : (
           <Button size="xs" className="rounded px-2 text-[10.5px] font-semibold" onClick={() => onAdd(entry)}>
-            {entry.tag === "local" ? "+ 连接" : "+ 添加"}
+            {entry.tag === "local" ? "+ Connect" : "+ Add"}
           </Button>
         )}
       </td>
@@ -128,7 +128,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     return [...rows].sort((a, b) => compare(sort.key, a, b) * sort.dir);
   }, [catalog, chip, query, sort]);
 
-  if (!catalog) return <div className="p-8 text-center text-[12px] text-mut">加载中…</div>;
+  if (!catalog) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
@@ -137,7 +137,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     <section>
       <div className="sticky top-0 z-20 flex h-11 items-center gap-2 border-b border-line bg-bg px-4">
         <span className="text-[12px] text-mut">
-          来自 Kiwano Hub · <span className="font-mono">{catalog.total}</span> 个供应商
+          From Kiwano Hub · <span className="font-mono">{catalog.total}</span> providers
         </span>
         <div className="ml-3 flex gap-1.5">
           {CHIPS.map((c) => (
@@ -154,7 +154,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mut" />
           <input
             className="h-7 w-[190px] rounded-md border border-line bg-surface pl-7 pr-2 text-[12px]"
-            placeholder="搜索供应商…"
+            placeholder="Search providers…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -166,7 +166,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
             {COLUMNS.map((c) => (
               <th
                 key={c.label}
-                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.label === "操作" ? "pr-4" : ""}`}
+                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.label === "Actions" ? "pr-4" : ""}`}
                 onClick={c.key ? () => toggleSort(c.key!) : undefined}
               >
                 {c.label}
@@ -184,7 +184,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           {filtered.length === 0 && (
             <tr>
               <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
-                没有匹配的供应商
+                No matching providers
               </td>
             </tr>
           )}

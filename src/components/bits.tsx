@@ -33,9 +33,9 @@ export function Dot({ state, size = "w-[6px] h-[6px]" }: { state: "ok" | "idle" 
 }
 
 const BILL_TAG: Record<Billing, { label: string; cls: string }> = {
-  payg: { label: "按量", cls: "bill-payg" },
-  plan: { label: "订阅", cls: "bill-plan" },
-  unl: { label: "不限", cls: "bill-unl" },
+  payg: { label: "PAYG", cls: "bill-payg" },
+  plan: { label: "Plan", cls: "bill-plan" },
+  unl: { label: "Unl", cls: "bill-unl" },
 };
 
 export function BillTag({ billing }: { billing: Billing }) {

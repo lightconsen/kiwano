@@ -111,7 +111,7 @@ pub fn enable(
             }
             Err(_) => {
                 return Err(format!(
-                    "未找到 {} —— 请先运行过 {} 再接管",
+                    "{} not found — run {} at least once before takeover",
                     p.display(),
                     agent
                 ))
@@ -226,13 +226,13 @@ fn rewrite_claude(original: &str, base: &str, port: u16, key: &str) -> Result<St
     let mut v: Value = if original.trim().is_empty() {
         Value::Object(serde_json::Map::new())
     } else {
-        serde_json::from_str(original).map_err(|e| format!("settings.json 不是合法 JSON: {e}"))?
+        serde_json::from_str(original).map_err(|e| format!("settings.json is not valid JSON: {e}"))?
     };
-    let obj = v.as_object_mut().ok_or("settings.json 顶层不是对象")?;
+    let obj = v.as_object_mut().ok_or("settings.json top level is not an object")?;
     let env = obj
         .entry("env")
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let env = env.as_object_mut().ok_or("settings.json 的 env 不是对象")?;
+    let env = env.as_object_mut().ok_or("settings.json env is not an object")?;
     env.insert(
         "ANTHROPIC_BASE_URL".into(),
         Value::String(format!("{base}:{port}")),
@@ -259,7 +259,7 @@ fn rewrite_codex_toml(original: &str, base: &str, port: u16) -> Result<String, S
     }
     if !found {
         return Err(
-            "config.toml 中没有 base_url —— 请先为 Codex 配置一个自定义 Provider 再接管".into(),
+            "no base_url in config.toml — configure a custom provider for Codex before takeover".into(),
         );
     }
     let mut s = out.join("\n");
@@ -274,9 +274,9 @@ fn rewrite_codex_auth(original: &str, key: &str) -> Result<String, String> {
     let mut v: Value = if original.trim().is_empty() {
         Value::Object(serde_json::Map::new())
     } else {
-        serde_json::from_str(original).map_err(|e| format!("auth.json 不是合法 JSON: {e}"))?
+        serde_json::from_str(original).map_err(|e| format!("auth.json is not valid JSON: {e}"))?
     };
-    let obj = v.as_object_mut().ok_or("auth.json 顶层不是对象")?;
+    let obj = v.as_object_mut().ok_or("auth.json top level is not an object")?;
     obj.insert("OPENAI_API_KEY".into(), Value::String(key.into()));
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
@@ -353,7 +353,7 @@ fn rewrite_grok_toml(original: &str, base: &str, port: u16, key: &str) -> Result
     }
     let Some(profile) = profile else {
         return Err(
-            "config.toml 中没有 [models] default —— Grok Build 可能还在使用官方 xAI 登录，请先配置自定义模型再接管"
+            "no [models] default in config.toml — Grok Build may still be signed in to official xAI; configure a custom model before takeover"
                 .into(),
         );
     };
@@ -402,7 +402,7 @@ fn rewrite_grok_toml(original: &str, base: &str, port: u16, key: &str) -> Result
     }
     if !found_base {
         return Err(format!(
-            "config.toml 中没有 [model.\"{profile}\"] 的 base_url —— 请先为 Grok Build 配置一个自定义模型再接管"
+            "no base_url under [model.\"{profile}\"] in config.toml — configure a custom model for Grok Build before takeover"
         ));
     }
     // Missing api_key / api_backend rows are inserted right after base_url
@@ -576,7 +576,7 @@ mod tests {
         std::fs::create_dir_all(&gemini_dir).unwrap();
         std::fs::write(
             gemini_dir.join(".env"),
-            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# 代理注释\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n",
+            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# proxy comment\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n",
         )
         .unwrap();
 
@@ -585,13 +585,13 @@ mod tests {
         assert!(env.contains("GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\n"));
         assert!(env.contains("GEMINI_API_KEY=kw-ag-gemini-abcd\n"));
         assert!(env.contains("GOOGLE_GENAI_USE_VERTEXAI=false")); // other lines untouched
-        assert!(env.contains("# 代理注释")); // comment preserved
+        assert!(env.contains("# proxy comment")); // comment preserved
 
         // restore = write back byte for byte
         disable(&aux, "gemini", &home).unwrap();
         assert_eq!(
             std::fs::read_to_string(gemini_dir.join(".env")).unwrap(),
-            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# 代理注释\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n"
+            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# proxy comment\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n"
         );
         assert!(aux.load_takeover_backup("gemini").is_none());
     }

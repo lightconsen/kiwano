@@ -31,13 +31,13 @@ import {
 } from "../api/types";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
-  { id: "plan", label: "订阅套餐" },
-  { id: "payg", label: "按量付费" },
-  { id: "unl", label: "不限额" },
+  { id: "plan", label: "Plan" },
+  { id: "payg", label: "Pay as you go" },
+  { id: "unl", label: "Unlimited" },
 ];
 
 const PROTOCOL_OPTIONS: { id: Protocol; label: string }[] = [
-  { id: "openai", label: "OpenAI 兼容" },
+  { id: "openai", label: "OpenAI-compatible" },
   { id: "anthropic", label: "Anthropic" },
   { id: "gemini", label: "Gemini API" },
 ];
@@ -174,7 +174,7 @@ export default function AddProviderModal({
       <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
         <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line px-4">
           <DialogTitle className="text-[13px] font-semibold">
-            {edit ? "编辑供应商" : "添加供应商"}
+            {edit ? "Edit provider" : "Add provider"}
           </DialogTitle>
         </DialogHeader>
 
@@ -188,21 +188,21 @@ export default function AddProviderModal({
                 onClick={() => preset && setMode("shelf")}
               >
                 <Store className="h-3 w-3" />
-                从模型{preset ? `：${preset.name}` : "（先在模型选择）"}
+                From Models{preset ? `: ${preset.name}` : " (pick one on the Models tab)"}
               </div>
               <div
                 className="btn flex h-8 flex-1 cursor-pointer items-center justify-center"
                 style={mode === "custom" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
                 onClick={() => setMode("custom")}
               >
-                自定义
+                Custom
               </div>
             </div>
           )}
 
           <div className="mt-3 space-y-3">
             <div>
-              <Label className="text-[11px] font-medium text-mut">名称</Label>
+              <Label className="text-[11px] font-medium text-mut">Name</Label>
               <Input
                 className="mt-1 h-8 bg-bg text-[12px] dark:bg-bg"
                 value={name}
@@ -211,7 +211,7 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">协议</Label>
+              <Label className="text-[11px] font-medium text-mut">Protocol</Label>
               <Select value={protocol} onValueChange={(v) => setProtocol(v as Protocol)}>
                 <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
                   <SelectValue />
@@ -230,7 +230,7 @@ export default function AddProviderModal({
               <Label className="text-[11px] font-medium text-mut">
                 API Key{" "}
                 <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                  {edit ? "留空则保持原 Key" : "仅存本机钥匙串"}
+                  {edit ? "Leave blank to keep the current key" : "Stored in the local keychain only"}
                 </span>
               </Label>
               <div className="relative mt-1">
@@ -246,7 +246,7 @@ export default function AddProviderModal({
                   size="icon-xs"
                   className="absolute top-1/2 right-1 -translate-y-1/2 text-mut"
                   onClick={() => setShowKey(!showKey)}
-                  aria-label="显示/隐藏"
+                  aria-label="Show / hide key"
                 >
                   <Eye className="h-3.5 w-3.5" />
                 </Button>
@@ -254,7 +254,7 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">请求地址</Label>
+              <Label className="text-[11px] font-medium text-mut">Endpoint URL</Label>
               <div className="mt-1 flex gap-1.5">
                 <Input
                   className="h-8 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
@@ -279,7 +279,7 @@ export default function AddProviderModal({
                   }}
                 >
                   <Gauge className="h-3 w-3" />
-                  测速{" "}
+                  Test{" "}
                   {latency != null && (
                     <span className="font-mono" style={{ color: "var(--kiwi)" }}>
                       {latency}ms
@@ -290,7 +290,7 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">默认模型</Label>
+              <Label className="text-[11px] font-medium text-mut">Default model</Label>
               {!edit && mode === "shelf" && preset ? (
                 <Select value={model} onValueChange={(v) => setModel(v ?? "")}>
                   <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
@@ -315,7 +315,7 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">计费方式</Label>
+              <Label className="text-[11px] font-medium text-mut">Billing</Label>
               <div className="mt-1 grid grid-cols-3 gap-1.5">
                 {BILL_OPTIONS.map((b) => {
                   const active = billing === b.id;
@@ -338,7 +338,7 @@ export default function AddProviderModal({
             {billing === "plan" && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-[11px] font-medium text-mut">每期上限</Label>
+                  <Label className="text-[11px] font-medium text-mut">Per-period limit</Label>
                   <div className="mt-1 flex gap-1.5">
                     <Input
                       className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
@@ -353,15 +353,15 @@ export default function AddProviderModal({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="requests">请求</SelectItem>
-                        <SelectItem value="wan_tokens">万 tokens</SelectItem>
-                        <SelectItem value="cny">¥ 金额</SelectItem>
+                        <SelectItem value="requests">Requests</SelectItem>
+                        <SelectItem value="wan_tokens">10k tokens</SelectItem>
+                        <SelectItem value="cny">¥ amount</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
                 <div>
-                  <Label className="text-[11px] font-medium text-mut">重置周期</Label>
+                  <Label className="text-[11px] font-medium text-mut">Reset cycle</Label>
                   <Select
                     value={resetPeriod}
                     onValueChange={(v) => setResetPeriod(v as typeof resetPeriod)}
@@ -370,10 +370,10 @@ export default function AddProviderModal({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="monthly">每月</SelectItem>
-                      <SelectItem value="weekly">每周</SelectItem>
-                      <SelectItem value="yearly">每年</SelectItem>
-                      <SelectItem value="none">不重置</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
+                      <SelectItem value="none">Never</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -383,7 +383,7 @@ export default function AddProviderModal({
             {billing === "payg" && (
               <div>
                 <Label className="text-[11px] font-medium text-mut">
-                  消费限额 <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>选填 · 留空则显示用量趋势</span>
+                  Spending limit <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>optional · leave blank to show the usage trend</span>
                 </Label>
                 <Input
                   className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
@@ -397,12 +397,12 @@ export default function AddProviderModal({
             {billing === "unl" && (
               <div className="flex h-8 items-center gap-1.5 text-[11.5px] text-mut">
                 <InfinityIcon className="h-3.5 w-3.5" />
-                无需额度配置 · 列表中不显示用量信息
+                No quota config · usage info hidden in lists
               </div>
             )}
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">保存后绑定到 Agent</Label>
+              <Label className="text-[11px] font-medium text-mut">Bind to agents after saving</Label>
               <div className="mt-1 grid grid-cols-3 gap-1.5">
                 {AGENTS.map((a) => {
                   const active = agents.includes(a.id);
@@ -433,9 +433,9 @@ export default function AddProviderModal({
             {edit && (
               <div>
                 <Label className="text-[11px] font-medium text-mut">
-                  轮询 Key{" "}
+                  Rotating keys{" "}
                   <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    与主 Key 轮换 · 避免限流
+                    rotate with the primary key · avoids rate limits
                   </span>
                 </Label>
                 <div className="mt-1 space-y-1">
@@ -452,7 +452,7 @@ export default function AddProviderModal({
                         variant="ghost"
                         size="icon-xs"
                         className="text-mut"
-                        aria-label="删除 Key"
+                        aria-label="Delete key"
                         onClick={() => removePollKey(k.id)}
                       >
                         <XIcon />
@@ -464,13 +464,13 @@ export default function AddProviderModal({
                       className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                       value={newKey}
                       onChange={(e) => setNewKey(e.target.value)}
-                      placeholder="sk-… 追加 Key"
+                      placeholder="sk-… add key"
                     />
                     <Input
                       className="h-8 w-[84px] bg-bg text-[11.5px] dark:bg-bg"
                       value={newKeyLabel}
                       onChange={(e) => setNewKeyLabel(e.target.value)}
-                      placeholder="备注"
+                      placeholder="Label"
                     />
                     <Button
                       variant="outline"
@@ -480,7 +480,7 @@ export default function AddProviderModal({
                       onClick={addPollKey}
                     >
                       <Plus className="h-3 w-3" />
-                      添加
+                      Add
                     </Button>
                   </div>
                 </div>
@@ -494,7 +494,7 @@ export default function AddProviderModal({
             >
               <span className="flex items-center gap-1.5">
                 <Gauge className="h-3 w-3" />
-                高级配置（超时 / 重试 / 请求头）
+                Advanced (timeout / retries / headers)
               </span>
               <XIcon className="h-3.5 w-3.5 rotate-45" />
             </Button>
@@ -503,10 +503,10 @@ export default function AddProviderModal({
 
         <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">
           <Button variant="outline" size="sm" onClick={onClose}>
-            取消
+            Cancel
           </Button>
           <Button size="sm" className="font-semibold" disabled={!canSave} onClick={save}>
-            {saving ? "保存中…" : edit ? "保存" : "保存并启用"}
+            {saving ? "Saving…" : edit ? "Save" : "Save & enable"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -18,7 +18,7 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Validate and normalize a Hub response: every entry must deserialize as a catalog entry.
 fn parse_catalog(raw: &str) -> Result<vm::CatalogListVm, String> {
-    serde_json::from_str(raw).map_err(|e| format!("Hub 响应不是合法目录: {e}"))
+    serde_json::from_str(raw).map_err(|e| format!("Hub response is not a valid catalog: {e}"))
 }
 
 /// Fetch the Hub catalog and cache it. `hub_url` comes from settings (ui_settings.hub_url).
@@ -29,9 +29,9 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         .map_err(|e| e.to_string())?
         .get(hub_url)
         .send()
-        .map_err(|e| format!("Hub 不可达: {e}"))?
+        .map_err(|e| format!("Hub unreachable: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("Hub 返回错误: {e}"))?
+        .map_err(|e| format!("Hub returned an error: {e}"))?
         .text()
         .map_err(|e| e.to_string())?;
 
@@ -56,10 +56,10 @@ mod tests {
         let entry = serde_json::json!({
             "id": "deepseek", "name": "DeepSeek", "logo_char": "D",
             "logo_color": "#4D6BFE", "logo_border": false,
-            "tag": "official", "tag_label": "官方",
+            "tag": "official", "tag_label": "Official",
             "rating": 4.8, "endpoint": "https://api.deepseek.com",
-            "price_line": "¥1/2 每百万", "billing": "per-token",
-            "users": "12k", "blurb": "性价比高", "added": false,
+            "price_line": "¥1/2 per million", "billing": "per-token",
+            "users": "12k", "blurb": "great value", "added": false,
             "models": ["deepseek-chat"]
         });
         let raw = serde_json::json!({ "total": 1, "entries": [entry] }).to_string();

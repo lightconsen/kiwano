@@ -13,9 +13,9 @@ import type { DashboardData, DashboardWindow } from "../api/types";
 import { fmtCny, fmtTokens } from "../lib/format";
 
 const WINDOWS: { id: DashboardWindow; label: string }[] = [
-  { id: "today", label: "今天" },
-  { id: "7d", label: "近 7 天" },
-  { id: "30d", label: "近 30 天" },
+  { id: "today", label: "Today" },
+  { id: "7d", label: "Last 7 days" },
+  { id: "30d", label: "Last 30 days" },
 ];
 
 /** Catmull-Rom → Bézier smoothing (programmatic equivalent of the prototype's hand-drawn C curves) */
@@ -107,7 +107,7 @@ export default function Dashboard() {
     api.getDashboard(win).then(setData);
   }, [win]);
 
-  if (!data) return <div className="p-8 text-center text-[12px] text-mut">加载中…</div>;
+  if (!data) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
 
   const totalTokens = data.input_tokens + data.output_tokens;
 
@@ -130,7 +130,7 @@ export default function Dashboard() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部供应商</SelectItem>
+            <SelectItem value="all">All providers</SelectItem>
           </SelectContent>
         </Select>
         <Select defaultValue="all">
@@ -138,10 +138,10 @@ export default function Dashboard() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部 Agent</SelectItem>
+            <SelectItem value="all">All agents</SelectItem>
           </SelectContent>
         </Select>
-        <span className="ml-auto text-[11px] text-mut">数据仅存本地 SQLite</span>
+        <span className="ml-auto text-[11px] text-mut">Data stays in local SQLite</span>
       </div>
 
       <div className="p-4">
@@ -150,7 +150,7 @@ export default function Dashboard() {
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <Send className="h-3 w-3" />
-              请求数
+              Requests
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
               {data.requests.toLocaleString()} <Delta pct={data.requests_delta_pct} />
@@ -163,27 +163,27 @@ export default function Dashboard() {
             </div>
             <div
               className="mt-1 font-mono text-[19px] font-semibold"
-              title={`输入 ${fmtTokens(data.input_tokens)}（缓存命中 ${fmtTokens(data.cache_read_tokens)}，按 1/10 计价）· 输出 ${fmtTokens(data.output_tokens)}`}
+              title={`in ${fmtTokens(data.input_tokens)} (cache hits ${fmtTokens(data.cache_read_tokens)}, billed at 1/10) · out ${fmtTokens(data.output_tokens)}`}
             >
               {fmtTokens(totalTokens)}{" "}
               <span className="text-[10.5px] font-normal text-mut">
-                入{fmtTokens(data.input_tokens)}/出{fmtTokens(data.output_tokens)}
+                in {fmtTokens(data.input_tokens)} / out {fmtTokens(data.output_tokens)}
               </span>
             </div>
           </div>
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <CircleDollarSign className="h-3 w-3" />
-              估算费用
+              Est. cost
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
-              {fmtCny(data.cost, 2)} <span className="text-[10.5px] font-normal text-mut">按 Hub 价</span>
+              {fmtCny(data.cost, 2)} <span className="text-[10.5px] font-normal text-mut">at Hub price</span>
             </div>
           </div>
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <Timer className="h-3 w-3" />
-              平均延迟
+              Avg latency
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
               {(Math.round(data.latency_ms / 100) / 10).toFixed(1)}s <Delta pct={-data.latency_delta_pct} invert />
@@ -194,11 +194,11 @@ export default function Dashboard() {
         {/* Request trend */}
         <div className="mt-3 rounded-lg border border-line bg-surface p-3.5">
           <div className="flex items-center justify-between">
-            <h3 className="text-[12.5px] font-semibold">请求趋势</h3>
+            <h3 className="text-[12.5px] font-semibold">Request trend</h3>
             <div className="flex items-center gap-3 text-[10.5px] text-mut">
               <span className="flex items-center gap-1">
                 <span className="h-1 w-2 rounded-full" style={{ background: "var(--kiwi)" }} />
-                请求数
+                Requests
               </span>
               <span className="flex items-center gap-1">
                 <span className="h-1 w-2 rounded-full" style={{ background: "oklch(0.62 0.14 250)" }} />
@@ -212,7 +212,7 @@ export default function Dashboard() {
         <div className="mt-3 grid grid-cols-2 gap-3">
           {/* Provider breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
-            <h3 className="text-[12.5px] font-semibold">供应商分布</h3>
+            <h3 className="text-[12.5px] font-semibold">By provider</h3>
             <div className="mt-2.5 space-y-2.5">
               {data.by_provider.map((p) => (
                 <div key={p.name}>
@@ -234,14 +234,14 @@ export default function Dashboard() {
           </div>
           {/* Agent breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
-            <h3 className="text-[12.5px] font-semibold">Agent 分布</h3>
+            <h3 className="text-[12.5px] font-semibold">By agent</h3>
             <table className="mt-2 w-full text-[11.5px]">
               <thead>
                 <tr className="text-left text-mut text-[10px]">
                   <th className="pb-1.5 font-medium">Agent</th>
-                  <th className="pb-1.5 text-right font-medium">请求</th>
+                  <th className="pb-1.5 text-right font-medium">Requests</th>
                   <th className="pb-1.5 text-right font-medium">Tokens</th>
-                  <th className="pb-1.5 text-right font-medium">费用</th>
+                  <th className="pb-1.5 text-right font-medium">Cost</th>
                 </tr>
               </thead>
               <tbody className="font-mono">

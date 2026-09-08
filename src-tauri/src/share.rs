@@ -84,9 +84,9 @@ pub fn export_config(store: &Store) -> Result<String, String> {
 /// Import a scheme (semantics in the module doc); returns a count report.
 pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> {
     let share: ConfigShare =
-        serde_json::from_str(json).map_err(|e| format!("不是有效的 Kiwano 配置文件: {e}"))?;
+        serde_json::from_str(json).map_err(|e| format!("Not a valid Kiwano config file: {e}"))?;
     if share.kiwano_config != FORMAT_VERSION {
-        return Err(format!("不支持的配置版本 {}", share.kiwano_config));
+        return Err(format!("Unsupported config version {}", share.kiwano_config));
     }
 
     let now = vm::rfc3339(vm::unix_now());

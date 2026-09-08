@@ -18,11 +18,11 @@ import { AGENTS, type AgentRoute, type StrategyKind } from "../api/types";
 import { AgentChip, Logo } from "./bits";
 
 const STRATEGIES: { id: StrategyKind; label: string; hint: string }[] = [
-  { id: "single", label: "单一主选", hint: "固定使用主选 Provider" },
-  { id: "failover", label: "故障转移", hint: "主选失败按序下沉备用，恢复后自动回切" },
-  { id: "roundrobin", label: "加权轮询", hint: "新会话按权重轮转，同会话固定以保住上游 prompt cache" },
-  { id: "timewindow", label: "峰谷窗口", hint: "按候选的本地时段窗口选择，未命中回主选" },
-  { id: "quota", label: "额度下沉", hint: "主选当日用量超阈值后转用备用" },
+  { id: "single", label: "Single primary", hint: "Always use the primary provider" },
+  { id: "failover", label: "Failover", hint: "Fall through standbys in order on failure, switch back on recovery" },
+  { id: "roundrobin", label: "Weighted round-robin", hint: "New sessions rotate by weight; sticky per session to keep the upstream prompt cache" },
+  { id: "timewindow", label: "Time window", hint: "Pick by each candidate's local time window; fall back to the primary when no window matches" },
+  { id: "quota", label: "Quota fallback", hint: "Switch to standbys once the primary exceeds its daily threshold" },
 ];
 
 function parseQuota(config: string | null): { limit: number; unit: "requests" | "tokens" } {
@@ -77,7 +77,7 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
         >
           <SelectTrigger
             size="sm"
-            aria-label={`${meta.label} 策略`}
+            aria-label={`${meta.label} strategy`}
             className="h-7 min-w-[92px] bg-transparent px-1.5 text-[11.5px] dark:bg-transparent"
           >
             <SelectValue />
@@ -115,8 +115,8 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="requests">请求/日</SelectItem>
-                <SelectItem value="tokens">tokens/日</SelectItem>
+                <SelectItem value="requests">requests/day</SelectItem>
+                <SelectItem value="tokens">tokens/day</SelectItem>
               </SelectContent>
             </Select>
           </span>
@@ -128,19 +128,19 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
           <span
             key={b.provider_id}
             className="flex items-center gap-1 rounded-md border border-line py-0.5 pl-1 pr-0.5"
-            title={`优先级 #${i} · 权重 ${b.weight}`}
+            title={`Priority #${i} · weight ${b.weight}`}
           >
             <Logo char={b.logo_char} color={b.logo_color} size="w-4 h-4 text-[9px]" />
             <span className="max-w-24 truncate text-[11px]">{b.provider_name}</span>
             {i === 0 && (
               <span className="rounded px-1 text-[9.5px] font-medium" style={{ background: "var(--kiwi-soft)", color: "var(--kiwi)" }}>
-                主
+                Primary
               </span>
             )}
             <span className="flex flex-col">
               <button
                 className="text-mut hover:text-ink disabled:opacity-30"
-                aria-label="上移"
+                aria-label="Move up"
                 disabled={i === 0}
                 onClick={() => move(i, -1)}
               >
@@ -148,7 +148,7 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
               </button>
               <button
                 className="text-mut hover:text-ink disabled:opacity-30"
-                aria-label="下移"
+                aria-label="Move down"
                 disabled={i === route.bindings.length - 1}
                 onClick={() => move(i, 1)}
               >
@@ -158,7 +158,7 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
           </span>
         ))}
         {route.bindings.length === 1 && (
-          <span className="text-[10.5px] text-mut">单候选 · 添加供应商后可排序</span>
+          <span className="text-[10.5px] text-mut">Single candidate · add providers to reorder</span>
         )}
       </div>
     </div>
@@ -178,7 +178,7 @@ export default function StrategyPanel() {
   return (
     <section className="mt-1">
       <div className="flex h-8 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-        Agent 路由策略 · 失败/超限自动下沉，改动即时生效
+        Agent routing strategies · auto-fallback on failure/quota, changes apply instantly
       </div>
       {routes.map((r) => (
         <RouteRow key={r.agent} route={r} onChanged={refetch} />

@@ -20,10 +20,10 @@ import AddProviderModal from "./screens/AddProviderModal";
 type Route = "providers" | "shelf" | "dashboard" | "settings";
 
 const NAV: { id: Route; label: string }[] = [
-  { id: "providers", label: "应用" },
-  { id: "shelf", label: "模型" },
-  { id: "dashboard", label: "仪表盘" },
-  { id: "settings", label: "设置" },
+  { id: "providers", label: "Apps" },
+  { id: "shelf", label: "Models" },
+  { id: "dashboard", label: "Dashboard" },
+  { id: "settings", label: "Settings" },
 ];
 
 function routeFromHash(): Route {
@@ -68,10 +68,10 @@ export default function App() {
             if (st !== "granted") return;
           }
           const used =
-            a.unit === "wan_tokens" ? `${a.used} 万 tokens` : `${a.used.toLocaleString()} 次`;
+            a.unit === "wan_tokens" ? `${(a.used * 10).toLocaleString()}k tokens` : `${a.used.toLocaleString()} requests`;
           sendNotification({
-            title: "Kiwano 费用预警",
-            body: `${a.provider_name} 本期用量 ${used}，已达上限 ${a.limit}，请注意控制消费`,
+            title: "Kiwano cost alert",
+            body: `${a.provider_name} used ${used} this period and has hit its limit of ${a.limit} — watch your spending`,
           });
         }
       } catch {
@@ -114,9 +114,9 @@ export default function App() {
         <div className="ml-auto flex items-center gap-2.5">
           <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
             <Dot state={gw?.running ? "ok" : "off"} size="h-[6px] w-[6px]" />
-            网关 <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
+            Gateway <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
           </span>
-          <Button variant="ghost" size="icon-sm" className="text-mut" onClick={refresh} aria-label="刷新">
+          <Button variant="ghost" size="icon-sm" className="text-mut" onClick={refresh} aria-label="Refresh">
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -141,14 +141,14 @@ export default function App() {
       >
         {footer && (
           <span>
-            今日 <span className="font-mono text-ink">{footer.today_requests.toLocaleString()}</span> 请求 ·{" "}
+            Today <span className="font-mono text-ink">{footer.today_requests.toLocaleString()}</span> requests ·{" "}
             <span className="font-mono text-ink">¥{footer.today_cost}</span>
           </span>
         )}
         {footer?.hub_synced && (
           <span className="flex items-center gap-1">
             <Dot state="ok" size="h-[5px] w-[5px]" />
-            Hub 刚刚同步
+            Hub just synced
           </span>
         )}
         <span className="ml-auto">{footer?.version ?? "v0.1.0 · MVP"}</span>

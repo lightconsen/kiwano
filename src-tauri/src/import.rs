@@ -76,7 +76,7 @@ pub fn run_import(
         }
     }
     if raws.is_empty() && skips.is_empty() {
-        detail.push("未找到可导入的 CC Switch 数据".into());
+        detail.push("No importable CC Switch data found".into());
         return ImportReportVm {
             imported: 0,
             skipped: 0,
@@ -98,7 +98,7 @@ pub fn run_import(
         // Skip official placeholders / empty configs
         if raw.base_url.is_empty() || raw.api_key.as_deref().unwrap_or("").is_empty() {
             skipped += 1;
-            detail.push(format!("skip {}/{}: 缺少端点或 Key", raw.app, raw.cc_id));
+            detail.push(format!("skip {}/{}: missing endpoint or key", raw.app, raw.cc_id));
             continue;
         }
         let id = format!("ccs-{}-{}", raw.app, slug(&raw.cc_id));
@@ -139,7 +139,7 @@ pub fn run_import(
             "import {id}: {} ({}){}",
             provider.name,
             provider.protocol.as_str(),
-            if existed { " · 已更新" } else { "" },
+            if existed { " · updated" } else { "" },
         ));
         if raw.is_current {
             let agent = raw.app; // app_type == Kiwano agent id (1:1 for all nine)
@@ -581,7 +581,7 @@ mod tests {
         // re-import → update, not an error
         let again = run_import(&store, None, Some(&path));
         assert_eq!(again.imported, 2);
-        assert!(again.detail.iter().any(|d| d.contains("已更新")));
+        assert!(again.detail.iter().any(|d| d.contains("updated")));
     }
 
     #[test]

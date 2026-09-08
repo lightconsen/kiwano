@@ -140,21 +140,21 @@ fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
 
-    let open = MenuItem::with_id(app, "open", "打开 Kiwano", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Kiwano", true, None::<&str>)?;
     let gw = MenuItem::with_id(
         app,
         "gateway",
-        format!("网关 :{data_port}"),
+        format!("Gateway :{data_port}"),
         false,
         None::<&str>,
     )?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 Kiwano", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Kiwano", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &gw, &sep, &quit])?;
 
     TrayIconBuilder::with_id("kiwano-tray")
         .icon(app.default_window_icon().expect("bundle icon").clone())
-        .tooltip(format!("Kiwano — 本地网关 :{data_port}"))
+        .tooltip(format!("Kiwano — local gateway :{data_port}"))
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => {

@@ -689,7 +689,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                                     .map(|b| b.priority)
                             })
                             .unwrap_or(1);
-                        badge = Some(format!("备用 #{pr}"));
+                        badge = Some(format!("Standby #{pr}"));
                     }
                 }
             }
@@ -699,9 +699,9 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 .any(|a| primary.get(a).map(String::as_str) == Some(&p.id));
 
             let note = if backup_for_any {
-                Some("故障转移队列".to_string())
+                Some("Failover queue".to_string())
             } else if !agents.is_empty() {
-                Some(format!("{} 个 Agent", agents.len()))
+                Some(format!("{} agent(s)", agents.len()))
             } else {
                 None
             };
@@ -862,7 +862,7 @@ fn display_endpoint(p: &Provider) -> String {
 
 fn endpoint_note(p: &Provider) -> String {
     match p.protocol {
-        kiwano_gateway::store::Protocol::OpenAI => "OpenAI 兼容".to_string(),
+        kiwano_gateway::store::Protocol::OpenAI => "OpenAI-compatible".to_string(),
         kiwano_gateway::store::Protocol::Anthropic => "Anthropic".to_string(),
         kiwano_gateway::store::Protocol::Gemini => "Gemini API".to_string(),
     }
@@ -889,7 +889,7 @@ fn health_vm(store: &Store, p: &Provider) -> HealthVm {
             "down" => HealthVm {
                 state: "off".into(),
                 latency_ms: last_latency_ms,
-                note: Some("故障".into()),
+                note: Some("Error".into()),
             },
             _ => derive_health(p, last_latency_ms),
         },
@@ -908,7 +908,7 @@ fn derive_health(p: &Provider, latency: Option<i64>) -> HealthVm {
         HealthVm {
             state: "off".into(),
             latency_ms: None,
-            note: Some("未启用".into()),
+            note: Some("Disabled".into()),
         }
     }
 }
@@ -1094,7 +1094,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         agents: input.agents.clone(),
         is_current: !input.agents.is_empty(),
         status_badge: None,
-        agents_note: (!input.agents.is_empty()).then(|| format!("{} 个 Agent", input.agents.len())),
+        agents_note: (!input.agents.is_empty()).then(|| format!("{} agent(s)", input.agents.len())),
         health: vm_health,
         usage: None,
     })
@@ -1418,7 +1418,7 @@ pub fn add_api_key(
 ) -> Result<ApiKeyVm, String> {
     let key = api_key.trim();
     if key.is_empty() {
-        return Err("API Key 不能为空".into());
+        return Err("API key must not be empty".into());
     }
     store
         .get_provider(provider_id)
@@ -1727,9 +1727,9 @@ mod tests {
         assert_eq!(json["logo_char"], "D");
         assert_eq!(json["is_current"], true);
         assert_eq!(json["agents"][0], "claude");
-        assert_eq!(json["agents_note"], "1 个 Agent");
+        assert_eq!(json["agents_note"], "1 agent(s)");
         assert_eq!(json["endpoint"], "deepseek-1.example.com");
-        assert_eq!(json["endpoint_note"], "OpenAI 兼容");
+        assert_eq!(json["endpoint_note"], "OpenAI-compatible");
     }
 
     #[test]
@@ -1765,8 +1765,8 @@ mod tests {
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(alpha.is_current);
         assert!(!beta.is_current);
-        assert_eq!(beta.status_badge.as_deref(), Some("备用 #1"));
-        assert_eq!(beta.agents_note.as_deref(), Some("故障转移队列"));
+        assert_eq!(beta.status_badge.as_deref(), Some("Standby #1"));
+        assert_eq!(beta.agents_note.as_deref(), Some("Failover queue"));
     }
 
     #[test]

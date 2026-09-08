@@ -1,4 +1,4 @@
-// Home screen: Apps (local provider list, design/index.html #s-providers, formerly "我的供应商")
+// Home screen: Apps (local provider list, design/index.html #s-providers)
 import { useCallback, useEffect, useState } from "react";
 
 import { Plus, Trash2 } from "lucide-react";
@@ -10,7 +10,7 @@ import StrategyPanel from "../components/StrategyPanel";
 import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
 const SEGMENTS: { id: AgentId | "all"; label: string }[] = [
-  { id: "all", label: "全部" },
+  { id: "all", label: "All" },
   { id: "claude", label: "Claude" },
   { id: "codex", label: "Codex" },
   { id: "gemini", label: "Gemini" },
@@ -34,14 +34,14 @@ function usageTitle(p: Provider): string {
   if (!u) return "";
   if (p.billing === "plan" && u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
-    return `订阅套餐 · 本期 ${u.quota.used}/${u.quota.limit} 请求（${pct}%）· ${u.quota.resets_at ?? ""} 重置 · 输入 ${fmtTokens(u.input_tokens)} · 输出 ${fmtTokens(u.output_tokens)}`;
+    return `Plan · ${u.quota.used}/${u.quota.limit} requests this period (${pct}%) · resets ${u.quota.resets_at ?? ""} · in ${fmtTokens(u.input_tokens)} · out ${fmtTokens(u.output_tokens)}`;
   }
-  if (p.billing === "unl") return "本地推理 · 不计量费用 · 离线可用";
+  if (p.billing === "unl") return "Local inference · no cost metering · works offline";
   if (u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
-    return `Pay as you go · 本期 ${fmtCny(u.cost ?? 0)} / ${fmtCny(u.quota.limit)}（${pct}%）· 输入 ${fmtTokens(u.input_tokens)}（缓存 ${fmtTokens(u.cache_read_tokens)}，按 1/10 计价）· 输出 ${fmtTokens(u.output_tokens)} · 延迟 ${fmtLatency(u.latency_ms)}`;
+    return `Pay as you go · ${fmtCny(u.cost ?? 0)} / ${fmtCny(u.quota.limit)} this period (${pct}%) · in ${fmtTokens(u.input_tokens)} (cache ${fmtTokens(u.cache_read_tokens)}, billed at 1/10) · out ${fmtTokens(u.output_tokens)} · latency ${fmtLatency(u.latency_ms)}`;
   }
-  return "Pay as you go · 未设限额 · 近 7 日用量趋势";
+  return "Pay as you go · no limit set · 7-day usage trend";
 }
 
 function UsageCell({ p }: { p: Provider }) {
@@ -57,10 +57,10 @@ function UsageCell({ p }: { p: Provider }) {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
             <BillTag billing="plan" />
-            {u.quota.used}/{u.quota.limit} <span className="font-normal text-mut">请求</span>
+            {u.quota.used}/{u.quota.limit} <span className="font-normal text-mut">req</span>
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
-            {[p.plan_price, u.quota.resets_at ? `${u.quota.resets_at.slice(5)} 重置` : null]
+            {[p.plan_price, u.quota.resets_at ? `resets ${u.quota.resets_at.slice(5)}` : null]
               .filter(Boolean)
               .join(" · ")}
           </div>
@@ -74,10 +74,10 @@ function UsageCell({ p }: { p: Provider }) {
       <div className="w-[22%]" title={title}>
         <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
           <BillTag billing="unl" />
-          {u.requests} 次 <span className="font-normal text-mut">· {fmtTokens(u.input_tokens + u.output_tokens)} tok</span>
+          {u.requests} <span className="font-normal text-mut">req · {fmtTokens(u.input_tokens + u.output_tokens)} tok</span>
         </div>
         <div className="mt-0.5 text-[10.5px] text-mut">
-          入 {fmtTokens(u.input_tokens)} · 出 {fmtTokens(u.output_tokens)}
+          in {fmtTokens(u.input_tokens)} · out {fmtTokens(u.output_tokens)}
         </div>
       </div>
     );
@@ -91,10 +91,10 @@ function UsageCell({ p }: { p: Provider }) {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
             <BillTag billing="payg" />
-            {fmtCny(u.cost ?? 0)} <span className="font-normal text-mut">/ {fmtCny(u.quota.limit)} 限额</span>
+            {fmtCny(u.cost ?? 0)} <span className="font-normal text-mut">/ {fmtCny(u.quota.limit)} limit</span>
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
-            {fmtTokens(u.input_tokens + u.output_tokens)} tokens · 延迟 {fmtLatency(u.latency_ms)}
+            {fmtTokens(u.input_tokens + u.output_tokens)} tokens · latency {fmtLatency(u.latency_ms)}
           </div>
         </div>
       </div>
@@ -105,7 +105,7 @@ function UsageCell({ p }: { p: Provider }) {
     <div className="w-[22%]" title={title}>
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
         <BillTag billing="payg" />
-        {fmtCny(u.cost ?? 0)} <span className="font-normal text-mut">· {u.requests} 次</span>
+        {fmtCny(u.cost ?? 0)} <span className="font-normal text-mut">· {u.requests} req</span>
       </div>
       {u.spark && (
         <span className="mt-1 block w-20">
@@ -143,7 +143,7 @@ function ProviderRow({
             <span className="text-[13px] font-semibold">{p.name}</span>
             {p.is_current && (
               <span className="rounded px-1.5 py-px text-[10px] font-medium" style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}>
-                使用中
+                In use
               </span>
             )}
             {p.status_badge && (
@@ -160,7 +160,7 @@ function ProviderRow({
 
       <div className="flex w-[22%] items-center gap-1">
         {p.agents.length === 0 ? (
-          <span className="text-[11px] text-mut">未绑定</span>
+          <span className="text-[11px] text-mut">Unbound</span>
         ) : (
           <>
             {p.agents.map((a) => (
@@ -176,7 +176,7 @@ function ProviderRow({
       <div className="w-[14%]">
         {p.health.state === "ok" ? (
           <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--kiwi)" }}>
-            <Dot state="ok" />健康 {p.health.latency_ms}ms
+            <Dot state="ok" />Healthy {p.health.latency_ms}ms
           </span>
         ) : (
           <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
@@ -194,7 +194,7 @@ function ProviderRow({
             className="h-7 whitespace-nowrap border border-line px-2.5 text-[11.5px]"
             onClick={() => onEdit(p)}
           >
-            编辑
+            Edit
           </Button>
         ) : (
           <Button
@@ -203,7 +203,7 @@ function ProviderRow({
             className="h-7 whitespace-nowrap border-kiwi-dim bg-kiwi-soft font-semibold text-kiwi text-[11.5px] dark:border-kiwi-dim dark:bg-kiwi-soft hover:bg-kiwi-soft dark:hover:bg-kiwi-soft"
             onClick={() => onEnable(p.id)}
           >
-            启用
+            Enable
           </Button>
         )}
         <Button
@@ -211,11 +211,11 @@ function ProviderRow({
           size="sm"
           className={`h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px]${confirmDel ? "" : " text-mut"}`}
           style={confirmDel ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
-          aria-label="删除"
-          title={confirmDel ? "再次点击确认删除" : "删除供应商"}
+          aria-label="Delete"
+          title={confirmDel ? "Click again to confirm" : "Delete provider"}
           onClick={() => (confirmDel ? onDelete(p) : setConfirmDel(true))}
         >
-          {confirmDel ? "确认删除" : <Trash2 className="h-3.5 w-3.5" />}
+          {confirmDel ? "Confirm" : <Trash2 className="h-3.5 w-3.5" />}
         </Button>
       </div>
     </div>
@@ -241,7 +241,7 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
     refetch();
   };
 
-  if (!providers) return <div className="p-8 text-center text-[12px] text-mut">加载中…</div>;
+  if (!providers) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
 
   const filtered = providers.filter((p) => seg === "all" || p.agents.includes(seg));
   const agentsBound = new Set(providers.flatMap((p) => p.agents)).size;
@@ -261,20 +261,20 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
           ))}
         </div>
         <span className="ml-1.5 text-[11.5px] text-mut">
-          {providers.length} 个供应商 · {agentsBound} 个 Agent 已绑定
+          {providers.length} providers · {agentsBound} agents bound
         </span>
         <Button size="sm" className="ml-auto h-7 gap-1 px-2.5 text-[12px] font-semibold" onClick={onAdd}>
           <Plus className="h-3.5 w-3.5" />
-          添加供应商
+          Add provider
         </Button>
       </div>
 
       <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-        <span className="w-[34%]">供应商</span>
-        <span className="w-[22%]">绑定的 Agent</span>
-        <span className="w-[22%]">用量 / 额度</span>
-        <span className="w-[14%]">状态</span>
-        <span className="flex-1 text-right">操作</span>
+        <span className="w-[34%]">Provider</span>
+        <span className="w-[22%]">Bound agents</span>
+        <span className="w-[22%]">Usage / quota</span>
+        <span className="w-[14%]">Status</span>
+        <span className="flex-1 text-right">Actions</span>
       </div>
 
       {filtered.map((p) => (
@@ -283,9 +283,9 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
 
       {filtered.length === 0 && (
         <div className="px-4 py-8 text-center text-[12px] text-mut">
-          该 Agent 尚未绑定 Provider —{" "}
+          No provider bound to this agent —{" "}
           <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
-            添加供应商
+            add provider
           </button>
         </div>
       )}
@@ -293,7 +293,7 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
       <StrategyPanel />
 
       <div className="px-4 py-3 text-[10.5px] text-mut">
-        切换即时生效（Agent 已接管至本地网关，切换仅改路由）· API Key 存于本机系统钥匙串 · 请求不经 Kiwano 云端
+        Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud
       </div>
     </section>
   );

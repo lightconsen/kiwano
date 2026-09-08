@@ -1,6 +1,8 @@
-# Kiwano
-
-Local-first AI provider manager — manage all your AI providers on one machine and route coding agents through a local gateway.
+<div align="center">
+  <img src="public/kiwano-logo.svg" width="112" alt="Kiwano logo" />
+  <h1>Kiwano</h1>
+  <p>Local-first AI provider manager — manage all your AI providers on one machine and route coding agents through a local gateway.</p>
+</div>
 
 ## Features
 

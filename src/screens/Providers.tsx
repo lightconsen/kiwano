@@ -6,21 +6,29 @@ import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import { AGENTS, type AgentId, type Provider } from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
+import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import StrategyPanel from "../components/StrategyPanel";
 import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
-const SEGMENTS: { id: AgentId | "all"; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" },
-  { id: "gemini", label: "Gemini" },
-  { id: "grokbuild", label: "Grok" },
-  { id: "claude-desktop", label: "Desktop" },
-  { id: "opencode", label: "OpenCode" },
-  { id: "openclaw", label: "OpenClaw" },
-  { id: "hermes", label: "Hermes" },
-  { id: "pi", label: "Pi" },
+// Agent filter segments — each renders the agent's brand logo (ported with
+// the cc-switch icon set, see components/icons). Hover shows the full name.
+const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
+  { id: "all" },
+  { id: "claude", icon: "claude" },
+  { id: "codex", icon: "openai" },
+  { id: "gemini", icon: "gemini" },
+  { id: "grokbuild", icon: "grok" },
+  { id: "claude-desktop", icon: "claude" },
+  { id: "opencode", icon: "opencode" },
+  { id: "openclaw", icon: "openclaw" },
+  { id: "hermes", icon: "hermes" },
+  { id: "pi", icon: "pi" },
 ];
+
+function segmentLabel(id: AgentId | "all"): string {
+  if (id === "all") return "All";
+  return AGENTS.find((a) => a.id === id)?.label ?? id;
+}
 
 function ringColor(billing: Provider["billing"], pct: number): string {
   if (billing === "plan") return "oklch(0.78 0.12 300)";
@@ -250,15 +258,24 @@ export default function Providers({ onAdd, onEdit }: { onAdd: () => void; onEdit
     <section>
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
         <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
-          {SEGMENTS.map((s, i) => (
-            <button
-              key={s.id}
-              className={`seg h-7 shrink-0 whitespace-nowrap px-3 text-mut${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
-              onClick={() => setSeg(s.id)}
-            >
-              {s.label}
-            </button>
-          ))}
+          {SEGMENTS.map((s, i) => {
+            const label = segmentLabel(s.id);
+            return (
+              <button
+                key={s.id}
+                title={label}
+                aria-label={label}
+                className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
+                onClick={() => setSeg(s.id)}
+              >
+                {s.icon ? (
+                  <ProviderLogo icon={s.icon} name={label} size={15} />
+                ) : (
+                  <span className="text-[12px] text-mut">{label}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
         <span className="ml-1.5 text-[11.5px] text-mut">
           {providers.length} providers · {agentsBound} agents bound

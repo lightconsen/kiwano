@@ -10,11 +10,13 @@
 //! The MVP covered claude (settings.json), codex (config.toml + auth.json),
 //! and gemini (~/.gemini/.env; inbound protocol in the gateway's
 //! protocol.rs /v1beta branch). The expanded registry adds grokbuild
-//! (~/.grok/config.toml, selected model's base_url/api_key/api_backend) and
-//! the additive-mode agents opencode/openclaw/hermes/pi, whose takeover
-//! upserts a `kiwano-gateway` provider entry and selects it via
-//! `kiwano_cc_adapters::gateway_takeover` — pre-existing provider entries
-//! survive, and disable still restores the original bytes verbatim.
+//! (~/.grok/config.toml, selected model's base_url/api_key/api_backend), the
+//! additive-mode agents opencode/openclaw/hermes/pi — whose takeover upserts
+//! a `kiwano-gateway` provider entry and selects it via
+//! `kiwano_cc_adapters::gateway_takeover` — and claude-desktop (macOS only:
+//! deploymentMode 3p + a gateway profile in the Claude-3p configLibrary via
+//! `kiwano_cc_adapters::claude_desktop_config`). Pre-existing provider
+//! entries survive, and disable still restores the original bytes verbatim.
 
 use std::path::Path;
 
@@ -34,6 +36,26 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
         ]),
         "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
         "grokbuild" => Ok(vec![home.join(".grok").join("config.toml")]),
+        // claude-desktop: macOS Claude-3p configLibrary (deployment mode in
+        // both claude_desktop_config.json copies + gateway profile + _meta.json)
+        #[cfg(target_os = "macos")]
+        "claude-desktop" => {
+            let app_support = home.join("Library").join("Application Support");
+            let threep = app_support.join("Claude-3p");
+            Ok(vec![
+                app_support.join("Claude").join("claude_desktop_config.json"),
+                threep.join("claude_desktop_config.json"),
+                threep.join("configLibrary").join(format!(
+                    "{}.json",
+                    kiwano_cc_adapters::claude_desktop_config::PROFILE_ID
+                )),
+                threep.join("configLibrary").join("_meta.json"),
+            ])
+        }
+        #[cfg(not(target_os = "macos"))]
+        "claude-desktop" => {
+            Err("claude-desktop takeover currently supports macOS only".into())
+        }
         // additive-mode agents: the gateway entry coexists with their native
         // providers, so a missing config is fine (a fresh one gets created)
         "opencode" => Ok(vec![home
@@ -74,10 +96,12 @@ pub fn enable(
     for p in &paths {
         let content = match std::fs::read_to_string(p) {
             Ok(c) => c,
-            // codex's auth.json / gemini's .env, and every additive agent's
-            // config, are allowed to be missing (treated as empty files)
+            // codex's auth.json / gemini's .env, every additive agent's
+            // config, and all claude-desktop files are allowed to be missing
+            // (treated as empty files — every claude-desktop write normalizes
+            // a missing/non-object document to {})
             Err(_)
-                if matches!(agent, "opencode" | "openclaw" | "hermes" | "pi")
+                if matches!(agent, "opencode" | "openclaw" | "hermes" | "pi" | "claude-desktop")
                     || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -153,6 +177,19 @@ fn rewrite(
         "codex" => rewrite_codex_auth(original, key),
         "gemini" => rewrite_gemini_env(original, base, data_port, key),
         "grokbuild" => rewrite_grok_toml(original, base, data_port, key),
+        // claude-desktop: flip both config copies to 3p mode, write the full
+        // gateway profile (Kiwano-owned while takeover is active) and register
+        // it as the applied configLibrary profile
+        "claude-desktop" if path.ends_with("claude_desktop_config.json") => {
+            kiwano_cc_adapters::claude_desktop_config::set_deployment_mode(original, "3p")
+        }
+        "claude-desktop" if path.ends_with("_meta.json") => {
+            kiwano_cc_adapters::claude_desktop_config::upsert_meta(original)
+        }
+        "claude-desktop" => kiwano_cc_adapters::claude_desktop_config::build_gateway_profile(
+            &format!("{base}:{data_port}"),
+            key,
+        ),
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (cc_adapters::gateway_takeover)
         "opencode" => {
@@ -743,5 +780,74 @@ base_url = "https://relay.example.com/v1"
         disable(&aux, "hermes", &home).unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("config.yaml")).unwrap(), original);
         assert!(aux.load_takeover_backup("hermes").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn claude_desktop_takeover_roundtrip_writes_profile() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let app_support = home.join("Library").join("Application Support");
+        let normal_config = app_support.join("Claude").join("claude_desktop_config.json");
+        std::fs::create_dir_all(normal_config.parent().unwrap()).unwrap();
+        let original = r#"{"deploymentMode":"1p","autoUpdater":true}"#;
+        std::fs::write(&normal_config, original).unwrap();
+        // Claude-3p side (config, profile, _meta.json) is absent: takeover
+        // must create it from scratch
+
+        enable(&aux, "claude-desktop", "kw-ag-claude-desktop-abcd", 8317, &home).unwrap();
+
+        let normal: Value =
+            serde_json::from_str(&std::fs::read_to_string(&normal_config).unwrap()).unwrap();
+        assert_eq!(normal["deploymentMode"], "3p");
+        assert_eq!(normal["autoUpdater"], true); // untouched key survives
+
+        let threep: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                app_support.join("Claude-3p").join("claude_desktop_config.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(threep["deploymentMode"], "3p");
+
+        let profile: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                app_support
+                    .join("Claude-3p")
+                    .join("configLibrary")
+                    .join("00000000-0000-4000-8000-000000157210.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(profile["inferenceProvider"], "gateway");
+        assert_eq!(profile["inferenceGatewayBaseUrl"], "http://127.0.0.1:8317");
+        assert_eq!(profile["inferenceGatewayApiKey"], "kw-ag-claude-desktop-abcd");
+        assert_eq!(profile["inferenceModels"].as_array().unwrap().len(), 4);
+
+        let meta: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                app_support.join("Claude-3p").join("configLibrary").join("_meta.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            meta["appliedId"],
+            "00000000-0000-4000-8000-000000157210"
+        );
+
+        disable(&aux, "claude-desktop", &home).unwrap();
+        // restore = write back byte for byte (absent originals → empty files)
+        assert_eq!(std::fs::read_to_string(&normal_config).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(
+                app_support.join("Claude-3p").join("claude_desktop_config.json")
+            )
+            .unwrap(),
+            ""
+        );
+        assert!(aux.load_takeover_backup("claude-desktop").is_none());
     }
 }

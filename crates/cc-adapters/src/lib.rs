@@ -10,6 +10,8 @@
 //! - [`provider`]: provider model, manager and metadata
 //! - [`model_capabilities`]: image-input capability resolution
 //! - [`gemini_config`]: Gemini env/settings file management
+//! - [`claude_desktop_config`]: Claude Desktop gateway profile + deploymentMode
+//!   writes (macOS Claude-3p configLibrary subset)
 //! - [`grok_config`]: Grok TOML live-config management
 //! - [`opencode_config`]: OpenCode opencode.json management
 //! - [`gateway_takeover`]: content→content gateway-entry upserts for the
@@ -21,6 +23,7 @@
 //! Global settings-override hooks from cc-switch are replaced here by
 //! explicit parameter injection or local stubs; nothing else was restructured.
 
+pub mod claude_desktop_config;
 pub mod codex_config;
 pub mod config;
 pub mod error;

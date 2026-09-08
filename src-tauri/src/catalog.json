@@ -17,7 +17,8 @@
       "deepseek-chat (V3)",
       "deepseek-reasoner (R1)"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "deepseek"
   },
   {
     "id": "kimi",
@@ -38,7 +39,8 @@
       "kimi-k2-0905-preview",
       "moonshot-v1-128k"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "kimi"
   },
   {
     "id": "qwen",
@@ -59,7 +61,8 @@
       "qwen-max",
       "qwen-plus"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "qwen"
   },
   {
     "id": "groq",
@@ -78,7 +81,8 @@
     "models": [
       "llama-3.3-70b-versatile"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "groq"
   },
   {
     "id": "openrouter",
@@ -99,7 +103,8 @@
       "anthropic/claude-sonnet-4.6",
       "openai/gpt-5.2"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "openrouter"
   },
   {
     "id": "ollama",
@@ -120,7 +125,8 @@
       "qwen3:32b",
       "llama3.3:70b"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "ollama"
   },
   {
     "id": "anthropic",
@@ -141,13 +147,14 @@
       "claude-opus-5",
       "claude-haiku-4-5"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "anthropic"
   },
   {
     "id": "baidu-qianfan-token-plan",
     "name": "Baidu Qianfan Token Plan",
     "logo_char": "B",
-    "logo_color": "#DB2777",
+    "logo_color": "#7C3AED",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -163,13 +170,14 @@
       "deepseek-v4-flash-0731",
       "glm-5.2"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "baidu"
   },
   {
     "id": "baidu-qianfan-token-plan-anthropic",
     "name": "Baidu Qianfan Token Plan",
     "logo_char": "B",
-    "logo_color": "#EA580C",
+    "logo_color": "#DB2777",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -183,7 +191,8 @@
       "qianfan-code-latest",
       "deepseek-v4-pro"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "baidu"
   },
   {
     "id": "bailian",
@@ -200,7 +209,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "bailian"
   },
   {
     "id": "bailian-for-coding",
@@ -217,7 +227,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "bailian"
   },
   {
     "id": "bailian-for-coding-openai",
@@ -237,7 +248,8 @@
       "qwen3-coder-plus",
       "qwen3-max"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "bailian"
   },
   {
     "id": "bailing",
@@ -256,7 +268,8 @@
     "models": [
       "Ling-2.5-1T"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": null
   },
   {
     "id": "bailing-anthropic",
@@ -275,7 +288,8 @@
     "models": [
       "Ling-2.5-1T"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": null
   },
   {
     "id": "byteplus",
@@ -294,7 +308,8 @@
     "models": [
       "ark-code-latest"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "byteplus"
   },
   {
     "id": "byteplus-anthropic",
@@ -313,7 +328,8 @@
     "models": [
       "ark-code-latest"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "byteplus"
   },
   {
     "id": "api-deepseek",
@@ -332,7 +348,8 @@
     "models": [
       "deepseek-v4-pro"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "deepseek"
   },
   {
     "id": "doubaoseed",
@@ -353,7 +370,8 @@
       "doubao-seed-2-1-pro-260628",
       "doubao-seed-2.1-pro"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "huoshan"
   },
   {
     "id": "doubaoseed-anthropic",
@@ -373,7 +391,8 @@
       "ark-code-latest",
       "doubao-seed-2-1-pro-260628"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "huoshan"
   },
   {
     "id": "google-ai-studio",
@@ -382,7 +401,7 @@
     "logo_color": "#1E6FEB",
     "tag": "official",
     "tag_label": "官方",
-    "rating": 4.0,
+    "rating": 4.9,
     "endpoint": "https://generativelanguage.googleapis.com",
     "price_line": "官方定价",
     "billing": "payg",
@@ -390,9 +409,11 @@
     "blurb": "",
     "added": false,
     "models": [
-      "gemini-3.6-flash"
+      "gemini-3.6-flash",
+      "gemini-3.6-pro"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "gemini"
   },
   {
     "id": "api-moonshot",
@@ -411,7 +432,8 @@
     "models": [
       "kimi-k2.7-code"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "kimi"
   },
   {
     "id": "kimi-for-coding",
@@ -431,7 +453,8 @@
       "kimi-for-coding",
       "kimi-k2.7-code"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "kimi"
   },
   {
     "id": "kimi-for-coding-anthropic",
@@ -450,7 +473,8 @@
     "models": [
       "kimi-for-coding"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "kimi"
   },
   {
     "id": "longcat",
@@ -469,7 +493,8 @@
     "models": [
       "LongCat-2.0"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "longcat"
   },
   {
     "id": "longcat-anthropic",
@@ -488,7 +513,8 @@
     "models": [
       "LongCat-2.0"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "longcat"
   },
   {
     "id": "minimax",
@@ -507,7 +533,8 @@
     "models": [
       "MiniMax-M2.7"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "minimax"
   },
   {
     "id": "minimax-anthropic",
@@ -526,7 +553,8 @@
     "models": [
       "MiniMax-M2.7"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "minimax"
   },
   {
     "id": "minimax-intl",
@@ -545,7 +573,8 @@
     "models": [
       "MiniMax-M2.7"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "minimax"
   },
   {
     "id": "minimax-intl-anthropic",
@@ -564,13 +593,14 @@
     "models": [
       "MiniMax-M2.7"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "minimax"
   },
   {
     "id": "nous-research",
     "name": "Nous Research",
     "logo_char": "N",
-    "logo_color": "#0EA5E9",
+    "logo_color": "#6467F2",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -584,7 +614,8 @@
       "Hermes-4-405B",
       "Hermes-4-70B"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "hermes"
   },
   {
     "id": "qwencloud",
@@ -605,7 +636,8 @@
       "qwen3.7-plus",
       "qwen3.6-plus"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "qwen"
   },
   {
     "id": "qwencloud-anthropic",
@@ -624,7 +656,8 @@
     "models": [
       "qwen3.7-max"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "qwen"
   },
   {
     "id": "qwencloud-for-coding",
@@ -645,7 +678,8 @@
       "qwen3.6-plus",
       "qwen3-coder-plus"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "qwen"
   },
   {
     "id": "qwencloud-for-coding-anthropic",
@@ -664,13 +698,14 @@
     "models": [
       "qwen3.7-plus"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "qwen"
   },
   {
     "id": "qwencloud-token-plan",
     "name": "QwenCloud Token Plan",
     "logo_char": "Q",
-    "logo_color": "#8B5CF6",
+    "logo_color": "#D97757",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -686,13 +721,14 @@
       "qwen3.7-max",
       "qwen3.7-plus"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "qwen"
   },
   {
     "id": "qwencloud-token-plan-anthropic",
     "name": "QwenCloud Token Plan",
     "logo_char": "Q",
-    "logo_color": "#2563EB",
+    "logo_color": "#8B5CF6",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -705,7 +741,8 @@
     "models": [
       "qwen3.8-max"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "qwen"
   },
   {
     "id": "stepfun",
@@ -725,7 +762,8 @@
       "step-3.5-flash-2603",
       "step-3.5-flash"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "stepfun"
   },
   {
     "id": "stepfun-anthropic",
@@ -744,7 +782,8 @@
     "models": [
       "step-3.5-flash-2603"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "stepfun"
   },
   {
     "id": "stepfun-intl",
@@ -764,7 +803,8 @@
       "step-3.5-flash-2603",
       "step-3.5-flash"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "stepfun"
   },
   {
     "id": "stepfun-intl-anthropic",
@@ -783,7 +823,8 @@
     "models": [
       "step-3.5-flash-2603"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "stepfun"
   },
   {
     "id": "tencent-token-plan",
@@ -805,7 +846,8 @@
       "deepseek-v4-pro-202606",
       "minimax-m2.7"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "tencent"
   },
   {
     "id": "tencent-token-plan-anthropic",
@@ -824,13 +866,14 @@
     "models": [
       "tc-code-latest"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "tencent"
   },
   {
     "id": "tencent-token-plan-intl",
     "name": "Tencent Token Plan (Intl)",
     "logo_char": "T",
-    "logo_color": "#DC2626",
+    "logo_color": "#2563EB",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -846,13 +889,14 @@
       "deepseek-v4-pro-202606",
       "deepseek-v4-flash-202605"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "tencent"
   },
   {
     "id": "tencent-token-plan-intl-anthropic",
     "name": "Tencent Token Plan (Intl)",
     "logo_char": "T",
-    "logo_color": "#0891B2",
+    "logo_color": "#DC2626",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -865,13 +909,14 @@
     "models": [
       "auto"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "tencent"
   },
   {
     "id": "tencent-token-plan-enterprise-pro",
     "name": "Tencent Token Plan Enterprise Pro",
     "logo_char": "T",
-    "logo_color": "#65A30D",
+    "logo_color": "#0891B2",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -887,13 +932,14 @@
       "glm-5",
       "glm-5.1"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "tencent"
   },
   {
     "id": "tencent-token-plan-enterprise-pro-anthropic",
     "name": "Tencent Token Plan Enterprise Pro",
     "logo_char": "T",
-    "logo_color": "#6467F2",
+    "logo_color": "#65A30D",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -906,7 +952,8 @@
     "models": [
       "auto"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "tencent"
   },
   {
     "id": "xai",
@@ -925,7 +972,8 @@
     "models": [
       "grok-4.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "xai"
   },
   {
     "id": "xiaomi-mimo",
@@ -945,7 +993,8 @@
       "mimo-v2.5-pro",
       "mimo-v2.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "xiaomimimo"
   },
   {
     "id": "xiaomi-mimo-anthropic",
@@ -964,13 +1013,14 @@
     "models": [
       "mimo-v2.5-pro"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "xiaomimimo"
   },
   {
     "id": "xiaomi-mimo-token-plan-china",
     "name": "Xiaomi MiMo Token Plan (China)",
     "logo_char": "X",
-    "logo_color": "#059669",
+    "logo_color": "#EA580C",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -984,13 +1034,14 @@
       "mimo-v2.5-pro",
       "mimo-v2.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "xiaomimimo"
   },
   {
     "id": "xiaomi-mimo-token-plan-china-anthropic",
     "name": "Xiaomi MiMo Token Plan (China)",
     "logo_char": "X",
-    "logo_color": "#D97757",
+    "logo_color": "#059669",
     "tag": "official",
     "tag_label": "官方",
     "rating": 4.0,
@@ -1003,7 +1054,8 @@
     "models": [
       "mimo-v2.5-pro"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "xiaomimimo"
   },
   {
     "id": "zhipu-glm",
@@ -1022,7 +1074,8 @@
     "models": [
       "glm-5.1"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "zhipu"
   },
   {
     "id": "zhipu-glm-anthropic",
@@ -1041,7 +1094,8 @@
     "models": [
       "glm-5.1"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "zhipu"
   },
   {
     "id": "zhipu-glm-intl",
@@ -1060,7 +1114,8 @@
     "models": [
       "glm-5.1"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "zhipu"
   },
   {
     "id": "zhipu-glm-intl-anthropic",
@@ -1079,7 +1134,8 @@
     "models": [
       "glm-5.1"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "zhipu"
   },
   {
     "id": "9527code",
@@ -1101,7 +1157,8 @@
       "claude-haiku-4-5",
       "claude-haiku-4.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "9527code"
   },
   {
     "id": "9527code-anthropic",
@@ -1118,7 +1175,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "9527code"
   },
   {
     "id": "9527code-gemini",
@@ -1137,7 +1195,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "9527code"
   },
   {
     "id": "a6api",
@@ -1156,7 +1215,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "a6api"
   },
   {
     "id": "a6api-anthropic",
@@ -1173,7 +1233,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "a6api"
   },
   {
     "id": "a6api-gemini",
@@ -1192,7 +1253,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "a6api"
   },
   {
     "id": "aicodewith",
@@ -1213,7 +1275,8 @@
       "claude-opus-5",
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "aicodewith"
   },
   {
     "id": "aicodewith-anthropic",
@@ -1230,7 +1293,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "aicodewith"
   },
   {
     "id": "aicodewith-gemini",
@@ -1249,7 +1313,8 @@
     "models": [
       "gemini-3.1-pro-preview"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "aicodewith"
   },
   {
     "id": "aihubmix",
@@ -1270,7 +1335,8 @@
       "claude-opus-5",
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "aihubmix"
   },
   {
     "id": "aihubmix-anthropic",
@@ -1287,7 +1353,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "aihubmix"
   },
   {
     "id": "amux",
@@ -1306,7 +1373,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "amux"
   },
   {
     "id": "amux-anthropic",
@@ -1323,7 +1391,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "amux"
   },
   {
     "id": "atlascloud",
@@ -1343,7 +1412,8 @@
       "zai-org/glm-5.1",
       "glm-5.1"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "atlascloud"
   },
   {
     "id": "atlascloud-anthropic",
@@ -1362,13 +1432,14 @@
     "models": [
       "zai-org/glm-5.1"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "atlascloud"
   },
   {
     "id": "ccsub",
     "name": "CCSub",
     "logo_char": "C",
-    "logo_color": "#0EA5E9",
+    "logo_color": "#6467F2",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -1381,13 +1452,14 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "ccsub"
   },
   {
     "id": "ccsub-anthropic",
     "name": "CCSub",
     "logo_char": "C",
-    "logo_color": "#7C3AED",
+    "logo_color": "#0EA5E9",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -1398,13 +1470,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "ccsub"
   },
   {
     "id": "cherryin",
     "name": "CherryIN",
     "logo_char": "C",
-    "logo_color": "#2563EB",
+    "logo_color": "#8B5CF6",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -1420,10 +1493,31 @@
       "claude-sonnet-5",
       "claude-opus-5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "cherryin"
   },
   {
     "id": "cherryin-anthropic",
+    "name": "CherryIN",
+    "logo_char": "C",
+    "logo_color": "#2563EB",
+    "tag": "aggregate",
+    "tag_label": "聚合",
+    "rating": 4.0,
+    "endpoint": "https://open.cherryin.net",
+    "price_line": "上游价",
+    "billing": "payg",
+    "users": "cc-switch 收录",
+    "blurb": "",
+    "added": false,
+    "models": [
+      "anthropic/claude-sonnet-5"
+    ],
+    "protocol": "anthropic",
+    "icon": "cherryin"
+  },
+  {
+    "id": "cherryin-gemini",
     "name": "CherryIN",
     "logo_char": "C",
     "logo_color": "#DC2626",
@@ -1437,34 +1531,16 @@
     "blurb": "",
     "added": false,
     "models": [
-      "anthropic/claude-sonnet-5"
-    ],
-    "protocol": "anthropic"
-  },
-  {
-    "id": "cherryin-gemini",
-    "name": "CherryIN",
-    "logo_char": "C",
-    "logo_color": "#0891B2",
-    "tag": "aggregate",
-    "tag_label": "聚合",
-    "rating": 4.0,
-    "endpoint": "https://open.cherryin.net",
-    "price_line": "上游价",
-    "billing": "payg",
-    "users": "cc-switch 收录",
-    "blurb": "",
-    "added": false,
-    "models": [
       "google/gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "cherryin"
   },
   {
     "id": "claudeapi",
     "name": "ClaudeAPI",
     "logo_char": "C",
-    "logo_color": "#6467F2",
+    "logo_color": "#65A30D",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -1475,7 +1551,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "claudeapi"
   },
   {
     "id": "code0",
@@ -1494,7 +1571,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "code0"
   },
   {
     "id": "code0-anthropic",
@@ -1511,7 +1589,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "code0"
   },
   {
     "id": "code0-gemini",
@@ -1530,7 +1609,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "code0"
   },
   {
     "id": "compshare",
@@ -1550,7 +1630,8 @@
       "claude-opus-5",
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "ucloud"
   },
   {
     "id": "compshare-anthropic",
@@ -1567,7 +1648,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "ucloud"
   },
   {
     "id": "compshare-coding-plan",
@@ -1587,7 +1669,8 @@
       "claude-opus-5",
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "ucloud"
   },
   {
     "id": "compshare-coding-plan-anthropic",
@@ -1604,13 +1687,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "ucloud"
   },
   {
     "id": "dmxapi",
     "name": "DMXAPI",
     "logo_char": "D",
-    "logo_color": "#DB2777",
+    "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -1625,13 +1709,14 @@
       "claude-opus-5",
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": null
   },
   {
     "id": "dmxapi-anthropic",
     "name": "DMXAPI",
     "logo_char": "D",
-    "logo_color": "#EA580C",
+    "logo_color": "#DB2777",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -1642,7 +1727,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": null
   },
   {
     "id": "fennoai",
@@ -1661,7 +1747,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "fenno"
   },
   {
     "id": "fennoai-anthropic",
@@ -1678,7 +1765,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "fenno"
   },
   {
     "id": "jiekou-ai",
@@ -1697,7 +1785,8 @@
     "models": [
       "claude-fable-5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "jiekou"
   },
   {
     "id": "jiekou-ai-anthropic",
@@ -1716,7 +1805,8 @@
     "models": [
       "claude-fable-5"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "jiekou"
   },
   {
     "id": "modelscope",
@@ -1736,7 +1826,8 @@
       "ZhipuAI/GLM-5.2",
       "GLM-5.2"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "modelscope"
   },
   {
     "id": "modelscope-anthropic",
@@ -1755,7 +1846,8 @@
     "models": [
       "ZhipuAI/GLM-5.2"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "modelscope"
   },
   {
     "id": "novita-ai",
@@ -1775,7 +1867,8 @@
       "zai-org/glm-5.1",
       "glm-5.1"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "novita"
   },
   {
     "id": "novita-ai-anthropic",
@@ -1794,7 +1887,8 @@
     "models": [
       "zai-org/glm-5.1"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "novita"
   },
   {
     "id": "nvidia",
@@ -1814,7 +1908,8 @@
       "moonshotai/kimi-k2.5",
       "kimi-k2.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "nvidia"
   },
   {
     "id": "openrouter-anthropic",
@@ -1833,7 +1928,8 @@
     "models": [
       "anthropic/claude-sonnet-5"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "openrouter"
   },
   {
     "id": "openrouter-gemini",
@@ -1852,7 +1948,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "openrouter"
   },
   {
     "id": "pipellm",
@@ -1874,7 +1971,8 @@
       "claude-sonnet-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "pipellm"
   },
   {
     "id": "pipellm-anthropic",
@@ -1893,7 +1991,8 @@
     "models": [
       "claude-opus-5"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "pipellm"
   },
   {
     "id": "ppio",
@@ -1914,7 +2013,8 @@
       "deepseek-v4-flash-0731",
       "deepseek-v4-flash"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "ppio"
   },
   {
     "id": "ppio-anthropic",
@@ -1933,7 +2033,8 @@
     "models": [
       "deepseek/deepseek-v4-flash-0731"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "ppio"
   },
   {
     "id": "qiniu",
@@ -1952,7 +2053,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "qiniu"
   },
   {
     "id": "qiniu-anthropic",
@@ -1969,7 +2071,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "qiniu"
   },
   {
     "id": "qiniu-gemini",
@@ -1988,13 +2091,14 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "qiniu"
   },
   {
     "id": "runapi",
     "name": "RunAPI",
     "logo_char": "R",
-    "logo_color": "#2563EB",
+    "logo_color": "#8B5CF6",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2010,13 +2114,14 @@
       "claude-haiku-4-5",
       "claude-haiku-4.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "runapi"
   },
   {
     "id": "runapi-openai",
     "name": "RunAPI",
     "logo_char": "R",
-    "logo_color": "#DC2626",
+    "logo_color": "#2563EB",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2031,13 +2136,14 @@
       "claude-opus-5",
       "claude-haiku-4-5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "runapi"
   },
   {
     "id": "runapi-anthropic",
     "name": "RunAPI",
     "logo_char": "R",
-    "logo_color": "#0891B2",
+    "logo_color": "#DC2626",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2048,13 +2154,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "runapi"
   },
   {
     "id": "shengsuanyun",
     "name": "Shengsuanyun",
     "logo_char": "S",
-    "logo_color": "#059669",
+    "logo_color": "#EA580C",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2070,10 +2177,31 @@
       "openai/gpt-5.6-sol",
       "claude-opus-5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "shengsuanyun"
   },
   {
     "id": "shengsuanyun-anthropic",
+    "name": "Shengsuanyun",
+    "logo_char": "S",
+    "logo_color": "#059669",
+    "tag": "aggregate",
+    "tag_label": "聚合",
+    "rating": 4.0,
+    "endpoint": "https://router.shengsuanyun.com/api",
+    "price_line": "上游价",
+    "billing": "payg",
+    "users": "cc-switch 收录",
+    "blurb": "",
+    "added": false,
+    "models": [
+      "anthropic/claude-sonnet-5"
+    ],
+    "protocol": "anthropic",
+    "icon": "shengsuanyun"
+  },
+  {
+    "id": "shengsuanyun-gemini",
     "name": "Shengsuanyun",
     "logo_char": "S",
     "logo_color": "#D97757",
@@ -2087,28 +2215,10 @@
     "blurb": "",
     "added": false,
     "models": [
-      "anthropic/claude-sonnet-5"
-    ],
-    "protocol": "anthropic"
-  },
-  {
-    "id": "shengsuanyun-gemini",
-    "name": "Shengsuanyun",
-    "logo_char": "S",
-    "logo_color": "#8B5CF6",
-    "tag": "aggregate",
-    "tag_label": "聚合",
-    "rating": 4.0,
-    "endpoint": "https://router.shengsuanyun.com/api",
-    "price_line": "上游价",
-    "billing": "payg",
-    "users": "cc-switch 收录",
-    "blurb": "",
-    "added": false,
-    "models": [
       "google/gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "shengsuanyun"
   },
   {
     "id": "siliconflow",
@@ -2127,7 +2237,8 @@
     "models": [
       "Pro/MiniMaxAI/MiniMax-M2.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "siliconflow"
   },
   {
     "id": "siliconflow-anthropic",
@@ -2146,7 +2257,8 @@
     "models": [
       "Pro/MiniMaxAI/MiniMax-M2.5"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "siliconflow"
   },
   {
     "id": "siliconflow-intl",
@@ -2165,7 +2277,8 @@
     "models": [
       "MiniMaxAI/MiniMax-M3"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "siliconflow"
   },
   {
     "id": "siliconflow-intl-anthropic",
@@ -2184,13 +2297,14 @@
     "models": [
       "MiniMaxAI/MiniMax-M3"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "siliconflow"
   },
   {
     "id": "subrouter",
     "name": "SubRouter",
     "logo_char": "S",
-    "logo_color": "#65A30D",
+    "logo_color": "#0891B2",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2203,13 +2317,14 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "subrouter"
   },
   {
     "id": "subrouter-anthropic",
     "name": "SubRouter",
     "logo_char": "S",
-    "logo_color": "#6467F2",
+    "logo_color": "#65A30D",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2220,13 +2335,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "subrouter"
   },
   {
     "id": "subrouter-gemini",
     "name": "SubRouter",
     "logo_char": "S",
-    "logo_color": "#0EA5E9",
+    "logo_color": "#6467F2",
     "tag": "aggregate",
     "tag_label": "聚合",
     "rating": 4.0,
@@ -2239,7 +2355,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "subrouter"
   },
   {
     "id": "teamorouter",
@@ -2258,7 +2375,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "teamorouter"
   },
   {
     "id": "teamorouter-anthropic",
@@ -2275,7 +2393,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "teamorouter"
   },
   {
     "id": "therouter",
@@ -2297,7 +2416,8 @@
       "openai/gpt-5.2",
       "google/gemini-3.6-flash"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": null
   },
   {
     "id": "therouter-anthropic",
@@ -2316,7 +2436,8 @@
     "models": [
       "anthropic/claude-sonnet-5"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": null
   },
   {
     "id": "therouter-gemini",
@@ -2335,7 +2456,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": null
   },
   {
     "id": "together-ai",
@@ -2356,7 +2478,8 @@
       "deepseek-ai/DeepSeek-V3.2",
       "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "together"
   },
   {
     "id": "xycai",
@@ -2375,7 +2498,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "xycai"
   },
   {
     "id": "xycai-anthropic",
@@ -2392,7 +2516,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "xycai"
   },
   {
     "id": "xycai-gemini",
@@ -2411,7 +2536,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "xycai"
   },
   {
     "id": "zetaapi",
@@ -2430,7 +2556,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "zetaapi"
   },
   {
     "id": "zetaapi-anthropic",
@@ -2447,7 +2574,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "zetaapi"
   },
   {
     "id": "aicodemirror",
@@ -2468,7 +2596,8 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "aicodemirror"
   },
   {
     "id": "aicodemirror-anthropic",
@@ -2485,7 +2614,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "aicodemirror"
   },
   {
     "id": "aicodemirror-gemini",
@@ -2504,7 +2634,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "aicodemirror"
   },
   {
     "id": "aicoding",
@@ -2525,7 +2656,8 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "aicoding"
   },
   {
     "id": "aicoding-anthropic",
@@ -2542,7 +2674,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "aicoding"
   },
   {
     "id": "aicoding-gemini",
@@ -2561,7 +2694,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "aicoding"
   },
   {
     "id": "aigocode",
@@ -2582,7 +2716,8 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "aigocode"
   },
   {
     "id": "aigocode-anthropic",
@@ -2599,7 +2734,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "aigocode"
   },
   {
     "id": "aigocode-gemini",
@@ -2618,7 +2754,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "aigocode"
   },
   {
     "id": "apikey-fun",
@@ -2640,7 +2777,8 @@
       "claude-sonnet-5",
       "claude-haiku-4-5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "apikeyfun"
   },
   {
     "id": "apikey-fun-anthropic",
@@ -2657,7 +2795,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "apikeyfun"
   },
   {
     "id": "apikey-fun-gemini",
@@ -2676,7 +2815,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "apikeyfun"
   },
   {
     "id": "apinebula",
@@ -2695,7 +2835,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "apinebula"
   },
   {
     "id": "apinebula-anthropic",
@@ -2712,7 +2853,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "apinebula"
   },
   {
     "id": "apinebula-gemini",
@@ -2731,7 +2873,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "apinebula"
   },
   {
     "id": "claudecn",
@@ -2753,7 +2896,8 @@
       "claude-haiku-4-5",
       "claude-haiku-4.5"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "claudecn"
   },
   {
     "id": "claudecn-anthropic",
@@ -2770,7 +2914,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "claudecn"
   },
   {
     "id": "crazyrouter",
@@ -2791,7 +2936,8 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "crazyrouter"
   },
   {
     "id": "crazyrouter-anthropic",
@@ -2808,7 +2954,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "crazyrouter"
   },
   {
     "id": "crazyrouter-gemini",
@@ -2827,7 +2974,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "crazyrouter"
   },
   {
     "id": "cubence",
@@ -2848,7 +2996,8 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "cubence"
   },
   {
     "id": "cubence-anthropic",
@@ -2865,7 +3014,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "cubence"
   },
   {
     "id": "cubence-gemini",
@@ -2884,7 +3034,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "cubence"
   },
   {
     "id": "e-flowcode",
@@ -2906,7 +3057,8 @@
       "gpt-5.3-codex",
       "gpt-5.2"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "eflowcode"
   },
   {
     "id": "e-flowcode-anthropic",
@@ -2923,7 +3075,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "eflowcode"
   },
   {
     "id": "e-flowcode-gemini",
@@ -2942,7 +3095,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "eflowcode"
   },
   {
     "id": "etok-ai",
@@ -2963,7 +3117,8 @@
       "claude-sonnet-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "etok"
   },
   {
     "id": "etok-ai-anthropic",
@@ -2980,7 +3135,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "etok"
   },
   {
     "id": "etok-ai-gemini",
@@ -2999,13 +3155,14 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "etok"
   },
   {
     "id": "micu",
     "name": "Micu",
     "logo_char": "M",
-    "logo_color": "#059669",
+    "logo_color": "#EA580C",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3020,13 +3177,14 @@
       "claude-sonnet-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "micu"
   },
   {
     "id": "micu-anthropic",
     "name": "Micu",
     "logo_char": "M",
-    "logo_color": "#D97757",
+    "logo_color": "#059669",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3037,13 +3195,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "micu"
   },
   {
     "id": "opencode-go",
     "name": "OpenCode Go",
     "logo_char": "O",
-    "logo_color": "#65A30D",
+    "logo_color": "#0891B2",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3059,13 +3218,14 @@
       "deepseek-v4-pro",
       "deepseek-v4-flash"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "opencode"
   },
   {
     "id": "opencode-go-anthropic",
     "name": "OpenCode Go",
     "logo_char": "O",
-    "logo_color": "#6467F2",
+    "logo_color": "#65A30D",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3078,7 +3238,8 @@
     "models": [
       "deepseek-v4-flash"
     ],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "opencode"
   },
   {
     "id": "packycode",
@@ -3099,7 +3260,8 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "packycode"
   },
   {
     "id": "packycode-anthropic",
@@ -3116,7 +3278,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "packycode"
   },
   {
     "id": "packycode-gemini",
@@ -3135,7 +3298,8 @@
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "packycode"
   },
   {
     "id": "patewayai",
@@ -3152,7 +3316,8 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "pateway"
   },
   {
     "id": "patewayai-openai",
@@ -3169,13 +3334,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "pateway"
   },
   {
     "id": "relaxycode",
     "name": "RelaxyCode",
     "logo_char": "R",
-    "logo_color": "#0891B2",
+    "logo_color": "#DC2626",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3186,13 +3352,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "relaxcode"
   },
   {
     "id": "relaxycode-openai",
     "name": "RelaxyCode",
     "logo_char": "R",
-    "logo_color": "#65A30D",
+    "logo_color": "#0891B2",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3203,13 +3370,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "relaxcode"
   },
   {
     "id": "rightcode",
     "name": "RightCode",
     "logo_char": "R",
-    "logo_color": "#6467F2",
+    "logo_color": "#65A30D",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3225,13 +3393,14 @@
       "claude-sonnet-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "rc"
   },
   {
     "id": "rightcode-anthropic",
     "name": "RightCode",
     "logo_char": "R",
-    "logo_color": "#0EA5E9",
+    "logo_color": "#6467F2",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3242,13 +3411,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "rc"
   },
   {
     "id": "sssaicode",
     "name": "SSSAiCode",
     "logo_char": "S",
-    "logo_color": "#DB2777",
+    "logo_color": "#7C3AED",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3263,10 +3433,29 @@
       "claude-opus-5",
       "claude-haiku-4-5-20251001"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "sssaicode"
   },
   {
     "id": "sssaicode-anthropic",
+    "name": "SSSAiCode",
+    "logo_char": "S",
+    "logo_color": "#DB2777",
+    "tag": "third",
+    "tag_label": "三方",
+    "rating": 4.0,
+    "endpoint": "https://node-hk.sssaicodeapi.com/api",
+    "price_line": "按量计费",
+    "billing": "payg",
+    "users": "cc-switch 收录",
+    "blurb": "",
+    "added": false,
+    "models": [],
+    "protocol": "anthropic",
+    "icon": "sssaicode"
+  },
+  {
+    "id": "sssaicode-gemini",
     "name": "SSSAiCode",
     "logo_char": "S",
     "logo_color": "#EA580C",
@@ -3279,27 +3468,11 @@
     "users": "cc-switch 收录",
     "blurb": "",
     "added": false,
-    "models": [],
-    "protocol": "anthropic"
-  },
-  {
-    "id": "sssaicode-gemini",
-    "name": "SSSAiCode",
-    "logo_char": "S",
-    "logo_color": "#059669",
-    "tag": "third",
-    "tag_label": "三方",
-    "rating": 4.0,
-    "endpoint": "https://node-hk.sssaicodeapi.com/api",
-    "price_line": "按量计费",
-    "billing": "payg",
-    "users": "cc-switch 收录",
-    "blurb": "",
-    "added": false,
     "models": [
       "gemini-3.6-flash"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "sssaicode"
   },
   {
     "id": "sudocode-chat",
@@ -3318,7 +3491,8 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "sudocode"
   },
   {
     "id": "sudocode-chat-anthropic",
@@ -3335,13 +3509,14 @@
     "blurb": "",
     "added": false,
     "models": [],
-    "protocol": "anthropic"
+    "protocol": "anthropic",
+    "icon": "sudocode"
   },
   {
     "id": "sudocode-us",
     "name": "SudoCode.us",
     "logo_char": "S",
-    "logo_color": "#7C3AED",
+    "logo_color": "#0EA5E9",
     "tag": "third",
     "tag_label": "三方",
     "rating": 4.0,
@@ -3354,10 +3529,29 @@
     "models": [
       "gpt-5.6-sol"
     ],
-    "protocol": "openai"
+    "protocol": "openai",
+    "icon": "sudocode-us"
   },
   {
     "id": "sudocode-us-anthropic",
+    "name": "SudoCode.us",
+    "logo_char": "S",
+    "logo_color": "#7C3AED",
+    "tag": "third",
+    "tag_label": "三方",
+    "rating": 4.0,
+    "endpoint": "https://sudocode.us",
+    "price_line": "按量计费",
+    "billing": "payg",
+    "users": "cc-switch 收录",
+    "blurb": "",
+    "added": false,
+    "models": [],
+    "protocol": "anthropic",
+    "icon": "sudocode-us"
+  },
+  {
+    "id": "sudocode-us-gemini",
     "name": "SudoCode.us",
     "logo_char": "S",
     "logo_color": "#DB2777",
@@ -3370,26 +3564,10 @@
     "users": "cc-switch 收录",
     "blurb": "",
     "added": false,
-    "models": [],
-    "protocol": "anthropic"
-  },
-  {
-    "id": "sudocode-us-gemini",
-    "name": "SudoCode.us",
-    "logo_char": "S",
-    "logo_color": "#EA580C",
-    "tag": "third",
-    "tag_label": "三方",
-    "rating": 4.0,
-    "endpoint": "https://sudocode.us",
-    "price_line": "按量计费",
-    "billing": "payg",
-    "users": "cc-switch 收录",
-    "blurb": "",
-    "added": false,
     "models": [
       "gemini-3.1-flash-lite"
     ],
-    "protocol": "gemini"
+    "protocol": "gemini",
+    "icon": "sudocode-us"
   }
 ]

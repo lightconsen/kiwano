@@ -416,6 +416,10 @@ pub struct CatalogEntryVm {
     pub logo_color: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logo_border: bool,
+    /// Brand-mark key in the frontend icon registry (cc-switch port);
+    /// absent entries fall back to the letter avatar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// Protocol fingerprint (anthropic | openai | gemini); entries predate the
     /// multi-protocol catalog, so older payloads default to openai.
     #[serde(default = "default_catalog_protocol")]

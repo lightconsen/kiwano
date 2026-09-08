@@ -117,6 +117,8 @@ export interface CatalogEntry {
   logo_char: string;
   logo_color: string;
   logo_border?: boolean;
+  /** Brand-mark key in src/components/icons registry; missing = letter avatar */
+  icon?: string;
   /** Tag category shown on the card's top-right label (Models page chip filter) */
   tag: "official" | "aggregate" | "third" | "free" | "local";
   tag_label: string;

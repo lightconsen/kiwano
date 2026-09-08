@@ -4,7 +4,7 @@ import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import type { CatalogEntry, Protocol } from "../api/types";
-import { Logo } from "../components/bits";
+import { ProviderLogo } from "@/components/icons/ProviderLogo";
 
 const CHIPS: { id: "all" | CatalogEntry["tag"]; label: string }[] = [
   { id: "all", label: "全部" },
@@ -72,7 +72,7 @@ function Row({ entry, onAdd }: { entry: CatalogEntry; onAdd: (e: CatalogEntry) =
     <tr className="border-t border-line hover:bg-surface2">
       <td className="px-4 py-2">
         <div className="flex items-center gap-2">
-          <Logo char={entry.logo_char} color={entry.logo_color} border={entry.logo_border} size="w-6 h-6 text-[11px]" />
+          <ProviderLogo icon={entry.icon} name={entry.name} color={entry.logo_color} />
           <span className="truncate text-[12.5px] font-semibold" title={entry.name}>
             {entry.name}
           </span>

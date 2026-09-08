@@ -370,7 +370,7 @@ export default function Providers({
   const agentsBound = new Set(providers.flatMap((p) => p.agents)).size;
 
   return (
-    <section>
+    <section className="flex min-h-full flex-col">
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
         <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
           {visibleSegments.map((s, i) => {
@@ -438,7 +438,7 @@ export default function Providers({
 
       <StrategyPanel />
 
-      <div className="px-4 py-3 text-[10.5px] text-mut">
+      <div className="mt-auto px-4 py-3 text-[10.5px] text-mut">
         Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud
       </div>
     </section>

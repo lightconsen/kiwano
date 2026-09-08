@@ -84,7 +84,7 @@ impl UsageSample {
 
 /// Pick the credential for one upstream request: the provider's key pool is
 /// `[primary, extras…]`; pools with more than one entry rotate per request
-/// (spec §4.1 P1 多 Key 轮询，避免单 Key 触发上游限流).
+/// (spec §4.1 P1 multi-key rotation, so a single key never trips upstream rate limits).
 fn select_upstream_key(
     state: &crate::server::GatewayState,
     provider: &UpstreamProvider,
@@ -242,7 +242,7 @@ pub async fn forward(
     };
 
     let status = upstream.status();
-    // 熔断回写（tech.md §4.7）：按响应头时刻的成功/失败计——流中断不追溯。
+    // Breaker feedback (tech.md §4.7): success/failure is judged at response-header time — a mid-stream abort is not counted retroactively.
     state
         .engine
         .record(&routed.agent, &provider.id, status.is_success())
@@ -736,14 +736,14 @@ mod tests {
         let mut p = provider(Protocol::OpenAI, None);
         p.extra_keys = vec!["sk-two".into(), "sk-three".into()];
 
-        // 单 Key 池恒取主 Key
+        // Single-key pool always returns the primary key
         let mut single = provider(Protocol::OpenAI, None);
         single.extra_keys.clear();
         for _ in 0..3 {
             assert_eq!(select_upstream_key(&state, &single).unwrap(), "sk-real-key");
         }
 
-        // 多 Key 池：主 Key → 附加 Key 依次轮转，再回到主 Key
+        // Multi-key pool: primary key → extra keys rotate in turn, then back to the primary key
         let mut seen = Vec::new();
         for _ in 0..3 {
             seen.push(select_upstream_key(&state, &p).unwrap());

@@ -32,7 +32,7 @@ pub struct GatewayState {
     pub engine: crate::strategy::StrategyEngine,
     route_table: RwLock<Arc<RouteTable>>,
     /// Per-provider rotating cursor for multi-key round-robin
-    /// (spec §4.1 P1 多 Key 轮询). In-memory only; a gateway restart
+    /// (spec §4.1 P1 multi-key rotation). In-memory only; a gateway restart
     /// simply restarts each pool at its primary.
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     pub started_at: Instant,

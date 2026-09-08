@@ -29,11 +29,11 @@ pub struct UpstreamProvider {
     /// Optional upstream path prefix, e.g. `/anthropic` on compatible endpoints.
     pub api_path: Option<String>,
     pub api_key: Option<String>,
-    /// Extra API keys rotating after the primary (spec §4.1 P1 多 Key 轮询).
+    /// Extra API keys rotating after the primary (spec §4.1 P1 multi-key rotation).
     pub extra_keys: Vec<String>,
-    /// roundrobin 权重（tech.md §4.7：默认 1）。
+    /// roundrobin weight (tech.md §4.7: default 1).
     pub weight: i64,
-    /// timewindow 本地窗口 `HH:MM`（agent_bindings 透传）。
+    /// timewindow local window `HH:MM` (passed through from agent_bindings).
     pub win_start: Option<String>,
     pub win_end: Option<String>,
 }
@@ -43,7 +43,7 @@ pub struct UpstreamProvider {
 pub struct AgentRoute {
     pub agent: String,
     pub strategy: StrategyType,
-    /// 策略 config 原始 JSON（quota 阈值等，agent_strategies.config 透传）。
+    /// Raw strategy config JSON (quota thresholds etc., passed through from agent_strategies.config).
     pub config: Option<String>,
     /// Ordered candidates: priority 0 (primary) first, backups after.
     pub candidates: Vec<UpstreamProvider>,

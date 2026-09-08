@@ -1,22 +1,23 @@
-//! 后台健康探测（tech.md §4.7 failover 地基）：周期性探测所有启用的
-//! Provider 端点，把粗粒度可达性结论持久化到 `provider_health` 表。
+//! Background health probing (tech.md §4.7 failover groundwork): periodically probe every enabled
+//! Provider endpoint, persisting the coarse reachability verdict into the `provider_health` table.
 //!
-//! 探测 = GET `{base_url}{api_path}`（凭据不携带——验证的是可达性而非
-//! 授权；任何 HTTP 应答均视为 healthy，仅传输层失败记 down）。熔断由
-//! 策略引擎的 circuit_breaker 实时承担，本表服务于 UI 展示与诊断。
+//! A probe = GET `{base_url}{api_path}` (no credentials attached — what is verified is
+//! reachability, not authorization; any HTTP response counts as healthy, only transport-level
+//! failures mark down). Circuit breaking is handled live by the strategy engine's circuit_breaker;
+//! this table serves UI display and diagnostics.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::store::Store;
 
-/// 默认探测周期。
+/// Default probe interval.
 pub const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// 单次探测超时。
+/// Per-probe timeout.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// 常驻探测循环（main 启动时 spawn）。
+/// Long-running probe loop (spawned by main at startup).
 pub async fn run(store: Arc<Store>, interval: Duration) {
     let client = match reqwest::Client::builder().timeout(PROBE_TIMEOUT).build() {
         Ok(c) => c,
@@ -31,7 +32,7 @@ pub async fn run(store: Arc<Store>, interval: Duration) {
     }
 }
 
-/// 一轮探测：对所有启用 Provider 逐一探测并落库（失败不中断循环）。
+/// One probing round: probe each enabled Provider in turn and persist the verdict (failures do not abort the loop).
 pub async fn probe_once(store: &Store, client: &reqwest::Client) {
     let providers = match store.list_providers() {
         Ok(p) => p,
@@ -70,7 +71,7 @@ mod tests {
             id: id.into(),
             name: id.into(),
             protocol: Protocol::Anthropic,
-            base_url: "http://127.0.0.1:1".into(), // 端口 1 必然连接失败
+            base_url: "http://127.0.0.1:1".into(), // port 1 always fails to connect
             api_path: None,
             api_key: None,
             billing: Billing::Metered,

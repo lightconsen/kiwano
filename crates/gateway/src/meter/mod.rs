@@ -1,4 +1,4 @@
-//! Usage capture (tech.md §4.3: usage 解析入库, streaming + non-streaming).
+//! Usage capture (tech.md §4.3: parse usage into the store, streaming + non-streaming).
 //!
 //! The gateway parses `usage` fields from upstream responses to meter every
 //! request into the `usage` table. Anthropic and OpenAI flavor differ:
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn scans_gemini_sse_stream() {
         let mut scanner = UsageScanner::new();
-        // 首个 chunk 只有 prompt 侧计数；后续 chunk 累计覆盖。
+        // The first chunk only carries prompt-side counts; later chunks overwrite with cumulative totals.
         scanner.feed_line(r#"data: {"candidates":[],"usageMetadata":{"promptTokenCount":88},"modelVersion":"gemini-2.5-flash"}"#);
         scanner.feed_line(r#"data: {"candidates":[{"content":{"parts":[{"text":"x"}]}}],"usageMetadata":{"promptTokenCount":88,"candidatesTokenCount":9,"cachedContentTokenCount":12},"modelVersion":"gemini-2.5-flash"}"#);
         assert_eq!(scanner.usage().input_tokens, 88);

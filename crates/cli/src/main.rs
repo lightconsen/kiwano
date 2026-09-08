@@ -1,5 +1,5 @@
 //! kiwano-cli — manage Kiwano providers without the desktop app (spec §4.1
-//! P1 CLI 模式). Talks straight to the shared SQLite store (same file as the
+//! P1 CLI mode). Talks straight to the shared SQLite store (same file as the
 //! GUI/gateway) and to the gateway admin plane for status/reload, so it works
 //! on headless servers. Route changes are picked up via `POST /reload` when
 //! the gateway is running.

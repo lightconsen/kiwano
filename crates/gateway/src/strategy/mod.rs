@@ -1,17 +1,17 @@
-//! 策略引擎（tech.md §4.7）：每请求从 Agent 的有序候选集选定 1 个 Provider。
+//! Strategy engine (tech.md §4.7): per request, select 1 Provider from the Agent's ordered candidate set.
 //!
-//! 策略（agent_strategies.type）：
-//! - `single` — 固定主选（MVP 语义，与现切换流等价）
-//! - `failover` — 按优先级取第一个"熔断器可用"者；全熔断时兜底回主选
-//! - `roundrobin` — 会话粒度粘性 + 加权轮转（同会话固定 Provider 以保住
-//!   上游 prompt cache；新会话按权重取下一个；粘性候选不可用时改派）
-//! - `timewindow` — 按 binding 的 `HH:MM` 本地窗口匹配（跨零点支持），
-//!   无命中回主选
-//! - `quota` — 主选当日用量（requests/tokens，读 usage 聚合）超过
-//!   策略 config 阈值时下沉到备用（failover 语义）
+//! Strategies (agent_strategies.type):
+//! - `single` — fixed primary (MVP semantics, equivalent to the current switch flow)
+//! - `failover` — take the first "breaker-available" candidate in priority order; when all are open, fall back to the primary
+//! - `roundrobin` — session-granularity stickiness + weighted rotation (a session keeps its
+//!   Provider to preserve the upstream prompt cache; new sessions pick by weight; reassigned when the sticky candidate goes unavailable)
+//! - `timewindow` — match the binding's local `HH:MM` window (supports crossing
+//!   midnight); falls back to the primary when nothing matches
+//! - `quota` — when the primary's same-day usage (requests/tokens, read from usage
+//!   aggregates) exceeds the threshold in the strategy config, sink to backups (failover semantics)
 //!
-//! 每次真实上游尝试后由 forward 层调用 [`StrategyEngine::record`] 回写
-//! 熔断器（key = `agent:provider_id`，tech.md §4.7.3）。
+//! After each real upstream attempt, the forward layer calls [`StrategyEngine::record`]
+//! to feed the breaker back (key = `agent:provider_id`, tech.md §4.7.3).
 
 pub mod circuit_breaker;
 pub mod prober;
@@ -27,17 +27,17 @@ use crate::store::{Store, StrategyType, UsageTotals};
 
 use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
 
-/// 跨会话轮转的粘性表键：`agent \0 session`（\0 防拼接歧义）。
+/// Sticky-table key for cross-session rotation: `agent \0 session` (\0 avoids concatenation ambiguity).
 fn sticky_key(agent: &str, session: Option<&str>) -> String {
     format!("{agent}\u{0}{}", session.unwrap_or(""))
 }
 
-/// 熔断器注册键（tech.md §4.7.3）：`agent:provider_id`。
+/// Breaker registry key (tech.md §4.7.3): `agent:provider_id`.
 fn breaker_key(agent: &str, provider_id: &str) -> String {
     format!("{agent}:{provider_id}")
 }
 
-/// 解析 "HH:MM" 为当日分钟数。
+/// Parse "HH:MM" into minutes-of-day.
 fn hhmm_minutes(s: &str) -> Option<u32> {
     let (h, m) = s.trim().split_once(':')?;
     let h: u32 = h.parse().ok()?;
@@ -49,12 +49,12 @@ fn hhmm_minutes(s: &str) -> Option<u32> {
     }
 }
 
-/// 本地时间 "HH:MM"（峰谷窗口用本地时区）。
+/// Local time "HH:MM" (peak/off-peak windows use the local timezone).
 fn local_hhmm() -> String {
     chrono::Local::now().format("%H:%M").to_string()
 }
 
-/// now 落在 [start, end] 内（start > end 视为跨零点窗口）。
+/// Whether now falls inside [start, end] (start > end means an overnight window).
 fn in_window(now_min: u32, start: &str, end: &str) -> bool {
     match (hhmm_minutes(start), hhmm_minutes(end)) {
         (Some(s), Some(e)) => {
@@ -68,17 +68,17 @@ fn in_window(now_min: u32, start: &str, end: &str) -> bool {
     }
 }
 
-/// quota 策略的 config 载荷（agent_strategies.config JSON）。
+/// Config payload of the quota strategy (agent_strategies.config JSON).
 ///
-/// `period` 目前仅支持 `day`（UTC 自然日）；其他值按 day 处理并在引擎
-/// 日志中提示。cost 单位待 §8 计费模型落地后开放。
+/// `period` currently supports only `day` (UTC calendar day); other values are treated
+/// as day and warned about in engine logs. The cost unit opens up once the §8 billing model lands.
 #[derive(Debug, Deserialize)]
 struct QuotaConfig {
     limit: f64,
     #[serde(default = "default_quota_unit")]
     unit: String,
     #[serde(default)]
-    #[allow(dead_code)] // 显式声明语义；当前仅 day
+    #[allow(dead_code)] // declared for explicit semantics; currently only day
     period: String,
 }
 
@@ -108,17 +108,17 @@ impl QuotaConfig {
     }
 }
 
-/// 当日（UTC）起始时间戳，与 usage 表的 RFC3339 字典序比较兼容。
+/// Start-of-day (UTC) timestamp, compatible with lexicographic comparison against the usage table's RFC3339 ts.
 fn today_start_utc() -> String {
     format!("{}T00:00:00Z", chrono::Utc::now().format("%Y-%m-%d"))
 }
 
-/// 每 Agent 策略运行时：熔断器注册表 + roundrobin 粘性表。
+/// Per-Agent strategy runtime: breaker registry + roundrobin sticky table.
 pub struct StrategyEngine {
     breakers: Mutex<HashMap<String, Arc<CircuitBreaker>>>,
-    /// roundrobin：会话键 → 候选下标（粘住以保 prompt cache）。
+    /// roundrobin: session key → candidate index (sticky to preserve the prompt cache).
     sticky: Mutex<HashMap<String, usize>>,
-    /// 新会话加入时在加权环上前进的游标。
+    /// Cursor advanced on the weighted ring as new sessions join.
     cursor: Mutex<u64>,
 }
 
@@ -137,7 +137,7 @@ impl StrategyEngine {
         }
     }
 
-    /// 取（或惰性创建）一对 (agent, provider) 的熔断器。
+    /// Get (or lazily create) the breaker for an (agent, provider) pair.
     async fn breaker(&self, agent: &str, provider_id: &str) -> Arc<CircuitBreaker> {
         let key = breaker_key(agent, provider_id);
         let existing = self
@@ -162,7 +162,7 @@ impl StrategyEngine {
         self.breaker(&route.agent, &c.id).await.is_available().await
     }
 
-    /// 单一策略 / 兜底：主选。
+    /// Single strategy / fallback: the primary.
     fn primary(route: &AgentRoute) -> Result<crate::router::UpstreamProvider> {
         route
             .candidates
@@ -171,7 +171,7 @@ impl StrategyEngine {
             .ok_or_else(|| GatewayError::NoBinding(route.agent.clone()))
     }
 
-    /// 按策略为一次请求选定 Provider。
+    /// Select a Provider for one request according to the strategy.
     pub async fn select(
         &self,
         store: &Store,
@@ -190,8 +190,8 @@ impl StrategyEngine {
         }
     }
 
-    /// failover：优先级顺序取第一个熔断器可用者；全部熔断则回主选兜底
-    /// （让请求失败于真实上游而非网关侧，保持 cc-switch 队列语义）。
+    /// failover: take the first breaker-available candidate in priority order; when all are open,
+    /// fall back to the primary (the request fails at the real upstream, not gateway-side — cc-switch queue semantics).
     async fn select_failover(
         &self,
         route: &AgentRoute,
@@ -205,14 +205,14 @@ impl StrategyEngine {
         Self::primary(route)
     }
 
-    /// roundrobin：会话粒度粘性 + 加权。粘性候选不可用（熔断开）时改派。
+    /// roundrobin: session-granularity stickiness + weighting. Reassigns when the sticky candidate is unavailable (breaker open).
     async fn select_roundrobin(
         &self,
         route: &AgentRoute,
         session: Option<&str>,
     ) -> Result<crate::router::UpstreamProvider> {
         let key = sticky_key(&route.agent, session);
-        // 锁只护读表（guard 不得跨 await，否则 future 非 Send）
+        // The lock only guards the table read (a guard must not be held across await, or the future is not Send)
         let sticky_hit = match self.sticky.lock().expect("sticky map poisoned").get(&key) {
             Some(&idx) if idx < route.candidates.len() => Some(idx),
             _ => None,
@@ -230,8 +230,8 @@ impl StrategyEngine {
         Ok(route.candidates[idx].clone())
     }
 
-    /// 加权环取下一个可用候选下标（weight 按 gcd 展开成环，锁只护游标读写、
-    /// 不跨 await）；全不可用时取 0（主选兜底）。
+    /// Weighted ring: next available candidate index (weights expanded into a ring by gcd, the lock
+    /// only guards cursor reads/writes and never crosses await); returns 0 (primary fallback) when none is available.
     async fn weighted_next(&self, route: &AgentRoute) -> Result<usize> {
         fn gcd(a: i64, b: i64) -> i64 {
             if b == 0 {
@@ -262,7 +262,7 @@ impl StrategyEngine {
         Ok(0)
     }
 
-    /// timewindow：本地时间窗口按候选顺序匹配（跨零点支持）；无命中回主选。
+    /// timewindow: match local time windows in candidate order (overnight supported); falls back to the primary on no match.
     fn select_timewindow(&self, route: &AgentRoute) -> crate::router::UpstreamProvider {
         let now = local_hhmm();
         let now_min = hhmm_minutes(&now).unwrap_or(0);
@@ -276,7 +276,7 @@ impl StrategyEngine {
         route.candidates[0].clone()
     }
 
-    /// quota：主选当日用量超阈值 → 按 failover 语义下沉备用；未超 → 主选。
+    /// quota: primary's same-day usage over threshold → sink to backups (failover semantics); under → primary.
     async fn select_quota(
         &self,
         store: &Store,
@@ -310,7 +310,7 @@ impl StrategyEngine {
         Self::primary(route)
     }
 
-    /// 回写一次真实上游尝试的结果（forward 层每尝试调用一次）。
+    /// Feed back the result of one real upstream attempt (called by the forward layer once per attempt).
     pub async fn record(&self, agent: &str, provider_id: &str, success: bool) {
         let b = self.breaker(agent, provider_id).await;
         if success {
@@ -392,20 +392,20 @@ mod tests {
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
 
-        // 主选连续失败达阈值 → 下沉备用
+        // Primary hits the consecutive-failure threshold → sink to backup
         for _ in 0..4 {
             engine.record("claude", "a", false).await;
         }
         assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "b");
 
-        // 备用也熔断 → 兜底回主选（真实上游失败语义）
+        // Backup also open → fall back to the primary (real upstream failure semantics)
         for _ in 0..4 {
             engine.record("claude", "b", false).await;
         }
         assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "a");
 
-        // 主选恢复（timeout=0 立即半开 + 成功转 closed）
-        // 直接再造新引擎验证恢复路径：成功记录清零连续失败
+        // Primary recovery (timeout=0 goes HalfOpen immediately + success flips to closed)
+        // Build a fresh engine to exercise the recovery path: a success record clears consecutive failures
         let engine2 = StrategyEngine::new();
         engine2.record("claude", "a", false).await;
         engine2.record("claude", "a", true).await;
@@ -425,13 +425,13 @@ mod tests {
             vec![candidate("a", 3, None), candidate("b", 1, None)],
         );
 
-        // 同会话粘住
+        // Same session stays sticky
         let first = engine.select(&s, &r, Some("sess-1")).await.unwrap().id;
         for _ in 0..5 {
             assert_eq!(engine.select(&s, &r, Some("sess-1")).await.unwrap().id, first);
         }
 
-        // 新会话按权重环前进：权重 3:1 下 4 个新会话应 3 次 a、1 次 b
+        // New sessions advance on the weighted ring: with weights 3:1, 4 new sessions should pick a 3 times, b once
         let mut counts = std::collections::HashMap::new();
         for i in 0..4 {
             let id = engine
@@ -455,7 +455,7 @@ mod tests {
         );
         let sticky = engine.select(&s, &r, Some("s")).await.unwrap().id;
 
-        // 粘住的候选熔断 → 同会话改派到另一个
+        // Sticky candidate trips its breaker → same session is reassigned to another
         for _ in 0..4 {
             engine.record("claude", &sticky, false).await;
         }
@@ -467,7 +467,7 @@ mod tests {
     async fn timewindow_matches_by_priority_and_falls_back() {
         let engine = StrategyEngine::new();
         let s = store();
-        // 囊括全天的窗口放到候选 b；a 无窗口 → 命中 b
+        // Candidate b holds an all-day window; a has none → b matches
         let r = route(
             StrategyType::Timewindow,
             vec![
@@ -477,7 +477,7 @@ mod tests {
         );
         assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "b");
 
-        // 所有窗口都不含当下（如未来一分钟的窄窗）→ 回主选
+        // No window contains the current time (e.g. a narrow window a minute ahead) → back to primary
         let (s2, e2) = narrow_future_window();
         let r2 = route(
             StrategyType::Timewindow,
@@ -489,14 +489,14 @@ mod tests {
         assert_eq!(engine.select(&s, &r2, None).await.unwrap().id, "a");
     }
 
-    /// 构造一个当前本地时间必然不在其中的 [start,end) 窗口（now+2 到 now+3 分钟）。
+    /// Build an [start,end) window guaranteed not to contain the current local time (now+2 to now+3 minutes).
     fn narrow_future_window() -> (&'static str, &'static str) {
-        // 时钟推进不影响断言成立性：窗口只含未来 1 分钟内两个刻度，
-        // 测试在同分钟内完成时 now < start 恒成立。
+        // Clock drift does not affect the assertions: the window holds only two marks within
+        // the coming minute, so as long as the test finishes within the same minute, now < start always holds.
         let now_min = hhmm_minutes(&local_hhmm()).unwrap();
         let s = now_min + 2;
         let e = now_min + 3;
-        // 跨零点绕回仍是合法窗口；格式化为 HH:MM 静态字符串
+        // Midnight wraparound remains a valid window; format as static HH:MM strings
         let fmt = |m: u32| {
             let m = m % (24 * 60);
             format!("{:02}:{:02}", m / 60, m % 60)
@@ -508,7 +508,7 @@ mod tests {
     async fn timewindow_supports_overnight_window() {
         let now = local_hhmm();
         let now_min = hhmm_minutes(&now).unwrap();
-        // 跨零点窗口 [23:00, 06:00]：now 在 23:00 后或 06:00 前必命中
+        // Overnight window [23:00, 06:00]: now after 23:00 or before 06:00 must match
         let late = now_min >= 23 * 60;
         let early = now_min <= 6 * 60;
         assert_eq!(in_window(now_min, "23:00", "06:00"), late || early);
@@ -541,10 +541,10 @@ mod tests {
         );
         r.config = Some(r#"{"limit": 5, "unit": "requests"}"#.into());
 
-        // 未超限 → 主选
+        // Under the limit → primary
         assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "a");
 
-        // 主选记满 5 条 → 超限下沉备用
+        // Primary records 5 rows → over the limit, sink to backup
         for _ in 0..5 {
             s.record_usage(&usage_row("a")).unwrap();
         }
@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(hhmm_minutes("24:00"), None);
         assert!(in_window(600, "09:00", "18:00"));
         assert!(!in_window(100, "09:00", "18:00"));
-        // 跨零点
+        // Crossing midnight
         assert!(in_window(60, "23:00", "06:00"));
         assert!(in_window(23 * 60 + 30, "23:00", "06:00"));
         assert!(!in_window(12 * 60, "23:00", "06:00"));

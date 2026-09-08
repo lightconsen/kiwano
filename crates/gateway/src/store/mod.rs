@@ -88,14 +88,14 @@ CREATE TABLE IF NOT EXISTS provider_health (
 );
 "#;
 
-/// v2: unit for the user-entered period cap (费用预警 / 环形百分比，tech.md §2.4 A).
+/// v2: unit for the user-entered period cap (spending alerts / ring percentage, tech.md §2.4 A).
 /// NULL rows predate the column and are read as 'requests'.
 const MIGRATION_V2: &str = r#"
 ALTER TABLE providers ADD COLUMN limit_unit TEXT
     CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens','cny'));
 "#;
 
-/// v3: extra API keys per provider (spec §4.1 P1 多 Key 轮询).
+/// v3: extra API keys per provider (spec §4.1 P1 multi-key rotation).
 /// providers.api_key stays the primary key of the pool; these rotate after it.
 const MIGRATION_V3: &str = r#"
 CREATE TABLE IF NOT EXISTS api_keys (
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider_id);
 "#;
 
-/// v4: Gemini protocol flavor (P1 Gemini CLI 接管). CHECK constraints can't be
+/// v4: Gemini protocol flavor (P1 Gemini CLI takeover). CHECK constraints can't be
 /// altered in place, so `providers` is rebuilt with the widened protocol set;
 /// bindings/keys survive via named-column copy (FKs off during the swap).
 const MIGRATION_V4: &str = r#"
@@ -291,7 +291,7 @@ pub struct PlaceholderKey {
     pub created_at: String,
 }
 
-/// One extra API key of a provider (spec §4.1 P1 多 Key 轮询).
+/// One extra API key of a provider (spec §4.1 P1 multi-key rotation).
 /// `providers.api_key` is the pool's primary; these rotate after it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApiKeyRow {
@@ -341,7 +341,7 @@ impl UsageTotals {
     }
 }
 
-/// One health-probe verdict (prober → `provider_health` 表).
+/// One health-probe verdict (prober → `provider_health` table).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderHealth {
     pub provider_id: String,
@@ -699,7 +699,7 @@ impl Store {
         Ok(out)
     }
 
-    // ---- extra API keys (spec §4.1 P1 多 Key 轮询) -----------------------
+    // ---- extra API keys (spec §4.1 P1 multi-key rotation) -----------------------
 
     pub fn list_api_keys(&self, provider_id: &str) -> Result<Vec<ApiKeyRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -795,7 +795,7 @@ impl Store {
     }
 
     /// Aggregated totals for one provider, optionally since a timestamp.
-    /// Quota 策略（tech.md §4.7 quota）读取。
+    /// Read by the quota strategy (tech.md §4.7 quota).
     pub fn usage_totals_for_provider(
         &self,
         provider_id: &str,
@@ -832,7 +832,7 @@ impl Store {
                 last_latency_ms,
                 now_rfc3339(),
                 if status == "down" {
-                    // 连击计数在同一事务里自增：读旧值 +1（down）或清零（healthy）
+                    // The streak counter increments in the same transaction: read the old value +1 (down) or reset to 0 (healthy)
                     conn.query_row(
                         "SELECT COALESCE((SELECT consecutive_failures FROM provider_health WHERE provider_id = ?1), 0) + 1",
                         params![provider_id],
@@ -847,7 +847,7 @@ impl Store {
         Ok(())
     }
 
-    /// Current health rows (UI 展示与诊断用)。
+    /// Current health rows (for UI display and diagnostics).
     pub fn list_provider_health(&self) -> Result<Vec<ProviderHealth>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(

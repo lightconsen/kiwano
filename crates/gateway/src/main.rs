@@ -107,7 +107,7 @@ async fn main() {
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
-    // 后台健康探测（tech.md §4.7 failover 地基）：30s 一轮，写 provider_health。
+    // Background health probing (tech.md §4.7 failover groundwork): one round every 30s, writes provider_health.
     tokio::spawn(kiwano_gateway::strategy::prober::run(
         state.store.clone(),
         kiwano_gateway::strategy::prober::PROBE_INTERVAL,

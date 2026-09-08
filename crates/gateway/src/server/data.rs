@@ -128,9 +128,9 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     .await
 }
 
-/// Roundrobin 会话标识（tech.md §4.7：会话粒度轮转以保住上游 prompt
-/// cache）：显式 `x-kw-session` 头优先，其次 Anthropic body 的
-/// `metadata.user_id`，再退到 body 顶层 `session_id`。
+/// Roundrobin session identity (tech.md §4.7: session-granularity rotation to
+/// preserve the upstream prompt cache): the explicit `x-kw-session` header
+/// wins, then the Anthropic body's `metadata.user_id`, then body top-level `session_id`.
 pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<String> {
     if let Some(v) = headers.get("x-kw-session").and_then(|v| v.to_str().ok()) {
         let v = v.trim();

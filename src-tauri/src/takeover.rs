@@ -7,9 +7,10 @@
 //! never overwrites the first backup, so the user's original config can be
 //! restored no matter how many takeovers happen in a row.
 //!
-//! The MVP covers claude (settings.json), codex (config.toml + auth.json),
+//! The MVP covered claude (settings.json), codex (config.toml + auth.json),
 //! and gemini (~/.gemini/.env; inbound protocol in the gateway's
-//! protocol.rs /v1beta branch).
+//! protocol.rs /v1beta branch). The expanded registry adds grokbuild
+//! (~/.grok/config.toml, selected model's base_url/api_key/api_backend).
 
 use std::path::Path;
 
@@ -28,6 +29,7 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
             home.join(".codex").join("auth.json"),
         ]),
         "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
+        "grokbuild" => Ok(vec![home.join(".grok").join("config.toml")]),
         other => Err(format!("unknown agent: {other}")),
     }
 }
@@ -119,6 +121,7 @@ fn rewrite(
         "codex" if path.ends_with("config.toml") => rewrite_codex_toml(original, base, data_port),
         "codex" => rewrite_codex_auth(original, key),
         "gemini" => rewrite_gemini_env(original, base, data_port, key),
+        "grokbuild" => rewrite_grok_toml(original, base, data_port, key),
         _ => Err("unsupported agent".into()),
     }
 }
@@ -217,6 +220,108 @@ fn rewrite_gemini_env(original: &str, base: &str, port: u16, key: &str) -> Resul
     }
     let mut s = out.join("\n");
     if original.is_empty() || original.ends_with('\n') {
+        s.push('\n');
+    }
+    Ok(s)
+}
+
+/// config.toml (Grok Build): point the selected model's base_url at the
+/// gateway (/v1), inject the placeholder api_key and pin api_backend to
+/// "responses" — the xAI Responses wire reaches the gateway's OpenAI family.
+/// Refuse when there is no [models].default / [model."…"] base_url to rewrite
+/// (official xAI OAuth setup) — same semantics as codex without base_url.
+fn rewrite_grok_toml(original: &str, base: &str, port: u16, key: &str) -> Result<String, String> {
+    let target = format!("{base}:{port}/v1");
+
+    // Pass 1: the selected profile name from the [models] table (`default = "…"`)
+    let mut profile: Option<String> = None;
+    let mut section = String::new();
+    for line in original.lines() {
+        let t = line.trim();
+        if t.starts_with('[') && t.ends_with(']') {
+            section = t[1..t.len() - 1].trim().to_string();
+            continue;
+        }
+        if section == "models" {
+            if let Some((k, v)) = t.split_once('=') {
+                if k.trim() == "default" {
+                    let v = v.trim().trim_matches('"').trim();
+                    if !v.is_empty() {
+                        profile = Some(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let Some(profile) = profile else {
+        return Err(
+            "config.toml 中没有 [models] default —— Grok Build 可能还在使用官方 xAI 登录，请先配置自定义模型再接管"
+                .into(),
+        );
+    };
+
+    // Pass 2: rewrite base_url / api_key / api_backend inside the selected
+    // [model."<profile>"] table; other tables and rows stay untouched
+    let selected = format!("model.\"{profile}\"");
+    let unquoted = format!("model.{profile}");
+    let mut found_base = false;
+    let mut found_key = false;
+    let mut found_backend = false;
+    let mut base_idx: Option<usize> = None;
+    let mut section = String::new();
+    let mut out: Vec<String> = Vec::new();
+    for line in original.lines() {
+        let t = line.trim();
+        if t.starts_with('[') && t.ends_with(']') {
+            section = t[1..t.len() - 1].trim().to_string();
+            out.push(line.to_string());
+            continue;
+        }
+        if section == selected || section == unquoted {
+            if let Some((k, _)) = t.split_once('=') {
+                match k.trim() {
+                    "base_url" => {
+                        found_base = true;
+                        base_idx = Some(out.len());
+                        out.push(format!("base_url = \"{target}\""));
+                        continue;
+                    }
+                    "api_key" => {
+                        found_key = true;
+                        out.push(format!("api_key = \"{key}\""));
+                        continue;
+                    }
+                    "api_backend" => {
+                        found_backend = true;
+                        out.push("api_backend = \"responses\"".into());
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out.push(line.to_string());
+    }
+    if !found_base {
+        return Err(format!(
+            "config.toml 中没有 [model.\"{profile}\"] 的 base_url —— 请先为 Grok Build 配置一个自定义模型再接管"
+        ));
+    }
+    // Missing api_key / api_backend rows are inserted right after base_url
+    // (they are optional in xAI's config when the profile relies on env_key)
+    let mut extra = Vec::new();
+    if !found_key {
+        extra.push(format!("api_key = \"{key}\""));
+    }
+    if !found_backend {
+        extra.push("api_backend = \"responses\"".into());
+    }
+    if let Some(i) = base_idx {
+        out.splice(i + 1..i + 1, extra);
+    }
+
+    let mut s = out.join("\n");
+    if original.ends_with('\n') {
         s.push('\n');
     }
     Ok(s)
@@ -404,5 +509,101 @@ mod tests {
             env,
             "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\nGEMINI_API_KEY=kw-ag-gemini-abcd\n"
         );
+    }
+
+    #[test]
+    fn grok_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let grok_dir = home.join(".grok");
+        std::fs::create_dir_all(&grok_dir).unwrap();
+        std::fs::write(
+            grok_dir.join("config.toml"),
+            r#"theme = "dark"
+[models]
+default = "custom-grok"
+
+[model."custom-grok"]
+name = "My Grok"
+model = "grok-4.5"
+base_url = "https://api.x.ai/v1"
+api_key = "xai-old"
+api_backend = "chat"
+context_window = 131072
+
+[model."other"]
+name = "Other"
+model = "grok-3"
+base_url = "https://relay.example.com/v1"
+"#,
+        )
+        .unwrap();
+
+        enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).unwrap();
+        let toml = std::fs::read_to_string(grok_dir.join("config.toml")).unwrap();
+        // selected model points at the gateway; backend pinned to responses
+        assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
+        assert!(toml.contains("api_key = \"kw-ag-grokbuild-abcd\""));
+        assert!(toml.contains("api_backend = \"responses\""));
+        // rows outside the selected model table stay untouched
+        assert!(toml.contains("https://relay.example.com/v1"));
+        assert!(toml.contains("theme = \"dark\""));
+
+        disable(&aux, "grokbuild", &home).unwrap();
+        // restore = write back byte for byte
+        assert_eq!(
+            std::fs::read_to_string(grok_dir.join("config.toml")).unwrap(),
+            r#"theme = "dark"
+[models]
+default = "custom-grok"
+
+[model."custom-grok"]
+name = "My Grok"
+model = "grok-4.5"
+base_url = "https://api.x.ai/v1"
+api_key = "xai-old"
+api_backend = "chat"
+context_window = 131072
+
+[model."other"]
+name = "Other"
+model = "grok-3"
+base_url = "https://relay.example.com/v1"
+"#
+        );
+        assert!(aux.load_takeover_backup("grokbuild").is_none());
+    }
+
+    #[test]
+    fn grok_missing_api_key_and_backend_are_inserted() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let grok_dir = home.join(".grok");
+        std::fs::create_dir_all(&grok_dir).unwrap();
+        std::fs::write(
+            grok_dir.join("config.toml"),
+            "[models]\ndefault = \"p\"\n\n[model.p]\nname = \"P\"\nmodel = \"grok-4.5\"\nbase_url = \"https://api.x.ai/v1\"\nenv_key = \"XAI_API_KEY\"\ncontext_window = 131072\n",
+        )
+        .unwrap();
+
+        enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).unwrap();
+        let toml = std::fs::read_to_string(grok_dir.join("config.toml")).unwrap();
+        assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
+        assert!(toml.contains("api_key = \"kw-ag-grokbuild-abcd\""));
+        assert!(toml.contains("api_backend = \"responses\""));
+        assert!(toml.contains("env_key = \"XAI_API_KEY\"")); // untouched row preserved
+    }
+
+    #[test]
+    fn grok_official_oauth_config_is_rejected() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let grok_dir = home.join(".grok");
+        std::fs::create_dir_all(&grok_dir).unwrap();
+        // official xAI login: no [models]/[model.*] tables at all
+        std::fs::write(grok_dir.join("config.toml"), "theme = \"dark\"\n").unwrap();
+        assert!(enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).is_err());
+        // no backup left behind on failure (escape hatch stays clean)
+        assert!(aux.load_takeover_backup("grokbuild").is_none());
     }
 }

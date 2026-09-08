@@ -10,6 +10,7 @@ const CHIPS: { id: "all" | CatalogEntry["tag"]; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "official", label: "官方" },
   { id: "aggregate", label: "聚合" },
+  { id: "third", label: "三方" },
   { id: "free", label: "有免费额度" },
 ];
 
@@ -21,6 +22,8 @@ function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
       return { background: "oklch(0.8 0.15 85 / .12)", color: "oklch(0.82 0.13 85)" };
     case "aggregate":
       return { background: "oklch(0.62 0.16 300 / .18)", color: "oklch(0.75 0.14 300)" };
+    case "third":
+      return { background: "oklch(0.62 0.14 250 / .16)", color: "oklch(0.72 0.12 250)" };
     case "local":
       return { background: "var(--surface2)", color: "var(--mut)" };
   }

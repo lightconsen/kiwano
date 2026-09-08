@@ -118,11 +118,13 @@ export interface CatalogEntry {
   logo_color: string;
   logo_border?: boolean;
   /** Tag category shown on the card's top-right label (Models page chip filter) */
-  tag: "official" | "aggregate" | "free" | "local";
+  tag: "official" | "aggregate" | "third" | "free" | "local";
   tag_label: string;
   rating: number;
   /** Endpoint pre-filled into the add modal */
   endpoint: string;
+  /** Protocol fingerprint of the endpoint (drives the add-modal protocol selector) */
+  protocol: Protocol;
   /** Price line: ¥4 /M in · ¥16 /M out etc. */
   price_line: string;
   price_note?: string;

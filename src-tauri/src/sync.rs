@@ -76,8 +76,13 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         // never synced → bundled fallback
         let fallback = vm::load_catalog(&aux);
-        assert_eq!(fallback.total, 42);
-        assert!(!fallback.entries.is_empty());
+        assert_eq!(fallback.total as usize, fallback.entries.len());
+        assert!(fallback.entries.len() > 100);
+        // every bundled entry carries its protocol fingerprint
+        assert!(fallback
+            .entries
+            .iter()
+            .all(|e| ["openai", "anthropic", "gemini"].contains(&e.protocol.as_str())));
 
         // cache written → cache wins
         let payload = serde_json::to_string(&vm::CatalogListVm {

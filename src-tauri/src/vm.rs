@@ -416,6 +416,10 @@ pub struct CatalogEntryVm {
     pub logo_color: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logo_border: bool,
+    /// Protocol fingerprint (anthropic | openai | gemini); entries predate the
+    /// multi-protocol catalog, so older payloads default to openai.
+    #[serde(default = "default_catalog_protocol")]
+    pub protocol: String,
     pub tag: String,
     pub tag_label: String,
     pub rating: f64,
@@ -436,6 +440,10 @@ pub struct CatalogEntryVm {
 pub struct CatalogListVm {
     pub total: i64,
     pub entries: Vec<CatalogEntryVm>,
+}
+
+fn default_catalog_protocol() -> String {
+    "openai".to_string()
 }
 
 /// Result of a manual/startup Hub sync (for UI feedback).
@@ -1639,8 +1647,11 @@ pub fn load_catalog(aux: &Aux) -> CatalogListVm {
     }
     let entries: Vec<CatalogEntryVm> =
         serde_json::from_str(include_str!("catalog.json")).expect("catalog.json is valid");
-    // Hub total (42) is the catalog listing size; bundled set is the top picks.
-    CatalogListVm { total: 42, entries }
+    // Total mirrors the bundled listing size; a Hub sync replaces both.
+    CatalogListVm {
+        total: entries.len() as i64,
+        entries,
+    }
 }
 
 #[cfg(test)]

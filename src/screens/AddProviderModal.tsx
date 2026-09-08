@@ -100,7 +100,7 @@ export default function AddProviderModal({
     }
     setMode(preset ? "shelf" : "custom");
     setName(preset?.name ?? "");
-    setProtocol("openai"); // catalog entries all use OpenAI-compatible endpoints
+    setProtocol(preset?.protocol ?? "openai"); // catalog entries carry their protocol fingerprint
     setApiKey(preset ? "sk-9f3e21a7c8d4b6e05a12" : "");
     setEndpoint(preset?.endpoint ?? "");
     setModel(preset?.models[0] ?? "");

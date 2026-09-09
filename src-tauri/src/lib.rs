@@ -245,8 +245,19 @@ fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
 }
 
 #[tauri::command]
-fn get_dashboard(state: State<AppState>, window: String) -> Result<vm::DashboardVm, String> {
-    vm::build_dashboard(&state.store, &state.aux, &window)
+fn get_dashboard(
+    state: State<AppState>,
+    window: String,
+    provider_id: Option<String>,
+    agent: Option<String>,
+) -> Result<vm::DashboardVm, String> {
+    vm::build_dashboard(
+        &state.store,
+        &state.aux,
+        &window,
+        provider_id.as_deref(),
+        agent.as_deref(),
+    )
 }
 
 #[tauri::command]

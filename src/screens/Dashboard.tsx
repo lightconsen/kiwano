@@ -102,11 +102,30 @@ function Delta({ pct, invert }: { pct: number; invert?: boolean }) {
 
 export default function Dashboard() {
   const [win, setWin] = useState<DashboardWindow>("7d");
+  // "all" = no filter; otherwise the provider id / agent id
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [agentFilter, setAgentFilter] = useState("all");
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
-    api.getDashboard(win).then(setData);
-  }, [win]);
+    api
+      .getDashboard(
+        win,
+        providerFilter === "all" ? undefined : providerFilter,
+        agentFilter === "all" ? undefined : agentFilter,
+      )
+      .then((d) => {
+        setData(d);
+        // A window switch can drop the selected provider/agent from the
+        // window's active set — fall back to All instead of a dead selection
+        if (providerFilter !== "all" && !d.filter_providers.some((p) => p.id === providerFilter)) {
+          setProviderFilter("all");
+        }
+        if (agentFilter !== "all" && !d.filter_agents.some((a) => a.id === agentFilter)) {
+          setAgentFilter("all");
+        }
+      });
+  }, [win, providerFilter, agentFilter]);
 
   if (!data) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
 
@@ -126,20 +145,32 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
-        <Select defaultValue="all">
+        {/* Filter options come from the window's active set (traffic in the
+            window), independent of the current selection */}
+        <Select value={providerFilter} onValueChange={(v) => setProviderFilter(v ?? "all")}>
           <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All providers</SelectItem>
+            {data.filter_providers.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <Select defaultValue="all">
+        <Select value={agentFilter} onValueChange={(v) => setAgentFilter(v ?? "all")}>
           <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All agents</SelectItem>
+            {data.filter_agents.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                {a.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <span className="ml-auto text-[11px] text-mut">Data stays in local SQLite</span>

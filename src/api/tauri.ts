@@ -52,7 +52,13 @@ export const tauriApi: KiwanoApi = {
 
   listCatalog: () => invoke<CatalogList>("list_catalog"),
 
-  getDashboard: (window: DashboardWindow) => invoke<DashboardData>("get_dashboard", { window }),
+  // Invoke args must be camelCase to reach the command's snake_case params
+  getDashboard: (window: DashboardWindow, providerId?: string, agentId?: string) =>
+    invoke<DashboardData>("get_dashboard", {
+      window,
+      providerId: providerId ?? null,
+      agentId: agentId ?? null,
+    }),
 
   getSettings: () => invoke<AppSettings>("get_settings"),
   syncHub: () => invoke<HubSyncReport>("sync_hub"),

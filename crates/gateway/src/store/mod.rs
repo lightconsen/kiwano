@@ -1011,24 +1011,25 @@ impl Store {
     /// WHERE fragment + positional params shared by usage-table aggregations
     /// (agent / provider / time window). Fragment indexes are 1-based and
     /// ordered, so callers splice it after `WHERE 1=1` and bind via
-    /// `params_from_iter`.
-    fn usage_filters<'a>(
-        agent: Option<&'a str>,
-        provider_id: Option<&'a str>,
-        since: Option<&'a str>,
-    ) -> (String, Vec<&'a dyn rusqlite::ToSql>) {
+    /// `params_from_iter`. Params are owned: binding trait-object lifetimes
+    /// to the borrowed inputs fights the borrows inside `if let` scopes.
+    fn usage_filters(
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+    ) -> (String, Vec<String>) {
         let mut cond = String::new();
-        let mut params: Vec<&'a dyn rusqlite::ToSql> = Vec::new();
+        let mut params: Vec<String> = Vec::new();
         if let Some(a) = agent {
-            params.push(a);
+            params.push(a.to_string());
             cond.push_str(&format!(" AND agent = ?{}", params.len()));
         }
         if let Some(p) = provider_id {
-            params.push(p);
+            params.push(p.to_string());
             cond.push_str(&format!(" AND provider_id = ?{}", params.len()));
         }
         if let Some(s) = since {
-            params.push(s);
+            params.push(s.to_string());
             cond.push_str(&format!(" AND ts >= ?{}", params.len()));
         }
         (cond, params)
@@ -1042,7 +1043,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<UsageTotals> {
-        let (cond, params) = usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
@@ -1134,7 +1135,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<ProviderUsage>> {
-        let (cond, params) = usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT provider_id, COUNT(*), COALESCE(SUM(input_tokens),0),
@@ -1170,7 +1171,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<DailyUsage>> {
-        let (cond, params) = usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT SUBSTR(ts, 1, 10) AS day, COUNT(*), COALESCE(SUM(input_tokens),0),
@@ -1312,7 +1313,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<i64> {
-        let (cond, params) = usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n = conn.query_row(
             &format!("SELECT COUNT(*) FROM request_logs WHERE 1=1{cond}"),

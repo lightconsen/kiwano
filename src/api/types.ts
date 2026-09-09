@@ -174,6 +174,10 @@ export interface DashboardData {
   trend: TrendPoint[];
   by_provider: { name: string; color: string; pct: number; cost: number }[];
   by_agent: { agent: AgentId; label: string; requests: number; tokens: string; cost: number }[];
+  /** Filter select options: providers/agents with traffic in the window,
+      computed independent of the active filter */
+  filter_providers: { id: string; label: string }[];
+  filter_agents: { id: string; label: string }[];
 }
 
 export interface TakeoverState {
@@ -372,7 +376,7 @@ export interface KiwanoApi {
       proves the protocol route exists (works without a key) */
   testEndpoint(protocol: Protocol, endpoint: string, apiKey?: string): Promise<ProbeReport>;
   listCatalog(): Promise<CatalogList>;
-  getDashboard(window: DashboardWindow): Promise<DashboardData>;
+  getDashboard(window: DashboardWindow, providerId?: string, agentId?: string): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   /** Fetch the Provider catalog from the Hub into the local cache (Models page prefers cache, falls back to static) */

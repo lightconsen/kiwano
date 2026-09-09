@@ -367,21 +367,23 @@ impl Aux {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         let mut sql =
             String::from("SELECT AVG(latency_ms) FROM usage WHERE latency_ms IS NOT NULL");
-        let mut params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+        // Owned params: binding trait objects to borrowed &str inside `if let`
+        // scopes fights the borrows (same as Store::usage_filters)
+        let mut params: Vec<String> = Vec::new();
         if let Some(p) = provider {
-            params.push(p);
+            params.push(p.to_string());
             sql.push_str(&format!(" AND provider_id = ?{}", params.len()));
         }
         if let Some(a) = agent {
-            params.push(a);
+            params.push(a.to_string());
             sql.push_str(&format!(" AND agent = ?{}", params.len()));
         }
         if let Some(f) = from {
-            params.push(f);
+            params.push(f.to_string());
             sql.push_str(&format!(" AND ts >= ?{}", params.len()));
         }
         if let Some(t) = to {
-            params.push(t);
+            params.push(t.to_string());
             sql.push_str(&format!(" AND ts < ?{}", params.len()));
         }
         let mut stmt = conn.prepare(&sql).ok()?;
@@ -561,6 +563,13 @@ pub struct AgentDistVm {
     pub cost: f64,
 }
 
+/// One select option of the dashboard's provider/agent filters.
+#[derive(Serialize)]
+pub struct FilterOptionVm {
+    pub id: String,
+    pub label: String,
+}
+
 #[derive(Serialize)]
 pub struct DashboardVm {
     pub window: String,
@@ -575,6 +584,11 @@ pub struct DashboardVm {
     pub trend: Vec<TrendVm>,
     pub by_provider: Vec<ProviderDistVm>,
     pub by_agent: Vec<AgentDistVm>,
+    /// Filter select options: providers/agents with traffic in the window,
+    /// computed independent of the active filter (otherwise the option list
+    /// would collapse to the current selection).
+    pub filter_providers: Vec<FilterOptionVm>,
+    pub filter_agents: Vec<FilterOptionVm>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2109,6 +2123,34 @@ pub fn build_dashboard(
         .unwrap_or(0);
     let latency_delta_pct = 0; // prev-window latency comparison lands with cost tables
 
+    // Filter select options: who has traffic in the window, independent of
+    // the active filter. The provider side reuses the same per-provider
+    // aggregation (query already orders by request count DESC); the agent
+    // side mirrors the by_agent loop without its provider narrowing.
+    let filter_providers: Vec<FilterOptionVm> = store
+        .usage_by_provider(None, None, Some(&since))
+        .map_err(e2s)?
+        .into_iter()
+        .filter(|pu| pu.totals.requests > 0)
+        .map(|pu| FilterOptionVm {
+            id: pu.provider_id.clone(),
+            label: name_by_id
+                .get(&pu.provider_id)
+                .cloned()
+                .unwrap_or(pu.provider_id.clone()),
+        })
+        .collect();
+    let filter_agents: Vec<FilterOptionVm> = AGENTS
+        .iter()
+        .filter_map(|(name, label)| {
+            let t = store.usage_totals(Some(name), None, Some(&since)).ok()?;
+            (t.requests > 0).then(|| FilterOptionVm {
+                id: name.to_string(),
+                label: label.to_string(),
+            })
+        })
+        .collect();
+
     Ok(DashboardVm {
         window: window.to_string(),
         requests,
@@ -2122,6 +2164,8 @@ pub fn build_dashboard(
         trend,
         by_provider,
         by_agent,
+        filter_providers,
+        filter_agents,
     })
 }
 

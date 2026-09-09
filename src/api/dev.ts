@@ -396,6 +396,9 @@ const dashboard7d: DashboardData = {
     { agent: "gemini", label: "Gemini CLI", requests: 77, tokens: "0.5M", cost: 3.0 },
     { agent: "opencode", label: "OpenCode", requests: 12, tokens: "0.1M", cost: 0.4 },
   ],
+  // getDashboard always derives the real option lists from by_provider/by_agent
+  filter_providers: [],
+  filter_agents: [],
 };
 
 const dashboards: Record<DashboardWindow, DashboardData> = {
@@ -826,9 +829,30 @@ export const devApi: KiwanoApi = {
     };
   },
 
-  async getDashboard(window: DashboardWindow): Promise<DashboardData> {
+  async getDashboard(window: DashboardWindow, providerId?: string, agentId?: string): Promise<DashboardData> {
     await delay();
-    return dashboards[window];
+    const base = dashboards[window];
+    // Filter options mirror the backend: who has traffic in the window,
+    // independent of the active filter. Ids resolve through the provider
+    // list; by_provider labels are short display names, so unmatched ones
+    // fall back to the label itself as the id.
+    const filter_providers = base.by_provider.map((p) => ({
+      id: providers.find((x) => x.name === p.name)?.id ?? p.name,
+      label: p.name,
+    }));
+    const filter_agents = base.by_agent.map((a) => ({ id: a.agent, label: a.label }));
+    const data: DashboardData = { ...base, filter_providers, filter_agents };
+    // The mock narrows the breakdowns only (headline stats stay fixture-wide)
+    if (providerId) {
+      const name = providers.find((x) => x.id === providerId)?.name ?? providerId;
+      data.by_provider = base.by_provider
+        .filter((p) => p.name === name)
+        .map((p) => ({ ...p, pct: 100 }));
+    }
+    if (agentId) {
+      data.by_agent = base.by_agent.filter((a) => a.agent === agentId);
+    }
+    return data;
   },
 
   async getSettings(): Promise<AppSettings> {

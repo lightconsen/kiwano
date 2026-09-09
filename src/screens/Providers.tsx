@@ -223,10 +223,13 @@ function UsageCell({ p }: { p: Provider }) {
 }
 
 /** First grid cell: brand mark + name + endpoint subtitle. Shared by the All-tab
-    management rows and the agent-tab strategy rows. */
-function IdentityCell({ p }: { p: Provider }) {
+    management rows and the agent-tab strategy rows. The All tab badges the
+    collapsed is_current; agent tabs pass inUse to badge membership in that
+    agent's serving set only. */
+function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
   // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
   const brandIcon = iconForEndpoint(p.endpoint);
+  const showInUse = inUse ?? p.is_current;
   return (
     <div className="flex min-w-0 w-[34%] items-center gap-2.5">
       {brandIcon ? (
@@ -237,7 +240,7 @@ function IdentityCell({ p }: { p: Provider }) {
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-[13px] font-semibold">{p.name}</span>
-          {p.is_current && (
+          {showInUse && (
             <span className="rounded px-1.5 py-px text-[10px] font-medium" style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}>
               In use
             </span>
@@ -570,9 +573,12 @@ function BindingRow({
   // Unbinding the last candidate drops the tab back to the onboarding state.
   const unbind = () => api.removeAgentBinding(route.agent, b.provider_id).then(onChanged);
 
+  // Local "In use": serving this agent right now, not merely any agent
+  const inUse = p.serving_agents.includes(route.agent);
+
   return (
-    <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
-      <IdentityCell p={p} />
+    <div className={`row group flex h-[58px] items-center border-b border-line px-4${inUse ? " current" : ""}`}>
+      <IdentityCell p={p} inUse={inUse} />
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
 

@@ -74,6 +74,7 @@ const providers: Provider[] = [
     billing: "payg",
     enabled: true,
     agents: ["claude", "codex"],
+    serving_agents: [],
     is_current: true,
     agents_note: "2 agents",
     health: { state: "ok", latency_ms: 312 },
@@ -101,6 +102,7 @@ const providers: Provider[] = [
     plan_price: "¥49/mo",
     enabled: true,
     agents: ["claude"],
+    serving_agents: [],
     is_current: false,
     agents_note: "Failover queue",
     health: { state: "idle", latency_ms: 287 },
@@ -127,6 +129,7 @@ const providers: Provider[] = [
     billing: "payg",
     enabled: false,
     agents: [],
+    serving_agents: [],
     is_current: false,
     health: { state: "off", latency_ms: null, note: "Disabled" },
     usage: {
@@ -152,6 +155,7 @@ const providers: Provider[] = [
     billing: "unl",
     enabled: true,
     agents: ["gemini"],
+    serving_agents: [],
     is_current: false,
     status_badge: "Local",
     agents_note: "1 agent",
@@ -530,10 +534,12 @@ const agentRoutes: AgentRoute[] = [
     bindings: [bind("ollama", 0)],
   },
   {
+    // Kimi heads opencode (globally "In use") while standing by in claude's
+    // queue — exercises the agent tabs' local vs global "In use" badge.
     agent: "opencode",
     strategy: "single",
     config: null,
-    bindings: [bind("deepseek", 0)],
+    bindings: [bind("kimi", 0)],
   },
   {
     // Overnight window on the standby exercises the timewindow wraparound path.
@@ -579,6 +585,12 @@ function servingNow(): Set<string> {
     }
   }
   return out;
+}
+
+// vm::build_provider_vms derives ProviderVm.agents from the bindings; the mock
+// fixtures' static arrays drift from agentRoutes, so derive them the same way.
+function agentsOf(pid: string): string[] {
+  return agentRoutes.filter((r) => r.bindings.some((b) => b.provider_id === pid)).map((r) => r.agent);
 }
 
 // Mirror vm::build_provider_vms's failover-queue classification: a non-head
@@ -708,15 +720,20 @@ export const devApi: KiwanoApi = {
     const { backups } = standbyFlags();
     return providers
       .filter((p) => filter === "all" || p.agents.includes(filter))
-      .map((p) => ({
-        ...p,
-        is_current: p.agents.some((a) => serving.has(`${a}/${p.id}`)),
-        agents_note: backups.has(p.id)
-          ? "Failover queue"
-          : p.agents.length
-            ? `${p.agents.length} agent(s)`
-            : undefined,
-      }));
+      .map((p) => {
+        const agents = agentsOf(p.id);
+        return {
+          ...p,
+          agents: agents as Provider["agents"],
+          serving_agents: agents.filter((a) => serving.has(`${a}/${p.id}`)) as Provider["serving_agents"],
+          is_current: agents.some((a) => serving.has(`${a}/${p.id}`)),
+          agents_note: backups.has(p.id)
+            ? "Failover queue"
+            : agents.length
+              ? `${agents.length} agent(s)`
+              : undefined,
+        };
+      });
   },
 
   async addProvider(input: NewProviderInput): Promise<Provider> {
@@ -737,6 +754,8 @@ export const devApi: KiwanoApi = {
       billing: input.billing,
       enabled: true,
       agents: input.agents,
+      // Optimistic, mirrors vm::add_provider; listProviders recomputes
+      serving_agents: [],
       is_current: input.agents.length > 0,
       agents_note: input.agents.length
         ? `${input.agents.length} agent(s)`
@@ -762,7 +781,8 @@ export const devApi: KiwanoApi = {
     t.endpoint_note = endpointNote(input.protocol, t.endpoints);
     t.billing = input.billing;
     t.agents = [...input.agents];
-    t.is_current = t.agents.length > 0 && t.is_current;
+    t.serving_agents = t.agents.filter((a) => servingNow().has(`${a}/${t.id}`));
+    t.is_current = t.serving_agents.length > 0;
     t.agents_note = t.agents.length ? `${t.agents.length} agent(s)` : undefined;
     return t;
   },
@@ -778,10 +798,14 @@ export const devApi: KiwanoApi = {
     const target = providers.find((p) => p.id === id);
     if (!target) return;
     target.enabled = true;
-    target.is_current = target.agents.length > 0;
+    target.serving_agents = target.agents.filter((a) => servingNow().has(`${a}/${target.id}`));
+    target.is_current = target.serving_agents.length > 0;
     const peers = new Set(target.agents);
     for (const p of providers) {
-      if (p.id !== id && p.agents.some((a) => peers.has(a))) p.is_current = false;
+      if (p.id !== id && p.agents.some((a) => peers.has(a))) {
+        p.serving_agents = p.serving_agents.filter((a) => !peers.has(a));
+        p.is_current = p.serving_agents.length > 0;
+      }
     }
   },
 

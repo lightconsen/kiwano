@@ -88,7 +88,10 @@ export interface Provider {
   enabled: boolean;
   /** Derived from agent_bindings */
   agents: AgentId[];
-  /** The row currently in use after list sorting (kiwi left bar + "in use" badge) */
+  /** Agents this provider would serve a request for right now — the per-agent
+      slice behind the agent tabs' local "In use" badge */
+  serving_agents: AgentId[];
+  /** Collapsed across agents (the All tab badge); agent tabs use serving_agents */
   is_current: boolean;
   /** Badge text: backup #1 / local / … */
   status_badge?: string;

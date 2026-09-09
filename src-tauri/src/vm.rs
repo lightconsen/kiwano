@@ -467,6 +467,11 @@ pub struct ProviderVm {
     pub plan_price: Option<String>,
     pub enabled: bool,
     pub agents: Vec<String>,
+    /// Agents this provider would serve a request for right now (per-agent
+    /// slice of the strategy serving map). The All tab badges the collapsed
+    /// `is_current`; an agent tab badges membership here instead, so a
+    /// provider serving another agent does not read as in-use locally.
+    pub serving_agents: Vec<String>,
     pub is_current: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_badge: Option<String>,
@@ -847,6 +852,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         .into_iter()
         .map(|p| {
             let mut agents: Vec<String> = Vec::new();
+            let mut serving_agents: Vec<String> = Vec::new();
             let mut backup_for_any = false;
             for (agent, _) in primary.iter() {
                 let is_bound = bindings_by_agent
@@ -856,6 +862,9 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                     continue;
                 }
                 agents.push(agent.clone());
+                if serving.get(agent).is_some_and(|ids| ids.contains(&p.id)) {
+                    serving_agents.push(agent.clone());
+                }
                 if primary.get(agent).map(String::as_str) == Some(&p.id) {
                     continue;
                 }
@@ -881,9 +890,8 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 }
             }
             agents.sort();
-            let is_current = agents
-                .iter()
-                .any(|a| serving.get(a).is_some_and(|ids| ids.contains(&p.id)));
+            serving_agents.sort();
+            let is_current = !serving_agents.is_empty();
 
             let note = if backup_for_any {
                 Some("Failover queue".to_string())
@@ -910,6 +918,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 plan_price: None, // no price metadata until Hub price tables land
                 enabled: p.enabled,
                 agents,
+                serving_agents,
                 is_current,
                 status_badge: None,
                 agents_note: note,
@@ -1459,6 +1468,9 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         plan_price: None,
         enabled: true,
         agents: input.agents.clone(),
+        // Optimistic: strategy serving is only computed by build_provider_vms;
+        // the list refetch right after returns the real per-agent state.
+        serving_agents: vec![],
         is_current: !input.agents.is_empty(),
         status_badge: None,
         agents_note: (!input.agents.is_empty()).then(|| format!("{} agent(s)", input.agents.len())),
@@ -2372,7 +2384,9 @@ mod tests {
         let alpha = vms.iter().find(|v| v.id == "a1").unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(alpha.is_current);
+        assert_eq!(alpha.serving_agents, ["claude"]);
         assert!(!beta.is_current);
+        assert!(beta.serving_agents.is_empty());
         // Standby badges are gone; the failover-queue role lives in the note
         assert_eq!(beta.status_badge, None);
         assert_eq!(beta.agents_note.as_deref(), Some("Failover queue"));
@@ -2409,6 +2423,7 @@ mod tests {
         let vms = build_provider_vms(&s, &aux).unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(beta.is_current); // roundrobin serves every candidate
+        assert_eq!(beta.serving_agents, ["codex"]);
         assert_eq!(beta.status_badge, None);
         assert_eq!(beta.agents_note.as_deref(), Some("1 agent(s)"));
         let gamma = vms.iter().find(|v| v.id == "c1").unwrap();

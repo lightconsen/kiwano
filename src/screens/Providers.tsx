@@ -1,7 +1,7 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import { AGENTS, type AgentDetect, type AgentId, type Provider } from "../api/types";
@@ -283,10 +283,12 @@ function ProviderRow({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 whitespace-nowrap border border-line px-2.5 text-[11.5px]"
+            className="h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px] text-mut"
+            aria-label="Edit"
+            title="Edit provider"
             onClick={() => onEdit(p)}
           >
-            Edit
+            <Pencil className="h-3.5 w-3.5" />
           </Button>
         ) : (
           <Button

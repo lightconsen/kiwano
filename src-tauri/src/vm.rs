@@ -1081,6 +1081,40 @@ pub fn remove_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Re
     Ok(())
 }
 
+/// Copy another agent's whole route onto this one: strategy kind + config
+/// plus the ordered candidate list (priority, weight, time windows). The
+/// target's existing route is replaced; providers are shared, not moved —
+/// the source agent keeps its own bindings. Weights come over as-is
+/// (upsert_strategy directly, no roundrobin even-split reseed).
+pub fn apply_agent_route(store: &Store, target: &str, source: &str) -> Result<(), String> {
+    if target == source {
+        return Err("cannot copy an agent's route onto itself".to_string());
+    }
+    let strategy = store
+        .get_strategy(source)
+        .map_err(e2s)?
+        .ok_or_else(|| format!("{source} has no route to copy"))?;
+    let bindings = store.bindings_for_agent(source).map_err(e2s)?;
+    if bindings.is_empty() {
+        return Err(format!("{source} has no candidates to copy"));
+    }
+    store
+        .upsert_strategy(target, strategy.kind, strategy.config.as_deref())
+        .map_err(e2s)?;
+    for b in store.bindings_for_agent(target).map_err(e2s)? {
+        store.delete_binding(target, &b.provider_id).map_err(e2s)?;
+    }
+    for b in bindings {
+        store
+            .upsert_binding(&Binding {
+                agent: target.to_string(),
+                ..b
+            })
+            .map_err(e2s)?;
+    }
+    Ok(())
+}
+
 fn e2s(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -2193,6 +2227,63 @@ mod tests {
         assert!(!delta.is_current);
         assert_eq!(delta.status_badge.as_deref(), Some("Standby #1"));
         assert_eq!(delta.agents_note.as_deref(), Some("Failover queue"));
+    }
+
+    #[test]
+    fn apply_agent_route_copies_strategy_and_candidates() {
+        let s = store();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered)).unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Subscription)).unwrap();
+        // source: roundrobin with tuned weights and a windowed tail
+        s.upsert_strategy("codex", StrategyType::Roundrobin, None).unwrap();
+        s.upsert_binding(&Binding {
+            agent: "codex".into(),
+            provider_id: "a1".into(),
+            priority: 0,
+            weight: 60,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "codex".into(),
+            provider_id: "b1".into(),
+            priority: 1,
+            weight: 40,
+            win_start: Some("22:00".into()),
+            win_end: Some("06:00".into()),
+            enabled: true,
+        })
+        .unwrap();
+        // target: an unrelated failover route that gets replaced wholesale
+        s.upsert_strategy("gemini", StrategyType::Failover, None).unwrap();
+        s.upsert_binding(&Binding {
+            agent: "gemini".into(),
+            provider_id: "a1".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+
+        apply_agent_route(&s, "gemini", "gemini").unwrap_err();
+        apply_agent_route(&s, "gemini", "claude").unwrap_err(); // no route
+        apply_agent_route(&s, "gemini", "codex").unwrap();
+
+        let st = s.get_strategy("gemini").unwrap().unwrap();
+        assert_eq!(st.kind, StrategyType::Roundrobin);
+        let bs = s.bindings_for_agent("gemini").unwrap();
+        assert_eq!(bs.len(), 2);
+        assert_eq!((bs[0].provider_id.as_str(), bs[0].weight), ("a1", 60));
+        assert_eq!((bs[1].provider_id.as_str(), bs[1].weight), ("b1", 40));
+        // weights copied as-is, not re-seeded to an even split
+        assert_eq!(bs[1].win_start.as_deref(), Some("22:00"));
+        assert_eq!(bs[1].win_end.as_deref(), Some("06:00"));
+        // the source agent keeps its own bindings
+        assert_eq!(s.bindings_for_agent("codex").unwrap().len(), 2);
     }
 
     #[test]

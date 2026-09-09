@@ -99,6 +99,9 @@ export const tauriApi: KiwanoApi = {
   removeAgentBinding: (agent: AgentId, providerId: string) =>
     invoke<void>("remove_agent_binding", { agent, providerId }),
 
+  applyAgentRoute: (target: AgentId, source: AgentId) =>
+    invoke<void>("apply_agent_route", { target, source }),
+
   exportConfig: (path: string) => invoke<number>("export_config", { path }),
 
   importConfig: (path: string) =>

@@ -382,6 +382,8 @@ export interface KiwanoApi {
   addAgentBinding(agent: AgentId, providerId: string): Promise<void>;
   /** Remove one agent's binding of a provider (other agents keep theirs) */
   removeAgentBinding(agent: AgentId, providerId: string): Promise<void>;
+  /** Copy another agent's whole route (strategy + ordered candidates) onto this one, replacing what it had */
+  applyAgentRoute(target: AgentId, source: AgentId): Promise<void>;
   /** Export the config plan to the given path (including API keys); returns the Provider count */
   exportConfig(path: string): Promise<number>;
   /** Import a config plan from a file (merged by name+base_url); returns a count report */

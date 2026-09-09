@@ -381,6 +381,19 @@ fn remove_agent_binding(
     Ok(())
 }
 
+/// Copy another agent's whole route (strategy + ordered candidates) onto
+/// this one, replacing whatever it had.
+#[tauri::command]
+fn apply_agent_route(
+    state: State<AppState>,
+    target: String,
+    source: String,
+) -> Result<(), String> {
+    vm::apply_agent_route(&state.store, &target, &source)?;
+    after_mutation(&state);
+    Ok(())
+}
+
 /// Hub catalog sync (network IO → runs on the async command thread, no UI blocking).
 #[tauri::command(async)]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
@@ -552,6 +565,7 @@ pub fn run() {
             update_agent_binding,
             add_agent_binding,
             remove_agent_binding,
+            apply_agent_route,
             export_config,
             import_config,
             detect_agents,

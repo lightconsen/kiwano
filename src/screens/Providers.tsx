@@ -23,7 +23,7 @@ import {
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { iconForEndpoint } from "@/components/icons/infer";
-import StrategyPanel from "../components/StrategyPanel";
+import StrategyPanel, { CopyRouteRow } from "../components/StrategyPanel";
 import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
 // Agent filter segments — each renders the agent's brand logo (ported with
@@ -62,6 +62,7 @@ function AgentOnboarding({
   onTakeover,
   onAdd,
   bindSlot,
+  copySlot,
 }: {
   agent: AgentId;
   installed: boolean;
@@ -71,6 +72,8 @@ function AgentOnboarding({
   onAdd: () => void;
   /** Extra first-candidate entry (bind an existing provider) for the taken-over branch */
   bindSlot?: ReactNode;
+  /** Copy another agent's whole route — available right after Enable, before any binding exists */
+  copySlot?: ReactNode;
 }) {
   const meta = AGENTS.find((m) => m.id === agent)!;
   return (
@@ -90,6 +93,7 @@ function AgentOnboarding({
               Add provider
             </Button>
           </div>
+          {copySlot}
         </>
       ) : (
         <>
@@ -861,6 +865,11 @@ export default function Providers({
               />
             ) : undefined
           }
+          copySlot={
+            takenOver?.has(seg) ? (
+              <CopyRouteRow agent={seg} routes={routes ?? []} onChanged={refetch} />
+            ) : undefined
+          }
         />
       )}
 
@@ -873,8 +882,12 @@ export default function Providers({
         </div>
       )}
 
-      {/* Strategy config lives in the agent's own tab, only once it is taken over */}
-      {seg !== "all" && (takenOver?.has(seg) ?? false) && <StrategyPanel agent={seg} onChanged={refetch} />}
+      {/* Strategy config lives in the agent's own tab, only once it is taken over.
+          Routes come from here (single fetch): a route created while the panel is
+          mounted (first bind / copy) must show up without a tab switch. */}
+      {seg !== "all" && (takenOver?.has(seg) ?? false) && (
+        <StrategyPanel agent={seg} routes={routes} onChanged={refetch} />
+      )}
 
       {/* Single closing note. In a taken-over agent tab with a route it also
           carries the strategy context (the StrategyPanel select row has no

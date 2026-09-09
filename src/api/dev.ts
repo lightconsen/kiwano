@@ -938,6 +938,34 @@ export const devApi: KiwanoApi = {
     p.agents = p.agents.filter((a) => a !== agent);
   },
 
+  async applyAgentRoute(target: AgentId, source: AgentId): Promise<void> {
+    await delay();
+    if (target === source) throw new Error("cannot copy an agent's route onto itself");
+    const src = agentRoutes.find((r) => r.agent === source);
+    if (!src || src.bindings.length === 0) throw new Error(`${source} has no route to copy`);
+    const existing = agentRoutes.find((r) => r.agent === target);
+    const before = new Set(existing?.bindings.map((b) => b.provider_id) ?? []);
+    const copy: AgentRoute = {
+      agent: target,
+      strategy: src.strategy,
+      config: src.config,
+      bindings: src.bindings.map((b) => ({ ...b })),
+    };
+    const i = agentRoutes.findIndex((r) => r.agent === target);
+    if (i >= 0) agentRoutes[i] = copy;
+    else agentRoutes.push(copy);
+    // Mirror the backend: a provider's agents derive from its bindings
+    for (const pid of before) {
+      if (copy.bindings.some((b) => b.provider_id === pid)) continue;
+      const p = providers.find((x) => x.id === pid);
+      if (p) p.agents = p.agents.filter((a) => a !== target);
+    }
+    for (const b of copy.bindings) {
+      const p = providers.find((x) => x.id === b.provider_id);
+      if (p && !p.agents.includes(target)) p.agents.push(target);
+    }
+  },
+
   async exportConfig(_path: string): Promise<number> {
     await delay(300);
     return providers.length;

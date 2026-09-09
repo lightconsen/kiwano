@@ -4,8 +4,6 @@
 // the gateway's /reload.
 import { useCallback, useEffect, useState } from "react";
 
-import { ArrowDown, ArrowUp } from "lucide-react";
-
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -17,7 +15,7 @@ import {
 
 import { api } from "../api/client";
 import { AGENTS, type AgentId, type AgentRoute, type StrategyKind } from "../api/types";
-import { AgentChip, Logo } from "./bits";
+import StrategyIcon from "./StrategyIcon";
 
 const STRATEGIES: { id: StrategyKind; label: string; hint: string }[] = [
   { id: "single", label: "Single primary", hint: "Always use the primary provider" },
@@ -60,19 +58,9 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
     onChanged();
   };
 
-  const move = async (idx: number, dir: -1 | 1) => {
-    const ids = route.bindings.map((b) => b.provider_id);
-    const j = idx + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[idx], ids[j]] = [ids[j], ids[idx]];
-    await api.reorderAgentBindings(route.agent, ids);
-    onChanged();
-  };
-
   return (
     <div className="flex items-center gap-3 border-b border-line px-4 py-2">
-      <div className="flex w-[200px] flex-none items-center gap-2">
-        <AgentChip meta={meta} />
+      <div className="flex w-[200px] flex-none items-center">
         <Select
           value={route.strategy}
           onValueChange={(v) => setStrategy(v as StrategyKind)}
@@ -82,11 +70,17 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
             aria-label={`${meta.label} strategy`}
             className="h-7 min-w-[92px] bg-transparent px-1.5 text-[11.5px] dark:bg-transparent"
           >
-            <SelectValue />
+            {/* Static children replace the selected-item label: icon + name */}
+            <SelectValue>
+              <StrategyIcon id={route.strategy} className="size-3.5" />
+              <span>{STRATEGIES.find((s) => s.id === route.strategy)?.label}</span>
+            </SelectValue>
           </SelectTrigger>
-          <SelectContent>
+          {/* wider than the trigger: the longest label ("Weighted round-robin") must fit */}
+          <SelectContent className="min-w-[230px]">
             {STRATEGIES.map((s) => (
               <SelectItem key={s.id} value={s.id}>
+                <StrategyIcon id={s.id} className="size-3.5" />
                 {s.label}
               </SelectItem>
             ))}
@@ -124,45 +118,6 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
           </span>
         )}
       </div>
-
-      <div className="flex flex-none items-center gap-1.5">
-        {route.bindings.map((b, i) => (
-          <span
-            key={b.provider_id}
-            className="flex items-center gap-1 rounded-md border border-line py-0.5 pl-1 pr-0.5"
-            title={`Priority #${i} · weight ${b.weight}`}
-          >
-            <Logo char={b.logo_char} color={b.logo_color} size="w-4 h-4 text-[9px]" />
-            <span className="max-w-24 truncate text-[11px]">{b.provider_name}</span>
-            {i === 0 && (
-              <span className="rounded px-1 text-[9.5px] font-medium" style={{ background: "var(--kiwi-soft)", color: "var(--kiwi)" }}>
-                Primary
-              </span>
-            )}
-            <span className="flex flex-col">
-              <button
-                className="text-mut hover:text-ink disabled:opacity-30"
-                aria-label="Move up"
-                disabled={i === 0}
-                onClick={() => move(i, -1)}
-              >
-                <ArrowUp className="h-2.5 w-2.5" />
-              </button>
-              <button
-                className="text-mut hover:text-ink disabled:opacity-30"
-                aria-label="Move down"
-                disabled={i === route.bindings.length - 1}
-                onClick={() => move(i, 1)}
-              >
-                <ArrowDown className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          </span>
-        ))}
-        {route.bindings.length === 1 && (
-          <span className="text-[10.5px] text-mut">Single candidate · add providers to reorder</span>
-        )}
-      </div>
     </div>
   );
 }
@@ -182,7 +137,7 @@ export default function StrategyPanel({ agent }: { agent: AgentId }) {
   return (
     <section className="mt-1">
       <div className="flex h-8 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-        Agent routing strategies · auto-fallback on failure/quota, changes apply instantly
+        Agent routing strategy · the provider rows above are the candidates in priority order · changes apply instantly
       </div>
       {mine.map((r) => (
         <RouteRow key={r.agent} route={r} onChanged={refetch} />

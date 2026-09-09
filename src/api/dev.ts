@@ -475,7 +475,7 @@ async function delay(ms = 120) {
 
 // ── Agent routing strategies (tech.md §4.7) ──
 
-function bind(pid: string, priority: number): StrategyBinding {
+function bind(pid: string, priority: number, win?: [string, string]): StrategyBinding {
   const p = providers.find((x) => x.id === pid)!;
   return {
     provider_id: pid,
@@ -484,6 +484,8 @@ function bind(pid: string, priority: number): StrategyBinding {
     logo_color: p.logo_color,
     priority,
     weight: 1,
+    win_start: win?.[0] ?? null,
+    win_end: win?.[1] ?? null,
     enabled: p.enabled,
   };
 }
@@ -512,6 +514,13 @@ const agentRoutes: AgentRoute[] = [
     strategy: "single",
     config: null,
     bindings: [bind("deepseek", 0)],
+  },
+  {
+    // Overnight window on the standby exercises the timewindow wraparound path.
+    agent: "grokbuild",
+    strategy: "timewindow",
+    config: null,
+    bindings: [bind("deepseek", 0), bind("ollama", 1, ["22:00", "06:00"])],
   },
 ];
 
@@ -800,6 +809,29 @@ export const devApi: KiwanoApi = {
         return { ...b, priority: i };
       })
       .sort((a, b) => a.priority - b.priority);
+  },
+
+  async updateAgentBinding(
+    agent: AgentId,
+    providerId: string,
+    patch: { weight?: number; win_start?: string | null; win_end?: string | null },
+  ): Promise<void> {
+    await delay();
+    const b = strategyOf(agent).bindings.find((x) => x.provider_id === providerId);
+    if (!b) throw new Error(`provider ${providerId} is not bound to ${agent}`);
+    if (patch.weight != null) b.weight = Math.max(1, patch.weight);
+    // Both bounds are set/cleared together: a half window would never match.
+    if (patch.win_start !== undefined || patch.win_end !== undefined) {
+      const s = patch.win_start || null;
+      const e = patch.win_end || null;
+      if (s && e) {
+        b.win_start = s;
+        b.win_end = e;
+      } else {
+        b.win_start = null;
+        b.win_end = null;
+      }
+    }
   },
 
   async exportConfig(_path: string): Promise<number> {

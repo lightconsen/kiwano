@@ -78,6 +78,12 @@ export const tauriApi: KiwanoApi = {
   reorderAgentBindings: (agent: AgentId, providerIds: string[]) =>
     invoke<void>("reorder_agent_bindings", { agent, providerIds }),
 
+  updateAgentBinding: (
+    agent: AgentId,
+    providerId: string,
+    patch: { weight?: number; win_start?: string | null; win_end?: string | null },
+  ) => invoke<void>("update_agent_binding", { agent, providerId, ...patch }),
+
   exportConfig: (path: string) => invoke<number>("export_config", { path }),
 
   importConfig: (path: string) =>

@@ -343,6 +343,21 @@ fn reorder_agent_bindings(
     Ok(())
 }
 
+/// Patch one binding's strategy parameters (weight / local time window).
+#[tauri::command]
+fn update_agent_binding(
+    state: State<AppState>,
+    agent: String,
+    provider_id: String,
+    weight: Option<i64>,
+    win_start: Option<String>,
+    win_end: Option<String>,
+) -> Result<(), String> {
+    vm::update_agent_binding(&state.store, &agent, &provider_id, weight, win_start, win_end)?;
+    after_mutation(&state);
+    Ok(())
+}
+
 /// Hub catalog sync (network IO → runs on the async command thread, no UI blocking).
 #[tauri::command(async)]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
@@ -511,6 +526,7 @@ pub fn run() {
             get_agent_routes,
             update_agent_strategy,
             reorder_agent_bindings,
+            update_agent_binding,
             export_config,
             import_config,
             detect_agents,

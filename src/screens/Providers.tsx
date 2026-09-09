@@ -1,10 +1,18 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { api } from "../api/client";
-import { AGENTS, type AgentDetect, type AgentId, type Provider } from "../api/types";
+import {
+  AGENTS,
+  type AgentDetect,
+  type AgentId,
+  type AgentRoute,
+  type Provider,
+  type StrategyBinding,
+} from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { iconForEndpoint } from "@/components/icons/infer";
@@ -196,6 +204,58 @@ function UsageCell({ p }: { p: Provider }) {
   );
 }
 
+/** First grid cell: brand mark + name + endpoint subtitle. Shared by the All-tab
+    management rows and the agent-tab strategy rows. */
+function IdentityCell({ p }: { p: Provider }) {
+  // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
+  const brandIcon = iconForEndpoint(p.endpoint);
+  return (
+    <div className="flex min-w-0 w-[34%] items-center gap-2.5">
+      {brandIcon ? (
+        <ProviderLogo icon={brandIcon} name={p.name} size={32} />
+      ) : (
+        <Logo char={p.logo_char} color={p.logo_color} border={p.logo_border} />
+      )}
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] font-semibold">{p.name}</span>
+          {p.is_current && (
+            <span className="rounded px-1.5 py-px text-[10px] font-medium" style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}>
+              In use
+            </span>
+          )}
+          {p.status_badge && (
+            <span className="rounded px-1.5 py-px text-[10px] font-medium text-mut" style={{ background: "var(--surface2)" }}>
+              {p.status_badge}
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 truncate font-mono text-[11px] text-mut">
+          {p.endpoint} · {p.endpoint_note}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Health cell: green dot + latency when healthy, muted note otherwise. */
+function HealthCell({ p }: { p: Provider }) {
+  return (
+    <div className="w-[14%]">
+      {p.health.state === "ok" ? (
+        <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--kiwi)" }}>
+          <Dot state="ok" />Healthy {p.health.latency_ms}ms
+        </span>
+      ) : (
+        <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
+          <Dot state={p.health.state} />
+          {p.health.note ?? `${p.health.latency_ms}ms`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ProviderRow({
   p,
   onEnable,
@@ -214,35 +274,9 @@ function ProviderRow({
     const t = setTimeout(() => setConfirmDel(false), 3000);
     return () => clearTimeout(t);
   }, [confirmDel]);
-  // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
-  const brandIcon = iconForEndpoint(p.endpoint);
   return (
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
-      <div className="flex min-w-0 w-[34%] items-center gap-2.5">
-        {brandIcon ? (
-          <ProviderLogo icon={brandIcon} name={p.name} size={32} />
-        ) : (
-          <Logo char={p.logo_char} color={p.logo_color} border={p.logo_border} />
-        )}
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[13px] font-semibold">{p.name}</span>
-            {p.is_current && (
-              <span className="rounded px-1.5 py-px text-[10px] font-medium" style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}>
-                In use
-              </span>
-            )}
-            {p.status_badge && (
-              <span className="rounded px-1.5 py-px text-[10px] font-medium text-mut" style={{ background: "var(--surface2)" }}>
-                {p.status_badge}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-mut">
-            {p.endpoint} · {p.endpoint_note}
-          </div>
-        </div>
-      </div>
+      <IdentityCell p={p} />
 
       <div className="flex w-[22%] items-center gap-1">
         {p.agents.length === 0 ? (
@@ -259,18 +293,7 @@ function ProviderRow({
 
       <UsageCell p={p} />
 
-      <div className="w-[14%]">
-        {p.health.state === "ok" ? (
-          <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--kiwi)" }}>
-            <Dot state="ok" />Healthy {p.health.latency_ms}ms
-          </span>
-        ) : (
-          <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
-            <Dot state={p.health.state} />
-            {p.health.note ?? `${p.health.latency_ms}ms`}
-          </span>
-        )}
-      </div>
+      <HealthCell p={p} />
 
       {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
           or while a delete confirmation is pending */}
@@ -316,6 +339,203 @@ function ProviderRow({
   );
 }
 
+// ── Agent-tab strategy rows ──
+//
+// Inside an agent tab the list is the agent's routing candidate queue: each row
+// shows its role under the active strategy (primary / standby order / weight /
+// time window) with that strategy's per-binding parameters editable inline.
+// Provider management (edit / enable / delete) stays on the All tab.
+
+/** Roundrobin weight editor: commits on blur or Enter, clamped to ≥ 1. */
+function WeightEditor({
+  agent,
+  b,
+  onChanged,
+}: {
+  agent: AgentId;
+  b: StrategyBinding;
+  onChanged: () => void;
+}) {
+  const [val, setVal] = useState(String(b.weight));
+  useEffect(() => setVal(String(b.weight)), [b.weight]);
+  const commit = () => {
+    const n = Math.max(1, Math.round(Number(val) || 1));
+    if (n === b.weight) {
+      setVal(String(b.weight));
+      return;
+    }
+    api.updateAgentBinding(agent, b.provider_id, { weight: n }).then(onChanged);
+  };
+  return (
+    <span className="flex flex-none items-center gap-1" title="Sessions rotate across candidates proportionally to their weights">
+      <span className="text-[10.5px] text-mut">weight</span>
+      <Input
+        type="number"
+        min={1}
+        className="h-6 w-12 rounded-md bg-transparent px-1.5 text-right font-mono text-[11px] dark:bg-transparent"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && commit()}
+      />
+    </span>
+  );
+}
+
+/** Timewindow editor: both bounds commit together (a half window would never
+    match — the backend clears them as a pair when either is emptied). */
+function WindowEditor({
+  agent,
+  b,
+  onChanged,
+}: {
+  agent: AgentId;
+  b: StrategyBinding;
+  onChanged: () => void;
+}) {
+  const [s, setS] = useState(b.win_start ?? "");
+  const [e, setE] = useState(b.win_end ?? "");
+  useEffect(() => {
+    setS(b.win_start ?? "");
+    setE(b.win_end ?? "");
+  }, [b.win_start, b.win_end]);
+  const commit = () => {
+    if (s && e) {
+      if (s !== b.win_start || e !== b.win_end) {
+        api.updateAgentBinding(agent, b.provider_id, { win_start: s, win_end: e }).then(onChanged);
+        return;
+      }
+    } else if (b.win_start || b.win_end) {
+      // Both bounds emptied: clear them as a pair
+      api.updateAgentBinding(agent, b.provider_id, { win_start: "", win_end: "" }).then(onChanged);
+      return;
+    }
+    setS(b.win_start ?? "");
+    setE(b.win_end ?? "");
+  };
+  return (
+    <span
+      className="flex flex-none items-center gap-1"
+      title="Local time window this candidate serves (overnight windows wrap midnight); empty = fallback when no window matches"
+    >
+      <Input
+        type="time"
+        className="h-6 w-[70px] rounded-md bg-transparent px-1 font-mono text-[11px] dark:bg-transparent"
+        value={s}
+        onChange={(ev) => setS(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => ev.key === "Enter" && commit()}
+      />
+      <span className="text-[10.5px] text-mut">–</span>
+      <Input
+        type="time"
+        className="h-6 w-[70px] rounded-md bg-transparent px-1 font-mono text-[11px] dark:bg-transparent"
+        value={e}
+        onChange={(ev) => setE(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => ev.key === "Enter" && commit()}
+      />
+    </span>
+  );
+}
+
+/** Role column: what this binding does under the active strategy, plus that
+    strategy's per-binding parameters (weight / window) editable inline. */
+function RoleCell({
+  agent,
+  route,
+  b,
+  idx,
+  onChanged,
+}: {
+  agent: AgentId;
+  route: AgentRoute;
+  b: StrategyBinding;
+  idx: number;
+  onChanged: () => void;
+}) {
+  const badge = (label: string, title: string) => (
+    <span className="rounded px-1 text-[9.5px] font-medium" style={{ background: "var(--kiwi-soft)", color: "var(--kiwi)" }} title={title}>
+      {label}
+    </span>
+  );
+  return (
+    <div className="flex w-[22%] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+      {route.strategy === "roundrobin" ? (
+        <WeightEditor agent={agent} b={b} onChanged={onChanged} />
+      ) : route.strategy === "timewindow" ? (
+        <>
+          {idx === 0 && !b.win_start && badge("Fallback", "Serves whenever no candidate's window matches")}
+          {idx > 0 && !b.win_start && (
+            <span className="text-[10.5px] text-mut" title="No window set — this candidate is never picked">
+              No window
+            </span>
+          )}
+          <WindowEditor agent={agent} b={b} onChanged={onChanged} />
+        </>
+      ) : idx === 0 ? (
+        badge("Primary", "Current route of this agent")
+      ) : (
+        <span className="text-[11px] text-mut">Standby #{idx}</span>
+      )}
+    </div>
+  );
+}
+
+/** One agent-tab row: the provider joined with its strategy binding. */
+function BindingRow({
+  p,
+  route,
+  b,
+  idx,
+  onMove,
+  onChanged,
+}: {
+  p: Provider;
+  route: AgentRoute;
+  b: StrategyBinding;
+  idx: number;
+  onMove: (idx: number, dir: -1 | 1) => void;
+  onChanged: () => void;
+}) {
+  return (
+    <div className={`row flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
+      <IdentityCell p={p} />
+
+      <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
+
+      <UsageCell p={p} />
+
+      <HealthCell p={p} />
+
+      {/* Candidate ordering is the only action here — provider management
+          (edit / enable / delete) stays on the All tab */}
+      <div className="flex flex-1 items-center justify-end gap-1">
+        {route.bindings.length > 1 && (
+          <span className="flex flex-col">
+            <button
+              className="text-mut hover:text-ink disabled:opacity-30"
+              aria-label="Move up"
+              disabled={idx === 0}
+              onClick={() => onMove(idx, -1)}
+            >
+              <ArrowUp className="h-3 w-3" />
+            </button>
+            <button
+              className="text-mut hover:text-ink disabled:opacity-30"
+              aria-label="Move down"
+              disabled={idx === route.bindings.length - 1}
+              onClick={() => onMove(idx, 1)}
+            >
+              <ArrowDown className="h-3 w-3" />
+            </button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Providers({
   onAdd,
   onEdit,
@@ -330,12 +550,15 @@ export default function Providers({
   agentVersions?: Partial<Record<AgentId, string>>;
 }) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
+  const [routes, setRoutes] = useState<AgentRoute[] | null>(null);
   const [seg, setSeg] = useState<AgentId | "all">("all");
   const [takenOver, setTakenOver] = useState<Set<AgentId> | null>(null);
   const [enabling, setEnabling] = useState(false);
 
   const refetch = useCallback(() => {
     api.listProviders().then(setProviders);
+    // Per-agent strategy routes drive the agent-tab candidate rows
+    api.getAgentRoutes().then(setRoutes).catch(() => setRoutes(null));
     // Takeover state drives the per-agent onboarding panel
     api
       .getSettings()
@@ -369,6 +592,19 @@ export default function Providers({
     refetch();
   };
 
+  // Swap two candidates in the current agent's strategy queue (priority order)
+  const onMoveBinding = async (idx: number, dir: -1 | 1) => {
+    if (seg === "all") return;
+    const route = routes?.find((r) => r.agent === seg);
+    if (!route) return;
+    const ids = route.bindings.map((b) => b.provider_id);
+    const j = idx + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[idx], ids[j]] = [ids[j], ids[idx]];
+    await api.reorderAgentBindings(seg, ids);
+    refetch();
+  };
+
   const onTakeover = async (agent: AgentId) => {
     setEnabling(true);
     try {
@@ -383,6 +619,9 @@ export default function Providers({
 
   const filtered = providers.filter((p) => seg === "all" || p.agents.includes(seg));
   const agentsBound = new Set(providers.flatMap((p) => p.agents)).size;
+  // Inside an agent tab with bindings the list IS the strategy candidate queue
+  const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
+  const byId = new Map(providers.map((p) => [p.id, p]));
 
   return (
     <section className="flex min-h-full flex-col">
@@ -419,15 +658,23 @@ export default function Providers({
 
       <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
         <span className="w-[34%]">Provider</span>
-        <span className="w-[22%]">Bound agents</span>
+        <span className="w-[22%]">{route ? "Role in strategy" : "Bound agents"}</span>
         <span className="w-[22%]">Usage / quota</span>
         <span className="w-[14%]">Status</span>
-        <span className="flex-1 text-right">Actions</span>
+        <span className="flex-1 text-right">{route ? "Priority" : "Actions"}</span>
       </div>
 
-      {filtered.map((p) => (
-        <ProviderRow key={p.id} p={p} onEnable={onEnable} onEdit={onEdit} onDelete={onDelete} />
-      ))}
+      {route
+        ? route.bindings.map((b, i) => {
+            const p = byId.get(b.provider_id);
+            // Skip a binding whose provider row vanished (deleted mid-session)
+            return p ? (
+              <BindingRow key={b.provider_id} p={p} route={route} b={b} idx={i} onMove={onMoveBinding} onChanged={refetch} />
+            ) : null;
+          })
+        : filtered.map((p) => (
+            <ProviderRow key={p.id} p={p} onEnable={onEnable} onEdit={onEdit} onDelete={onDelete} />
+          ))}
 
       {filtered.length === 0 && seg !== "all" && (
         <AgentOnboarding

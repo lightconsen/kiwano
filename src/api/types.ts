@@ -275,6 +275,9 @@ export interface StrategyBinding {
   logo_color: string;
   priority: number;
   weight: number;
+  /** Local "HH:MM" window bounds (timewindow strategy); null = windowless fallback */
+  win_start: string | null;
+  win_end: string | null;
   enabled: boolean;
 }
 
@@ -369,6 +372,12 @@ export interface KiwanoApi {
   updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void>;
   /** Reorder candidates: provider_id order → priority 0..n */
   reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void>;
+  /** Patch one binding's strategy parameters (roundrobin weight / timewindow local window) */
+  updateAgentBinding(
+    agent: AgentId,
+    providerId: string,
+    patch: { weight?: number; win_start?: string | null; win_end?: string | null },
+  ): Promise<void>;
   /** Export the config plan to the given path (including API keys); returns the Provider count */
   exportConfig(path: string): Promise<number>;
   /** Import a config plan from a file (merged by name+base_url); returns a count report */

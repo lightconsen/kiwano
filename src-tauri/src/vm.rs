@@ -757,6 +757,9 @@ pub struct BindingVm {
     pub logo_color: String,
     pub priority: i64,
     pub weight: i64,
+    /// Local "HH:MM" window bounds (timewindow strategy); null = no window.
+    pub win_start: Option<String>,
+    pub win_end: Option<String>,
     pub enabled: bool,
 }
 
@@ -806,6 +809,8 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
                     provider_id: b.provider_id,
                     priority: b.priority,
                     weight: b.weight,
+                    win_start: b.win_start,
+                    win_end: b.win_end,
                     enabled: b.enabled,
                 }
             })
@@ -854,6 +859,44 @@ pub fn reorder_agent_bindings(
         b.priority = i as i64;
         store.upsert_binding(&b).map_err(e2s)?;
     }
+    Ok(())
+}
+
+/// Patch one binding's strategy parameters (weight for roundrobin, the local
+/// "HH:MM" window for timewindow). Unspecified fields keep their value; a
+/// binding without a window is the timewindow fallback candidate.
+pub fn update_agent_binding(
+    store: &Store,
+    agent: &str,
+    provider_id: &str,
+    weight: Option<i64>,
+    win_start: Option<String>,
+    win_end: Option<String>,
+) -> Result<(), String> {
+    let mut b = store
+        .bindings_for_agent(agent)
+        .map_err(e2s)?
+        .into_iter()
+        .find(|b| b.provider_id == provider_id)
+        .ok_or_else(|| format!("provider {provider_id} is not bound to {agent}"))?;
+    if let Some(w) = weight {
+        b.weight = w.max(1);
+    }
+    // Both bounds are set/cleared together: a half window would never match.
+    if win_start.is_some() || win_end.is_some() {
+        let (s, e) = (win_start.filter(|v| !v.is_empty()), win_end.filter(|v| !v.is_empty()));
+        match (s, e) {
+            (Some(s), Some(e)) => {
+                b.win_start = Some(s);
+                b.win_end = Some(e);
+            }
+            _ => {
+                b.win_start = None;
+                b.win_end = None;
+            }
+        }
+    }
+    store.upsert_binding(&b).map_err(e2s)?;
     Ok(())
 }
 

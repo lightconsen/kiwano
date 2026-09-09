@@ -217,7 +217,7 @@ function ProviderRow({
   // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
   const brandIcon = iconForEndpoint(p.endpoint);
   return (
-    <div className={`row flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
+    <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <div className="flex min-w-0 w-[34%] items-center gap-2.5">
         {brandIcon ? (
           <ProviderLogo icon={brandIcon} name={p.name} size={32} />
@@ -272,7 +272,13 @@ function ProviderRow({
         )}
       </div>
 
-      <div className="flex flex-1 items-center justify-end gap-1.5">
+      {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
+          or always for the in-use row and a pending delete confirm */}
+      <div
+        className={`flex flex-1 items-center justify-end gap-1.5 transition-opacity${
+          p.is_current || confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+        }`}
+      >
         {p.is_current ? (
           <Button
             variant="ghost"

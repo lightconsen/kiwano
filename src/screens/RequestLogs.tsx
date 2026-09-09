@@ -4,7 +4,7 @@
 // record (redacted headers + bodies) and a Copy button that puts the whole
 // log as plain text on the clipboard.
 import { useEffect, useState } from "react";
-import { Check, ChevronRight, Copy, Trash2 } from "lucide-react";
+import { Check, ChevronRight, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -66,14 +66,10 @@ function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
   return lines.join("\n");
 }
 
-/** navigator.clipboard with a hidden-textarea fallback (WKWebView edge cases). */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // fall through to the legacy path
-  }
+/** Synchronous clipboard write. WKWebView has no navigator.clipboard and only
+    honors execCommand copies made inside the user gesture, so the legacy
+    textarea path runs first; the async Clipboard API is the fallback. */
+function copyText(text: string): boolean {
   try {
     const ta = document.createElement("textarea");
     ta.value = text;
@@ -83,7 +79,13 @@ async function copyText(text: string): Promise<boolean> {
     ta.select();
     const ok = document.execCommand("copy");
     ta.remove();
-    return ok;
+    if (ok) return true;
+  } catch {
+    // fall through to the async path
+  }
+  try {
+    void navigator.clipboard.writeText(text);
+    return true;
   } catch {
     return false;
   }
@@ -104,13 +106,7 @@ function StatusPill({ code }: { code: number }) {
   );
 }
 
-function Detail({ id }: { id: number }) {
-  const [d, setD] = useState<RequestLogDetail | null>(null);
-
-  useEffect(() => {
-    api.getRequestLog(id).then(setD).catch(() => {});
-  }, [id]);
-
+function Detail({ d }: { d: RequestLogDetail | null }) {
   if (!d) return <div className="px-5 pb-4 text-[11px] text-mut">Loading…</div>;
 
   return (
@@ -171,15 +167,17 @@ function Detail({ id }: { id: number }) {
     (metadata + headers + bodies) on the clipboard as plain text. */
 function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [d, setD] = useState<RequestLogDetail | null>(null);
 
-  const onCopy = async () => {
-    let d: RequestLogDetail | null = null;
-    try {
-      d = await api.getRequestLog(entry.id);
-    } catch {
-      // detail unavailable — copy metadata only
-    }
-    if (await copyText(fmtLogText(entry, d))) {
+  useEffect(() => {
+    api.getRequestLog(entry.id).then(setD).catch(() => {});
+  }, [entry.id]);
+
+  const onCopy = () => {
+    // Must stay synchronous inside the click gesture: awaiting anything here
+    // (e.g. the detail fetch) ends the user-activation window and the copy
+    // silently fails in WKWebView — so the detail is prefetched on open.
+    if (copyText(fmtLogText(entry, d))) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     }
@@ -198,7 +196,7 @@ function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => 
             {copied ? "Copied" : "Copy"}
           </Button>
         </DialogHeader>
-        <Detail id={entry.id} />
+        <Detail d={d} />
       </DialogContent>
     </Dialog>
   );
@@ -231,13 +229,6 @@ export default function RequestLogs() {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const openLog = openId != null ? rows.find((r) => r.id === openId) : undefined;
 
-  const onClear = () => {
-    api.clearRequestLogs().then(() => {
-      setPage(1);
-      fetchPage(1);
-    });
-  };
-
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface">
       <div className="flex items-center gap-3 border-b border-line px-3.5 py-2.5">
@@ -259,10 +250,6 @@ export default function RequestLogs() {
         </div>
         <span className="ml-auto flex items-center gap-3 text-[11px] text-mut">
           <span>{total.toLocaleString()} requests</span>
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px] text-mut" onClick={onClear} title="Delete every recorded request">
-            <Trash2 className="h-3 w-3" />
-            Clear
-          </Button>
         </span>
       </div>
 

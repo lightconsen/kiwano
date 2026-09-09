@@ -33,6 +33,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   "subrouter": { name: "subrouter", displayName: "SubRouter", defaultColor: "#0D9488" },
   "chatglm": { name: "chatglm", displayName: "chatglm", defaultColor: "currentColor" },
   "claude": { name: "claude", displayName: "Claude", defaultColor: "#D4915D" },
+  claudecode: { name: "claudecode", displayName: "Claude Code", defaultColor: "#D97757" },
   "cherryin": { name: "cherryin", displayName: "CherryIN", defaultColor: "#FB6354" },
   "claudeapi": { name: "claudeapi", displayName: "ClaudeAPI", defaultColor: "#F38020" },
   "code0": { name: "code0", displayName: "Code0", defaultColor: "#20C050" },

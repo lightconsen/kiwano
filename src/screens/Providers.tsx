@@ -30,7 +30,7 @@ import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 // the cc-switch icon set, see components/icons). Hover shows the full name.
 const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
   { id: "all" },
-  { id: "claude", icon: "claude" },
+  { id: "claude", icon: "claudecode" },
   { id: "codex", icon: "openai" },
   { id: "gemini", icon: "gemini" },
   { id: "grokbuild", icon: "grok" },

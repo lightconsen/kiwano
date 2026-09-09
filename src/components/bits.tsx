@@ -4,7 +4,7 @@ import { ProviderLogo } from "@/components/icons/ProviderLogo";
 
 /** AgentId → brand icon key in the cc-switch registry (components/icons). */
 export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
-  claude: "claude",
+  claude: "claudecode",
   codex: "openai",
   gemini: "gemini",
   grokbuild: "grok",

@@ -34,6 +34,7 @@ import _xycai from "./xycai-icon.png";
 import _zetaapi from "./zetaapi-icon.png";
 // Kiwano additions sourced from lobehub/lobe-icons (packages/static-svg)
 import _groq from "./groq.svg?url";
+import _claudecodeColor from "./claudecode-color.svg?url";
 // Dark-theme variants for near-black brand marks: recolored statics from
 // lobehub/lobe-icons or PIL-inverted rasters (see git history for provenance).
 import _kimiDark from "./kimi-dark.svg?url";
@@ -131,6 +132,7 @@ export const icons: Record<string, string> = {
 
 export const iconUrls: Record<string, string> = {
   groq: _groq,
+  claudecode: _claudecodeColor,
   together: _together,
   a6api: _a6api,
   apikeyfun: _apikeyfun,

@@ -273,10 +273,10 @@ function ProviderRow({
       </div>
 
       {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
-          or always for the in-use row and a pending delete confirm */}
+          or while a delete confirmation is pending */}
       <div
         className={`flex flex-1 items-center justify-end gap-1.5 transition-opacity${
-          p.is_current || confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         }`}
       >
         {p.is_current ? (

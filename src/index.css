@@ -160,7 +160,8 @@ textarea,
   background: var(--surface);
 }
 .row.current {
-  background: var(--kiwi-soft);
+  /* no permanent tint: the In-use badge and the left bar mark it, hover stays
+     uniform with every other row */
   box-shadow: inset 2px 0 0 var(--kiwi);
 }
 

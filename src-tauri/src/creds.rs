@@ -96,6 +96,68 @@ pub fn host_of(base_url: &str) -> String {
         .to_string()
 }
 
+/// Friendly brand name inferred from an endpoint host — the display-name twin
+/// of the frontend icon inference (components/icons/infer.ts, same rules and
+/// order). Used at import time so a row reads "DeepSeek" instead of
+/// "api.deepseek.com" when the agent's config declares no provider name.
+pub fn brand_name_for_host(host: &str) -> Option<&'static str> {
+    const RULES: &[(&str, &str)] = &[
+        ("moonshot", "Kimi"),
+        ("bigmodel", "Zhipu GLM"),
+        ("zhipu", "Zhipu GLM"),
+        ("chatglm", "ChatGLM"),
+        ("dashscope", "Qwen"),
+        ("bailian", "Bailian"),
+        ("aliyun", "Alibaba Cloud"),
+        ("minimax", "MiniMax"),
+        ("volces", "Doubao"),
+        ("volcengine", "Doubao"),
+        ("doubao", "Doubao"),
+        ("hunyuan", "Hunyuan"),
+        ("tencent", "Tencent Cloud"),
+        ("wenxin", "Wenxin"),
+        ("baidubce", "Baidu"),
+        ("baidu", "Baidu"),
+        ("modelscope", "ModelScope"),
+        ("siliconflow", "SiliconFlow"),
+        ("aihubmix", "AiHubMix"),
+        ("openrouter", "OpenRouter"),
+        ("packycode", "PackyCode"),
+        ("newapi", "New API"),
+        ("novita", "Novita"),
+        ("ppio", "PPIO"),
+        ("stepfun", "StepFun"),
+        ("longcat", "LongCat"),
+        ("xiaomi", "Xiaomi MiMo"),
+        ("lingyiwanwu", "Yi"),
+        ("deepseek", "DeepSeek"),
+        ("kimi", "Kimi"),
+        ("qwen", "Qwen"),
+        ("generativelanguage", "Google Gemini"),
+        ("googleapis", "Google"),
+        ("gemini", "Gemini"),
+        ("aistudio", "Google AI Studio"),
+        ("grok", "Grok"),
+        ("x.ai", "xAI"),
+        ("anthropic", "Anthropic"),
+        ("claude", "Claude"),
+        ("openai", "OpenAI"),
+        ("mistral", "Mistral"),
+        ("cohere", "Cohere"),
+        ("perplexity", "Perplexity"),
+        ("ollama", "Ollama"),
+        ("nvidia", "NVIDIA"),
+        ("huggingface", "Hugging Face"),
+        ("amazonaws", "AWS"),
+        ("azure", "Azure"),
+        ("cloudflare", "Cloudflare"),
+        ("vercel", "Vercel"),
+        ("github", "GitHub"),
+    ];
+    let h = host.to_ascii_lowercase();
+    RULES.iter().find(|(needle, _)| h.contains(needle)).map(|(_, name)| *name)
+}
+
 fn from_additive(p: CurrentProvider) -> CurrentCreds {
     CurrentCreds {
         base_url: p.base_url,
@@ -191,6 +253,17 @@ mod tests {
         assert_eq!(host_of("https://api.deepseek.com/v1"), "api.deepseek.com");
         assert_eq!(host_of("http://127.0.0.1:8317/v1"), "127.0.0.1");
         assert_eq!(host_of("api.moonshot.cn"), "api.moonshot.cn");
+    }
+
+    #[test]
+    fn brand_name_infers_from_host() {
+        assert_eq!(brand_name_for_host("api.deepseek.com"), Some("DeepSeek"));
+        assert_eq!(brand_name_for_host("api.moonshot.cn"), Some("Kimi"));
+        assert_eq!(brand_name_for_host("open.bigmodel.cn"), Some("Zhipu GLM"));
+        assert_eq!(brand_name_for_host("dashscope.aliyuncs.com"), Some("Qwen"));
+        assert_eq!(brand_name_for_host("generativelanguage.googleapis.com"), Some("Google Gemini"));
+        assert_eq!(brand_name_for_host("api.x.ai"), Some("xAI"));
+        assert_eq!(brand_name_for_host("example.com"), None);
     }
 
     #[test]

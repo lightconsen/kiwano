@@ -1489,7 +1489,11 @@ fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) ->
     let now = rfc3339(unix_now());
     let name = creds.name.clone().unwrap_or_else(|| {
         let host = crate::creds::host_of(&creds.base_url);
-        if host.is_empty() { "Imported provider".into() } else { host }
+        crate::creds::brand_name_for_host(&host)
+            .map(String::from)
+            .unwrap_or_else(|| {
+                if host.is_empty() { "Imported provider".into() } else { host }
+            })
     });
     let provider = Provider {
         id: format!("{}-{}", slug(&name), &uuid::Uuid::new_v4().simple().to_string()[..6]),
@@ -1851,10 +1855,10 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "deepseek");
         assert_eq!(list[0].api_key.as_deref(), Some("sk-x"));
-        // no declared name → URL host
+        // no declared name → brand name inferred from the host
         let id3 = import_current_provider(&s, &creds("https://api.x.ai/v1", None)).unwrap();
         let p = s.get_provider(&id3).unwrap().unwrap();
-        assert_eq!(p.name, "api.x.ai");
+        assert_eq!(p.name, "xAI");
         assert_ne!(id1, id3);
     }
 

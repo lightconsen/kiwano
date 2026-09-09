@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -624,6 +624,17 @@ impl Store {
             conn.execute_batch(MIGRATION_V4)?;
         }
         if version < 5 {
+            conn.execute_batch(MIGRATION_V5)?;
+        }
+        if version < 6 {
+            // Repair: early dev builds stamped user_version ahead of the final
+            // migration bodies, so a database can claim v5 while missing the v3
+            // api_keys table, the v4 gemini-capable providers shape, or the v5
+            // request-log tables. V3/V5 are IF NOT EXISTS and V4 is a lossless
+            // named-column swap, so replaying all three on a complete schema
+            // (or a partial one) converges to the target state.
+            conn.execute_batch(MIGRATION_V3)?;
+            conn.execute_batch(MIGRATION_V4)?;
             conn.execute_batch(MIGRATION_V5)?;
         }
         if version < SCHEMA_VERSION {
@@ -1562,6 +1573,65 @@ mod tests {
         assert_eq!(
             store.get_provider("p-gem").unwrap().unwrap().protocol,
             Protocol::Gemini
+        );
+    }
+
+    /// A database stamped v5 by an early dev build but missing the v3 api_keys
+    /// table, the v4 gemini providers shape, and the v5 request-log tables is
+    /// repaired on open (version bumped to SCHEMA_VERSION, objects created,
+    /// data kept).
+    #[test]
+    fn migrate_repairs_database_stamped_ahead_of_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(MIGRATION_V1).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
+                 VALUES ('p-ant', 'Old', 'anthropic', 'https://api.anthropic.com', 'metered', 't0', 't0');
+                 PRAGMA user_version = 5;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            let version: i32 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(version, SCHEMA_VERSION);
+
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master
+                     WHERE type='table'
+                       AND name IN ('api_keys','request_logs','request_bodies','gateway_settings')",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 4, "missing tables repaired");
+
+            // providers rebuilt to the gemini-capable shape
+            let ddl: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name='providers'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(ddl.contains("gemini"));
+        }
+        assert_eq!(
+            store
+                .get_provider("p-ant")
+                .unwrap()
+                .expect("provider kept")
+                .name,
+            "Old"
         );
     }
 

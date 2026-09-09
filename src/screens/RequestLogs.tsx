@@ -1,17 +1,22 @@
 // Request logs (data-plane audit trail captured by the gateway, migration V5),
 // rendered as the trailing card section of the Dashboard: paged metadata list
-// with status filter, expandable detail (redacted headers + bodies), clear-all.
-// Long-press a row (600ms) to copy the full log (metadata + detail) to the
-// clipboard; a short click still toggles the detail expansion.
-import { Fragment, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+// with status filter, clear-all. Clicking a row opens a dialog with the full
+// record (redacted headers + bodies) and a Copy button that puts the whole
+// log as plain text on the clipboard.
+import { useEffect, useState } from "react";
+import { Check, ChevronRight, Copy, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { api } from "../api/client";
 import type { RequestLogDetail, RequestLogEntry } from "../api/types";
 import { fmtLatency, fmtTokens } from "../lib/format";
 
 const PAGE_SIZE = 50;
-const LONG_PRESS_MS = 600;
 
 type StatusFilter = "all" | "ok" | "error";
 
@@ -106,10 +111,10 @@ function Detail({ id }: { id: number }) {
     api.getRequestLog(id).then(setD).catch(() => {});
   }, [id]);
 
-  if (!d) return <div className="px-6 pb-3 text-[11px] text-mut">Loading…</div>;
+  if (!d) return <div className="px-5 pb-4 text-[11px] text-mut">Loading…</div>;
 
   return (
-    <div className="space-y-2 border-t border-line px-6 pb-3 pt-2">
+    <div className="space-y-2 px-5 pb-4 pt-3">
       <div className="flex gap-6 text-[10.5px] text-mut">
         {d.session_id && (
           <span>
@@ -162,6 +167,42 @@ function Detail({ id }: { id: number }) {
   );
 }
 
+/** Full-record dialog: detail body + a Copy button that puts the whole log
+    (metadata + headers + bodies) on the clipboard as plain text. */
+function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = async () => {
+    let d: RequestLogDetail | null = null;
+    try {
+      d = await api.getRequestLog(entry.id);
+    } catch {
+      // detail unavailable — copy metadata only
+    }
+    if (await copyText(fmtLogText(entry, d))) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[min(660px,100dvh)] w-[calc(100%-2rem)] max-w-[720px] gap-0 overflow-y-auto rounded-xl p-0 sm:max-w-[720px]">
+        <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line px-4">
+          <DialogTitle className="text-[13px] font-semibold">
+            Log #{entry.id} · <span className="font-mono text-[11.5px] font-normal text-mut">{fmtTime(entry.ts)}</span>
+          </DialogTitle>
+          <Button variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-[11px] text-mut" onClick={onCopy}>
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </DialogHeader>
+        <Detail id={entry.id} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function RequestLogs() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
@@ -187,40 +228,13 @@ export default function RequestLogs() {
   }, [page, filter]);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const openLog = openId != null ? rows.find((r) => r.id === openId) : undefined;
 
   const onClear = () => {
     api.clearRequestLogs().then(() => {
       setPage(1);
       fetchPage(1);
     });
-  };
-
-  // Long-press to copy: the timer starts on pointer-down and copies when it
-  // fires; releasing early cancels it and the click toggles the detail. A
-  // fired press suppresses the trailing click so the row doesn't expand.
-  const [copiedId, setCopiedId] = useState<number | null>(null);
-  const pressTimer = useRef<number | null>(null);
-  const suppressClick = useRef(false);
-
-  const cancelPress = () => {
-    if (pressTimer.current != null) {
-      clearTimeout(pressTimer.current);
-      pressTimer.current = null;
-    }
-  };
-
-  const copyLog = async (r: RequestLogEntry) => {
-    let text = fmtLogText(r);
-    try {
-      const d = await api.getRequestLog(r.id);
-      if (d) text = fmtLogText(d, d);
-    } catch {
-      // detail unavailable — metadata-only copy
-    }
-    if (await copyText(text)) {
-      setCopiedId(r.id);
-      window.setTimeout(() => setCopiedId((cur) => (cur === r.id ? null : cur)), 1200);
-    }
   };
 
   return (
@@ -268,66 +282,31 @@ export default function RequestLogs() {
             </thead>
             <tbody className="font-mono">
               {rows.map((r) => (
-                <Fragment key={r.id}>
-                  <tr
-                    className="cursor-pointer select-none border-b border-line hover:bg-surface2"
-                    title="Click to expand · long-press to copy"
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      suppressClick.current = false;
-                      pressTimer.current = window.setTimeout(() => {
-                        pressTimer.current = null;
-                        suppressClick.current = true;
-                        void copyLog(r);
-                      }, LONG_PRESS_MS);
-                    }}
-                    onPointerUp={cancelPress}
-                    onPointerLeave={cancelPress}
-                    onPointerCancel={cancelPress}
-                    onClick={() => {
-                      if (suppressClick.current) {
-                        suppressClick.current = false;
-                        return;
-                      }
-                      setOpenId(openId === r.id ? null : r.id);
-                    }}
-                  >
-                    <td className="whitespace-nowrap px-3 py-1.5 text-mut">{fmtTime(r.ts)}</td>
-                    <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
-                    <td className="px-2 py-1.5 font-sans">{r.provider_id ?? "—"}</td>
-                    <td className="max-w-[180px] truncate px-2 py-1.5 text-mut">
-                      {r.path}
-                      {r.is_streaming && <span className="ml-1 text-[9.5px]">SSE</span>}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <StatusPill code={r.status_code} />
-                    </td>
-                    <td className="text-right px-2 py-1.5">{fmtLatency(r.latency_ms)}</td>
-                    <td className="text-right px-2 py-1.5 text-mut">
-                      {r.input_tokens + r.output_tokens > 0
-                        ? `${fmtTokens(r.input_tokens)} / ${fmtTokens(r.output_tokens)}`
-                        : "—"}
-                    </td>
-                    <td className="px-2 py-1.5 text-mut">
-                      {copiedId === r.id ? (
-                        <span className="text-[9.5px] font-sans font-medium" style={{ color: "var(--kiwi)" }}>
-                          Copied
-                        </span>
-                      ) : openId === r.id ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                    </td>
-                  </tr>
-                  {openId === r.id && (
-                    <tr>
-                      <td colSpan={8} className="p-0">
-                        <Detail id={r.id} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                <tr
+                  key={r.id}
+                  className="cursor-pointer border-b border-line hover:bg-surface2"
+                  onClick={() => setOpenId(r.id)}
+                >
+                  <td className="whitespace-nowrap px-3 py-1.5 text-mut">{fmtTime(r.ts)}</td>
+                  <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
+                  <td className="px-2 py-1.5 font-sans">{r.provider_id ?? "—"}</td>
+                  <td className="max-w-[180px] truncate px-2 py-1.5 text-mut">
+                    {r.path}
+                    {r.is_streaming && <span className="ml-1 text-[9.5px]">SSE</span>}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <StatusPill code={r.status_code} />
+                  </td>
+                  <td className="text-right px-2 py-1.5">{fmtLatency(r.latency_ms)}</td>
+                  <td className="text-right px-2 py-1.5 text-mut">
+                    {r.input_tokens + r.output_tokens > 0
+                      ? `${fmtTokens(r.input_tokens)} / ${fmtTokens(r.output_tokens)}`
+                      : "—"}
+                  </td>
+                  <td className="px-2 py-1.5 text-mut">
+                    <ChevronRight className="h-3 w-3" />
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -351,6 +330,8 @@ export default function RequestLogs() {
             </Button>
           </div>
         )}
+
+        {openLog && <LogDialog entry={openLog} onClose={() => setOpenId(null)} />}
       </div>
     </div>
   );

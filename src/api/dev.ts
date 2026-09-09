@@ -561,6 +561,35 @@ function servingNow(): Set<string> {
   return out;
 }
 
+// Mirror vm::build_provider_vms's standby classification: a non-head
+// candidate is a failover-queue member ("Standby #N" badge + "Failover
+// queue" note) unless its strategy rotates through everyone (roundrobin)
+// or it serves its own time window; a windowless timewindow candidate is
+// never picked, so it stays flagged. Static dev badges like "Local" are
+// preserved — only the standby badge is dynamic.
+function standbyFlags(): { badges: Map<string, string>; backups: Set<string> } {
+  const badges = new Map<string, string>();
+  const backups = new Set<string>();
+  for (const r of agentRoutes) {
+    const head = r.bindings.filter((b) => b.enabled)[0]?.provider_id;
+    if (!head) continue;
+    for (const b of r.bindings) {
+      if (b.provider_id === head) continue;
+      const standby =
+        r.strategy === "roundrobin"
+          ? false
+          : r.strategy === "timewindow"
+            ? !(b.win_start && b.win_end)
+            : true;
+      if (standby && !badges.has(b.provider_id)) {
+        badges.set(b.provider_id, `Standby #${b.priority}`);
+        backups.add(b.provider_id);
+      }
+    }
+  }
+  return { badges, backups };
+}
+
 // ── Request logs (data-plane audit trail; fixtures mirror gateway capture) ──
 
 const requestLogs: RequestLogDetail[] = [
@@ -662,11 +691,18 @@ export const devApi: KiwanoApi = {
   async listProviders(filter: AgentId | "all" = "all"): Promise<Provider[]> {
     await delay();
     const serving = servingNow();
+    const { badges, backups } = standbyFlags();
     return providers
       .filter((p) => filter === "all" || p.agents.includes(filter))
       .map((p) => ({
         ...p,
         is_current: p.agents.some((a) => serving.has(`${a}/${p.id}`)),
+        status_badge: badges.get(p.id) ?? p.status_badge,
+        agents_note: backups.has(p.id)
+          ? "Failover queue"
+          : p.agents.length
+            ? `${p.agents.length} agent(s)`
+            : undefined,
       }));
   },
 

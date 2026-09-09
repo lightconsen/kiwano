@@ -721,11 +721,16 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         }
     }
 
-    // agent → bindings (to read priorities for the backup #N badges)
+    // agent → bindings (to read priorities for the backup #N badges) and the
+    // active strategy kind (to classify non-head candidates below)
     let mut bindings_by_agent: HashMap<String, Vec<Binding>> = HashMap::new();
+    let mut strategy_by_agent: HashMap<String, StrategyType> = HashMap::new();
     for agent in primary.keys() {
         if let Ok(bs) = store.bindings_for_agent(agent) {
             bindings_by_agent.insert(agent.clone(), bs);
+        }
+        if let Ok(Some(st)) = store.get_strategy(agent) {
+            strategy_by_agent.insert(agent.clone(), st.kind);
         }
     }
 
@@ -802,17 +807,29 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                     continue;
                 }
                 agents.push(agent.clone());
-                if primary.get(agent).map(String::as_str) != Some(&p.id) {
+                if primary.get(agent).map(String::as_str) == Some(&p.id) {
+                    continue;
+                }
+                // Non-head. Whether that makes this binding a standby depends
+                // on the strategy: a roundrobin tail takes rotation turns and
+                // a windowed timewindow tail serves its own window — neither
+                // sits in a failover queue. A windowless timewindow tail is
+                // never picked at all, and single/failover/quota tails are
+                // standbys proper.
+                let binding = bindings_by_agent
+                    .get(agent)
+                    .and_then(|bs| bs.iter().find(|b| b.provider_id == p.id));
+                let windowed =
+                    binding.is_some_and(|b| b.win_start.is_some() && b.win_end.is_some());
+                let standby = match strategy_by_agent.get(agent) {
+                    Some(StrategyType::Roundrobin) => false,
+                    Some(StrategyType::Timewindow) => !windowed,
+                    _ => true,
+                };
+                if standby {
                     backup_for_any = true;
                     if badge.is_none() {
-                        let pr = bindings_by_agent
-                            .get(agent)
-                            .and_then(|bs| {
-                                bs.iter()
-                                    .find(|b| b.provider_id == p.id)
-                                    .map(|b| b.priority)
-                            })
-                            .unwrap_or(1);
+                        let pr = binding.map(|b| b.priority).unwrap_or(1);
                         badge = Some(format!("Standby #{pr}"));
                     }
                 }
@@ -2135,6 +2152,47 @@ mod tests {
         assert!(!beta.is_current);
         assert_eq!(beta.status_badge.as_deref(), Some("Standby #1"));
         assert_eq!(beta.agents_note.as_deref(), Some("Failover queue"));
+    }
+
+    #[test]
+    fn standby_flag_follows_strategy() {
+        let s = store();
+        for (id, name) in [("a1", "Alpha"), ("b1", "Beta"), ("c1", "Gamma"), ("d1", "Delta")] {
+            s.insert_provider(&provider(id, name, Billing::Metered)).unwrap();
+        }
+        s.upsert_strategy("codex", StrategyType::Roundrobin, None).unwrap();
+        s.upsert_strategy("gemini", StrategyType::Timewindow, None).unwrap();
+        s.upsert_strategy("hermes", StrategyType::Timewindow, None).unwrap();
+        let bind = |agent: &str, pid: &str, priority: i64, win: Option<(&str, &str)>| Binding {
+            agent: agent.into(),
+            provider_id: pid.into(),
+            priority,
+            weight: 1,
+            win_start: win.map(|w| w.0.into()),
+            win_end: win.map(|w| w.1.into()),
+            enabled: true,
+        };
+        // roundrobin tail: takes rotation turns → not a standby
+        s.upsert_binding(&bind("codex", "a1", 0, None)).unwrap();
+        s.upsert_binding(&bind("codex", "b1", 1, None)).unwrap();
+        // windowed timewindow tail: serves its own window → not a standby
+        s.upsert_binding(&bind("gemini", "a1", 0, None)).unwrap();
+        s.upsert_binding(&bind("gemini", "c1", 1, Some(("22:00", "06:00")))).unwrap();
+        // windowless timewindow tail: never picked → still a standby
+        s.upsert_binding(&bind("hermes", "a1", 0, None)).unwrap();
+        s.upsert_binding(&bind("hermes", "d1", 1, None)).unwrap();
+        let aux = Aux::open_in_memory().unwrap();
+        let vms = build_provider_vms(&s, &aux).unwrap();
+        let beta = vms.iter().find(|v| v.id == "b1").unwrap();
+        assert!(beta.is_current); // roundrobin serves every candidate
+        assert_eq!(beta.status_badge, None);
+        assert_eq!(beta.agents_note.as_deref(), Some("1 agent(s)"));
+        let gamma = vms.iter().find(|v| v.id == "c1").unwrap();
+        assert_eq!(gamma.status_badge, None);
+        let delta = vms.iter().find(|v| v.id == "d1").unwrap();
+        assert!(!delta.is_current);
+        assert_eq!(delta.status_badge.as_deref(), Some("Standby #1"));
+        assert_eq!(delta.agents_note.as_deref(), Some("Failover queue"));
     }
 
     #[test]

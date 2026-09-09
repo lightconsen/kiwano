@@ -1,5 +1,19 @@
 // Shared atomic components from the design prototype (React versions of design/index.html's .logo-c/.dot/.billtag etc.; base controls have moved to shadcn/ui)
 import type { AgentMeta, Billing } from "../api/types";
+import { ProviderLogo } from "@/components/icons/ProviderLogo";
+
+/** AgentId → brand icon key in the cc-switch registry (components/icons). */
+export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
+  claude: "claude",
+  codex: "openai",
+  gemini: "gemini",
+  grokbuild: "grok",
+  "claude-desktop": "claude",
+  opencode: "opencode",
+  openclaw: "openclaw",
+  hermes: "hermes",
+  pi: "pi",
+};
 
 export function Logo({
   char,
@@ -79,14 +93,19 @@ export function Sparkline({ points }: { points: number[] }) {
   );
 }
 
+/** Bound-agents cell chip: the agent's brand logo (letter-avatar fallback
+    keeps the same 18px footprint as the old .achip). chip_color is NOT passed
+    as the tint — it is the old letter-chip background (near-black for
+    codex/grok), which would vanish on the dark theme. Without it ProviderLogo
+    tints currentColor marks with var(--ink) (theme-aware) and brand marks
+    with their registry defaultColor, matching the segment bar. */
 export function AgentChip({ meta }: { meta: AgentMeta }) {
   return (
-    <span
-      className="achip"
-      title={meta.label}
-      style={meta.chip_border ? { background: meta.chip_color, border: "1px solid var(--line)" } : { background: meta.chip_color }}
-    >
-      {meta.chip_char}
-    </span>
+    <ProviderLogo
+      icon={AGENT_ICON[meta.id]}
+      char={meta.chip_char}
+      name={meta.label}
+      size={18}
+    />
   );
 }

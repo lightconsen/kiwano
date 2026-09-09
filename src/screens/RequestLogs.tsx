@@ -1,7 +1,9 @@
 // Request logs (data-plane audit trail captured by the gateway, migration V5),
 // rendered as the trailing card section of the Dashboard: paged metadata list
 // with status filter, expandable detail (redacted headers + bodies), clear-all.
-import { Fragment, useEffect, useState } from "react";
+// Long-press a row (600ms) to copy the full log (metadata + detail) to the
+// clipboard; a short click still toggles the detail expansion.
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
@@ -9,6 +11,7 @@ import type { RequestLogDetail, RequestLogEntry } from "../api/types";
 import { fmtLatency, fmtTokens } from "../lib/format";
 
 const PAGE_SIZE = 50;
+const LONG_PRESS_MS = 600;
 
 type StatusFilter = "all" | "ok" | "error";
 
@@ -27,6 +30,58 @@ function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)}KB`;
   return `${n}B`;
+}
+
+/** Pretty-print stored header JSON; non-JSON passes through untouched. */
+function prettyJson(json: string | null): string {
+  if (!json) return "—";
+  try {
+    return JSON.stringify(JSON.parse(json), null, 2);
+  } catch {
+    return json;
+  }
+}
+
+/** Whole-log plain text for the clipboard: metadata, then detail sections when available. */
+function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
+  const lines = [
+    `#${r.id} · ${r.ts}`,
+    `${r.method} ${r.path}${r.query ? `?${r.query}` : ""}`,
+    `agent: ${r.agent ?? "—"} · provider: ${r.provider_id ?? "—"} · model: ${r.model ?? "—"} · status: ${r.status_code}`,
+    `latency: ${r.latency_ms ?? "—"}ms · tokens: in ${r.input_tokens} / out ${r.output_tokens}`,
+  ];
+  if (r.error_kind) lines.push(`error: ${r.error_kind} ${r.error_message ?? ""}`);
+  if (d?.session_id) lines.push(`session: ${d.session_id}`);
+  if (d) {
+    lines.push("", "-- request headers --", prettyJson(d.request_headers));
+    lines.push("", "-- response headers --", prettyJson(d.response_headers));
+    if (d.request_body) lines.push("", "-- request body --", d.request_body);
+    if (d.response_body) lines.push("", "-- response body --", d.response_body);
+  }
+  return lines.join("\n");
+}
+
+/** navigator.clipboard with a hidden-textarea fallback (WKWebView edge cases). */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fall through to the legacy path
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function StatusPill({ code }: { code: number }) {
@@ -52,15 +107,6 @@ function Detail({ id }: { id: number }) {
   }, [id]);
 
   if (!d) return <div className="px-6 pb-3 text-[11px] text-mut">Loading…</div>;
-
-  const parse = (json: string | null): string => {
-    if (!json) return "—";
-    try {
-      return JSON.stringify(JSON.parse(json), null, 2);
-    } catch {
-      return json;
-    }
-  };
 
   return (
     <div className="space-y-2 border-t border-line px-6 pb-3 pt-2">
@@ -90,13 +136,13 @@ function Detail({ id }: { id: number }) {
         <div>
           <div className="mb-1 text-[10px] font-medium text-mut">REQUEST HEADERS</div>
           <pre className="max-h-32 overflow-auto rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed">
-            {parse(d.request_headers)}
+            {prettyJson(d.request_headers)}
           </pre>
         </div>
         <div>
           <div className="mb-1 text-[10px] font-medium text-mut">RESPONSE HEADERS</div>
           <pre className="max-h-32 overflow-auto rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed">
-            {parse(d.response_headers)}
+            {prettyJson(d.response_headers)}
           </pre>
         </div>
         <div>
@@ -149,6 +195,34 @@ export default function RequestLogs() {
     });
   };
 
+  // Long-press to copy: the timer starts on pointer-down and copies when it
+  // fires; releasing early cancels it and the click toggles the detail. A
+  // fired press suppresses the trailing click so the row doesn't expand.
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const pressTimer = useRef<number | null>(null);
+  const suppressClick = useRef(false);
+
+  const cancelPress = () => {
+    if (pressTimer.current != null) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  };
+
+  const copyLog = async (r: RequestLogEntry) => {
+    let text = fmtLogText(r);
+    try {
+      const d = await api.getRequestLog(r.id);
+      if (d) text = fmtLogText(d, d);
+    } catch {
+      // detail unavailable — metadata-only copy
+    }
+    if (await copyText(text)) {
+      setCopiedId(r.id);
+      window.setTimeout(() => setCopiedId((cur) => (cur === r.id ? null : cur)), 1200);
+    }
+  };
+
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface">
       <div className="flex items-center gap-3 border-b border-line px-3.5 py-2.5">
@@ -196,8 +270,27 @@ export default function RequestLogs() {
               {rows.map((r) => (
                 <Fragment key={r.id}>
                   <tr
-                    className="cursor-pointer border-b border-line hover:bg-surface2"
-                    onClick={() => setOpenId(openId === r.id ? null : r.id)}
+                    className="cursor-pointer select-none border-b border-line hover:bg-surface2"
+                    title="Click to expand · long-press to copy"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      suppressClick.current = false;
+                      pressTimer.current = window.setTimeout(() => {
+                        pressTimer.current = null;
+                        suppressClick.current = true;
+                        void copyLog(r);
+                      }, LONG_PRESS_MS);
+                    }}
+                    onPointerUp={cancelPress}
+                    onPointerLeave={cancelPress}
+                    onPointerCancel={cancelPress}
+                    onClick={() => {
+                      if (suppressClick.current) {
+                        suppressClick.current = false;
+                        return;
+                      }
+                      setOpenId(openId === r.id ? null : r.id);
+                    }}
                   >
                     <td className="whitespace-nowrap px-3 py-1.5 text-mut">{fmtTime(r.ts)}</td>
                     <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
@@ -216,7 +309,15 @@ export default function RequestLogs() {
                         : "—"}
                     </td>
                     <td className="px-2 py-1.5 text-mut">
-                      {openId === r.id ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      {copiedId === r.id ? (
+                        <span className="text-[9.5px] font-sans font-medium" style={{ color: "var(--kiwi)" }}>
+                          Copied
+                        </span>
+                      ) : openId === r.id ? (
+                        <ChevronDown className="h-3 w-3" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3" />
+                      )}
                     </td>
                   </tr>
                   {openId === r.id && (

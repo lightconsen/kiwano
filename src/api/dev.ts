@@ -528,6 +528,39 @@ function strategyOf(agent: AgentId): AgentRoute {
   return agentRoutes.find((r) => r.agent === agent)!;
 }
 
+// Mirror vm::build_provider_vms: the "In use" badge marks the provider(s) that
+// would serve a request issued right now under each agent's strategy. Quota
+// stays on the head here — the mock usage has no per-day totals.
+function servingNow(): Set<string> {
+  const out = new Set<string>();
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const inWin = (n: number, s: string, e: string) => {
+    const [sh, sm] = s.split(":").map(Number);
+    const [eh, em] = e.split(":").map(Number);
+    const a = sh * 60 + sm;
+    const b = eh * 60 + em;
+    return a <= b ? n >= a && n <= b : n >= a || n <= b;
+  };
+  for (const r of agentRoutes) {
+    const enabled = r.bindings.filter((b) => b.enabled);
+    if (enabled.length === 0) continue;
+    const head = enabled[0].provider_id;
+    if (r.strategy === "roundrobin") {
+      enabled.forEach((b) => out.add(`${r.agent}/${b.provider_id}`));
+    } else if (r.strategy === "timewindow") {
+      const hit = enabled.find(
+        (b) => b.win_start && b.win_end && inWin(nowMin, b.win_start, b.win_end),
+      );
+      out.add(`${r.agent}/${hit?.provider_id ?? head}`);
+    } else {
+      // single / failover / quota: the head (breaker state is gateway runtime)
+      out.add(`${r.agent}/${head}`);
+    }
+  }
+  return out;
+}
+
 // ── Request logs (data-plane audit trail; fixtures mirror gateway capture) ──
 
 const requestLogs: RequestLogDetail[] = [
@@ -628,9 +661,13 @@ export const devApi: KiwanoApi = {
 
   async listProviders(filter: AgentId | "all" = "all"): Promise<Provider[]> {
     await delay();
-    return providers.filter(
-      (p) => filter === "all" || p.agents.includes(filter),
-    );
+    const serving = servingNow();
+    return providers
+      .filter((p) => filter === "all" || p.agents.includes(filter))
+      .map((p) => ({
+        ...p,
+        is_current: p.agents.some((a) => serving.has(`${a}/${p.id}`)),
+      }));
   },
 
   async addProvider(input: NewProviderInput): Promise<Provider> {
@@ -801,6 +838,14 @@ export const devApi: KiwanoApi = {
     await delay();
     strategyOf(agent).strategy = strategy;
     strategyOf(agent).config = config ?? null;
+    // Entering roundrobin: reseed the weights as an even split of 100
+    // (remainder to the head of the queue), mirroring vm::set_agent_strategy
+    if (strategy === "roundrobin") {
+      const bs = strategyOf(agent).bindings;
+      bs.forEach((b, i) => {
+        b.weight = Math.max(1, Math.floor(100 / bs.length) + (i < 100 % bs.length ? 1 : 0));
+      });
+    }
   },
 
   async reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void> {

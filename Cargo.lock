@@ -2327,6 +2327,7 @@ dependencies = [
 name = "kiwano"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "kiwano-adapters",
  "kiwano-gateway",
  "reqwest",

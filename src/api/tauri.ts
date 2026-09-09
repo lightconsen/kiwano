@@ -82,7 +82,16 @@ export const tauriApi: KiwanoApi = {
     agent: AgentId,
     providerId: string,
     patch: { weight?: number; win_start?: string | null; win_end?: string | null },
-  ) => invoke<void>("update_agent_binding", { agent, providerId, ...patch }),
+  ) =>
+    // Invoke args must be camelCase to match the Rust command's snake_case
+    // params — snake keys here would silently arrive as None in the desktop app
+    invoke<void>("update_agent_binding", {
+      agent,
+      providerId,
+      weight: patch.weight ?? null,
+      winStart: patch.win_start ?? null,
+      winEnd: patch.win_end ?? null,
+    }),
 
   addAgentBinding: (agent: AgentId, providerId: string) =>
     invoke<void>("add_agent_binding", { agent, providerId }),

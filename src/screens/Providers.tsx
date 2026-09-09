@@ -1,5 +1,5 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type FocusEvent, type ReactNode } from "react";
 
 import { ArrowDown, ArrowUp, Pencil, Pin, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -384,9 +384,15 @@ function WeightEditor({
   );
 }
 
-/** Timewindow editor: both bounds commit together (a half window would never
-    match — the backend clears them as a pair when either is emptied). */
-function WindowEditor({
+/** Timewindow range editor: one control owning both bounds, committed as a
+    pair (a half window would never match — the backend clears them together).
+    Validation: each bound must be a valid HH:MM and the end must be later
+    than the start; invalid fields are highlighted red and the pair is simply
+    not committed. Plain "HH:MM" text fields instead of <input type="time">:
+    the native control's click/stepper UI varies per WebView (Tauri's WKWebView
+    offers nothing to click), while a masked text field behaves identically
+    everywhere. */
+function TimeRangeEditor({
   agent,
   b,
   onChanged,
@@ -397,44 +403,81 @@ function WindowEditor({
 }) {
   const [s, setS] = useState(b.win_start ?? "");
   const [e, setE] = useState(b.win_end ?? "");
+  const [left, setLeft] = useState(false); // focus has left the pair once
   useEffect(() => {
     setS(b.win_start ?? "");
     setE(b.win_end ?? "");
+    setLeft(false);
   }, [b.win_start, b.win_end]);
-  const commit = () => {
-    if (s && e) {
-      if (s !== b.win_start || e !== b.win_end) {
-        api.updateAgentBinding(agent, b.provider_id, { win_start: s, win_end: e }).then(onChanged);
-        return;
-      }
-    } else if (b.win_start || b.win_end) {
-      // Both bounds emptied: clear them as a pair
-      api.updateAgentBinding(agent, b.provider_id, { win_start: "", win_end: "" }).then(onChanged);
-      return;
-    }
-    setS(b.win_start ?? "");
-    setE(b.win_end ?? "");
+  // Digits only; the colon is inserted automatically once past the hours
+  const mask = (raw: string) => {
+    const d = raw.replace(/[^0-9]/g, "").slice(0, 4);
+    return d.length > 2 ? `${d.slice(0, 2)}:${d.slice(2)}` : d;
   };
+  // Complete a masked entry: "9" -> "09:00", "0930" -> "09:30"; null = invalid
+  const complete = (t: string): string | null => {
+    const d = t.replace(/[^0-9]/g, "");
+    if (!d) return "";
+    if (d.length <= 2) {
+      const h = Number(d);
+      return h <= 23 ? `${d.padStart(2, "0")}:00` : null;
+    }
+    const h = Number(d.slice(0, 2));
+    const m = Number(d.slice(2, 4));
+    return h <= 23 && m <= 59 ? `${d.slice(0, 2).padStart(2, "0")}:${d.slice(2, 4).padStart(2, "0")}` : null;
+  };
+
+  const cs = complete(s);
+  const ce = complete(e);
+  // An incomplete pair only matters once editing is done: while the focus is
+  // still inside, a single filled bound is just work in progress
+  const half = left && !!cs !== !!ce;
+  // Per-field red highlight: bad text flags its own bound, an end that is not
+  // later than the start flags the end bound, an incomplete pair flags the
+  // missing side
+  const badS = cs === null || (half && !s);
+  const badE = ce === null || (!!cs && !!ce && ce <= cs) || (half && !e);
+
+  const commit = () => {
+    setLeft(true);
+    if (badS || badE) return; // invalid: stay red until fixed
+    if (cs === (b.win_start ?? "") && ce === (b.win_end ?? "")) return;
+    api.updateAgentBinding(agent, b.provider_id, { win_start: cs, win_end: ce }).then(onChanged);
+  };
+  // Commit only when the focus leaves the pair: moving between the two bounds
+  // is mid-edit, and committing on each blur would wipe the first field before
+  // the second one is filled.
+  const onBlur = (ev: FocusEvent) => {
+    if (ev.currentTarget.contains(ev.relatedTarget as Node | null)) return;
+    commit();
+  };
+  const field =
+    "h-5 w-[46px] border-0 bg-transparent p-0 text-center font-mono text-[11px] focus-visible:ring-0 dark:bg-transparent";
   return (
     <span
-      className="flex flex-none items-center gap-1"
-      title="Local time window this candidate serves (overnight windows wrap midnight); empty = fallback when no window matches"
+      className="flex flex-none items-center gap-1.5 rounded-md border border-line px-1.5 py-0.5"
+      title="Local time window this candidate serves; type digits like 0930 — the end must be later than the start. Clear both to remove the window"
+      onBlur={onBlur}
     >
       <Input
-        type="time"
-        className="h-6 w-[70px] rounded-md bg-transparent px-1 font-mono text-[11px] dark:bg-transparent"
+        inputMode="numeric"
+        placeholder="--:--"
+        aria-label="Window start"
+        className={field}
+        aria-invalid={badS}
         value={s}
-        onChange={(ev) => setS(ev.target.value)}
-        onBlur={commit}
+        onChange={(ev) => setS(mask(ev.target.value))}
         onKeyDown={(ev) => ev.key === "Enter" && commit()}
       />
       <span className="text-[10.5px] text-mut">–</span>
       <Input
-        type="time"
-        className="h-6 w-[70px] rounded-md bg-transparent px-1 font-mono text-[11px] dark:bg-transparent"
+        inputMode="numeric"
+        placeholder="--:--"
+        aria-label="Window end"
+        className={field}
+        aria-invalid={badE}
         value={e}
-        onChange={(ev) => setE(ev.target.value)}
-        onBlur={commit}
+        onChange={(ev) => setE(mask(ev.target.value))}
         onKeyDown={(ev) => ev.key === "Enter" && commit()}
       />
     </span>
@@ -473,7 +516,9 @@ function RoleCell({
               No window
             </span>
           )}
-          <WindowEditor agent={agent} b={b} onChanged={onChanged} />
+          {/* The Fallback slot has no window by definition — no range editor
+              there; give it one by pinning a windowed candidate to the top */}
+          {(idx > 0 || !!b.win_start) && <TimeRangeEditor agent={agent} b={b} onChanged={onChanged} />}
         </>
       ) : idx === 0 ? (
         badge("Primary", "Current route of this agent")
@@ -577,7 +622,8 @@ function BindingRow({
 
 /** Select that offers providers not yet bound to the agent; picking one binds
     it to the route tail. Shared by the list-bottom add row and the onboarding
-    empty state. Renders nothing when every provider is already in the route. */
+    empty state. When every provider is already in the route the trigger stays
+    visible but disabled, so the row keeps its shape. */
 function BindProviderSelect({
   providers,
   boundIds,
@@ -589,10 +635,11 @@ function BindProviderSelect({
 }) {
   const available = providers.filter((p) => !boundIds.has(p.id));
   const [sel, setSel] = useState("");
-  if (available.length === 0) return null;
+  const full = available.length === 0;
   return (
     <Select
       value={sel}
+      disabled={full}
       onValueChange={(pid) => {
         setSel("");
         if (pid) onPick(pid);
@@ -601,9 +648,9 @@ function BindProviderSelect({
       <SelectTrigger
         size="sm"
         aria-label="Bind provider to route"
-        className="h-7 w-[210px] bg-transparent text-[12px] dark:bg-transparent"
+        className="h-7 w-[210px] bg-transparent text-[12px] dark:bg-transparent disabled:opacity-50"
       >
-        <SelectValue placeholder="Bind existing provider…" />
+        <SelectValue placeholder={full ? "All providers are already bound" : "Bind existing provider…"} />
       </SelectTrigger>
       <SelectContent className="min-w-[220px]">
         {available.map((p) => {

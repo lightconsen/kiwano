@@ -37,6 +37,11 @@ function parseQuota(config: string | null): { limit: number; unit: "requests" | 
   }
 }
 
+// Sensible per-unit thresholds: 100 requests vs 100 tokens a day are not
+// meaningful swaps, so a unit switch replaces a default/empty limit with the
+// new unit's default and keeps user-tuned values
+const DEFAULT_LIMIT: Record<"requests" | "tokens", number> = { requests: 100, tokens: 1_000_000 };
+
 function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => void }) {
   const meta = AGENTS.find((m) => m.id === route.agent)!;
   const hint = STRATEGIES.find((s) => s.id === route.strategy)?.hint ?? "";
@@ -44,7 +49,7 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
 
   const setStrategy = async (next: StrategyKind) => {
     if (next === "quota") {
-      const config = JSON.stringify({ limit: quota.limit || 100, unit: quota.unit });
+      const config = JSON.stringify({ limit: quota.limit || DEFAULT_LIMIT.requests, unit: quota.unit });
       await api.updateAgentStrategy(route.agent, next, config);
     } else {
       await api.updateAgentStrategy(route.agent, next, null);
@@ -54,6 +59,10 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
 
   const setQuota = async (patch: Partial<ReturnType<typeof parseQuota>>) => {
     const next = { ...quota, ...patch };
+    // Crossing units on a default (or empty) limit: seed the new unit's default
+    if (patch.unit && patch.unit !== quota.unit && (quota.limit === 0 || quota.limit === DEFAULT_LIMIT[quota.unit])) {
+      next.limit = DEFAULT_LIMIT[patch.unit];
+    }
     await api.updateAgentStrategy(route.agent, "quota", JSON.stringify(next));
     onChanged();
   };
@@ -95,9 +104,9 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
             <Input
               type="number"
               min={1}
-              className="h-6 w-16 rounded-md bg-transparent px-1.5 text-right font-mono text-[11px] dark:bg-transparent"
+              className="h-6 w-20 rounded-md bg-transparent px-1.5 text-right font-mono text-[11px] dark:bg-transparent"
               value={quota.limit || ""}
-              placeholder="100"
+              placeholder={String(DEFAULT_LIMIT[quota.unit])}
               onChange={(e) => setQuota({ limit: Number(e.target.value) || 0 })}
             />
             <Select

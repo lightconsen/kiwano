@@ -6,7 +6,7 @@
 //! the gateway store does not expose (average latency, per-provider daily
 //! sparkline) plus a GUI-scoped `app_settings` table.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -111,6 +111,65 @@ fn day_key(epoch_secs: i64) -> String {
 /// `MM-DD` label for the dashboard trend axis.
 fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
+}
+
+// ── "In use" helpers: which candidate would serve a request issued right now,
+//    mirroring the gateway's strategy selection (strategy/mod.rs) minus its
+//    runtime state (circuit breakers, roundrobin sticky sessions) ──
+
+/// Minutes-of-day in the local timezone (timewindow windows are local).
+fn local_minutes_now() -> u32 {
+    use chrono::Timelike;
+    let t = chrono::Local::now().time();
+    t.hour() * 60 + t.minute()
+}
+
+/// Whether `now_min` falls inside an "HH:MM" window; inclusive bounds, and a
+/// start later than the end wraps midnight (same semantics as the gateway).
+fn in_window(now_min: u32, start: &str, end: &str) -> bool {
+    let parse = |s: &str| -> Option<u32> {
+        let (h, m) = s.trim().split_once(':')?;
+        let (h, m) = (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?);
+        (h < 24 && m < 60).then_some(h * 60 + m)
+    };
+    match (parse(start), parse(end)) {
+        (Some(s), Some(e)) => {
+            if s <= e {
+                now_min >= s && now_min <= e
+            } else {
+                now_min >= s || now_min <= e
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Whether the quota config puts `provider_id` over threshold for the current
+/// UTC day — counted exactly like the gateway's select_quota (requests, or
+/// input+output tokens; cache reads excluded). No/invalid config → under.
+fn quota_over_threshold(store: &Store, config: Option<&str>, provider_id: &str) -> bool {
+    #[derive(Deserialize)]
+    struct QuotaCfg {
+        limit: f64,
+        #[serde(default = "default_quota_unit")]
+        unit: String,
+    }
+    fn default_quota_unit() -> String {
+        "requests".into()
+    }
+    let Some(cfg) = config.and_then(|c| serde_json::from_str::<QuotaCfg>(c).ok()) else {
+        return false;
+    };
+    let since = format!("{}T00:00:00Z", day_key(unix_now()));
+    let Ok(t) = store.usage_totals_for_provider(provider_id, Some(&since)) else {
+        return false;
+    };
+    let consumed = if cfg.unit == "tokens" {
+        (t.input_tokens + t.output_tokens) as f64
+    } else {
+        t.requests as f64
+    };
+    consumed >= cfg.limit
 }
 
 /// Start of the current reset period (RFC3339 UTC, for `ts >= ?` filters)
@@ -670,6 +729,59 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         }
     }
 
+    // agent → provider ids that would serve a request issued right now under
+    // the active strategy (the "In use" badge). Mirrors the gateway's strategy
+    // selection; its runtime state (breaker health, roundrobin sticky sessions)
+    // is process-local and invisible here, so those two degrade to the
+    // deterministic first choice / full rotation.
+    let mut serving: HashMap<String, HashSet<String>> = HashMap::new();
+    for agent in store.bound_agents().map_err(e2s)? {
+        let enabled: Vec<Binding> = store
+            .bindings_for_agent(&agent)
+            .map_err(e2s)?
+            .into_iter()
+            .filter(|b| b.enabled)
+            .collect();
+        let Some(head) = enabled.first().map(|b| b.provider_id.clone()) else {
+            continue;
+        };
+        let strategy = store
+            .get_strategy(&agent)
+            .map_err(e2s)?
+            .unwrap_or(Strategy {
+                agent: agent.clone(),
+                kind: StrategyType::Single,
+                config: None,
+            });
+        let ids: HashSet<String> = match strategy.kind {
+            // every candidate takes rotation turns → all of them serve
+            StrategyType::Roundrobin => enabled.iter().map(|b| b.provider_id.clone()).collect(),
+            // the candidate whose local window matches now; none → the head
+            StrategyType::Timewindow => {
+                let now = local_minutes_now();
+                let hit = enabled.iter().find(|b| {
+                    matches!(
+                        (b.win_start.as_deref(), b.win_end.as_deref()),
+                        (Some(s), Some(e)) if in_window(now, s, e)
+                    )
+                });
+                HashSet::from([hit.map(|b| b.provider_id.clone()).unwrap_or(head)])
+            }
+            // under threshold → primary; over → first backup in line
+            StrategyType::Quota => {
+                let over = quota_over_threshold(&store, strategy.config.as_deref(), &head);
+                HashSet::from([if over {
+                    enabled.get(1).map(|b| b.provider_id.clone()).unwrap_or(head)
+                } else {
+                    head
+                }])
+            }
+            // single / failover: the head (failover degradation is breaker runtime)
+            _ => HashSet::from([head]),
+        };
+        serving.insert(agent, ids);
+    }
+
     // provider → 7d usage totals
     let mut usage_by_id: HashMap<String, UsageTotals> = HashMap::new();
     for pu in store.usage_by_provider(None, Some(&since7)).map_err(e2s)? {
@@ -708,7 +820,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             agents.sort();
             let is_current = agents
                 .iter()
-                .any(|a| primary.get(a).map(String::as_str) == Some(&p.id));
+                .any(|a| serving.get(a).is_some_and(|ids| ids.contains(&p.id)));
 
             let note = if backup_for_any {
                 Some("Failover queue".to_string())
@@ -835,6 +947,20 @@ pub fn set_agent_strategy(
     let kind = StrategyType::from_str(strategy)
         .ok_or_else(|| format!("unknown strategy type: {strategy}"))?;
     store.upsert_strategy(agent, kind, config).map_err(e2s)?;
+    // Entering roundrobin: seed the weights as an even split of 100 (2
+    // candidates → 50/50, 3 → 34/33/33, remainder to the head of the queue)
+    // instead of leaving every candidate at 1, so the rotation starts balanced.
+    if kind == StrategyType::Roundrobin {
+        let bindings = store.bindings_for_agent(agent).map_err(e2s)?;
+        let n = bindings.len();
+        for (i, mut b) in bindings.into_iter().enumerate() {
+            let w = ((100 / n) + if i < 100 % n { 1 } else { 0 }).max(1) as i64;
+            if b.weight != w {
+                b.weight = w;
+                store.upsert_binding(&b).map_err(e2s)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -2378,6 +2504,136 @@ mod tests {
             r.config.as_deref(),
             Some(r#"{"limit":50,"unit":"requests"}"#)
         );
+    }
+
+    #[test]
+    fn roundrobin_strategy_seeds_even_weights() {
+        let s = store();
+        for (pid, name, pr) in [
+            ("a1", "Alpha", 0),
+            ("b1", "Beta", 1),
+            ("c1", "Gamma", 2),
+        ] {
+            s.insert_provider(&provider(pid, name, Billing::Metered))
+                .unwrap();
+            s.upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: pid.into(),
+                priority: pr,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        }
+
+        // Entering roundrobin splits 100 across the candidates (remainder to
+        // the head of the queue): 3 candidates → 34/33/33
+        set_agent_strategy(&s, "claude", "roundrobin", None).unwrap();
+        let weights: Vec<i64> = build_agent_routes(&s).unwrap()[0]
+            .bindings
+            .iter()
+            .map(|b| b.weight)
+            .collect();
+        assert_eq!(weights, vec![34, 33, 33]);
+
+        // Other strategies leave the weights untouched
+        set_agent_strategy(&s, "claude", "failover", None).unwrap();
+        let weights: Vec<i64> = build_agent_routes(&s).unwrap()[0]
+            .bindings
+            .iter()
+            .map(|b| b.weight)
+            .collect();
+        assert_eq!(weights, vec![34, 33, 33]);
+    }
+
+    #[test]
+    fn in_use_badge_follows_strategy() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Metered))
+            .unwrap();
+        for (pid, pr) in [("a1", 0), ("b1", 1)] {
+            s.upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: pid.into(),
+                priority: pr,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        }
+        let in_use = |s: &Store| -> (bool, bool) {
+            let vms = build_provider_vms(s, &aux).unwrap();
+            let cur = |id: &str| vms.iter().find(|p| p.id == id).unwrap().is_current;
+            (cur("a1"), cur("b1"))
+        };
+
+        // single: only the head serves
+        assert_eq!(in_use(&s), (true, false));
+
+        // roundrobin: every candidate takes rotation turns
+        set_agent_strategy(&s, "claude", "roundrobin", None).unwrap();
+        assert_eq!(in_use(&s), (true, true));
+
+        // timewindow: a window containing now moves the badge off the head
+        use chrono::Timelike;
+        let t = chrono::Local::now().time();
+        let now = t.hour() * 60 + t.minute();
+        let hhmm = |min: u32| format!("{:02}:{:02}", min / 60 % 24, min % 60);
+        // [now-30, now+30] — wraps midnight safely near the day edges
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "b1".into(),
+            priority: 1,
+            weight: 1,
+            win_start: Some(hhmm(now + 1440 - 30)),
+            win_end: Some(hhmm(now + 30)),
+            enabled: true,
+        })
+        .unwrap();
+        set_agent_strategy(&s, "claude", "timewindow", None).unwrap();
+        assert_eq!(in_use(&s), (false, true));
+
+        // timewindow: no window matching now → the fallback head serves
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "b1".into(),
+            priority: 1,
+            weight: 1,
+            // one-minute window later today — can never contain now
+            win_start: Some(hhmm(now + 60)),
+            win_end: Some(hhmm(now + 60)),
+            enabled: true,
+        })
+        .unwrap();
+        assert_eq!(in_use(&s), (true, false));
+
+        // quota: head under threshold; over → first backup (windows ignored)
+        set_agent_strategy(&s, "claude", "quota", Some(r#"{"limit":5,"unit":"requests"}"#))
+            .unwrap();
+        assert_eq!(in_use(&s), (true, false));
+        for _ in 0..5 {
+            s.record_usage(&kiwano_gateway::store::UsageRecord {
+                ts: rfc3339(unix_now()),
+                agent: "claude".into(),
+                provider_id: "a1".into(),
+                model: None,
+                input_tokens: 10,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+            })
+            .unwrap();
+        }
+        assert_eq!(in_use(&s), (false, true));
     }
 
     fn usage_row(provider_id: &str) -> UsageRecord {

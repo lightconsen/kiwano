@@ -37,6 +37,17 @@ function fmtBytes(n: number): string {
   return `${n}B`;
 }
 
+/** Generation throughput when the stream's first-token timing exists (output
+    tokens over the generation phase = total minus first-token latency);
+    otherwise end-to-end (output tokens over total latency). */
+function fmtThroughput(r: RequestLogEntry): string {
+  if (r.output_tokens <= 0 || r.latency_ms == null) return "—";
+  if (r.first_token_ms != null && r.latency_ms > r.first_token_ms) {
+    return `${(r.output_tokens / ((r.latency_ms - r.first_token_ms) / 1000)).toFixed(0)} tok/s`;
+  }
+  return `${(r.output_tokens / (r.latency_ms / 1000)).toFixed(0)} tok/s`;
+}
+
 /** Pretty-print stored header JSON; non-JSON passes through untouched. */
 function prettyJson(json: string | null): string {
   if (!json) return "—";
@@ -111,6 +122,11 @@ function Detail({ d }: { d: RequestLogDetail | null }) {
 
   return (
     <div className="space-y-2 px-5 pb-4 pt-3">
+      {/* The list table trades this away for Model — it stays here, one per detail */}
+      <div className="font-mono text-[11px] text-mut">
+        {d.method} <span className="text-ink">{d.path}</span>
+        {d.query ? `?${d.query}` : ""}
+      </div>
       <div className="flex gap-6 text-[10.5px] text-mut">
         {d.session_id && (
           <span>
@@ -263,9 +279,14 @@ export default function RequestLogs() {
                 <th className="px-3 py-2 font-medium">Time</th>
                 <th className="px-2 py-2 font-medium">Agent</th>
                 <th className="px-2 py-2 font-medium">Provider</th>
-                <th className="px-2 py-2 font-medium">Path</th>
+                {/* Model beats Path in the list: per-agent paths repeat (claude →
+                    /v1/messages, codex → /v1/chat/completions…) while the model
+                    differs per request; the path lives in the detail dialog */}
+                <th className="px-2 py-2 font-medium">Model</th>
                 <th className="px-2 py-2 font-medium">Status</th>
                 <th className="px-2 py-2 text-right font-medium">Latency</th>
+                <th className="px-2 py-2 text-right font-medium">First token</th>
+                <th className="px-2 py-2 text-right font-medium">Tok/s</th>
                 <th className="px-2 py-2 text-right font-medium">Tokens</th>
                 <th className="w-6 px-2 py-2" />
               </tr>
@@ -280,14 +301,16 @@ export default function RequestLogs() {
                   <td className="whitespace-nowrap px-3 py-1.5 text-mut">{fmtTime(r.ts)}</td>
                   <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
                   <td className="px-2 py-1.5 font-sans">{r.provider_id ?? "—"}</td>
-                  <td className="max-w-[180px] truncate px-2 py-1.5 text-mut">
-                    {r.path}
-                    {r.is_streaming && <span className="ml-1 text-[9.5px]">SSE</span>}
-                  </td>
+                  <td className="max-w-[180px] truncate px-2 py-1.5 text-mut">{r.model ?? "—"}</td>
                   <td className="px-2 py-1.5">
                     <StatusPill code={r.status_code} />
                   </td>
-                  <td className="text-right px-2 py-1.5">{fmtLatency(r.latency_ms)}</td>
+                  <td className="text-right px-2 py-1.5">
+                    {fmtLatency(r.latency_ms)}
+                    {r.is_streaming && <span className="ml-1 text-[9.5px]">SSE</span>}
+                  </td>
+                  <td className="text-right px-2 py-1.5 text-mut">{fmtLatency(r.first_token_ms)}</td>
+                  <td className="whitespace-nowrap text-right px-2 py-1.5 text-mut">{fmtThroughput(r)}</td>
                   <td className="text-right px-2 py-1.5 text-mut">
                     {r.input_tokens + r.output_tokens > 0
                       ? `${fmtTokens(r.input_tokens)} / ${fmtTokens(r.output_tokens)}`

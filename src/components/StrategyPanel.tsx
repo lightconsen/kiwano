@@ -1,5 +1,7 @@
 // Agent routing strategy panel (tech.md §4.7): strategy type + candidate ordering.
-// Only agents with bindings are shown; changes take effect immediately via the gateway's /reload.
+// Rendered inside a single agent's tab: shows that agent's route only (and
+// nothing when it has no bindings yet); changes take effect immediately via
+// the gateway's /reload.
 import { useCallback, useEffect, useState } from "react";
 
 import { ArrowDown, ArrowUp } from "lucide-react";
@@ -14,7 +16,7 @@ import {
 } from "@/components/ui/select";
 
 import { api } from "../api/client";
-import { AGENTS, type AgentRoute, type StrategyKind } from "../api/types";
+import { AGENTS, type AgentId, type AgentRoute, type StrategyKind } from "../api/types";
 import { AgentChip, Logo } from "./bits";
 
 const STRATEGIES: { id: StrategyKind; label: string; hint: string }[] = [
@@ -165,7 +167,7 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
   );
 }
 
-export default function StrategyPanel() {
+export default function StrategyPanel({ agent }: { agent: AgentId }) {
   const [routes, setRoutes] = useState<AgentRoute[] | null>(null);
 
   const refetch = useCallback(() => {
@@ -173,14 +175,16 @@ export default function StrategyPanel() {
   }, []);
   useEffect(refetch, [refetch]);
 
-  if (!routes || routes.length === 0) return null;
+  // Only this tab's agent, and only once it has a route (bindings) to configure
+  const mine = routes?.filter((r) => r.agent === agent) ?? null;
+  if (!mine || mine.length === 0) return null;
 
   return (
     <section className="mt-1">
       <div className="flex h-8 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
         Agent routing strategies · auto-fallback on failure/quota, changes apply instantly
       </div>
-      {routes.map((r) => (
+      {mine.map((r) => (
         <RouteRow key={r.agent} route={r} onChanged={refetch} />
       ))}
     </section>

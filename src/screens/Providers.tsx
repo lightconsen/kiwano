@@ -436,7 +436,8 @@ export default function Providers({
         </div>
       )}
 
-      <StrategyPanel />
+      {/* Strategy config lives in the agent's own tab, only once it is taken over */}
+      {seg !== "all" && (takenOver?.has(seg) ?? false) && <StrategyPanel agent={seg} />}
 
       <div className="mt-auto px-4 py-3 text-[10.5px] text-mut">
         Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud

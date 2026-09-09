@@ -157,7 +157,7 @@ textarea,
   transition: background 0.12s;
 }
 .row:hover {
-  background: var(--surface);
+  background: var(--kiwi-soft);
 }
 .row.current {
   /* no permanent tint: the In-use badge and the left bar mark it, hover stays

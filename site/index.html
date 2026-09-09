@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<!-- Kiwano 落地页 — 纯黑 dark mode,设计 token 与桌面端一致(见 design/design.md §3)。
+     中英双语:默认简体中文,data-i18n 节点由页尾字典切换,选择存 localStorage。
+     下载链接目前统一指向 GitHub Releases 页;首版发布后把各按钮换成精确资产链接,例如:
+       https://github.com/lightconsen/kiwano/releases/latest/download/Kiwano_0.1.0_aarch64.dmg
+       https://github.com/lightconsen/kiwano/releases/latest/download/Kiwano_0.1.0_x64.dmg
+       https://github.com/lightconsen/kiwano/releases/latest/download/Kiwano_0.1.0_x64-setup.exe
+       https://github.com/lightconsen/kiwano/releases/latest/download/kiwano_0.1.0_amd64.deb
+       https://github.com/lightconsen/kiwano/releases/latest/download/kiwano_0.1.0_amd64.AppImage -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kiwano — 本地优先的 AI Provider 管理器</title>
+<meta name="description" content="在本地发现、对比、切换 AI 模型供应商;一键把 Claude Code、Codex、Gemini CLI 接入本地网关,逐请求计量用量,数据不出本机。">
+<meta property="og:title" content="Kiwano — 本地优先的 AI Provider 管理器">
+<meta property="og:description" content="发现、对比、切换供应商,一键接管编程 Agent;所有请求本地直连,Key 永不上传。">
+<meta property="og:image" content="assets/app-providers.png">
+<link rel="icon" type="image/svg+xml" href="assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Design tokens:与桌面端 src/index.css 同源;页面底色按需求改为纯黑 ── */
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --kiwi-dim: oklch(0.55 0.14 132);
+  --blue: oklch(0.72 0.13 245);
+  --radius: 12px;
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: oklch(0.80 0.19 132 / 0.28); }
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; height: auto; }
+.mono { font-family: var(--font-mono); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
+section { scroll-margin-top: 76px; }
+.icon { width: 18px; height: 18px; flex: none; }
+
+/* ── 顶部导航 ── */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  border-bottom: 1px solid var(--line);
+  background: oklch(0 0 0 / 0.72);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.nav-inner { display: flex; align-items: center; gap: 28px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15.5px; letter-spacing: 0.01em; }
+.brand img { width: 24px; height: 24px; border-radius: 7px; }
+.nav-links { display: flex; gap: 4px; }
+.nav-links a {
+  padding: 7px 12px; border-radius: 8px;
+  font-size: 13.5px; color: var(--mut); transition: color .15s, background .15s;
+}
+.nav-links a:hover { color: var(--ink); background: var(--surface2); }
+.nav-cta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.btn-lang { font-family: var(--font-mono); font-size: 12px; padding: 8px 12px; letter-spacing: 0.04em; }
+
+/* ── 按钮 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  padding: 9px 16px; font-size: 13.5px; font-weight: 500; font-family: var(--font-sans);
+  color: var(--ink); background: var(--surface2);
+  cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.btn:hover { border-color: oklch(0.42 0.03 132 / 0.8); background: oklch(0.24 0.012 260 / 0.7); }
+.btn:active { transform: scale(0.98); }
+.btn-primary {
+  background: var(--kiwi); border-color: var(--kiwi); color: oklch(0.18 0.03 132); font-weight: 600;
+}
+.btn-primary:hover { background: var(--kiwi); border-color: var(--kiwi); filter: brightness(1.08); }
+.btn-lg { padding: 12px 22px; font-size: 15px; border-radius: 12px; }
+.btn-gh { display: inline-flex; align-items: center; gap: 7px; }
+.btn-gh .icon { width: 16px; height: 16px; }
+
+/* ── Hero ── */
+.hero { padding: 92px 0 0; text-align: center; position: relative; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: -40% -20% auto; height: 130%;
+  background: radial-gradient(46% 42% at 50% 18%, oklch(0.80 0.19 132 / 0.09), transparent 70%);
+  pointer-events: none;
+}
+.badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid oklch(0.55 0.14 132 / 0.4); background: var(--kiwi-soft);
+  border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: var(--kiwi); font-weight: 500;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+.hero h1 {
+  margin: 26px auto 0; max-width: 760px;
+  font-size: clamp(34px, 5.4vw, 54px); font-weight: 700; line-height: 1.18; letter-spacing: -0.02em;
+}
+.hero h1 em { font-style: normal; color: var(--kiwi); }
+.hero .sub {
+  margin: 20px auto 0; max-width: 640px; color: var(--mut); font-size: 16.5px; line-height: 1.75;
+}
+.hero .sub strong { color: var(--ink); font-weight: 500; }
+.dl-row { margin-top: 34px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.dl-note { margin-top: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--mut); letter-spacing: 0.02em; }
+.dl-note b { color: oklch(0.70 0.02 260); font-weight: 500; }
+
+/* Hero 截图:窗框 + kiwi 微光 */
+.shot {
+  position: relative; margin: 56px auto 0; max-width: 980px;
+  border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.9), 0 0 90px -30px oklch(0.80 0.19 132 / 0.22);
+  background: oklch(0.15 0.008 260);
+}
+.shot img { width: 100%; }
+.shot::after { content: ""; position: absolute; inset: 0; border-radius: 14px; box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06); pointer-events: none; }
+
+/* ── 区块标题 ── */
+.sec-head { text-align: center; max-width: 620px; margin: 0 auto 52px; }
+.sec-head .kicker {
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.18em;
+  color: var(--kiwi); text-transform: uppercase;
+}
+.sec-head h2 { margin-top: 12px; font-size: clamp(26px, 3.4vw, 34px); font-weight: 700; letter-spacing: -0.015em; }
+.sec-head p { margin-top: 14px; color: var(--mut); font-size: 15px; }
+section.block { padding: 96px 0 0; }
+
+/* ── 特性卡片 ── */
+.grid-feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.feat {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: 22px 20px 20px; transition: border-color .15s, background .15s;
+}
+.feat:hover { border-color: oklch(0.36 0.02 260 / 0.9); background: oklch(0.165 0.008 260 / 0.6); }
+.feat .fi {
+  width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+  background: var(--kiwi-soft); color: var(--kiwi); margin-bottom: 14px;
+}
+.feat h3 { font-size: 15px; font-weight: 600; }
+.feat p { margin-top: 7px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.feat p code { font-family: var(--font-mono); font-size: 12px; color: oklch(0.72 0.02 260); }
+
+/* ── 界面展示 ── */
+.cap { display: flex; align-items: baseline; gap: 12px; margin: 14px 2px 0; }
+.tag {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  color: var(--kiwi); border: 1px solid oklch(0.55 0.14 132 / 0.4); background: var(--kiwi-soft);
+  padding: 2px 8px; border-radius: 5px; flex: none;
+}
+.cap p { font-size: 13px; color: var(--mut); }
+
+/* ── 工作原理 ── */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.step {
+  position: relative; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: 22px 20px;
+}
+.step .no {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--kiwi);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.step .no::after { content: ""; width: 26px; height: 1px; background: oklch(0.55 0.14 132 / 0.55); }
+.step h3 { margin-top: 12px; font-size: 15.5px; font-weight: 600; }
+.step p { margin-top: 7px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.step p code {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi);
+  background: var(--kiwi-soft); padding: 1px 6px; border-radius: 5px;
+}
+
+/* ── 策略示意动画:8s 主循环,节点态与请求点同步;reduced-motion 时停在静态初始态 ── */
+.grid-strat { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.st-head { text-align: center; margin: 62px auto 34px; max-width: 560px; }
+.st-head h3 { margin-top: 12px; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+.st-head p { margin-top: 8px; color: var(--mut); font-size: 13.5px; }
+.sh { display: flex; align-items: center; gap: 10px; }
+.diag {
+  position: relative; height: 118px; margin-top: 16px;
+  border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85);
+  overflow: hidden;
+}
+.pn {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface2);
+  font-family: var(--font-mono); font-size: 11px; color: var(--mut);
+}
+.pn i { width: 6px; height: 6px; border-radius: 999px; background: oklch(0.42 0.01 260); }
+.pn.on { color: var(--ink); border-color: oklch(0.55 0.14 132 / 0.7); }
+.pn.on i { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+.rq {
+  position: absolute; top: 50%; width: 8px; height: 8px; margin: -4px; border-radius: 999px;
+  background: var(--kiwi); box-shadow: 0 0 8px oklch(0.8 0.19 132 / 0.7); opacity: 0;
+}
+
+/* failover:A 故障转红,请求点改道 B,随后 A 恢复 */
+.fa-a { animation: 8s fa-a-n infinite; }
+.fa-a i { animation: 8s fa-a-i infinite; }
+.fa-b { animation: 8s fa-b-n infinite; }
+.fa-b i { animation: 8s fa-b-i infinite; }
+.fa-rq { animation: 8s fa-rq infinite; }
+@keyframes fa-rq {
+  0%   { left: 2%;  top: 50%; opacity: 0; }
+  6%   { left: 2%;  top: 50%; opacity: 1; }
+  20%  { left: 16%; top: 50%; }
+  30%  { left: 16%; top: 50%; }
+  36%  { left: 32%; top: 24%; }
+  42%  { left: 48%; top: 50%; }
+  90%  { left: 48%; top: 50%; opacity: 1; }
+  100% { left: 48%; top: 50%; opacity: 0; }
+}
+@keyframes fa-a-n {
+  0%, 29%  { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  30%, 85% { border-color: oklch(0.65 0.2 25 / 0.75); color: oklch(0.75 0.1 25); }
+  86%, 100% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+}
+@keyframes fa-a-i {
+  0%, 29%  { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  30%, 85% { background: var(--red); box-shadow: 0 0 6px oklch(0.65 0.2 25 / 0.55); }
+  86%, 100% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+}
+@keyframes fa-b-n {
+  0%, 41%  { border-color: var(--line-strong); color: var(--mut); }
+  42%, 100% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+}
+@keyframes fa-b-i {
+  0%, 41%  { background: oklch(0.42 0.01 260); box-shadow: none; }
+  42%, 100% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+}
+
+/* roundrobin:请求点在 A→B→C 间轮流,命中节点亮起 */
+.rr-a { animation: 8s rr-a-n infinite; }
+.rr-a i { animation: 8s rr-a-i infinite; }
+.rr-b { animation: 8s rr-b-n infinite; }
+.rr-b i { animation: 8s rr-b-i infinite; }
+.rr-c { animation: 8s rr-c-n infinite; }
+.rr-c i { animation: 8s rr-c-i infinite; }
+.rr-rq { animation: 8s rr-rq infinite; }
+@keyframes rr-rq {
+  0%   { left: 2%;  opacity: 0; }
+  4%   { left: 2%;  opacity: 1; }
+  10%, 20% { left: 16%; }
+  24%, 34% { left: 48%; }
+  38%, 48% { left: 80%; }
+  52%, 62% { left: 16%; }
+  66%, 76% { left: 48%; }
+  80%, 90% { left: 80%; }
+  96%   { left: 80%; opacity: 1; }
+  100%  { left: 80%; opacity: 0; }
+}
+@keyframes rr-a-n {
+  0%, 7% { border-color: var(--line-strong); color: var(--mut); }
+  9%, 17% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  19%, 49% { border-color: var(--line-strong); color: var(--mut); }
+  51%, 59% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  61%, 100% { border-color: var(--line-strong); color: var(--mut); }
+}
+@keyframes rr-a-i {
+  0%, 7% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  9%, 17% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  19%, 49% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  51%, 59% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  61%, 100% { background: oklch(0.42 0.01 260); box-shadow: none; }
+}
+@keyframes rr-b-n {
+  0%, 21% { border-color: var(--line-strong); color: var(--mut); }
+  23%, 31% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  33%, 63% { border-color: var(--line-strong); color: var(--mut); }
+  65%, 73% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  75%, 100% { border-color: var(--line-strong); color: var(--mut); }
+}
+@keyframes rr-b-i {
+  0%, 21% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  23%, 31% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  33%, 63% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  65%, 73% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  75%, 100% { background: oklch(0.42 0.01 260); box-shadow: none; }
+}
+@keyframes rr-c-n {
+  0%, 35% { border-color: var(--line-strong); color: var(--mut); }
+  37%, 45% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  47%, 77% { border-color: var(--line-strong); color: var(--mut); }
+  79%, 87% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  89%, 100% { border-color: var(--line-strong); color: var(--mut); }
+}
+@keyframes rr-c-i {
+  0%, 35% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  37%, 45% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  47%, 77% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  79%, 87% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  89%, 100% { background: oklch(0.42 0.01 260); box-shadow: none; }
+}
+
+/* timewindow:时间游标扫过 24h 轴,进入哪个窗口哪家亮 */
+.tw-a { animation: 8s tw-a-n infinite; }
+.tw-a i { animation: 8s tw-a-i infinite; }
+.tw-b { animation: 8s tw-b-n infinite; }
+.tw-b i { animation: 8s tw-b-i infinite; }
+.tw-bar {
+  position: absolute; left: 8%; right: 8%; bottom: 22px; height: 10px;
+  border: 1px solid var(--line); border-radius: 5px; background: var(--surface2); overflow: hidden;
+}
+.tw-s1 { position: absolute; left: 0; top: 0; bottom: 0; width: 33.4%; background: oklch(0.72 0.13 245 / 0.3); }
+.tw-s2 { position: absolute; left: 33.4%; top: 0; bottom: 0; right: 0; background: oklch(0.8 0.19 132 / 0.2); }
+.tw-cursor {
+  position: absolute; top: 22%; bottom: 26px; width: 2px; margin-left: -1px;
+  background: oklch(0.93 0.005 260 / 0.6); border-radius: 1px; left: 50%;
+  animation: 8s tw-cur linear infinite;
+}
+.tw-lab { position: absolute; bottom: 5px; font-family: var(--font-mono); font-size: 9px; color: var(--mut); }
+@keyframes tw-cur { 0% { left: 8%; } 100% { left: 92%; } }
+@keyframes tw-a-n {
+  0%, 32% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  33%, 100% { border-color: var(--line-strong); color: var(--mut); }
+}
+@keyframes tw-a-i {
+  0%, 32% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+  33%, 100% { background: oklch(0.42 0.01 260); box-shadow: none; }
+}
+@keyframes tw-b-n {
+  0%, 33% { border-color: var(--line-strong); color: var(--mut); }
+  34%, 100% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+}
+@keyframes tw-b-i {
+  0%, 33% { background: oklch(0.42 0.01 260); box-shadow: none; }
+  34%, 100% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+}
+
+/* quota:A 的配额环注满转 amber,请求点改道 B,周期复位后回 A */
+.qa-a { animation: 8s qa-a-n infinite; }
+.qa-b { animation: 8s qa-b-n infinite; }
+.qa-b i { animation: 8s qa-b-i infinite; }
+.q-rq { animation: 8s q-rq infinite; }
+.qring { width: 14px; height: 14px; transform: rotate(-90deg); flex: none; }
+.qbg { fill: none; stroke: oklch(0.32 0.014 260); stroke-width: 3.5; }
+.qfg {
+  fill: none; stroke: var(--kiwi); stroke-width: 3.5; stroke-linecap: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100;
+  animation: 8s q-ring infinite;
+}
+@keyframes q-ring {
+  0%   { stroke-dashoffset: 100; stroke: var(--kiwi); }
+  48%  { stroke-dashoffset: 0;   stroke: var(--kiwi); }
+  52%, 88% { stroke-dashoffset: 0; stroke: var(--amber); }
+  100% { stroke-dashoffset: 100; stroke: var(--kiwi); }
+}
+@keyframes qa-a-n {
+  0%, 49%  { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+  50%, 86% { border-color: oklch(0.78 0.15 80 / 0.75); color: oklch(0.82 0.1 80); }
+  87%, 100% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+}
+@keyframes qa-b-n {
+  0%, 57%  { border-color: var(--line-strong); color: var(--mut); }
+  58%, 100% { border-color: oklch(0.55 0.14 132 / 0.7); color: var(--ink); }
+}
+@keyframes qa-b-i {
+  0%, 57%  { background: oklch(0.42 0.01 260); box-shadow: none; }
+  58%, 100% { background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+}
+@keyframes q-rq {
+  0%   { left: 2%;  top: 50%; opacity: 0; }
+  3%   { left: 2%;  top: 50%; opacity: 1; }
+  10%  { left: 16%; top: 50%; }
+  14%  { left: 16%; top: 50%; }
+  16%  { left: 6%;  top: 50%; }
+  26%  { left: 16%; top: 50%; }
+  44%  { left: 16%; top: 50%; }
+  52%  { left: 34%; top: 24%; }
+  60%  { left: 62%; top: 50%; }
+  90%  { left: 62%; top: 50%; opacity: 1; }
+  100% { left: 62%; top: 50%; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diag .rq, .diag .pn, .diag .pn i, .diag .qfg, .diag .tw-cursor { animation: none !important; }
+}
+
+/* ── 下载区 ── */
+.dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.dl-card {
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+  padding: 26px 24px; display: flex; flex-direction: column;
+  transition: border-color .15s;
+}
+.dl-card:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.dl-os { display: flex; align-items: center; gap: 11px; }
+.dl-os .icon { width: 26px; height: 26px; color: var(--ink); }
+.dl-os h3 { font-size: 17px; font-weight: 600; }
+.dl-req { margin-top: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--mut); letter-spacing: 0.03em; }
+.dl-card .btns { margin-top: 20px; display: flex; flex-direction: column; gap: 9px; }
+.dl-card .btn { justify-content: space-between; padding: 11px 15px; }
+.dl-card .btn .fmt { font-family: var(--font-mono); font-size: 10.5px; color: oklch(0.62 0.01 260); font-weight: 400; }
+.dl-card .btn-primary .fmt { color: oklch(0.30 0.05 132); }
+.dl-foot { text-align: center; margin-top: 26px; font-size: 13px; color: var(--mut); }
+.dl-foot .dot { display: inline-block; width: 5px; height: 5px; border-radius: 999px; background: var(--kiwi); margin: 0 7px 1px; vertical-align: middle; }
+
+/* ── 隐私承诺 ── */
+.privacy { margin-top: 96px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: oklch(0.09 0.006 260 / 0.8); }
+.privacy-inner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 34px 0; }
+.priv { display: flex; align-items: center; gap: 13px; justify-content: center; }
+.priv .icon { color: var(--kiwi); width: 19px; height: 19px; }
+.priv span { font-size: 13.5px; color: oklch(0.72 0.015 260); }
+
+/* ── 页脚 ── */
+footer { padding: 56px 0 44px; }
+.foot-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.foot-slogan { margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi-dim); letter-spacing: 0.04em; }
+.foot-links { display: flex; gap: 20px; font-size: 13px; color: var(--mut); }
+.foot-links a:hover { color: var(--ink); }
+.foot-bottom { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: 12px; color: oklch(0.48 0.008 260); }
+
+/* ── 进场动画:400ms ease-out [Y+18→0, α0→1],尊重系统减弱动态 ── */
+@media (prefers-reduced-motion: no-preference) {
+  .rv { opacity: 0; transform: translateY(18px); transition: opacity .45s ease-out, transform .45s ease-out; transition-delay: var(--d, 0ms); }
+  .rv.in { opacity: 1; transform: none; }
+}
+
+/* ── 响应式 ── */
+@media (max-width: 920px) {
+  .grid-feats, .steps, .dl-grid, .privacy-inner { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .grid-feats, .steps, .grid-strat, .dl-grid, .privacy-inner { grid-template-columns: 1fr; }
+  .hero { padding-top: 64px; }
+  .dl-row .btn { flex: 1 1 100%; }
+}
+</style>
+</head>
+<body>
+
+<!-- SVG 雪碧图:线性图标为 lucide(ISC),品牌标为 simple-icons(CC0) -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="m2 22 3-3"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m18 3-4 4h6l-4 4"/></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+  <symbol id="i-store" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/></symbol>
+  <symbol id="i-import" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+  <symbol id="i-wifioff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></symbol>
+  <symbol id="i-windows" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></symbol>
+  <symbol id="i-linux" viewBox="0 0 24 24" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 0 0-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 0 0-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139zm.529 3.405h.013c.213 0 .396.062.584.198.19.135.33.332.438.533.105.259.158.459.166.724 0-.02.006-.04.006-.06v.105a.086.086 0 0 1-.004-.021l-.004-.024a1.807 1.807 0 0 1-.15.706.953.953 0 0 1-.213.335.71.71 0 0 0-.088-.042c-.104-.045-.198-.064-.284-.133a1.312 1.312 0 0 0-.22-.066c.05-.06.146-.133.183-.198.053-.128.082-.264.088-.402v-.02a1.21 1.21 0 0 0-.061-.4c-.045-.134-.101-.2-.183-.333-.084-.066-.167-.132-.267-.132h-.016c-.093 0-.176.03-.262.132a.8.8 0 0 0-.205.334 1.18 1.18 0 0 0-.09.4v.019c.002.089.008.179.02.267-.193-.067-.438-.135-.607-.202a1.635 1.635 0 0 1-.018-.2v-.02a1.772 1.772 0 0 1 .15-.768c.082-.22.232-.406.43-.533a.985.985 0 0 1 .594-.2zm-2.962.059h.036c.142 0 .27.048.399.135.146.129.264.288.344.465.09.199.14.4.153.667v.004c.007.134.006.2-.002.266v.08c-.03.007-.056.018-.083.024-.152.055-.274.135-.393.2.012-.09.013-.18.003-.267v-.015c-.012-.133-.04-.2-.082-.333a.613.613 0 0 0-.166-.267.248.248 0 0 0-.183-.064h-.021c-.071.006-.13.04-.186.132a.552.552 0 0 0-.12.27.944.944 0 0 0-.023.33v.015c.012.135.037.2.08.334.046.134.098.2.166.268.01.009.02.018.034.024-.07.057-.117.07-.176.136a.304.304 0 0 1-.131.068 2.62 2.62 0 0 1-.275-.402 1.772 1.772 0 0 1-.155-.667 1.759 1.759 0 0 1 .08-.668 1.43 1.43 0 0 1 .283-.535c.128-.133.26-.2.418-.2zm1.37 1.706c.332 0 .733.065 1.216.399.293.2.523.269 1.052.468h.003c.255.136.405.266.478.399v-.131a.571.571 0 0 1 .016.47c-.123.31-.516.643-1.063.842v.002c-.268.135-.501.333-.775.465-.276.135-.588.292-1.012.267a1.139 1.139 0 0 1-.448-.067 3.566 3.566 0 0 1-.322-.198c-.195-.135-.363-.332-.612-.465v-.005h-.005c-.4-.246-.616-.512-.686-.71-.07-.268-.005-.47.193-.6.224-.135.38-.271.483-.336.104-.074.143-.102.176-.131h.002v-.003c.169-.202.436-.47.839-.601a2.914 2.914 0 0 1 .466-.065zm2.8 2.142c.358 1.417 1.196 3.475 1.735 4.473.286.534.855 1.659 1.102 3.024.156-.005.33.018.513.064.646-1.671-.546-3.467-1.089-3.966-.22-.2-.232-.335-.123-.335.59.534 1.365 1.572 1.646 2.757.13.535.16 1.104.021 1.67.067.028.135.06.205.067 1.032.534 1.413.938 1.23 1.537v-.043c-.06-.003-.12 0-.18 0h-.016c.151-.467-.182-.825-1.065-1.224-.915-.4-1.646-.336-1.77.465-.008.043-.013.066-.018.135-.068.023-.139.053-.209.064-.43.268-.662.669-.793 1.187-.13.533-.17 1.156-.205 1.869v.003c-.02.334-.17.838-.319 1.35-1.5 1.072-3.58 1.538-5.348.334a2.645 2.645 0 0 0-.402-.533 1.45 1.45 0 0 0-.275-.333c.182 0 .338-.03.465-.067a.615.615 0 0 0 .314-.334c.108-.267 0-.697-.345-1.163-.345-.467-.931-.995-1.788-1.521-.63-.4-.986-.87-1.15-1.396-.165-.534-.143-1.085-.015-1.645.245-1.07.873-2.11 1.274-2.763.107-.065.037.135-.408.974-.396.751-1.14 2.497-.122 3.854a8.123 8.123 0 0 1 .647-2.876c.564-1.278 1.743-3.504 1.836-5.268.048.036.217.135.289.202.218.133.38.333.59.465.21.201.477.335.876.335.039.003.075.006.11.006.412 0 .73-.134.997-.268.29-.134.52-.334.74-.4h.005c.467-.135.835-.402 1.044-.7zm2.185 8.958c.037.6.343 1.245.882 1.377.588.134 1.434-.333 1.791-.765l.211-.01c.315-.007.577.01.847.268l.003.003c.208.199.305.53.391.876.085.4.154.78.409 1.066.486.527.645.906.636 1.14l.003-.007v.018l-.003-.012c-.015.262-.185.396-.498.595-.63.401-1.746.712-2.457 1.57-.618.737-1.37 1.14-2.036 1.191-.664.053-1.237-.2-1.574-.898l-.005-.003c-.21-.4-.12-1.025.056-1.69.176-.668.428-1.344.463-1.897.037-.714.076-1.335.195-1.814.12-.465.308-.797.641-.984l.045-.022zm-10.814.049h.01c.053 0 .105.005.157.014.376.055.706.333 1.023.752l.91 1.664.003.003c.243.533.754 1.064 1.189 1.637.434.598.77 1.131.729 1.57v.006c-.057.744-.48 1.148-1.125 1.294-.645.135-1.52.002-2.395-.464-.968-.536-2.118-.469-2.857-.602-.369-.066-.61-.2-.723-.4-.11-.2-.113-.602.123-1.23v-.004l.002-.003c.117-.334.03-.752-.027-1.118-.055-.401-.083-.71.043-.94.16-.334.396-.4.69-.533.294-.135.64-.202.915-.47h.002v-.002c.256-.268.445-.601.668-.838.19-.201.38-.336.663-.336zm7.159-9.074c-.435.201-.945.535-1.488.535-.542 0-.97-.267-1.28-.466-.154-.134-.28-.268-.373-.335-.164-.134-.144-.333-.074-.333.109.016.129.134.199.2.096.066.215.2.36.333.292.2.68.467 1.167.467.485 0 1.053-.267 1.398-.466.195-.135.445-.334.648-.467.156-.136.149-.267.279-.267.128.016.034.134-.147.332a8.097 8.097 0 0 1-.69.468zm-1.082-1.583v.02c-.006-.02.013-.042.029-.05.074-.043.18-.027.26.004.063 0 .16.067.15.135-.006.049-.085.066-.135.066-.055 0-.092-.043-.141-.068-.052-.018-.146-.008-.163-.065zm-.551 0c-.02.058-.113.049-.166.066-.047.025-.086.068-.14.068-.05 0-.13-.02-.136-.068-.01-.066.088-.133.15-.133.08-.031.184-.047.259-.005.019.009.036.03.03.05v.02h.003z"/></symbol>
+</svg>
+
+<!-- ══ 导航 ══ -->
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top"><img src="assets/kiwano-logo.svg" alt="">Kiwano</a>
+    <div class="nav-links">
+      <a href="#features" data-i18n="nav.features">特性</a>
+      <a href="#screens" data-i18n="nav.screens">界面</a>
+      <a href="#how" data-i18n="nav.how">工作原理</a>
+      <a href="#download" data-i18n="nav.download">下载</a>
+    </div>
+    <div class="nav-cta">
+      <button class="btn btn-lang" id="langBtn" type="button" aria-label="Switch language">EN</button>
+      <a class="btn btn-gh" href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">
+        <svg class="icon"><use href="#i-github"/></svg>GitHub
+      </a>
+      <a class="btn btn-primary" href="#download">
+        <svg class="icon"><use href="#i-download"/></svg><span data-i18n="nav.dlbtn">下载</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ══ Hero ══ -->
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="badge rv"><span class="dot"></span><span data-i18n="hero.badge">本地优先 · API 请求不经过任何云端</span></span>
+    <h1 class="rv" style="--d:60ms" data-i18n="hero.h1">一个入口,管好你的<br>所有 <em>AI 供应商</em></h1>
+    <p class="sub rv" style="--d:120ms" data-i18n="hero.sub">
+      Kiwano 是本地优先的 AI Provider 管理器:发现、对比、切换模型供应商,
+      把 <strong>Claude Code、Codex、Gemini CLI</strong> 一键接入本地网关——
+      所有请求本地直连,API Key 只存在你的机器上。
+    </p>
+    <div class="dl-row rv" style="--d:180ms">
+      <a class="btn btn-primary btn-lg" href="#download-mac"><svg class="icon"><use href="#i-apple"/></svg><span data-i18n="hero.dlmac">下载 macOS</span></a>
+      <a class="btn btn-lg" href="#download-win"><svg class="icon"><use href="#i-windows"/></svg>Windows</a>
+      <a class="btn btn-lg" href="#download-linux"><svg class="icon"><use href="#i-linux"/></svg>Linux</a>
+    </div>
+    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note">v0.1.0 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源</p>
+    <figure class="shot rv" style="--d:300ms">
+      <img src="assets/app-providers.png" width="2000" height="1300" alt="Kiwano 主界面:本机 Provider 列表,展示绑定的 Agent、近 7 日用量与额度、健康状态" fetchpriority="high">
+    </figure>
+  </div>
+</header>
+
+<main>
+  <!-- ══ 特性 ══ -->
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">Features</div>
+        <h2 data-i18n="feats.h2">网关底座 × 供应商目录</h2>
+        <p data-i18n="feats.p">既不是纯切换工具,也不是云端网关:本地负责路由与计量,Hub 目录帮你选型。</p>
+      </div>
+      <div class="grid-feats">
+        <div class="feat rv">
+          <div class="fi"><svg class="icon"><use href="#i-layers"/></svg></div>
+          <h3 data-i18n="f1.t">供应商管理</h3>
+          <p data-i18n="f1.d">添加、切换、删除供应商配置;路由支持 <code>failover</code> / <code>roundrobin</code> / <code>timewindow</code> / <code>quota</code> 策略,当前项一键生效。</p>
+        </div>
+        <div class="feat rv" style="--d:60ms">
+          <div class="fi"><svg class="icon"><use href="#i-plug"/></svg></div>
+          <h3 data-i18n="f2.t">Agent 一键接管</h3>
+          <p data-i18n="f2.d">Claude Code、Codex、Gemini CLI 等一键指向本地网关;关闭开关即还原原始配置,随时反悔。</p>
+        </div>
+        <div class="feat rv" style="--d:120ms">
+          <div class="fi"><svg class="icon"><use href="#i-network"/></svg></div>
+          <h3 data-i18n="f3.t">本地网关</h3>
+          <p data-i18n="f3.d">单端口常驻 <code>127.0.0.1:8317</code>,协议归一化 anthropic / openai / gemini,逐请求路由、故障转移与计量。</p>
+        </div>
+        <div class="feat rv">
+          <div class="fi"><svg class="icon"><use href="#i-chart"/></svg></div>
+          <h3 data-i18n="f4.t">用量仪表盘</h3>
+          <p data-i18n="f4.d">请求、token、费用、延迟的 7 天趋势,按供应商与 Agent 归因;明细可下钻到每一次请求。</p>
+        </div>
+        <div class="feat rv" style="--d:60ms">
+          <div class="fi"><svg class="icon"><use href="#i-store"/></svg></div>
+          <h3 data-i18n="f5.t">Provider 货架</h3>
+          <p data-i18n="f5.d">Hub 目录聚合 177 家供应商,按官方 / 聚合 / 第三方 / 免费筛选,价格透明,看中即添加。</p>
+        </div>
+        <div class="feat rv" style="--d:120ms">
+          <div class="fi"><svg class="icon"><use href="#i-import"/></svg></div>
+          <h3 data-i18n="f6.t">cc-switch 导入</h3>
+          <p data-i18n="f6.d">已在用 cc-switch?读取其现有配置无缝迁移,供应商与绑定关系原样带过来。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 界面 ══ -->
+  <section class="block" id="screens">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">Screens</div>
+        <h2 data-i18n="scr.h2">紧凑、克制,为每天用而设计</h2>
+        <p data-i18n="scr.p">1000×650 单窗口,首屏就是你的供应商列表——没有仪表盘迷宫,一切一屏直达。</p>
+      </div>
+      <figure class="shot rv">
+        <img src="assets/app-dashboard.png" width="2000" height="1300" alt="Kiwano 仪表盘:请求、token、费用、延迟统计与 7 天趋势图" loading="lazy">
+      </figure>
+      <div class="cap">
+        <span class="tag">Dashboard</span>
+        <p data-i18n="scr.cap">7 天请求 / token / 费用 / 延迟趋势,按供应商与 Agent 归因,数据全部落在本地 SQLite。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 工作原理 ══ -->
+  <section class="block" id="how">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">How it works</div>
+        <h2 data-i18n="how.h2">三步,从此告别手改配置文件</h2>
+        <p data-i18n="how.p">Agent 的 base_url 一次性指向网关,之后所有切换都只是路由变更,即时生效、无需重启。</p>
+      </div>
+      <div class="steps">
+        <div class="step rv">
+          <span class="no">01</span>
+          <h3 data-i18n="s1.t">添加供应商</h3>
+          <p data-i18n="s1.d">从货架一键添加,或自定义端点;API Key 存入本机钥匙串,永不上传。</p>
+        </div>
+        <div class="step rv" style="--d:80ms">
+          <span class="no">02</span>
+          <h3 data-i18n="s2.t">接管你的 Agent</h3>
+          <p data-i18n="s2.d">一键把 Claude Code / Codex / Gemini CLI 指向 <code>127.0.0.1:8317</code>,原配置自动备份。</p>
+        </div>
+        <div class="step rv" style="--d:160ms">
+          <span class="no">03</span>
+          <h3 data-i18n="s3.t">随便切换</h3>
+          <p data-i18n="s3.d">列表里点一下即完成切换:Agent 配置不再改动,只变网关路由,故障自动兜底。</p>
+        </div>
+      </div>
+
+      <!-- 策略子区块:四种路由策略 + 动效示意(纯 CSS 循环动画) -->
+      <div class="st-head rv">
+        <span class="tag">strategies</span>
+        <h3 data-i18n="st.h">四种路由策略,坏节点也兜得住</h3>
+        <p data-i18n="st.p">每个 Agent 绑定一组候选供应商,策略决定这一次请求谁来处理——网关逐请求执行,调整即时生效。</p>
+      </div>
+      <div class="grid-strat">
+        <div class="feat rv">
+          <div class="sh"><span class="tag">failover</span><h3 data-i18n="st1.t">故障转移</h3></div>
+          <p data-i18n="st1.d">按优先级排好候选队列:主供应商故障或超时,自动切到下一家;恢复后流量自动回主路。</p>
+          <div class="diag" aria-hidden="true">
+            <span class="pn on fa-a" style="left:16%"><i></i>A</span>
+            <span class="pn fa-b" style="left:48%"><i></i>B</span>
+            <span class="pn" style="left:80%"><i></i>C</span>
+            <span class="rq fa-rq"></span>
+          </div>
+        </div>
+        <div class="feat rv" style="--d:60ms">
+          <div class="sh"><span class="tag">roundrobin</span><h3 data-i18n="st2.t">轮询分发</h3></div>
+          <p data-i18n="st2.d">请求在候选供应商之间轮流分配,把用量和压力摊到多家,谁也不至于超载。</p>
+          <div class="diag" aria-hidden="true">
+            <span class="pn on rr-a" style="left:16%"><i></i>A</span>
+            <span class="pn rr-b" style="left:48%"><i></i>B</span>
+            <span class="pn rr-c" style="left:80%"><i></i>C</span>
+            <span class="rq rr-rq"></span>
+          </div>
+        </div>
+        <div class="feat rv">
+          <div class="sh"><span class="tag">timewindow</span><h3 data-i18n="st3.t">时间窗</h3></div>
+          <p data-i18n="st3.d">为每家候选设定本地时段:深夜走套餐、白天走按量;跨零点窗口自动回绕,无匹配时落到兜底候选。</p>
+          <div class="diag" aria-hidden="true">
+            <span class="pn on tw-a" style="left:22%; top:34%"><i></i>A</span>
+            <span class="pn tw-b" style="left:70%; top:34%"><i></i>B</span>
+            <div class="tw-bar"><span class="tw-s1"></span><span class="tw-s2"></span></div>
+            <span class="tw-cursor"></span>
+            <span class="tw-lab" style="left:8%">00:00</span>
+            <span class="tw-lab" style="left:34%">08:00</span>
+            <span class="tw-lab" style="right:8%">24:00</span>
+          </div>
+        </div>
+        <div class="feat rv" style="--d:60ms">
+          <div class="sh"><span class="tag">quota</span><h3 data-i18n="st4.t">配额切换</h3></div>
+          <p data-i18n="st4.d">为候选设定消费 / 请求上限,触顶自动切下一家;新周期配额自动复位,花费不再失控。</p>
+          <div class="diag" aria-hidden="true">
+            <span class="pn on qa-a" style="left:16%"><svg class="qring" viewBox="0 0 20 20"><circle class="qbg" cx="10" cy="10" r="8"/><circle class="qfg" cx="10" cy="10" r="8" pathLength="100"/></svg>A</span>
+            <span class="pn qa-b" style="left:62%"><i></i>B</span>
+            <span class="rq q-rq"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 下载 ══ -->
+  <section class="block" id="download">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">Download</div>
+        <h2 data-i18n="dl.h2">下载 Kiwano</h2>
+        <p data-i18n="dl.p">免费、无账号、不联网也能用。选你的平台:</p>
+      </div>
+      <div class="dl-grid">
+        <div class="dl-card rv" id="download-mac">
+          <div class="dl-os">
+            <svg class="icon"><use href="#i-apple"/></svg>
+            <div><h3>macOS</h3><div class="dl-req">macOS 12+ · Universal</div></div>
+          </div>
+          <div class="btns">
+            <a class="btn btn-primary" href="https://github.com/lightconsen/kiwano/releases/latest" target="_blank" rel="noopener">Apple Silicon<span class="fmt">dmg · aarch64</span></a>
+            <a class="btn" href="https://github.com/lightconsen/kiwano/releases/latest" target="_blank" rel="noopener"><span data-i18n="dl.intel">Intel 芯片</span><span class="fmt">dmg · x86_64</span></a>
+          </div>
+        </div>
+        <div class="dl-card rv" id="download-win" style="--d:80ms">
+          <div class="dl-os">
+            <svg class="icon"><use href="#i-windows"/></svg>
+            <div><h3>Windows</h3><div class="dl-req">Windows 10 / 11 · x64</div></div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="https://github.com/lightconsen/kiwano/releases/latest" target="_blank" rel="noopener"><span data-i18n="dl.winbtn">64 位安装包</span><span class="fmt">exe · x64</span></a>
+          </div>
+        </div>
+        <div class="dl-card rv" id="download-linux" style="--d:160ms">
+          <div class="dl-os">
+            <svg class="icon"><use href="#i-linux"/></svg>
+            <div><h3>Linux</h3><div class="dl-req">x64 · .deb / .AppImage</div></div>
+          </div>
+          <div class="btns">
+            <a class="btn" href="https://github.com/lightconsen/kiwano/releases/latest" target="_blank" rel="noopener">Debian / Ubuntu<span class="fmt">deb · x64</span></a>
+            <a class="btn" href="https://github.com/lightconsen/kiwano/releases/latest" target="_blank" rel="noopener"><span data-i18n="dl.appimg">通用</span><span class="fmt">AppImage · x64</span></a>
+          </div>
+        </div>
+      </div>
+      <p class="dl-foot rv">
+        <span data-i18n="dl.f1">开源免费</span><span class="dot"></span><span data-i18n="dl.f2">无需账号</span><span class="dot"></span><span data-i18n="dl.f3">数据不出本机</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 隐私承诺 ══ -->
+  <div class="privacy">
+    <div class="wrap privacy-inner">
+      <div class="priv rv"><svg class="icon"><use href="#i-shield"/></svg><span data-i18n="pv.1">API 请求本地直连,不经过任何云端中转</span></div>
+      <div class="priv rv" style="--d:80ms"><svg class="icon"><use href="#i-key"/></svg><span data-i18n="pv.2">API Key 仅存本机系统钥匙串</span></div>
+      <div class="priv rv" style="--d:160ms"><svg class="icon"><use href="#i-wifioff"/></svg><span data-i18n="pv.3">无账号体系,离线完整可用</span></div>
+    </div>
+  </div>
+
+  <!-- ══ 页脚 ══ -->
+  <footer>
+    <div class="wrap">
+      <div class="foot-top">
+        <div>
+          <a class="brand" href="#top"><img src="assets/kiwano-logo.svg" alt="">Kiwano</a>
+          <div class="foot-slogan">Hard shell, soft core. Just switch.</div>
+        </div>
+        <div class="foot-links">
+          <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/lightconsen/kiwano/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/lightconsen/kiwano/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span>© 2026 Kiwano</span>
+        <span data-i18n="foot.note">部分模块移植自 cc-switch(MIT),声明见 THIRD-PARTY-NOTICES</span>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<script>
+// ── i18n:默认简体中文;html 内即中文源,字典补英文。含 HTML 的节点(标记/加粗)走 innerHTML ──
+const I18N = {
+  en: {
+    "title": "Kiwano — Local-first AI Provider Manager",
+    "nav.features": "Features", "nav.screens": "Screens", "nav.how": "How it works", "nav.download": "Download", "nav.dlbtn": "Download",
+    "hero.badge": "Local-first · API requests never touch the cloud",
+    "hero.h1": "One hub for all<br>your <em>AI providers</em>",
+    "hero.sub": `Kiwano is a local-first AI provider manager: discover, compare and switch model providers, and connect
+      <strong>Claude Code, Codex and Gemini CLI</strong> to a local gateway in one click —
+      every request stays on your machine, and so do your API keys.`,
+    "hero.dlmac": "Download for macOS",
+    "hero.note": `v0.1.0 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source`,
+    "feats.h2": "A local gateway × a provider catalog",
+    "feats.p": "Neither a plain switcher nor a cloud gateway: routing and metering run locally, while the Hub catalog helps you choose.",
+    "f1.t": "Provider management",
+    "f1.d": `Add, switch and delete provider configs; route with <code>failover</code> / <code>roundrobin</code> / <code>timewindow</code> / <code>quota</code> strategies — one click to go live.`,
+    "f2.t": "One-click agent takeover",
+    "f2.d": "Point Claude Code, Codex, Gemini CLI and more at the local gateway in one click; flip the switch off to restore the original config, anytime.",
+    "f3.t": "Local gateway",
+    "f3.d": `A single resident port at <code>127.0.0.1:8317</code> normalizes anthropic / openai / gemini protocols, routing and metering every request with automatic failover.`,
+    "f4.t": "Usage dashboard",
+    "f4.d": "7-day trends of requests, tokens, cost and latency, attributed per provider and agent — drill down to every single request.",
+    "f5.t": "Provider shelf",
+    "f5.d": "The Hub catalog aggregates 177 providers, filterable by official / aggregator / third-party / free — transparent pricing, add in one click.",
+    "f6.t": "cc-switch import",
+    "f6.d": "Already on cc-switch? Import your existing config and migrate seamlessly — providers and bindings come along as-is.",
+    "scr.h2": "Compact and restrained, built for daily use",
+    "scr.p": "A single 1000×650 window where the first screen is your provider list — no dashboard maze, everything one click away.",
+    "scr.cap": "7-day trends of requests / tokens / cost / latency, attributed per provider and agent — all in local SQLite.",
+    "how.h2": "Three steps, never hand-edit config files again",
+    "how.p": "Each agent's base_url is pointed at the gateway once; every switch after that is just a routing change — instant, no restarts.",
+    "s1.t": "Add a provider",
+    "s1.d": "Add from the shelf in one click, or use a custom endpoint; API keys go into the local keychain, never uploaded.",
+    "s2.t": "Take over your agents",
+    "s2.d": `Point Claude Code / Codex / Gemini CLI at <code>127.0.0.1:8317</code> in one click; the original config is backed up automatically.`,
+    "s3.t": "Switch freely",
+    "s3.d": "Switching is one click in the list: agent configs are never touched again — only gateway routing changes, with automatic failover.",
+    "st.h": "Four routing strategies, bad days included",
+    "st.p": "Bind a set of candidate providers to each agent; the strategy decides who handles each request — enforced per-request by the gateway, effective immediately.",
+    "st1.t": "Failover",
+    "st1.d": "Candidates ranked by priority: if the primary fails or times out, traffic moves to the next in line, and returns once it recovers.",
+    "st2.t": "Round robin",
+    "st2.d": "Requests rotate across candidates, spreading usage and load so no single provider gets overwhelmed.",
+    "st3.t": "Time window",
+    "st3.d": "Give each candidate a local time window — subscription plan overnight, pay-as-you-go by day. Windows past midnight wrap; unmatched times fall back.",
+    "st4.t": "Quota cutover",
+    "st4.d": "Set spend or request caps per candidate; on hitting a cap traffic moves to the next, and caps reset each period — spend stays in control.",
+    "dl.h2": "Download Kiwano",
+    "dl.p": "Free, no account, works offline. Pick your platform:",
+    "dl.intel": "Intel", "dl.winbtn": "64-bit installer", "dl.appimg": "Portable",
+    "dl.f1": "Open source", "dl.f2": "No account", "dl.f3": "Data stays on your machine",
+    "pv.1": "API requests go direct from your machine — no cloud relay",
+    "pv.2": "API keys stay in your local system keychain",
+    "pv.3": "No accounts; fully usable offline",
+    "foot.note": "Portions ported from cc-switch (MIT); see THIRD-PARTY-NOTICES",
+  },
+};
+
+// 应用语言:zh 还原 HTML 内联文案,en 从字典取(先缓存原文,来回切不丢)
+document.querySelectorAll("[data-i18n]").forEach((el) => {
+  el.dataset.zh = el.innerHTML;
+});
+function applyLang(lang) {
+  document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
+  document.title = lang === "en" ? I18N.en.title : "Kiwano — 本地优先的 AI Provider 管理器";
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    if (lang === "en") {
+      const v = I18N.en[el.dataset.i18n];
+      if (v !== undefined) el.innerHTML = v;
+    } else {
+      el.innerHTML = el.dataset.zh;
+    }
+  });
+  // 按钮显示「可切换到的语言」
+  document.getElementById("langBtn").textContent = lang === "en" ? "中文" : "EN";
+  localStorage.setItem("kiwano.lang", lang);
+}
+
+// 恢复上次选择(默认中文,即 HTML 原文)
+const saved = localStorage.getItem("kiwano.lang");
+if (saved === "en") applyLang("en");
+document.getElementById("langBtn").addEventListener("click", () => {
+  applyLang(document.documentElement.lang === "en" ? "zh" : "en");
+});
+
+// 进场动画:IntersectionObserver 一次性加 .in,css 过渡负责动效
+const io = new IntersectionObserver(
+  (entries) => entries.forEach((e) => e.isIntersecting && (e.target.classList.add("in"), io.unobserve(e.target))),
+  { threshold: 0.12 },
+);
+document.querySelectorAll(".rv").forEach((el) => io.observe(el));
+</script>
+</body>
+</html>

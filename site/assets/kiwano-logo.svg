@@ -1,0 +1,44 @@
+<!-- Kiwano logo mark — geometric horned-melon emblem (brand kiwi green oklch(0.80 0.19 132) ≈ #7FE05A);
+     transparent background, artwork covers ~90% of the canvas -->
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="body" cx="0.38" cy="0.32" r="0.85">
+      <stop offset="0%" stop-color="#96EE73"/>
+      <stop offset="55%" stop-color="#7FE05A"/>
+      <stop offset="100%" stop-color="#5CC93F"/>
+    </radialGradient>
+    <linearGradient id="spike" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8CE968"/>
+      <stop offset="100%" stop-color="#5CC93F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Spikes (8, rotated around the fruit center; triangular bases buried in the body) -->
+  <g fill="url(#spike)" stroke="#3F8F2F" stroke-width="3" stroke-linejoin="round">
+    <path transform="rotate(0   256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(45  256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(90  256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(135 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(180 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(225 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(270 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+    <path transform="rotate(315 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+  </g>
+
+  <!-- Body -->
+  <ellipse cx="256" cy="256" rx="192" ry="152" fill="url(#body)" stroke="#3F8F2F" stroke-width="4"/>
+
+  <!-- Highlight -->
+  <ellipse cx="192" cy="195" rx="74" ry="42" fill="#FFFFFF" opacity="0.22"
+           transform="rotate(-18 192 195)"/>
+
+  <!-- Skin speckles -->
+  <g fill="#D8FBC4" opacity="0.55">
+    <circle cx="314" cy="208" r="9.5"/>
+    <circle cx="355" cy="272" r="7"/>
+    <circle cx="266" cy="301" r="9"/>
+    <circle cx="192" cy="285" r="6.5"/>
+    <circle cx="230" cy="214" r="5.5"/>
+    <circle cx="326" cy="326" r="5.5"/>
+  </g>
+</svg>

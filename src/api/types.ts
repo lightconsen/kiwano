@@ -378,6 +378,10 @@ export interface KiwanoApi {
     providerId: string,
     patch: { weight?: number; win_start?: string | null; win_end?: string | null },
   ): Promise<void>;
+  /** Bind a provider to an agent as a new candidate (appended at the queue tail) */
+  addAgentBinding(agent: AgentId, providerId: string): Promise<void>;
+  /** Remove one agent's binding of a provider (other agents keep theirs) */
+  removeAgentBinding(agent: AgentId, providerId: string): Promise<void>;
   /** Export the config plan to the given path (including API keys); returns the Provider count */
   exportConfig(path: string): Promise<number>;
   /** Import a config plan from a file (merged by name+base_url); returns a count report */

@@ -791,7 +791,10 @@ export const devApi: KiwanoApi = {
 
   async getAgentRoutes(): Promise<AgentRoute[]> {
     await delay();
-    return agentRoutes.map((r) => ({ ...r, bindings: r.bindings.map((b) => ({ ...b })) }));
+    // Mirror the backend: only agents with at least one binding get a route
+    return agentRoutes
+      .filter((r) => r.bindings.length > 0)
+      .map((r) => ({ ...r, bindings: r.bindings.map((b) => ({ ...b })) }));
   },
 
   async updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void> {
@@ -832,6 +835,26 @@ export const devApi: KiwanoApi = {
         b.win_end = null;
       }
     }
+  },
+
+  async addAgentBinding(agent: AgentId, providerId: string): Promise<void> {
+    await delay();
+    const route = strategyOf(agent);
+    if (route.bindings.some((b) => b.provider_id === providerId)) return;
+    route.bindings.push(bind(providerId, route.bindings.length));
+    // Mirror the backend: a provider's agents derive from its bindings
+    const p = providers.find((x) => x.id === providerId)!;
+    if (!p.agents.includes(agent)) p.agents.push(agent);
+  },
+
+  async removeAgentBinding(agent: AgentId, providerId: string): Promise<void> {
+    await delay();
+    const route = strategyOf(agent);
+    const i = route.bindings.findIndex((b) => b.provider_id === providerId);
+    if (i < 0) throw new Error(`provider ${providerId} is not bound to ${agent}`);
+    route.bindings.splice(i, 1);
+    const p = providers.find((x) => x.id === providerId)!;
+    p.agents = p.agents.filter((a) => a !== agent);
   },
 
   async exportConfig(_path: string): Promise<number> {

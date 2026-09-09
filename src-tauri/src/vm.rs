@@ -900,6 +900,44 @@ pub fn update_agent_binding(
     Ok(())
 }
 
+/// Bind a provider to an agent as a new candidate: appended at the tail of
+/// the queue (primary keeps its place). Binding an already-bound provider is
+/// a no-op so the call stays idempotent. Takes effect on the gateway via
+/// after_mutation's /reload.
+pub fn add_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
+    if store.get_provider(provider_id).map_err(e2s)?.is_none() {
+        return Err(format!("unknown provider: {provider_id}"));
+    }
+    let existing = store.bindings_for_agent(agent).map_err(e2s)?;
+    if existing.iter().any(|b| b.provider_id == provider_id) {
+        return Ok(());
+    }
+    let next_priority = existing.iter().map(|b| b.priority).max().unwrap_or(-1) + 1;
+    store
+        .upsert_binding(&Binding {
+            agent: agent.to_string(),
+            provider_id: provider_id.to_string(),
+            priority: next_priority,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .map_err(e2s)?;
+    Ok(())
+}
+
+/// Remove one agent's binding of a provider (other agents keep theirs).
+/// Unbinding the last candidate is allowed: the route then has zero
+/// candidates and requests fail cleanly with NoBinding until re-bound.
+pub fn remove_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
+    let removed = store.delete_binding(agent, provider_id).map_err(e2s)?;
+    if !removed {
+        return Err(format!("provider {provider_id} is not bound to {agent}"));
+    }
+    Ok(())
+}
+
 fn e2s(e: impl std::fmt::Display) -> String {
     e.to_string()
 }

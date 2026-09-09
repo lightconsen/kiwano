@@ -358,6 +358,29 @@ fn update_agent_binding(
     Ok(())
 }
 
+/// Bind a provider to an agent (appended at the queue tail) and unbind it.
+#[tauri::command]
+fn add_agent_binding(
+    state: State<AppState>,
+    agent: String,
+    provider_id: String,
+) -> Result<(), String> {
+    vm::add_agent_binding(&state.store, &agent, &provider_id)?;
+    after_mutation(&state);
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_agent_binding(
+    state: State<AppState>,
+    agent: String,
+    provider_id: String,
+) -> Result<(), String> {
+    vm::remove_agent_binding(&state.store, &agent, &provider_id)?;
+    after_mutation(&state);
+    Ok(())
+}
+
 /// Hub catalog sync (network IO → runs on the async command thread, no UI blocking).
 #[tauri::command(async)]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
@@ -527,6 +550,8 @@ pub fn run() {
             update_agent_strategy,
             reorder_agent_bindings,
             update_agent_binding,
+            add_agent_binding,
+            remove_agent_binding,
             export_config,
             import_config,
             detect_agents,

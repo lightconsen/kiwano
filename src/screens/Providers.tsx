@@ -1,9 +1,16 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Pin, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../api/client";
 import {
   AGENTS,
@@ -45,7 +52,8 @@ const SEGMENT_ICON: Partial<Record<AgentId, string>> = Object.fromEntries(
 
 /** First-touch state for an agent tab with no bound providers: one click to
     back up + take over (importing the provider the agent already uses), or
-    manual entry. When already taken over but unbound, steer to manual add. */
+    manual entry. When already taken over but unbound, steer to binding an
+    existing provider (bindSlot) or manual add. */
 function AgentOnboarding({
   agent,
   installed,
@@ -53,6 +61,7 @@ function AgentOnboarding({
   busy,
   onTakeover,
   onAdd,
+  bindSlot,
 }: {
   agent: AgentId;
   installed: boolean;
@@ -60,6 +69,8 @@ function AgentOnboarding({
   busy: boolean;
   onTakeover: () => void;
   onAdd: () => void;
+  /** Extra first-candidate entry (bind an existing provider) for the taken-over branch */
+  bindSlot?: ReactNode;
 }) {
   const meta = AGENTS.find((m) => m.id === agent)!;
   return (
@@ -72,10 +83,13 @@ function AgentOnboarding({
             The local gateway routes this agent's requests, but no provider is bound yet — add one so
             requests have somewhere to go.
           </div>
-          <Button size="sm" className="h-7 gap-1 px-3 text-[12px] font-semibold" onClick={onAdd}>
-            <Plus className="h-3.5 w-3.5" />
-            Add provider
-          </Button>
+          <div className="flex items-center gap-2">
+            {bindSlot}
+            <Button size="sm" className="h-7 gap-1 px-3 text-[12px] font-semibold" onClick={onAdd}>
+              <Plus className="h-3.5 w-3.5" />
+              Add provider
+            </Button>
+          </div>
         </>
       ) : (
         <>
@@ -258,12 +272,10 @@ function HealthCell({ p }: { p: Provider }) {
 
 function ProviderRow({
   p,
-  onEnable,
   onEdit,
   onDelete,
 }: {
   p: Provider;
-  onEnable: (id: string) => void;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
@@ -296,33 +308,23 @@ function ProviderRow({
       <HealthCell p={p} />
 
       {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
-          or while a delete confirmation is pending */}
+          or while a delete confirmation is pending. Binding / unbinding happens
+          in the agent tabs, so there is no Enable action here. */}
       <div
         className={`flex flex-1 items-center justify-end gap-1.5 transition-opacity${
           confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         }`}
       >
-        {p.is_current ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px] text-mut"
-            aria-label="Edit"
-            title="Edit provider"
-            onClick={() => onEdit(p)}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 whitespace-nowrap border-kiwi-dim bg-kiwi-soft font-semibold text-kiwi text-[11.5px] dark:border-kiwi-dim dark:bg-kiwi-soft hover:bg-kiwi-soft dark:hover:bg-kiwi-soft"
-            onClick={() => onEnable(p.id)}
-          >
-            Enable
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px] text-mut"
+          aria-label="Edit"
+          title="Edit provider"
+          onClick={() => onEdit(p)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -498,8 +500,21 @@ function BindingRow({
   onMove: (idx: number, dir: -1 | 1) => void;
   onChanged: () => void;
 }) {
+  // Pin: promote this candidate to the queue head (the primary slot) — the
+  // same reorder the arrows do, just straight to the top. Meaningless under
+  // roundrobin (every candidate serves by weight), so it is hidden there.
+  const makePrimary = () => {
+    if (idx === 0) return;
+    const ids = route.bindings.map((x) => x.provider_id);
+    ids.unshift(ids.splice(idx, 1)[0]);
+    api.reorderAgentBindings(route.agent, ids).then(onChanged);
+  };
+  // Unbind: removes only this agent's binding; other agents keep theirs.
+  // Unbinding the last candidate drops the tab back to the onboarding state.
+  const unbind = () => api.removeAgentBinding(route.agent, b.provider_id).then(onChanged);
+
   return (
-    <div className={`row flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
+    <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <IdentityCell p={p} />
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
@@ -508,9 +523,11 @@ function BindingRow({
 
       <HealthCell p={p} />
 
-      {/* Candidate ordering is the only action here — provider management
-          (edit / enable / delete) stays on the All tab */}
-      <div className="flex flex-1 items-center justify-end gap-1">
+      {/* Candidate ordering / membership is the only action here — provider
+          management (edit / enable / delete) stays on the All tab. Actions
+          reveal on hover; the Pin slot renders on every row (invisible for the
+          primary) so resting rows keep identical column alignment. */}
+      <div className="flex flex-1 items-center justify-end gap-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
         {route.bindings.length > 1 && (
           <span className="flex flex-col">
             <button
@@ -531,7 +548,104 @@ function BindingRow({
             </button>
           </span>
         )}
+        {route.strategy !== "roundrobin" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`h-7 border border-line px-1.5 text-mut${idx === 0 ? " invisible" : ""}`}
+            aria-label="Make primary"
+            title="Make primary — move this candidate to the head of the queue"
+            onClick={makePrimary}
+          >
+            <Pin className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 border border-line px-1.5 text-mut hover:text-ink"
+          aria-label="Remove from route"
+          title="Remove from this route (other agents keep their binding)"
+          onClick={unbind}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
       </div>
+    </div>
+  );
+}
+
+/** Select that offers providers not yet bound to the agent; picking one binds
+    it to the route tail. Shared by the list-bottom add row and the onboarding
+    empty state. Renders nothing when every provider is already in the route. */
+function BindProviderSelect({
+  providers,
+  boundIds,
+  onPick,
+}: {
+  providers: Provider[];
+  boundIds: Set<string>;
+  onPick: (providerId: string) => void;
+}) {
+  const available = providers.filter((p) => !boundIds.has(p.id));
+  const [sel, setSel] = useState("");
+  if (available.length === 0) return null;
+  return (
+    <Select
+      value={sel}
+      onValueChange={(pid) => {
+        setSel("");
+        if (pid) onPick(pid);
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Bind provider to route"
+        className="h-7 w-[210px] bg-transparent text-[12px] dark:bg-transparent"
+      >
+        <SelectValue placeholder="Bind existing provider…" />
+      </SelectTrigger>
+      <SelectContent className="min-w-[220px]">
+        {available.map((p) => {
+          const icon = iconForEndpoint(p.endpoint);
+          return (
+            <SelectItem key={p.id} value={p.id} className="text-[12px]">
+              {icon && <ProviderLogo icon={icon} name={p.name} size={14} />}
+              {p.name}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Bottom row of an agent tab with candidates: bind one more provider to this
+    route (it joins the queue tail as a standby). */
+function AddBindingRow({
+  agent,
+  providers,
+  boundIds,
+  onChanged,
+}: {
+  agent: AgentId;
+  providers: Provider[];
+  boundIds: Set<string>;
+  onChanged: () => void;
+}) {
+  const available = providers.filter((p) => !boundIds.has(p.id));
+  return (
+    <div className="flex h-11 items-center gap-3 border-b border-line px-4">
+      <span className="flex-1 text-[11px] text-mut">
+        {available.length === 0
+          ? "All providers are already in this route — add a new one from the header"
+          : "Bind another provider to this route — it joins the queue tail as a standby"}
+      </span>
+      <BindProviderSelect
+        providers={providers}
+        boundIds={boundIds}
+        onPick={(pid) => api.addAgentBinding(agent, pid).then(onChanged)}
+      />
     </div>
   );
 }
@@ -581,11 +695,6 @@ export default function Providers({
   useEffect(() => {
     if (seg !== "all" && !visibleSegments.some((s) => s.id === seg)) setSeg("all");
   }, [visibleSegments, seg]);
-
-  const onEnable = async (id: string) => {
-    await api.enableProvider(id);
-    refetch();
-  };
 
   const onDelete = async (p: Provider) => {
     await api.deleteProvider(p.id);
@@ -673,8 +782,18 @@ export default function Providers({
             ) : null;
           })
         : filtered.map((p) => (
-            <ProviderRow key={p.id} p={p} onEnable={onEnable} onEdit={onEdit} onDelete={onDelete} />
+            <ProviderRow key={p.id} p={p} onEdit={onEdit} onDelete={onDelete} />
           ))}
+
+      {/* Bind-one-more entry under the candidate queue of an agent tab */}
+      {route && (
+        <AddBindingRow
+          agent={route.agent}
+          providers={providers}
+          boundIds={new Set(route.bindings.map((b) => b.provider_id))}
+          onChanged={refetch}
+        />
+      )}
 
       {filtered.length === 0 && seg !== "all" && (
         <AgentOnboarding
@@ -686,6 +805,15 @@ export default function Providers({
           busy={enabling}
           onTakeover={() => onTakeover(seg)}
           onAdd={onAdd}
+          bindSlot={
+            takenOver?.has(seg) ? (
+              <BindProviderSelect
+                providers={providers}
+                boundIds={new Set(providers.filter((p) => p.agents.includes(seg)).map((p) => p.id))}
+                onPick={(pid) => api.addAgentBinding(seg, pid).then(refetch)}
+              />
+            ) : undefined
+          }
         />
       )}
 
@@ -699,7 +827,7 @@ export default function Providers({
       )}
 
       {/* Strategy config lives in the agent's own tab, only once it is taken over */}
-      {seg !== "all" && (takenOver?.has(seg) ?? false) && <StrategyPanel agent={seg} />}
+      {seg !== "all" && (takenOver?.has(seg) ?? false) && <StrategyPanel agent={seg} onChanged={refetch} />}
 
       <div className="mt-auto px-4 py-3 text-[10.5px] text-mut">
         Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud

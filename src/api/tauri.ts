@@ -84,6 +84,12 @@ export const tauriApi: KiwanoApi = {
     patch: { weight?: number; win_start?: string | null; win_end?: string | null },
   ) => invoke<void>("update_agent_binding", { agent, providerId, ...patch }),
 
+  addAgentBinding: (agent: AgentId, providerId: string) =>
+    invoke<void>("add_agent_binding", { agent, providerId }),
+
+  removeAgentBinding: (agent: AgentId, providerId: string) =>
+    invoke<void>("remove_agent_binding", { agent, providerId }),
+
   exportConfig: (path: string) => invoke<number>("export_config", { path }),
 
   importConfig: (path: string) =>

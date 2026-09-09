@@ -152,7 +152,7 @@ export default function RequestLogs() {
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface">
       <div className="flex items-center gap-3 border-b border-line px-3.5 py-2.5">
-        <h3 className="text-[12.5px] font-semibold">Requests</h3>
+        <h3 className="text-[12.5px] font-semibold">Logs</h3>
         <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
           {FILTERS.map((f, i) => (
             <button

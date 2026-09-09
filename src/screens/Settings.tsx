@@ -1,7 +1,6 @@
 // Settings (design/index.html #s-settings)
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, ShieldCheck, SlidersHorizontal, User } from "lucide-react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { Check, ChevronDown, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,8 +13,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
 import type { AppSettings } from "../api/types";
-
-const CONFIG_FILE_FILTERS = [{ name: "Kiwano config", extensions: ["json"] }];
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
   return (
@@ -31,43 +28,6 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 
 export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
-  const [shareMsg, setShareMsg] = useState<string | null>(null);
-
-  const onExport = () => {
-    save({
-      defaultPath: "kiwano-config.json",
-      filters: CONFIG_FILE_FILTERS,
-    })
-      .then((path) => {
-        if (!path) return;
-        setShareMsg("Exporting…");
-        api
-          .exportConfig(path)
-          .then((n) => setShareMsg(`Exported ${n} providers (includes API keys — keep the file safe)`))
-          .catch((e) => setShareMsg(`Export failed: ${String(e).slice(0, 60)}`))
-          .finally(() => setTimeout(() => setShareMsg(null), 5000));
-      })
-      .catch(() => {});
-  };
-
-  const onImport = () => {
-    open({ multiple: false, filters: CONFIG_FILE_FILTERS })
-      .then((path) => {
-        if (!path || Array.isArray(path)) return;
-        setShareMsg("Importing…");
-        api
-          .importConfig(path)
-          .then((r) =>
-            setShareMsg(
-              `Imported: ${r.providers_added} added · ${r.providers_kept} reused · ${r.routes_applied} routes`,
-            ),
-          )
-          .catch((e) => setShareMsg(`Import failed: ${String(e).slice(0, 60)}`))
-          .finally(() => setTimeout(() => setShareMsg(null), 5000));
-      })
-      .catch(() => {});
-  };
 
   useEffect(() => {
     api.getSettings().then(setS);
@@ -204,74 +164,6 @@ export default function Settings() {
               <Check className="h-3 w-3" style={{ color: "var(--kiwi)" }} />
               API keys never leave your device
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Hub & config */}
-      <div className="rounded-lg border border-line bg-surface p-4">
-        <h3 className="mb-3 text-[12.5px] font-semibold">Kiwano Hub & config</h3>
-        <div className="flex items-center justify-between text-[12.5px]">
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full" style={{ background: "var(--surface2)" }}>
-              <User className="h-3.5 w-3.5 text-mut" />
-            </div>
-            {s.hub_logged_in ? "Signed in" : "Not signed in"}
-            <span className="text-[10.5px] text-mut">Sign in to sync configs and rate providers</span>
-            {importMsg && importMsg !== "Importing…" && (
-              <span className="text-[10.5px]" style={{ color: "var(--kiwi)" }}>
-                {importMsg}
-              </span>
-            )}
-            {shareMsg && shareMsg !== "Importing…" && shareMsg !== "Exporting…" && (
-              <span className="text-[10.5px]" style={{ color: "var(--kiwi)" }}>
-                {shareMsg}
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 whitespace-nowrap px-3 text-[11.5px]"
-              onClick={onExport}
-              title="Export providers and routes as JSON (includes API keys)"
-            >
-              Export plan
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 whitespace-nowrap px-3 text-[11.5px]"
-              onClick={onImport}
-              title="Import a one-click config plan (merges by same name + endpoint)"
-            >
-              Import plan
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 whitespace-nowrap px-3 text-[11.5px]"
-              disabled={importMsg === "Importing…"}
-              title={importMsg ?? undefined}
-              onClick={() => {
-                setImportMsg("Importing…");
-                api
-                  .importCcSwitch()
-                  .then((r) =>
-                    setImportMsg(
-                      `Imported ${r.imported} · skipped ${r.skipped}${r.detail.length ? ` · ${r.detail[0]}` : ""}`,
-                    ),
-                  )
-                  .catch(() => setImportMsg("Import failed"))
-                  .finally(() => setTimeout(() => setImportMsg(null), 4000));
-              }}
-            >
-              Import from CC Switch
-            </Button>
-            <Button size="sm" className="h-7 px-3 text-[11.5px] font-semibold">
-              Sign in
-            </Button>
           </div>
         </div>
       </div>

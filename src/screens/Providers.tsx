@@ -12,15 +12,13 @@ import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
-const SEGMENTS: { id: AgentId | "all"; icon?: string; char?: string; color?: string }[] = [
+const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
   { id: "all" },
   { id: "claude", icon: "claude" },
   { id: "codex", icon: "openai" },
   { id: "gemini", icon: "gemini" },
   { id: "grokbuild", icon: "grok" },
-  // Claude Desktop shares the Claude mark — render the design-system "D"
-  // chip instead, so the two Claude agents stay distinguishable.
-  { id: "claude-desktop", char: "D", color: "#B45E51" },
+  { id: "claude-desktop", icon: "claude" },
   { id: "opencode", icon: "opencode" },
   { id: "openclaw", icon: "openclaw" },
   { id: "hermes", icon: "hermes" },
@@ -386,10 +384,10 @@ export default function Providers({
                 className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
                 onClick={() => setSeg(s.id)}
               >
-                {s.id === "all" ? (
-                  <span className="text-[12px] text-mut">{label}</span>
+                {s.icon ? (
+                  <ProviderLogo icon={s.icon} name={label} size={15} />
                 ) : (
-                  <ProviderLogo icon={s.icon} char={s.char} color={s.color} name={label} size={15} />
+                  <span className="text-[12px] text-mut">{label}</span>
                 )}
               </button>
             );

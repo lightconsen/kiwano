@@ -636,16 +636,16 @@ function AddBindingRow({
   const available = providers.filter((p) => !boundIds.has(p.id));
   return (
     <div className="flex h-11 items-center gap-3 border-b border-line px-4">
-      <span className="flex-1 text-[11px] text-mut">
-        {available.length === 0
-          ? "All providers are already in this route — add a new one from the header"
-          : "Bind another provider to this route — it joins the queue tail as a standby"}
-      </span>
       <BindProviderSelect
         providers={providers}
         boundIds={boundIds}
         onPick={(pid) => api.addAgentBinding(agent, pid).then(onChanged)}
       />
+      <span className="flex-1 truncate text-[11px] text-mut">
+        {available.length === 0
+          ? "All providers are already in this route — add a new one from the header"
+          : "Bind another provider to this route — it joins the queue tail as a standby"}
+      </span>
     </div>
   );
 }
@@ -829,8 +829,15 @@ export default function Providers({
       {/* Strategy config lives in the agent's own tab, only once it is taken over */}
       {seg !== "all" && (takenOver?.has(seg) ?? false) && <StrategyPanel agent={seg} onChanged={refetch} />}
 
-      <div className="mt-auto px-4 py-3 text-[10.5px] text-mut">
-        Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud
+      {/* Single closing note. In a taken-over agent tab with a route it also
+          carries the strategy context (the StrategyPanel select row has no
+          header of its own). */}
+      <div className="mt-auto truncate px-4 py-3 text-[10.5px] text-mut">
+        {seg !== "all" &&
+        (takenOver?.has(seg) ?? false) &&
+        (routes?.some((r) => r.agent === seg) ?? false)
+          ? "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys stay in the system keychain · requests never touch the Kiwano cloud"
+          : "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud"}
       </div>
     </section>
   );

@@ -137,15 +137,10 @@ export default function StrategyPanel({ agent, onChanged }: { agent: AgentId; on
   const mine = routes?.filter((r) => r.agent === agent) ?? null;
   if (!mine || mine.length === 0) return null;
 
+  // No header row of its own: the closing note at the bottom of the screen
+  // carries the strategy context (see Providers' footer line).
   return (
     <section className="mt-1">
-      <div className="flex h-8 items-center gap-3 border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-        <span className="flex-none">Agent routing strategy</span>
-        <span className="truncate">
-          the provider rows above are the candidates in priority order · switching strategy keeps the
-          order, the primary stays first · changes apply instantly
-        </span>
-      </div>
       {mine.map((r) => (
         <RouteRow key={r.agent} route={r} onChanged={refetch} />
       ))}

@@ -1051,9 +1051,9 @@ export const devApi: KiwanoApi = {
     await delay();
     return {
       today_requests: 1284,
-      today_cost: 46.2,
+      today_tokens: 1_900_000,
       hub_synced: true,
-      version: "v0.1.0 · MVP",
+      version: "v0.1.0",
     };
   },
 

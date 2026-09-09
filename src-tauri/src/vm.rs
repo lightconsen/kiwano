@@ -666,7 +666,9 @@ pub struct GatewayStatusVm {
 #[derive(Serialize)]
 pub struct FooterStatsVm {
     pub today_requests: i64,
-    pub today_cost: f64,
+    /// Tokens consumed today (input + output) — the footer's headline metric;
+    /// cost stays out of the status bar until price tables land (P1).
+    pub today_tokens: i64,
     pub hub_synced: bool,
     pub version: String,
 }
@@ -2181,9 +2183,9 @@ pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, Str
         .unwrap_or(false);
     Ok(FooterStatsVm {
         today_requests: t.requests,
-        today_cost: 0.0,
+        today_tokens: t.input_tokens + t.output_tokens,
         hub_synced,
-        version: "v0.1.0 · MVP".into(),
+        version: "v0.1.0".into(),
     })
 }
 

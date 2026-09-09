@@ -224,7 +224,8 @@ export interface GatewayStatus {
 
 export interface FooterStats {
   today_requests: number;
-  today_cost: number;
+  /** Tokens consumed today (input + output) */
+  today_tokens: number;
   hub_synced: boolean;
   version: string;
 }

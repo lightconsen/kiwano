@@ -17,6 +17,7 @@ import type {
   Provider,
 } from "./api/types";
 import { Dot } from "./components/bits";
+import { fmtTokens } from "./lib/format";
 import logoUrl from "./assets/kiwano-logo.svg";
 import Providers from "./screens/Providers";
 import Shelf from "./screens/Shelf";
@@ -172,16 +173,15 @@ export default function App() {
         {footer && (
           <span>
             Today <span className="font-mono text-ink">{footer.today_requests.toLocaleString()}</span> requests ·{" "}
-            <span className="font-mono text-ink">¥{footer.today_cost}</span>
+            <span className="font-mono text-ink">{fmtTokens(footer.today_tokens)} tokens</span>
           </span>
         )}
         {footer?.hub_synced && (
-          <span className="flex items-center gap-1">
+          <span className="ml-auto flex items-center gap-1">
             <Dot state="ok" size="h-[5px] w-[5px]" />
             Hub just synced
           </span>
         )}
-        <span className="ml-auto">{footer?.version ?? "v0.1.0 · MVP"}</span>
       </footer>
 
       <AddProviderModal

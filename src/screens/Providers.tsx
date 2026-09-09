@@ -7,6 +7,7 @@ import { api } from "../api/client";
 import { AGENTS, type AgentDetect, type AgentId, type Provider } from "../api/types";
 import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
+import { iconForEndpoint } from "@/components/icons/infer";
 import StrategyPanel from "../components/StrategyPanel";
 import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
 
@@ -213,10 +214,16 @@ function ProviderRow({
     const t = setTimeout(() => setConfirmDel(false), 3000);
     return () => clearTimeout(t);
   }, [confirmDel]);
+  // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
+  const brandIcon = iconForEndpoint(p.endpoint);
   return (
     <div className={`row flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <div className="flex min-w-0 w-[34%] items-center gap-2.5">
-        <Logo char={p.logo_char} color={p.logo_color} border={p.logo_border} />
+        {brandIcon ? (
+          <ProviderLogo icon={brandIcon} name={p.name} size={32} />
+        ) : (
+          <Logo char={p.logo_char} color={p.logo_color} border={p.logo_border} />
+        )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-[13px] font-semibold">{p.name}</span>

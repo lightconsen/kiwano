@@ -9,7 +9,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use crate::error::{GatewayError, Result};
-use crate::store::{Protocol, Store, StrategyType};
+use crate::store::{Protocol, ProviderEndpoint, Store, StrategyType};
 
 /// Canonical agent ids (tech.md §2.4 B: MVP takes over Claude Code + Codex).
 pub const AGENT_CLAUDE: &str = "claude";
@@ -28,6 +28,9 @@ pub struct UpstreamProvider {
     pub base_url: String,
     /// Optional upstream path prefix, e.g. `/anthropic` on compatible endpoints.
     pub api_path: Option<String>,
+    /// Additional per-protocol endpoints (migration v7): an inbound request in
+    /// one of these protocols is forwarded natively to the matching URL.
+    pub endpoints: Vec<ProviderEndpoint>,
     pub api_key: Option<String>,
     /// Extra API keys rotating after the primary (spec §4.1 P1 multi-key rotation).
     pub extra_keys: Vec<String>,
@@ -91,6 +94,12 @@ impl UpstreamProvider {
         }
         pool
     }
+
+    /// The additional endpoint registered for `protocol`, if any. The primary
+    /// protocol/endpoint is handled before this lookup (native path).
+    pub fn endpoint_for(&self, protocol: Protocol) -> Option<&ProviderEndpoint> {
+        self.endpoints.iter().find(|e| e.protocol == protocol)
+    }
 }
 
 impl RouteTable {
@@ -133,6 +142,7 @@ impl RouteTable {
                         protocol: p.protocol,
                         base_url: p.base_url.clone(),
                         api_path: p.api_path.clone(),
+                        endpoints: p.endpoints.clone(),
                         api_key: p.api_key.clone(),
                         extra_keys: store
                             .list_api_keys(&p.id)?
@@ -279,6 +289,7 @@ mod tests {
             protocol,
             base_url: format!("https://{id}.example.com"),
             api_path: None,
+            endpoints: Vec::new(),
             api_key: Some(format!("sk-{id}")),
             billing: Billing::Metered,
             period_limit: None,
@@ -370,6 +381,27 @@ mod tests {
         let codex = table.routes.get(AGENT_CODEX).unwrap();
         assert_eq!(codex.candidates.len(), 1);
         assert_eq!(codex.candidates[0].protocol, Protocol::OpenAI);
+    }
+
+    /// Additional per-protocol endpoints flow from the store into candidates
+    /// (migration v7) and `endpoint_for` resolves them.
+    #[test]
+    fn route_table_carries_per_protocol_endpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = seeded_store(&dir);
+        let mut p = provider("p-oai", Protocol::OpenAI, true);
+        p.endpoints = vec![ProviderEndpoint {
+            protocol: Protocol::Anthropic,
+            base_url: "https://p-oai.example.com/anthropic".into(),
+            api_path: None,
+        }];
+        store.update_provider(&p).unwrap();
+
+        let table = RouteTable::load(&store).unwrap();
+        let codex = table.routes.get(AGENT_CODEX).unwrap();
+        let got = codex.candidates[0].endpoint_for(Protocol::Anthropic).expect("alt endpoint");
+        assert_eq!(got.base_url, "https://p-oai.example.com/anthropic");
+        assert!(codex.candidates[0].endpoint_for(Protocol::Gemini).is_none());
     }
 
     #[test]

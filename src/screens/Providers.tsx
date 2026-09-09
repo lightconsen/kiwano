@@ -294,15 +294,23 @@ function ProviderRow({
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <IdentityCell p={p} />
 
-      <div className="flex w-[22%] items-center gap-1">
+      <div className="flex w-[22%] items-center">
         {p.agents.length === 0 ? (
           <span className="text-[11px] text-mut">Unbound</span>
         ) : (
           <>
-            {p.agents.map((a) => (
-              <AgentChip key={a} meta={AGENTS.find((m) => m.id === a)!} />
+            {/* Mini-logos, slightly overlapping (earlier agents on top); the
+                opaque chip background keeps marks legible where they overlap */}
+            {p.agents.map((a, i) => (
+              <span
+                key={a}
+                className={`relative inline-flex rounded-[4px] bg-bg${i > 0 ? "-ml-0.5" : ""}`}
+                style={{ zIndex: p.agents.length - i }}
+              >
+                <AgentChip meta={AGENTS.find((m) => m.id === a)!} size={14} />
+              </span>
             ))}
-            {p.agents_note && <span className="ml-1 text-[11px] text-mut">{p.agents_note}</span>}
+            {p.agents_note && <span className="ml-1.5 text-[11px] text-mut">{p.agents_note}</span>}
           </>
         )}
       </div>

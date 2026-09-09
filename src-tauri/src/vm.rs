@@ -354,42 +354,42 @@ impl Aux {
         .ok()
     }
 
-    /// Average `latency_ms` over a window, optionally per provider.
-    /// `from`/`to` are RFC3339 (store ts strings compare lexicographically).
+    /// Average `latency_ms` over a window, optionally per provider and/or
+    /// agent. `from`/`to` are RFC3339 (store ts strings compare
+    /// lexicographically).
     pub fn avg_latency(
         &self,
         provider: Option<&str>,
+        agent: Option<&str>,
         from: Option<&str>,
         to: Option<&str>,
     ) -> Option<i64> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         let mut sql =
             String::from("SELECT AVG(latency_ms) FROM usage WHERE latency_ms IS NOT NULL");
-        if provider.is_some() {
-            sql.push_str(" AND provider_id = ?1");
+        let mut params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+        if let Some(p) = provider {
+            params.push(p);
+            sql.push_str(&format!(" AND provider_id = ?{}", params.len()));
         }
-        if from.is_some() {
-            sql.push_str(&format!(
-                " AND ts >= ?{}",
-                if provider.is_some() { 2 } else { 1 }
-            ));
+        if let Some(a) = agent {
+            params.push(a);
+            sql.push_str(&format!(" AND agent = ?{}", params.len()));
         }
-        if to.is_some() {
-            let base = 1 + provider.is_some() as i32 + from.is_some() as i32;
-            sql.push_str(&format!(" AND ts < ?{base}"));
+        if let Some(f) = from {
+            params.push(f);
+            sql.push_str(&format!(" AND ts >= ?{}", params.len()));
+        }
+        if let Some(t) = to {
+            params.push(t);
+            sql.push_str(&format!(" AND ts < ?{}", params.len()));
         }
         let mut stmt = conn.prepare(&sql).ok()?;
-        let map = |r: &rusqlite::Row| r.get::<_, Option<f64>>(0);
-        let avg: Option<f64> = match (provider, from, to) {
-            (Some(p), Some(f), Some(t)) => stmt.query_row(rusqlite::params![p, f, t], map).ok()?,
-            (Some(p), Some(f), None) => stmt.query_row(rusqlite::params![p, f], map).ok()?,
-            (Some(p), None, Some(t)) => stmt.query_row(rusqlite::params![p, t], map).ok()?,
-            (Some(p), None, None) => stmt.query_row(rusqlite::params![p], map).ok()?,
-            (None, Some(f), Some(t)) => stmt.query_row(rusqlite::params![f, t], map).ok()?,
-            (None, Some(f), None) => stmt.query_row(rusqlite::params![f], map).ok()?,
-            (None, None, Some(t)) => stmt.query_row(rusqlite::params![t], map).ok()?,
-            (None, None, None) => stmt.query_row([], map).ok()?,
-        };
+        let avg: Option<f64> = stmt
+            .query_row(rusqlite::params_from_iter(params), |r| {
+                r.get::<_, Option<f64>>(0)
+            })
+            .ok()?;
         avg.map(|a| a.round() as i64)
     }
 
@@ -457,6 +457,9 @@ pub struct ProviderVm {
     pub endpoint: String,
     pub protocol: String,
     pub endpoint_note: String,
+    /// Additional per-protocol endpoints (primary excluded).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<ProviderEndpointVm>,
     pub billing: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_price: Option<String>,
@@ -487,6 +490,10 @@ pub struct CatalogEntryVm {
     /// multi-protocol catalog, so older payloads default to openai.
     #[serde(default = "default_catalog_protocol")]
     pub protocol: String,
+    /// Additional per-protocol endpoints of the same vendor service (migration
+    /// v7 merged the former per-protocol variant entries into one brand row).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<CatalogEndpointVm>,
     pub tag: String,
     pub tag_label: String,
     pub rating: f64,
@@ -500,6 +507,14 @@ pub struct CatalogEntryVm {
     pub added: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub free_offer: Option<String>,
+    pub models: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CatalogEndpointVm {
+    pub protocol: String,
+    pub endpoint: String,
+    #[serde(default)]
     pub models: Vec<String>,
 }
 
@@ -530,6 +545,7 @@ pub struct TrendVm {
 
 #[derive(Serialize)]
 pub struct ProviderDistVm {
+    pub id: String,
     pub name: String,
     pub color: String,
     pub pct: i64,
@@ -649,6 +665,20 @@ pub struct BillingConfigInput {
     pub reset_period: Option<String>,
 }
 
+/// An additional per-protocol endpoint of a provider (migration v7): the
+/// gateway forwards natively here when an inbound request speaks `protocol`.
+#[derive(Serialize)]
+pub struct ProviderEndpointVm {
+    pub protocol: String,
+    pub endpoint: String,
+}
+
+#[derive(Deserialize)]
+pub struct NewEndpointInput {
+    pub protocol: String,
+    pub endpoint: String,
+}
+
 #[derive(Deserialize)]
 pub struct NewProviderInput {
     pub name: String,
@@ -661,6 +691,10 @@ pub struct NewProviderInput {
     pub billing: String,
     pub billing_config: BillingConfigInput,
     pub agents: Vec<String>,
+    /// Additional per-protocol endpoints; unknown protocol strings are
+    /// skipped (defaulting one to openai could collide with the primary).
+    #[serde(default)]
+    pub endpoints: Vec<NewEndpointInput>,
 }
 
 // ── Billing mapping (UI plan/payg/unl ↔ DB subscription/metered/unlimited) ──
@@ -789,7 +823,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
 
     // provider → 7d usage totals
     let mut usage_by_id: HashMap<String, UsageTotals> = HashMap::new();
-    for pu in store.usage_by_provider(None, Some(&since7)).map_err(e2s)? {
+    for pu in store.usage_by_provider(None, None, Some(&since7)).map_err(e2s)? {
         usage_by_id.insert(pu.provider_id, pu.totals);
     }
 
@@ -797,7 +831,6 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         .into_iter()
         .map(|p| {
             let mut agents: Vec<String> = Vec::new();
-            let mut badge: Option<String> = None;
             let mut backup_for_any = false;
             for (agent, _) in primary.iter() {
                 let is_bound = bindings_by_agent
@@ -810,12 +843,13 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 if primary.get(agent).map(String::as_str) == Some(&p.id) {
                     continue;
                 }
-                // Non-head. Whether that makes this binding a standby depends
-                // on the strategy: a roundrobin tail takes rotation turns and
-                // a windowed timewindow tail serves its own window — neither
-                // sits in a failover queue. A windowless timewindow tail is
-                // never picked at all, and single/failover/quota tails are
-                // standbys proper.
+                // Non-head. Whether that marks the provider as a failover-queue
+                // member (the Agent-column note) depends on the strategy: a
+                // roundrobin tail takes rotation turns and a windowed
+                // timewindow tail serves its own window — neither queues. A
+                // windowless timewindow tail is never picked at all, and
+                // single/failover/quota tails queue. No "Standby" badge here:
+                // next to "In use" it read as a contradiction.
                 let binding = bindings_by_agent
                     .get(agent)
                     .and_then(|bs| bs.iter().find(|b| b.provider_id == p.id));
@@ -828,10 +862,6 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 };
                 if standby {
                     backup_for_any = true;
-                    if badge.is_none() {
-                        let pr = binding.map(|b| b.priority).unwrap_or(1);
-                        badge = Some(format!("Standby #{pr}"));
-                    }
                 }
             }
             agents.sort();
@@ -859,12 +889,13 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 endpoint: display_endpoint(&p),
                 protocol: p.protocol.as_str().to_string(),
                 endpoint_note: endpoint_note(&p),
+                endpoints: vm_endpoints(&p),
                 billing: billing_to_ui(p.billing).to_string(),
                 plan_price: None, // no price metadata until Hub price tables land
                 enabled: p.enabled,
                 agents,
                 is_current,
-                status_badge: badge,
+                status_badge: None,
                 agents_note: note,
                 health,
                 usage,
@@ -1119,23 +1150,41 @@ fn e2s(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-fn display_endpoint(p: &Provider) -> String {
-    let stripped = p
-        .base_url
+fn display_base(base_url: &str, api_path: &Option<String>) -> String {
+    let stripped = base_url
         .trim_start_matches("https://")
         .trim_start_matches("http://");
-    match &p.api_path {
+    match api_path {
         Some(path) if !path.is_empty() => format!("{stripped}{path}"),
         _ => stripped.to_string(),
     }
 }
 
-fn endpoint_note(p: &Provider) -> String {
-    match p.protocol {
-        kiwano_gateway::store::Protocol::OpenAI => "OpenAI-compatible".to_string(),
-        kiwano_gateway::store::Protocol::Anthropic => "Anthropic".to_string(),
-        kiwano_gateway::store::Protocol::Gemini => "Gemini API".to_string(),
+fn display_endpoint(p: &Provider) -> String {
+    display_base(&p.base_url, &p.api_path)
+}
+
+fn protocol_label(p: kiwano_gateway::store::Protocol) -> &'static str {
+    match p {
+        kiwano_gateway::store::Protocol::OpenAI => "OpenAI-compatible",
+        kiwano_gateway::store::Protocol::Anthropic => "Anthropic",
+        kiwano_gateway::store::Protocol::Gemini => "Gemini API",
     }
+}
+
+fn endpoint_note(p: &Provider) -> String {
+    let mut note = protocol_label(p.protocol).to_string();
+    // Additional endpoints surface in the same subtitle: "OpenAI-compatible · +Anthropic".
+    for e in &p.endpoints {
+        let tag = match e.protocol {
+            kiwano_gateway::store::Protocol::OpenAI => "OpenAI",
+            kiwano_gateway::store::Protocol::Anthropic => "Anthropic",
+            kiwano_gateway::store::Protocol::Gemini => "Gemini",
+        };
+        note.push_str(" · +");
+        note.push_str(tag);
+    }
+    note
 }
 
 fn health_vm(store: &Store, p: &Provider) -> HealthVm {
@@ -1246,7 +1295,7 @@ fn usage_vm(
         cache_read_tokens: t.cache_read_tokens,
         output_tokens: t.output_tokens,
         cost: None, // cost estimation needs per-provider price tables (Hub, P1)
-        latency_ms: aux.avg_latency(Some(&p.id), Some(since7), None),
+        latency_ms: aux.avg_latency(Some(&p.id), None, Some(since7), None),
         quota,
         spark,
     })
@@ -1273,6 +1322,35 @@ pub(crate) fn slug(name: &str) -> String {
     }
 }
 
+/// Map the user-supplied additional endpoints to store rows; unknown protocol
+/// strings are skipped (defaulting one to openai could collide with the
+/// primary's protocol in provider_endpoints' PK).
+fn input_endpoints(input: &NewProviderInput) -> Vec<kiwano_gateway::store::ProviderEndpoint> {
+    input
+        .endpoints
+        .iter()
+        .filter_map(|e| {
+            kiwano_gateway::store::Protocol::from_str(&e.protocol).map(|p| {
+                kiwano_gateway::store::ProviderEndpoint {
+                    protocol: p,
+                    base_url: e.endpoint.trim().to_string(),
+                    api_path: None,
+                }
+            })
+        })
+        .collect()
+}
+
+fn vm_endpoints(p: &Provider) -> Vec<ProviderEndpointVm> {
+    p.endpoints
+        .iter()
+        .map(|e| ProviderEndpointVm {
+            protocol: e.protocol.as_str().to_string(),
+            endpoint: display_base(&e.base_url, &e.api_path),
+        })
+        .collect()
+}
+
 pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderVm, String> {
     let now = rfc3339(unix_now());
     let id = format!(
@@ -1293,6 +1371,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
             .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
         base_url: input.endpoint.trim().to_string(),
         api_path: None,
+        endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
         billing: billing_to_db(&input.billing),
         period_limit: input.billing_config.limit_value,
@@ -1312,6 +1391,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     let vm_endpoint = display_endpoint(&provider);
     let vm_note = endpoint_note(&provider);
     let vm_protocol = provider.protocol.as_str().to_string();
+    let vm_endpoints = vm_endpoints(&provider);
     let vm_billing = billing_to_ui(provider.billing).to_string();
     let vm_health = derive_health(&provider, None);
 
@@ -1358,6 +1438,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         endpoint: vm_endpoint,
         protocol: vm_protocol,
         endpoint_note: vm_note,
+        endpoints: vm_endpoints,
         billing: vm_billing,
         plan_price: None,
         enabled: true,
@@ -1438,6 +1519,7 @@ pub fn update_provider(
     p.base_url = input.endpoint.trim().to_string();
     p.protocol = kiwano_gateway::store::Protocol::from_str(&input.protocol)
         .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
+    p.endpoints = input_endpoints(input);
     p.billing = billing_to_db(&input.billing);
     p.period_limit = input.billing_config.limit_value;
     p.limit_unit = normalize_limit_unit(
@@ -1760,6 +1842,7 @@ fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) ->
             .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
         base_url: base.to_string(),
         api_path: None,
+        endpoints: Vec::new(),
         api_key: Some(creds.api_key.clone()),
         billing: kiwano_gateway::store::Billing::Metered,
         period_limit: None,
@@ -1912,7 +1995,15 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
 
 // ── Dashboard ──
 
-pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<DashboardVm, String> {
+/// Dashboard aggregation. `provider_id`/`agent` narrow every stat (headline,
+/// trend, distributions, latency) to that slice; None means all.
+pub fn build_dashboard(
+    store: &Store,
+    aux: &Aux,
+    window: &str,
+    provider_id: Option<&str>,
+    agent: Option<&str>,
+) -> Result<DashboardVm, String> {
     let now = unix_now();
     let (window, since, days) = match window {
         "today" => ("today", day_key(now) + "T00:00:00Z", 1),
@@ -1920,7 +2011,15 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
         _ => ("7d", rfc3339(now - 7 * 86_400), 7),
     };
 
-    let cur = store.usage_totals(None, Some(&since)).map_err(e2s)?;
+    let cur = store.usage_totals(agent, provider_id, Some(&since)).map_err(e2s)?;
+    // Headline request count shares the Logs card's source (request_logs):
+    // usage rows only cover forwarded requests, so failures before the forward
+    // leg (no provider bound, protocol mismatch…) would vanish from the top
+    // stat while the Logs card below still shows them. Token/cost/latency stay
+    // usage-based — failed requests carry none.
+    let requests = store
+        .count_request_logs(agent, provider_id, Some(&since))
+        .map_err(e2s)?;
     let providers = store.list_providers().map_err(e2s)?;
     let name_by_id: HashMap<String, String> = providers
         .iter()
@@ -1929,7 +2028,10 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
 
     // trend: daily totals zero-filled over the window (30d buckets by 5 days)
     let mut daily: HashMap<String, UsageTotals> = HashMap::new();
-    for d in store.usage_daily(None, Some(&since)).map_err(e2s)? {
+    for d in store
+        .usage_daily(agent, provider_id, Some(&since))
+        .map_err(e2s)?
+    {
         daily.insert(d.day, d.totals);
     }
     let mut trend = Vec::new();
@@ -1966,7 +2068,7 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
     // provider distribution
     let total_req = cur.requests.max(1);
     let mut by_provider: Vec<ProviderDistVm> = store
-        .usage_by_provider(None, Some(&since))
+        .usage_by_provider(agent, provider_id, Some(&since))
         .map_err(e2s)?
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
@@ -1976,6 +2078,7 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
                 .cloned()
                 .unwrap_or(pu.provider_id.clone());
             ProviderDistVm {
+                id: pu.provider_id.clone(),
                 name,
                 color: palette_color(&pu.provider_id).to_string(),
                 pct: (pu.totals.requests * 100 / total_req) as i64,
@@ -1986,11 +2089,13 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
     by_provider.sort_by(|a, b| b.pct.cmp(&a.pct));
 
     let mut by_agent = Vec::new();
-    for (agent, label) in AGENTS {
-        let t = store.usage_totals(Some(agent), Some(&since)).map_err(e2s)?;
+    for (name, label) in AGENTS {
+        let t = store
+            .usage_totals(Some(name), provider_id, Some(&since))
+            .map_err(e2s)?;
         if t.requests > 0 {
             by_agent.push(AgentDistVm {
-                agent: agent.to_string(),
+                agent: name.to_string(),
                 label: label.to_string(),
                 requests: t.requests,
                 tokens: fmt_tokens(t.input_tokens + t.output_tokens),
@@ -1999,12 +2104,14 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
         }
     }
 
-    let latency = aux.avg_latency(None, Some(&since), None).unwrap_or(0);
+    let latency = aux
+        .avg_latency(provider_id, agent, Some(&since), None)
+        .unwrap_or(0);
     let latency_delta_pct = 0; // prev-window latency comparison lands with cost tables
 
     Ok(DashboardVm {
         window: window.to_string(),
-        requests: cur.requests,
+        requests,
         requests_delta_pct: 0, // prev-window deltas land with cost tables (P1)
         input_tokens: cur.input_tokens,
         cache_read_tokens: cur.cache_read_tokens,
@@ -2021,7 +2128,7 @@ pub fn build_dashboard(store: &Store, aux: &Aux, window: &str) -> Result<Dashboa
 pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, String> {
     let today = day_key(unix_now());
     let since = format!("{today}T00:00:00Z");
-    let t = store.usage_totals(None, Some(&since)).map_err(e2s)?;
+    let t = store.usage_totals(None, None, Some(&since)).map_err(e2s)?;
     // hub_synced = catalog synced today (first 10 chars of the cache
     // timestamp are the date)
     let hub_synced = aux
@@ -2038,12 +2145,36 @@ pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, Str
 
 /// Catalog shelf: Hub cache first; fall back to the bundled static
 /// catalog.json when never synced or on parse failure.
-pub fn load_catalog(aux: &Aux) -> CatalogListVm {
-    if let Some((payload, _)) = aux.load_hub_cache() {
-        if let Ok(list) = serde_json::from_str::<CatalogListVm>(&payload) {
-            return list;
-        }
+///
+/// `added` is derived at read time from the local provider list: an entry
+/// counts as added when a provider exists at its primary OR any of its
+/// additional per-protocol endpoints. The static flags carried by
+/// catalog.json / the Hub cache are ignored.
+pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
+    let mut list = if let Some((payload, _)) = aux.load_hub_cache() {
+        serde_json::from_str::<CatalogListVm>(&payload).unwrap_or_else(|_| bundled_catalog())
+    } else {
+        bundled_catalog()
+    };
+    let keys: HashSet<String> = store
+        .list_providers()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|p| {
+            let mut keys = vec![endpoint_key(&p.base_url)];
+            keys.extend(p.endpoints.iter().map(|e| endpoint_key(&e.base_url)));
+            keys
+        })
+        .collect();
+    for e in &mut list.entries {
+        let mut endpoints = vec![&e.endpoint];
+        endpoints.extend(e.endpoints.iter().map(|x| &x.endpoint));
+        e.added = endpoints.iter().any(|url| keys.contains(&endpoint_key(url)));
     }
+    list
+}
+
+fn bundled_catalog() -> CatalogListVm {
     let entries: Vec<CatalogEntryVm> =
         serde_json::from_str(include_str!("catalog.json")).expect("catalog.json is valid");
     // Total mirrors the bundled listing size; a Hub sync replaces both.
@@ -2051,6 +2182,17 @@ pub fn load_catalog(aux: &Aux) -> CatalogListVm {
         total: entries.len() as i64,
         entries,
     }
+}
+
+/// Normalize an endpoint into its identity: host+path, lowercased, scheme
+/// and trailing slashes stripped (config import merges by base_url too).
+fn endpoint_key(s: &str) -> String {
+    let t = s.trim().to_lowercase();
+    let no_scheme = t
+        .strip_prefix("https://")
+        .or_else(|| t.strip_prefix("http://"))
+        .unwrap_or(&t);
+    no_scheme.trim_end_matches('/').to_string()
 }
 
 #[cfg(test)]
@@ -2069,6 +2211,7 @@ mod tests {
             protocol: kiwano_gateway::store::Protocol::OpenAI,
             base_url: format!("https://{id}.example.com"),
             api_path: None,
+            endpoints: Vec::new(),
             api_key: Some("sk-test".into()),
             billing,
             period_limit: None,
@@ -2184,7 +2327,8 @@ mod tests {
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(alpha.is_current);
         assert!(!beta.is_current);
-        assert_eq!(beta.status_badge.as_deref(), Some("Standby #1"));
+        // Standby badges are gone; the failover-queue role lives in the note
+        assert_eq!(beta.status_badge, None);
         assert_eq!(beta.agents_note.as_deref(), Some("Failover queue"));
     }
 
@@ -2225,7 +2369,7 @@ mod tests {
         assert_eq!(gamma.status_badge, None);
         let delta = vms.iter().find(|v| v.id == "d1").unwrap();
         assert!(!delta.is_current);
-        assert_eq!(delta.status_badge.as_deref(), Some("Standby #1"));
+        assert_eq!(delta.status_badge, None);
         assert_eq!(delta.agents_note.as_deref(), Some("Failover queue"));
     }
 
@@ -2284,6 +2428,47 @@ mod tests {
         assert_eq!(bs[1].win_end.as_deref(), Some("06:00"));
         // the source agent keeps its own bindings
         assert_eq!(s.bindings_for_agent("codex").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn catalog_added_derives_from_provider_endpoints() {
+        let aux = Aux::open_in_memory().unwrap();
+        let s = store();
+        // nothing added yet: the bundled static flags are ignored
+        let empty = load_catalog(&s, &aux);
+        assert!(!empty.entries.iter().any(|e| e.added));
+
+        // add a provider on the merged Kimi entry's anthropic additional
+        // endpoint (trailing slash variant) — the whole entry counts as added
+        let mut p = provider("kfc", "Kimi For Coding", Billing::Metered);
+        p.base_url = "https://api.kimi.com/coding/".into();
+        s.insert_provider(&p).unwrap();
+
+        let list = load_catalog(&s, &aux);
+        let added: Vec<&str> = list
+            .entries
+            .iter()
+            .filter(|e| e.added)
+            .map(|e| e.id.as_str())
+            .collect();
+        // exactly the merged entry matches (via its alt endpoint); everything
+        // else — including DeepSeek at a different endpoint — stays addable
+        assert_eq!(added, ["kimi-for-coding"]);
+
+        // a provider on the primary endpoint also marks the entry added
+        let aux2 = Aux::open_in_memory().unwrap();
+        let mut d = provider("ds", "DeepSeek", Billing::Metered);
+        d.base_url = "https://api.deepseek.com".into();
+        s.insert_provider(&d).unwrap();
+        let list2 = load_catalog(&s, &aux2);
+        let added2: Vec<&str> = list2
+            .entries
+            .iter()
+            .filter(|e| e.added)
+            .map(|e| e.id.as_str())
+            .collect();
+        // catalog order: DeepSeek is the first bundled entry
+        assert_eq!(added2, ["deepseek", "kimi-for-coding"]);
     }
 
     #[test]
@@ -2354,6 +2539,7 @@ mod tests {
                 reset_period: Some("monthly".into()),
             },
             agents: vec!["codex".into()],
+            endpoints: Vec::new(),
         };
         let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
@@ -2367,6 +2553,87 @@ mod tests {
         // plan + limit → request-unit quota
         let s2_quota = serde_json::to_value(&vm).unwrap();
         assert!(s2_quota["is_current"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn add_provider_persists_endpoints() {
+        let s = store();
+        let input = NewProviderInput {
+            name: "Qianfan".into(),
+            api_key: "sk-x".into(),
+            endpoint: "https://qianfan.baidubce.com/v2/tokenplan/personal".into(),
+            protocol: "openai".into(),
+            model_default: "qianfan-code-latest".into(),
+            billing: "payg".into(),
+            billing_config: BillingConfigInput {
+                limit_value: None,
+                limit_unit: None,
+                reset_period: None,
+            },
+            agents: vec![],
+            endpoints: vec![
+                NewEndpointInput {
+                    protocol: "anthropic".into(),
+                    endpoint: "  https://qianfan.baidubce.com/anthropic/coding  ".into(),
+                },
+                // unknown protocol → skipped, not defaulted (PK clash guard)
+                NewEndpointInput {
+                    protocol: "xml".into(),
+                    endpoint: "https://x.example.com".into(),
+                },
+            ],
+        };
+        add_provider(&s, &input).unwrap();
+
+        let rows = s.list_providers().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].endpoints.len(), 1);
+        assert_eq!(
+            rows[0].endpoints[0].base_url,
+            "https://qianfan.baidubce.com/anthropic/coding"
+        );
+        assert_eq!(
+            rows[0].endpoints[0].protocol,
+            kiwano_gateway::store::Protocol::Anthropic
+        );
+    }
+
+    #[test]
+    fn provider_vm_carries_endpoints_and_note_suffix() {
+        let s = store();
+        let input = NewProviderInput {
+            name: "Qianfan".into(),
+            api_key: "sk-x".into(),
+            endpoint: "https://qianfan.baidubce.com/v2/tokenplan/personal".into(),
+            protocol: "openai".into(),
+            model_default: "qianfan-code-latest".into(),
+            billing: "payg".into(),
+            billing_config: BillingConfigInput {
+                limit_value: None,
+                limit_unit: None,
+                reset_period: None,
+            },
+            agents: vec![],
+            endpoints: vec![NewEndpointInput {
+                protocol: "anthropic".into(),
+                endpoint: "https://qianfan.baidubce.com/anthropic/coding".into(),
+            }],
+        };
+        let vm = add_provider(&s, &input).unwrap();
+        assert_eq!(vm.endpoints.len(), 1);
+        assert_eq!(vm.endpoints[0].protocol, "anthropic");
+        // display_base strips the scheme (same as the primary endpoint field)
+        assert_eq!(
+            vm.endpoints[0].endpoint,
+            "qianfan.baidubce.com/anthropic/coding"
+        );
+        assert_eq!(vm.endpoint_note, "OpenAI-compatible · +Anthropic");
+        // endpoints survive a fresh VM build from the store
+        let aux = Aux::open_in_memory().unwrap();
+        let vms = build_provider_vms(&s, &aux).unwrap();
+        let loaded = vms.iter().find(|v| v.id == vm.id).unwrap();
+        assert_eq!(loaded.endpoints.len(), 1);
+        assert_eq!(loaded.endpoint_note, "OpenAI-compatible · +Anthropic");
     }
 
     #[test]
@@ -2413,6 +2680,7 @@ mod tests {
                 reset_period: None,
             },
             agents: vec!["codex".into()], // rebind: claude dropped
+            endpoints: Vec::new(),
         };
         let vm = update_provider(&s, &aux, "p1", &input).unwrap();
         assert_eq!(vm.name, "P One Renamed");
@@ -2555,6 +2823,38 @@ mod tests {
             status: "ok".into(),
         })
         .unwrap();
+        // Seed the request-log rows the headline counts: the forwarded request
+        // above plus a pre-forward failure (usage tables never see the latter).
+        let log = |status: i64, tokens: (i64, i64)| kiwano_gateway::store::RequestLogNew {
+            ts: now.clone(),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: Some("claude".into()),
+            attribution: Some("key".into()),
+            provider_id: Some("p1".into()),
+            model: None,
+            status_code: status,
+            error_kind: None,
+            error_message: None,
+            session_id: None,
+            is_streaming: false,
+            input_tokens: tokens.0,
+            output_tokens: tokens.1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: Some(1200),
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: None,
+            response_body: None,
+            request_size: 0,
+            response_size: 0,
+            truncated: false,
+        };
+        s.insert_request_log(&log(200, (1000, 500))).unwrap();
+        s.insert_request_log(&log(503, (0, 0))).unwrap();
         // The aux connection is a separate in-memory DB in tests (one shared
         // file in production); mirror the usage row so avg-latency reads see it.
         {
@@ -2579,13 +2879,28 @@ mod tests {
             )
             .unwrap();
         }
-        let d = build_dashboard(&s, &aux, "7d").unwrap();
-        assert_eq!(d.requests, 1);
+        let d = build_dashboard(&s, &aux, "7d", None, None).unwrap();
+        // The headline reads request_logs (Logs-card source): both the
+        // forwarded and the failed request count, while the usage-derived
+        // totals stay limited to the forwarded one.
+        assert_eq!(d.requests, 2);
         assert_eq!(d.input_tokens, 1000);
         assert_eq!(d.latency_ms, 1200);
         assert_eq!(d.by_agent[0].tokens, "2k");
         assert_eq!(d.by_provider[0].pct, 100);
         assert!(d.trend.iter().map(|t| t.requests).sum::<i64>() >= 1);
+
+        // Filters narrow every stat to the matching slice — and zero out on
+        // a provider with no traffic.
+        let fp = build_dashboard(&s, &aux, "7d", Some("p1"), Some("claude")).unwrap();
+        assert_eq!(fp.requests, 2);
+        assert_eq!(fp.by_provider.len(), 1);
+        assert_eq!(fp.by_provider[0].id, "p1");
+        assert_eq!(fp.by_agent.len(), 1);
+        let fo = build_dashboard(&s, &aux, "7d", Some("ghost"), None).unwrap();
+        assert_eq!(fo.requests, 0);
+        assert!(fo.by_provider.is_empty());
+        assert!(fo.by_agent.is_empty());
     }
 
     #[test]

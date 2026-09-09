@@ -260,6 +260,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: base.into(),
             api_path: api_path.map(Into::into),
+            endpoints: Vec::new(),
             api_key: None,
             extra_keys: Vec::new(),
             weight: 1,

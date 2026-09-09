@@ -73,6 +73,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://127.0.0.1:1".into(), // port 1 always fails to connect
             api_path: None,
+            endpoints: Vec::new(),
             api_key: None,
             billing: Billing::Metered,
             period_limit: None,

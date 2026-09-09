@@ -226,9 +226,22 @@ fn test_latency(endpoint: String) -> Result<u64, String> {
     sidecar::measure_latency(&endpoint)
 }
 
+/// Protocol-aware probe: GET the protocol's models route (auth headers only
+/// when a key is given) and classify the answer. A missing key is fine —
+/// 401/403 still proves the protocol route exists. Async: the probe uses an
+/// async HTTP client (a blocking one panics when dropped on the runtime).
+#[tauri::command]
+async fn test_endpoint(
+    protocol: String,
+    endpoint: String,
+    api_key: Option<String>,
+) -> Result<sidecar::ProbeReport, String> {
+    sidecar::probe_endpoint(&protocol, &endpoint, api_key.as_deref()).await
+}
+
 #[tauri::command]
 fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
-    vm::load_catalog(&state.aux)
+    vm::load_catalog(&state.store, &state.aux)
 }
 
 #[tauri::command]
@@ -544,6 +557,7 @@ pub fn run() {
             delete_provider,
             enable_provider,
             test_latency,
+            test_endpoint,
             list_catalog,
             get_dashboard,
             get_settings,

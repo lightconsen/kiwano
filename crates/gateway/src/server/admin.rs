@@ -101,6 +101,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "https://api.anthropic.com".into(),
             api_path: None,
+            endpoints: Vec::new(),
             api_key: Some("sk-ant".into()),
             billing: Billing::Metered,
             period_limit: None,

@@ -18,7 +18,18 @@
       "deepseek-reasoner (R1)"
     ],
     "protocol": "openai",
-    "icon": "deepseek"
+    "icon": "deepseek",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.deepseek.com/anthropic",
+        "models": [
+          "deepseek-chat (V3)",
+          "deepseek-reasoner (R1)",
+          "deepseek-v4-pro"
+        ]
+      }
+    ]
   },
   {
     "id": "kimi",
@@ -40,7 +51,16 @@
       "moonshot-v1-128k"
     ],
     "protocol": "openai",
-    "icon": "kimi"
+    "icon": "kimi",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.moonshot.cn/anthropic",
+        "models": [
+          "kimi-k2.7-code"
+        ]
+      }
+    ]
   },
   {
     "id": "qwen",
@@ -104,7 +124,23 @@
       "openai/gpt-5.2"
     ],
     "protocol": "openai",
-    "icon": "openrouter"
+    "icon": "openrouter",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://openrouter.ai/api",
+        "models": [
+          "anthropic/claude-sonnet-5"
+        ]
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://openrouter.ai/api",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "ollama",
@@ -157,7 +193,7 @@
     "logo_color": "#7C3AED",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://qianfan.baidubce.com/v2/tokenplan/personal",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -171,28 +207,17 @@
       "glm-5.2"
     ],
     "protocol": "openai",
-    "icon": "baidu"
-  },
-  {
-    "id": "baidu-qianfan-token-plan-anthropic",
-    "name": "Baidu Qianfan Token Plan",
-    "logo_char": "B",
-    "logo_color": "#DB2777",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://qianfan.baidubce.com/anthropic/coding",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "qianfan-code-latest",
-      "deepseek-v4-pro"
-    ],
-    "protocol": "anthropic",
-    "icon": "baidu"
+    "icon": "baidu",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://qianfan.baidubce.com/anthropic/coding",
+        "models": [
+          "qianfan-code-latest",
+          "deepseek-v4-pro"
+        ]
+      }
+    ]
   },
   {
     "id": "bailian",
@@ -201,7 +226,7 @@
     "logo_color": "#615CED",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://dashscope.aliyuncs.com/apps/anthropic",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -219,25 +244,7 @@
     "logo_color": "#0EA5E9",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "bailian"
-  },
-  {
-    "id": "bailian-for-coding-openai",
-    "name": "Bailian For Coding",
-    "logo_char": "B",
-    "logo_color": "#7C3AED",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -248,8 +255,9 @@
       "qwen3-coder-plus",
       "qwen3-max"
     ],
-    "protocol": "openai",
-    "icon": "bailian"
+    "protocol": "anthropic",
+    "icon": "bailian",
+    "endpoints": []
   },
   {
     "id": "bailing",
@@ -258,7 +266,7 @@
     "logo_color": "#2B7AFF",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.tbox.cn/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -269,27 +277,16 @@
       "Ling-2.5-1T"
     ],
     "protocol": "openai",
-    "icon": null
-  },
-  {
-    "id": "bailing-anthropic",
-    "name": "BaiLing",
-    "logo_char": "B",
-    "logo_color": "#2B7AFF",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.tbox.cn/api/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "Ling-2.5-1T"
-    ],
-    "protocol": "anthropic",
-    "icon": null
+    "icon": null,
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.tbox.cn/api/anthropic",
+        "models": [
+          "Ling-2.5-1T"
+        ]
+      }
+    ]
   },
   {
     "id": "byteplus",
@@ -298,7 +295,7 @@
     "logo_color": "#DC2626",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -309,47 +306,16 @@
       "ark-code-latest"
     ],
     "protocol": "openai",
-    "icon": "byteplus"
-  },
-  {
-    "id": "byteplus-anthropic",
-    "name": "BytePlus",
-    "logo_char": "B",
-    "logo_color": "#0891B2",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://ark.ap-southeast.bytepluses.com/api/coding",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "ark-code-latest"
-    ],
-    "protocol": "anthropic",
-    "icon": "byteplus"
-  },
-  {
-    "id": "api-deepseek",
-    "name": "DeepSeek",
-    "logo_char": "D",
-    "logo_color": "#4D6BFE",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.deepseek.com/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "deepseek-v4-pro"
-    ],
-    "protocol": "anthropic",
-    "icon": "deepseek"
+    "icon": "byteplus",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://ark.ap-southeast.bytepluses.com/api/coding",
+        "models": [
+          "ark-code-latest"
+        ]
+      }
+    ]
   },
   {
     "id": "doubaoseed",
@@ -358,7 +324,7 @@
     "logo_color": "#65A30D",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v3",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -371,28 +337,17 @@
       "doubao-seed-2.1-pro"
     ],
     "protocol": "openai",
-    "icon": "huoshan"
-  },
-  {
-    "id": "doubaoseed-anthropic",
-    "name": "DouBaoSeed",
-    "logo_char": "D",
-    "logo_color": "#6467F2",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://ark.cn-beijing.volces.com/api/coding",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "ark-code-latest",
-      "doubao-seed-2-1-pro-260628"
-    ],
-    "protocol": "anthropic",
-    "icon": "huoshan"
+    "icon": "huoshan",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://ark.cn-beijing.volces.com/api/coding",
+        "models": [
+          "ark-code-latest",
+          "doubao-seed-2-1-pro-260628"
+        ]
+      }
+    ]
   },
   {
     "id": "google-ai-studio",
@@ -416,33 +371,13 @@
     "icon": "gemini"
   },
   {
-    "id": "api-moonshot",
-    "name": "Kimi",
-    "logo_char": "K",
-    "logo_color": "#111111",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.moonshot.cn/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "kimi-k2.7-code"
-    ],
-    "protocol": "anthropic",
-    "icon": "kimi"
-  },
-  {
     "id": "kimi-for-coding",
     "name": "Kimi For Coding",
     "logo_char": "K",
     "logo_color": "#EA580C",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.kimi.com/coding/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -454,27 +389,16 @@
       "kimi-k2.7-code"
     ],
     "protocol": "openai",
-    "icon": "kimi"
-  },
-  {
-    "id": "kimi-for-coding-anthropic",
-    "name": "Kimi For Coding",
-    "logo_char": "K",
-    "logo_color": "#059669",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.kimi.com/coding",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "kimi-for-coding"
-    ],
-    "protocol": "anthropic",
-    "icon": "kimi"
+    "icon": "kimi",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.kimi.com/coding",
+        "models": [
+          "kimi-for-coding"
+        ]
+      }
+    ]
   },
   {
     "id": "longcat",
@@ -483,7 +407,7 @@
     "logo_color": "#FF6A00",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.longcat.chat/openai/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -494,27 +418,16 @@
       "LongCat-2.0"
     ],
     "protocol": "openai",
-    "icon": "longcat"
-  },
-  {
-    "id": "longcat-anthropic",
-    "name": "Longcat",
-    "logo_char": "L",
-    "logo_color": "#FF6A00",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.longcat.chat/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "LongCat-2.0"
-    ],
-    "protocol": "anthropic",
-    "icon": "longcat"
+    "icon": "longcat",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.longcat.chat/anthropic",
+        "models": [
+          "LongCat-2.0"
+        ]
+      }
+    ]
   },
   {
     "id": "minimax",
@@ -523,7 +436,7 @@
     "logo_color": "#FF3D3D",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.minimaxi.com/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -534,27 +447,16 @@
       "MiniMax-M2.7"
     ],
     "protocol": "openai",
-    "icon": "minimax"
-  },
-  {
-    "id": "minimax-anthropic",
-    "name": "MiniMax",
-    "logo_char": "M",
-    "logo_color": "#FF3D3D",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.minimaxi.com/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "MiniMax-M2.7"
-    ],
-    "protocol": "anthropic",
-    "icon": "minimax"
+    "icon": "minimax",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.minimaxi.com/anthropic",
+        "models": [
+          "MiniMax-M2.7"
+        ]
+      }
+    ]
   },
   {
     "id": "minimax-intl",
@@ -563,7 +465,7 @@
     "logo_color": "#FF3D3D",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.minimax.io/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -574,27 +476,16 @@
       "MiniMax-M2.7"
     ],
     "protocol": "openai",
-    "icon": "minimax"
-  },
-  {
-    "id": "minimax-intl-anthropic",
-    "name": "MiniMax (Intl)",
-    "logo_char": "M",
-    "logo_color": "#FF3D3D",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.minimax.io/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "MiniMax-M2.7"
-    ],
-    "protocol": "anthropic",
-    "icon": "minimax"
+    "icon": "minimax",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.minimax.io/anthropic",
+        "models": [
+          "MiniMax-M2.7"
+        ]
+      }
+    ]
   },
   {
     "id": "nous-research",
@@ -603,7 +494,7 @@
     "logo_color": "#6467F2",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://inference-api.nousresearch.com/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -624,7 +515,7 @@
     "logo_color": "#615CED",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -637,27 +528,16 @@
       "qwen3.6-plus"
     ],
     "protocol": "openai",
-    "icon": "qwen"
-  },
-  {
-    "id": "qwencloud-anthropic",
-    "name": "QwenCloud",
-    "logo_char": "Q",
-    "logo_color": "#615CED",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://dashscope-intl.aliyuncs.com/apps/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "qwen3.7-max"
-    ],
-    "protocol": "anthropic",
-    "icon": "qwen"
+    "icon": "qwen",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://dashscope-intl.aliyuncs.com/apps/anthropic",
+        "models": [
+          "qwen3.7-max"
+        ]
+      }
+    ]
   },
   {
     "id": "qwencloud-for-coding",
@@ -666,7 +546,7 @@
     "logo_color": "#65A30D",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -679,27 +559,16 @@
       "qwen3-coder-plus"
     ],
     "protocol": "openai",
-    "icon": "qwen"
-  },
-  {
-    "id": "qwencloud-for-coding-anthropic",
-    "name": "QwenCloud For Coding",
-    "logo_char": "Q",
-    "logo_color": "#6467F2",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "qwen3.7-plus"
-    ],
-    "protocol": "anthropic",
-    "icon": "qwen"
+    "icon": "qwen",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+        "models": [
+          "qwen3.7-plus"
+        ]
+      }
+    ]
   },
   {
     "id": "qwencloud-token-plan",
@@ -708,7 +577,7 @@
     "logo_color": "#D97757",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -722,27 +591,16 @@
       "qwen3.7-plus"
     ],
     "protocol": "openai",
-    "icon": "qwen"
-  },
-  {
-    "id": "qwencloud-token-plan-anthropic",
-    "name": "QwenCloud Token Plan",
-    "logo_char": "Q",
-    "logo_color": "#8B5CF6",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "qwen3.8-max"
-    ],
-    "protocol": "anthropic",
-    "icon": "qwen"
+    "icon": "qwen",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+        "models": [
+          "qwen3.8-max"
+        ]
+      }
+    ]
   },
   {
     "id": "stepfun",
@@ -751,7 +609,7 @@
     "logo_color": "#2A6DF5",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.stepfun.com/step_plan/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -763,27 +621,16 @@
       "step-3.5-flash"
     ],
     "protocol": "openai",
-    "icon": "stepfun"
-  },
-  {
-    "id": "stepfun-anthropic",
-    "name": "StepFun",
-    "logo_char": "S",
-    "logo_color": "#2A6DF5",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.stepfun.com/step_plan",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "step-3.5-flash-2603"
-    ],
-    "protocol": "anthropic",
-    "icon": "stepfun"
+    "icon": "stepfun",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.stepfun.com/step_plan",
+        "models": [
+          "step-3.5-flash-2603"
+        ]
+      }
+    ]
   },
   {
     "id": "stepfun-intl",
@@ -792,7 +639,7 @@
     "logo_color": "#D97757",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.stepfun.ai/step_plan/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -804,27 +651,16 @@
       "step-3.5-flash"
     ],
     "protocol": "openai",
-    "icon": "stepfun"
-  },
-  {
-    "id": "stepfun-intl-anthropic",
-    "name": "StepFun (Intl)",
-    "logo_char": "S",
-    "logo_color": "#8B5CF6",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.stepfun.ai/step_plan",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "step-3.5-flash-2603"
-    ],
-    "protocol": "anthropic",
-    "icon": "stepfun"
+    "icon": "stepfun",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.stepfun.ai/step_plan",
+        "models": [
+          "step-3.5-flash-2603"
+        ]
+      }
+    ]
   },
   {
     "id": "tencent-token-plan",
@@ -833,7 +669,7 @@
     "logo_color": "#D97757",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.lkeap.cloud.tencent.com/plan/v3",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -847,27 +683,16 @@
       "minimax-m2.7"
     ],
     "protocol": "openai",
-    "icon": "tencent"
-  },
-  {
-    "id": "tencent-token-plan-anthropic",
-    "name": "Tencent Token Plan",
-    "logo_char": "T",
-    "logo_color": "#8B5CF6",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.lkeap.cloud.tencent.com/plan/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "tc-code-latest"
-    ],
-    "protocol": "anthropic",
-    "icon": "tencent"
+    "icon": "tencent",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.lkeap.cloud.tencent.com/plan/anthropic",
+        "models": [
+          "tc-code-latest"
+        ]
+      }
+    ]
   },
   {
     "id": "tencent-token-plan-intl",
@@ -876,7 +701,7 @@
     "logo_color": "#2563EB",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -890,27 +715,16 @@
       "deepseek-v4-flash-202605"
     ],
     "protocol": "openai",
-    "icon": "tencent"
-  },
-  {
-    "id": "tencent-token-plan-intl-anthropic",
-    "name": "Tencent Token Plan (Intl)",
-    "logo_char": "T",
-    "logo_color": "#DC2626",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "auto"
-    ],
-    "protocol": "anthropic",
-    "icon": "tencent"
+    "icon": "tencent",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic",
+        "models": [
+          "auto"
+        ]
+      }
+    ]
   },
   {
     "id": "tencent-token-plan-enterprise-pro",
@@ -919,7 +733,7 @@
     "logo_color": "#0891B2",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://tokenhub.tencentmaas.com/plan/v3",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -933,27 +747,16 @@
       "glm-5.1"
     ],
     "protocol": "openai",
-    "icon": "tencent"
-  },
-  {
-    "id": "tencent-token-plan-enterprise-pro-anthropic",
-    "name": "Tencent Token Plan Enterprise Pro",
-    "logo_char": "T",
-    "logo_color": "#65A30D",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://tokenhub.tencentmaas.com/plan/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "auto"
-    ],
-    "protocol": "anthropic",
-    "icon": "tencent"
+    "icon": "tencent",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://tokenhub.tencentmaas.com/plan/anthropic",
+        "models": [
+          "auto"
+        ]
+      }
+    ]
   },
   {
     "id": "xai",
@@ -962,7 +765,7 @@
     "logo_color": "#1A1A1A",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.x.ai/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -982,7 +785,7 @@
     "logo_color": "#FF6900",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.xiaomimimo.com/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -994,27 +797,16 @@
       "mimo-v2.5"
     ],
     "protocol": "openai",
-    "icon": "xiaomimimo"
-  },
-  {
-    "id": "xiaomi-mimo-anthropic",
-    "name": "Xiaomi MiMo",
-    "logo_char": "X",
-    "logo_color": "#FF6900",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.xiaomimimo.com/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "mimo-v2.5-pro"
-    ],
-    "protocol": "anthropic",
-    "icon": "xiaomimimo"
+    "icon": "xiaomimimo",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.xiaomimimo.com/anthropic",
+        "models": [
+          "mimo-v2.5-pro"
+        ]
+      }
+    ]
   },
   {
     "id": "xiaomi-mimo-token-plan-china",
@@ -1023,7 +815,7 @@
     "logo_color": "#EA580C",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://token-plan-cn.xiaomimimo.com/v1",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -1035,27 +827,16 @@
       "mimo-v2.5"
     ],
     "protocol": "openai",
-    "icon": "xiaomimimo"
-  },
-  {
-    "id": "xiaomi-mimo-token-plan-china-anthropic",
-    "name": "Xiaomi MiMo Token Plan (China)",
-    "logo_char": "X",
-    "logo_color": "#059669",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://token-plan-cn.xiaomimimo.com/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "mimo-v2.5-pro"
-    ],
-    "protocol": "anthropic",
-    "icon": "xiaomimimo"
+    "icon": "xiaomimimo",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        "models": [
+          "mimo-v2.5-pro"
+        ]
+      }
+    ]
   },
   {
     "id": "zhipu-glm",
@@ -1064,7 +845,7 @@
     "logo_color": "#3859FF",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://open.bigmodel.cn/api/coding/paas/v4",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -1075,27 +856,16 @@
       "glm-5.1"
     ],
     "protocol": "openai",
-    "icon": "zhipu"
-  },
-  {
-    "id": "zhipu-glm-anthropic",
-    "name": "Zhipu GLM",
-    "logo_char": "Z",
-    "logo_color": "#3859FF",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://open.bigmodel.cn/api/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "glm-5.1"
-    ],
-    "protocol": "anthropic",
-    "icon": "zhipu"
+    "icon": "zhipu",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://open.bigmodel.cn/api/anthropic",
+        "models": [
+          "glm-5.1"
+        ]
+      }
+    ]
   },
   {
     "id": "zhipu-glm-intl",
@@ -1104,7 +874,7 @@
     "logo_color": "#3859FF",
     "tag": "official",
     "tag_label": "Official",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.z.ai/api/coding/paas/v4",
     "price_line": "Official pricing",
     "billing": "payg",
@@ -1115,27 +885,16 @@
       "glm-5.1"
     ],
     "protocol": "openai",
-    "icon": "zhipu"
-  },
-  {
-    "id": "zhipu-glm-intl-anthropic",
-    "name": "Zhipu GLM (Intl)",
-    "logo_char": "Z",
-    "logo_color": "#3859FF",
-    "tag": "official",
-    "tag_label": "Official",
-    "rating": 4.0,
-    "endpoint": "https://api.z.ai/api/anthropic",
-    "price_line": "Official pricing",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "glm-5.1"
-    ],
-    "protocol": "anthropic",
-    "icon": "zhipu"
+    "icon": "zhipu",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.z.ai/api/anthropic",
+        "models": [
+          "glm-5.1"
+        ]
+      }
+    ]
   },
   {
     "id": "9527code",
@@ -1144,7 +903,7 @@
     "logo_color": "#6467F2",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://9527.codes/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1158,45 +917,21 @@
       "claude-haiku-4.5"
     ],
     "protocol": "openai",
-    "icon": "9527code"
-  },
-  {
-    "id": "9527code-anthropic",
-    "name": "9527CODE",
-    "logo_char": "9",
-    "logo_color": "#0EA5E9",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://9527.codes",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "9527code"
-  },
-  {
-    "id": "9527code-gemini",
-    "name": "9527CODE",
-    "logo_char": "9",
-    "logo_color": "#7C3AED",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://9527.codes",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "9527code"
+    "icon": "9527code",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://9527.codes",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://9527.codes",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "a6api",
@@ -1205,7 +940,7 @@
     "logo_color": "#8B5CF6",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.a6api.com/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1216,45 +951,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "a6api"
-  },
-  {
-    "id": "a6api-anthropic",
-    "name": "A6API",
-    "logo_char": "A",
-    "logo_color": "#2563EB",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.a6api.com",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "a6api"
-  },
-  {
-    "id": "a6api-gemini",
-    "name": "A6API",
-    "logo_char": "A",
-    "logo_color": "#DC2626",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.a6api.com",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "a6api"
+    "icon": "a6api",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.a6api.com",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.a6api.com",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "aicodewith",
@@ -1263,7 +974,7 @@
     "logo_color": "#0EA5E9",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.aicodewith.ai/chatgpt/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1276,45 +987,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "aicodewith"
-  },
-  {
-    "id": "aicodewith-anthropic",
-    "name": "AICodeWith",
-    "logo_char": "A",
-    "logo_color": "#7C3AED",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.aicodewith.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "aicodewith"
-  },
-  {
-    "id": "aicodewith-gemini",
-    "name": "AICodeWith",
-    "logo_char": "A",
-    "logo_color": "#DB2777",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.aicodewith.ai/gemini_cli",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.1-pro-preview"
-    ],
-    "protocol": "gemini",
-    "icon": "aicodewith"
+    "icon": "aicodewith",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.aicodewith.ai",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.aicodewith.ai/gemini_cli",
+        "models": [
+          "gemini-3.1-pro-preview"
+        ]
+      }
+    ]
   },
   {
     "id": "aihubmix",
@@ -1323,7 +1010,7 @@
     "logo_color": "#F59E0B",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://aihubmix.com/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1336,25 +1023,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "aihubmix"
-  },
-  {
-    "id": "aihubmix-anthropic",
-    "name": "AiHubMix",
-    "logo_char": "A",
-    "logo_color": "#F59E0B",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://aihubmix.com",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "aihubmix"
+    "icon": "aihubmix",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://aihubmix.com",
+        "models": []
+      }
+    ]
   },
   {
     "id": "amux",
@@ -1363,7 +1039,7 @@
     "logo_color": "#0891B2",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.amux.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1374,25 +1050,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "amux"
-  },
-  {
-    "id": "amux-anthropic",
-    "name": "Amux",
-    "logo_char": "A",
-    "logo_color": "#65A30D",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.amux.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "amux"
+    "icon": "amux",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.amux.ai",
+        "models": []
+      }
+    ]
   },
   {
     "id": "atlascloud",
@@ -1401,7 +1066,7 @@
     "logo_color": "#DB2777",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.atlascloud.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1413,27 +1078,16 @@
       "glm-5.1"
     ],
     "protocol": "openai",
-    "icon": "atlascloud"
-  },
-  {
-    "id": "atlascloud-anthropic",
-    "name": "AtlasCloud",
-    "logo_char": "A",
-    "logo_color": "#EA580C",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.atlascloud.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "zai-org/glm-5.1"
-    ],
-    "protocol": "anthropic",
-    "icon": "atlascloud"
+    "icon": "atlascloud",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.atlascloud.ai",
+        "models": [
+          "zai-org/glm-5.1"
+        ]
+      }
+    ]
   },
   {
     "id": "ccsub",
@@ -1442,7 +1096,7 @@
     "logo_color": "#6467F2",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://www.ccsub.net/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1453,25 +1107,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "ccsub"
-  },
-  {
-    "id": "ccsub-anthropic",
-    "name": "CCSub",
-    "logo_char": "C",
-    "logo_color": "#0EA5E9",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://www.ccsub.net",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "ccsub"
+    "icon": "ccsub",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://www.ccsub.net",
+        "models": []
+      }
+    ]
   },
   {
     "id": "cherryin",
@@ -1480,7 +1123,7 @@
     "logo_color": "#8B5CF6",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://open.cherryin.net/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1494,47 +1137,23 @@
       "claude-opus-5"
     ],
     "protocol": "openai",
-    "icon": "cherryin"
-  },
-  {
-    "id": "cherryin-anthropic",
-    "name": "CherryIN",
-    "logo_char": "C",
-    "logo_color": "#2563EB",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://open.cherryin.net",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "anthropic/claude-sonnet-5"
-    ],
-    "protocol": "anthropic",
-    "icon": "cherryin"
-  },
-  {
-    "id": "cherryin-gemini",
-    "name": "CherryIN",
-    "logo_char": "C",
-    "logo_color": "#DC2626",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://open.cherryin.net",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "google/gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "cherryin"
+    "icon": "cherryin",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://open.cherryin.net",
+        "models": [
+          "anthropic/claude-sonnet-5"
+        ]
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://open.cherryin.net",
+        "models": [
+          "google/gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "claudeapi",
@@ -1543,7 +1162,7 @@
     "logo_color": "#65A30D",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://gw.apito.ai",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1561,7 +1180,7 @@
     "logo_color": "#2563EB",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://code0.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1572,45 +1191,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "code0"
-  },
-  {
-    "id": "code0-anthropic",
-    "name": "Code0",
-    "logo_char": "C",
-    "logo_color": "#DC2626",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://code0.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "code0"
-  },
-  {
-    "id": "code0-gemini",
-    "name": "Code0",
-    "logo_char": "C",
-    "logo_color": "#0891B2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://code0.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "code0"
+    "icon": "code0",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://code0.ai",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://code0.ai",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "compshare",
@@ -1619,7 +1214,7 @@
     "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.modelverse.cn/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1631,25 +1226,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "ucloud"
-  },
-  {
-    "id": "compshare-anthropic",
-    "name": "Compshare",
-    "logo_char": "C",
-    "logo_color": "#DB2777",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.modelverse.cn",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "ucloud"
+    "icon": "ucloud",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.modelverse.cn",
+        "models": []
+      }
+    ]
   },
   {
     "id": "compshare-coding-plan",
@@ -1658,7 +1242,7 @@
     "logo_color": "#DB2777",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://cp.compshare.cn/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1670,25 +1254,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "ucloud"
-  },
-  {
-    "id": "compshare-coding-plan-anthropic",
-    "name": "Compshare Coding Plan",
-    "logo_char": "C",
-    "logo_color": "#EA580C",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://cp.compshare.cn",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "ucloud"
+    "icon": "ucloud",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://cp.compshare.cn",
+        "models": []
+      }
+    ]
   },
   {
     "id": "dmxapi",
@@ -1697,7 +1270,7 @@
     "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://www.dmxapi.cn/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1710,25 +1283,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": null
-  },
-  {
-    "id": "dmxapi-anthropic",
-    "name": "DMXAPI",
-    "logo_char": "D",
-    "logo_color": "#DB2777",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://www.dmxapi.cn",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": null
+    "icon": null,
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://www.dmxapi.cn",
+        "models": []
+      }
+    ]
   },
   {
     "id": "fennoai",
@@ -1737,7 +1299,7 @@
     "logo_color": "#6467F2",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.fenno.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1748,25 +1310,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "fenno"
-  },
-  {
-    "id": "fennoai-anthropic",
-    "name": "FennoAI",
-    "logo_char": "F",
-    "logo_color": "#0EA5E9",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.fenno.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "fenno"
+    "icon": "fenno",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.fenno.ai",
+        "models": []
+      }
+    ]
   },
   {
     "id": "jiekou-ai",
@@ -1775,7 +1326,7 @@
     "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.jiekou.ai/openai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1786,27 +1337,16 @@
       "claude-fable-5"
     ],
     "protocol": "openai",
-    "icon": "jiekou"
-  },
-  {
-    "id": "jiekou-ai-anthropic",
-    "name": "JieKou AI",
-    "logo_char": "J",
-    "logo_color": "#DB2777",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.jiekou.ai/anthropic",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "claude-fable-5"
-    ],
-    "protocol": "anthropic",
-    "icon": "jiekou"
+    "icon": "jiekou",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.jiekou.ai/anthropic",
+        "models": [
+          "claude-fable-5"
+        ]
+      }
+    ]
   },
   {
     "id": "modelscope",
@@ -1815,7 +1355,7 @@
     "logo_color": "#7B1FA2",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api-inference.modelscope.cn/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1827,27 +1367,16 @@
       "GLM-5.2"
     ],
     "protocol": "openai",
-    "icon": "modelscope"
-  },
-  {
-    "id": "modelscope-anthropic",
-    "name": "ModelScope",
-    "logo_char": "M",
-    "logo_color": "#7B1FA2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api-inference.modelscope.cn",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "ZhipuAI/GLM-5.2"
-    ],
-    "protocol": "anthropic",
-    "icon": "modelscope"
+    "icon": "modelscope",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api-inference.modelscope.cn",
+        "models": [
+          "ZhipuAI/GLM-5.2"
+        ]
+      }
+    ]
   },
   {
     "id": "novita-ai",
@@ -1856,7 +1385,7 @@
     "logo_color": "#0EA5E9",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.novita.ai/openai",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1868,27 +1397,16 @@
       "glm-5.1"
     ],
     "protocol": "openai",
-    "icon": "novita"
-  },
-  {
-    "id": "novita-ai-anthropic",
-    "name": "Novita AI",
-    "logo_char": "N",
-    "logo_color": "#0EA5E9",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.novita.ai/anthropic",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "zai-org/glm-5.1"
-    ],
-    "protocol": "anthropic",
-    "icon": "novita"
+    "icon": "novita",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.novita.ai/anthropic",
+        "models": [
+          "zai-org/glm-5.1"
+        ]
+      }
+    ]
   },
   {
     "id": "nvidia",
@@ -1897,7 +1415,7 @@
     "logo_color": "#76B900",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://integrate.api.nvidia.com/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1912,53 +1430,13 @@
     "icon": "nvidia"
   },
   {
-    "id": "openrouter-anthropic",
-    "name": "OpenRouter",
-    "logo_char": "O",
-    "logo_color": "#6467F2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://openrouter.ai/api",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "anthropic/claude-sonnet-5"
-    ],
-    "protocol": "anthropic",
-    "icon": "openrouter"
-  },
-  {
-    "id": "openrouter-gemini",
-    "name": "OpenRouter",
-    "logo_char": "O",
-    "logo_color": "#6467F2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://openrouter.ai/api",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "openrouter"
-  },
-  {
     "id": "pipellm",
     "name": "PIPELLM",
     "logo_char": "P",
     "logo_color": "#0EA5E9",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://cc-api.pipellm.ai",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -1972,27 +1450,16 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "pipellm"
-  },
-  {
-    "id": "pipellm-anthropic",
-    "name": "PIPELLM",
-    "logo_char": "P",
-    "logo_color": "#7C3AED",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://cc-api.pipellm.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "claude-opus-5"
-    ],
-    "protocol": "anthropic",
-    "icon": "pipellm"
+    "icon": "pipellm",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://cc-api.pipellm.ai",
+        "models": [
+          "claude-opus-5"
+        ]
+      }
+    ]
   },
   {
     "id": "ppio",
@@ -2001,7 +1468,7 @@
     "logo_color": "#DC2626",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.ppio.com/openai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2014,27 +1481,16 @@
       "deepseek-v4-flash"
     ],
     "protocol": "openai",
-    "icon": "ppio"
-  },
-  {
-    "id": "ppio-anthropic",
-    "name": "PPIO",
-    "logo_char": "P",
-    "logo_color": "#0891B2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.ppio.com/anthropic",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "deepseek/deepseek-v4-flash-0731"
-    ],
-    "protocol": "anthropic",
-    "icon": "ppio"
+    "icon": "ppio",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.ppio.com/anthropic",
+        "models": [
+          "deepseek/deepseek-v4-flash-0731"
+        ]
+      }
+    ]
   },
   {
     "id": "qiniu",
@@ -2043,7 +1499,7 @@
     "logo_color": "#65A30D",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.qnaigc.com/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2054,45 +1510,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "qiniu"
-  },
-  {
-    "id": "qiniu-anthropic",
-    "name": "Qiniu",
-    "logo_char": "Q",
-    "logo_color": "#6467F2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.qnaigc.com",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "qiniu"
-  },
-  {
-    "id": "qiniu-gemini",
-    "name": "Qiniu",
-    "logo_char": "Q",
-    "logo_color": "#0EA5E9",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.qnaigc.com/bypass/vertex",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "qiniu"
+    "icon": "qiniu",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.qnaigc.com",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.qnaigc.com/bypass/vertex",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "runapi",
@@ -2101,8 +1533,8 @@
     "logo_color": "#8B5CF6",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://runapi.co",
+    "rating": 4,
+    "endpoint": "https://runapi.host",
     "price_line": "Upstream price",
     "billing": "payg",
     "users": "Listed on cc-switch",
@@ -2115,47 +1547,14 @@
       "claude-haiku-4.5"
     ],
     "protocol": "openai",
-    "icon": "runapi"
-  },
-  {
-    "id": "runapi-openai",
-    "name": "RunAPI",
-    "logo_char": "R",
-    "logo_color": "#2563EB",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://runapi.host",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "claude-sonnet-5",
-      "claude-opus-5",
-      "claude-haiku-4-5"
-    ],
-    "protocol": "openai",
-    "icon": "runapi"
-  },
-  {
-    "id": "runapi-anthropic",
-    "name": "RunAPI",
-    "logo_char": "R",
-    "logo_color": "#DC2626",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://runapi.host",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "runapi"
+    "icon": "runapi",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://runapi.host",
+        "models": []
+      }
+    ]
   },
   {
     "id": "shengsuanyun",
@@ -2164,7 +1563,7 @@
     "logo_color": "#EA580C",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://router.shengsuanyun.com/api/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2178,47 +1577,23 @@
       "claude-opus-5"
     ],
     "protocol": "openai",
-    "icon": "shengsuanyun"
-  },
-  {
-    "id": "shengsuanyun-anthropic",
-    "name": "Shengsuanyun",
-    "logo_char": "S",
-    "logo_color": "#059669",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://router.shengsuanyun.com/api",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "anthropic/claude-sonnet-5"
-    ],
-    "protocol": "anthropic",
-    "icon": "shengsuanyun"
-  },
-  {
-    "id": "shengsuanyun-gemini",
-    "name": "Shengsuanyun",
-    "logo_char": "S",
-    "logo_color": "#D97757",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://router.shengsuanyun.com/api",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "google/gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "shengsuanyun"
+    "icon": "shengsuanyun",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://router.shengsuanyun.com/api",
+        "models": [
+          "anthropic/claude-sonnet-5"
+        ]
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://router.shengsuanyun.com/api",
+        "models": [
+          "google/gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "siliconflow",
@@ -2227,7 +1602,7 @@
     "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.siliconflow.cn/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2238,27 +1613,16 @@
       "Pro/MiniMaxAI/MiniMax-M2.5"
     ],
     "protocol": "openai",
-    "icon": "siliconflow"
-  },
-  {
-    "id": "siliconflow-anthropic",
-    "name": "SiliconFlow",
-    "logo_char": "S",
-    "logo_color": "#7C3AED",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.siliconflow.cn",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "Pro/MiniMaxAI/MiniMax-M2.5"
-    ],
-    "protocol": "anthropic",
-    "icon": "siliconflow"
+    "icon": "siliconflow",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.siliconflow.cn",
+        "models": [
+          "Pro/MiniMaxAI/MiniMax-M2.5"
+        ]
+      }
+    ]
   },
   {
     "id": "siliconflow-intl",
@@ -2267,7 +1631,7 @@
     "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.siliconflow.com/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2278,27 +1642,16 @@
       "MiniMaxAI/MiniMax-M3"
     ],
     "protocol": "openai",
-    "icon": "siliconflow"
-  },
-  {
-    "id": "siliconflow-intl-anthropic",
-    "name": "SiliconFlow (Intl)",
-    "logo_char": "S",
-    "logo_color": "#7C3AED",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.siliconflow.com",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "MiniMaxAI/MiniMax-M3"
-    ],
-    "protocol": "anthropic",
-    "icon": "siliconflow"
+    "icon": "siliconflow",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.siliconflow.com",
+        "models": [
+          "MiniMaxAI/MiniMax-M3"
+        ]
+      }
+    ]
   },
   {
     "id": "subrouter",
@@ -2307,7 +1660,7 @@
     "logo_color": "#0891B2",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://subrouter.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2318,45 +1671,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "subrouter"
-  },
-  {
-    "id": "subrouter-anthropic",
-    "name": "SubRouter",
-    "logo_char": "S",
-    "logo_color": "#65A30D",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://subrouter.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "subrouter"
-  },
-  {
-    "id": "subrouter-gemini",
-    "name": "SubRouter",
-    "logo_char": "S",
-    "logo_color": "#6467F2",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://subrouter.ai/v1beta",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "subrouter"
+    "icon": "subrouter",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://subrouter.ai",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://subrouter.ai/v1beta",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "teamorouter",
@@ -2365,7 +1694,7 @@
     "logo_color": "#7C3AED",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.teamorouter.cn/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2376,25 +1705,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "teamorouter"
-  },
-  {
-    "id": "teamorouter-anthropic",
-    "name": "TeamoRouter",
-    "logo_char": "T",
-    "logo_color": "#DB2777",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.teamorouter.cn",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "teamorouter"
+    "icon": "teamorouter",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.teamorouter.cn",
+        "models": []
+      }
+    ]
   },
   {
     "id": "therouter",
@@ -2403,7 +1721,7 @@
     "logo_color": "#EA580C",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.therouter.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2417,47 +1735,23 @@
       "google/gemini-3.6-flash"
     ],
     "protocol": "openai",
-    "icon": null
-  },
-  {
-    "id": "therouter-anthropic",
-    "name": "TheRouter",
-    "logo_char": "T",
-    "logo_color": "#059669",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.therouter.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "anthropic/claude-sonnet-5"
-    ],
-    "protocol": "anthropic",
-    "icon": null
-  },
-  {
-    "id": "therouter-gemini",
-    "name": "TheRouter",
-    "logo_char": "T",
-    "logo_color": "#D97757",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.therouter.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": null
+    "icon": null,
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.therouter.ai",
+        "models": [
+          "anthropic/claude-sonnet-5"
+        ]
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.therouter.ai",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "together-ai",
@@ -2466,7 +1760,7 @@
     "logo_color": "#0F6FFF",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.together.xyz/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2488,7 +1782,7 @@
     "logo_color": "#DB2777",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://apicdn.xycai.us/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2499,45 +1793,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "xycai"
-  },
-  {
-    "id": "xycai-anthropic",
-    "name": "XycAi",
-    "logo_char": "X",
-    "logo_color": "#EA580C",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://apicdn.xycai.us",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "xycai"
-  },
-  {
-    "id": "xycai-gemini",
-    "name": "XycAi",
-    "logo_char": "X",
-    "logo_color": "#059669",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://apicdn.xycai.us",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "xycai"
+    "icon": "xycai",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://apicdn.xycai.us",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://apicdn.xycai.us",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "zetaapi",
@@ -2546,7 +1816,7 @@
     "logo_color": "#0EA5E9",
     "tag": "aggregate",
     "tag_label": "Aggregator",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.zetaapi.ai/v1",
     "price_line": "Upstream price",
     "billing": "payg",
@@ -2557,25 +1827,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "zetaapi"
-  },
-  {
-    "id": "zetaapi-anthropic",
-    "name": "ZetaAPI",
-    "logo_char": "Z",
-    "logo_color": "#7C3AED",
-    "tag": "aggregate",
-    "tag_label": "Aggregator",
-    "rating": 4.0,
-    "endpoint": "https://api.zetaapi.ai",
-    "price_line": "Upstream price",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "zetaapi"
+    "icon": "zetaapi",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.zetaapi.ai",
+        "models": []
+      }
+    ]
   },
   {
     "id": "aicodemirror",
@@ -2584,7 +1843,7 @@
     "logo_color": "#0891B2",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.aicodemirror.ai/api/claudecode",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2597,45 +1856,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "aicodemirror"
-  },
-  {
-    "id": "aicodemirror-anthropic",
-    "name": "AICodeMirror",
-    "logo_char": "A",
-    "logo_color": "#65A30D",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.aicodemirror.ai/api/claudecode",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "aicodemirror"
-  },
-  {
-    "id": "aicodemirror-gemini",
-    "name": "AICodeMirror",
-    "logo_char": "A",
-    "logo_color": "#6467F2",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.aicodemirror.ai/api/gemini",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "aicodemirror"
+    "icon": "aicodemirror",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.aicodemirror.ai/api/claudecode",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.aicodemirror.ai/api/gemini",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "aicoding",
@@ -2644,7 +1879,7 @@
     "logo_color": "#EA580C",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.aicoding.inc",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2657,45 +1892,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "aicoding"
-  },
-  {
-    "id": "aicoding-anthropic",
-    "name": "AICoding",
-    "logo_char": "A",
-    "logo_color": "#059669",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.aicoding.inc",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "aicoding"
-  },
-  {
-    "id": "aicoding-gemini",
-    "name": "AICoding",
-    "logo_char": "A",
-    "logo_color": "#D97757",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.aicoding.inc",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "aicoding"
+    "icon": "aicoding",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.aicoding.inc",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.aicoding.inc",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "aigocode",
@@ -2704,7 +1915,7 @@
     "logo_color": "#8B5CF6",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.aigocode.app",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2717,45 +1928,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "aigocode"
-  },
-  {
-    "id": "aigocode-anthropic",
-    "name": "AIGoCode",
-    "logo_char": "A",
-    "logo_color": "#2563EB",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.aigocode.app",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "aigocode"
-  },
-  {
-    "id": "aigocode-gemini",
-    "name": "AIGoCode",
-    "logo_char": "A",
-    "logo_color": "#DC2626",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.aigocode.app",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "aigocode"
+    "icon": "aigocode",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.aigocode.app",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.aigocode.app",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "apikey-fun",
@@ -2764,7 +1951,7 @@
     "logo_color": "#6467F2",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.apikey.fun/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2778,45 +1965,21 @@
       "claude-haiku-4-5"
     ],
     "protocol": "openai",
-    "icon": "apikeyfun"
-  },
-  {
-    "id": "apikey-fun-anthropic",
-    "name": "APIKEY.FUN",
-    "logo_char": "A",
-    "logo_color": "#0EA5E9",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.apikey.fun",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "apikeyfun"
-  },
-  {
-    "id": "apikey-fun-gemini",
-    "name": "APIKEY.FUN",
-    "logo_char": "A",
-    "logo_color": "#7C3AED",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.apikey.fun",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "apikeyfun"
+    "icon": "apikeyfun",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.apikey.fun",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.apikey.fun",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "apinebula",
@@ -2825,7 +1988,7 @@
     "logo_color": "#D97757",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://apinebula.ai/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2836,45 +1999,21 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "apinebula"
-  },
-  {
-    "id": "apinebula-anthropic",
-    "name": "APINebula",
-    "logo_char": "A",
-    "logo_color": "#8B5CF6",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://apinebula.ai",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "apinebula"
-  },
-  {
-    "id": "apinebula-gemini",
-    "name": "APINebula",
-    "logo_char": "A",
-    "logo_color": "#2563EB",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://apinebula.ai",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "apinebula"
+    "icon": "apinebula",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://apinebula.ai",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://apinebula.ai",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "claudecn",
@@ -2883,7 +2022,7 @@
     "logo_color": "#DB2777",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://claudecn.top",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2897,25 +2036,14 @@
       "claude-haiku-4.5"
     ],
     "protocol": "openai",
-    "icon": "claudecn"
-  },
-  {
-    "id": "claudecn-anthropic",
-    "name": "ClaudeCN",
-    "logo_char": "C",
-    "logo_color": "#EA580C",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://claudecn.top",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "claudecn"
+    "icon": "claudecn",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://claudecn.top",
+        "models": []
+      }
+    ]
   },
   {
     "id": "crazyrouter",
@@ -2924,7 +2052,7 @@
     "logo_color": "#059669",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://cn.crazyrouter.com/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2937,45 +2065,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "crazyrouter"
-  },
-  {
-    "id": "crazyrouter-anthropic",
-    "name": "CrazyRouter",
-    "logo_char": "C",
-    "logo_color": "#D97757",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://cn.crazyrouter.com",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "crazyrouter"
-  },
-  {
-    "id": "crazyrouter-gemini",
-    "name": "CrazyRouter",
-    "logo_char": "C",
-    "logo_color": "#8B5CF6",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://cn.crazyrouter.com",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "crazyrouter"
+    "icon": "crazyrouter",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://cn.crazyrouter.com",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://cn.crazyrouter.com",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "cubence",
@@ -2984,7 +2088,7 @@
     "logo_color": "#059669",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.cubence.com/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -2997,45 +2101,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "cubence"
-  },
-  {
-    "id": "cubence-anthropic",
-    "name": "Cubence",
-    "logo_char": "C",
-    "logo_color": "#D97757",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.cubence.com",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "cubence"
-  },
-  {
-    "id": "cubence-gemini",
-    "name": "Cubence",
-    "logo_char": "C",
-    "logo_color": "#8B5CF6",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.cubence.com",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "cubence"
+    "icon": "cubence",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.cubence.com",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.cubence.com",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "e-flowcode",
@@ -3044,7 +2124,7 @@
     "logo_color": "#2563EB",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://e-flowcode.cc/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3058,45 +2138,21 @@
       "gpt-5.2"
     ],
     "protocol": "openai",
-    "icon": "eflowcode"
-  },
-  {
-    "id": "e-flowcode-anthropic",
-    "name": "E-FlowCode",
-    "logo_char": "E",
-    "logo_color": "#DC2626",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://e-flowcode.cc",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "eflowcode"
-  },
-  {
-    "id": "e-flowcode-gemini",
-    "name": "E-FlowCode",
-    "logo_char": "E",
-    "logo_color": "#0891B2",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://e-flowcode.cc",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "eflowcode"
+    "icon": "eflowcode",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://e-flowcode.cc",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://e-flowcode.cc",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "etok-ai",
@@ -3105,7 +2161,7 @@
     "logo_color": "#DC2626",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.etok.ai/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3118,45 +2174,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "etok"
-  },
-  {
-    "id": "etok-ai-anthropic",
-    "name": "ETok.ai",
-    "logo_char": "E",
-    "logo_color": "#0891B2",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.etok.ai",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "etok"
-  },
-  {
-    "id": "etok-ai-gemini",
-    "name": "ETok.ai",
-    "logo_char": "E",
-    "logo_color": "#65A30D",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.etok.ai/v1beta",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "etok"
+    "icon": "etok",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.etok.ai",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://api.etok.ai/v1beta",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "micu",
@@ -3165,7 +2197,7 @@
     "logo_color": "#EA580C",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://www.micuapi.ai/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3178,25 +2210,14 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "micu"
-  },
-  {
-    "id": "micu-anthropic",
-    "name": "Micu",
-    "logo_char": "M",
-    "logo_color": "#059669",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://www.micuapi.ai",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "micu"
+    "icon": "micu",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://www.micuapi.ai",
+        "models": []
+      }
+    ]
   },
   {
     "id": "opencode-go",
@@ -3205,7 +2226,7 @@
     "logo_color": "#0891B2",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://opencode.ai/zen/go/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3219,27 +2240,16 @@
       "deepseek-v4-flash"
     ],
     "protocol": "openai",
-    "icon": "opencode"
-  },
-  {
-    "id": "opencode-go-anthropic",
-    "name": "OpenCode Go",
-    "logo_char": "O",
-    "logo_color": "#65A30D",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://opencode.ai/zen/go",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "deepseek-v4-flash"
-    ],
-    "protocol": "anthropic",
-    "icon": "opencode"
+    "icon": "opencode",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://opencode.ai/zen/go",
+        "models": [
+          "deepseek-v4-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "packycode",
@@ -3248,7 +2258,7 @@
     "logo_color": "#0F9D58",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://www.packyapi.ai/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3261,45 +2271,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "packycode"
-  },
-  {
-    "id": "packycode-anthropic",
-    "name": "PackyCode",
-    "logo_char": "P",
-    "logo_color": "#0F9D58",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://www.packyapi.ai",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "packycode"
-  },
-  {
-    "id": "packycode-gemini",
-    "name": "PackyCode",
-    "logo_char": "P",
-    "logo_color": "#0F9D58",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://www.packyapi.ai",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "packycode"
+    "icon": "packycode",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://www.packyapi.ai",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://www.packyapi.ai",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "patewayai",
@@ -3308,7 +2294,7 @@
     "logo_color": "#8B5CF6",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.pateway.ai",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3317,25 +2303,14 @@
     "added": false,
     "models": [],
     "protocol": "anthropic",
-    "icon": "pateway"
-  },
-  {
-    "id": "patewayai-openai",
-    "name": "PatewayAI",
-    "logo_char": "P",
-    "logo_color": "#2563EB",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.pateway.ai/v1",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "openai",
-    "icon": "pateway"
+    "icon": "pateway",
+    "endpoints": [
+      {
+        "protocol": "openai",
+        "endpoint": "https://api.pateway.ai/v1",
+        "models": []
+      }
+    ]
   },
   {
     "id": "relaxycode",
@@ -3344,7 +2319,7 @@
     "logo_color": "#DC2626",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://www.relaxycode.com",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3353,25 +2328,14 @@
     "added": false,
     "models": [],
     "protocol": "anthropic",
-    "icon": "relaxcode"
-  },
-  {
-    "id": "relaxycode-openai",
-    "name": "RelaxyCode",
-    "logo_char": "R",
-    "logo_color": "#0891B2",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://www.relaxycode.com/v1",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "openai",
-    "icon": "relaxcode"
+    "icon": "relaxcode",
+    "endpoints": [
+      {
+        "protocol": "openai",
+        "endpoint": "https://www.relaxycode.com/v1",
+        "models": []
+      }
+    ]
   },
   {
     "id": "rightcode",
@@ -3380,7 +2344,7 @@
     "logo_color": "#65A30D",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://www.rightapi.ai/codex/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3394,25 +2358,14 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "rc"
-  },
-  {
-    "id": "rightcode-anthropic",
-    "name": "RightCode",
-    "logo_char": "R",
-    "logo_color": "#6467F2",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://www.rightapi.ai/claude",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "rc"
+    "icon": "rc",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://www.rightapi.ai/claude",
+        "models": []
+      }
+    ]
   },
   {
     "id": "sssaicode",
@@ -3421,7 +2374,7 @@
     "logo_color": "#7C3AED",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://node-hk.sssaicodeapi.com/api",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3434,45 +2387,21 @@
       "claude-haiku-4-5-20251001"
     ],
     "protocol": "openai",
-    "icon": "sssaicode"
-  },
-  {
-    "id": "sssaicode-anthropic",
-    "name": "SSSAiCode",
-    "logo_char": "S",
-    "logo_color": "#DB2777",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://node-hk.sssaicodeapi.com/api",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "sssaicode"
-  },
-  {
-    "id": "sssaicode-gemini",
-    "name": "SSSAiCode",
-    "logo_char": "S",
-    "logo_color": "#EA580C",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://node-hk.sssaicodeapi.com/api",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.6-flash"
-    ],
-    "protocol": "gemini",
-    "icon": "sssaicode"
+    "icon": "sssaicode",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://node-hk.sssaicodeapi.com/api",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://node-hk.sssaicodeapi.com/api",
+        "models": [
+          "gemini-3.6-flash"
+        ]
+      }
+    ]
   },
   {
     "id": "sudocode-chat",
@@ -3481,7 +2410,7 @@
     "logo_color": "#0891B2",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://api.sudocode.chat/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3492,25 +2421,14 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "sudocode"
-  },
-  {
-    "id": "sudocode-chat-anthropic",
-    "name": "SudoCode.chat",
-    "logo_char": "S",
-    "logo_color": "#65A30D",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://api.sudocode.chat",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "sudocode"
+    "icon": "sudocode",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://api.sudocode.chat",
+        "models": []
+      }
+    ]
   },
   {
     "id": "sudocode-us",
@@ -3519,7 +2437,7 @@
     "logo_color": "#0EA5E9",
     "tag": "third",
     "tag_label": "Third-party",
-    "rating": 4.0,
+    "rating": 4,
     "endpoint": "https://sudocode.us/v1",
     "price_line": "Pay-as-you-go",
     "billing": "payg",
@@ -3530,44 +2448,20 @@
       "gpt-5.6-sol"
     ],
     "protocol": "openai",
-    "icon": "sudocode-us"
-  },
-  {
-    "id": "sudocode-us-anthropic",
-    "name": "SudoCode.us",
-    "logo_char": "S",
-    "logo_color": "#7C3AED",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://sudocode.us",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [],
-    "protocol": "anthropic",
-    "icon": "sudocode-us"
-  },
-  {
-    "id": "sudocode-us-gemini",
-    "name": "SudoCode.us",
-    "logo_char": "S",
-    "logo_color": "#DB2777",
-    "tag": "third",
-    "tag_label": "Third-party",
-    "rating": 4.0,
-    "endpoint": "https://sudocode.us",
-    "price_line": "Pay-as-you-go",
-    "billing": "payg",
-    "users": "Listed on cc-switch",
-    "blurb": "",
-    "added": false,
-    "models": [
-      "gemini-3.1-flash-lite"
-    ],
-    "protocol": "gemini",
-    "icon": "sudocode-us"
+    "icon": "sudocode-us",
+    "endpoints": [
+      {
+        "protocol": "anthropic",
+        "endpoint": "https://sudocode.us",
+        "models": []
+      },
+      {
+        "protocol": "gemini",
+        "endpoint": "https://sudocode.us",
+        "models": [
+          "gemini-3.1-flash-lite"
+        ]
+      }
+    ]
   }
 ]

@@ -26,9 +26,11 @@ import {
   type ApiKeyEntry,
   type Billing,
   type CatalogEntry,
+  type ProbeReport,
   type Protocol,
   type Provider,
 } from "../api/types";
+import { ProviderLogo } from "@/components/icons/ProviderLogo";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
   { id: "plan", label: "Plan" },
@@ -41,6 +43,21 @@ const PROTOCOL_OPTIONS: { id: Protocol; label: string }[] = [
   { id: "anthropic", label: "Anthropic" },
   { id: "gemini", label: "Gemini API" },
 ];
+
+// Inline probe readout: ok shows the measured latency, every other verdict
+// shows a short word (full detail lives in the span's title). Green/kiwi =
+// usable (ok, or route exists but key invalid), red = broken/unreachable.
+const PROBE_TEXT: Record<ProbeReport["verdict"], string> = {
+  ok: "OK",
+  auth: "Auth",
+  unsupported: "404",
+  error: "Error",
+  unreachable: "Down",
+};
+
+function probeColor(verdict: ProbeReport["verdict"]): string {
+  return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "oklch(0.62 0.2 25)";
+}
 
 export default function AddProviderModal({
   open,
@@ -56,11 +73,21 @@ export default function AddProviderModal({
   onSaved: () => void;
 }) {
   const [mode, setMode] = useState<"shelf" | "custom">("shelf");
+  // Catalog entry chosen in the "From Models" mode (preset pre-seeds it when
+  // the modal opens from the Models page; otherwise picked in-modal)
+  const [shelf, setShelf] = useState<CatalogEntry | null>(null);
+  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
+  const [query, setQuery] = useState("");
   const [name, setName] = useState("");
   const [protocol, setProtocol] = useState<Protocol>("openai");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [endpoint, setEndpoint] = useState("");
+  // Additional per-protocol endpoints (one provider serves agents speaking
+  // other protocols natively, e.g. Qianfan openai + anthropic)
+  const [altEndpoints, setAltEndpoints] = useState<{ protocol: Protocol; endpoint: string }[]>([]);
+  const [altProbes, setAltProbes] = useState<Record<number, ProbeReport | null>>({});
+  const [altTesting, setAltTesting] = useState<Record<number, boolean>>({});
   const [model, setModel] = useState("");
   const [billing, setBilling] = useState<Billing>("payg");
   const [limitValue, setLimitValue] = useState("");
@@ -68,7 +95,9 @@ export default function AddProviderModal({
   const [resetPeriod, setResetPeriod] = useState<"monthly" | "weekly" | "yearly" | "none">("monthly");
   const [agents, setAgents] = useState<AgentId[]>([]);
   const [testing, setTesting] = useState(false);
-  const [latency, setLatency] = useState<number | null>(null);
+  // Protocol-aware probe of the primary endpoint (uses the form's API key
+  // when present — a 401 verdict means the key is wrong, not the route)
+  const [probe, setProbe] = useState<ProbeReport | null>(null);
   const [saving, setSaving] = useState(false);
   // Rotating Key management (spec §4.1 P1 multi-key rotation; available in edit mode)
   const [pollKeys, setPollKeys] = useState<ApiKeyEntry[]>([]);
@@ -76,18 +105,78 @@ export default function AddProviderModal({
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
 
+  // Prefill the form from a catalog entry (Models-page preset or in-modal pick)
+  const applyShelf = (e: CatalogEntry) => {
+    setName(e.name);
+    setProtocol(e.protocol); // catalog entries carry their protocol fingerprint
+    setApiKey("sk-9f3e21a7c8d4b6e05a12");
+    setEndpoint(e.endpoint);
+    setAltEndpoints((e.endpoints ?? []).map((x) => ({ protocol: x.protocol, endpoint: x.endpoint })));
+    setAltProbes({});
+    setModel(e.models[0] ?? "");
+    setBilling(e.billing);
+    setLimitValue(e.billing === "payg" ? "50" : "");
+    setLimitUnit("cny");
+    setResetPeriod("monthly");
+    setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
+  };
+
+  // Default model options: primary models ∪ each additional endpoint's models
+  const shelfModelOptions = shelf
+    ? Array.from(new Set([...shelf.models, ...(shelf.endpoints ?? []).flatMap((x) => x.models ?? [])]))
+    : [];
+
+  const setAlt = (i: number, patch: Partial<{ protocol: Protocol; endpoint: string }>) => {
+    setAltEndpoints((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+    setAltProbes((m) => ({ ...m, [i]: null }));
+  };
+
+  const removeAlt = (i: number) => {
+    setAltEndpoints((rows) => rows.filter((_, j) => j !== i));
+    setAltProbes({});
+  };
+
+  const addAlt = () => {
+    const used = new Set<Protocol>([protocol, ...altEndpoints.map((r) => r.protocol)]);
+    const next = PROTOCOL_OPTIONS.find((p) => !used.has(p.id));
+    if (!next) return;
+    setAltEndpoints((rows) => [...rows, { protocol: next.id, endpoint: "" }]);
+  };
+
+  const testAlt = async (i: number) => {
+    const row = altEndpoints[i];
+    if (!row?.endpoint.trim()) return;
+    setAltTesting((m) => ({ ...m, [i]: true }));
+    try {
+      const report = await api.testEndpoint(row.protocol, row.endpoint.trim(), apiKey.trim() || undefined);
+      setAltProbes((m) => ({ ...m, [i]: report }));
+    } catch (e) {
+      // Rejected invoke → visible verdict instead of a silent no-op
+      setAltProbes((m) => ({
+        ...m,
+        [i]: { verdict: "error", status: null, latency_ms: 0, detail: String(e) },
+      }));
+    } finally {
+      setAltTesting((m) => ({ ...m, [i]: false }));
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     setShowKey(false);
-    setLatency(null);
+    setProbe(null);
     setNewKey("");
     setNewKeyLabel("");
+    setQuery("");
     if (edit) {
       setMode("custom");
+      setShelf(null);
       setName(edit.name);
       setProtocol(edit.protocol);
       setApiKey(""); // leave empty = keep the existing key
       setEndpoint(edit.endpoint);
+      setAltEndpoints((edit.endpoints ?? []).map((x) => ({ protocol: x.protocol, endpoint: x.endpoint })));
+      setAltProbes({});
       setModel("");
       setBilling(edit.billing);
       const q = edit.usage?.quota;
@@ -99,17 +188,30 @@ export default function AddProviderModal({
       return;
     }
     setMode(preset ? "shelf" : "custom");
-    setName(preset?.name ?? "");
-    setProtocol(preset?.protocol ?? "openai"); // catalog entries carry their protocol fingerprint
-    setApiKey(preset ? "sk-9f3e21a7c8d4b6e05a12" : "");
-    setEndpoint(preset?.endpoint ?? "");
-    setModel(preset?.models[0] ?? "");
-    setBilling(preset?.billing ?? "payg");
-    setLimitValue(preset?.billing === "payg" ? "50" : "");
-    setLimitUnit("cny");
-    setResetPeriod("monthly");
-    setAgents(preset?.id === "deepseek" ? ["claude", "codex"] : []);
+    setShelf(preset);
+    if (preset) {
+      applyShelf(preset);
+    } else {
+      setName("");
+      setProtocol("openai");
+      setApiKey("");
+      setEndpoint("");
+      setAltEndpoints([]);
+      setModel("");
+      setBilling("payg");
+      setLimitValue("");
+      setLimitUnit("cny");
+      setResetPeriod("monthly");
+      setAgents([]);
+    }
   }, [open, preset, edit]);
+
+  // Catalog loads lazily, the first time the in-modal picker is shown
+  useEffect(() => {
+    if (open && !edit && mode === "shelf" && !shelf && catalog === null) {
+      api.listCatalog().then((c) => setCatalog(c.entries));
+    }
+  }, [open, edit, mode, shelf, catalog]);
 
   const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
 
@@ -143,6 +245,16 @@ export default function AddProviderModal({
     if (!canSave) return;
     setSaving(true);
     try {
+      // Drop empty rows, rows duplicating the primary protocol, and duplicate
+      // protocols — the store PK is (provider_id, protocol)
+      const used = new Set<Protocol>([protocol]);
+      const altInputs: { protocol: Protocol; endpoint: string }[] = [];
+      for (const r of altEndpoints) {
+        const ep = r.endpoint.trim();
+        if (ep === "" || used.has(r.protocol)) continue;
+        used.add(r.protocol);
+        altInputs.push({ protocol: r.protocol, endpoint: ep });
+      }
       const input = {
         name: name.trim(),
         api_key: apiKey,
@@ -156,6 +268,7 @@ export default function AddProviderModal({
           reset_period: billing === "plan" ? resetPeriod : undefined,
         },
         agents,
+        endpoints: altInputs,
       };
       if (edit) {
         await api.updateProvider(edit.id, input);
@@ -171,7 +284,10 @@ export default function AddProviderModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
+      {/* overflow-x-hidden: WebKit (WKWebView) computes flex/grid min-content
+          wider than Blink, letting some inner row force a horizontal scrollbar
+          on the modal; nothing here legitimately scrolls horizontally, so clip. */}
+      <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-x-hidden overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
         <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line px-4">
           <DialogTitle className="text-[13px] font-semibold">
             {edit ? "Edit provider" : "Add provider"}
@@ -183,20 +299,77 @@ export default function AddProviderModal({
           {!edit && (
             <div className="flex overflow-hidden rounded-md border border-line text-[11.5px]">
               <div
-                className="btn flex h-8 flex-1 cursor-pointer items-center justify-center gap-1 font-medium"
+                className="btn flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1 font-medium"
                 style={mode === "shelf" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
-                onClick={() => preset && setMode("shelf")}
+                onClick={() => setMode("shelf")}
               >
                 <Store className="h-3 w-3" />
-                From Models{preset ? `: ${preset.name}` : " (pick one on the Models tab)"}
+                From Models{shelf ? `: ${shelf.name}` : ""}
               </div>
               <div
-                className="btn flex h-8 flex-1 cursor-pointer items-center justify-center"
+                className="btn flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center"
                 style={mode === "custom" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
                 onClick={() => setMode("custom")}
               >
                 Custom
               </div>
+            </div>
+          )}
+
+          {/* In-modal catalog picker (shelf mode without a chosen entry) */}
+          {!edit && mode === "shelf" && !shelf && (
+            <div className="mt-3">
+              <Input
+                className="h-8 bg-bg text-[12px] dark:bg-bg"
+                placeholder="Search the catalog…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {/* rows carry logo + name only (endpoint URLs were dropped: they
+                  ellipsized awkwardly in the narrow list); overflow-x-hidden
+                  stays as WKWebView hardening */}
+              <div className="mt-1.5 max-h-40 overflow-x-hidden overflow-y-auto rounded-md border border-line">
+                {(catalog ?? [])
+                  .filter(
+                    (e) =>
+                      !e.added &&
+                      e.name.toLowerCase().includes(query.trim().toLowerCase()),
+                  )
+                  .map((e) => (
+                    <button
+                      key={e.id}
+                      className="btn flex w-full items-center gap-2 border-b border-line px-2.5 py-1.5 text-left last:border-b-0 hover:bg-surface2"
+                      onClick={() => {
+                        setShelf(e);
+                        applyShelf(e);
+                      }}
+                    >
+                      <ProviderLogo icon={e.icon} name={e.name} color={e.logo_color} size={16} />
+                      <span className="min-w-0 truncate text-[12px] font-medium">{e.name}</span>
+                    </button>
+                  ))}
+                {catalog && catalog.filter((e) => !e.added && e.name.toLowerCase().includes(query.trim().toLowerCase())).length === 0 && (
+                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">No matching providers</div>
+                )}
+                {!catalog && (
+                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">Loading…</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Chosen catalog entry (with a way back to the picker) */}
+          {!edit && mode === "shelf" && shelf && (
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
+              <ProviderLogo icon={shelf.icon} name={shelf.name} color={shelf.logo_color} size={16} />
+              <span className="min-w-0 truncate text-[12px] font-medium">{shelf.name}</span>
+              <button
+                className="ml-auto flex-none text-[11px] font-medium"
+                style={{ color: "var(--kiwi)" }}
+                onClick={() => setShelf(null)}
+              >
+                Change
+              </button>
             </div>
           )}
 
@@ -212,7 +385,7 @@ export default function AddProviderModal({
 
             <div>
               <Label className="text-[11px] font-medium text-mut">Protocol</Label>
-              <Select value={protocol} onValueChange={(v) => setProtocol(v as Protocol)}>
+              <Select value={protocol} onValueChange={(v) => { setProtocol(v as Protocol); setProbe(null); }}>
                 <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
                   <SelectValue />
                 </SelectTrigger>
@@ -257,11 +430,11 @@ export default function AddProviderModal({
               <Label className="text-[11px] font-medium text-mut">Endpoint URL</Label>
               <div className="mt-1 flex gap-1.5">
                 <Input
-                  className="h-8 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+                  className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                   value={endpoint}
                   onChange={(e) => {
                     setEndpoint(e.target.value);
-                    setLatency(null);
+                    setProbe(null);
                   }}
                 />
                 <Button
@@ -272,7 +445,11 @@ export default function AddProviderModal({
                   onClick={async () => {
                     setTesting(true);
                     try {
-                      setLatency(await api.testLatency(endpoint.trim()));
+                      setProbe(await api.testEndpoint(protocol, endpoint.trim(), apiKey.trim() || undefined));
+                    } catch (e) {
+                      // A rejected invoke (e.g. command missing in a stale app
+                      // binary) must still land as a visible verdict, not vanish
+                      setProbe({ verdict: "error", status: null, latency_ms: 0, detail: String(e) });
                     } finally {
                       setTesting(false);
                     }
@@ -280,24 +457,100 @@ export default function AddProviderModal({
                 >
                   <Gauge className="h-3 w-3" />
                   Test{" "}
-                  {latency != null && (
-                    <span className="font-mono" style={{ color: "var(--kiwi)" }}>
-                      {latency}ms
+                  {probe && (
+                    <span className="font-mono" style={{ color: probeColor(probe.verdict) }} title={probe.detail}>
+                      {probe.verdict === "ok" ? `${probe.latency_ms}ms` : PROBE_TEXT[probe.verdict]}
                     </span>
                   )}
                 </Button>
               </div>
             </div>
 
+            {/* Additional per-protocol endpoints: agents speaking another
+                protocol hit their endpoint natively (same API key pool) */}
+            <div>
+              <Label className="text-[11px] font-medium text-mut">
+                Additional endpoints{" "}
+                <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                  one per protocol · shares the API key
+                </span>
+              </Label>
+              <div className="mt-1 space-y-1.5">
+                {altEndpoints.map((r, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <Select value={r.protocol} onValueChange={(v) => setAlt(i, { protocol: v as Protocol })}>
+                      <SelectTrigger className="h-8 w-[108px] flex-none bg-bg text-[11.5px] dark:bg-bg">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROTOCOL_OPTIONS.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+                      value={r.endpoint}
+                      onChange={(e) => setAlt(i, { endpoint: e.target.value })}
+                      placeholder="https://…"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 flex-none gap-1 px-2.5 text-[11px]"
+                      disabled={!r.endpoint.trim() || altTesting[i]}
+                      onClick={() => testAlt(i)}
+                    >
+                      <Gauge className="h-3 w-3" />
+                      Test{" "}
+                      {altProbes[i] && (
+                        <span
+                          className="font-mono"
+                          style={{ color: probeColor(altProbes[i]!.verdict) }}
+                          title={altProbes[i]!.detail}
+                        >
+                          {altProbes[i]!.verdict === "ok"
+                            ? `${altProbes[i]!.latency_ms}ms`
+                            : PROBE_TEXT[altProbes[i]!.verdict]}
+                        </span>
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="flex-none text-mut"
+                      aria-label="Remove endpoint"
+                      onClick={() => removeAlt(i)}
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                ))}
+                {altEndpoints.length < PROTOCOL_OPTIONS.length - 1 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-full gap-1 text-[11px] text-mut"
+                    onClick={addAlt}
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add endpoint
+                  </Button>
+                )}
+              </div>
+            </div>
+
             <div>
               <Label className="text-[11px] font-medium text-mut">Default model</Label>
-              {!edit && mode === "shelf" && preset ? (
+              {!edit && mode === "shelf" && shelf ? (
                 <Select value={model} onValueChange={(v) => setModel(v ?? "")}>
                   <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {preset.models.map((m) => (
+                    {shelfModelOptions.map((m) => (
                       <SelectItem key={m} value={m}>
                         {m}
                       </SelectItem>

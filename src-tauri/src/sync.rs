@@ -74,10 +74,20 @@ mod tests {
     #[test]
     fn cache_preferred_and_fallback_bundled() {
         let aux = Aux::open_in_memory().unwrap();
+        let store = kiwano_gateway::store::Store::open_in_memory().unwrap();
         // never synced → bundled fallback
-        let fallback = vm::load_catalog(&aux);
+        let fallback = vm::load_catalog(&store, &aux);
         assert_eq!(fallback.total as usize, fallback.entries.len());
-        assert!(fallback.entries.len() > 100);
+        // Multi-protocol merge puts one row per brand (openai/anthropic/gemini
+        // siblings folded in), so the entry count shrinks while the endpoint
+        // count keeps the catalog's real size
+        let endpoint_count = fallback
+            .entries
+            .iter()
+            .map(|e| 1 + e.endpoints.len())
+            .sum::<usize>();
+        assert!(fallback.entries.len() > 80);
+        assert!(endpoint_count > 100);
         // every bundled entry carries its protocol fingerprint
         assert!(fallback
             .entries
@@ -92,7 +102,7 @@ mod tests {
         .unwrap();
         aux.save_hub_cache(&payload, "2026-09-07T00:00:00Z")
             .unwrap();
-        let cached = vm::load_catalog(&aux);
+        let cached = vm::load_catalog(&store, &aux);
         assert_eq!(cached.total, 1);
     }
 

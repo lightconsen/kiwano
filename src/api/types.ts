@@ -80,6 +80,8 @@ export interface Provider {
   protocol: Protocol;
   /** Second half of the endpoint subtitle: OpenAI compatible / qwen3:32b etc. */
   endpoint_note: string;
+  /** Additional per-protocol endpoints (one provider serves multiple agent protocols) */
+  endpoints?: { protocol: Protocol; endpoint: string }[];
   billing: Billing;
   /** Price row for subscription types (plan): ¥49/month */
   plan_price?: string;
@@ -109,6 +111,8 @@ export interface NewProviderInput {
     reset_period?: "monthly" | "weekly" | "yearly" | "none";
   };
   agents: AgentId[];
+  /** Additional per-protocol endpoints to persist alongside the primary */
+  endpoints?: { protocol: Protocol; endpoint: string }[];
 }
 
 export interface CatalogEntry {
@@ -133,11 +137,14 @@ export interface CatalogEntry {
   billing: Billing;
   users: string;
   blurb: string;
+  /** Derived at read time from the local provider list (same endpoint = added) */
   added: boolean;
   /** One-liner shown when a free quota exists */
   free_offer?: string;
   /** Model options pre-populated in the add modal */
   models: string[];
+  /** Additional per-protocol endpoints merged from former sibling entries */
+  endpoints?: { protocol: Protocol; endpoint: string; models: string[] }[];
 }
 
 export interface CatalogList {
@@ -338,6 +345,18 @@ export interface RequestLogFilter {
   status?: "ok" | "error";
 }
 
+/** Protocol-aware endpoint probe (GET the protocol's models route; works
+    without a key — 401/403 still proves the route exists) */
+export interface ProbeReport {
+  /** ok=route answers · auth=route exists, key required/invalid ·
+      unsupported=404/405 · error=bad status/non-JSON · unreachable=no connect */
+  verdict: "ok" | "auth" | "unsupported" | "error" | "unreachable";
+  status: number | null;
+  latency_ms: number;
+  /** Human-readable explanation for the UI chip */
+  detail: string;
+}
+
 export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
@@ -349,6 +368,9 @@ export interface KiwanoApi {
   /** Enable = make this Provider the current route of its bound agents */
   enableProvider(id: string): Promise<void>;
   testLatency(endpoint: string): Promise<number>;
+  /** Protocol-aware probe: GET the protocol's models route; 401/403 still
+      proves the protocol route exists (works without a key) */
+  testEndpoint(protocol: Protocol, endpoint: string, apiKey?: string): Promise<ProbeReport>;
   listCatalog(): Promise<CatalogList>;
   getDashboard(window: DashboardWindow): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;

@@ -99,13 +99,13 @@ export function Sparkline({ points }: { points: number[] }) {
     codex/grok), which would vanish on the dark theme. Without it ProviderLogo
     tints currentColor marks with var(--ink) (theme-aware) and brand marks
     with their registry defaultColor, matching the segment bar. */
-export function AgentChip({ meta }: { meta: AgentMeta }) {
+export function AgentChip({ meta, size = 18 }: { meta: AgentMeta; size?: number }) {
   return (
     <ProviderLogo
       icon={AGENT_ICON[meta.id]}
       char={meta.chip_char}
       name={meta.label}
-      size={18}
+      size={size}
     />
   );
 }

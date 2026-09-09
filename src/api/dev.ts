@@ -15,6 +15,8 @@ import type {
   ImportReport,
   KiwanoApi,
   NewProviderInput,
+  ProbeReport,
+  Protocol,
   Provider,
   RequestLogDetail,
   RequestLogFilter,
@@ -34,7 +36,30 @@ function protocolNote(protocol: NewProviderInput["protocol"]): string {
       : "Anthropic";
 }
 
-const CATALOG_TOTAL = 177;
+// endpoint_note suffix mirrors vm::endpoint_note ("OpenAI-compatible · +Anthropic")
+function endpointNote(
+  protocol: NewProviderInput["protocol"],
+  endpoints?: { protocol: Protocol }[],
+): string {
+  const tags = (endpoints ?? []).map((e) =>
+    `+${e.protocol === "openai" ? "OpenAI" : e.protocol === "gemini" ? "Gemini" : "Anthropic"}`,
+  );
+  return [protocolNote(protocol), ...tags].join(" · ");
+}
+
+// Mirrors the merged bundled catalog (protocol siblings folded in; runapi.co
+// was dead and dropped in favor of the live runapi.host)
+const CATALOG_TOTAL = 82;
+
+// Endpoint identity: host+path, lowercased, scheme and trailing slashes
+// stripped — mirrors vm::endpoint_key on the backend
+function endpointKey(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+}
 
 const providers: Provider[] = [
   {
@@ -43,8 +68,9 @@ const providers: Provider[] = [
     logo_char: "D",
     logo_color: "#4D6BFE",
     endpoint: "api.deepseek.com",
-    endpoint_note: "OpenAI-compatible",
+    endpoint_note: "OpenAI-compatible · +Anthropic",
     protocol: "openai",
+    endpoints: [{ protocol: "anthropic", endpoint: "api.deepseek.com/anthropic" }],
     billing: "payg",
     enabled: true,
     agents: ["claude", "codex"],
@@ -76,7 +102,6 @@ const providers: Provider[] = [
     enabled: true,
     agents: ["claude"],
     is_current: false,
-    status_badge: "Standby #1",
     agents_note: "Failover queue",
     health: { state: "idle", latency_ms: 287 },
     usage: {
@@ -96,8 +121,9 @@ const providers: Provider[] = [
     logo_char: "G",
     logo_color: "#3859FF",
     endpoint: "open.bigmodel.cn",
-    endpoint_note: "OpenAI-compatible",
+    endpoint_note: "OpenAI-compatible · +Anthropic",
     protocol: "openai",
+    endpoints: [{ protocol: "anthropic", endpoint: "open.bigmodel.cn/api/anthropic" }],
     billing: "payg",
     enabled: false,
     agents: [],
@@ -161,6 +187,10 @@ const catalog: CatalogEntry[] = [
     blurb: "",
     added: true,
     models: ["deepseek-chat (V3)", "deepseek-reasoner (R1)"],
+    // Official Anthropic-compatible endpoint (api.deepseek.com/anthropic)
+    endpoints: [
+      { protocol: "anthropic", endpoint: "https://api.deepseek.com/anthropic", models: ["deepseek-chat (V3)", "deepseek-reasoner (R1)"] },
+    ],
   },
   {
     id: "kimi",
@@ -253,7 +283,8 @@ const catalog: CatalogEntry[] = [
     billing: "unl",
     users: "Fully offline",
     blurb: "",
-    added: false,
+    // Mirrors the backend: added derives from Ollama existing in the provider list
+    added: true,
     models: ["qwen3:32b", "llama3.3:70b"],
   },
   // Multi-protocol samples from the cc-switch port (anthropic / gemini fingerprints)
@@ -310,24 +341,10 @@ const catalog: CatalogEntry[] = [
     added: false,
     models: ["glm-5", "glm-5-air"],
     protocol: "openai",
-  },
-  {
-    id: "zhipu-glm-anthropic",
-    name: "Zhipu GLM",
-    logo_char: "Z",
-    logo_color: "#3859FF",
-    tag: "official",
-    tag_label: "Official",
-    rating: 4.4,
-    endpoint: "https://open.bigmodel.cn/api/anthropic",
-    icon: "zhipu",
-    price_line: "Official pricing",
-    billing: "payg",
-    users: "Listed on cc-switch",
-    blurb: "",
-    added: false,
-    models: ["glm-5", "glm-5-air"],
-    protocol: "anthropic",
+    // Merged from the former zhipu-glm-anthropic sibling entry
+    endpoints: [
+      { protocol: "anthropic", endpoint: "https://open.bigmodel.cn/api/anthropic", models: ["glm-5", "glm-5-air"] },
+    ],
   },
   {
     id: "packycode",
@@ -561,14 +578,11 @@ function servingNow(): Set<string> {
   return out;
 }
 
-// Mirror vm::build_provider_vms's standby classification: a non-head
-// candidate is a failover-queue member ("Standby #N" badge + "Failover
-// queue" note) unless its strategy rotates through everyone (roundrobin)
-// or it serves its own time window; a windowless timewindow candidate is
-// never picked, so it stays flagged. Static dev badges like "Local" are
-// preserved — only the standby badge is dynamic.
-function standbyFlags(): { badges: Map<string, string>; backups: Set<string> } {
-  const badges = new Map<string, string>();
+// Mirror vm::build_provider_vms's failover-queue classification: a non-head
+// candidate is a queue member ("Failover queue" note — no badge; standby
+// badges read as a contradiction next to "In use") unless its strategy
+// rotates through everyone (roundrobin) or it serves its own time window.
+function standbyFlags(): { backups: Set<string> } {
   const backups = new Set<string>();
   for (const r of agentRoutes) {
     const head = r.bindings.filter((b) => b.enabled)[0]?.provider_id;
@@ -581,13 +595,10 @@ function standbyFlags(): { badges: Map<string, string>; backups: Set<string> } {
           : r.strategy === "timewindow"
             ? !(b.win_start && b.win_end)
             : true;
-      if (standby && !badges.has(b.provider_id)) {
-        badges.set(b.provider_id, `Standby #${b.priority}`);
-        backups.add(b.provider_id);
-      }
+      if (standby) backups.add(b.provider_id);
     }
   }
-  return { badges, backups };
+  return { backups };
 }
 
 // ── Request logs (data-plane audit trail; fixtures mirror gateway capture) ──
@@ -691,13 +702,12 @@ export const devApi: KiwanoApi = {
   async listProviders(filter: AgentId | "all" = "all"): Promise<Provider[]> {
     await delay();
     const serving = servingNow();
-    const { badges, backups } = standbyFlags();
+    const { backups } = standbyFlags();
     return providers
       .filter((p) => filter === "all" || p.agents.includes(filter))
       .map((p) => ({
         ...p,
         is_current: p.agents.some((a) => serving.has(`${a}/${p.id}`)),
-        status_badge: badges.get(p.id) ?? p.status_badge,
         agents_note: backups.has(p.id)
           ? "Failover queue"
           : p.agents.length
@@ -708,14 +718,19 @@ export const devApi: KiwanoApi = {
 
   async addProvider(input: NewProviderInput): Promise<Provider> {
     await delay();
+    const endpoints = input.endpoints?.map((e) => ({
+      protocol: e.protocol,
+      endpoint: e.endpoint.replace(/^https?:\/\//, ""),
+    }));
     const p: Provider = {
       id: input.name.toLowerCase().replace(/\s+/g, "-") + "-" + ++idSeq,
       name: input.name,
       logo_char: input.name.charAt(0).toUpperCase(),
       logo_color: "#555555",
       endpoint: input.endpoint.replace(/^https?:\/\//, ""),
-      endpoint_note: protocolNote(input.protocol),
+      endpoint_note: endpointNote(input.protocol, endpoints),
       protocol: input.protocol,
+      endpoints,
       billing: input.billing,
       enabled: true,
       agents: input.agents,
@@ -737,7 +752,11 @@ export const devApi: KiwanoApi = {
     t.name = input.name.trim();
     t.endpoint = input.endpoint.replace(/^https?:\/\//, "");
     t.protocol = input.protocol;
-    t.endpoint_note = protocolNote(input.protocol);
+    t.endpoints = input.endpoints?.map((e) => ({
+      protocol: e.protocol,
+      endpoint: e.endpoint.replace(/^https?:\/\//, ""),
+    }));
+    t.endpoint_note = endpointNote(input.protocol, t.endpoints);
     t.billing = input.billing;
     t.agents = [...input.agents];
     t.is_current = t.agents.length > 0 && t.is_current;
@@ -774,9 +793,37 @@ export const devApi: KiwanoApi = {
     return table[endpoint.replace(/^https?:\/\//, "")] ?? 260;
   },
 
+  // Dev probe: pretend the protocol's models route answered (ok), unless the
+  // endpoint is empty/decorated with "invalid" — exercises the chip styling
+  async testEndpoint(_protocol: Protocol, endpoint: string): Promise<ProbeReport> {
+    await delay(500);
+    const latency_ms = 200 + Math.floor(Math.random() * 300);
+    if (!endpoint.trim() || endpoint.includes("invalid")) {
+      return { verdict: "unreachable", status: null, latency_ms, detail: "connection failed (dev)" };
+    }
+    return { verdict: "ok", status: 200, latency_ms, detail: "12 models listed (dev)" };
+  },
+
   async listCatalog(): Promise<CatalogList> {
     await delay();
-    return { total: CATALOG_TOTAL, entries: catalog };
+    // Mirror the backend: `added` derives from the provider list at read
+    // time, matching the primary endpoint OR any additional per-protocol
+    // endpoint on either side (merged catalog entries stay one row)
+    const keys = new Set(
+      providers.flatMap((p) => [
+        endpointKey(p.endpoint),
+        ...(p.endpoints ?? []).map((e) => endpointKey(e.endpoint)),
+      ]),
+    );
+    return {
+      total: CATALOG_TOTAL,
+      entries: catalog.map((e) => ({
+        ...e,
+        added:
+          keys.has(endpointKey(e.endpoint)) ||
+          (e.endpoints ?? []).some((x) => keys.has(endpointKey(x.endpoint))),
+      })),
+    };
   },
 
   async getDashboard(window: DashboardWindow): Promise<DashboardData> {

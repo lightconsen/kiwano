@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 7;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -194,6 +194,21 @@ CREATE TABLE IF NOT EXISTS gateway_settings (
 );
 "#;
 
+/// v7: per-protocol endpoints on one provider — a single provider row can now
+/// serve multiple inbound protocols, each with its own upstream URL (e.g. a
+/// vendor exposing both an OpenAI-compatible and a native Anthropic endpoint).
+/// The provider's primary protocol/endpoint stay in `providers`; this table
+/// holds only the ADDITIONAL endpoints (one row per protocol).
+const MIGRATION_V7: &str = r#"
+CREATE TABLE IF NOT EXISTS provider_endpoints (
+    provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    protocol    TEXT NOT NULL CHECK (protocol IN ('anthropic','openai','gemini')),
+    base_url    TEXT NOT NULL,
+    api_path    TEXT,
+    PRIMARY KEY (provider_id, protocol)
+);
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -284,6 +299,18 @@ impl StrategyType {
     }
 }
 
+/// An additional per-protocol upstream endpoint of a provider (migration v7).
+/// One vendor can expose several protocol flavors (e.g. an OpenAI-compatible
+/// and a native Anthropic URL); the primary one lives in `Provider.protocol`
+/// + `Provider.base_url`, the rest here — keyed by protocol.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderEndpoint {
+    pub protocol: Protocol,
+    pub base_url: String,
+    /// Optional upstream path prefix, same semantics as `Provider.api_path`.
+    pub api_path: Option<String>,
+}
+
 /// A configured upstream provider.
 ///
 /// `api_key` holds the upstream credential for MVP (P1 plan: value lives in
@@ -296,6 +323,11 @@ pub struct Provider {
     pub base_url: String,
     /// Optional upstream path prefix, e.g. `/anthropic` for compatible endpoints.
     pub api_path: Option<String>,
+    /// Additional per-protocol endpoints (migration v7): when an inbound
+    /// request's protocol matches one of these, the gateway forwards natively
+    /// to its URL instead of erroring or converting. Shared `api_key` pool.
+    #[serde(default)]
+    pub endpoints: Vec<ProviderEndpoint>,
     pub api_key: Option<String>,
     pub billing: Billing,
     /// User-entered spending/period cap used for the ring percentage estimate.
@@ -637,6 +669,9 @@ impl Store {
             conn.execute_batch(MIGRATION_V4)?;
             conn.execute_batch(MIGRATION_V5)?;
         }
+        if version < 7 {
+            conn.execute_batch(MIGRATION_V7)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -646,8 +681,9 @@ impl Store {
     // ---- providers ------------------------------------------------------
 
     pub fn insert_provider(&self, p: &Provider) -> Result<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
                                     billing, period_limit, limit_unit, reset_period,
                                     enabled, created_at, updated_at)
@@ -668,6 +704,8 @@ impl Store {
                 p.updated_at,
             ],
         )?;
+        write_endpoints(&tx, &p.id, &p.endpoints)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -678,7 +716,10 @@ impl Store {
                     period_limit, limit_unit, reset_period, enabled, created_at, updated_at
              FROM providers WHERE id = ?1",
         )?;
-        let provider = stmt.query_row(params![id], provider_from_row).optional()?;
+        let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
+        if let Some(p) = &mut provider {
+            p.endpoints = read_endpoints(&conn, &p.id)?;
+        }
         Ok(provider)
     }
 
@@ -692,20 +733,24 @@ impl Store {
         let rows = stmt.query_map([], provider_from_row)?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            let mut p = row?;
+            p.endpoints = read_endpoints(&conn, &p.id)?;
+            out.push(p);
         }
         Ok(out)
     }
 
-    /// Update an existing provider; refreshes `updated_at`.
+    /// Update an existing provider; refreshes `updated_at`. The additional
+    /// endpoint set is replaced wholesale (add/update pass the full list).
     pub fn update_provider(&self, p: &Provider) -> Result<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
         let updated = if p.updated_at.is_empty() {
             now_rfc3339()
         } else {
             p.updated_at.clone()
         };
-        conn.execute(
+        let tx = conn.transaction()?;
+        tx.execute(
             "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
                     api_key = ?6, billing = ?7, period_limit = ?8, limit_unit = ?9,
                     reset_period = ?10, enabled = ?11, updated_at = ?12
@@ -725,6 +770,8 @@ impl Store {
                 updated,
             ],
         )?;
+        write_endpoints(&tx, &p.id, &p.endpoints)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -961,28 +1008,48 @@ impl Store {
         Ok(())
     }
 
-    /// Aggregated totals, optionally filtered by agent and/or a start timestamp.
-    pub fn usage_totals(&self, agent: Option<&str>, since: Option<&str>) -> Result<UsageTotals> {
+    /// WHERE fragment + positional params shared by usage-table aggregations
+    /// (agent / provider / time window). Fragment indexes are 1-based and
+    /// ordered, so callers splice it after `WHERE 1=1` and bind via
+    /// `params_from_iter`.
+    fn usage_filters<'a>(
+        agent: Option<&'a str>,
+        provider_id: Option<&'a str>,
+        since: Option<&'a str>,
+    ) -> (String, Vec<&'a dyn rusqlite::ToSql>) {
+        let mut cond = String::new();
+        let mut params: Vec<&'a dyn rusqlite::ToSql> = Vec::new();
+        if let Some(a) = agent {
+            params.push(a);
+            cond.push_str(&format!(" AND agent = ?{}", params.len()));
+        }
+        if let Some(p) = provider_id {
+            params.push(p);
+            cond.push_str(&format!(" AND provider_id = ?{}", params.len()));
+        }
+        if let Some(s) = since {
+            params.push(s);
+            cond.push_str(&format!(" AND ts >= ?{}", params.len()));
+        }
+        (cond, params)
+    }
+
+    /// Aggregated totals, optionally filtered by agent, provider and/or a
+    /// start timestamp.
+    pub fn usage_totals(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<UsageTotals> {
+        let (cond, params) = usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
                     COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0)
-             FROM usage WHERE 1=1{}{}",
-            agent.map_or(String::new(), |_| " AND agent = ?1".to_string()),
-            since.map_or(String::new(), |_| format!(
-                " AND ts >= ?{}",
-                if agent.is_some() { 2 } else { 1 }
-            )),
+             FROM usage WHERE 1=1{cond}",
         ))?;
-
-        let map_row = |row: &rusqlite::Row<'_>| UsageTotals::from_row(row);
-        let totals = match (agent, since) {
-            (Some(a), Some(s)) => stmt.query_row(params![a, s], map_row)?,
-            (Some(a), None) => stmt.query_row(params![a], map_row)?,
-            (None, Some(s)) => stmt.query_row(params![s], map_row)?,
-            (None, None) => stmt.query_row([], map_row)?,
-        };
-        Ok(totals)
+        Ok(stmt.query_row(rusqlite::params_from_iter(params), UsageTotals::from_row)?)
     }
 
     /// Aggregated totals for one provider, optionally since a timestamp.
@@ -1059,24 +1126,22 @@ impl Store {
         Ok(rows)
     }
 
-    /// Totals grouped by provider, optionally filtered by agent/since.
+    /// Totals grouped by provider, optionally filtered by agent, provider
+    /// and/or since.
     pub fn usage_by_provider(
         &self,
         agent: Option<&str>,
+        provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<ProviderUsage>> {
+        let (cond, params) = usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT provider_id, COUNT(*), COALESCE(SUM(input_tokens),0),
                     COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
                     COALESCE(SUM(cache_creation_tokens),0)
-             FROM usage WHERE 1=1{}{}
+             FROM usage WHERE 1=1{cond}
              GROUP BY provider_id ORDER BY COUNT(*) DESC",
-            agent.map_or(String::new(), |_| " AND agent = ?1".to_string()),
-            since.map_or(String::new(), |_| format!(
-                " AND ts >= ?{}",
-                if agent.is_some() { 2 } else { 1 }
-            )),
         ))?;
 
         let map_row = |row: &rusqlite::Row<'_>| {
@@ -1092,45 +1157,27 @@ impl Store {
             })
         };
         let mut out = Vec::new();
-        match (agent, since) {
-            (Some(a), Some(s)) => {
-                for row in stmt.query_map(params![a, s], map_row)? {
-                    out.push(row?);
-                }
-            }
-            (Some(a), None) => {
-                for row in stmt.query_map(params![a], map_row)? {
-                    out.push(row?);
-                }
-            }
-            (None, Some(s)) => {
-                for row in stmt.query_map(params![s], map_row)? {
-                    out.push(row?);
-                }
-            }
-            (None, None) => {
-                for row in stmt.query_map([], map_row)? {
-                    out.push(row?);
-                }
-            }
+        for row in stmt.query_map(rusqlite::params_from_iter(params), map_row)? {
+            out.push(row?);
         }
         Ok(out)
     }
 
     /// Daily aggregation (UTC day = first 10 chars of the RFC3339 ts).
-    pub fn usage_daily(&self, agent: Option<&str>, since: Option<&str>) -> Result<Vec<DailyUsage>> {
+    pub fn usage_daily(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<DailyUsage>> {
+        let (cond, params) = usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT SUBSTR(ts, 1, 10) AS day, COUNT(*), COALESCE(SUM(input_tokens),0),
                     COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
                     COALESCE(SUM(cache_creation_tokens),0)
-             FROM usage WHERE 1=1{}{}
+             FROM usage WHERE 1=1{cond}
              GROUP BY day ORDER BY day ASC",
-            agent.map_or(String::new(), |_| " AND agent = ?1".to_string()),
-            since.map_or(String::new(), |_| format!(
-                " AND ts >= ?{}",
-                if agent.is_some() { 2 } else { 1 }
-            )),
         ))?;
 
         let map_row = |row: &rusqlite::Row<'_>| {
@@ -1146,27 +1193,8 @@ impl Store {
             })
         };
         let mut out = Vec::new();
-        match (agent, since) {
-            (Some(a), Some(s)) => {
-                for row in stmt.query_map(params![a, s], map_row)? {
-                    out.push(row?);
-                }
-            }
-            (Some(a), None) => {
-                for row in stmt.query_map(params![a], map_row)? {
-                    out.push(row?);
-                }
-            }
-            (None, Some(s)) => {
-                for row in stmt.query_map(params![s], map_row)? {
-                    out.push(row?);
-                }
-            }
-            (None, None) => {
-                for row in stmt.query_map([], map_row)? {
-                    out.push(row?);
-                }
-            }
+        for row in stmt.query_map(rusqlite::params_from_iter(params), map_row)? {
+            out.push(row?);
         }
         Ok(out)
     }
@@ -1270,6 +1298,28 @@ impl Store {
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((rows, total))
+    }
+
+    /// COUNT of data-plane requests (every row: forwarded + pre-forward
+    /// failures), optionally filtered by agent, provider and/or a start
+    /// timestamp. The dashboard headline reads this instead of `usage_totals`:
+    /// usage rows only cover forwarded requests, so pre-forward failures would
+    /// silently vanish from the top stat while the Logs card below still
+    /// shows them.
+    pub fn count_request_logs(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<i64> {
+        let (cond, params) = usage_filters(agent, provider_id, since);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.query_row(
+            &format!("SELECT COUNT(*) FROM request_logs WHERE 1=1{cond}"),
+            rusqlite::params_from_iter(params),
+            |r| r.get(0),
+        )?;
+        Ok(n)
     }
 
     /// One request with bodies (detail view); None if the id is unknown.
@@ -1404,6 +1454,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         protocol: Protocol::from_str(&protocol_str).unwrap_or(Protocol::Anthropic),
         base_url: row.get(3)?,
         api_path: row.get(4)?,
+        endpoints: Vec::new(),
         api_key: row.get(5)?,
         billing: Billing::from_str(&billing_str).unwrap_or(Billing::Metered),
         period_limit: row.get(7)?,
@@ -1413,6 +1464,49 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
     })
+}
+
+/// Additional per-protocol endpoints of one provider, ordered by protocol for
+/// stable output.
+fn read_endpoints(conn: &Connection, provider_id: &str) -> Result<Vec<ProviderEndpoint>> {
+    let mut stmt = conn.prepare(
+        "SELECT protocol, base_url, api_path FROM provider_endpoints
+         WHERE provider_id = ?1 ORDER BY protocol",
+    )?;
+    let rows = stmt.query_map(params![provider_id], |row| {
+        let protocol_str: String = row.get(0)?;
+        Ok(ProviderEndpoint {
+            protocol: Protocol::from_str(&protocol_str).unwrap_or(Protocol::OpenAI),
+            base_url: row.get(1)?,
+            api_path: row.get(2)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Replace-all write of a provider's additional endpoints (inside the caller's
+/// transaction; rows cascade away with the provider).
+fn write_endpoints(
+    tx: &rusqlite::Transaction<'_>,
+    provider_id: &str,
+    endpoints: &[ProviderEndpoint],
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM provider_endpoints WHERE provider_id = ?1",
+        params![provider_id],
+    )?;
+    for e in endpoints {
+        tx.execute(
+            "INSERT INTO provider_endpoints (provider_id, protocol, base_url, api_path)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![provider_id, e.protocol.as_str(), e.base_url, e.api_path],
+        )?;
+    }
+    Ok(())
 }
 
 fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Binding> {
@@ -1478,6 +1572,7 @@ mod tests {
             protocol,
             base_url: "https://api.example.com".to_string(),
             api_path: None,
+            endpoints: Vec::new(),
             api_key: Some("sk-upstream".to_string()),
             billing: Billing::Metered,
             period_limit: Some(50.0),
@@ -1526,6 +1621,7 @@ mod tests {
             "request_logs",
             "request_bodies",
             "gateway_settings",
+            "provider_endpoints",
         ] {
             assert!(tables.iter().any(|t| t == expected), "missing {expected}");
         }
@@ -1574,6 +1670,68 @@ mod tests {
             store.get_provider("p-gem").unwrap().unwrap().protocol,
             Protocol::Gemini
         );
+    }
+
+    /// v7: additional per-protocol endpoints round-trip with the provider row
+    /// and cascade away on delete.
+    #[test]
+    fn provider_endpoints_roundtrip() {
+        let (_dir, store) = temp_store();
+
+        let mut p = sample_provider("p-dual", Protocol::OpenAI);
+        p.endpoints = vec![ProviderEndpoint {
+            protocol: Protocol::Anthropic,
+            base_url: "https://api.example.com/anthropic".into(),
+            api_path: None,
+        }];
+        store.insert_provider(&p).unwrap();
+
+        let got = store.get_provider("p-dual").unwrap().unwrap();
+        assert_eq!(got.endpoints.len(), 1);
+        assert_eq!(got.endpoints[0].protocol, Protocol::Anthropic);
+        assert_eq!(got.endpoints[0].base_url, "https://api.example.com/anthropic");
+        // list reads them too
+        assert_eq!(store.list_providers().unwrap()[0].endpoints.len(), 1);
+
+        // update replaces the whole set
+        let mut updated = got.clone();
+        updated.endpoints = vec![
+            ProviderEndpoint {
+                protocol: Protocol::Anthropic,
+                base_url: "https://api.example.com/anthropic/v2".into(),
+                api_path: None,
+            },
+            ProviderEndpoint {
+                protocol: Protocol::Gemini,
+                base_url: "https://api.example.com/gemini".into(),
+                api_path: None,
+            },
+        ];
+        store.update_provider(&updated).unwrap();
+        let got = store.get_provider("p-dual").unwrap().unwrap();
+        assert_eq!(got.endpoints.len(), 2);
+        assert_eq!(got.endpoints[0].base_url, "https://api.example.com/anthropic/v2");
+
+        // empty list clears every additional endpoint
+        let mut cleared = got.clone();
+        cleared.endpoints.clear();
+        store.update_provider(&cleared).unwrap();
+        assert!(store.get_provider("p-dual").unwrap().unwrap().endpoints.is_empty());
+
+        // rows cascade away with the provider
+        let mut p2 = sample_provider("p-cascade", Protocol::OpenAI);
+        p2.endpoints = vec![ProviderEndpoint {
+            protocol: Protocol::Anthropic,
+            base_url: "https://x.example.com/anthropic".into(),
+            api_path: None,
+        }];
+        store.insert_provider(&p2).unwrap();
+        store.delete_provider("p-cascade").unwrap();
+        let conn = store.conn.lock().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM provider_endpoints", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
     }
 
     /// A database stamped v5 by an early dev build but missing the v3 api_keys
@@ -1828,35 +1986,46 @@ mod tests {
             })
             .unwrap();
 
-        let totals = store.usage_totals(None, None).unwrap();
+        let totals = store.usage_totals(None, None, None).unwrap();
         assert_eq!(totals.requests, 4);
         assert_eq!(totals.input_tokens, 122);
         assert_eq!(totals.output_tokens, 228);
         assert_eq!(totals.cache_read_tokens, 40);
         assert_eq!(totals.cache_creation_tokens, 2);
 
-        let agent_totals = store.usage_totals(Some("claude"), None).unwrap();
+        let agent_totals = store.usage_totals(Some("claude"), None, None).unwrap();
         assert_eq!(agent_totals.requests, 3);
         assert_eq!(agent_totals.input_tokens, 117);
 
+        // Provider filter spans agents (2 claude + 1 codex rows on p1).
+        let provider_totals = store.usage_totals(None, Some("p1"), None).unwrap();
+        assert_eq!(provider_totals.requests, 3);
+        // Combined agent + provider filter ANDs both conditions.
+        let combined = store.usage_totals(Some("claude"), Some("p1"), None).unwrap();
+        assert_eq!(combined.requests, 2);
+
         let since_totals = store
-            .usage_totals(None, Some("2026-09-07T00:00:00+00:00"))
+            .usage_totals(None, None, Some("2026-09-07T00:00:00+00:00"))
             .unwrap();
         assert_eq!(since_totals.requests, 2);
 
-        let by_provider = store.usage_by_provider(Some("claude"), None).unwrap();
+        let by_provider = store.usage_by_provider(Some("claude"), None, None).unwrap();
         assert_eq!(by_provider.len(), 2);
         assert_eq!(by_provider[0].provider_id, "p1");
         assert_eq!(by_provider[0].totals.requests, 2);
         assert_eq!(by_provider[0].totals.output_tokens, 220);
 
-        let daily = store.usage_daily(Some("claude"), None).unwrap();
+        let one_provider = store.usage_by_provider(None, Some("p2"), None).unwrap();
+        assert_eq!(one_provider.len(), 1);
+        assert_eq!(one_provider[0].provider_id, "p2");
+
+        let daily = store.usage_daily(Some("claude"), None, None).unwrap();
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].day, "2026-09-06");
         assert_eq!(daily[1].day, "2026-09-07");
         assert_eq!(daily[1].totals.requests, 1);
 
-        let empty = store.usage_totals(Some("gemini"), None).unwrap();
+        let empty = store.usage_totals(Some("gemini"), None, None).unwrap();
         assert_eq!(empty.requests, 0);
         assert_eq!(empty.input_tokens, 0);
     }
@@ -2011,6 +2180,29 @@ mod tests {
         assert_eq!(detail.response_body, None);
 
         assert!(store.get_request_log(9999).unwrap().is_none());
+    }
+
+    #[test]
+    fn count_request_logs_windows_by_ts() {
+        let (_dir, store) = temp_store();
+        store.insert_request_log(&sample_log("2026-09-01T10:00:00+00:00", Some("claude"), 200)).unwrap();
+        store.insert_request_log(&sample_log("2026-09-07T10:00:00+00:00", Some("claude"), 503)).unwrap();
+        store.insert_request_log(&sample_log("2026-09-08T10:00:00+00:00", None, 404)).unwrap();
+
+        assert_eq!(store.count_request_logs(None, None, None).unwrap(), 3);
+        // Failures count too — the dashboard headline uses this.
+        assert_eq!(
+            store.count_request_logs(None, None, Some("2026-09-07T00:00:00Z")).unwrap(),
+            2
+        );
+        assert_eq!(
+            store.count_request_logs(None, None, Some("2026-09-09T00:00:00Z")).unwrap(),
+            0
+        );
+        // Agent / provider filters: the agentless row (no provider either) is
+        // only counted in the unfiltered totals.
+        assert_eq!(store.count_request_logs(Some("claude"), None, None).unwrap(), 2);
+        assert_eq!(store.count_request_logs(None, Some("p1"), None).unwrap(), 2);
     }
 
     #[test]

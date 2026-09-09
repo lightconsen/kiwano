@@ -16,7 +16,7 @@ import { api } from "../api/client";
 import type { RequestLogDetail, RequestLogEntry } from "../api/types";
 import { fmtLatency, fmtTokens } from "../lib/format";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 type StatusFilter = "all" | "ok" | "error";
 
@@ -185,7 +185,9 @@ function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[min(660px,100dvh)] w-[calc(100%-2rem)] max-w-[720px] gap-0 overflow-y-auto rounded-xl p-0 sm:max-w-[720px]">
+      {/* overflow-x-hidden: same WKWebView hardening as AddProviderModal —
+          long unbroken values in the header <pre>s must never widen the modal */}
+      <DialogContent className="max-h-[min(660px,100dvh)] w-[calc(100%-2rem)] max-w-[720px] gap-0 overflow-x-hidden overflow-y-auto rounded-xl p-0 sm:max-w-[720px]">
         {/* pr-12 keeps the Copy button clear of the dialog's absolute X close button */}
         <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line pl-4 pr-12">
           <DialogTitle className="text-[13px] font-semibold">
@@ -305,7 +307,7 @@ export default function RequestLogs() {
           )}
         </div>
 
-        {pages > 1 && (
+        {loaded && total > 0 && (
           <div className="flex items-center justify-center gap-3 pb-3 text-[11.5px] text-mut">
             <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px]" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               Prev

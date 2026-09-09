@@ -109,6 +109,7 @@ pub fn run_import(
             protocol,
             base_url: raw.base_url.clone(),
             api_path: raw.api_path.clone(),
+            endpoints: Vec::new(),
             api_key: raw.api_key.clone(),
             billing: kiwano_gateway::store::Billing::Metered,
             period_limit: None,

@@ -153,6 +153,7 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         protocol,
         base_url,
         api_path: None,
+        endpoints: Vec::new(),
         api_key: Some(REAL_KEY.to_string()),
         billing: Billing::Metered,
         period_limit: None,
@@ -205,7 +206,7 @@ async fn wait_for_usage(
     expected: i64,
 ) -> kiwano_gateway::store::UsageTotals {
     for _ in 0..60 {
-        let totals = state.store.usage_totals(Some(agent), None).unwrap();
+        let totals = state.store.usage_totals(Some(agent), None, None).unwrap();
         if totals.requests >= expected {
             return totals;
         }
@@ -279,13 +280,13 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
     drop(captured);
 
     // Usage metered into SQLite, attributed to agent + provider.
-    let totals = state.store.usage_totals(Some("claude"), None).unwrap();
+    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 2095);
     assert_eq!(totals.output_tokens, 503);
     assert_eq!(totals.cache_creation_tokens, 2095);
 
-    let by_provider = state.store.usage_by_provider(Some("claude"), None).unwrap();
+    let by_provider = state.store.usage_by_provider(Some("claude"), None, None).unwrap();
     assert_eq!(by_provider.len(), 1);
     assert_eq!(by_provider[0].provider_id, "p-ant");
 }
@@ -391,7 +392,7 @@ async fn openai_path_without_key_falls_back_to_codex_agent() {
     );
     drop(captured);
 
-    let totals = state.store.usage_totals(Some("codex"), None).unwrap();
+    let totals = state.store.usage_totals(Some("codex"), None, None).unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 42);
     assert_eq!(totals.output_tokens, 7);
@@ -578,7 +579,7 @@ async fn anthropic_inbound_converts_non_streaming_to_openai_upstream() {
     assert!(sent[0].get("system").is_none());
 
     // Usage metered from the upstream OpenAI usage block.
-    let totals = state.store.usage_totals(Some("claude"), None).unwrap();
+    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 42);
     assert_eq!(totals.output_tokens, 7);
@@ -754,13 +755,13 @@ async fn gemini_inbound_passthrough_meters_usage_metadata() {
     drop(captured);
 
     // usageMetadata metered into SQLite, attributed to the gemini agent.
-    let totals = state.store.usage_totals(Some("gemini"), None).unwrap();
+    let totals = state.store.usage_totals(Some("gemini"), None, None).unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 88);
     assert_eq!(totals.output_tokens, 31);
     assert_eq!(totals.cache_read_tokens, 12);
 
-    let by_provider = state.store.usage_by_provider(Some("gemini"), None).unwrap();
+    let by_provider = state.store.usage_by_provider(Some("gemini"), None, None).unwrap();
     assert_eq!(by_provider.len(), 1);
     assert_eq!(by_provider[0].provider_id, "p-gem");
 }
@@ -789,7 +790,7 @@ async fn unknown_key_on_anthropic_path_falls_back_to_claude() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Fallback attribution still meters to the claude agent.
-    let totals = state.store.usage_totals(Some("claude"), None).unwrap();
+    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(captured.lock().unwrap().len(), 1);
 }
@@ -928,7 +929,7 @@ async fn request_log_records_failures_without_usage() {
     assert_eq!(unbound.agent.as_deref(), Some("claude"));
 
     // Usage metering semantics unchanged: failed requests are not usage.
-    let totals = state.store.usage_totals(None, None).unwrap();
+    let totals = state.store.usage_totals(None, None, None).unwrap();
     assert_eq!(totals.requests, 0);
 
     // Request bodies are captured even for failed requests.
@@ -979,7 +980,7 @@ async fn request_log_disabled_records_nothing() {
         .unwrap();
     assert_eq!(total, 0);
 
-    let totals = state.store.usage_totals(Some("claude"), None).unwrap();
+    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
     assert_eq!(totals.requests, 1);
 }
 

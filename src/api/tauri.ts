@@ -17,6 +17,8 @@ import type {
   ImportReport,
   KiwanoApi,
   NewProviderInput,
+  ProbeReport,
+  Protocol,
   Provider,
   RequestLogDetail,
   RequestLogFilter,
@@ -44,6 +46,9 @@ export const tauriApi: KiwanoApi = {
   enableProvider: (id: string) => invoke<void>("enable_provider", { id }),
 
   testLatency: (endpoint: string) => invoke<number>("test_latency", { endpoint }),
+
+  testEndpoint: (protocol: Protocol, endpoint: string, apiKey?: string) =>
+    invoke<ProbeReport>("test_endpoint", { protocol, endpoint, apiKey: apiKey ?? null }),
 
   listCatalog: () => invoke<CatalogList>("list_catalog"),
 

@@ -472,6 +472,7 @@ fn cmd_providers_add(store: &Store, args: &AddArgs) -> Result<(), String> {
         protocol: args.protocol,
         base_url: args.endpoint.trim().to_string(),
         api_path: None,
+        endpoints: Vec::new(),
         api_key: args.key.clone(),
         billing: args.billing,
         period_limit: args.limit,
@@ -733,10 +734,10 @@ fn cmd_usage(
     }
     let since = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
     let totals = store
-        .usage_totals(agent.as_deref(), Some(&since))
+        .usage_totals(agent.as_deref(), None, Some(&since))
         .map_err(|e| e.to_string())?;
     let by_provider = store
-        .usage_by_provider(agent.as_deref(), Some(&since))
+        .usage_by_provider(agent.as_deref(), None, Some(&since))
         .map_err(|e| e.to_string())?;
     let names: BTreeMap<String, String> = store
         .list_providers()
@@ -1017,6 +1018,7 @@ mod tests {
                 protocol: Protocol::OpenAI,
                 base_url: "https://example.com".into(),
                 api_path: None,
+                endpoints: Vec::new(),
                 api_key: Some("sk-x".into()),
                 billing: Billing::Metered,
                 period_limit: None,
@@ -1129,12 +1131,12 @@ mod tests {
 
         // The command is stdout-only; verify the aggregation it renders from.
         let since = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339();
-        let totals = store.usage_totals(None, Some(&since)).unwrap();
+        let totals = store.usage_totals(None, None, Some(&since)).unwrap();
         assert_eq!(totals.requests, 1);
         assert_eq!(totals.input_tokens, 1_500_000);
         assert_eq!(fmt_tokens(totals.input_tokens), "1.5M");
 
-        let by_agent = store.usage_totals(Some("codex"), Some(&since)).unwrap();
+        let by_agent = store.usage_totals(Some("codex"), None, Some(&since)).unwrap();
         assert_eq!(by_agent.requests, 0);
     }
 

@@ -188,7 +188,8 @@ function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[min(660px,100dvh)] w-[calc(100%-2rem)] max-w-[720px] gap-0 overflow-y-auto rounded-xl p-0 sm:max-w-[720px]">
-        <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line px-4">
+        {/* pr-12 keeps the Copy button clear of the dialog's absolute X close button */}
+        <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line pl-4 pr-12">
           <DialogTitle className="text-[13px] font-semibold">
             Log #{entry.id} · <span className="font-mono text-[11.5px] font-normal text-mut">{fmtTime(entry.ts)}</span>
           </DialogTitle>

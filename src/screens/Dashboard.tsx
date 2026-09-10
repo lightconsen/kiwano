@@ -554,7 +554,10 @@ export default function Dashboard() {
         </div>
 
         {/* Full data-plane request log (gateway audit trail) */}
-        <RequestLogs />
+        <RequestLogs
+          agent={agentFilter === "all" ? undefined : agentFilter}
+          providerId={providerFilter === "all" ? undefined : providerFilter}
+        />
       </div>
     </section>
   );

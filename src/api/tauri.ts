@@ -60,12 +60,15 @@ export const tauriApi: KiwanoApi = {
 
   listCatalog: () => invoke<CatalogList>("list_catalog"),
 
-  // Invoke args must be camelCase to reach the command's snake_case params
+  // Invoke args must be camelCase to reach the command's snake_case params —
+  // and the key must be the parameter's own name. `agentId` would map to
+  // `agent_id`, which get_dashboard does not take: the value was dropped and
+  // every stat stayed unfiltered.
   getDashboard: (window: DashboardWindow, providerId?: string, agentId?: string) =>
     invoke<DashboardData>("get_dashboard", {
       window,
       providerId: providerId ?? null,
-      agentId: agentId ?? null,
+      agent: agentId ?? null,
     }),
 
   getSettings: () => invoke<AppSettings>("get_settings"),

@@ -220,7 +220,16 @@ function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => 
   );
 }
 
-export default function RequestLogs() {
+export default function RequestLogs({
+  agent,
+  providerId,
+}: {
+  /** The page's provider/agent filters. They narrow this table the same way
+   *  they narrow the cards above it — the reader set one slice and expects
+   *  every panel to be answering for it. */
+  agent?: string;
+  providerId?: string;
+} = {}) {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<RequestLogEntry[]>([]);
@@ -228,9 +237,22 @@ export default function RequestLogs() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
 
+  // The page filters change what the result set is, not just which rows of it
+  // are on screen, so the pager has to go back to the start. Keyed by value
+  // because the props are plain strings by the time they arrive.
+  const scope = `${agent ?? ""} ${providerId ?? ""}`;
+  useEffect(() => {
+    setPage(1);
+    setOpenId(null);
+  }, [scope]);
+
   const fetchPage = (p: number) => {
     api
-      .listRequestLogs(p, PAGE_SIZE, filter === "all" ? undefined : { status: filter })
+      .listRequestLogs(p, PAGE_SIZE, {
+        ...(filter === "all" ? {} : { status: filter }),
+        agent,
+        provider_id: providerId,
+      })
       .then((r) => {
         setRows(r.rows);
         setTotal(r.total);
@@ -242,7 +264,7 @@ export default function RequestLogs() {
   useEffect(() => {
     fetchPage(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, filter]);
+  }, [page, filter, scope]);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const openLog = openId != null ? rows.find((r) => r.id === openId) : undefined;

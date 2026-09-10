@@ -215,7 +215,7 @@ function planPercentCell(
       : null;
   const maxUtil = plan?.success ? Math.max(...plan.tiers.map((t) => t.utilization), 0) : 0;
   return (
-    <div className="flex w-[22%] items-center gap-2" title={title}>
+    <div className="flex w-[28%] items-center gap-2" title={title}>
       <Ring pct={pct} color={color} />
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
@@ -254,7 +254,7 @@ function UsageCell({
     return planPercentCell(p, plan, usageTitle(p));
   }
 
-  if (!u) return <div className="w-[22%]" />;
+  if (!u) return <div className="w-[28%]" />;
   const title = usageTitle(p);
 
   if (p.billing === "plan" && u.quota) {
@@ -268,7 +268,7 @@ function UsageCell({
         : null;
     const maxUtil = plan?.success ? Math.max(...plan.tiers.map((t) => t.utilization), 0) : 0;
     return (
-      <div className="flex w-[22%] items-center gap-2" title={title}>
+      <div className="flex w-[28%] items-center gap-2" title={title}>
         <Ring pct={pct} color={ringColor("plan", pct)} />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
@@ -307,7 +307,7 @@ function UsageCell({
   // ceiling (tightest window wins); legacy used/limit rows render above.
   if (p.billing === "unl") {
     return (
-      <div className="w-[22%]" title={title}>
+      <div className="w-[28%]" title={title}>
         <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
           <BillTag billing="unl" />
           {u.requests} <span className="font-normal text-mut">req · {fmtTokens(u.input_tokens + u.output_tokens)} tok</span>
@@ -322,7 +322,7 @@ function UsageCell({
   if (u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
     return (
-      <div className="flex w-[22%] items-center gap-2" title={title}>
+      <div className="flex w-[28%] items-center gap-2" title={title}>
         <Ring pct={pct} color={ringColor("payg", pct)} />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
@@ -341,7 +341,7 @@ function UsageCell({
   }
 
   return (
-    <div className="w-[22%]" title={title}>
+    <div className="w-[28%]" title={title}>
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
         <BillTag billing="payg" />
         {fmtMoney(u.cost ?? 0, u.cost_currency ?? providerCurrency(p) ?? "USD")}{" "}
@@ -385,9 +385,10 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
             </span>
           )}
         </div>
-        <div className="mt-0.5 truncate font-mono text-[11px] text-mut">
-          {p.endpoint} · {p.endpoint_note}
-        </div>
+        {/* Endpoint only. The protocol is a property of how Kiwano talks to
+            the provider, not of where it is — it belongs in the edit dialog,
+            not in a subtitle every row repeats. */}
+        <div className="mt-0.5 truncate font-mono text-[11px] text-mut">{p.endpoint}</div>
       </div>
     </div>
   );
@@ -433,7 +434,7 @@ function ProviderRow({
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <IdentityCell p={p} />
 
-      <div className="flex w-[22%] items-center">
+      <div className="flex w-[18%] items-center">
         {p.agents.length === 0 ? (
           <span className="text-[11px] text-mut">Unbound</span>
         ) : (
@@ -656,7 +657,7 @@ function RoleCell({
     </span>
   );
   return (
-    <div className="flex w-[22%] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+    <div className="flex w-[18%] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
       {route.strategy === "roundrobin" ? (
         <WeightEditor agent={agent} b={b} onChanged={onChanged} />
       ) : route.strategy === "timewindow" ? (
@@ -1058,9 +1059,9 @@ export default function Providers({
       ) : (
         <>
           <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-            <span className="w-[34%]">Provider</span>
-            <span className="w-[22%]">{route ? "Role in strategy" : "Bound agents"}</span>
-            <span className="w-[22%]">Usage / quota</span>
+            <span className="w-[32%]">Provider</span>
+            <span className="w-[18%]">{route ? "Role in strategy" : "Bound agents"}</span>
+            <span className="w-[28%]">Usage / quota</span>
             <span className="w-[14%]">Status</span>
             <span className="flex-1 text-right">{route ? "Priority" : "Actions"}</span>
           </div>

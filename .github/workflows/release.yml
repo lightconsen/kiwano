@@ -218,13 +218,69 @@ jobs:
           -R "${{ github.repository }}"
           --pattern latest.json --dir manifest --clobber
 
+      # tauri-action writes api.github.com asset URLs into the manifest, so
+      # mirroring it verbatim would move the manifest and leave every download
+      # on GitHub — i.e. mirror the half that already works. Rewrite each
+      # platform to its version-free R2 path, then prove every rewritten URL
+      # serves before uploading: a manifest pointing at a 404 is worse than no
+      # mirror, because it looks like a working update until the download fails.
+      - name: Point the mirror's manifest at the mirror
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, sys, urllib.request
+
+          BASE = "https://hub.kiwano.cc/releases"
+          # Platform key (as tauri writes it) -> mirrored file name. The mirror
+          # keeps no version in the name, so this table stays valid across
+          # releases; an unmapped key means the build matrix grew a target the
+          # mirror does not know about, and it must be added here.
+          NAMES = {
+              "darwin-aarch64": "Kiwano_aarch64.app.tar.gz",
+              "darwin-aarch64-app": "Kiwano_aarch64.app.tar.gz",
+              "darwin-x86_64": "Kiwano_x64.app.tar.gz",
+              "darwin-x86_64-app": "Kiwano_x64.app.tar.gz",
+              "linux-x86_64": "Kiwano_amd64.AppImage",
+              "linux-x86_64-appimage": "Kiwano_amd64.AppImage",
+              "linux-x86_64-deb": "Kiwano_amd64.deb",
+              "linux-x86_64-rpm": "Kiwano-1.x86_64.rpm",
+              "windows-x86_64": "Kiwano_x64-setup.exe",
+              "windows-x86_64-msi": "Kiwano_x64_en-US.msi",
+              "windows-x86_64-nsis": "Kiwano_x64-setup.exe",
+          }
+
+          with open("manifest/latest.json") as fh:
+              doc = json.load(fh)
+
+          unmapped = sorted(k for k in doc["platforms"] if k not in NAMES)
+          if unmapped:
+              sys.exit(f"unmapped platform key(s): {', '.join(unmapped)}")
+
+          for key, entry in doc["platforms"].items():
+              entry["url"] = f"{BASE}/{NAMES[key]}"
+
+          for key, entry in doc["platforms"].items():
+              req = urllib.request.Request(entry["url"], method="HEAD")
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      status = resp.status
+              except Exception as exc:
+                  sys.exit(f"{key}: {entry['url']} unreachable: {exc}")
+              if status != 200:
+                  sys.exit(f"{key}: {entry['url']} -> HTTP {status}")
+
+          with open("manifest/latest.r2.json", "w") as fh:
+              json.dump(doc, fh, indent=2)
+          print(f"rewrote and verified {len(doc['platforms'])} platform URLs")
+          PY
+
       - name: Mirror it to Cloudflare R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
-        run: aws s3 cp manifest/latest.json s3://kiwano-hub/releases/latest.json --no-progress
+        run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress
 
   # No human in the loop: publishing is a tag push and nothing else.
   # `needs: build` only (not the mirror jobs) — the release is the deliverable,

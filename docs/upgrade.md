@@ -159,5 +159,7 @@ tauri-plugin-process = "2"   # relaunch 用
 ## 8. 开放问题
 
 - macOS 公证（Developer ID + notarization）是否进 v0？建议 v0 先跳过（自用/内测），公开发布前补；
-- `latest.json` 端点是否同步镜像到 `hub.kiwano.cc`？建议等 Hub 上线时一并做，端点数组支持多源容灾；
+- ~~`latest.json` 端点是否同步镜像到 `hub.kiwano.cc`？~~ **已做**：镜像 job 会把清单里每个平台的 URL
+  重写成 R2 稳定路径（上传前逐个 HEAD 校验，任一 404 即失败），endpoints 也已加入 R2 作为次级源。
+  GitHub 仍是第一顺位：R2 只在镜像 job 失败时才会落后一版，而 GitHub 不通时（国内常见）自动落到 R2；
 - 是否引入「跳过此版本」？建议 v0 不做，保持最小实现。

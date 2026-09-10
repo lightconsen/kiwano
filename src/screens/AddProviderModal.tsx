@@ -1,7 +1,7 @@
 // Add/edit provider modal (design/index.html #modal, cc-switch AddProviderDialog pattern)
 // Base controls use shadcn/ui (Dialog/Input/Label/Select/Button); the segmented pills are kept as design language
 import { useEffect, useState } from "react";
-import { ChevronDown, Eye, Gauge, Infinity as InfinityIcon, Plus, Store, XIcon } from "lucide-react";
+import { Check, ChevronDown, Eye, Gauge, Infinity as InfinityIcon, Plus, Store, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,6 +30,7 @@ import {
   type Protocol,
   type Provider,
 } from "../api/types";
+import { AgentChip } from "@/components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
@@ -94,6 +95,8 @@ export default function AddProviderModal({
   const [limitUnit, setLimitUnit] = useState<"requests" | "wan_tokens" | "cny">("cny");
   const [resetPeriod, setResetPeriod] = useState<"monthly" | "weekly" | "yearly" | "none">("monthly");
   const [agents, setAgents] = useState<AgentId[]>([]);
+  // Multi-select dropdown for agent binding (rows = logo + name)
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   // Protocol-aware probe of the primary endpoint (uses the form's API key
   // when present — a 401 verdict means the key is wrong, not the route)
@@ -187,6 +190,7 @@ export default function AddProviderModal({
     if (!open) return;
     setShowKey(false);
     setProbe(null);
+    setAgentsOpen(false);
     setNewKey("");
     setNewKeyLabel("");
     setQuery("");
@@ -215,7 +219,9 @@ export default function AddProviderModal({
       api.listApiKeys(edit.id).then(setPollKeys).catch(() => setPollKeys([]));
       return;
     }
-    setMode(preset ? "shelf" : "custom");
+    // Default to the "From Models" catalog picker; a Models-page preset
+    // pre-selects its entry directly
+    setMode("shelf");
     setShelf(preset);
     resetAdvanced();
     if (preset) {
@@ -241,6 +247,17 @@ export default function AddProviderModal({
       api.listCatalog().then((c) => setCatalog(c.entries));
     }
   }, [open, edit, mode, shelf, catalog]);
+
+  // Close the agents dropdown on Escape (outside clicks are handled by the
+  // transparent overlay rendered behind the open panel)
+  useEffect(() => {
+    if (!agentsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAgentsOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [agentsOpen]);
 
   const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
 
@@ -694,32 +711,63 @@ export default function AddProviderModal({
               </div>
             )}
 
-            <div>
-              <Label className="text-[11px] font-medium text-mut">Bind to agents after saving</Label>
-              <div className="mt-1 grid grid-cols-3 gap-1.5">
-                {AGENTS.map((a) => {
-                  const active = agents.includes(a.id);
-                  return (
-                    <label
-                      key={a.id}
-                      className="flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[11.5px]"
-                      style={active
-                        ? { borderColor: "var(--kiwi-dim)", background: "var(--kiwi-soft)", color: "var(--ink)" }
-                        : { borderColor: "var(--line)", color: "var(--mut)" }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={active}
-                        onChange={() =>
+            <div className="relative">
+              <Label
+                className="cursor-pointer select-none text-[11px] font-medium text-mut"
+                onClick={() => setAgentsOpen((o) => !o)}
+              >
+                Bind to agents after saving
+              </Label>
+              <button
+                type="button"
+                className="mt-1 flex min-h-8 w-full cursor-pointer flex-wrap items-center gap-1 rounded-md border border-line bg-bg px-2 py-1 text-left text-[12px] dark:bg-bg"
+                onClick={() => setAgentsOpen((o) => !o)}
+              >
+                {agents.length === 0 ? (
+                  <span className="text-mut">Select agents…</span>
+                ) : (
+                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                    {AGENTS.filter((a) => agents.includes(a.id)).map((a) => (
+                      <span
+                        key={a.id}
+                        className="flex items-center gap-1 rounded bg-surface2 px-1 py-0.5 text-[10.5px]"
+                      >
+                        <AgentChip meta={a} size={12} />
+                        {a.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <ChevronDown
+                  className={`ml-auto h-3.5 w-3.5 flex-none text-mut transition-transform ${agentsOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {agentsOpen && (
+                <>
+                  {/* Click-catcher behind the panel: any press elsewhere in the
+                      modal lands here and closes the dropdown */}
+                  <div className="fixed inset-0 z-40" onClick={() => setAgentsOpen(false)} />
+                  <div className="absolute z-50 mt-1 max-h-[210px] w-full overflow-y-auto rounded-md border border-line bg-bg py-1 shadow-lg">
+                  {AGENTS.map((a) => {
+                    const active = agents.includes(a.id);
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-surface2"
+                        onClick={() =>
                           setAgents(active ? agents.filter((x) => x !== a.id) : [...agents, a.id])
                         }
-                        style={{ accentColor: "var(--kiwi)" }}
-                      />
-                      {a.label}
-                    </label>
-                  );
-                })}
-              </div>
+                      >
+                        <AgentChip meta={a} size={16} />
+                        <span className="min-w-0 flex-1 truncate">{a.label}</span>
+                        {active && <Check className="h-3.5 w-3.5 flex-none" style={{ color: "var(--kiwi)" }} />}
+                      </button>
+                    );
+                  })}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Rotating keys (edit mode: multiple keys rotate automatically, spec §4.1 P1) */}

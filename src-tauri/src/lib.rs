@@ -265,9 +265,26 @@ fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
 
 #[tauri::command]
 fn get_gateway_status(state: State<AppState>) -> vm::GatewayStatusVm {
+    let report = sidecar::gateway_status(state.admin_port);
+    let blocked = report
+        .as_ref()
+        .and_then(|r| r.get("blocked"))
+        .and_then(|b| b.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    Some(vm::BlockedProviderVm {
+                        id: row.get("provider_id")?.as_str()?.to_string(),
+                        reason: row.get("reason")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     vm::GatewayStatusVm {
-        running: sidecar::ping_admin(state.admin_port),
+        running: report.is_some(),
         port: state.data_port,
+        blocked,
     }
 }
 

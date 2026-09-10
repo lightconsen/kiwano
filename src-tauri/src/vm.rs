@@ -943,6 +943,18 @@ pub(crate) fn default_retain_days() -> u32 {
 pub struct GatewayStatusVm {
     pub running: bool,
     pub port: u16,
+    /// Providers the gateway is refusing to route, with the reason it gave.
+    ///
+    /// Read from the gateway rather than recomputed here: the block is decided
+    /// there, and a card that worked out its own answer could disagree with the
+    /// process actually turning requests away.
+    pub blocked: Vec<BlockedProviderVm>,
+}
+
+#[derive(Serialize)]
+pub struct BlockedProviderVm {
+    pub id: String,
+    pub reason: String,
 }
 
 #[derive(Serialize)]

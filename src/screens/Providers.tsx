@@ -241,12 +241,37 @@ function planPercentCell(
 function UsageCell({
   p,
   plan,
+  blocked,
 }: {
   p: Provider;
   /** Plan-quota report for providers with a plan query (undefined = not fetched yet) */
   plan?: PlanQuotaReport;
+  /** Why the gateway is refusing to route here, when it is. */
+  blocked?: string;
 }) {
   const u = p.usage;
+
+  // First, because it overrides everything the rest of this cell would say:
+  // whatever the numbers are, the gateway is not sending requests here, and a
+  // ring claiming "57% of budget" beside that would be a lie.
+  if (blocked) {
+    return (
+      <div className="w-[28%]" title={`Not routing here: ${blocked}`}>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="rounded px-1.5 py-px text-[10px] font-medium"
+            style={{
+              background: "color-mix(in srgb, var(--red) 14%, transparent)",
+              color: "var(--red)",
+            }}
+          >
+            Blocked
+          </span>
+          <span className="truncate font-mono text-[11px] text-mut">{blocked}</span>
+        </div>
+      </div>
+    );
+  }
 
   // Percent-limit rows render even before the provider has any usage
   // history (usage summary still null): the ring/limit line need no totals.
@@ -415,11 +440,13 @@ function HealthCell({ p }: { p: Provider }) {
 function ProviderRow({
   p,
   plan,
+  blocked,
   onEdit,
   onDelete,
 }: {
   p: Provider;
   plan?: PlanQuotaReport;
+  blocked?: string;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
@@ -455,7 +482,7 @@ function ProviderRow({
         )}
       </div>
 
-      <UsageCell p={p} plan={plan} />
+      <UsageCell p={p} plan={plan} blocked={blocked} />
 
       <HealthCell p={p} />
 
@@ -688,6 +715,7 @@ function BindingRow({
   b,
   idx,
   plan,
+  blocked,
   onMove,
   onChanged,
 }: {
@@ -696,6 +724,7 @@ function BindingRow({
   b: StrategyBinding;
   idx: number;
   plan?: PlanQuotaReport;
+  blocked?: string;
   onMove: (idx: number, dir: -1 | 1) => void;
   onChanged: () => void;
 }) {
@@ -721,7 +750,7 @@ function BindingRow({
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
 
-      <UsageCell p={p} plan={plan} />
+      <UsageCell p={p} plan={plan} blocked={blocked} />
 
       <HealthCell p={p} />
 
@@ -884,6 +913,20 @@ export default function Providers({
     setSeg(id);
     window.location.hash = id === "all" ? "providers" : `providers/${id}`;
   };
+
+  // Why the gateway is refusing to route, straight from the gateway. Polled on
+  // its own re-evaluation interval; this screen is the one that has to show it.
+  const [blocked, setBlocked] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const load = () =>
+      api
+        .getGatewayStatus()
+        .then((s) => setBlocked(Object.fromEntries(s.blocked.map((b) => [b.id, b.reason]))))
+        .catch(() => {});
+    load();
+    const t = window.setInterval(load, 30_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   // Adopt a deep-linked segment arriving while mounted (App re-parses the hash)
   useEffect(() => {
@@ -1078,6 +1121,7 @@ export default function Providers({
                     b={b}
                     idx={i}
                     plan={planQuotas[p.id]}
+                    blocked={blocked[p.id]}
                     onMove={onMoveBinding}
                     onChanged={refetch}
                   />
@@ -1088,6 +1132,7 @@ export default function Providers({
                   key={p.id}
                   p={p}
                   plan={planQuotas[p.id]}
+                  blocked={blocked[p.id]}
                   onEdit={onEdit}
                   onDelete={onDelete}
                 />

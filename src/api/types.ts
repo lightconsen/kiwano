@@ -370,6 +370,9 @@ export interface HubSyncReport {
 export interface GatewayStatus {
   running: boolean;
   port: number;
+  /** Providers the gateway is refusing to route, with its reason. The gateway
+   *  decides this, so the card reads it rather than working out its own. */
+  blocked: { id: string; reason: string }[];
 }
 
 export interface FooterStats {

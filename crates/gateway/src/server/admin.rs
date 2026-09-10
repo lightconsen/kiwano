@@ -53,6 +53,21 @@ async fn status(State(state): State<Arc<GatewayState>>) -> Response {
         .collect();
     routes.sort_by(|a, b| a["agent"].as_str().cmp(&b["agent"].as_str()));
 
+    // Providers the gateway is refusing to route, with the reason. The Apps
+    // card reads this rather than recomputing: it must agree with what is
+    // actually being enforced, and the enforcement is here.
+    let mut blocked: Vec<Value> = state
+        .limits()
+        .entries()
+        .map(|(id, reason)| {
+            json!({
+                "provider_id": id,
+                "reason": reason.describe(),
+            })
+        })
+        .collect();
+    blocked.sort_by(|a, b| a["provider_id"].as_str().cmp(&b["provider_id"].as_str()));
+
     Json(json!({
         "ok": true,
         "name": "kiwano-gateway",
@@ -64,6 +79,7 @@ async fn status(State(state): State<Arc<GatewayState>>) -> Response {
         "usage_rows": metrics.usage_rows,
         "agents_routed": table.routes.len(),
         "routes": routes,
+        "blocked": blocked,
     }))
     .into_response()
 }

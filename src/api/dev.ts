@@ -788,7 +788,7 @@ function matchingLogs(filter?: RequestLogFilter): RequestLogEntry[] {
 export const devApi: KiwanoApi = {
   async getGatewayStatus(): Promise<GatewayStatus> {
     await delay();
-    return { running: true, port: 8317 };
+    return { running: true, port: 8317, blocked: [] };
   },
 
   async listProviders(filter: AgentId | "all" = "all"): Promise<Provider[]> {

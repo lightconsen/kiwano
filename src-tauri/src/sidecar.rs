@@ -4,7 +4,7 @@
 //! SQLite file; control-channel calls are raw loopback HTTP so no extra
 //! HTTP client dependency is needed.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -52,6 +52,31 @@ fn loopback_http(port: u16, request: &str) -> Option<String> {
     let mut line = String::new();
     reader.read_line(&mut line).ok()?;
     Some(line)
+}
+
+/// `GET /status`, payload included. The liveness check below reads one line by
+/// design; this one wants the body, so it reads to EOF (`Connection: close`).
+fn loopback_body(port: u16, request: &str) -> Option<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(CONNECT_TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(CONNECT_TIMEOUT)).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut raw = String::new();
+    BufReader::new(stream).read_to_string(&mut raw).ok()?;
+    // Drop the status line and headers: the body follows the blank line.
+    raw.split_once("\r\n\r\n").map(|(_, body)| body.to_string())
+}
+
+/// The gateway's own `/status` report. None when it is not answering, or says
+/// something we cannot read — the caller then shows less, never a guess.
+pub fn gateway_status(admin_port: u16) -> Option<serde_json::Value> {
+    let body = loopback_body(
+        admin_port,
+        &format!(
+            "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nConnection: close\r\n\r\n"
+        ),
+    )?;
+    serde_json::from_str(&body).ok()
 }
 
 /// `GET /status` — true when the admin plane answers.

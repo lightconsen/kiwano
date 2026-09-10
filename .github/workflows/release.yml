@@ -101,4 +101,5 @@ jobs:
         # Single line on purpose: the Windows runner's shell is PowerShell,
         # where a backslash does not continue a line. --exclude drops the raw
         # .app bundle tree (dmg + updater tar.gz are what matter).
-        run: aws s3 sync target/release/bundle s3://kiwano-hub/releases --no-progress --exclude "*.app" --exclude "*.app/*"
+        # The build passes --target, so bundles land under target/<triple>/.
+        run: aws s3 sync target/${{ matrix.target }}/release/bundle s3://kiwano-hub/releases --no-progress --exclude "*.app" --exclude "*.app/*"

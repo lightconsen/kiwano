@@ -720,6 +720,7 @@ export default function Providers({
   onEdit,
   agentDetect = null,
   agentVersions = {},
+  initialAgent = null,
 }: {
   onAdd: () => void;
   onEdit: (p: Provider) => void;
@@ -727,12 +728,25 @@ export default function Providers({
   agentDetect?: AgentDetect[] | null;
   /** Phase 2 versions by agent id (arrive async, tooltip only) */
   agentVersions?: Partial<Record<AgentId, string>>;
+  /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
+  initialAgent?: AgentId | null;
 }) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [routes, setRoutes] = useState<AgentRoute[] | null>(null);
-  const [seg, setSeg] = useState<AgentId | "all">("all");
+  const [seg, setSeg] = useState<AgentId | "all">(initialAgent ?? "all");
   const [takenOver, setTakenOver] = useState<Set<AgentId> | null>(null);
   const [enabling, setEnabling] = useState(false);
+
+  // Segment switch that keeps the #providers/<agent> deep link truthful
+  const pickSeg = (id: AgentId | "all") => {
+    setSeg(id);
+    window.location.hash = id === "all" ? "providers" : `providers/${id}`;
+  };
+
+  // Adopt a deep-linked segment arriving while mounted (App re-parses the hash)
+  useEffect(() => {
+    if (initialAgent && initialAgent !== seg) setSeg(initialAgent);
+  }, [initialAgent, seg]);
 
   const refetch = useCallback(() => {
     api.listProviders().then(setProviders);
@@ -758,7 +772,10 @@ export default function Providers({
 
   // Drop a hidden segment if the detection result changed under us.
   useEffect(() => {
-    if (seg !== "all" && !visibleSegments.some((s) => s.id === seg)) setSeg("all");
+    if (seg !== "all" && !visibleSegments.some((s) => s.id === seg)) {
+      setSeg("all");
+      window.location.hash = "providers";
+    }
   }, [visibleSegments, seg]);
 
   const onDelete = async (p: Provider) => {
@@ -815,7 +832,7 @@ export default function Providers({
                 title={s.id === "all" ? label : ver ? `${label} · v${ver}` : label}
                 aria-label={label}
                 className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
-                onClick={() => setSeg(s.id)}
+                onClick={() => pickSeg(s.id)}
               >
                 {s.icon ? (
                   <ProviderLogo icon={s.icon} name={label} size={15} />

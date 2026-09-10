@@ -8,6 +8,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
+import { AGENTS } from "./api/types";
 import type {
   AgentDetect,
   AgentId,
@@ -34,13 +35,17 @@ const NAV: { id: Route; label: string }[] = [
   { id: "settings", label: "Settings" },
 ];
 
-function routeFromHash(): Route {
-  const h = window.location.hash.slice(1) as Route;
-  return NAV.some((n) => n.id === h) ? h : "providers";
+/** Hash router: #settings etc., plus an optional deep-linked agent segment
+    (#providers/openclaw) that the Apps screen adopts as its active tab. */
+function routeFromHash(): { route: Route; agent: AgentId | null } {
+  const [head, tail] = window.location.hash.slice(1).split("/");
+  const route: Route = NAV.some((n) => n.id === head) ? (head as Route) : "providers";
+  const agent = AGENTS.some((a) => a.id === tail) ? (tail as AgentId) : null;
+  return { route, agent };
 }
 
 export default function App() {
-  const [route, setRoute] = useState<Route>(routeFromHash);
+  const [route, setRoute] = useState<{ route: Route; agent: AgentId | null }>(routeFromHash);
   const [tick, setTick] = useState(0);
   const [gw, setGw] = useState<GatewayStatus | null>(null);
   const [footer, setFooter] = useState<FooterStats | null>(null);
@@ -113,7 +118,7 @@ export default function App() {
   }, []);
 
   const nav = (id: Route) => {
-    setRoute(id);
+    setRoute({ route: id, agent: null });
     window.location.hash = id;
   };
 
@@ -133,7 +138,7 @@ export default function App() {
           {NAV.map((n) => (
             <button
               key={n.id}
-              className={`navtab h-full px-3 text-[12.5px] font-medium text-mut${route === n.id ? " active" : ""}`}
+              className={`navtab h-full px-3 text-[12.5px] font-medium text-mut${route.route === n.id ? " active" : ""}`}
               onClick={() => nav(n.id)}
             >
               {n.label}
@@ -152,18 +157,19 @@ export default function App() {
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {route === "providers" && (
+        {route.route === "providers" && (
           <Providers
             key={`p${tick}`}
             agentDetect={agentDetect}
             agentVersions={agentVersions}
+            initialAgent={route.agent}
             onAdd={() => setModal({ open: true, preset: null, edit: null })}
             onEdit={(p) => setModal({ open: true, preset: null, edit: p })}
           />
         )}
-        {route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset, edit: null })} />}
-        {route === "dashboard" && <Dashboard key={`d${tick}`} />}
-        {route === "settings" && <Settings key={`c${tick}`} />}
+        {route.route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset, edit: null })} />}
+        {route.route === "dashboard" && <Dashboard key={`d${tick}`} />}
+        {route.route === "settings" && <Settings key={`c${tick}`} />}
       </main>
 
       <footer

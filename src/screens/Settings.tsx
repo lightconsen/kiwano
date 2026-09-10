@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -45,25 +44,26 @@ export default function Settings() {
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">General</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          <Row label="Language">
-            <Select value={s.language ?? "zh-CN"} onValueChange={(v) => patch({ language: v ?? "zh-CN" })}>
+          {/* Language / theme ship with a single supported value — the selects
+              stay (visual consistency, desktop-tool convention) but disabled
+              until i18n and theming actually land. */}
+          <Row label="Language" note="English only">
+            <Select value="en" disabled>
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="zh-CN">Chinese (Simplified)</SelectItem>
                 <SelectItem value="en">English</SelectItem>
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Theme">
-            <Select value={s.theme ?? "dark"} onValueChange={(v) => patch({ theme: v ?? "dark" })}>
+          <Row label="Theme" note="Dark only">
+            <Select value="dark" disabled>
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="dark">Dark</SelectItem>
-                <SelectItem value="light">Light</SelectItem>
               </SelectContent>
             </Select>
           </Row>
@@ -80,13 +80,6 @@ export default function Settings() {
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">Local gateway</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          <Row label="Listen address">
-            <Input
-              className="h-7 w-[130px] bg-surface2 font-mono text-[11.5px] dark:bg-surface2"
-              value={s.gateway_listen}
-              onChange={(e) => patch({ gateway_listen: e.target.value })}
-            />
-          </Row>
           <div className="pb-0.5 pt-1 text-[11px] font-medium text-mut">
             Agent takeover <span className="font-normal">· hot-switching once pointed at the local gateway</span>
           </div>
@@ -109,12 +102,19 @@ export default function Settings() {
                 <span className="text-[10.5px]" style={t.enabled ? { color: "var(--kiwi)" } : { color: "var(--mut)" }}>
                   {t.enabled ? "Taken over" : "Not taken over"}
                 </span>
-                <Switch
-                  checked={t.enabled}
-                  onCheckedChange={(v) => {
-                    api.setTakeover(t.agent, v).then(() => api.getSettings().then(setS));
+                {/* Takeover is performed in Apps/<agent> so the user walks the
+                    onboarding flow (enable → route → config rewrite); this row
+                    only navigates there (deep link #providers/<agent>). */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2.5 text-[11px]"
+                  onClick={() => {
+                    window.location.hash = `providers/${t.agent}`;
                   }}
-                />
+                >
+                  {t.enabled ? "Manage in Apps" : "Enable in Apps"}
+                </Button>
               </span>
             </div>
           ))}

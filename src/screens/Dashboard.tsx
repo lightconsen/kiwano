@@ -19,87 +19,73 @@ const WINDOWS: { id: DashboardWindow; label: string }[] = [
   { id: "30d", label: "Last 30 days" },
 ];
 
-/** Catmull-Rom → Bézier smoothing (programmatic equivalent of the prototype's hand-drawn C curves) */
-function smoothPath(pts: [number, number][]): string {
-  if (pts.length < 2) return pts.length ? `M${pts[0][0]},${pts[0][1]}` : "";
-  let d = `M${pts[0][0]},${pts[0][1]}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    d += ` C${c1x},${c1y} ${c2x},${c2y} ${p2[0]},${p2[1]}`;
-  }
-  return d;
-}
+type TrendMetric = "requests" | "tokens";
 
-function TrendChart({ data }: { data: DashboardData }) {
+/** One metric as columns.
+ *
+ * Requests and tokens are different scales, so they get a chart each and a
+ * switch between them rather than a shared axis: bar heights invite direct
+ * comparison, which two units on one frame cannot honestly support. The
+ * switch also means only one series is ever on screen, so identity never
+ * rests on telling two colours apart.
+ */
+function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric }) {
   const W = 900;
   const H = 140;
   const top = 22;
   const bottom = 112;
-  // Both units get their own scale and their own tick column: requests on the
-  // left, tokens on the right. Sharing one axis meant normalising each series
-  // to its own maximum with nothing to read against, so two series that move
-  // together — which requests and tokens usually do — drew one line.
-  const left = 38;
-  const right = 862;
+  const left = 52;
+  const right = 884;
   const n = data.trend.length;
-  const x = (i: number) => left + (i * (right - left)) / Math.max(1, n - 1);
+  const value = (t: DashboardData["trend"][number]) =>
+    metric === "requests" ? t.requests : t.tokens;
   // Empty DB gives max=0 → division yields NaN → SVG error; clamp with max(1, ·)
-  const reqMax = Math.max(1, ...data.trend.map((t) => t.requests));
-  const tokMax = Math.max(1, ...data.trend.map((t) => t.tokens));
-  const yReq = (v: number) => bottom - (v / reqMax) * (bottom - top);
-  const yTok = (v: number) => bottom - (v / tokMax) * (bottom - top);
-  const reqPts = data.trend.map((t, i) => [x(i), yReq(t.requests)] as [number, number]);
-  const tokPts = data.trend.map((t, i) => [x(i), yTok(t.tokens)] as [number, number]);
-  const reqPath = smoothPath(reqPts);
-  const areaPath = `${reqPath} L${right},${bottom} L${left},${bottom} Z`;
-  const last = reqPts[reqPts.length - 1];
-  // Grid and ticks are the same three levels, so a label always sits on a line.
+  const max = Math.max(1, ...data.trend.map(value));
+  const slot = (right - left) / Math.max(1, n);
+  // Thin marks with a 2px gap between them, and a cap so a one-bucket window
+  // ("today") does not draw a single slab the width of the card.
+  const barWidth = Math.max(2, Math.min(slot - 2, 44));
+  const color = metric === "requests" ? "var(--kiwi)" : "var(--orange)";
   const ticks = [
-    { y: top, req: reqMax, tok: tokMax },
-    { y: (top + bottom) / 2, req: reqMax / 2, tok: tokMax / 2 },
-    { y: bottom, req: 0, tok: 0 },
+    { y: top, v: max },
+    { y: (top + bottom) / 2, v: max / 2 },
+    { y: bottom, v: 0 },
   ];
   const tick = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" style={{ height: 128 }}>
-      <defs>
-        <linearGradient id="gk" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--kiwi)" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="var(--kiwi)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
       <g stroke="var(--line)" strokeDasharray="3 4">
         {ticks.map((t) => (
           <line key={t.y} x1={left} y1={t.y} x2={right} y2={t.y} />
         ))}
       </g>
-      <path d={areaPath} fill="url(#gk)" />
-      <path d={reqPath} fill="none" stroke="var(--kiwi)" strokeWidth="1.8" />
-      {/* Solid, and warm: a dashed blue line beside a green one reads as the
-          same family, and the dash was doing work the colour should do. */}
-      <path d={smoothPath(tokPts)} fill="none" stroke="var(--orange)" strokeWidth="1.6" />
-      {last && <circle cx={last[0]} cy={last[1]} r="3" fill="var(--kiwi)" stroke="var(--bg)" strokeWidth="1.5" />}
+      {data.trend.map((t, i) => {
+        const v = value(t);
+        const h = Math.max(1, (bottom - top) * (v / max));
+        return (
+          <rect
+            key={t.date}
+            x={left + slot * i + (slot - barWidth) / 2}
+            y={bottom - h}
+            width={barWidth}
+            height={h}
+            rx="2"
+            fill={color}
+          >
+            {/* Native tooltip: the chart's only hover affordance so far. */}
+            <title>{`${t.date} · ${tick(v)} ${metric}`}</title>
+          </rect>
+        );
+      })}
       <g fill="var(--mut)" fontSize="9.5" fontFamily="JetBrains Mono">
         {ticks.map((t) => (
-          <g key={t.y}>
-            <text x={left - 6} y={t.y + 3} textAnchor="end">
-              {tick(t.req)}
-            </text>
-            <text x={right + 6} y={t.y + 3} textAnchor="start">
-              {tick(t.tok)}
-            </text>
-          </g>
+          <text key={t.y} x={left - 6} y={t.y + 3} textAnchor="end">
+            {tick(t.v)}
+          </text>
         ))}
         {data.trend.map((t, i) => (
-          <text key={t.date} x={x(i) - 14} y={H - 8}>
+          <text key={t.date} x={left + slot * (i + 0.5)} y={H - 8} textAnchor="middle">
             {t.date}
           </text>
         ))}
@@ -191,6 +177,8 @@ export default function Dashboard() {
   // "all" = no filter; otherwise the provider id / agent id
   const [providerFilter, setProviderFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
+  // The trend chart shows one metric at a time (see TrendBars).
+  const [metric, setMetric] = useState<TrendMetric>("requests");
   const [data, setData] = useState<DashboardData | null>(null);
   // Costs arrive already converted to the preferred currency (Settings)
   const [pref, setPref] = useState("CNY");
@@ -318,19 +306,20 @@ export default function Dashboard() {
         {/* Request trend */}
         <div className="mt-3 rounded-lg border border-line bg-surface p-3.5">
           <div className="flex items-center justify-between">
-            <h3 className="text-[12.5px] font-semibold">Request trend</h3>
-            <div className="flex items-center gap-3 text-[10.5px] text-mut">
-              <span className="flex items-center gap-1">
-                <span className="h-1 w-2 rounded-full" style={{ background: "var(--kiwi)" }} />
-                Requests
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="h-1 w-2 rounded-full" style={{ background: "var(--orange)" }} />
-                Tokens
-              </span>
+            <h3 className="text-[12.5px] font-semibold">Usage trend</h3>
+            <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
+              {(["requests", "tokens"] as TrendMetric[]).map((m, i) => (
+                <button
+                  key={m}
+                  className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${metric === m ? " active" : ""}`}
+                  onClick={() => setMetric(m)}
+                >
+                  {m === "requests" ? "Requests" : "Tokens"}
+                </button>
+              ))}
             </div>
           </div>
-          <TrendChart data={data} />
+          <TrendBars data={data} metric={metric} />
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

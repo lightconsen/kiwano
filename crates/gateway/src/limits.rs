@@ -13,8 +13,14 @@
 //!   * **plan percent** — `plan_limits` ceilings (`five_hour`, `weekly`) against
 //!     the utilization the provider's own endpoint reports (see `plan_quota`).
 
+use std::sync::Arc;
+// `Duration` below is chrono's — the two are named apart so the date maths
+// stays readable.
+use std::time::Duration as StdDuration;
+
 use chrono::{Datelike, Duration, NaiveDate, SecondsFormat, TimeZone, Utc};
 
+use crate::server::GatewayState;
 use crate::store::{Provider, Store};
 
 /// Start of the current reset period as the RFC3339 UTC instant a `ts >=`
@@ -131,6 +137,146 @@ pub fn period_limit_usage(
     }))
 }
 
+/// Why a provider is out of service.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockReason {
+    /// A plan window's live utilization reached the ceiling configured for it.
+    PlanWindow { window: String, util: f64, pct: f64 },
+    /// The period's usage reached an amount limit.
+    Spend { used: f64, limit: f64, unit: String },
+}
+
+impl BlockReason {
+    /// One line, for a log and for the Apps card.
+    pub fn describe(&self) -> String {
+        match self {
+            BlockReason::PlanWindow { window, util, pct } => {
+                format!("{window} window at {util:.0}% of a {pct:.0}% ceiling")
+            }
+            BlockReason::Spend { used, limit, unit } => {
+                format!("{used:.2} of {limit:.2} {unit} this period")
+            }
+        }
+    }
+}
+
+/// Which providers are over a limit right now.
+///
+/// Derived state, never authored: it is recomputed from scratch every tick, so
+/// it cannot strand a provider the way a persisted `enabled = false` would —
+/// there is no marker to clean up and no "who switched this off?" to answer.
+#[derive(Debug, Default)]
+pub struct LimitState {
+    blocked: std::collections::HashMap<String, BlockReason>,
+}
+
+impl LimitState {
+    pub fn blocked(&self, provider_id: &str) -> Option<&BlockReason> {
+        self.blocked.get(provider_id)
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &BlockReason)> {
+        self.blocked.iter().map(|(id, r)| (id.as_str(), r))
+    }
+
+    /// A snapshot with exactly these providers blocked. `evaluate` is the
+    /// production constructor; this is for stating a case outright.
+    #[cfg(test)]
+    pub fn from_reasons(reasons: impl IntoIterator<Item = (String, BlockReason)>) -> Self {
+        LimitState {
+            blocked: reasons.into_iter().collect(),
+        }
+    }
+}
+
+/// Take the providers that are over a limit out of a route's candidate list.
+/// `None` when nothing was removed, so the common case allocates nothing.
+pub fn without_blocked(
+    route: &crate::router::AgentRoute,
+    limits: &LimitState,
+) -> Option<crate::router::AgentRoute> {
+    if limits.blocked.is_empty() {
+        return None;
+    }
+    let kept: Vec<_> = route
+        .candidates
+        .iter()
+        .filter(|c| limits.blocked(&c.id).is_none())
+        .cloned()
+        .collect();
+    (kept.len() != route.candidates.len()).then(|| crate::router::AgentRoute {
+        candidates: kept,
+        ..route.clone()
+    })
+}
+
+/// Evaluate every provider's limits against the store.
+///
+/// Best-effort throughout: a provider whose numbers cannot be read is left
+/// unblocked. A limit that fails closed would take the agent down on a hiccup,
+/// which is a worse failure than one more request against the cap.
+pub fn evaluate(store: &Store) -> LimitState {
+    let mut blocked = std::collections::HashMap::new();
+    let providers = match store.list_providers() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "limit evaluation skipped: providers unreadable");
+            return LimitState::default();
+        }
+    };
+    for p in providers {
+        // `enabled` is the user's switch and the router already honours it;
+        // unlimited has nothing to measure.
+        if !p.enabled || p.billing == crate::store::Billing::Unlimited {
+            continue;
+        }
+        if let Ok(Some(pl)) = period_limit_usage(store, &p) {
+            if pl.used >= pl.limit {
+                blocked.insert(
+                    p.id.clone(),
+                    BlockReason::Spend {
+                        used: pl.used,
+                        limit: pl.limit,
+                        unit: pl.unit,
+                    },
+                );
+            }
+        }
+    }
+    LimitState { blocked }
+}
+
+/// How often the limits are re-evaluated. The plan half rides a 5-minute
+/// upstream cache, so this is about noticing a spending limit promptly rather
+/// than about refresh cost.
+pub const LIMIT_INTERVAL: StdDuration = StdDuration::from_secs(30);
+
+/// Re-evaluate and publish, forever. Shaped like `strategy::prober::run` — the
+/// other thing here that has to look at the world outside a request.
+pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
+    loop {
+        let prev = state.limits();
+        let current = state.set_limits(evaluate(&state.store));
+        // Transitions only: this is the line that answers "why did my request
+        // start failing?" without turning the log into a per-tick heartbeat.
+        for (id, reason) in current.entries() {
+            if prev.blocked(id).is_none() {
+                tracing::warn!(
+                    provider = %id,
+                    reason = %reason.describe(),
+                    "provider is over its limit; routing around it"
+                );
+            }
+        }
+        for (id, _) in prev.entries() {
+            if current.blocked(id).is_none() {
+                tracing::info!(provider = %id, "provider is back under its limit");
+            }
+        }
+        tokio::time::sleep(interval).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +298,97 @@ mod tests {
         let (since, key) = period_start(t, None, 0);
         assert_eq!(since, None);
         assert_eq!(key, "all");
+    }
+
+    fn store_with_spend(provider_id: &str, limit: f64, spent: f64) -> Store {
+        use crate::store::{Billing, Protocol, Provider, UsageRecord};
+        let s = Store::open_in_memory().unwrap();
+        s.insert_provider(&Provider {
+            id: provider_id.into(),
+            name: provider_id.into(),
+            protocol: Protocol::Anthropic,
+            base_url: "https://a.example.com".into(),
+            api_path: None,
+            endpoints: Vec::new(),
+            api_key: None,
+            billing: Billing::Metered,
+            period_limit: Some(limit),
+            limit_unit: Some("CNY".into()),
+            reset_period: Some("monthly".into()),
+            plan_query: None,
+            plan_limits: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
+            enabled: true,
+            created_at: crate::store::now_rfc3339(),
+            updated_at: crate::store::now_rfc3339(),
+        })
+        .unwrap();
+        s.record_usage(&UsageRecord {
+            ts: crate::store::now_rfc3339(),
+            agent: "claude".into(),
+            provider_id: provider_id.into(),
+            model: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: None,
+            status: "ok".into(),
+            cost: Some(spent),
+            cost_currency: Some("CNY".into()),
+        })
+        .unwrap();
+        s
+    }
+
+    #[test]
+    fn evaluate_blocks_a_provider_over_its_cap_and_clears_when_it_rolls_back() {
+        let s = store_with_spend("payg-1", 30.0, 31.0);
+        let state = evaluate(&s);
+        assert!(
+            matches!(state.blocked("payg-1"), Some(BlockReason::Spend { .. })),
+            "31 spent against a 30 cap is over it"
+        );
+
+        // Under the cap: not blocked. (`evaluate` recomputes from scratch, so
+        // there is no state to clear — that is the point of not persisting it.)
+        let s2 = store_with_spend("payg-1", 30.0, 29.0);
+        assert!(evaluate(&s2).blocked("payg-1").is_none());
+    }
+
+    #[test]
+    fn evaluate_leaves_unlimited_and_disabled_providers_alone() {
+        let s = store_with_spend("payg-1", 30.0, 31.0);
+        // Unlimited meters nothing, so a cap on it means nothing either.
+        let mut p = s.get_provider("payg-1").unwrap().unwrap();
+        p.billing = crate::store::Billing::Unlimited;
+        s.update_provider(&p).unwrap();
+        assert!(evaluate(&s).blocked("payg-1").is_none());
+
+        // A provider the user switched off is already not routed; blocking it
+        // too would just mean two mechanisms with one visible cause.
+        let mut p = s.get_provider("payg-1").unwrap().unwrap();
+        p.billing = crate::store::Billing::Metered;
+        p.enabled = false;
+        s.update_provider(&p).unwrap();
+        assert!(evaluate(&s).blocked("payg-1").is_none());
+    }
+
+    #[test]
+    fn a_provider_with_no_limit_is_never_blocked() {
+        let mut s = store_with_spend("payg-1", 30.0, 999.0);
+        let mut p = s.get_provider("payg-1").unwrap().unwrap();
+        p.period_limit = None;
+        s.update_provider(&p).unwrap();
+        assert!(evaluate(&s).blocked("payg-1").is_none());
+        // and a zero cap is "no limit", not "everything is over it"
+        let mut p = s.get_provider("payg-1").unwrap().unwrap();
+        p.period_limit = Some(0.0);
+        s.update_provider(&p).unwrap();
+        assert!(evaluate(&s).blocked("payg-1").is_none());
+        let _ = &mut s;
     }
 
     #[test]

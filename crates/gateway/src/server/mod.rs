@@ -40,6 +40,10 @@ pub struct GatewayState {
     /// Bundled model price table (crates/adapters resources/models.json);
     /// consulted at usage-record time to cost every metered request.
     pub(crate) pricing: RwLock<kiwano_adapters::model_pricing::PricingTable>,
+    /// Providers currently over a billing limit. Derived state, recomputed by
+    /// `crate::limits::run`; selection reads it, so the gateway enforces limits
+    /// whether or not the desktop app is open to.
+    limits: RwLock<Arc<crate::limits::LimitState>>,
     pub started_at: Instant,
     pub version: &'static str,
 }
@@ -66,8 +70,11 @@ impl GatewayState {
             .read_timeout(Duration::from_secs(300))
             .pool_idle_timeout(Duration::from_secs(90))
             .build()?;
-        // Resolve before `store` moves into the Arc below.
+        // Resolve before `store` moves into the Arc below. The limits are
+        // seeded here so the very first request already respects them, rather
+        // than being served in the window before the task's first tick.
         let pricing = resolve_pricing(&store);
+        let limits = crate::limits::evaluate(&store);
         Ok(GatewayState {
             store: Arc::new(store),
             http,
@@ -76,6 +83,7 @@ impl GatewayState {
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             log_cfg: RwLock::new(log_config),
             pricing: RwLock::new(pricing),
+            limits: RwLock::new(Arc::new(limits)),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         })
@@ -85,6 +93,19 @@ impl GatewayState {
     /// a future backend-fed table swaps here on `/reload`).
     pub fn pricing(&self) -> kiwano_adapters::model_pricing::PricingTable {
         self.pricing.read().expect("pricing lock poisoned").clone()
+    }
+
+    /// The providers over a limit right now (cheap `Arc` clone).
+    pub fn limits(&self) -> Arc<crate::limits::LimitState> {
+        self.limits.read().expect("limits lock poisoned").clone()
+    }
+
+    /// Publish a fresh evaluation, returning it. Only `crate::limits::run`
+    /// writes here.
+    pub fn set_limits(&self, next: crate::limits::LimitState) -> Arc<crate::limits::LimitState> {
+        let next = Arc::new(next);
+        *self.limits.write().expect("limits lock poisoned") = next.clone();
+        next
     }
 
     /// Current route table snapshot (cheap `Arc` clone).
@@ -194,6 +215,9 @@ pub fn error_response(
 pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Response {
     let (status, kind) = match &err {
         GatewayError::NoBinding(_) => (StatusCode::SERVICE_UNAVAILABLE, "no_provider_bound"),
+        // 429 rather than 503: the provider exists and works, the caller has
+        // simply spent what it was allowed to for this period.
+        GatewayError::AllOverLimit { .. } => (StatusCode::TOO_MANY_REQUESTS, "provider_over_limit"),
         GatewayError::ProviderNotFound(_) => (StatusCode::SERVICE_UNAVAILABLE, "provider_missing"),
         GatewayError::UnsupportedPath(_) => (StatusCode::NOT_FOUND, "unsupported_path"),
         GatewayError::Upstream(_) | GatewayError::Http(_) => {

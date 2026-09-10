@@ -281,12 +281,13 @@ pub async fn resolve_via_engine(
     table: &RouteTable,
     engine: &crate::strategy::StrategyEngine,
     store: &crate::store::Store,
+    limits: &crate::limits::LimitState,
     protocol_hint: Option<Protocol>,
     placeholder_key: Option<&str>,
     session: Option<&str>,
 ) -> Result<RoutedRequest> {
     let (route, attribution) = route_agent(table, protocol_hint, placeholder_key)?;
-    let provider = engine.select(store, route, session).await?;
+    let provider = engine.select(store, route, session, limits).await?;
     Ok(RoutedRequest {
         agent: route.agent.clone(),
         attribution,

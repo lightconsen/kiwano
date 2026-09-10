@@ -177,16 +177,44 @@ impl StrategyEngine {
         store: &Store,
         route: &AgentRoute,
         session: Option<&str>,
+        limits: &crate::limits::LimitState,
     ) -> Result<crate::router::UpstreamProvider> {
         if route.candidates.is_empty() {
             return Err(GatewayError::NoBinding(route.agent.clone()));
         }
-        match route.strategy {
-            StrategyType::Single => Self::primary(route),
-            StrategyType::Failover => self.select_failover(route).await,
-            StrategyType::Roundrobin => self.select_roundrobin(route, session).await,
-            StrategyType::Timewindow => Ok(self.select_timewindow(route)),
-            StrategyType::Quota => self.select_quota(store, route).await,
+        // Providers over a billing limit are not candidates at all. Pruning the
+        // list here, rather than checking inside `candidate_available`, is what
+        // makes it hold for every strategy: `candidate_available` is consulted
+        // by failover/roundrobin/quota only, while `single` and `timewindow`
+        // index `candidates` directly — and so do the no-backup fallbacks
+        // (`Self::primary`, `weighted_next`), which would otherwise serve a
+        // provider the user has already spent out.
+        let pruned = crate::limits::without_blocked(route, limits);
+        let usable = pruned.as_ref().unwrap_or(route);
+        if usable.candidates.is_empty() {
+            // Name what is blocked and by how much, so the failure says what to
+            // do about it rather than just refusing.
+            let reasons = route
+                .candidates
+                .iter()
+                .filter_map(|c| {
+                    limits
+                        .blocked(&c.id)
+                        .map(|r| format!("{} ({})", c.name, r.describe()))
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(GatewayError::AllOverLimit {
+                agent: route.agent.clone(),
+                reasons,
+            });
+        }
+        match usable.strategy {
+            StrategyType::Single => Self::primary(usable),
+            StrategyType::Failover => self.select_failover(usable).await,
+            StrategyType::Roundrobin => self.select_roundrobin(usable, session).await,
+            StrategyType::Timewindow => Ok(self.select_timewindow(usable)),
+            StrategyType::Quota => self.select_quota(store, usable).await,
         }
     }
 
@@ -381,7 +409,14 @@ mod tests {
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
         for _ in 0..3 {
-            assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "a");
+            assert_eq!(
+                engine
+                    .select(&s, &r, None, &crate::limits::LimitState::default())
+                    .await
+                    .unwrap()
+                    .id,
+                "a"
+            );
         }
     }
 
@@ -398,13 +433,27 @@ mod tests {
         for _ in 0..4 {
             engine.record("claude", "a", false).await;
         }
-        assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "b");
+        assert_eq!(
+            engine
+                .select(&s, &r, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "b"
+        );
 
         // Backup also open → fall back to the primary (real upstream failure semantics)
         for _ in 0..4 {
             engine.record("claude", "b", false).await;
         }
-        assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "a");
+        assert_eq!(
+            engine
+                .select(&s, &r, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "a"
+        );
 
         // Primary recovery (timeout=0 goes HalfOpen immediately + success flips to closed)
         // Build a fresh engine to exercise the recovery path: a success record clears consecutive failures
@@ -415,7 +464,14 @@ mod tests {
             StrategyType::Failover,
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
-        assert_eq!(engine2.select(&s, &r2, None).await.unwrap().id, "a");
+        assert_eq!(
+            engine2
+                .select(&s, &r2, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "a"
+        );
     }
 
     #[tokio::test]
@@ -428,10 +484,28 @@ mod tests {
         );
 
         // Same session stays sticky
-        let first = engine.select(&s, &r, Some("sess-1")).await.unwrap().id;
+        let first = engine
+            .select(
+                &s,
+                &r,
+                Some("sess-1"),
+                &crate::limits::LimitState::default(),
+            )
+            .await
+            .unwrap()
+            .id;
         for _ in 0..5 {
             assert_eq!(
-                engine.select(&s, &r, Some("sess-1")).await.unwrap().id,
+                engine
+                    .select(
+                        &s,
+                        &r,
+                        Some("sess-1"),
+                        &crate::limits::LimitState::default()
+                    )
+                    .await
+                    .unwrap()
+                    .id,
                 first
             );
         }
@@ -440,7 +514,12 @@ mod tests {
         let mut counts = std::collections::HashMap::new();
         for i in 0..4 {
             let id = engine
-                .select(&s, &r, Some(&format!("sess-{i}")))
+                .select(
+                    &s,
+                    &r,
+                    Some(&format!("sess-{i}")),
+                    &crate::limits::LimitState::default(),
+                )
                 .await
                 .unwrap()
                 .id;
@@ -458,13 +537,21 @@ mod tests {
             StrategyType::Roundrobin,
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
-        let sticky = engine.select(&s, &r, Some("s")).await.unwrap().id;
+        let sticky = engine
+            .select(&s, &r, Some("s"), &crate::limits::LimitState::default())
+            .await
+            .unwrap()
+            .id;
 
         // Sticky candidate trips its breaker → same session is reassigned to another
         for _ in 0..4 {
             engine.record("claude", &sticky, false).await;
         }
-        let reassigned = engine.select(&s, &r, Some("s")).await.unwrap().id;
+        let reassigned = engine
+            .select(&s, &r, Some("s"), &crate::limits::LimitState::default())
+            .await
+            .unwrap()
+            .id;
         assert_ne!(reassigned, sticky);
     }
 
@@ -480,7 +567,14 @@ mod tests {
                 candidate("b", 1, Some(("00:00", "23:59"))),
             ],
         );
-        assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "b");
+        assert_eq!(
+            engine
+                .select(&s, &r, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "b"
+        );
 
         // No window contains the current time (e.g. a narrow window a minute ahead) → back to primary
         let (s2, e2) = narrow_future_window();
@@ -488,7 +582,14 @@ mod tests {
             StrategyType::Timewindow,
             vec![candidate("a", 1, None), candidate("b", 1, Some((s2, e2)))],
         );
-        assert_eq!(engine.select(&s, &r2, None).await.unwrap().id, "a");
+        assert_eq!(
+            engine
+                .select(&s, &r2, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "a"
+        );
     }
 
     /// Build an [start,end) window guaranteed not to contain the current local time (now+2 to now+3 minutes).
@@ -517,6 +618,117 @@ mod tests {
         let late = now_min >= 23 * 60;
         let early = now_min <= 6 * 60;
         assert_eq!(in_window(now_min, "23:00", "06:00"), late || early);
+    }
+
+    /// A state with exactly one provider over an amount limit.
+    fn blocked(id: &str) -> crate::limits::LimitState {
+        crate::limits::LimitState::from_reasons([(
+            id.to_string(),
+            crate::limits::BlockReason::Spend {
+                used: 31.0,
+                limit: 30.0,
+                unit: "CNY".into(),
+            },
+        )])
+    }
+
+    #[tokio::test]
+    async fn every_strategy_routes_around_a_blocked_provider() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        let limits = blocked("a");
+        // `candidate_available` only guards failover/roundrobin/quota; single
+        // and timewindow index the candidate list directly, and every strategy
+        // has a "fall back to the primary" branch. Pruning the list is what
+        // covers all of them, so all five are asserted rather than the one.
+        for strategy in [
+            StrategyType::Single,
+            StrategyType::Failover,
+            StrategyType::Roundrobin,
+            StrategyType::Timewindow,
+            StrategyType::Quota,
+        ] {
+            let r = route(
+                strategy,
+                vec![candidate("a", 1, None), candidate("b", 1, None)],
+            );
+            let picked = engine.select(&s, &r, None, &limits).await.unwrap();
+            assert_eq!(picked.id, "b", "{strategy:?} served a blocked provider");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_no_backup_fallback_cannot_resurrect_a_blocked_provider() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        // 'a' is over its limit and 'b' is circuit-open, so failover has no
+        // available candidate and takes its fallback branch. That branch must
+        // land on the pruned primary, not the original one.
+        let r = route(
+            StrategyType::Failover,
+            vec![candidate("a", 1, None), candidate("b", 1, None)],
+        );
+        engine.record("claude", "b", false).await;
+        engine.record("claude", "b", false).await;
+        engine.record("claude", "b", false).await;
+        engine.record("claude", "b", false).await;
+        engine.record("claude", "b", false).await;
+
+        let picked = engine.select(&s, &r, None, &blocked("a")).await.unwrap();
+        assert_eq!(picked.id, "b", "the fallback must not reach for 'a'");
+    }
+
+    #[tokio::test]
+    async fn all_candidates_blocked_is_a_hard_wall() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        let r = route(
+            StrategyType::Single,
+            vec![candidate("a", 1, None), candidate("b", 1, None)],
+        );
+        let limits = crate::limits::LimitState::from_reasons([
+            (
+                "a".to_string(),
+                crate::limits::BlockReason::Spend {
+                    used: 31.0,
+                    limit: 30.0,
+                    unit: "CNY".into(),
+                },
+            ),
+            (
+                "b".to_string(),
+                crate::limits::BlockReason::Spend {
+                    used: 11.0,
+                    limit: 10.0,
+                    unit: "CNY".into(),
+                },
+            ),
+        ]);
+
+        let err = engine.select(&s, &r, None, &limits).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("over its limit") && msg.contains("31.00 of 30.00"),
+            "the failure should say which limit was hit: {msg}"
+        );
+        // Distinct from NoBinding: something is bound, it just must not be spent on.
+        assert!(
+            matches!(err, GatewayError::AllOverLimit { .. }),
+            "expected AllOverLimit, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_single_strategy_with_an_unblocked_provider_is_untouched() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        let r = route(StrategyType::Single, vec![candidate("a", 1, None)]);
+        // Nothing blocked anywhere: the pruning path must not alter behaviour.
+        let picked = engine
+            .select(&s, &r, None, &crate::limits::LimitState::default())
+            .await
+            .unwrap();
+        assert_eq!(picked.id, "a");
     }
 
     #[tokio::test]
@@ -553,13 +765,27 @@ mod tests {
         r.config = Some(r#"{"limit": 5, "unit": "requests"}"#.into());
 
         // Under the limit → primary
-        assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "a");
+        assert_eq!(
+            engine
+                .select(&s, &r, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "a"
+        );
 
         // Primary records 5 rows → over the limit, sink to backup
         for _ in 0..5 {
             s.record_usage(&usage_row("a")).unwrap();
         }
-        assert_eq!(engine.select(&s, &r, None).await.unwrap().id, "b");
+        assert_eq!(
+            engine
+                .select(&s, &r, None, &crate::limits::LimitState::default())
+                .await
+                .unwrap()
+                .id,
+            "b"
+        );
     }
 
     #[test]

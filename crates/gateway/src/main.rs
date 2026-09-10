@@ -113,6 +113,13 @@ async fn main() {
         kiwano_gateway::strategy::prober::PROBE_INTERVAL,
     ));
 
+    // Billing limits, evaluated here rather than in the desktop app so they
+    // hold with the app closed — the gateway is the process that routes.
+    tokio::spawn(kiwano_gateway::limits::run(
+        state.clone(),
+        kiwano_gateway::limits::LIMIT_INTERVAL,
+    ));
+
     // Request-log retention: prune at startup and every 6 hours (bodies make
     // the log grow fast; the retain_days setting lives in gateway_settings).
     {

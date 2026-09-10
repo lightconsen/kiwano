@@ -150,6 +150,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         &table,
         &state.engine,
         &state.store,
+        &state.limits(),
         inbound,
         key.as_deref(),
         session.as_deref(),
@@ -161,6 +162,9 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
             let message = e.to_string();
             let (agent, kind) = match &e {
                 crate::error::GatewayError::NoBinding(a) => (Some(a.clone()), "no_provider_bound"),
+                crate::error::GatewayError::AllOverLimit { agent, .. } => {
+                    (Some(agent.clone()), "provider_over_limit")
+                }
                 _ => (None, "routing_error"),
             };
             let resp = error_into_response(e, inbound);

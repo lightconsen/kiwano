@@ -15,6 +15,11 @@ pub enum GatewayError {
     #[error("no enabled provider bound for agent `{0}`")]
     NoBinding(String),
 
+    /// Every provider this agent could use is over a billing limit. Distinct
+    /// from `NoBinding`: something is bound, it just must not be spent on.
+    #[error("every provider for agent `{agent}` is over its limit: {reasons}")]
+    AllOverLimit { agent: String, reasons: String },
+
     #[error("provider `{0}` not found")]
     ProviderNotFound(String),
 

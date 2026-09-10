@@ -50,7 +50,7 @@ export interface ProviderHealth {
 export interface QuotaState {
   used: number;
   limit: number;
-  /** requests=counted by requests (subscription) · wan_tokens=counted by 万 tokens ·
+  /** requests=counted by requests (subscription) · wan_tokens=counted by 10k-token blocks ·
       otherwise a 3-letter ISO currency code (limit denominated in that currency) */
   unit: "requests" | "wan_tokens" | (string & {});
   /** Reset date YYYY-MM-DD (subscription period); null for payg limits */
@@ -71,7 +71,7 @@ export interface UsageSummary {
   spark: number[] | null;
 }
 
-/** Plan-quota query config (providers.plan_query JSON, 套餐查询): one of the
+/** Plan-quota query config (providers.plan_query JSON): one of the
     known templates plus its extra credential fields. Templates without extra
     credentials authenticate with the provider's own API key. */
 export interface PlanQuery {
@@ -175,7 +175,7 @@ export interface Provider {
   plan_price?: string;
   /** Raw limit unit (requests | wan_tokens | ISO currency) for edit prefill */
   limit_unit?: string;
-  /** Plan-quota query config (套餐查询); absent = not configured */
+  /** Plan-quota query config; absent = not configured */
   plan_query?: PlanQuery | null;
   enabled: boolean;
   /** Derived from agent_bindings */
@@ -215,7 +215,7 @@ export interface NewProviderInput {
   agents: AgentId[];
   /** Additional per-protocol endpoints to persist alongside the primary */
   endpoints?: { protocol: Protocol; endpoint: string }[];
-  /** Plan-quota query config (套餐查询); null clears an existing config */
+  /** Plan-quota query config; null clears an existing config */
   plan_query?: PlanQuery | null;
   /**
    * Advanced forwarding settings. Absent in an update = keep existing
@@ -502,7 +502,7 @@ export interface KiwanoApi {
   syncHub(): Promise<HubSyncReport>;
   /** Cost alert patrol (backend KV dedupe: returned at most once per Provider per reset period) */
   checkUsageAlerts(): Promise<UsageAlert[]>;
-  /** Token-plan quota query (套餐查询); 5-min backend cache, force bypasses it */
+  /** Token-plan quota query; 5-min backend cache, force bypasses it */
   getPlanQuota(providerId: string, force?: boolean): Promise<PlanQuotaReport>;
   /** Currency metadata for the Settings selector + client-side conversion */
   getCurrencyMeta(): Promise<CurrencyMeta>;

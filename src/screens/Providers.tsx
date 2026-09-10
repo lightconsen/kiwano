@@ -195,7 +195,7 @@ function UsageCell({
             {u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? (
               <>
                 {u.quota.used}/{u.quota.limit}{" "}
-                <span className="font-normal text-mut">{u.quota.unit === "requests" ? "req" : "万 tok"}</span>
+                <span className="font-normal text-mut">{u.quota.unit === "requests" ? "req" : "10k tok"}</span>
               </>
             ) : (
               <span>{quotaAmountText(u.quota.used, u.quota.limit, u.quota.unit)}</span>
@@ -206,7 +206,7 @@ function UsageCell({
               .filter(Boolean)
               .join(" · ")}
           </div>
-          {/* Live plan quota (套餐查询): per-window utilization from the provider's own endpoint */}
+          {/* Live plan quota: per-window utilization from the provider's own endpoint */}
           {planLine && (
             <div
               className="mt-0.5 truncate text-[10.5px]"
@@ -793,7 +793,7 @@ export default function Providers({
   const [seg, setSeg] = useState<AgentId | "all">(initialAgent ?? "all");
   const [takenOver, setTakenOver] = useState<Set<AgentId> | null>(null);
   const [enabling, setEnabling] = useState(false);
-  // Plan-quota reports per provider (套餐查询), auto-refreshed on load
+  // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
   const [quotaBusy, setQuotaBusy] = useState(false);
   // Currency metadata (preferred display currency for cost cells)

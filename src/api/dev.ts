@@ -980,7 +980,7 @@ export const devApi: KiwanoApi = {
         provider_id: providerId,
         template,
         success: false,
-        error: "该 Provider 未配置套餐查询",
+        error: "This provider has no plan query configured",
         note: null,
         tiers: [],
         queried_at: Date.now(),

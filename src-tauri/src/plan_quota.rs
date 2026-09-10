@@ -119,18 +119,18 @@ fn fold_response(
 ) -> Result<Result<serde_json::Value, String>, String> {
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Ok(Err(format!("鉴权失败 (HTTP {status})：API Key 无效或已过期")));
+        return Ok(Err(format!("Auth failed (HTTP {status}): the API key is invalid or expired")));
     }
     if !status.is_success() {
         let body = resp.text().unwrap_or_default();
-        return Ok(Err(format!("接口错误 (HTTP {status}): {body}")));
+        return Ok(Err(format!("Endpoint error (HTTP {status}): {body}")));
     }
     // Read the whole body before parsing: a read failure is transient (outer
     // Err), a parse failure of a complete body is deterministic.
-    let raw = resp.text().map_err(|e| format!("网络错误: {e}"))?;
+    let raw = resp.text().map_err(|e| format!("Network error: {e}"))?;
     match serde_json::from_str(&raw) {
         Ok(v) => Ok(Ok(v)),
-        Err(e) => Ok(Err(format!("响应解析失败: {e}"))),
+        Err(e) => Ok(Err(format!("Failed to parse the response: {e}"))),
     }
 }
 
@@ -138,7 +138,7 @@ fn fold_response(
 fn fetch_json(
     req: reqwest::blocking::RequestBuilder,
 ) -> Result<Result<serde_json::Value, String>, String> {
-    let resp = req.send().map_err(|e| format!("网络错误: {e}"))?;
+    let resp = req.send().map_err(|e| format!("Network error: {e}"))?;
     fold_response(resp)
 }
 
@@ -153,7 +153,7 @@ fn blocking_client() -> Result<reqwest::blocking::Client, String> {
 
 fn query_kimi(client: &reqwest::blocking::Client, api_key: &str) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
-        return Ok(QuotaOutcome::Failed("API Key 为空".to_string()));
+        return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
     let req = client
         .get("https://api.kimi.com/coding/v1/usages")
@@ -296,10 +296,10 @@ fn zhipu_outcome(body: &serde_json::Value) -> QuotaOutcome {
             .get("msg")
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown error");
-        return QuotaOutcome::Failed(format!("接口错误: {msg}"));
+        return QuotaOutcome::Failed(format!("Endpoint error: {msg}"));
     }
     let Some(data) = body.get("data") else {
-        return QuotaOutcome::Failed("响应缺少 data 字段".to_string());
+        return QuotaOutcome::Failed("Response is missing the data field".to_string());
     };
     let note = data
         .get("level")
@@ -313,7 +313,7 @@ fn zhipu_outcome(body: &serde_json::Value) -> QuotaOutcome {
 
 fn query_zhipu(client: &reqwest::blocking::Client, base_url: &str, api_key: &str) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
-        return Ok(QuotaOutcome::Failed("API Key 为空".to_string()));
+        return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
     let url = format!("{}/api/monitor/usage/quota/limit", zhipu_quota_base(base_url));
     // Zhipu does NOT use a Bearer prefix.
@@ -361,7 +361,7 @@ fn query_minimax(
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
-        return Ok(QuotaOutcome::Failed("API Key 为空".to_string()));
+        return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
     let domain = if base_url.to_lowercase().contains("minimaxi.com") {
         "api.minimaxi.com"
@@ -388,7 +388,7 @@ fn query_minimax(
                 .get("status_msg")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown error");
-            return Ok(QuotaOutcome::Failed(format!("接口错误 (code {code}): {msg}")));
+            return Ok(QuotaOutcome::Failed(format!("Endpoint error (code {code}): {msg}")));
         }
     }
     Ok(QuotaOutcome::Ok {
@@ -464,7 +464,7 @@ fn query_zenmux(
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
-        return Ok(QuotaOutcome::Failed("API Key 为空".to_string()));
+        return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
     let req = client
         .get(quota_url)
@@ -479,10 +479,10 @@ fn query_zenmux(
             .get("message")
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown error");
-        return Ok(QuotaOutcome::Failed(format!("接口错误: {msg}")));
+        return Ok(QuotaOutcome::Failed(format!("Endpoint error: {msg}")));
     }
     let Some(data) = body.get("data") else {
-        return Ok(QuotaOutcome::Failed("响应缺少 data 字段".to_string()));
+        return Ok(QuotaOutcome::Failed("Response is missing the data field".to_string()));
     };
 
     let mut tiers = Vec::new();
@@ -561,7 +561,7 @@ fn query_opencode_go(
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
-        return Ok(QuotaOutcome::Failed("API Key 为空".to_string()));
+        return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
     // The usage endpoint only accepts `Authorization: Bearer` — the inverse
     // of the inference side, which wants x-api-key.
@@ -571,14 +571,14 @@ fn query_opencode_go(
         .header("Accept", "application/json");
     let resp = match req.send() {
         Ok(r) => r,
-        Err(e) => return Err(format!("网络错误: {e}")),
+        Err(e) => return Err(format!("Network error: {e}")),
     };
     let status = resp.status();
     // 403 EntitlementError: the key is valid (Zen and Go share the workspace
     // key) but the workspace has no Go subscription — a distinct message.
     if status == reqwest::StatusCode::FORBIDDEN {
         return Ok(QuotaOutcome::Failed(
-            "API Key 有效但未订阅 OpenCode Go 套餐 (HTTP 403)".to_string(),
+            "API key is valid but not subscribed to OpenCode Go (HTTP 403)".to_string(),
         ));
     }
     let body = match fold_response(resp)? {
@@ -589,7 +589,7 @@ fn query_opencode_go(
     // No window parsed = shape unrecognized (the endpoint changed shape once
     // on launch day) — fail loudly instead of rendering an empty card.
     if tiers.is_empty() {
-        return Ok(QuotaOutcome::Failed("响应形态无法识别".to_string()));
+        return Ok(QuotaOutcome::Failed("Unrecognized response shape".to_string()));
     }
     Ok(QuotaOutcome::Ok { tiers, note: None })
 }
@@ -610,7 +610,7 @@ const VOLCENGINE_SERVICE: &str = "ark";
 const VOLCENGINE_CONTENT_TYPE: &str = "application/json; charset=utf-8";
 const VOLCENGINE_SIGNED_HEADERS: &str = "host;x-date;x-content-sha256;content-type";
 const VOLCENGINE_AKSK_HINT: &str =
-    "请检查 AccessKey ID / Secret 是否正确，且账号具备 Ark 用量查询 (OpenAPI) 权限";
+    "Check that the AccessKey ID / Secret are correct and the account has Ark usage query (OpenAPI) permission";
 
 enum VolcCall {
     Body(serde_json::Value),
@@ -810,12 +810,12 @@ fn volcengine_openapi_call(
         .send();
     let resp = match resp {
         Ok(r) => r,
-        Err(e) => return VolcCall::Transient(format!("网络错误: {e}")),
+        Err(e) => return VolcCall::Transient(format!("Network error: {e}")),
     };
 
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return VolcCall::Auth(format!("鉴权失败 (HTTP {status})。{VOLCENGINE_AKSK_HINT}"));
+        return VolcCall::Auth(format!("Auth failed (HTTP {status}). {VOLCENGINE_AKSK_HINT}"));
     }
     if !status.is_success() {
         // The gateway returns 4xx (often 400) with the same
@@ -827,30 +827,30 @@ fn volcengine_openapi_call(
             if let Some((code, msg)) = volcengine_response_error(&body) {
                 if volcengine_is_auth_error_code(&code) {
                     return VolcCall::Auth(format!(
-                        "鉴权失败 (HTTP {status}, {code}): {msg}。{VOLCENGINE_AKSK_HINT}"
+                        "Auth failed (HTTP {status}, {code}): {msg}. {VOLCENGINE_AKSK_HINT}"
                     ));
                 }
-                return VolcCall::Soft(format!("接口错误 (HTTP {status}, {code}): {msg}"));
+                return VolcCall::Soft(format!("Endpoint error (HTTP {status}, {code}): {msg}"));
             }
         }
-        return VolcCall::Soft(format!("接口错误 (HTTP {status}): {raw}"));
+        return VolcCall::Soft(format!("Endpoint error (HTTP {status}): {raw}"));
     }
 
     let raw = match resp.text() {
         Ok(b) => b,
-        Err(e) => return VolcCall::Transient(format!("网络错误: {e}")),
+        Err(e) => return VolcCall::Transient(format!("Network error: {e}")),
     };
     let body: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(e) => return VolcCall::Soft(format!("响应解析失败: {e}")),
+        Err(e) => return VolcCall::Soft(format!("Failed to parse the response: {e}")),
     };
 
     // Business errors arrive as 200 + ResponseMetadata.Error.
     if let Some((code, msg)) = volcengine_response_error(&body) {
         if volcengine_is_auth_error_code(&code) {
-            return VolcCall::Auth(format!("鉴权失败 ({code}): {msg}。{VOLCENGINE_AKSK_HINT}"));
+            return VolcCall::Auth(format!("Auth failed ({code}): {msg}. {VOLCENGINE_AKSK_HINT}"));
         }
-        return VolcCall::Soft(format!("接口错误 ({code}): {msg}"));
+        return VolcCall::Soft(format!("Endpoint error ({code}): {msg}"));
     }
     VolcCall::Body(body)
 }
@@ -1003,12 +1003,12 @@ fn query_volcengine(
         // Signature passed and the request reached the business layer, but no
         // quota could be parsed. Include the raw payloads for diagnosis.
         Ok(QuotaOutcome::Failed(format!(
-            "未找到有效的套餐订阅 (签名已通过)。原始响应: {}",
+            "No active plan subscription found (signature passed). Raw response: {}",
             empty_responses.join(" || ")
         )))
     } else {
         Ok(QuotaOutcome::Failed(
-            "该凭据下未找到有效的 Agent Plan 或 Coding Plan 订阅".to_string(),
+            "No active Agent Plan or Coding Plan subscription under these credentials".to_string(),
         ))
     }
 }
@@ -1021,7 +1021,7 @@ pub fn plan_monthly_price(plan_query: Option<&str>) -> Option<String> {
     let raw = plan_query?;
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
     match v.get("template")?.as_str()? {
-        "opencode_go" => Some("$10/月".to_string()),
+        "opencode_go" => Some("$10/mo".to_string()),
         _ => None,
     }
 }
@@ -1044,7 +1044,7 @@ fn run_template(
             let project = field_str(fields, "project_id");
             if api_key.trim().is_empty() || org.is_empty() || project.is_empty() {
                 Ok(QuotaOutcome::Failed(
-                    "智谱团队套餐需要 API Key + 组织 ID + 项目 ID".to_string(),
+                    "The Zhipu team plan needs the API key + org ID + project ID".to_string(),
                 ))
             } else {
                 query_zhipu_team(&client, api_key, org, project)
@@ -1055,7 +1055,7 @@ fn run_template(
             let quota_url = field_str(fields, "quota_url");
             if quota_url.is_empty() {
                 Ok(QuotaOutcome::Failed(
-                    "请填写 ZenMux 用量查询接口 URL".to_string(),
+                    "Fill in the ZenMux usage endpoint URL".to_string(),
                 ))
             } else {
                 query_zenmux(&client, quota_url, api_key)
@@ -1067,7 +1067,7 @@ fn run_template(
             let sk = field_str(fields, "secret_access_key");
             if ak.is_empty() || sk.is_empty() {
                 Ok(QuotaOutcome::Failed(
-                    "火山方舟用量查询需要账号 AccessKey ID + Secret（非推理 API Key）".to_string(),
+                    "Volcengine Ark usage queries need the account AccessKey ID + Secret (not the inference API key)".to_string(),
                 ))
             } else {
                 query_volcengine(&client, base_url, ak, sk)
@@ -1075,9 +1075,9 @@ fn run_template(
         }
         // Grok reports quota over an undocumented gRPC-web API — stubbed.
         "grok" => Ok(QuotaOutcome::Failed(
-            "暂不支持 Grok 套餐查询（gRPC-web 接口尚未适配）".to_string(),
+            "Grok plan queries are not supported yet (the gRPC-web API is not adapted)".to_string(),
         )),
-        other => Ok(QuotaOutcome::Failed(format!("未知的套餐查询模板: {other}"))),
+        other => Ok(QuotaOutcome::Failed(format!("Unknown plan query template: {other}"))),
     }
 }
 
@@ -1121,12 +1121,12 @@ pub fn get_plan_quota_report(
     let p = store
         .get_provider(provider_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Provider 不存在: {provider_id}"))?;
+        .ok_or_else(|| format!("Provider not found: {provider_id}"))?;
     let query: serde_json::Value = p
         .plan_query
         .as_deref()
         .and_then(|s| serde_json::from_str(s).ok())
-        .ok_or_else(|| "该 Provider 未配置套餐查询".to_string())?;
+        .ok_or_else(|| "This provider has no plan query configured".to_string())?;
     let template = query
         .get("template")
         .and_then(|v| v.as_str())
@@ -1494,11 +1494,11 @@ mod tests {
     fn unknown_template_and_grok_fail_deterministically() {
         let fields = HashMap::new();
         match run_template("grok", &fields, "https://x.grok.com", "k").unwrap() {
-            QuotaOutcome::Failed(m) => assert!(m.contains("暂不支持")),
+            QuotaOutcome::Failed(m) => assert!(m.contains("not supported yet")),
             _ => panic!("grok must fail deterministically"),
         }
         match run_template("whatever", &fields, "https://x", "k").unwrap() {
-            QuotaOutcome::Failed(m) => assert!(m.contains("未知的套餐查询模板")),
+            QuotaOutcome::Failed(m) => assert!(m.contains("Unknown plan query template")),
             _ => panic!("unknown template must fail"),
         }
     }
@@ -1522,7 +1522,7 @@ mod tests {
         let pq = json!({ "template": "opencode_go", "fields": {} }).to_string();
         assert_eq!(
             plan_monthly_price(Some(&pq)).as_deref(),
-            Some("$10/月")
+            Some("$10/mo")
         );
         let pq2 = json!({ "template": "kimi", "fields": {} }).to_string();
         assert_eq!(plan_monthly_price(Some(&pq2)), None);

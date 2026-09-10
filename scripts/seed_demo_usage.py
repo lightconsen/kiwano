@@ -16,8 +16,9 @@ Two traps it handles for you:
 
 Shape: day offset d holds `5 + d % 7` requests — each 1000 in / 200 out / 100
 cache-read tokens times a per-day scale, $0.02, latency 200 + d ms — spread
-between two providers and two agents. Today's rows are placed in the recent
-past so they cannot land after "now".
+between two providers and two agents. Today's rows are spread over the local
+hours already elapsed, so the hourly "today" chart has a shape to draw — and so
+none of them can land after "now".
 
 Usage:
   cp ~/.kiwano/kiwano.db /tmp/kiwano-demo.db   # keeps providers + settings
@@ -53,6 +54,12 @@ def day_boundaries(days):
     ]
 
 
+def local_day_start(moment):
+    """Midnight local on `moment`'s date, as the UTC instant the store sees."""
+    midnight = datetime.combine(moment.astimezone(LOCAL).date(), time(0), tzinfo=LOCAL)
+    return midnight.astimezone(timezone.utc)
+
+
 def rows_on(day_index):
     return ROWS_BASE + day_index % ROWS_CYCLE
 
@@ -76,15 +83,25 @@ def seed(db, days, clear):
         conn.commit()
 
     now = datetime.now(timezone.utc)
+    # Today's rows spread across the local hours already elapsed, so the hourly
+    # chart has a day's shape to draw. Stacking them in the seed's own second
+    # (as this once did) leaves that chart a single bar with 23 empty ones.
+    midnight = local_day_start(now)
+    elapsed = (now - midnight).total_seconds()
     inserted = 0
     per_day: list[tuple[int, int, int, float]] = []
     for day_index, day in enumerate(day_boundaries(days)):
         count = rows_on(day_index)
         day_tokens = [0, 0, 0.0]  # in, out, cost
         for i in range(count):
-            # Today's rows go in the recent past: local noon could still be
-            # ahead of "now", and a future timestamp would count as today's.
-            ts = now - timedelta(seconds=2 + i) if day_index == 0 else day + timedelta(minutes=i)
+            ts = (
+                # Fractions stay strictly inside (0, 1), so every row is after
+                # midnight and before "now" — a future one would still count as
+                # today's, and local noon can be ahead of the seed.
+                midnight + timedelta(seconds=elapsed * (i + 1) / (count + 1))
+                if day_index == 0
+                else day + timedelta(minutes=i)
+            )
             stamp = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
             provider = PROVIDERS[i % len(PROVIDERS)]
             agent = AGENTS[i % len(AGENTS)]

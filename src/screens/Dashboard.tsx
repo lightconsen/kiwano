@@ -1,5 +1,10 @@
 // Dashboard (design/index.html #s-dashboard)
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { CircleDollarSign, Coins, Send, Timer } from "lucide-react";
 import {
   Select,
@@ -28,6 +33,11 @@ type TrendMetric = "requests" | "tokens";
  * comparison, which two units on one frame cannot honestly support. The
  * switch also means only one series is ever on screen, so identity never
  * rests on telling two colours apart.
+ *
+ * The readout is per-bar, not a crosshair: on a column chart the mark already
+ * says where on the axis you are, so the bar is the hit target and the value
+ * hangs off it. The arrow keys walk the same bars, giving the keyboard the
+ * readout the pointer gets.
  */
 function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric }) {
   const W = 900;
@@ -36,6 +46,7 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
   const bottom = 112;
   const left = 52;
   const right = 884;
+  const TIP_H = 24; // the readout's own height; only offsets where it lands
   const n = data.trend.length;
   const value = (t: DashboardData["trend"][number]) =>
     metric === "requests" ? t.requests : t.tokens;
@@ -52,51 +63,132 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
     { y: bottom, v: 0 },
   ];
   const tick = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
+  const barHeight = (v: number) => Math.max(1, (bottom - top) * (v / max));
   // "today" is 24 hourly bars: printing every label would overlap them into a
   // smear, so keep roughly eight (00:00, 03:00, …). Shorter windows are
   // unchanged — the divisor bottoms out at 1.
   const labelEvery = Math.ceil(n / 8);
 
+  // Which bar the readout is about, and where to hang it. Both are measured in
+  // wrapper pixels off the bar's own hit area: the SVG letterboxes (viewBox
+  // aspect ≠ box), so its rendered box beats re-deriving the scale from W.
+  const [hover, setHover] = useState<number | null>(null);
+  const [tip, setTip] = useState({ x: 0, y: 0 });
+  const wrap = useRef<HTMLDivElement>(null);
+  const bars = useRef<(SVGRectElement | null)[]>([]);
+
+  const pointAt = (i: number) => {
+    setHover(i);
+    const hit = bars.current[i];
+    const box = wrap.current?.getBoundingClientRect();
+    if (!hit || !box) return;
+    const r = hit.getBoundingClientRect();
+    // The hit area spans the full viewBox height, so its on-screen height is the
+    // scale factor — close enough to place the readout on the bar's top edge,
+    // where it reads as belonging to that bar rather than to the chart.
+    const scale = r.height / H;
+    const topPx = r.top - box.top + (bottom - barHeight(value(data.trend[i]))) * scale;
+    setTip({ x: r.left + r.width / 2 - box.left, y: Math.max(0, topPx - TIP_H) });
+  };
+
+  const onKeyDown = (e: ReactKeyboardEvent<SVGSVGElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = e.key === "ArrowRight" ? 1 : -1;
+    pointAt(Math.min(n - 1, Math.max(0, (hover ?? (step > 0 ? -1 : n)) + step)));
+  };
+
+  const shown = hover === null ? undefined : data.trend[hover];
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" style={{ height: 128 }}>
-      <g stroke="var(--line)" strokeDasharray="3 4">
-        {ticks.map((t) => (
-          <line key={t.y} x1={left} y1={t.y} x2={right} y2={t.y} />
-        ))}
-      </g>
-      {data.trend.map((t, i) => {
-        const v = value(t);
-        const h = Math.max(1, (bottom - top) * (v / max));
-        return (
-          <rect
-            key={t.date}
-            x={left + slot * i + (slot - barWidth) / 2}
-            y={bottom - h}
-            width={barWidth}
-            height={h}
-            rx="2"
-            fill={color}
-          >
-            {/* Native tooltip: the chart's only hover affordance so far. */}
-            <title>{`${t.date} · ${tick(v)} ${metric}`}</title>
-          </rect>
-        );
-      })}
-      <g fill="var(--mut)" fontSize="9.5" fontFamily="JetBrains Mono">
-        {ticks.map((t) => (
-          <text key={t.y} x={left - 6} y={t.y + 3} textAnchor="end">
-            {tick(t.v)}
-          </text>
-        ))}
-        {data.trend.map((t, i) =>
-          i % labelEvery === 0 ? (
-            <text key={t.date} x={left + slot * (i + 0.5)} y={H - 8} textAnchor="middle">
-              {t.date}
+    <div ref={wrap} className="relative mt-2">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        style={{ height: 128 }}
+        tabIndex={0}
+        role="img"
+        aria-label={`Usage trend · ${metric} · ${n} buckets`}
+        onKeyDown={onKeyDown}
+        onFocus={() => pointAt(hover ?? 0)}
+        onBlur={() => setHover(null)}
+        onPointerLeave={() => setHover(null)}
+      >
+        <g stroke="var(--line)" strokeDasharray="3 4">
+          {ticks.map((t) => (
+            <line key={t.y} x1={left} y1={t.y} x2={right} y2={t.y} />
+          ))}
+        </g>
+        {data.trend.map((t, i) => {
+          const v = value(t);
+          const h = barHeight(v);
+          return (
+            <rect
+              key={t.date}
+              x={left + slot * i + (slot - barWidth) / 2}
+              y={bottom - h}
+              width={barWidth}
+              height={h}
+              rx="2"
+              fill={color}
+              // The hovered bar holds full strength while its neighbours recede,
+              // which shows the chart answering without adding an outline.
+              opacity={hover === null || hover === i ? 1 : 0.45}
+            />
+          );
+        })}
+        <g fill="var(--mut)" fontSize="9.5" fontFamily="JetBrains Mono">
+          {ticks.map((t) => (
+            <text key={t.y} x={left - 6} y={t.y + 3} textAnchor="end">
+              {tick(t.v)}
             </text>
-          ) : null,
-        )}
-      </g>
-    </svg>
+          ))}
+          {data.trend.map((t, i) =>
+            i % labelEvery === 0 ? (
+              <text key={t.date} x={left + slot * (i + 0.5)} y={H - 8} textAnchor="middle">
+                {t.date}
+              </text>
+            ) : null,
+          )}
+        </g>
+        {/* Full-slot, full-height hit areas drawn last, so the pointer only has
+            to be somewhere in the column rather than on the painted bar. Enter
+            is enough to switch: every point in a column reads the same. */}
+        {data.trend.map((t, i) => (
+          <rect
+            key={`hit-${t.date}`}
+            ref={(el) => {
+              bars.current[i] = el;
+            }}
+            x={left + slot * i}
+            y={0}
+            width={slot}
+            height={H}
+            fill="transparent"
+            onPointerEnter={() => pointAt(i)}
+          />
+        ))}
+      </svg>
+      {/* Value leads, bucket follows — the reader already knows the series. */}
+      {shown && (
+        <div
+          role="status"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-md border px-2 py-[3px] text-[10.5px] whitespace-nowrap"
+          style={{
+            left: tip.x,
+            top: tip.y,
+            background: "var(--panel)",
+            borderColor: "var(--line)",
+          }}
+        >
+          <span className="font-semibold">{tick(value(shown))}</span>
+          <span style={{ color: "var(--mut)" }}>
+            {" "}
+            {metric} · {shown.date}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 

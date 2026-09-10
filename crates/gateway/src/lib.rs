@@ -8,6 +8,7 @@
 
 pub mod error;
 pub mod forward;
+pub mod limits;
 pub mod log_capture;
 pub mod meter;
 pub mod protocol;

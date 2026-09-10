@@ -154,19 +154,6 @@ fn hour_key(local_secs: i64) -> String {
     )
 }
 
-/// Inverse of `civil_from_days` (Howard Hinnant's `days_from_civil`): the day
-/// index of a calendar date, so a period boundary can be turned back into the
-/// instant a filter needs.
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (m as i64 + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
 /// `MM-DD` label for the dashboard trend axis.
 fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
@@ -263,51 +250,6 @@ fn quota_over_threshold(store: &Store, aux: &Aux, config: Option<&str>, provider
         t.requests as f64
     };
     consumed >= cfg.limit
-}
-
-/// Start of the current reset period (RFC3339 UTC, for `ts >= ?` filters)
-/// plus a dedup key. Returns (since, period_key); reset_period NULL = no
-/// reset → (None, "all"). Day math: 1970-01-01 was a Thursday, so
-/// `(days + 3) % 7 == 0` lands on Monday.
-fn period_start(
-    epoch_secs: i64,
-    reset_period: Option<&str>,
-    tz_offset_minutes: i64,
-) -> (Option<String>, String) {
-    // Reset periods follow the user's day too: a daily limit resetting at
-    // 00:00 UTC is 08:00 for a UTC+8 user.
-    let days = (epoch_secs + tz_offset_minutes * 60).div_euclid(86_400);
-    let (y, m, _) = civil_from_days(days);
-    match reset_period {
-        None => (None, "all".into()),
-        Some("weekly") => {
-            let monday = days - (days + 3).rem_euclid(7);
-            let (wy, wm, wd) = civil_from_days(monday);
-            let key = format!("{wy:04}-{wm:02}-{wd:02}");
-            (Some(local_day_start_from(tz_offset_minutes, monday)), key)
-        }
-        Some("yearly") => {
-            let key = format!("{y:04}");
-            (
-                Some(local_day_start_from(
-                    tz_offset_minutes,
-                    days_from_civil(y, 1, 1),
-                )),
-                key,
-            )
-        }
-        // monthly and any unexpected values all fall back to monthly
-        _ => {
-            let key = format!("{y:04}-{m:02}");
-            (
-                Some(local_day_start_from(
-                    tz_offset_minutes,
-                    days_from_civil(y, m, 1),
-                )),
-                key,
-            )
-        }
-    }
 }
 
 // ── Auxiliary connection (same DB file, GUI-scoped tables + extra reads) ──
@@ -2608,70 +2550,6 @@ pub struct UsageAlertVm {
     pub unit: String,
 }
 
-/// What a provider's per-period limit is measured in, and how much of the
-/// period is spent. One reader for the notification and the enforcement, so
-/// the two can never disagree about the same number.
-struct PeriodLimit {
-    used: f64,
-    limit: f64,
-    /// "requests" | "wan_tokens" | an ISO currency code — the limit's own unit.
-    unit: String,
-    /// The reset period's identity (e.g. "2026-09"), for notification dedup.
-    period_key: String,
-}
-
-/// Read one provider's period limit and how much of it is spent. None when the
-/// provider has no limit worth measuring.
-fn period_limit_usage(
-    store: &Store,
-    aux: &Aux,
-    p: &Provider,
-) -> Result<Option<PeriodLimit>, String> {
-    let Some(limit) = p.period_limit.filter(|l| *l > 0.0) else {
-        return Ok(None);
-    };
-    // NULL unit normalizes to requests (same source as the ring percentage,
-    // compatible with v1 rows).
-    let unit = match p.limit_unit.as_deref() {
-        Some("wan_tokens") => "wan_tokens",
-        // A spending limit is denominated in the provider's own currency — the
-        // one the price table quotes its models in — so the period's cost
-        // compares directly. Converting here would make the limit mean
-        // whatever the rate said that day.
-        Some(u) if u.len() == 3 => u,
-        _ => "requests",
-    };
-    let (since, period_key) = period_start(unix_now(), p.reset_period.as_deref(), tz_offset(aux));
-    let used = match unit {
-        "wan_tokens" => {
-            let t = store
-                .usage_totals_for_provider(&p.id, since.as_deref())
-                .map_err(e2s)?;
-            (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
-                as f64
-                / 10_000.0
-        }
-        u if u.len() == 3 => store
-            .usage_cost_by_currency(None, Some(&p.id), since.as_deref())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|(currency, cost)| currency.as_deref().map(|_| *cost))
-            .sum(),
-        _ => {
-            store
-                .usage_totals_for_provider(&p.id, since.as_deref())
-                .map_err(e2s)?
-                .requests as f64
-        }
-    };
-    Ok(Some(PeriodLimit {
-        used,
-        limit,
-        unit: unit.to_string(),
-        period_key,
-    }))
-}
-
 /// Check whether enabled providers' usage this period has reached the
 /// user-set per-period limit (period_limit). Hits not yet notified this
 /// period are recorded under a dedup key and returned (the frontend turns
@@ -2688,12 +2566,12 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         if !p.enabled {
             continue;
         }
-        let Some(PeriodLimit {
+        let Some(kiwano_gateway::limits::PeriodLimit {
             used,
             limit,
             unit,
             period_key,
-        }) = period_limit_usage(store, aux, &p)?
+        }) = kiwano_gateway::limits::period_limit_usage(store, &p).map_err(e2s)?
         else {
             continue;
         };
@@ -2895,7 +2773,7 @@ pub fn enforce_amount_limits(store: &Store, aux: &Aux) -> Result<bool, String> {
             .get_setting(&marker)
             .as_deref()
             .is_some_and(|v| !v.is_empty());
-        let measured = period_limit_usage(store, aux, &p)?;
+        let measured = kiwano_gateway::limits::period_limit_usage(store, &p).map_err(e2s)?;
 
         // Limit removed (or row corrupted) while Kiwano had disabled it →
         // restore the provider and drop the marker.
@@ -2904,7 +2782,7 @@ pub fn enforce_amount_limits(store: &Store, aux: &Aux) -> Result<bool, String> {
             aux.delete_setting(&marker).map_err(e2s)?;
             continue;
         }
-        let Some(PeriodLimit { used, limit, .. }) = measured else {
+        let Some(kiwano_gateway::limits::PeriodLimit { used, limit, .. }) = measured else {
             continue;
         };
 
@@ -4975,24 +4853,5 @@ mod tests {
             alerts.iter().all(|a| a.provider_id != "glm-1"),
             "10 USD at 2.0 CNY/USD is 20 CNY, under the 50 CNY limit"
         );
-    }
-
-    #[test]
-    fn period_start_keys() {
-        // 2026-09-07T12:34:56Z (Monday)
-        let t = 1_788_784_496_i64;
-        let (since, key) = period_start(t, Some("monthly"), 0);
-        assert_eq!(since.as_deref(), Some("2026-09-01T00:00:00Z"));
-        assert_eq!(key, "2026-09");
-        let (since, key) = period_start(t, Some("weekly"), 0);
-        assert_eq!(since.as_deref(), Some("2026-09-07T00:00:00Z"));
-        assert_eq!(key, "2026-09-07");
-        let (since, key) = period_start(t, Some("yearly"), 0);
-        assert_eq!(since.as_deref(), Some("2026-01-01T00:00:00Z"));
-        assert_eq!(key, "2026");
-        // no reset → all-time totals
-        let (since, key) = period_start(t, None, 0);
-        assert_eq!(since, None);
-        assert_eq!(key, "all");
     }
 }

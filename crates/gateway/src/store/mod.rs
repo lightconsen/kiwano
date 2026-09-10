@@ -1674,6 +1674,53 @@ impl Store {
         Ok(conn.execute("DELETE FROM request_logs", [])?)
     }
 
+    // ── The GUI's KV (`app_settings`) ──
+    //
+    // Both processes open this one file, and `app_settings` used to be read and
+    // written by the GUI alone. The plan-quota cache now lives there under both:
+    // the gateway enforces the ceilings it feeds, so if each side fetched and
+    // cached separately they could disagree about a provider's utilization —
+    // and a provider would be blocked by one process and served by the other.
+
+    /// One `app_settings` value. Absent or unreadable reads as absent.
+    pub fn app_setting(&self, key: &str) -> Option<String> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![key],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    pub fn set_app_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_app_setting(&self, key: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])? > 0)
+    }
+
+    /// The user's UTC offset in minutes east, from the `ui` blob the GUI keeps
+    /// current. Reset periods follow the user's clock — a monthly limit rolls
+    /// over at their midnight, not UTC's — so the enforcement side needs it.
+    /// Absent means UTC, which is what an older settings blob yields.
+    pub fn ui_tz_offset_minutes(&self) -> i64 {
+        self.app_setting("ui")
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|v| v.get("tz_offset_minutes").and_then(|t| t.as_i64()))
+            .unwrap_or(0)
+    }
+
     /// Load the log capture config (defaults when the key is absent/corrupt).
     pub fn load_log_config(&self) -> Result<LogConfig> {
         let conn = self.conn.lock().expect("store mutex poisoned");

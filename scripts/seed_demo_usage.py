@@ -65,7 +65,7 @@ def day_token_scale(day_index):
     deterministic scale that does not share the request cycle's period and
     cannot lock phase with it. Real traffic sits somewhere in between.
     """
-    return 1 + (day_index * 7919) % 9
+    return 3 + (day_index * 7919) % 9
 
 
 def seed(db, days, clear):

@@ -951,7 +951,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             let mut agents: Vec<String> = Vec::new();
             let mut serving_agents: Vec<String> = Vec::new();
             let mut backup_for_any = false;
-            for (agent, _) in primary.iter() {
+            for agent in primary.keys() {
                 let is_bound = bindings_by_agent
                     .get(agent)
                     .is_some_and(|bs| bs.iter().any(|b| b.provider_id == p.id));
@@ -2570,13 +2570,13 @@ pub fn build_dashboard(
                 id: pu.provider_id.clone(),
                 name,
                 color: palette_color(&pu.provider_id).to_string(),
-                pct: (pu.totals.requests * 100 / total_req) as i64,
+                pct: pu.totals.requests * 100 / total_req,
                 cost: (cost_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
                     / 1e6,
             }
         })
         .collect();
-    by_provider.sort_by(|a, b| b.pct.cmp(&a.pct));
+    by_provider.sort_by_key(|p| std::cmp::Reverse(p.pct));
 
     let mut by_agent = Vec::new();
     for (name, label) in AGENTS {

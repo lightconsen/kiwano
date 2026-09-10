@@ -269,6 +269,7 @@ impl SendFailure {
 /// so in-flight streams are never retried; body-read failures after headers
 /// are also not retried (the breaker was already fed at header time).
 #[allow(clippy::too_many_arguments)] // every argument is a distinct routing input
+#[allow(clippy::result_large_err)] // Err is the client-facing response, not a diagnostic
 async fn send_upstream(
     state: &GatewayState,
     provider: &UpstreamProvider,

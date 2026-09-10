@@ -1,0 +1,73 @@
+# Re-mirror the updater manifest on demand.
+#
+# The release pipeline mirrors it as part of every release. When that step
+# fails — a platform key the script does not know, an upload hiccup — the R2
+# copy is left behind: it keeps the previous version's manifest, or one whose
+# URLs still point at GitHub. Repairing it does not warrant a release, so this
+# does exactly what the release job does, against any published tag.
+#
+#   gh workflow run mirror-manifest.yml                 # newest published release
+#   gh workflow run mirror-manifest.yml -f tag=v0.1.5   # a specific one
+
+name: Mirror manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to mirror; empty means the newest published one"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag=$(gh release view -R "${{ github.repository }}" --json tagName -q .tagName)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "mirroring $tag"
+
+      - name: Download its updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release download "${{ steps.tag.outputs.tag }}"
+          -R "${{ github.repository }}"
+          --pattern latest.json --dir manifest --clobber
+
+      # Same script the release job runs: rewrite every platform URL to its
+      # version-free R2 path, prove the objects are in the bucket, then check
+      # they are publicly reachable.
+      - name: Rewrite it to R2 paths and verify
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
+        run: >-
+          python3 scripts/mirror_manifest.py
+          --manifest manifest/latest.json
+          --out manifest/latest.r2.json
+          --bucket kiwano-hub
+
+      - name: Upload it
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
+        run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress

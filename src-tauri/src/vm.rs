@@ -273,7 +273,7 @@ impl Aux {
     pub fn save_takeover_backup(
         &self,
         agent: &str,
-        files: &[(String, String)],
+        files: &[crate::takeover::BackupFile],
     ) -> rusqlite::Result<()> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         let json = serde_json::to_string(files).expect("serialize backup files");
@@ -285,7 +285,10 @@ impl Aux {
         Ok(())
     }
 
-    pub fn load_takeover_backup(&self, agent: &str) -> Option<(String, Vec<(String, String)>)> {
+    pub fn load_takeover_backup(
+        &self,
+        agent: &str,
+    ) -> Option<(String, Vec<crate::takeover::BackupFile>)> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         let (ts, json) = conn
             .query_row(
@@ -294,7 +297,25 @@ impl Aux {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .ok()?;
-        let files: Vec<(String, String)> = serde_json::from_str(&json).ok()?;
+        // Earlier builds stored a bare [path, content] array, which cannot say
+        // whether the file existed. Reading those as "existed" keeps the old
+        // restore behaviour for backups already on disk. Refusing them instead
+        // would make `disable` report "never taken over" and leave the agent
+        // pointed at the gateway — the one outcome worth avoiding here.
+        let files = serde_json::from_str::<Vec<crate::takeover::BackupFile>>(&json)
+            .or_else(|_| {
+                serde_json::from_str::<Vec<(String, String)>>(&json).map(|legacy| {
+                    legacy
+                        .into_iter()
+                        .map(|(path, content)| crate::takeover::BackupFile {
+                            path,
+                            content,
+                            existed: true,
+                        })
+                        .collect()
+                })
+            })
+            .ok()?;
         Some((ts, files))
     }
 
@@ -3648,6 +3669,32 @@ mod tests {
     fn delete_unknown_provider_is_noop() {
         let s = store();
         assert!(!delete_provider(&s, "nope").unwrap());
+    }
+
+    #[test]
+    fn legacy_takeover_backup_still_loads() {
+        let aux = Aux::open_in_memory().unwrap();
+        // Builds before the `existed` field stored a bare [path, content] array.
+        let legacy =
+            serde_json::json!([["/tmp/kiwano-test/settings.json", "{\"a\":1}"]]).to_string();
+        aux.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO takeover_backups (agent, files, backed_up_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params!["claude", legacy, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+
+        let (_, files) = aux
+            .load_takeover_backup("claude")
+            .expect("legacy backup loads");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/tmp/kiwano-test/settings.json");
+        assert_eq!(files[0].content, "{\"a\":1}");
+        // Read as "existed", so disabling still writes the content back instead
+        // of deleting a file it cannot prove we created.
+        assert!(files[0].existed);
     }
 
     #[test]

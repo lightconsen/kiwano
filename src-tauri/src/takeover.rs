@@ -25,7 +25,21 @@ use serde_json::Value;
 use crate::vm::Aux;
 
 /// The set of backed-up files: `(absolute path, original content)`.
+/// The rewritten (path, new content) pairs a takeover writes to disk.
 type Files = Vec<(String, String)>;
+
+/// One config file captured by a takeover.
+///
+/// `existed` separates "was empty" from "was not there". Without it, disabling
+/// a takeover writes an empty file back for a config the agent never had —
+/// leaving a 0-byte `opencode.json` behind, which the agent may read as a
+/// broken config rather than as no config at all.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BackupFile {
+    pub path: String,
+    pub content: String,
+    pub existed: bool,
+}
 
 fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     match agent {
@@ -92,14 +106,15 @@ pub fn enable(
     home: &Path,
 ) -> Result<(), String> {
     let paths = takeover_paths(agent, home)?;
-    let mut originals: Files = Vec::new();
+    let mut originals: Vec<BackupFile> = Vec::new();
     for p in &paths {
-        let content = match std::fs::read_to_string(p) {
-            Ok(c) => c,
-            // codex's auth.json / gemini's .env, every additive agent's
-            // config, and all claude-desktop files are allowed to be missing
-            // (treated as empty files — every claude-desktop write normalizes
-            // a missing/non-object document to {})
+        // codex's auth.json / gemini's .env, every additive agent's config, and
+        // all claude-desktop files are allowed to be missing (treated as empty
+        // files — every claude-desktop write normalizes a missing/non-object
+        // document to {}). `existed` records which of the two it was, so
+        // disabling can put the directory back the way it found it.
+        let (content, existed) = match std::fs::read_to_string(p) {
+            Ok(c) => (c, true),
             Err(_)
                 if matches!(
                     agent,
@@ -107,7 +122,7 @@ pub fn enable(
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
-                String::new()
+                (String::new(), false)
             }
             Err(_) => {
                 return Err(format!(
@@ -117,17 +132,27 @@ pub fn enable(
                 ))
             }
         };
-        originals.push((p.to_string_lossy().into_owned(), content));
+        originals.push(BackupFile {
+            path: p.to_string_lossy().into_owned(),
+            content,
+            existed,
+        });
     }
 
     // Back up / write to disk only after every rewrite succeeds; any failure
     // fails the whole thing and keeps the escape hatch clean
     let rewritten: Files = originals
         .iter()
-        .map(|(path, original)| {
+        .map(|original| {
             Ok((
-                path.clone(),
-                rewrite(agent, path, original, placeholder_key, data_port)?,
+                original.path.clone(),
+                rewrite(
+                    agent,
+                    &original.path,
+                    &original.content,
+                    placeholder_key,
+                    data_port,
+                )?,
             ))
         })
         .collect::<Result<Files, String>>()?;
@@ -151,14 +176,28 @@ pub fn enable(
     Ok(())
 }
 
-/// Restore: write the backup back verbatim and deregister it.
+/// Restore: put every captured file back the way it was, then deregister the
+/// backup. A file that did not exist before the takeover is removed rather than
+/// written empty.
 pub fn disable(aux: &Aux, agent: &str, home: &Path) -> Result<(), String> {
     let Some((_, files)) = aux.load_takeover_backup(agent) else {
         return Ok(()); // never taken over → idempotent success
     };
     let _ = takeover_paths(agent, home)?; // validate the agent name
-    for (path, content) in &files {
-        atomic_write(std::path::Path::new(path), content)?;
+    for file in &files {
+        let path = std::path::Path::new(&file.path);
+        if file.existed {
+            atomic_write(path, &file.content)?;
+        } else {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                // Already gone: the takeover created it, so this is the same
+                // end state. Anything else (permissions, a directory in the
+                // way) is reported rather than swallowed.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("{}: {e}", file.path)),
+            }
+        }
     }
     aux.delete_takeover_backup(agent)
         .map_err(|e| e.to_string())?;
@@ -441,17 +480,22 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 }
 
 /// File-copy fallback: `~/.kiwano/backups/<agent>/<filename>` (an escape hatch beyond SQLite).
-fn copy_files(agent: &str, home: &Path, files: &Files) {
+fn copy_files(agent: &str, home: &Path, files: &[BackupFile]) {
     let dir = home.join(".kiwano").join("backups").join(agent);
     if std::fs::create_dir_all(&dir).is_err() {
         return; // a copy failure does not break the takeover (SQLite already has it)
     }
-    for (path, content) in files {
-        let name = std::path::Path::new(path)
+    for file in files {
+        // Nothing to copy for a file the agent never had; an empty copy would
+        // read as "their config was empty".
+        if !file.existed {
+            continue;
+        }
+        let name = std::path::Path::new(&file.path)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned());
         if let Some(name) = name {
-            let _ = std::fs::write(dir.join(name), content);
+            let _ = std::fs::write(dir.join(name), &file.content);
         }
     }
 }
@@ -608,13 +652,24 @@ mod tests {
     fn gemini_takeover_creates_missing_env() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
+        let env_path = home.join(".gemini").join(".env");
         // takeover works even when ~/.gemini/.env is missing entirely (dir + file are created automatically)
         enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
-        let env = std::fs::read_to_string(home.join(".gemini").join(".env")).unwrap();
+        let env = std::fs::read_to_string(&env_path).unwrap();
         assert_eq!(
             env,
             "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\nGEMINI_API_KEY=kw-ag-gemini-abcd\n"
         );
+
+        // Disabling puts the directory back the way it found it: the file we
+        // created is removed, not left behind as an empty config (which an
+        // agent may read as a broken one).
+        disable(&aux, "gemini", &home).unwrap();
+        assert!(
+            !env_path.exists(),
+            "a file created by the takeover must not survive disable"
+        );
+        assert!(aux.load_takeover_backup("gemini").is_none());
     }
 
     #[test]
@@ -774,16 +829,11 @@ base_url = "https://relay.example.com/v1"
         assert_eq!(settings["defaultProvider"], "kiwano-gateway");
 
         disable(&aux, "pi", &home).unwrap();
-        // originals were missing → restored as empty files (backup-verbatim
-        // semantics, same as gemini's .env); the CLI recreates its own state
-        assert_eq!(
-            std::fs::read_to_string(agent.join("models.json")).unwrap(),
-            ""
-        );
-        assert_eq!(
-            std::fs::read_to_string(agent.join("settings.json")).unwrap(),
-            ""
-        );
+        // The originals were missing, so restore removes what the takeover
+        // created instead of leaving two 0-byte JSON files for the CLI to
+        // choke on; the agent recreates its own state.
+        assert!(!agent.join("models.json").exists());
+        assert!(!agent.join("settings.json").exists());
         assert!(aux.load_takeover_backup("pi").is_none());
     }
 
@@ -883,17 +933,16 @@ base_url = "https://relay.example.com/v1"
         assert_eq!(meta["appliedId"], "00000000-0000-4000-8000-000000157210");
 
         disable(&aux, "claude-desktop", &home).unwrap();
-        // restore = write back byte for byte (absent originals → empty files)
+        // Restore is byte-for-byte for files that existed and removal for files
+        // the takeover created: here the whole Claude-3p side was absent.
         assert_eq!(std::fs::read_to_string(&normal_config).unwrap(), original);
-        assert_eq!(
-            std::fs::read_to_string(
-                app_support
-                    .join("Claude-3p")
-                    .join("claude_desktop_config.json")
-            )
-            .unwrap(),
-            ""
-        );
+        let threep = app_support.join("Claude-3p");
+        assert!(!threep.join("claude_desktop_config.json").exists());
+        assert!(!threep
+            .join("configLibrary")
+            .join("00000000-0000-4000-8000-000000157210.json")
+            .exists());
+        assert!(!threep.join("configLibrary").join("_meta.json").exists());
         assert!(aux.load_takeover_backup("claude-desktop").is_none());
     }
 }

@@ -659,6 +659,9 @@ pub struct SettingsVm {
     /// into it via the bundled exchange rates.
     #[serde(default = "default_preferred_currency")]
     pub preferred_currency: String,
+    /// Auto-check for app updates at startup (opt-out; silent, notification only).
+    #[serde(default = "default_true")]
+    pub auto_check_update: bool,
 }
 
 pub(crate) fn default_preferred_currency() -> String {
@@ -686,6 +689,7 @@ impl Default for SettingsVm {
             hub_logged_in: false,
             hub_url: default_hub_url(),
             preferred_currency: default_preferred_currency(),
+            auto_check_update: true,
         }
     }
 }

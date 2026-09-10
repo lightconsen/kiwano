@@ -13,12 +13,14 @@ mod share;
 mod sidecar;
 mod sync;
 mod takeover;
+mod update;
 mod vm;
 
 use std::sync::Mutex;
 
 use kiwano_gateway::store::Store;
 use tauri::{Manager, State};
+use tauri_plugin_notification::NotificationExt;
 
 use detect::{detect_agents, probe_agent_versions};
 use vm::Aux;
@@ -525,6 +527,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let path = db_path();
             if let Some(dir) = path.parent() {
@@ -581,6 +584,22 @@ pub fn run() {
             setup_tray(app, data_port)?;
             sync_autostart(app.handle(), ui.autostart);
 
+            // Self-update: silent startup check (opt-out in Settings). Failures
+            // are ignored; a found update raises a system notification only.
+            if ui.auto_check_update {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(Some(info)) = update::check_app_update(handle.clone()).await {
+                        let _ = handle
+                            .notification()
+                            .builder()
+                            .title("Kiwano update available")
+                            .body(format!("Version {} is ready to install", info.version))
+                            .show();
+                    }
+                });
+            }
+
             // Hub catalog uses local JSON for now (bundled catalog.json +
             // hub_cache); network sync protocol v0 is implemented (sync.rs /
             // sync_hub command) but disabled — startup sync and the
@@ -623,6 +642,8 @@ pub fn run() {
             import_config,
             detect_agents,
             probe_agent_versions,
+            update::check_app_update,
+            update::download_and_install_app_update,
             pricing::get_currency_meta,
             plan_quota::get_plan_quota,
         ])

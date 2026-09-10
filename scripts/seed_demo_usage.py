@@ -63,15 +63,55 @@ AGENTS = ["claude", "codex"]
 # vm::add_provider clears period_limit/limit_unit for plan rows on save. An
 # amount limit on a subscription row is legacy data the UI can no longer set.
 #
-# id, name, protocol, base_url, billing, period_limit, limit_unit, reset_period, plan_limits
+# id, name, protocol, base_url, billing, period_limit, limit_unit, reset_period, plan_limits, plan_query
 PROVIDER_ROWS = [
     ("demo-alpha", "Demo Alpha", "anthropic", "https://alpha.demo.invalid", "subscription",
-     None, None, None, '{"five_hour":20,"weekly":60}'),
+     None, None, None, '{"five_hour":20,"weekly":60}',
+     # Any template that is not `opencode_go`: plan_monthly_price only knows a
+     # price for that one, and the demo has no subscription price to state.
+     '{"template":"zhipu","fields":{}}'),
     ("demo-beta", "Demo Beta", "openai", "https://beta.demo.invalid", "metered",
-     30.0, "CNY", "monthly", None),
+     30.0, "CNY", "monthly", None, None),
     ("demo-local", "Demo Local", "openai", "http://127.0.0.1:11434/v1", "unlimited",
-     None, None, None, None),
+     None, None, None, None, None),
 ]
+
+# Live plan report for demo-alpha, as its own endpoint would supply: 14% of the
+# five-hour window (against the 20% ceiling above → a 70% ring) and 30% of the
+# week (against 60%).
+DEMO_PLAN_TIERS = [("five_hour", 14.0), ("weekly_limit", 30.0)]
+
+# The Providers page rings a plan's *live* utilization, which it fetches only
+# for providers that have a plan query — and the answer comes from a 5-minute
+# cache. The demo has no endpoint to query, so the report is written straight
+# into that cache, stamped a year ahead: the TTL compares `now - ts`, so a
+# future stamp never expires. A ring that dies five minutes after seeding would
+# make the fixture worse than one that lies about a timestamp.
+CACHE_STAMP_AHEAD_MS = 365 * 24 * 60 * 60 * 1000
+
+
+def seed_plan_quota_cache(conn, provider_id, tiers):
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    report = {
+        "provider_id": provider_id,
+        "template": "zhipu",
+        "success": True,
+        "error": None,
+        "note": None,
+        "tiers": [
+            {"name": name, "utilization": util, "resets_at": None,
+             "used": None, "limit": None, "unit": None}
+            for name, util in tiers
+        ],
+        "queried_at": now_ms,
+        "cached": True,
+    }
+    conn.execute(
+        """INSERT INTO app_settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+        (f"plan_quota_cache:{provider_id}",
+         json.dumps({"ts": now_ms + CACHE_STAMP_AHEAD_MS, "report": report})),
+    )
 
 
 def provider_currencies(conn):
@@ -96,19 +136,22 @@ def provider_rotation(conn):
 def upsert_providers(conn):
     """Create the demo providers, leaving any existing row's key untouched."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for pid, name, protocol, base_url, billing, limit, unit, reset, limits in PROVIDER_ROWS:
+    for pid, name, protocol, base_url, billing, limit, unit, reset, limits, query in PROVIDER_ROWS:
         conn.execute(
             """INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
                                       billing, period_limit, limit_unit, plan_query,
                                       reset_period, enabled, created_at, updated_at, plan_limits)
-               VALUES (?,?,?,?,NULL,?,?,?,?,NULL,?,1,?,?,?)
+               VALUES (?,?,?,?,NULL,?,?,?,?,?,?,1,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                   name = excluded.name, billing = excluded.billing,
                   period_limit = excluded.period_limit, limit_unit = excluded.limit_unit,
                   reset_period = excluded.reset_period, plan_limits = excluded.plan_limits,
+                  plan_query = excluded.plan_query,
                   updated_at = excluded.updated_at""",
-            (pid, name, protocol, base_url, f"sk-demo-{pid}", billing, limit, unit, reset, now, now, limits),
+            (pid, name, protocol, base_url, f"sk-demo-{pid}", billing, limit, unit,
+             query, reset, now, now, limits),
         )
+    seed_plan_quota_cache(conn, "demo-alpha", DEMO_PLAN_TIERS)
 
 
 def day_boundaries(days):

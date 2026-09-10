@@ -14,10 +14,10 @@ Two traps it handles for you:
     display, so the printed expectations include the conversion into your
     preferred currency and the rate used.
 
-Shape: day offset d holds `5 + d % 7` requests of 1000 in / 200 out / 100
-cache-read tokens, $0.02, latency 200 + d ms, spread between two providers and
-two agents. Today's rows are placed in the recent past so they cannot land
-after "now".
+Shape: day offset d holds `5 + d % 7` requests — each 1000 in / 200 out / 100
+cache-read tokens times a per-day scale, $0.02, latency 200 + d ms — spread
+between two providers and two agents. Today's rows are placed in the recent
+past so they cannot land after "now".
 
 Usage:
   cp ~/.kiwano/kiwano.db /tmp/kiwano-demo.db   # keeps providers + settings
@@ -40,10 +40,6 @@ ROWS_BASE = 5
 ROWS_CYCLE = 7
 IN_TOKENS, OUT_TOKENS, CACHE_READ = 1000, 200, 100
 COST_USD, LATENCY_BASE = 0.02, 200
-# Tokens per request vary (requests do not scale with them), so the two trend
-# lines — each normalised to its own maximum — actually diverge instead of
-# lying on top of each other.
-TOKEN_SPREAD = 7
 PROVIDERS = ["demo-alpha", "demo-beta"]
 AGENTS = ["claude", "codex"]
 
@@ -59,6 +55,17 @@ def day_boundaries(days):
 
 def rows_on(day_index):
     return ROWS_BASE + day_index % ROWS_CYCLE
+
+
+def day_token_scale(day_index):
+    """Tokens per request, deliberately unrelated to the request count.
+
+    A fixture whose two series rise and fall together draws one curve — which
+    is exactly what made the chart look broken — so each day gets a
+    deterministic scale that does not share the request cycle's period and
+    cannot lock phase with it. Real traffic sits somewhere in between.
+    """
+    return 1 + (day_index * 7919) % 9
 
 
 def seed(db, days, clear):
@@ -82,7 +89,7 @@ def seed(db, days, clear):
             provider = PROVIDERS[i % len(PROVIDERS)]
             agent = AGENTS[i % len(AGENTS)]
             latency = LATENCY_BASE + day_index
-            scale = 1 + ((day_index * 3 + i) % TOKEN_SPREAD)
+            scale = day_token_scale(day_index)
             in_tokens, out_tokens, cache_read = (
                 IN_TOKENS * scale, OUT_TOKENS * scale, CACHE_READ * scale,
             )
@@ -163,8 +170,11 @@ def main():
         print(f"{label:8} {r:9} {i:11} {o:11} {c * rate:11.2f} {currency}")
         print(f"{'':8} {note}")
     print()
-    print("The chart's daily numbers are the same pattern: 5,6,7,8,9,10,11 then repeat,")
-    print("newest point on the right.")
+    print("Per-day shape (the two series pull against each other on purpose):")
+    print(f"{'date':>12} {'requests':>9} {'tokens':>10}")
+    dates = [d.astimezone(LOCAL).date().isoformat() for d in day_boundaries(args.days)]
+    for date, (count, tok_in, _tok_out, _cost) in zip(dates, per_day):
+        print(f"{date:>12} {count:9d} {tok_in:10d}")
 
 
 if __name__ == "__main__":

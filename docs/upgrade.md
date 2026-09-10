@@ -21,7 +21,7 @@
 
 - 插件内置 minisign 签名验证，是 Tauri 2 的标准路径；
 - `tauri-action` 在 CI 中自动产出各平台 updater 工件与 `latest.json`，无需自建服务器；
-- 备选：静态托管到 `hub.kiwano.app`（复用 Hub 域名，协议 v0 本就是静态 JSON，风格一致）。
+- 备选：静态托管到 `hub.kiwano.cc`（复用 Hub 域名，协议 v0 本就是静态 JSON，风格一致）。
   端点只是配置项（`tauri.conf.json` 的 `endpoints` 数组），先走 GitHub Releases，后续可平滑切换或叠加。
 
 更新检查形态：**设置页手动「检查更新」为常态入口；启动时静默检查为可选项（默认开启、失败完全静默）**。
@@ -155,5 +155,5 @@ tauri-plugin-process = "2"   # relaunch 用
 ## 8. 开放问题
 
 - macOS 公证（Developer ID + notarization）是否进 v0？建议 v0 先跳过（自用/内测），公开发布前补；
-- `latest.json` 端点是否同步镜像到 `hub.kiwano.app`？建议等 Hub 上线时一并做，端点数组支持多源容灾；
+- `latest.json` 端点是否同步镜像到 `hub.kiwano.cc`？建议等 Hub 上线时一并做，端点数组支持多源容灾；
 - 是否引入「跳过此版本」？建议 v0 不做，保持最小实现。

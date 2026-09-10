@@ -24,6 +24,7 @@ import type {
   Protocol,
   Provider,
   RequestLogDetail,
+  RequestLogExport,
   RequestLogFilter,
   RequestLogList,
   StrategyKind,
@@ -145,9 +146,23 @@ export const tauriApi: KiwanoApi = {
       agent: filter?.agent ?? null,
       providerId: filter?.provider_id ?? null,
       status: filter?.status ?? null,
+      from: filter?.from ?? null,
+      to: filter?.to ?? null,
     }),
 
   getRequestLog: (id: number) => invoke<RequestLogDetail | null>("get_request_log", { id }),
+
+  // `path` was chosen by the caller from the save dialog; the file itself is
+  // written in Rust, which is why no fs-plugin permission is involved.
+  exportRequestLogs: (path: string, filter?: RequestLogFilter) =>
+    invoke<RequestLogExport>("export_request_logs", {
+      path,
+      agent: filter?.agent ?? null,
+      providerId: filter?.provider_id ?? null,
+      status: filter?.status ?? null,
+      from: filter?.from ?? null,
+      to: filter?.to ?? null,
+    }),
 
   clearRequestLogs: () => invoke<void>("clear_request_logs"),
 

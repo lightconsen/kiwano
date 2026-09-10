@@ -481,6 +481,10 @@ export interface RequestLogEntry {
   request_size: number;
   response_size: number;
   truncated: boolean;
+  /** Recorded in `cost_currency`, never converted — the export states the cost
+   *  as it was logged. */
+  cost?: number | null;
+  cost_currency?: string | null;
 }
 
 /** Detail view: metadata + the captured request/response bodies */
@@ -498,6 +502,20 @@ export interface RequestLogFilter {
   agent?: string;
   provider_id?: string;
   status?: "ok" | "error";
+  /** RFC3339 UTC instant, inclusive lower bound on `ts`. Build it with
+   *  `localMidnightUtc` — a `.000Z` shape sorts past the `+00:00` rows Rust
+   *  writes and drops the row sitting exactly on the bound. */
+  from?: string;
+  /** RFC3339 UTC instant, EXCLUSIVE upper bound — `localMidnightUtcAfter` of
+   *  the last day you want to see. */
+  to?: string;
+}
+
+/** What one export wrote, so the UI can say so and warn when the slice was
+ *  larger than the row cap. */
+export interface RequestLogExport {
+  rows_written: number;
+  truncated: boolean;
 }
 
 /** Protocol-aware endpoint probe (GET the protocol's models route; works
@@ -594,6 +612,9 @@ export interface KiwanoApi {
   listRequestLogs(page: number, pageSize: number, filter?: RequestLogFilter): Promise<RequestLogList>;
   /** One request-log row with captured bodies; null when the row was pruned */
   getRequestLog(id: number): Promise<RequestLogDetail | null>;
+  /** Write every row the filter matches to `path` as CSV. Unpaged, so it can
+   *  exceed the list's page size; `truncated` says the cap was hit. */
+  exportRequestLogs(path: string, filter?: RequestLogFilter): Promise<RequestLogExport>;
   /** Delete every request-log row (bodies cascade) */
   clearRequestLogs(): Promise<void>;
   getFooterStats(): Promise<FooterStats>;

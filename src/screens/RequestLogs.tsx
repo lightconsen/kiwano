@@ -4,7 +4,8 @@
 // record (redacted headers + bodies) and a Copy button that puts the whole
 // log as plain text on the clipboard.
 import { useEffect, useState } from "react";
-import { Check, ChevronRight, Copy } from "lucide-react";
+import { Check, ChevronRight, Copy, Download } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,8 +13,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../api/client";
-import type { RequestLogDetail, RequestLogEntry } from "../api/types";
+import type { RequestLogDetail, RequestLogEntry, RequestLogFilter } from "../api/types";
+import {
+  localMidnightUtc,
+  localMidnightUtcAfter,
+  shiftLocalDate,
+  todayLocalDate,
+} from "../lib/daterange";
 import { fmtLatency, fmtTokens } from "../lib/format";
 
 const PAGE_SIZE = 10;
@@ -24,6 +39,16 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "ok", label: "OK" },
   { id: "error", label: "Errors" },
+];
+
+type RangeId = "any" | "today" | "7d" | "30d" | "custom";
+
+const RANGES: { id: RangeId; label: string }[] = [
+  { id: "any", label: "Any time" },
+  { id: "today", label: "Today" },
+  { id: "7d", label: "Last 7 days" },
+  { id: "30d", label: "Last 30 days" },
+  { id: "custom", label: "Custom…" },
 ];
 
 function fmtTime(ts: string): string {
@@ -236,11 +261,31 @@ export default function RequestLogs({
   const [total, setTotal] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [range, setRange] = useState<RangeId>("any");
+  const [fromDate, setFromDate] = useState(todayLocalDate);
+  const [toDate, setToDate] = useState(todayLocalDate);
+  const [exporting, setExporting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // One filter, built in one place: the table and the export both read it, so
+  // the file can never cover a different slice from the one on screen.
+  const buildFilter = (): RequestLogFilter => ({
+    ...(filter === "all" ? {} : { status: filter }),
+    agent,
+    provider_id: providerId,
+    ...(range === "any"
+      ? {}
+      : {
+          from: localMidnightUtc(fromDate),
+          to: localMidnightUtcAfter(toDate),
+        }),
+  });
 
   // The page filters change what the result set is, not just which rows of it
   // are on screen, so the pager has to go back to the start. Keyed by value
   // because the props are plain strings by the time they arrive.
-  const scope = `${agent ?? ""} ${providerId ?? ""}`;
+  const scope = `${agent ?? ""} ${providerId ?? ""} ${range} ${fromDate} ${toDate}`;
   useEffect(() => {
     setPage(1);
     setOpenId(null);
@@ -248,11 +293,7 @@ export default function RequestLogs({
 
   const fetchPage = (p: number) => {
     api
-      .listRequestLogs(p, PAGE_SIZE, {
-        ...(filter === "all" ? {} : { status: filter }),
-        agent,
-        provider_id: providerId,
-      })
+      .listRequestLogs(p, PAGE_SIZE, buildFilter())
       .then((r) => {
         setRows(r.rows);
         setTotal(r.total);
@@ -266,12 +307,63 @@ export default function RequestLogs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, filter, scope]);
 
+  // Presets move both ends at once, so React batches them into one refetch.
+  const applyRange = (id: RangeId) => {
+    setRange(id);
+    const today = todayLocalDate();
+    if (id === "today") {
+      setFromDate(today);
+      setToDate(today);
+    } else if (id === "7d" || id === "30d") {
+      setFromDate(shiftLocalDate(today, id === "7d" ? -6 : -29));
+      setToDate(today);
+    }
+  };
+
+  const onExport = async () => {
+    setErr(null);
+    setNotice(null);
+    setExporting(true);
+    try {
+      // `save()` has to be the first await in the gesture: WKWebView drops the
+      // user activation across a tick and the dialog then never opens.
+      const path = await save({
+        title: "Export logs",
+        defaultPath: `kiwano-logs-${fromDate}_${toDate}.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!path) {
+        // Cancelling is a decision, not a failure: say nothing.
+        setExporting(false);
+        return;
+      }
+      const r = await api.exportRequestLogs(path, buildFilter());
+      if (r.truncated) {
+        setErr(
+          `Capped at ${r.rows_written.toLocaleString()} rows — narrow the range for the rest.`,
+        );
+      } else {
+        setNotice(`Exported ${r.rows_written.toLocaleString()} rows`);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const openLog = openId != null ? rows.find((r) => r.id === openId) : undefined;
 
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-3 border-b border-line px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3.5 py-2.5">
         <h3 className="text-[12.5px] font-semibold">Logs</h3>
         <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
           {FILTERS.map((f, i) => (
@@ -288,8 +380,70 @@ export default function RequestLogs({
             </button>
           ))}
         </div>
+        {/* The range scopes the table and the export alike: one control, one
+            truth, so the row count on screen is the row count in the file. */}
+        <div className="flex items-center gap-1.5">
+          <Select value={range} onValueChange={(v) => applyRange((v ?? "any") as RangeId)}>
+            <SelectTrigger
+              size="sm"
+              className="h-6 bg-surface text-[11px] text-mut dark:bg-surface"
+            >
+              {/* A bare <SelectValue /> renders the raw id ("any"), which
+                  reads as noise next to the status tabs. */}
+              <SelectValue>
+                {(v) => RANGES.find((r) => r.id === v)?.label ?? "Any time"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {RANGES.map((r) => (
+                <SelectItem key={r.id} value={r.id}>
+                  {r.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {range === "custom" && (
+            <span className="flex items-center gap-1 text-[11px] text-mut">
+              <Input
+                type="date"
+                value={fromDate}
+                max={toDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="h-6 w-[112px] px-1.5 text-[11px]"
+              />
+              <span>→</span>
+              <Input
+                type="date"
+                value={toDate}
+                min={fromDate}
+                max={todayLocalDate()}
+                onChange={(e) => setToDate(e.target.value)}
+                className="h-6 w-[112px] px-1.5 text-[11px]"
+              />
+            </span>
+          )}
+        </div>
         <span className="ml-auto flex items-center gap-3 text-[11px] text-mut">
+          {/* Feedback lives here rather than in a toast: a transient clip that
+              fades, or the error until the next attempt. */}
+          {err && <span style={{ color: "var(--red)" }}>{err}</span>}
+          {notice && <span style={{ color: "var(--kiwi)" }}>{notice}</span>}
           <span>{total.toLocaleString()} requests</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 gap-1 px-2 text-[11px]"
+            disabled={!loaded || total === 0 || exporting}
+            onClick={onExport}
+            title={
+              total === 0
+                ? "Nothing to export in this slice"
+                : "Write these rows to a CSV file"
+            }
+          >
+            <Download className="h-3 w-3" />
+            {exporting ? "Exporting…" : "Export CSV"}
+          </Button>
         </span>
       </div>
 

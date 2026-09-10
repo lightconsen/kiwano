@@ -657,6 +657,10 @@ pub struct RequestLogEntry {
     pub request_size: i64,
     pub response_size: i64,
     pub truncated: bool,
+    /// What the request cost, in `cost_currency`. Carried from the row's own
+    /// currency (never converted here) so an export can state it as recorded.
+    pub cost: Option<f64>,
+    pub cost_currency: Option<String>,
 }
 
 /// Detail view: metadata + the captured bodies.
@@ -669,12 +673,40 @@ pub struct RequestLogDetail {
 }
 
 /// Filter for `list_request_logs`. `status` is "ok" (<400) or "error" (>=400).
+/// `from`/`to` are RFC3339 UTC bounds, half-open (`from <= ts < to`) — stored
+/// timestamps are RFC3339 text, which orders lexicographically, so the range is
+/// a plain string comparison.
 #[derive(Debug, Clone, Default)]
 pub struct RequestLogFilter<'a> {
     pub agent: Option<&'a str>,
     pub provider_id: Option<&'a str>,
     pub status: Option<&'a str>,
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
 }
+
+/// The WHERE every request-log read shares, so a page and an export can never
+/// disagree about which rows they cover. Fixed positional params keep the SQL
+/// simple: an absent filter binds NULL and drops out.
+const REQUEST_LOG_WHERE: &str = " WHERE (?1 IS NULL OR agent = ?1)
+                                  AND (?2 IS NULL OR provider_id = ?2)
+                                  AND (?3 IS NULL OR (?3 = 'ok' AND status_code < 400)
+                                                   OR (?3 = 'error' AND status_code >= 400))
+                                  AND (?4 IS NULL OR ts >= ?4)
+                                  AND (?5 IS NULL OR ts < ?5)";
+
+/// The columns `request_log_from_row` reads, in the order it reads them.
+const REQUEST_LOG_COLUMNS: &str = "id, ts, method, path, query, agent, attribution, provider_id,
+                                   model, status_code, error_kind, error_message, session_id,
+                                   is_streaming, input_tokens, output_tokens, cache_read_tokens,
+                                   cache_creation_tokens, latency_ms, first_token_ms,
+                                   request_headers, response_headers, request_size, response_size,
+                                   truncated, cost, cost_currency";
+
+/// Ceiling on one export. A local log can be large, and the CSV is built in
+/// memory before it is written, so the read is capped rather than unbounded;
+/// callers detect the cap by asking for one row more than they will write.
+pub const EXPORT_ROW_CAP: i64 = 100_000;
 
 /// Gateway-visible log capture configuration (`gateway_settings` JSON blob).
 /// The GUI writes it; the gateway reads it at startup and on /reload.
@@ -1508,7 +1540,6 @@ impl Store {
     }
 
     /// Paged list (newest first) with optional filters; returns rows + total.
-    /// `filter.status` is "ok" (<400) or "error" (>=400); anything else means all.
     pub fn list_request_logs(
         &self,
         page: i64,
@@ -1516,25 +1547,21 @@ impl Store {
         filter: RequestLogFilter<'_>,
     ) -> Result<(Vec<RequestLogEntry>, i64)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // Fixed positional params keep the SQL simple: absent filters bind NULL.
-        const WHERE: &str = " WHERE (?1 IS NULL OR agent = ?1)
-                             AND (?2 IS NULL OR provider_id = ?2)
-                             AND (?3 IS NULL OR (?3 = 'ok' AND status_code < 400)
-                                              OR (?3 = 'error' AND status_code >= 400))";
         let total: i64 = conn.query_row(
-            &format!("SELECT COUNT(*) FROM request_logs{WHERE}"),
-            params![filter.agent, filter.provider_id, filter.status],
+            &format!("SELECT COUNT(*) FROM request_logs{REQUEST_LOG_WHERE}"),
+            params![
+                filter.agent,
+                filter.provider_id,
+                filter.status,
+                filter.from,
+                filter.to
+            ],
             |r| r.get(0),
         )?;
 
         let mut stmt = conn.prepare(&format!(
-            "SELECT id, ts, method, path, query, agent, attribution, provider_id, model,
-                    status_code, error_kind, error_message, session_id, is_streaming,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                    latency_ms, first_token_ms, request_headers, response_headers,
-                    request_size, response_size, truncated
-             FROM request_logs{WHERE}
-             ORDER BY id DESC LIMIT ?4 OFFSET ?5",
+            "SELECT {REQUEST_LOG_COLUMNS} FROM request_logs{REQUEST_LOG_WHERE}
+             ORDER BY id DESC LIMIT ?6 OFFSET ?7",
         ))?;
         let offset = (page - 1).max(0) * page_size;
         let rows = stmt
@@ -1543,6 +1570,8 @@ impl Store {
                     filter.agent,
                     filter.provider_id,
                     filter.status,
+                    filter.from,
+                    filter.to,
                     page_size,
                     offset
                 ],
@@ -1550,6 +1579,36 @@ impl Store {
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((rows, total))
+    }
+
+    /// Every row the filter matches, newest first — the export's read. Unpaged
+    /// on purpose: a page size is a display concern, and letting one cap an
+    /// export would drop rows silently. `limit` is the explicit cap instead,
+    /// so the caller can say so rather than produce a quietly short file.
+    pub fn export_request_logs(
+        &self,
+        filter: RequestLogFilter<'_>,
+        limit: i64,
+    ) -> Result<Vec<RequestLogEntry>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {REQUEST_LOG_COLUMNS} FROM request_logs{REQUEST_LOG_WHERE}
+             ORDER BY id DESC LIMIT ?6",
+        ))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    filter.agent,
+                    filter.provider_id,
+                    filter.status,
+                    filter.from,
+                    filter.to,
+                    limit
+                ],
+                request_log_from_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// COUNT of data-plane requests (every row: forwarded + pre-forward
@@ -1578,14 +1637,9 @@ impl Store {
     pub fn get_request_log(&self, id: i64) -> Result<Option<RequestLogDetail>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let entry = {
-            let mut stmt = conn.prepare(
-                "SELECT id, ts, method, path, query, agent, attribution, provider_id, model,
-                        status_code, error_kind, error_message, session_id, is_streaming,
-                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                        latency_ms, first_token_ms, request_headers, response_headers,
-                        request_size, response_size, truncated
-                 FROM request_logs WHERE id = ?1",
-            )?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {REQUEST_LOG_COLUMNS} FROM request_logs WHERE id = ?1"
+            ))?;
             stmt.query_row(params![id], request_log_from_row)
                 .optional()?
         };
@@ -1874,6 +1928,8 @@ fn request_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogE
         request_size: row.get(22)?,
         response_size: row.get(23)?,
         truncated: row.get::<_, i64>(24)? != 0,
+        cost: row.get(25)?,
+        cost_currency: row.get(26)?,
     })
 }
 
@@ -2667,6 +2723,136 @@ mod tests {
             cost: None,
             cost_currency: None,
         }
+    }
+
+    #[test]
+    fn request_log_date_range_is_half_open() {
+        let (_dir, store) = temp_store();
+        // The bound is `from <= ts < to`, and the shapes matter: real rows come
+        // from chrono (`...+00:00`, sometimes fractional), the seeded fixture
+        // writes `...Z`, and the two sort differently against a `.000Z` bound.
+        for ts in [
+            "2026-09-06T23:59:59+00:00", // before
+            "2026-09-07T00:00:00+00:00", // exactly at `from` — included
+            "2026-09-07T12:00:00+00:00",
+            "2026-09-07T23:59:59.500+00:00", // fractional, still inside
+            "2026-09-08T00:00:00+00:00",     // exactly at `to` — excluded
+        ] {
+            store
+                .insert_request_log(&sample_log(ts, Some("claude"), 200))
+                .unwrap();
+        }
+
+        let window = RequestLogFilter {
+            from: Some("2026-09-07T00:00:00+00:00"),
+            to: Some("2026-09-08T00:00:00+00:00"),
+            ..Default::default()
+        };
+        let (rows, total) = store.list_request_logs(1, 10, window.clone()).unwrap();
+        assert_eq!(total, 3, "the day's rows, and neither edge crossed");
+        let ts: Vec<&str> = rows.iter().map(|r| r.ts.as_str()).collect();
+        assert!(
+            ts.contains(&"2026-09-07T00:00:00+00:00"),
+            "from is inclusive"
+        );
+        assert!(
+            ts.contains(&"2026-09-07T23:59:59.500+00:00"),
+            "fractional rows sort inside"
+        );
+        assert!(
+            !ts.contains(&"2026-09-08T00:00:00+00:00"),
+            "to is exclusive"
+        );
+        assert!(!ts.contains(&"2026-09-06T23:59:59+00:00"));
+
+        // A `.000Z` bound is not usable: '.' sorts after '+' at that index, so
+        // the bound lands *past* a row stored as `+00:00` at the same instant
+        // and drops it. The count alone hides this — same total, different set.
+        let loose = RequestLogFilter {
+            from: Some("2026-09-07T00:00:00.000Z"),
+            ..Default::default()
+        };
+        let (rows, total) = store.list_request_logs(1, 10, loose).unwrap();
+        assert_eq!(total, 3);
+        assert!(
+            !rows.iter().any(|r| r.ts == "2026-09-07T00:00:00+00:00"),
+            "the row sitting exactly on the bound is the one it loses"
+        );
+    }
+
+    #[test]
+    fn request_log_date_range_composes_with_the_other_filters() {
+        let (_dir, store) = temp_store();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-07T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-07T11:00:00+00:00",
+                Some("claude"),
+                502,
+            ))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log("2026-09-07T12:00:00+00:00", Some("codex"), 502))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-08T10:00:00+00:00",
+                Some("claude"),
+                502,
+            ))
+            .unwrap();
+
+        let (_, total) = store
+            .list_request_logs(
+                1,
+                10,
+                RequestLogFilter {
+                    agent: Some("claude"),
+                    status: Some("error"),
+                    from: Some("2026-09-07T00:00:00+00:00"),
+                    to: Some("2026-09-08T00:00:00+00:00"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(total, 1, "all four predicates at once, on the right ?N");
+    }
+
+    #[test]
+    fn export_reads_past_one_page_and_stops_at_the_cap() {
+        let (_dir, store) = temp_store();
+        for i in 0..7 {
+            store
+                .insert_request_log(&sample_log(
+                    &format!("2026-09-07T0{i}:00:00+00:00"),
+                    Some("claude"),
+                    200,
+                ))
+                .unwrap();
+        }
+        store
+            .insert_request_log(&sample_log("2026-09-06T10:00:00+00:00", Some("codex"), 200))
+            .unwrap();
+
+        let claude = RequestLogFilter {
+            agent: Some("claude"),
+            ..Default::default()
+        };
+        let rows = store.export_request_logs(claude.clone(), 100).unwrap();
+        assert_eq!(rows.len(), 7, "every match, not one page of them");
+        assert!(rows[0].ts > rows[6].ts, "newest first, like the list");
+
+        assert_eq!(
+            store.export_request_logs(claude, 3).unwrap().len(),
+            3,
+            "the cap is what limits it"
+        );
     }
 
     #[test]

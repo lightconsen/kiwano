@@ -21,6 +21,8 @@ import type {
   Protocol,
   Provider,
   RequestLogDetail,
+  RequestLogEntry,
+  RequestLogExport,
   RequestLogFilter,
   RequestLogList,
   StrategyBinding,
@@ -766,6 +768,23 @@ const requestLogs: RequestLogDetail[] = [
   },
 ];
 
+/** The status/agent/provider/date predicate shared by the mock's list and
+ *  export, so the two cannot disagree — same reason the real store has one
+ *  WHERE for both. Date bounds compare as strings, exactly as SQLite does on
+ *  the RFC3339 column. */
+function matchingLogs(filter?: RequestLogFilter): RequestLogEntry[] {
+  return requestLogs.filter(
+    (r) =>
+      (!filter?.agent || r.agent === filter.agent) &&
+      (!filter?.provider_id || r.provider_id === filter.provider_id) &&
+      (!filter?.status ||
+        (filter.status === "error" && r.status_code >= 400) ||
+        (filter.status === "ok" && r.status_code < 400)) &&
+      (!filter?.from || r.ts >= filter.from) &&
+      (!filter?.to || r.ts < filter.to),
+  );
+}
+
 export const devApi: KiwanoApi = {
   async getGatewayStatus(): Promise<GatewayStatus> {
     await delay();
@@ -1259,14 +1278,7 @@ export const devApi: KiwanoApi = {
 
   async listRequestLogs(page: number, pageSize: number, filter?: RequestLogFilter): Promise<RequestLogList> {
     await delay();
-    const rows = requestLogs.filter(
-      (r) =>
-        (!filter?.agent || r.agent === filter.agent) &&
-        (!filter?.provider_id || r.provider_id === filter.provider_id) &&
-        (!filter?.status ||
-          (filter.status === "error" && r.status_code >= 400) ||
-          (filter.status === "ok" && r.status_code < 400)),
-    );
+    const rows = matchingLogs(filter);
     const start = (page - 1) * pageSize;
     return { rows: rows.slice(start, start + pageSize).map((r) => ({ ...r })), total: rows.length };
   },
@@ -1274,6 +1286,14 @@ export const devApi: KiwanoApi = {
   async getRequestLog(id: number): Promise<RequestLogDetail | null> {
     await delay();
     return requestLogs.find((r) => r.id === id) ?? null;
+  },
+
+  // No filesystem in the browser, so this reports what it would have written
+  // rather than pretending to write it — the toolbar's feedback then matches
+  // the desktop app's without a second code path here.
+  async exportRequestLogs(_path: string, filter?: RequestLogFilter): Promise<RequestLogExport> {
+    await delay();
+    return { rows_written: matchingLogs(filter).length, truncated: false };
   },
 
   async clearRequestLogs(): Promise<void> {

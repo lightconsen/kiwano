@@ -5,6 +5,7 @@
 //! gateway route table. The gateway process itself is spawned in `setup`.
 
 mod creds;
+mod csv;
 mod detect;
 mod import;
 mod plan_quota;
@@ -18,7 +19,7 @@ mod vm;
 
 use std::sync::Mutex;
 
-use kiwano_gateway::store::Store;
+use kiwano_gateway::store::{RequestLogFilter, Store};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
@@ -388,6 +389,7 @@ fn update_settings(
 // ── Request logs (full data-plane audit trail, migration V5) ──
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn list_request_logs(
     state: State<AppState>,
     page: i64,
@@ -395,14 +397,45 @@ fn list_request_logs(
     agent: Option<String>,
     provider_id: Option<String>,
     status: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
 ) -> Result<vm::RequestLogListVm, String> {
     vm::list_request_logs(
         &state.store,
         page,
         page_size,
+        RequestLogFilter {
+            agent: agent.as_deref(),
+            provider_id: provider_id.as_deref(),
+            status: status.as_deref(),
+            from: from.as_deref(),
+            to: to.as_deref(),
+        },
+    )
+}
+
+/// Writes the filtered log slice to `path` as CSV. The frontend picks the path
+/// from the dialog plugin first — the same split as `export_config` — and this
+/// is `async` because a full export is a lot of formatting to block a thread on.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+fn export_request_logs(
+    state: State<AppState>,
+    path: String,
+    agent: Option<String>,
+    provider_id: Option<String>,
+    status: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<vm::RequestLogExportVm, String> {
+    vm::export_request_logs_csv(
+        &state.store,
+        &path,
         agent.as_deref(),
         provider_id.as_deref(),
         status.as_deref(),
+        from.as_deref(),
+        to.as_deref(),
     )
 }
 
@@ -774,6 +807,7 @@ pub fn run() {
             get_settings,
             update_settings,
             list_request_logs,
+            export_request_logs,
             get_request_log,
             clear_request_logs,
             set_agent_takeover,

@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwano_gateway::store::{
     Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry, RequestLogFilter,
-    Store, Strategy, StrategyType, UsageTotals,
+    Store, Strategy, StrategyType, UsageTotals, EXPORT_ROW_CAP,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -2343,22 +2343,54 @@ pub fn list_request_logs(
     store: &Store,
     page: i64,
     page_size: i64,
+    filter: RequestLogFilter<'_>,
+) -> Result<RequestLogListVm, String> {
+    let (rows, total) = store
+        .list_request_logs(page, page_size, filter)
+        .map_err(e2s)?;
+    Ok(RequestLogListVm { rows, total })
+}
+
+#[derive(Serialize)]
+pub struct RequestLogExportVm {
+    pub rows_written: usize,
+    /// The slice was larger than `EXPORT_ROW_CAP`, so the file is short of it.
+    pub truncated: bool,
+}
+
+/// Every log row the filter matches, as CSV — what the Logs card's export
+/// writes. Unpaged, unlike `list_request_logs`: the page size is a display
+/// concern and must not cap what lands in the file.
+pub fn export_request_logs_csv(
+    store: &Store,
+    path: &str,
     agent: Option<&str>,
     provider_id: Option<&str>,
     status: Option<&str>,
-) -> Result<RequestLogListVm, String> {
-    let (rows, total) = store
-        .list_request_logs(
-            page,
-            page_size,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<RequestLogExportVm, String> {
+    // Ask for one row more than the cap will allow, so "exactly at the cap"
+    // and "more than the cap" are distinguishable.
+    let mut rows = store
+        .export_request_logs(
             RequestLogFilter {
                 agent,
                 provider_id,
                 status,
+                from,
+                to,
             },
+            EXPORT_ROW_CAP + 1,
         )
         .map_err(e2s)?;
-    Ok(RequestLogListVm { rows, total })
+    let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
+    rows.truncate(EXPORT_ROW_CAP as usize);
+    crate::csv::write_csv(path, &rows).map_err(e2s)?;
+    Ok(RequestLogExportVm {
+        rows_written: rows.len(),
+        truncated,
+    })
 }
 
 /// Detail view (metadata + bodies); re-exported for the command signature.
@@ -4299,6 +4331,38 @@ mod tests {
         assert_eq!(fo.requests, 0);
         assert!(fo.by_provider.is_empty());
         assert!(fo.by_agent.is_empty());
+    }
+
+    #[test]
+    fn export_writes_the_filtered_slice_as_csv() {
+        let s = store();
+        let now = unix_now();
+        // seed_usage_rows writes the request_logs twin too, which is the table
+        // the export reads.
+        seed_usage_rows(&s, now - 90, 3, 1_000);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("logs.csv");
+        let path = path.to_str().unwrap();
+
+        let out = export_request_logs_csv(&s, path, None, None, None, None, None).unwrap();
+        assert_eq!(out.rows_written, 3);
+        assert!(!out.truncated);
+
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.starts_with('\u{feff}'), "Excel needs the BOM");
+        assert_eq!(text.lines().count(), 4, "a header and one line per row");
+        assert!(
+            text.starts_with("\u{feff}id,ts,method,path"),
+            "header first"
+        );
+        assert!(text.contains("claude"), "the row's agent is in there");
+
+        // The same filter the table gets: a slice with no rows writes a
+        // header-only file rather than the whole table.
+        let empty =
+            export_request_logs_csv(&s, path, Some("codex"), None, None, None, None).unwrap();
+        assert_eq!(empty.rows_written, 0);
+        assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 1);
     }
 
     #[test]

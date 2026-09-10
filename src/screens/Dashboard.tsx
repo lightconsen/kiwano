@@ -83,7 +83,9 @@ function TrendChart({ data }: { data: DashboardData }) {
       </g>
       <path d={areaPath} fill="url(#gk)" />
       <path d={reqPath} fill="none" stroke="var(--kiwi)" strokeWidth="1.8" />
-      <path d={smoothPath(tokPts)} fill="none" stroke="var(--blue)" strokeWidth="1.3" strokeDasharray="5 4" />
+      {/* Solid, and warm: a dashed blue line beside a green one reads as the
+          same family, and the dash was doing work the colour should do. */}
+      <path d={smoothPath(tokPts)} fill="none" stroke="var(--orange)" strokeWidth="1.6" />
       {last && <circle cx={last[0]} cy={last[1]} r="3" fill="var(--kiwi)" stroke="var(--bg)" strokeWidth="1.5" />}
       <g fill="var(--mut)" fontSize="9.5" fontFamily="JetBrains Mono">
         {ticks.map((t) => (
@@ -323,7 +325,7 @@ export default function Dashboard() {
                 Requests
               </span>
               <span className="flex items-center gap-1">
-                <span className="h-1 w-2 rounded-full" style={{ background: "var(--blue)" }} />
+                <span className="h-1 w-2 rounded-full" style={{ background: "var(--orange)" }} />
                 Tokens
               </span>
             </div>

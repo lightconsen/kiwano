@@ -41,8 +41,41 @@ ROWS_BASE = 5
 ROWS_CYCLE = 7
 IN_TOKENS, OUT_TOKENS, CACHE_READ = 1000, 200, 100
 COST_USD, LATENCY_BASE = 0.02, 200
-PROVIDERS = ["demo-alpha", "demo-beta"]
+PROVIDERS = ["demo-alpha", "demo-beta", "demo-local"]
 AGENTS = ["claude", "codex"]
+
+# The providers the rows are written against, created here rather than expected
+# in the copied database: usage naming a provider that does not exist is
+# invisible on the Providers page, so the quota cells had nothing to draw — and
+# one of each billing mode is what makes those cells testable.
+#
+#   demo-alpha  subscription — a monthly cap in the provider's own currency
+#   demo-beta   metered      — a spending cap, the same shape one mode over
+#   demo-local  unlimited    — no metering at all
+#
+# id, name, protocol, base_url, billing, period_limit, limit_unit, reset_period
+PROVIDER_ROWS = [
+    ("demo-alpha", "Demo Alpha", "anthropic", "https://alpha.demo.invalid", "subscription", 50.0, "CNY", "monthly"),
+    ("demo-beta", "Demo Beta", "openai", "https://beta.demo.invalid", "metered", 30.0, "CNY", "monthly"),
+    ("demo-local", "Demo Local", "openai", "http://127.0.0.1:11434/v1", "unlimited", None, None, None),
+]
+
+
+def upsert_providers(conn):
+    """Create the demo providers, leaving any existing row's key untouched."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for pid, name, protocol, base_url, billing, limit, unit, reset in PROVIDER_ROWS:
+        conn.execute(
+            """INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
+                                      billing, period_limit, limit_unit, plan_query,
+                                      reset_period, enabled, created_at, updated_at)
+               VALUES (?,?,?,?,NULL,?,?,?,?,NULL,?,1,?,?)
+               ON CONFLICT(id) DO UPDATE SET
+                  name = excluded.name, billing = excluded.billing,
+                  period_limit = excluded.period_limit, limit_unit = excluded.limit_unit,
+                  reset_period = excluded.reset_period, updated_at = excluded.updated_at""",
+            (pid, name, protocol, base_url, f"sk-demo-{pid}", billing, limit, unit, reset, now, now),
+        )
 
 
 def day_boundaries(days):
@@ -81,6 +114,8 @@ def seed(db, days, clear):
         conn.execute("DELETE FROM usage")
         conn.execute("DELETE FROM request_logs")
         conn.commit()
+    upsert_providers(conn)
+    conn.commit()
 
     now = datetime.now(timezone.utc)
     # Today's rows spread across the local hours already elapsed, so the hourly

@@ -12,7 +12,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
 import { onUpdateAvailable } from "../lib/updateEvents";
-import type { AppSettings, UpdateInfo } from "../api/types";
+import type { AgentId, AppSettings, UpdateInfo } from "../api/types";
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
   return (
@@ -36,6 +36,8 @@ export default function Settings() {
   const [progress, setProgress] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [upToDate, setUpToDate] = useState(false);
+  const [takeoverBusy, setTakeoverBusy] = useState<string | null>(null);
+  const [takeoverErr, setTakeoverErr] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
@@ -67,6 +69,19 @@ export default function Settings() {
       offProgress.then((off) => off()).catch(() => {});
     };
   }, []);
+
+  // Turning a takeover off is one call — the backend restores the agent's own
+  // configuration. Turning one on is not: it walks the Apps onboarding
+  // (enable → route → rewrite), so that direction stays a deep link.
+  const disableTakeover = (agent: AgentId) => {
+    setTakeoverBusy(agent);
+    setTakeoverErr(null);
+    api
+      .setTakeover(agent, false)
+      .then(() => api.getSettings().then(setS))
+      .catch((e) => setTakeoverErr(`${agent}: ${String(e)}`))
+      .finally(() => setTakeoverBusy(null));
+  };
 
   // "Up to date" is a confirmation, not a mode: it clears itself.
   useEffect(() => {
@@ -192,22 +207,31 @@ export default function Settings() {
                 <span className="text-[10.5px]" style={t.enabled ? { color: "var(--kiwi)" } : { color: "var(--mut)" }}>
                   {t.enabled ? "Taken over" : "Not taken over"}
                 </span>
-                {/* Takeover is performed in Apps/<agent> so the user walks the
-                    onboarding flow (enable → route → config rewrite); this row
-                    only navigates there (deep link #providers/<agent>). */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2.5 text-[11px]"
-                  onClick={() => {
-                    window.location.hash = `providers/${t.agent}`;
-                  }}
-                >
-                  {t.enabled ? "Manage in Apps" : "Enable in Apps"}
-                </Button>
+                {t.enabled ? (
+                  // Off is one call, so it lives here as a switch. Turning one
+                  // back on is not (enable → route → rewrite in Apps), which is
+                  // why that direction keeps its own button below.
+                  <Switch
+                    checked
+                    disabled={takeoverBusy === t.agent}
+                    onCheckedChange={() => disableTakeover(t.agent)}
+                  />
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-[11px]"
+                    onClick={() => {
+                      window.location.hash = `providers/${t.agent}`;
+                    }}
+                  >
+                    Enable in Apps
+                  </Button>
+                )}
               </span>
             </div>
           ))}
+          {takeoverErr ? <div className="text-[11px] text-red-400">{takeoverErr}</div> : null}
           <Row label="Auto failover" note="Switch to a standby when the primary fails">
             <Switch checked={s.auto_failover} onCheckedChange={(v) => patch({ auto_failover: v })} />
           </Row>

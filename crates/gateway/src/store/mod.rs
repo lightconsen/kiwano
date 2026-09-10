@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 8;
+pub const SCHEMA_VERSION: i32 = 9;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -220,6 +220,79 @@ ALTER TABLE providers ADD COLUMN retries INTEGER;
 ALTER TABLE providers ADD COLUMN headers TEXT;
 "#;
 
+/// v9: model pricing (port of cc-switch's price layer).
+/// - `model_pricing` mirrors the bundled models.json seed (TEXT decimals,
+///   currency per row; the gateway resolves prices in memory, the table keeps
+///   the GUI-side copy in sync via the src-tauri seeder).
+/// - `usage`/`request_logs` gain `cost` + `cost_currency` (cost is stored in
+///   the price entry's currency; NULL for unpriced models).
+/// - `providers.plan_query` holds the token-plan quota query template +
+///   credentials as JSON (`{"template":"kimi","fields":{...}}`).
+/// - `limit_unit` widens from ('requests','wan_tokens','cny') to those two
+///   units plus any 3-letter uppercase currency code. CHECK constraints can't
+///   be altered in place, so `providers` is rebuilt (v4 pattern); legacy
+///   lowercase units are preserved verbatim, bare currency codes uppercased.
+const MIGRATION_V9: &str = r#"
+CREATE TABLE IF NOT EXISTS model_pricing (
+    model_id        TEXT PRIMARY KEY,
+    display_name    TEXT NOT NULL,
+    input           TEXT NOT NULL,
+    output          TEXT NOT NULL,
+    cache_read      TEXT NOT NULL DEFAULT '0',
+    cache_creation  TEXT NOT NULL DEFAULT '0',
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    source          TEXT
+);
+
+ALTER TABLE usage ADD COLUMN cost REAL;
+ALTER TABLE usage ADD COLUMN cost_currency TEXT;
+
+ALTER TABLE request_logs ADD COLUMN cost REAL;
+ALTER TABLE request_logs ADD COLUMN cost_currency TEXT;
+
+PRAGMA foreign_keys=OFF;
+CREATE TABLE providers_new (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    protocol     TEXT NOT NULL DEFAULT 'anthropic'
+                 CHECK (protocol IN ('anthropic','openai','gemini')),
+    base_url     TEXT NOT NULL,
+    api_path     TEXT,
+    api_key      TEXT,
+    billing      TEXT NOT NULL DEFAULT 'metered'
+                 CHECK (billing IN ('subscription','metered','unlimited')),
+    period_limit REAL,
+    limit_unit   TEXT
+                 CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens')
+                        OR (length(limit_unit) = 3 AND upper(limit_unit) = limit_unit)),
+    plan_query   TEXT,
+    reset_period TEXT
+                 CHECK (reset_period IS NULL OR reset_period IN ('monthly','weekly','yearly')),
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    timeout_secs INTEGER,
+    retries      INTEGER,
+    headers      TEXT
+);
+INSERT INTO providers_new (id, name, protocol, base_url, api_path, api_key,
+                           billing, period_limit, limit_unit, plan_query,
+                           reset_period, enabled, created_at, updated_at,
+                           timeout_secs, retries, headers)
+    SELECT id, name, protocol, base_url, api_path, api_key,
+           billing, period_limit,
+           CASE WHEN limit_unit IN ('requests','wan_tokens') THEN limit_unit
+                WHEN limit_unit IS NULL THEN NULL
+                ELSE upper(limit_unit) END,
+           NULL,
+           reset_period, enabled, created_at, updated_at,
+           timeout_secs, retries, headers
+    FROM providers;
+DROP TABLE providers;
+ALTER TABLE providers_new RENAME TO providers;
+PRAGMA foreign_keys=ON;
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -343,10 +416,15 @@ pub struct Provider {
     pub billing: Billing,
     /// User-entered spending/period cap used for the ring percentage estimate.
     pub period_limit: Option<f64>,
-    /// Unit of `period_limit`: requests | wan_tokens | cny (NULL reads as requests).
-    /// `default` keeps v1 export files deserializable (config share, share.rs).
+    /// Unit of `period_limit`: requests | wan_tokens | <3-letter currency> (NULL
+    /// reads as requests). `default` keeps v1 export files deserializable
+    /// (config share, share.rs).
     #[serde(default)]
     pub limit_unit: Option<String>,
+    /// Token-plan quota query as JSON `{"template":"kimi","fields":{...}}`
+    /// (migration v9). NULL = no plan quota configured.
+    #[serde(default)]
+    pub plan_query: Option<String>,
     /// Per-provider cap on the wait for upstream response headers, seconds
     /// (migration v8). NULL = gateway defaults (10s connect / 300s read).
     #[serde(default)]
@@ -420,6 +498,11 @@ pub struct UsageRecord {
     pub cache_creation_tokens: i64,
     pub latency_ms: Option<i64>,
     pub status: String,
+    /// Computed request cost in the price entry's currency (migration v9);
+    /// NULL when the model is unpriced.
+    pub cost: Option<f64>,
+    /// Currency of `cost` (ISO code, e.g. "USD"); NULL when cost is NULL.
+    pub cost_currency: Option<String>,
 }
 
 /// Aggregated token/request totals.
@@ -516,6 +599,9 @@ pub struct RequestLogNew {
     pub request_size: i64,
     pub response_size: i64,
     pub truncated: bool,
+    /// Computed request cost in the price entry's currency (migration v9).
+    pub cost: Option<f64>,
+    pub cost_currency: Option<String>,
 }
 
 /// Metadata row of `request_logs` (list view — never includes bodies).
@@ -697,6 +783,9 @@ impl Store {
         if version < 8 {
             conn.execute_batch(MIGRATION_V8)?;
         }
+        if version < 9 {
+            conn.execute_batch(MIGRATION_V9)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -710,10 +799,10 @@ impl Store {
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
-                                    billing, period_limit, limit_unit, timeout_secs,
-                                    retries, headers, reset_period,
+                                    billing, period_limit, limit_unit, plan_query,
+                                    timeout_secs, retries, headers, reset_period,
                                     enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 p.id,
                 p.name,
@@ -724,6 +813,7 @@ impl Store {
                 p.billing.as_str(),
                 p.period_limit,
                 p.limit_unit,
+                p.plan_query,
                 p.timeout_secs,
                 p.retries,
                 p.headers,
@@ -742,7 +832,7 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, limit_unit, timeout_secs, retries, headers,
+                    period_limit, limit_unit, plan_query, timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at
              FROM providers WHERE id = ?1",
         )?;
@@ -757,7 +847,7 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, limit_unit, timeout_secs, retries, headers,
+                    period_limit, limit_unit, plan_query, timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
@@ -784,8 +874,8 @@ impl Store {
         tx.execute(
             "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
                     api_key = ?6, billing = ?7, period_limit = ?8, limit_unit = ?9,
-                    timeout_secs = ?10, retries = ?11, headers = ?12,
-                    reset_period = ?13, enabled = ?14, updated_at = ?15
+                    plan_query = ?10, timeout_secs = ?11, retries = ?12, headers = ?13,
+                    reset_period = ?14, enabled = ?15, updated_at = ?16
              WHERE id = ?1",
             params![
                 p.id,
@@ -797,6 +887,7 @@ impl Store {
                 p.billing.as_str(),
                 p.period_limit,
                 p.limit_unit,
+                p.plan_query,
                 p.timeout_secs,
                 p.retries,
                 p.headers,
@@ -1025,8 +1116,9 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
-                                cache_read_tokens, cache_creation_tokens, latency_ms, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                cache_read_tokens, cache_creation_tokens, latency_ms, status,
+                                cost, cost_currency)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 u.ts,
                 u.agent,
@@ -1038,9 +1130,64 @@ impl Store {
                 u.cache_creation_tokens,
                 u.latency_ms,
                 u.status,
+                u.cost,
+                u.cost_currency,
             ],
         )?;
         Ok(())
+    }
+
+    /// Cost sums grouped by currency (rows without a computed cost are
+    /// skipped). Used to build currency-aware usage/dashboard figures.
+    pub fn usage_cost_by_currency(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<(Option<String>, f64)>> {
+        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT cost_currency, SUM(cost) FROM usage
+             WHERE 1=1{cond} AND cost IS NOT NULL
+             GROUP BY cost_currency",
+        ))?;
+        let mut out = Vec::new();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, f64>(1)?))
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Per-provider cost sums with their currency (dashboard by-provider
+    /// breakdown needs the split before converting to the preferred currency).
+    pub fn usage_cost_by_provider(
+        &self,
+        agent: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<(String, Option<String>, f64)>> {
+        let (cond, params) = Self::usage_filters(agent, None, since);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT provider_id, cost_currency, SUM(cost) FROM usage
+             WHERE 1=1{cond} AND cost IS NOT NULL
+             GROUP BY provider_id, cost_currency",
+        ))?;
+        let mut out = Vec::new();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, f64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// WHERE fragment + positional params shared by usage-table aggregations
@@ -1249,9 +1396,10 @@ impl Store {
                                        input_tokens, output_tokens, cache_read_tokens,
                                        cache_creation_tokens, latency_ms, first_token_ms,
                                        request_headers, response_headers,
-                                       request_size, response_size, truncated)
+                                       request_size, response_size, truncated,
+                                       cost, cost_currency)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             params![
                 r.ts,
                 r.method,
@@ -1277,6 +1425,8 @@ impl Store {
                 r.request_size,
                 r.response_size,
                 r.truncated as i64,
+                r.cost,
+                r.cost_currency,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -1495,13 +1645,14 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         billing: Billing::from_str(&billing_str).unwrap_or(Billing::Metered),
         period_limit: row.get(7)?,
         limit_unit: row.get(8)?,
-        timeout_secs: row.get(9)?,
-        retries: row.get(10)?,
-        headers: row.get(11)?,
-        reset_period: row.get(12)?,
-        enabled: row.get::<_, i64>(13)? != 0,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        plan_query: row.get(9)?,
+        timeout_secs: row.get(10)?,
+        retries: row.get(11)?,
+        headers: row.get(12)?,
+        reset_period: row.get(13)?,
+        enabled: row.get::<_, i64>(14)? != 0,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
     })
 }
 
@@ -1616,6 +1767,7 @@ mod tests {
             billing: Billing::Metered,
             period_limit: Some(50.0),
             limit_unit: None,
+            plan_query: None,
             timeout_secs: None,
             retries: None,
             headers: None,
@@ -1712,6 +1864,93 @@ mod tests {
             store.get_provider("p-gem").unwrap().unwrap().protocol,
             Protocol::Gemini
         );
+    }
+
+    /// v8 → v9 rebuild: providers survive with widened limit_unit CHECK
+    /// (legacy 'cny' uppercased, units preserved), plan_query backfilled NULL,
+    /// model_pricing created, usage/request_logs gain cost columns.
+    #[test]
+    fn migration_v9_rebuilds_providers_with_plan_query_and_cost_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v8 database (pre-pricing) with data in it.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(MIGRATION_V1).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute_batch(MIGRATION_V3).unwrap();
+            conn.execute_batch(MIGRATION_V4).unwrap();
+            conn.execute_batch(MIGRATION_V5).unwrap();
+            conn.execute_batch(MIGRATION_V7).unwrap();
+            conn.execute_batch(MIGRATION_V8).unwrap();
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing,
+                                        period_limit, limit_unit, created_at, updated_at)
+                 VALUES ('p-cny', 'Old', 'anthropic', 'https://api.example.com', 'metered',
+                         10.0, 'cny', 't0', 't0'),
+                        ('p-req', 'Old2', 'openai', 'https://api2.example.com', 'metered',
+                         100.0, 'requests', 't0', 't0');
+                 PRAGMA user_version = 8;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let cny = store.get_provider("p-cny").unwrap().expect("provider kept");
+        // Legacy lowercase currency unit is uppercased; 'requests' preserved.
+        assert_eq!(cny.limit_unit.as_deref(), Some("CNY"));
+        assert_eq!(cny.plan_query, None);
+        assert_eq!(
+            store.get_provider("p-req").unwrap().unwrap().limit_unit.as_deref(),
+            Some("requests")
+        );
+        // Bindings survive the rebuild.
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "p-cny".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 1);
+
+        // New v9 shapes exist: model_pricing table + cost columns + 3-letter
+        // currency units accepted.
+        let conn = store.conn.lock().unwrap();
+        let has_table: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_pricing'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_table, 1);
+        conn.execute_batch(
+            "INSERT INTO model_pricing (model_id, display_name, input, output)
+             VALUES ('m-x', 'X', '1', '2');",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO usage (ts, agent, provider_id, status, cost, cost_currency)
+             VALUES ('t0', 'claude', 'p-cny', 'ok', 0.5, 'USD')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        // Currency limit units pass the widened CHECK; plan_query round-trips.
+        let mut p = sample_provider("p-usd", Protocol::OpenAI);
+        p.limit_unit = Some("USD".to_string());
+        p.plan_query = Some(r#"{"template":"kimi"}"#.to_string());
+        store.insert_provider(&p).unwrap();
+        let got = store.get_provider("p-usd").unwrap().expect("usd provider");
+        assert_eq!(got.limit_unit.as_deref(), Some("USD"));
+        assert_eq!(got.plan_query.as_deref(), Some(r#"{"template":"kimi"}"#));
     }
 
     /// v7: additional per-protocol endpoints round-trip with the provider row
@@ -2037,6 +2276,8 @@ mod tests {
             cache_creation_tokens: 0,
             latency_ms: Some(120),
             status: "ok".to_string(),
+            cost: None,
+            cost_currency: None,
         };
 
         store
@@ -2060,6 +2301,8 @@ mod tests {
                 cache_creation_tokens: 2,
                 latency_ms: None,
                 status: "error".into(),
+                cost: None,
+                cost_currency: None,
             })
             .unwrap();
 
@@ -2175,6 +2418,8 @@ mod tests {
                 cache_creation_tokens: 0,
                 latency_ms: None,
                 status: "ok".into(),
+                cost: None,
+                cost_currency: None,
             })
             .unwrap();
 
@@ -2213,6 +2458,8 @@ mod tests {
             request_size: 28,
             response_size: 12,
             truncated: false,
+            cost: None,
+            cost_currency: None,
         }
     }
 

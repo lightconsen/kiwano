@@ -78,6 +78,7 @@ mod tests {
             billing: Billing::Metered,
             period_limit: None,
             limit_unit: None,
+            plan_query: None,
             timeout_secs: None,
             retries: None,
             headers: None,

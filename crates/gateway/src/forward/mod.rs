@@ -82,12 +82,16 @@ struct UsageSample {
     usage: Usage,
     latency_ms: i64,
     status: &'static str,
+    /// Input-token semantics of the outbound protocol: openai/gemini
+    /// `input_tokens` already contain the cache buckets (deducted before
+    /// billing); anthropic reports fresh input only.
+    cache_inclusive: bool,
     /// Full-log payload; None while request logging is disabled.
     log: Option<CompletedLog>,
 }
 
 impl UsageSample {
-    fn into_record(self) -> UsageRecord {
+    fn into_record(self, cost: Option<f64>, cost_currency: Option<String>) -> UsageRecord {
         UsageRecord {
             ts: now_rfc3339(),
             agent: self.agent,
@@ -99,8 +103,35 @@ impl UsageSample {
             cache_creation_tokens: self.usage.cache_creation_tokens,
             latency_ms: Some(self.latency_ms),
             status: self.status.to_string(),
+            cost,
+            cost_currency,
         }
     }
+}
+
+/// Resolve the sample's price and compute its cost in the price entry's
+/// currency. Unpriced / unknown models yield `(None, None)` (row keeps
+/// NULL cost).
+fn compute_sample_cost(
+    state: &GatewayState,
+    sample: &UsageSample,
+) -> (Option<f64>, Option<String>) {
+    let Some(model) = sample.model.as_deref().filter(|m| !m.is_empty()) else {
+        return (None, None);
+    };
+    let pricing = state.pricing.read().expect("pricing lock poisoned");
+    let Some(entry) = pricing.find(model) else {
+        return (None, None);
+    };
+    let cost = kiwano_adapters::model_pricing::compute_cost(
+        entry,
+        sample.usage.input_tokens.max(0) as u64,
+        sample.usage.output_tokens.max(0) as u64,
+        sample.usage.cache_read_tokens.max(0) as u64,
+        sample.usage.cache_creation_tokens.max(0) as u64,
+        sample.cache_inclusive,
+    );
+    (cost, Some(entry.currency.clone()))
 }
 
 /// Pick the credential for one upstream request: the provider's key pool is
@@ -577,6 +608,10 @@ pub async fn forward(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
+                cache_inclusive: matches!(
+                    provider.protocol,
+                    Protocol::OpenAI | Protocol::Gemini
+                ),
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -637,6 +672,7 @@ pub async fn forward(
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: if status.is_success() { "ok" } else { "error" },
+            cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
             log,
         };
         record_sample(&state, sample);
@@ -842,6 +878,8 @@ async fn forward_anthropic_via_openai(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
+                // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
+                cache_inclusive: true,
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -907,6 +945,8 @@ async fn forward_anthropic_via_openai(
                 usage: usage.unwrap_or_default(),
                 latency_ms,
                 status: "error",
+                // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
+                cache_inclusive: true,
                 log,
             };
             record_sample(&state, sample);
@@ -977,6 +1017,8 @@ async fn forward_anthropic_via_openai(
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: "ok",
+            // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
+            cache_inclusive: true,
             log,
         };
         record_sample(&state, sample);
@@ -1020,7 +1062,8 @@ async fn record_pending_usage(state: Arc<GatewayState>, mut rx: mpsc::Receiver<U
 fn record_sample(state: &GatewayState, sample: UsageSample) {
     let mut sample = sample;
     let log = sample.log.take();
-    let record = sample.into_record();
+    let (cost, cost_currency) = compute_sample_cost(state, &sample);
+    let record = sample.into_record(cost, cost_currency);
     tracing::info!(
         agent = %record.agent,
         provider_id = %record.provider_id,
@@ -1030,6 +1073,7 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
         cache_creation = record.cache_creation_tokens,
         latency_ms = record.latency_ms,
         status = %record.status,
+        cost = record.cost,
         "usage captured"
     );
     if let Err(e) = state.store.record_usage(&record) {
@@ -1063,6 +1107,8 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
             request_size: log.capture.request_size,
             response_size: log.response_size,
             truncated: log.capture.truncated || log.truncated,
+            cost: record.cost,
+            cost_currency: record.cost_currency,
         };
         if let Err(e) = state.store.insert_request_log(&entry) {
             tracing::warn!(error = %e, "failed to persist request log");
@@ -1396,6 +1442,68 @@ mod tests {
     }
 
     #[test]
+    fn record_sample_costs_priced_models_and_skips_unknown() {
+        use crate::store::Protocol;
+
+        let state = crate::server::GatewayState::new(
+            crate::store::Store::open_in_memory().expect("store"),
+        )
+        .expect("state");
+        state
+            .store
+            .insert_provider(&crate::store::Provider {
+                id: "p1".into(),
+                name: "p1".into(),
+                protocol: Protocol::Anthropic,
+                base_url: "https://a.example.com".into(),
+                api_path: None,
+                endpoints: Vec::new(),
+                api_key: Some("sk".into()),
+                billing: crate::store::Billing::Metered,
+                period_limit: None,
+                limit_unit: None,
+                plan_query: None,
+                timeout_secs: None,
+                retries: None,
+                headers: None,
+                reset_period: None,
+                enabled: true,
+                created_at: crate::store::now_rfc3339(),
+                updated_at: crate::store::now_rfc3339(),
+            })
+            .unwrap();
+
+        // claude-opus-4-8 is priced in the bundled table (input 5 USD/M).
+        let sample = |model: Option<&'static str>| UsageSample {
+            agent: "claude".into(),
+            provider_id: "p1".into(),
+            model: model.map(str::to_string),
+            usage: Usage {
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            log: None,
+        };
+        record_sample(&state, sample(Some("claude-opus-4-8")));
+        record_sample(&state, sample(Some("totally-unpriced-model")));
+        record_sample(&state, sample(None));
+
+        let totals = state.store.usage_totals(None, None, None).unwrap();
+        assert_eq!(totals.requests, 3);
+        // Only the priced model contributes; cost is stored in the price
+        // entry's currency (1M fresh input @ 5 USD/M = 5.0).
+        let costs = state.store.usage_cost_by_currency(None, None, None).unwrap();
+        assert_eq!(costs.len(), 1);
+        assert_eq!(costs[0].0.as_deref(), Some("USD"));
+        assert!((costs[0].1 - 5.0).abs() < 1e-9, "got {}", costs[0].1);
+    }
+
+    #[test]
     fn multi_key_pool_rotates_per_request() {
         let state = crate::server::GatewayState::new(
             crate::store::Store::open_in_memory().expect("store"),
@@ -1484,6 +1592,7 @@ mod tests {
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
+                cache_inclusive: false,
                 log: None,
             },
             Instant::now(),

@@ -477,13 +477,22 @@ fn cmd_providers_add(store: &Store, args: &AddArgs) -> Result<(), String> {
         billing: args.billing,
         period_limit: args.limit,
         // Unit only matters together with a limit; NULL reads as requests.
-        limit_unit: args
-            .limit
-            .map(|_| args.unit.clone().unwrap_or_else(|| "requests".into())),
+        // Currency units normalize to the 3-letter uppercase ISO code (same
+        // rule as the GUI's normalize_limit_unit); unknown units fall back.
+        limit_unit: args.limit.map(|_| {
+            let raw = args.unit.clone().unwrap_or_else(|| "requests".into());
+            let up = raw.trim().to_ascii_uppercase();
+            match raw.as_str() {
+                "requests" | "wan_tokens" => raw,
+                u if u.len() == 3 && u.chars().all(|c| c.is_ascii_alphabetic()) => up,
+                _ => "requests".into(),
+            }
+        }),
         reset_period: match args.reset.as_deref() {
             Some("monthly") | Some("weekly") | Some("yearly") => args.reset.clone(),
             _ => None,
         },
+        plan_query: None,
         timeout_secs: None,
         retries: None,
         headers: None,
@@ -1027,6 +1036,7 @@ mod tests {
                 period_limit: None,
                 limit_unit: None,
                 reset_period: None,
+                plan_query: None,
                 timeout_secs: None,
                 retries: None,
                 headers: None,
@@ -1063,7 +1073,7 @@ mod tests {
             .map(|p| p.id.clone())
             .unwrap();
         let row = stored.iter().find(|p| p.id == ds).unwrap();
-        assert_eq!(row.limit_unit.as_deref(), Some("cny"));
+        assert_eq!(row.limit_unit.as_deref(), Some("CNY"));
         assert_eq!(row.reset_period, None, "--reset none stores NULL");
 
         // claude primary = deepseek-* row.
@@ -1132,6 +1142,8 @@ mod tests {
                 cache_creation_tokens: 0,
                 latency_ms: Some(120),
                 status: "ok".into(),
+                cost: None,
+                cost_currency: None,
             })
             .unwrap();
 

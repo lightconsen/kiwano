@@ -37,6 +37,9 @@ pub struct GatewayState {
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Request-log capture config, refreshed alongside the route table.
     log_cfg: RwLock<LogConfig>,
+    /// Bundled model price table (crates/adapters resources/models.json);
+    /// consulted at usage-record time to cost every metered request.
+    pub(crate) pricing: RwLock<kiwano_adapters::model_pricing::PricingTable>,
     pub started_at: Instant,
     pub version: &'static str,
 }
@@ -57,9 +60,19 @@ impl GatewayState {
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             log_cfg: RwLock::new(log_config),
+            pricing: RwLock::new(kiwano_adapters::model_pricing::PricingTable::bundled()),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         })
+    }
+
+    /// Current price-table snapshot (cheap clone; bundled data is static but
+    /// a future backend-fed table swaps here on `/reload`).
+    pub fn pricing(&self) -> kiwano_adapters::model_pricing::PricingTable {
+        self.pricing
+            .read()
+            .expect("pricing lock poisoned")
+            .clone()
     }
 
     /// Current route table snapshot (cheap `Arc` clone).
@@ -101,6 +114,8 @@ impl GatewayState {
         if let Ok(cfg) = self.store.load_log_config() {
             *self.log_cfg.write().expect("log config lock poisoned") = cfg;
         }
+        *self.pricing.write().expect("pricing lock poisoned") =
+            kiwano_adapters::model_pricing::PricingTable::bundled();
         Ok(agents)
     }
 }

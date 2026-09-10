@@ -158,6 +158,7 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         billing: Billing::Metered,
         period_limit: None,
         limit_unit: None,
+        plan_query: None,
         timeout_secs: None,
         retries: None,
         headers: None,

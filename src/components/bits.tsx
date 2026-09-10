@@ -52,9 +52,18 @@ const BILL_TAG: Record<Billing, { label: string; cls: string }> = {
   unl: { label: "Unl", cls: "bill-unl" },
 };
 
+/** Fallback class for a billing tag this build does not know (a Hub catalog
+    row may carry one): a neutral chip showing the raw tag, instead of crashing
+    on a missing lookup entry. */
+const BILL_TAG_UNKNOWN_CLS = "bill-other";
+
 export function BillTag({ billing }: { billing: Billing }) {
-  const t = BILL_TAG[billing];
-  return <span className={`billtag ${t.cls}`}>{t.label}</span>;
+  const t = BILL_TAG[billing] as { label: string; cls: string } | undefined;
+  return (
+    <span className={`billtag ${t?.cls ?? BILL_TAG_UNKNOWN_CLS}`}>
+      {t?.label ?? billing}
+    </span>
+  );
 }
 
 /** 28px usage ring (design.md §8: plan=purple / payg=kiwi, ≥80% amber, ≥95% red) */

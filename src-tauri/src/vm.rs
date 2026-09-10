@@ -573,6 +573,58 @@ pub struct ProviderVm {
     pub plan_limits: Option<serde_json::Value>,
 }
 
+/// Catalog-side billing vocabulary (`plan` | `payg` | `unl`).
+///
+/// Serialized as the bare lowercase tag, so the wire shape is unchanged. An
+/// unrecognized tag is *not* silently coerced to `payg`: it is preserved
+/// verbatim in `Other` and written back byte-identically, which keeps the hub
+/// cache round-trip stable. One bad row must not fail a whole sync — the
+/// catalog is the primary resource and a failed sync would strand the user on
+/// the bundled snapshot forever.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum CatalogBilling {
+    Plan,
+    Payg,
+    Unl,
+    /// Unrecognized tag, kept verbatim for lossless round-tripping.
+    Other(String),
+}
+
+impl CatalogBilling {
+    pub fn as_str(&self) -> &str {
+        match self {
+            CatalogBilling::Plan => "plan",
+            CatalogBilling::Payg => "payg",
+            CatalogBilling::Unl => "unl",
+            CatalogBilling::Other(raw) => raw,
+        }
+    }
+
+    /// Inverse of `as_str`; `None` on an unrecognized tag (`Other` is what the
+    /// `From<String>` conversion falls back to).
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "plan" => Some(CatalogBilling::Plan),
+            "payg" => Some(CatalogBilling::Payg),
+            "unl" => Some(CatalogBilling::Unl),
+            _ => None,
+        }
+    }
+}
+
+impl From<String> for CatalogBilling {
+    fn from(raw: String) -> Self {
+        CatalogBilling::parse_str(&raw).unwrap_or(CatalogBilling::Other(raw))
+    }
+}
+
+impl From<CatalogBilling> for String {
+    fn from(b: CatalogBilling) -> Self {
+        b.as_str().to_string()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CatalogEntryVm {
     pub id: String,
@@ -604,7 +656,8 @@ pub struct CatalogEntryVm {
     pub price_line: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_note: Option<String>,
-    pub billing: String,
+    /// Billing mode; unknown Hub tags survive as `CatalogBilling::Other`.
+    pub billing: CatalogBilling,
     pub users: String,
     pub blurb: String,
     pub added: bool,
@@ -886,11 +939,17 @@ pub struct NewProviderInput {
 
 // ── Billing mapping (UI plan/payg/unl ↔ DB subscription/metered/unlimited) ──
 
-fn billing_to_db(ui: &str) -> Billing {
+/// Map a UI billing tag onto the store vocabulary. Unrecognized tags are an
+/// error, never a silent `Metered` fallback (an unknown tag would otherwise
+/// persist as a wrong billing mode and mis-shape the quota columns).
+fn billing_to_db(ui: &str) -> Result<Billing, String> {
     match ui {
-        "plan" => Billing::Subscription,
-        "unl" => Billing::Unlimited,
-        _ => Billing::Metered,
+        "plan" => Ok(Billing::Subscription),
+        "unl" => Ok(Billing::Unlimited),
+        "payg" => Ok(Billing::Metered),
+        other => Err(format!(
+            "unknown billing \"{other}\" (expected plan|payg|unl)"
+        )),
     }
 }
 
@@ -1649,7 +1708,8 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         .map(|v| v.to_string());
     // Plan rows carry percent limits in plan_limits; the legacy
     // number+unit+reset-cycle columns are left NULL (v10 form dropped them).
-    let is_plan = billing_to_db(&input.billing) == kiwano_gateway::store::Billing::Subscription;
+    let billing = billing_to_db(&input.billing)?;
+    let is_plan = billing == kiwano_gateway::store::Billing::Subscription;
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
@@ -1659,7 +1719,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         api_path: None,
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
-        billing: billing_to_db(&input.billing),
+        billing,
         period_limit: if is_plan {
             None
         } else {
@@ -1831,7 +1891,7 @@ pub fn update_provider(
     p.protocol = kiwano_gateway::store::Protocol::parse_str(&input.protocol)
         .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
     p.endpoints = input_endpoints(input);
-    p.billing = billing_to_db(&input.billing);
+    p.billing = billing_to_db(&input.billing)?;
     // Plan rows carry percent limits in plan_limits and NULL the legacy
     // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
     let is_plan = p.billing == kiwano_gateway::store::Billing::Subscription;
@@ -2960,9 +3020,71 @@ mod tests {
 
     #[test]
     fn billing_mapping_roundtrip() {
-        assert_eq!(billing_to_ui(billing_to_db("plan")), "plan");
-        assert_eq!(billing_to_ui(billing_to_db("payg")), "payg");
-        assert_eq!(billing_to_ui(billing_to_db("unl")), "unl");
+        assert_eq!(billing_to_ui(billing_to_db("plan").unwrap()), "plan");
+        assert_eq!(billing_to_ui(billing_to_db("payg").unwrap()), "payg");
+        assert_eq!(billing_to_ui(billing_to_db("unl").unwrap()), "unl");
+    }
+
+    #[test]
+    fn billing_to_db_rejects_unknown_tag() {
+        // An unknown tag must never silently become payg/metered.
+        let err = billing_to_db("per-token").unwrap_err();
+        assert!(err.contains("per-token"), "{err}");
+        assert!(err.contains("plan|payg|unl"), "{err}");
+        assert!(billing_to_db("").is_err());
+        assert!(billing_to_db("PAYG").is_err());
+    }
+
+    #[test]
+    fn catalog_billing_roundtrip_known_and_unknown() {
+        // Known tags map onto their variants and serialize back lowercase.
+        for (raw, variant) in [
+            ("plan", CatalogBilling::Plan),
+            ("payg", CatalogBilling::Payg),
+            ("unl", CatalogBilling::Unl),
+        ] {
+            assert_eq!(CatalogBilling::parse_str(raw), Some(variant.clone()));
+            assert_eq!(CatalogBilling::from(raw.to_string()), variant);
+            assert_eq!(variant.as_str(), raw);
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!("\"{raw}\"")
+            );
+        }
+
+        // Unknown tags survive verbatim instead of being coerced to payg.
+        let other = CatalogBilling::from("per-token".to_string());
+        assert_eq!(other, CatalogBilling::Other("per-token".into()));
+        assert_eq!(CatalogBilling::parse_str("per-token"), None);
+        assert_eq!(serde_json::to_string(&other).unwrap(), "\"per-token\"");
+        assert_eq!(other.as_str(), "per-token");
+        let back: CatalogBilling = serde_json::from_str("\"per-token\"").unwrap();
+        assert_eq!(back, other);
+    }
+
+    #[test]
+    fn catalog_entry_unknown_billing_survives_json_roundtrip() {
+        // A hub cache payload with a bad row must deserialize and re-serialize
+        // byte-identically (the sync gate compares bytes).
+        let raw = r##"{"id":"x","name":"X","logo_char":"X","logo_color":"#000",
+            "tag":"official","tag_label":"Official","rating":1.0,
+            "endpoint":"https://x.example","price_line":"p","billing":"per-token",
+            "users":"1","blurb":"b","added":false,"models":[]}"##;
+        let entry: CatalogEntryVm = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            entry.billing,
+            CatalogBilling::Other("per-token".to_string())
+        );
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["billing"], "per-token");
+
+        let known: CatalogEntryVm =
+            serde_json::from_str(&raw.replace("\"per-token\"", "\"payg\"")).unwrap();
+        assert_eq!(known.billing, CatalogBilling::Payg);
+        assert_eq!(
+            serde_json::to_value(&known).unwrap()["billing"],
+            serde_json::json!("payg")
+        );
     }
 
     #[test]

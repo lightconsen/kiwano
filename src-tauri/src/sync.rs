@@ -381,6 +381,18 @@ mod tests {
         let list = parse_catalog(&raw).unwrap();
         assert_eq!(list.total, 1);
         assert_eq!(list.entries[0].name, "DeepSeek");
+        // An unrecognized billing tag is isolated, not rejected and not
+        // coerced: one bad Hub row must not cost the user the whole catalog.
+        assert_eq!(
+            list.entries[0].billing,
+            vm::CatalogBilling::Other("per-token".to_string())
+        );
+        // …and it round-trips verbatim, so the cache stays byte-stable.
+        let reserialized = serde_json::to_string(&list).unwrap();
+        assert_eq!(
+            parse_catalog(&reserialized).unwrap().entries[0].billing,
+            list.entries[0].billing
+        );
 
         assert!(parse_catalog("{not json").is_err());
         assert!(parse_catalog(r#"{"total":1,"entries":[{"id":"x"}]}"#).is_err());
@@ -443,7 +455,9 @@ mod tests {
 
     // ── conditional sync ────────────────────────────────────────────────
 
-    /// A parseable catalog body (pretty or compact) for the gate tests.
+    /// A parseable catalog body (pretty or compact) for the gate tests. The
+    /// billing tag is deliberately unrecognized: the conditional-sync gate
+    /// must tolerate it (it is preserved, not rejected).
     fn catalog_body(pretty: bool) -> String {
         let entry = serde_json::json!({
             "id": "deepseek", "name": "DeepSeek", "logo_char": "D",

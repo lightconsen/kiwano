@@ -329,7 +329,12 @@ export default function AddProviderModal({
   // adding from Models, and to the stored value when editing. Vendors that
   // support several modes get one catalog entry per mode. Custom providers
   // (no catalog entry behind the form) pick freely at creation.
-  const billingLocked = !!edit || (mode === "shelf" && !!shelf);
+  // A Hub catalog row may carry a billing tag this build predates: keep it
+  // visible instead of silently rewriting it to payg, and leave the picker
+  // open — the backend rejects an unknown tag on save, so locking the form
+  // would dead-end the entry.
+  const billingKnown = BILL_OPTIONS.some((b) => b.id === billing);
+  const billingLocked = (!!edit || (mode === "shelf" && !!shelf)) && billingKnown;
 
   // Non-empty credential fields of the selected template (empty rows dropped)
   const pqFieldInputs = (): Record<string, string> => {
@@ -767,6 +772,11 @@ export default function AddProviderModal({
                     );
                   })}
                 </div>
+              )}
+              {!billingKnown && (
+                <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
+                  Unrecognized billing tag “{billing}” · pick a mode
+                </p>
               )}
             </div>
 

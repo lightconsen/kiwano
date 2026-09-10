@@ -64,6 +64,12 @@ const BILLING_LABEL: Record<Billing, string> = {
   unl: "Unlimited",
 };
 
+/** Hub catalogs may carry a billing tag this build predates: show the raw
+    tag rather than a blank cell. */
+function billingLabel(billing: Billing): string {
+  return BILLING_LABEL[billing] ?? billing;
+}
+
 // Probe verdict chip: green=usable, amber=route exists but needs a key,
 // gray=route missing, red=broken/unreachable
 const PROBE_LABEL: Record<ProbeReport["verdict"], string> = {
@@ -272,7 +278,7 @@ function DetailDialog({
 
           <div className="mt-2.5 flex gap-4 text-[11.5px] text-mut">
             <span>
-              Billing <span className="text-ink">{BILLING_LABEL[entry.billing]}</span>
+              Billing <span className="text-ink">{billingLabel(entry.billing)}</span>
             </span>
             <span>{entry.users}</span>
           </div>

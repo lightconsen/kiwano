@@ -233,6 +233,12 @@ textarea,
   background: var(--surface2);
   color: var(--mut);
 }
+/* Unknown billing tag from a Hub catalog row: neutral, never a quota color. */
+.bill-other {
+  background: var(--surface2);
+  color: var(--mut);
+  border: 1px dashed var(--line);
+}
 
 .pcard {
   transition: border-color 0.15s;

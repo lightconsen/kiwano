@@ -3022,8 +3022,14 @@ pub fn build_footer_stats(
     aux: &Aux,
     version: &str,
 ) -> Result<FooterStatsVm, String> {
-    let today = local_day_key(tz_offset(aux), unix_now());
-    let since = format!("{today}T00:00:00Z");
+    let tz = tz_offset(aux);
+    let now = unix_now();
+    let today = local_day_key(tz, now);
+    // The same boundary the dashboard's "today" window uses: local midnight as
+    // the UTC instant a `ts >=` filter needs. Spelling it `{today}T00:00:00Z`
+    // reads as *UTC* midnight, which for a UTC+8 user drops the day's first
+    // eight hours — and, seen just after midnight, the whole day.
+    let since = local_day_start(tz, now);
     let t = store.usage_totals(None, None, Some(&since)).map_err(e2s)?;
     // hub_synced = catalog synced today (first 10 chars of the cache
     // timestamp are the date)
@@ -3992,28 +3998,65 @@ mod tests {
     }
 
     #[test]
+    fn footer_today_counts_from_local_midnight() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        update_settings(&s, &aux, &serde_json::json!({ "tz_offset_minutes": 480 })).unwrap();
+        // One row a second after *local* midnight at UTC+8 — 16:00:01Z the day
+        // before. It is the first moment of the user's day and the stretch a
+        // UTC-midnight boundary silently dropped.
+        let now = unix_now();
+        let local_day = (now + 480 * 60).div_euclid(86_400);
+        seed_usage_rows(&s, local_day * 86_400 - 480 * 60 + 1, 1, 1_000);
+
+        let f = build_footer_stats(&s, &aux, "test").unwrap();
+        assert_eq!(
+            f.today_requests, 1,
+            "00:00:01 local is today, not yesterday"
+        );
+        assert_eq!(f.today_tokens, 1_000);
+    }
+
+    #[test]
     fn day_boundaries_follow_the_configured_offset() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
-        // 23:00 UTC yesterday: still yesterday in UTC — and already 07:00 this
-        // morning at UTC+8, which is the whole point of the offset.
-        let yesterday_late = (unix_now().div_euclid(86_400) - 1) * 86_400 + 23 * 3600;
-        seed_usage_rows(&s, yesterday_late, 1, 1_000);
+        let now = unix_now();
+        let utc_day = now.div_euclid(86_400);
+        let local_day = (now + 480 * 60).div_euclid(86_400);
+        // One row the two clocks date differently. Which way it can be built
+        // depends on the hour, because the offset only opens a gap once one
+        // date has rolled over and the other has not. While UTC's date still
+        // matches the local one, the local day's first second (16:00Z the day
+        // before) is what UTC calls yesterday; once UTC has caught up, a row in
+        // UTC's morning is what the user's clock calls yesterday. Only one of
+        // the two exists at any given moment — a fixed "23:00Z yesterday",
+        // which is what this used to seed, is yesterday on *both* clocks for
+        // the first eight hours of every local day, and the test failed there.
+        let (row, in_utc, in_local) = if local_day == utc_day {
+            (local_day * 86_400 - 480 * 60 + 1, 0, 1)
+        } else {
+            (utc_day * 86_400 + 3_600, 1, 0)
+        };
+        seed_usage_rows(&s, row, 1, 1_000);
 
-        // UTC (the default, and what an older settings blob yields): not today.
+        // UTC (the default, and what an older settings blob yields).
         assert_eq!(
             build_dashboard(&s, &aux, "today", None, None)
                 .unwrap()
                 .requests,
-            0
+            in_utc
         );
 
         update_settings(&s, &aux, &serde_json::json!({ "tz_offset_minutes": 480 })).unwrap();
         let shifted = build_dashboard(&s, &aux, "today", None, None).unwrap();
-        assert_eq!(shifted.requests, 1, "at UTC+8 that row is this morning's");
+        assert_eq!(shifted.requests, in_local, "the two clocks disagree");
         assert_eq!(shifted.trend.len(), 24);
-        assert_eq!(shifted.trend[7].date, "07:00", "23:00Z is 07:00 at UTC+8");
-        assert_eq!(shifted.trend[7].requests, 1, "the chart's hour agrees");
+        assert_eq!(
+            shifted.trend.iter().filter(|t| t.requests > 0).count(),
+            in_local as usize,
+            "and the chart plots the day the stat counts"
+        );
     }
 
     #[test]

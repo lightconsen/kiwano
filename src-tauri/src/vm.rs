@@ -2057,12 +2057,26 @@ pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
 
 // ── Settings ──
 
+/// The Hub endpoint older builds shipped as the default. That host no longer
+/// resolves, and `#[serde(default)]` cannot repair it: the value is already
+/// stored, so the default never applies again. Anyone who ran a build from
+/// before the domain change would keep failing to sync forever, and silently —
+/// a failed sync only logs and falls back to the bundled catalog.
+const LEGACY_HUB_URL: &str = "https://hub.kiwano.app/catalog.json";
+
 /// Read UI settings (used by Rust-side logic like tray/autostart; the
 /// store-free part of `build_settings`).
 pub(crate) fn ui_settings(aux: &Aux) -> SettingsVm {
-    aux.load_settings_json()
+    let mut s: SettingsVm = aux
+        .load_settings_json()
         .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // Heal the one value known to be a bygone default. An endpoint the user
+    // chose — even a broken one — is left exactly as it is.
+    if s.hub_url == LEGACY_HUB_URL {
+        s.hub_url = default_hub_url();
+    }
+    s
 }
 
 pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
@@ -3634,6 +3648,25 @@ mod tests {
     fn delete_unknown_provider_is_noop() {
         let s = store();
         assert!(!delete_provider(&s, "nope").unwrap());
+    }
+
+    #[test]
+    fn legacy_hub_url_is_healed_on_load() {
+        let aux = Aux::open_in_memory().unwrap();
+        let mut v = serde_json::to_value(SettingsVm::default()).unwrap();
+
+        // A settings blob written by a build from before the domain change.
+        v["hub_url"] = serde_json::json!(LEGACY_HUB_URL);
+        aux.save_settings_json(&v).unwrap();
+        assert_eq!(ui_settings(&aux).hub_url, default_hub_url());
+
+        // An endpoint the user picked is never rewritten, broken or not.
+        v["hub_url"] = serde_json::json!("https://hub.example.com/catalog.json");
+        aux.save_settings_json(&v).unwrap();
+        assert_eq!(
+            ui_settings(&aux).hub_url,
+            "https://hub.example.com/catalog.json"
+        );
     }
 
     #[test]

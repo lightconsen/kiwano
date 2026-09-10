@@ -1109,6 +1109,11 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         usage_by_id.insert(pu.provider_id, pu.totals);
     }
 
+    // Read once, outside the per-provider closure: `effective_doc` parses the
+    // whole price table, and the exchange rates are the Hub's when it has
+    // published any — the same table the currency selector reports.
+    let rates = crate::pricing::effective_doc(aux).0.exchange_rates;
+
     let vms = providers
         .into_iter()
         .map(|p| {
@@ -1163,7 +1168,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             };
 
             let health = health_vm(store, &p);
-            let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7);
+            let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7, &rates);
 
             ProviderVm {
                 id: p.id.clone(),
@@ -1578,12 +1583,17 @@ fn provider_cost(buckets: &[(Option<String>, f64)]) -> (Option<f64>, Option<Stri
     }
 }
 
+/// Usage cell for one provider. `rates` are the effective price table's
+/// exchange rates (Hub-supplied when there is one): only the
+/// currency-denominated quota ring needs them, and it must agree with the
+/// currency selector rather than with the compiled-in snapshot.
 fn usage_vm(
     store: &Store,
     aux: &Aux,
     p: &Provider,
     totals: Option<&UsageTotals>,
     since7: &str,
+    rates: &HashMap<String, f64>,
 ) -> Option<UsageVm> {
     let t = totals?;
     // The cost stays in the currency this provider's usage was priced in: it
@@ -1591,7 +1601,6 @@ fn usage_vm(
     // user's display currency made the two disagree. Rolling several
     // providers into one number is the Dashboard's job, and converting there
     // is what the display currency is for.
-    let rates = crate::pricing::bundled_doc().exchange_rates;
     let cost_buckets = store
         .usage_cost_by_currency(None, Some(&p.id), Some(since7))
         .unwrap_or_default();
@@ -1609,7 +1618,7 @@ fn usage_vm(
                 ),
                 // Currency limits ring against the converted usage cost.
                 Some(u) if u.len() == 3 => (
-                    crate::pricing::convert_cost_buckets(&cost_buckets, u, &rates),
+                    crate::pricing::convert_cost_buckets(&cost_buckets, u, rates),
                     u,
                 ),
                 _ => (t.requests as f64, "requests"),
@@ -2447,7 +2456,7 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         return Ok(Vec::new());
     }
     let now = unix_now();
-    let rates = crate::pricing::bundled_doc().exchange_rates;
+    let rates = crate::pricing::effective_doc(aux).0.exchange_rates;
     let mut alerts = Vec::new();
     for p in store.list_providers().map_err(e2s)? {
         let Some(limit) = p.period_limit else {
@@ -2693,8 +2702,10 @@ pub fn build_dashboard(
         .collect();
 
     // Cost rolls up per-currency buckets (each row's cost_currency) into the
-    // user's preferred display currency via the bundled exchange rates.
-    let rates = crate::pricing::bundled_doc().exchange_rates;
+    // user's preferred display currency via the effective price table's rates:
+    // the Hub's when it has published any, so this agrees with the currency
+    // selector instead of a snapshot compiled into the binary.
+    let rates = crate::pricing::effective_doc(aux).0.exchange_rates;
     let pref = crate::pricing::preferred_currency(aux);
     let cost_of = |buckets: &[(Option<String>, f64)]| {
         crate::pricing::convert_cost_buckets(buckets, &pref, &rates)
@@ -4203,6 +4214,41 @@ mod tests {
         assert_eq!(alerts[1].provider_id, "glm-1");
         assert_eq!(alerts[1].unit, "CNY");
         assert!((alerts[1].used - 60.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn currency_limits_convert_with_the_hub_rate_table() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        // A Hub price table whose CNY rate is nothing like the bundled one
+        // (the bundled table quotes several CNY per USD).
+        let hub = serde_json::json!({
+            "version": 99,
+            "exchange_rates": { "USD": 1.0, "CNY": 2.0 },
+            "models": []
+        })
+        .to_string();
+        aux.save_hub_models_cache(99, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
+            .unwrap();
+
+        let mut cny = provider("glm-1", "GLM", Billing::Subscription);
+        cny.period_limit = Some(50.0);
+        cny.limit_unit = Some("CNY".into());
+        s.insert_provider(&cny).unwrap();
+
+        let mut row = usage_row("glm-1");
+        row.cost = Some(10.0);
+        row.cost_currency = Some("USD".into());
+        s.record_usage(&row).unwrap();
+
+        // 10 USD is 20 CNY at the Hub's rate — under the 50 CNY limit, so no
+        // alert. Converting with the bundled table instead would put it at 71
+        // and fire one, which is what makes "no alert" a real assertion.
+        let alerts = check_usage_alerts(&s, &aux).unwrap();
+        assert!(
+            alerts.iter().all(|a| a.provider_id != "glm-1"),
+            "10 USD at 2.0 CNY/USD is 20 CNY, under the 50 CNY limit"
+        );
     }
 
     #[test]

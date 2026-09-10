@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "kiwano-adapters",
@@ -2379,7 +2379,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-adapters"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-stream",
  "base64 0.22.1",
@@ -2406,7 +2406,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "kiwano-gateway",
@@ -2417,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "kiwano-gateway"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "axum",
  "chrono",

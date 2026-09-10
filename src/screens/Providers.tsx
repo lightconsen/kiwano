@@ -796,6 +796,11 @@ export default function Providers({
   // Inside an agent tab with bindings the list IS the strategy candidate queue
   const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
   const byId = new Map(providers.map((p) => [p.id, p]));
+  // Disabling a takeover keeps the stored route (re-enabling restores it), but
+  // the agent config no longer points at the gateway — the route is dormant.
+  // An agent tab for an agent that is not taken over shows the (re-)takeover
+  // onboarding instead of the dormant binding rows.
+  const notTakenOver = seg !== "all" && !(takenOver?.has(seg) ?? false);
 
   return (
     <section className="flex min-h-full flex-col">
@@ -830,70 +835,81 @@ export default function Providers({
         </Button>
       </div>
 
-      <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-        <span className="w-[34%]">Provider</span>
-        <span className="w-[22%]">{route ? "Role in strategy" : "Bound agents"}</span>
-        <span className="w-[22%]">Usage / quota</span>
-        <span className="w-[14%]">Status</span>
-        <span className="flex-1 text-right">{route ? "Priority" : "Actions"}</span>
-      </div>
-
-      {route
-        ? route.bindings.map((b, i) => {
-            const p = byId.get(b.provider_id);
-            // Skip a binding whose provider row vanished (deleted mid-session)
-            return p ? (
-              <BindingRow key={b.provider_id} p={p} route={route} b={b} idx={i} onMove={onMoveBinding} onChanged={refetch} />
-            ) : null;
-          })
-        : filtered.map((p) => (
-            <ProviderRow key={p.id} p={p} onEdit={onEdit} onDelete={onDelete} />
-          ))}
-
-      {/* Bind-one-more entry under the candidate queue of an agent tab */}
-      {route && (
-        <AddBindingRow
-          agent={route.agent}
-          providers={providers}
-          boundIds={new Set(route.bindings.map((b) => b.provider_id))}
-          onChanged={refetch}
-        />
-      )}
-
-      {filtered.length === 0 && seg !== "all" && (
+      {notTakenOver ? (
         <AgentOnboarding
           agent={seg}
           installed={
             agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
           }
-          takenOver={takenOver?.has(seg) ?? false}
+          takenOver={false}
           busy={enabling}
           onTakeover={() => onTakeover(seg)}
           onAdd={onAdd}
-          bindSlot={
-            takenOver?.has(seg) ? (
-              <BindProviderSelect
-                providers={providers}
-                boundIds={new Set(providers.filter((p) => p.agents.includes(seg)).map((p) => p.id))}
-                onPick={(pid) => api.addAgentBinding(seg, pid).then(refetch)}
-              />
-            ) : undefined
-          }
-          copySlot={
-            takenOver?.has(seg) ? (
-              <CopyRouteRow agent={seg} routes={routes ?? []} onChanged={refetch} />
-            ) : undefined
-          }
         />
-      )}
+      ) : (
+        <>
+          <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
+            <span className="w-[34%]">Provider</span>
+            <span className="w-[22%]">{route ? "Role in strategy" : "Bound agents"}</span>
+            <span className="w-[22%]">Usage / quota</span>
+            <span className="w-[14%]">Status</span>
+            <span className="flex-1 text-right">{route ? "Priority" : "Actions"}</span>
+          </div>
 
-      {filtered.length === 0 && seg === "all" && (
-        <div className="px-4 py-8 text-center text-[12px] text-mut">
-          No providers yet —{" "}
-          <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
-            Add provider
-          </button>
-        </div>
+          {route
+            ? route.bindings.map((b, i) => {
+                const p = byId.get(b.provider_id);
+                // Skip a binding whose provider row vanished (deleted mid-session)
+                return p ? (
+                  <BindingRow key={b.provider_id} p={p} route={route} b={b} idx={i} onMove={onMoveBinding} onChanged={refetch} />
+                ) : null;
+              })
+            : filtered.map((p) => (
+                <ProviderRow key={p.id} p={p} onEdit={onEdit} onDelete={onDelete} />
+              ))}
+
+          {/* Bind-one-more entry under the candidate queue of an agent tab */}
+          {route && (
+            <AddBindingRow
+              agent={route.agent}
+              providers={providers}
+              boundIds={new Set(route.bindings.map((b) => b.provider_id))}
+              onChanged={refetch}
+            />
+          )}
+
+          {filtered.length === 0 && seg !== "all" && (
+            <AgentOnboarding
+              agent={seg}
+              installed={
+                agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
+              }
+              takenOver={true}
+              busy={enabling}
+              onTakeover={() => onTakeover(seg)}
+              onAdd={onAdd}
+              bindSlot={
+                <BindProviderSelect
+                  providers={providers}
+                  boundIds={new Set(providers.filter((p) => p.agents.includes(seg)).map((p) => p.id))}
+                  onPick={(pid) => api.addAgentBinding(seg, pid).then(refetch)}
+                />
+              }
+              copySlot={
+                <CopyRouteRow agent={seg} routes={routes ?? []} onChanged={refetch} />
+              }
+            />
+          )}
+
+          {filtered.length === 0 && seg === "all" && (
+            <div className="px-4 py-8 text-center text-[12px] text-mut">
+              No providers yet —{" "}
+              <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
+                Add provider
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Strategy config lives in the agent's own tab, only once it is taken over.
@@ -907,11 +923,13 @@ export default function Providers({
           carries the strategy context (the StrategyPanel select row has no
           header of its own). */}
       <div className="mt-auto truncate px-4 py-3 text-[10.5px] text-mut">
-        {seg !== "all" &&
-        (takenOver?.has(seg) ?? false) &&
-        (routes?.some((r) => r.agent === seg) ?? false)
-          ? "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys stay in the system keychain · requests never touch the Kiwano cloud"
-          : "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud"}
+        {notTakenOver
+          ? "Kiwano does not route this agent yet — enable the takeover above; the stored route is kept and applies again as-is · API keys stay in the system keychain · requests never touch the Kiwano cloud"
+          : seg !== "all" &&
+              (takenOver?.has(seg) ?? false) &&
+              (routes?.some((r) => r.agent === seg) ?? false)
+            ? "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys stay in the system keychain · requests never touch the Kiwano cloud"
+            : "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud"}
       </div>
     </section>
   );

@@ -551,7 +551,15 @@ const agentRoutes: AgentRoute[] = [
 ];
 
 function strategyOf(agent: AgentId): AgentRoute {
-  return agentRoutes.find((r) => r.agent === agent)!;
+  // The backend lazily creates a Single-strategy route on first takeover
+  // (vm::set_agent_takeover); the mock does the same so agents enabled from
+  // Settings without a pre-seeded route behave identically.
+  let route = agentRoutes.find((r) => r.agent === agent);
+  if (!route) {
+    route = { agent, strategy: "single", config: null, bindings: [] };
+    agentRoutes.push(route);
+  }
+  return route;
 }
 
 // Mirror vm::build_provider_vms: the "In use" badge marks the provider(s) that
@@ -881,7 +889,9 @@ export const devApi: KiwanoApi = {
 
   async getSettings(): Promise<AppSettings> {
     await delay();
-    return settings;
+    // Fresh copy every call: the caller mutates nothing, but React needs a new
+    // reference to re-render after setTakeover mutated the fixture in place.
+    return structuredClone(settings);
   },
 
   async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {

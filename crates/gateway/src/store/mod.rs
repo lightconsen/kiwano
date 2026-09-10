@@ -13,6 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
 pub const SCHEMA_VERSION: i32 = 10;
@@ -221,9 +222,12 @@ ALTER TABLE providers ADD COLUMN headers TEXT;
 "#;
 
 /// v9: model pricing (port of cc-switch's price layer).
-/// - `model_pricing` mirrors the bundled models.json seed (TEXT decimals,
-///   currency per row; the gateway resolves prices in memory, the table keeps
-///   the GUI-side copy in sync via the src-tauri seeder).
+/// - `model_pricing` is the price table itself (TEXT decimals, currency per
+///   row). The GUI seeds it from the bundled snapshot and refreshes it from the
+///   Hub; the gateway builds its in-memory table from these rows at startup and
+///   on `/reload` (`server::resolve_pricing`), falling back to the bundled
+///   snapshot when the table is still empty. A price update therefore affects
+///   costs recorded *after* the reload — history is not rewritten.
 /// - `usage`/`request_logs` gain `cost` + `cost_currency` (cost is stored in
 ///   the price entry's currency; NULL for unpriced models).
 /// - `providers.plan_query` holds the token-plan quota query template +
@@ -1606,6 +1610,64 @@ impl Store {
             "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = ?2",
             params![LOG_CONFIG_KEY, json],
+        )?;
+        Ok(())
+    }
+
+    /// The `model_pricing` mirror, written by the GUI's seeder from the bundled
+    /// snapshot and refreshed from the Hub. The gateway resolves prices in
+    /// memory, so this is what feeds a Hub price update into cost recording.
+    ///
+    /// An empty result means the seeder has never run — callers must fall back
+    /// to the bundled table rather than read it as "nothing is priced".
+    pub fn load_model_pricing(&self) -> Result<Vec<ModelPriceEntry>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT model_id, display_name, input, output,
+                    cache_read, cache_creation, currency
+             FROM model_pricing",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ModelPriceEntry {
+                model_id: r.get(0)?,
+                display_name: r.get(1)?,
+                input: r.get(2)?,
+                output: r.get(3)?,
+                cache_read: r.get(4)?,
+                cache_creation: r.get(5)?,
+                currency: r.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Test-only seeding hook. The GUI owns every production write to
+    /// `model_pricing` (it shares the file through its own connection), so the
+    /// gateway has no upsert of its own — but a test needs one to prove that
+    /// the table it reads is the table that gets served.
+    #[cfg(test)]
+    pub fn upsert_model_pricing(&self, e: &ModelPriceEntry) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO model_pricing (model_id, display_name, input, output,
+                                        cache_read, cache_creation, currency, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'test')
+             ON CONFLICT(model_id) DO UPDATE SET
+                display_name = ?2, input = ?3, output = ?4,
+                cache_read = ?5, cache_creation = ?6, currency = ?7",
+            params![
+                e.model_id,
+                e.display_name,
+                e.input,
+                e.output,
+                e.cache_read,
+                e.cache_creation,
+                e.currency
+            ],
         )?;
         Ok(())
     }

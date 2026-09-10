@@ -15,6 +15,7 @@
 //! degrades to the unconditional full fetch, never to an error.
 
 use crate::vm::{self, Aux};
+use kiwano_adapters::model_pricing::ModelsDoc;
 use sha2::{Digest, Sha256};
 
 /// Public Hub catalog endpoint (protocol v0: plain static JSON; can later
@@ -76,11 +77,11 @@ fn normalize_sha(sha: Option<String>) -> Option<String> {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct HubManifest {
     pub catalog_sha: Option<String>,
-    /// Reserved for the pricing sync (remote models.json); parsed here so the
-    /// type is complete and one manifest GET serves both resources.
+    /// Informational: the price doc carries its own `version`, which is what
+    /// the seed gate uses. Kept so the manifest type mirrors the published
+    /// shape in full.
     #[allow(dead_code)]
     pub models_version: Option<i64>,
-    #[allow(dead_code)]
     pub models_sha: Option<String>,
 }
 
@@ -190,9 +191,23 @@ fn parse_catalog(raw: &str) -> Result<vm::CatalogListVm, String> {
     serde_json::from_str(raw).map_err(|e| format!("Hub response is not a valid catalog: {e}"))
 }
 
-/// Fetch the Hub catalog and cache it. `hub_url` comes from settings
-/// (ui_settings.hub_url). When the manifest says the remote catalog is the one
-/// we already cached, nothing is downloaded and `unchanged` comes back true.
+/// Catalog half of a sync: `(entries fetched, unchanged)`.
+struct CatalogOutcome {
+    fetched: i64,
+    unchanged: bool,
+}
+
+/// Pricing half of a sync: the version now cached, and whether it was already
+/// the cached one. `version` is None when the Hub has no pricing to offer.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct PricingOutcome {
+    version: Option<i64>,
+    unchanged: bool,
+}
+
+/// Sync both Hub resources. `hub_url` comes from settings (ui_settings.hub_url).
+/// One manifest GET serves both gates. The resources degrade independently: a
+/// pricing failure never costs the user the catalog, and vice versa.
 pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, String> {
     let manifest_url = hub_asset_url(hub_url, "manifest.json")?;
     let client = reqwest::blocking::Client::builder()
@@ -201,6 +216,28 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         .map_err(|e| e.to_string())?;
     let mut manifest = fetch_manifest(&client, &manifest_url);
 
+    let catalog = sync_catalog(&client, aux, hub_url, &manifest_url, &mut manifest)?;
+    // Best-effort: the catalog is the primary resource. A bad models.json
+    // leaves the previous pricing cache (or the bundled snapshot) in place.
+    let pricing = sync_pricing(&client, aux, hub_url, &manifest).unwrap_or_default();
+
+    Ok(vm::SyncReportVm {
+        fetched: catalog.fetched,
+        synced_at: vm::rfc3339(vm::unix_now()),
+        hub_url: hub_url.into(),
+        unchanged: catalog.unchanged,
+        pricing_version: pricing.version,
+        pricing_unchanged: pricing.unchanged,
+    })
+}
+
+fn sync_catalog(
+    client: &reqwest::blocking::Client,
+    aux: &Aux,
+    hub_url: &str,
+    manifest_url: &str,
+    manifest: &mut HubManifest,
+) -> Result<CatalogOutcome, String> {
     // ── gate ──
     // Skipping requires all three of: a remote sha, the sha we cached, and a
     // cache payload that still parses. A stray sha with no usable payload must
@@ -221,10 +258,8 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         // current, which is exactly what the footer badge claims.
         aux.touch_hub_synced_at(&synced_at)
             .map_err(|e| e.to_string())?;
-        return Ok(vm::SyncReportVm {
+        return Ok(CatalogOutcome {
             fetched: cached_list.map_or(0, |l| l.entries.len() as i64),
-            synced_at,
-            hub_url: hub_url.into(),
             unchanged: true,
         });
     }
@@ -241,7 +276,7 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         // Hash the raw bytes. The cached payload is a re-serialization
         // (different key order, spacing, omitted None fields) and would never
         // match the manifest, silently defeating the whole gate.
-        let bytes = fetch_bytes(&client, hub_url)?;
+        let bytes = fetch_bytes(client, hub_url)?;
         let remote_sha = manifest.catalog_sha.clone();
         let verified = remote_sha
             .as_deref()
@@ -251,7 +286,7 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         let list = parse_catalog(body)?;
         if !verified && remote_sha.is_some() && attempt == 0 {
             attempt += 1;
-            manifest = fetch_manifest(&client, &manifest_url);
+            *manifest = fetch_manifest(client, manifest_url);
             continue;
         }
         break (list, remote_sha, verified);
@@ -263,10 +298,67 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         .map_err(|e| e.to_string())?;
     // Only arm the gate once the payload is safely cached.
     record_catalog_sha(aux, remote_sha.as_deref(), verified)?;
-    Ok(vm::SyncReportVm {
+    Ok(CatalogOutcome {
         fetched: list.entries.len() as i64,
-        synced_at,
-        hub_url: hub_url.into(),
+        unchanged: false,
+    })
+}
+
+/// Why a Hub price doc is unusable, if it is.
+///
+/// A doc without USD would silently mis-denominate every displayed cost:
+/// `convert_amount` passes an unknown currency through unchanged rather than
+/// failing, so a missing rate shows up as a plausible-looking wrong number. It
+/// is rejected whole rather than half-applied.
+fn pricing_doc_error(doc: &ModelsDoc) -> Option<&'static str> {
+    if !doc.exchange_rates.contains_key("USD") {
+        return Some("Hub pricing has no USD exchange rate");
+    }
+    None
+}
+
+/// Fetch the Hub price table and cache it verbatim.
+///
+/// The cache row carries the sha256 of the bytes it holds, so the gate needs
+/// nothing else: a stale manifest simply fails to match and the next sync
+/// re-reads. Storing the computed digest (rather than the manifest's) keeps the
+/// row self-describing and the column non-nullable.
+fn sync_pricing(
+    client: &reqwest::blocking::Client,
+    aux: &Aux,
+    hub_url: &str,
+    manifest: &HubManifest,
+) -> Result<PricingOutcome, String> {
+    let cached = aux.load_hub_models_cache();
+    if let (Some(remote), Some((version, _, cached_sha, _))) =
+        (manifest.models_sha.as_deref(), cached.as_ref())
+    {
+        if remote == cached_sha {
+            return Ok(PricingOutcome {
+                version: Some(*version),
+                unchanged: true,
+            });
+        }
+    }
+
+    let bytes = fetch_bytes(client, &hub_asset_url(hub_url, "models.json")?)?;
+    let body =
+        std::str::from_utf8(&bytes).map_err(|e| format!("Hub pricing is not UTF-8: {e}"))?;
+    let doc: ModelsDoc = serde_json::from_str(body)
+        .map_err(|e| format!("Hub pricing is not a valid models doc: {e}"))?;
+    if let Some(why) = pricing_doc_error(&doc) {
+        return Err(why.into());
+    }
+
+    aux.save_hub_models_cache(
+        doc.version,
+        body,
+        &sha256_hex(&bytes),
+        &vm::rfc3339(vm::unix_now()),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(PricingOutcome {
+        version: Some(doc.version),
         unchanged: false,
     })
 }
@@ -528,6 +620,39 @@ mod tests {
         assert!(!aux
             .touch_hub_synced_at(&vm::rfc3339(vm::unix_now()))
             .unwrap());
+    }
+
+    // ── pricing cache / validation ──────────────────────────────────────
+
+    #[test]
+    fn hub_models_cache_roundtrip() {
+        let aux = Aux::open_in_memory().unwrap();
+        assert_eq!(aux.load_hub_models_cache(), None);
+        aux.save_hub_models_cache(7, "{\"version\":7}", &"a".repeat(64), "2026-01-01T00:00:00Z")
+            .unwrap();
+        let (version, payload, sha, synced_at) = aux.load_hub_models_cache().unwrap();
+        assert_eq!(version, 7);
+        assert_eq!(payload, "{\"version\":7}");
+        assert_eq!(sha, "a".repeat(64));
+        assert_eq!(synced_at, "2026-01-01T00:00:00Z");
+        // A second write replaces the row (single-row table).
+        aux.save_hub_models_cache(8, "{\"version\":8}", &"b".repeat(64), "2026-01-02T00:00:00Z")
+            .unwrap();
+        assert_eq!(aux.load_hub_models_cache().unwrap().0, 8);
+    }
+
+    #[test]
+    fn pricing_doc_rejects_missing_usd() {
+        let parse = |rates: &str| -> ModelsDoc {
+            serde_json::from_str(&format!(
+                r#"{{"version":1,"exchange_rates":{rates},"models":[]}}"#
+            ))
+            .unwrap()
+        };
+        assert!(pricing_doc_error(&parse(r#"{"USD":1.0}"#)).is_none());
+        assert!(pricing_doc_error(&parse(r#"{"USD":1.0,"CNY":7.1}"#)).is_none());
+        assert!(pricing_doc_error(&parse("{}")).is_some());
+        assert!(pricing_doc_error(&parse(r#"{"CNY":7.1}"#)).is_some());
     }
 
     #[test]

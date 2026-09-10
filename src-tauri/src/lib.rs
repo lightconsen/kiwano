@@ -133,10 +133,10 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
     });
 }
 
-/// One-shot Hub catalog sync at startup. Runs on a plain thread for the same
-/// reason `sync_hub` is not `async`: the sync uses blocking reqwest. Failures
-/// are logged and nothing else — the Hub is an enhancement, and the cached or
-/// bundled catalog always works offline.
+/// One-shot Hub sync at startup: catalog + pricing. Runs on a plain thread for
+/// the same reason `sync_hub` is not `async` (blocking reqwest). Failures are
+/// logged and nothing else — the Hub is an enhancement, and the cached or
+/// bundled data always works offline.
 fn spawn_hub_sync(handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let Some(state) = handle.try_state::<AppState>() else {
@@ -148,6 +148,20 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
             Ok(r) if r.unchanged => {}
             Ok(r) => println!("kiwano: hub catalog synced ({} providers)", r.fetched),
             Err(e) => eprintln!("kiwano: hub sync failed: {e}"),
+        }
+        // The Hub may have brought a newer price table. Re-run the seed (a
+        // no-op when the version and content are unchanged) and reload the
+        // daemon so its in-memory table is rebuilt from the mirror.
+        match pricing::seed_model_pricing(&state.aux) {
+            Ok(r) if r.seeded > 0 => {
+                println!(
+                    "kiwano: hub model pricing seeded v{} ({} rows changed)",
+                    r.version, r.seeded
+                );
+                sidecar::notify_reload(state.admin_port);
+            }
+            Err(e) => eprintln!("kiwano: model pricing seed failed: {e}"),
+            _ => {}
         }
     });
 }

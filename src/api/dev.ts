@@ -977,6 +977,8 @@ export const devApi: KiwanoApi = {
       synced_at: new Date().toISOString(),
       hub_url: settings.hub_url,
       unchanged,
+      pricing_version: 1,
+      pricing_unchanged: unchanged,
     };
   },
 

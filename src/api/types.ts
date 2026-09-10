@@ -348,6 +348,10 @@ export interface HubSyncReport {
   hub_url: string;
   /** The manifest hash matched the cache, so the catalog was not re-downloaded */
   unchanged: boolean;
+  /** Version of the price table now cached; absent when the Hub has none */
+  pricing_version?: number;
+  /** The pricing half was already current, so models.json was not re-downloaded */
+  pricing_unchanged: boolean;
 }
 
 export interface GatewayStatus {

@@ -44,6 +44,17 @@ pub struct GatewayState {
     pub version: &'static str,
 }
 
+/// The price table to serve from: the GUI-seeded `model_pricing` mirror when it
+/// has rows (so a Hub price refresh reaches cost recording), else the snapshot
+/// compiled into the binary. An empty mirror must never blank out pricing —
+/// it only means the seeder has not run yet.
+fn resolve_pricing(store: &Store) -> kiwano_adapters::model_pricing::PricingTable {
+    match store.load_model_pricing() {
+        Ok(rows) if !rows.is_empty() => kiwano_adapters::model_pricing::PricingTable::from_entries(rows),
+        _ => kiwano_adapters::model_pricing::PricingTable::bundled(),
+    }
+}
+
 impl GatewayState {
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
@@ -53,6 +64,8 @@ impl GatewayState {
             .read_timeout(Duration::from_secs(300))
             .pool_idle_timeout(Duration::from_secs(90))
             .build()?;
+        // Resolve before `store` moves into the Arc below.
+        let pricing = resolve_pricing(&store);
         Ok(GatewayState {
             store: Arc::new(store),
             http,
@@ -60,7 +73,7 @@ impl GatewayState {
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             log_cfg: RwLock::new(log_config),
-            pricing: RwLock::new(kiwano_adapters::model_pricing::PricingTable::bundled()),
+            pricing: RwLock::new(pricing),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         })
@@ -111,8 +124,9 @@ impl GatewayState {
         if let Ok(cfg) = self.store.load_log_config() {
             *self.log_cfg.write().expect("log config lock poisoned") = cfg;
         }
-        *self.pricing.write().expect("pricing lock poisoned") =
-            kiwano_adapters::model_pricing::PricingTable::bundled();
+        // Rebuild prices too: the GUI re-seeds the mirror after a Hub refresh
+        // and then reloads, which is how a price update takes effect.
+        *self.pricing.write().expect("pricing lock poisoned") = resolve_pricing(&self.store);
         Ok(agents)
     }
 }
@@ -229,5 +243,42 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer "));
         assert_eq!(extract_placeholder_key(&headers), None);
+    }
+
+    // ── price table resolution ───────────────────────────────────────────
+
+    fn entry(id: &str) -> kiwano_adapters::model_pricing::ModelPriceEntry {
+        kiwano_adapters::model_pricing::ModelPriceEntry {
+            model_id: id.into(),
+            display_name: id.into(),
+            input: "1".into(),
+            output: "2".into(),
+            cache_read: "0".into(),
+            cache_creation: "0".into(),
+            currency: "USD".into(),
+        }
+    }
+
+    /// A model the bundled table is known to price (see the adapters tests).
+    const BUNDLED_MODEL: &str = "claude-opus-4-8";
+
+    /// An unseeded mirror must not blank out pricing — it only means the GUI
+    /// seeder has not run.
+    #[test]
+    fn resolve_pricing_falls_back_to_bundled_when_empty() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(resolve_pricing(&store).find(BUNDLED_MODEL).is_some());
+    }
+
+    /// A seeded mirror is served, and it is the *whole* table: the seeder
+    /// always writes a complete document, so nothing is merged in behind it.
+    /// This is the guard against the mirror going unread again.
+    #[test]
+    fn resolve_pricing_prefers_the_mirror() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_model_pricing(&entry("kw-test-model")).unwrap();
+        let table = resolve_pricing(&store);
+        assert!(table.find("kw-test-model").is_some(), "mirror row is served");
+        assert!(table.find(BUNDLED_MODEL).is_none(), "mirror replaces bundled");
     }
 }

@@ -253,6 +253,20 @@ impl Aux {
              )",
             [],
         )?;
+        // Hub pricing cache: single-row, self-describing so the seed gate is
+        // one read. A new table (not a column) because `CREATE TABLE IF NOT
+        // EXISTS` reaches existing databases for free, whereas added columns
+        // would need a migration framework this half of the DB does not have.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS hub_models_cache (
+                 id        INTEGER PRIMARY KEY CHECK (id = 1),
+                 version   INTEGER NOT NULL,
+                 sha256    TEXT NOT NULL,
+                 payload   TEXT NOT NULL,
+                 synced_at TEXT NOT NULL
+             )",
+            [],
+        )?;
         Ok(())
     }
 
@@ -371,6 +385,45 @@ impl Aux {
             rusqlite::params![synced_at],
         )?;
         Ok(n > 0)
+    }
+
+    /// Hub pricing cache: single-row upsert. `payload` is the remote
+    /// models.json **verbatim** — re-serializing would break the sha256 that
+    /// the seed gate compares against the manifest.
+    pub fn save_hub_models_cache(
+        &self,
+        version: i64,
+        payload: &str,
+        sha256: &str,
+        synced_at: &str,
+    ) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.execute(
+            "INSERT INTO hub_models_cache (id, version, sha256, payload, synced_at)
+             VALUES (1, ?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                 version = ?1, sha256 = ?2, payload = ?3, synced_at = ?4",
+            rusqlite::params![version, sha256, payload, synced_at],
+        )?;
+        Ok(())
+    }
+
+    /// `(version, payload, sha256, synced_at)`; None when never fetched.
+    pub fn load_hub_models_cache(&self) -> Option<(i64, String, String, String)> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.query_row(
+            "SELECT version, payload, sha256, synced_at FROM hub_models_cache WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .ok()
     }
 
     /// Average `latency_ms` over a window, optionally per provider and/or
@@ -588,6 +641,12 @@ pub struct SyncReportVm {
     /// catalog.json was not re-downloaded. `synced_at` still refreshed — the
     /// app confirmed it is current, which is what the footer badge claims.
     pub unchanged: bool,
+    /// Version of the price table now cached; None when the Hub offers no
+    /// pricing (unreachable, malformed, or absent — the bundled table stands).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing_version: Option<i64>,
+    /// The pricing half was already current, so models.json was not fetched.
+    pub pricing_unchanged: bool,
 }
 
 #[derive(Serialize)]

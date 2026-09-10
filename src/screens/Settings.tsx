@@ -63,19 +63,23 @@ export default function Settings() {
       .finally(() => setChecking(false));
   };
 
-  // Conditional catalog sync: the backend compares the Hub manifest's sha256
-  // with the cached catalog and skips the download when they match.
+  // Conditional sync: the backend compares the Hub manifest's sha256 with the
+  // cached artifacts and skips the download of whichever is unchanged.
   const syncNow = () => {
     setSyncing(true);
     setSyncErr(null);
     setSyncNote(null);
     api
       .syncHub()
-      .then((r) =>
-        setSyncNote(
-          r.unchanged ? `Up to date · ${r.fetched} providers` : `Synced ${r.fetched} providers`,
-        ),
-      )
+      .then((r) => {
+        const bits = [
+          r.unchanged ? `Catalog up to date · ${r.fetched} providers` : `Synced ${r.fetched} providers`,
+        ];
+        if (r.pricing_version != null && !r.pricing_unchanged) {
+          bits.push(`pricing v${r.pricing_version}`);
+        }
+        setSyncNote(bits.join(" · "));
+      })
       .catch((e) => setSyncErr(String(e)))
       .finally(() => setSyncing(false));
   };

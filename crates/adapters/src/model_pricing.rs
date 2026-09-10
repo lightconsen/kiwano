@@ -36,6 +36,11 @@ pub struct ModelPriceEntry {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelsDoc {
     pub version: i64,
+    /// Informational only, so it tolerates being absent: the Hub serves this
+    /// document remotely, and one omitted field must not strand every client
+    /// on a parse error. `version` and `exchange_rates` stay required — their
+    /// absence is a real defect, and rejecting it keeps the previous cache.
+    #[serde(default)]
     pub generated_at: String,
     pub exchange_rates: HashMap<String, f64>,
     pub models: Vec<ModelPriceEntry>,
@@ -79,6 +84,27 @@ impl PricingTable {
     /// The bundled snapshot compiled into the binary.
     pub fn bundled() -> Self {
         MODELS_JSON.parse().expect("bundled models.json is valid")
+    }
+
+    /// Build a table from rows read back from the `model_pricing` mirror. The
+    /// gateway resolves prices in memory, so this is how a Hub-refreshed price
+    /// table reaches a forwarded request. Exchange rates stay empty: they are a
+    /// GUI display concern and nothing in the gateway reads them.
+    ///
+    /// `version` is 0 — it keys the SQLite seeder, not in-memory lookups.
+    pub fn from_entries(entries: Vec<ModelPriceEntry>) -> Self {
+        let mut rows = HashMap::with_capacity(entries.len());
+        for entry in entries {
+            rows.insert(entry.model_id.to_ascii_lowercase(), entry);
+        }
+        let mut keys: Vec<String> = rows.keys().cloned().collect();
+        keys.sort_by_key(|k| (k.len(), k.clone()));
+        Self {
+            rows,
+            keys,
+            exchange_rates: HashMap::new(),
+            version: 0,
+        }
     }
 
     pub fn exchange_rates(&self) -> &HashMap<String, f64> {

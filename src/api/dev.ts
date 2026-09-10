@@ -27,6 +27,8 @@ import type {
   StrategyKind,
   UsageAlert,
   ApiKeyEntry,
+  UpdateInfo,
+  UpdateProgress,
 } from "./types";
 import { AGENTS } from "./types";
 
@@ -489,6 +491,7 @@ const settings: AppSettings = {
   telemetry: false,
   cost_alert: true,
   preferred_currency: "CNY",
+  auto_check_update: true,
   hub_logged_in: false,
   hub_url: "https://hub.kiwano.app/catalog.json",
 };
@@ -1160,6 +1163,19 @@ export const devApi: KiwanoApi = {
       hub_synced: true,
       version: "v0.1.0",
     };
+  },
+
+  async checkAppUpdate(): Promise<UpdateInfo | null> {
+    await delay();
+    return null;
+  },
+
+  async downloadAndInstallAppUpdate(): Promise<void> {
+    await delay();
+  },
+
+  async onUpdateProgress(_cb: (p: UpdateProgress) => void): Promise<() => void> {
+    return () => {};
   },
 
   async detectAgents() {

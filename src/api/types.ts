@@ -331,6 +331,8 @@ export interface AppSettings {
   cost_alert: boolean;
   /** Preferred display currency for costs (ISO code; converted via the bundled rates) */
   preferred_currency: string;
+  /** Auto-check for app updates at startup (silent; notification only) */
+  auto_check_update: boolean;
   hub_logged_in: boolean;
   /** Hub catalog sync endpoint (protocol v0: static JSON) */
   hub_url: string;
@@ -488,6 +490,20 @@ export interface ProbeReport {
   detail: string;
 }
 
+/** A pending app update found on the release channel */
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
+  /** Release publish time, unix seconds */
+  pub_date: number | null;
+}
+
+/** Download progress payload */
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
 export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
   listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
@@ -559,4 +575,10 @@ export interface KiwanoApi {
   /** Delete every request-log row (bodies cascade) */
   clearRequestLogs(): Promise<void>;
   getFooterStats(): Promise<FooterStats>;
+  /** Check GitHub Releases for a newer version; null = up to date */
+  checkAppUpdate(): Promise<UpdateInfo | null>;
+  /** Download, verify and install the pending update, then relaunch */
+  downloadAndInstallAppUpdate(): Promise<void>;
+  /** Subscribe to download progress; returns an unsubscribe function */
+  onUpdateProgress(cb: (p: UpdateProgress) => void): Promise<() => void>;
 }

@@ -1,6 +1,7 @@
 // Tauri invoke implementation of KiwanoApi — command names map one-to-one to src-tauri/src/lib.rs,
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   AgentDetect,
   AgentId,
@@ -28,6 +29,8 @@ import type {
   StrategyKind,
   UsageAlert,
   ApiKeyEntry,
+  UpdateInfo,
+  UpdateProgress,
 } from "./types";
 
 export const tauriApi: KiwanoApi = {
@@ -146,4 +149,11 @@ export const tauriApi: KiwanoApi = {
   clearRequestLogs: () => invoke<void>("clear_request_logs"),
 
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
+
+  checkAppUpdate: () => invoke<UpdateInfo | null>("check_app_update"),
+
+  downloadAndInstallAppUpdate: () => invoke<void>("download_and_install_app_update"),
+
+  onUpdateProgress: (cb: (p: UpdateProgress) => void) =>
+    listen<UpdateProgress>("update-progress", (e) => cb(e.payload)),
 };

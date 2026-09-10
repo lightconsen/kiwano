@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
-import type { AppSettings } from "../api/types";
+import type { AppSettings, UpdateInfo } from "../api/types";
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
   return (
@@ -28,16 +28,46 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [currencies, setCurrencies] = useState<string[]>([]);
+  const [version, setVersion] = useState("");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSettings().then(setS);
     api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
+    api.getFooterStats().then((f) => setVersion(f.version)).catch(() => {});
+    api.onUpdateProgress((p) => {
+      setProgress(p.total ? Math.round((p.downloaded / p.total) * 100) : null);
+    }).catch(() => {});
   }, []);
 
   if (!s) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
 
   const patch = (p: Partial<AppSettings>) => {
     api.updateSettings(p).then(setS);
+  };
+
+  const checkUpdate = () => {
+    setChecking(true);
+    setErr(null);
+    setUpdate(null);
+    api.checkAppUpdate()
+      .then(setUpdate)
+      .catch((e) => setErr(String(e)))
+      .finally(() => setChecking(false));
+  };
+
+  const installUpdate = () => {
+    setInstalling(true);
+    setProgress(0);
+    setErr(null);
+    api.downloadAndInstallAppUpdate().catch((e) => {
+      setErr(String(e));
+      setInstalling(false);
+    });
   };
 
   return (
@@ -184,6 +214,55 @@ export default function Settings() {
               API keys never leave your device
             </div>
           </div>
+        </div>
+      </div>
+      {/* About / update */}
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-[12.5px] font-semibold">About</h3>
+        <div className="space-y-2.5 text-[12.5px]">
+          <Row label="Version">
+            <span className="text-mut">{version || "—"}</span>
+          </Row>
+          <Row label="Auto-check for updates" note="Silent check at startup">
+            <Switch checked={s.auto_check_update} onCheckedChange={(v) => patch({ auto_check_update: v })} />
+          </Row>
+          <Row label="Updates">
+            <span className="flex items-center gap-2">
+              {update ? (
+                installing ? (
+                  <span className="text-[11px] text-mut">
+                    {progress == null ? "Downloading…" : `${progress}%`}
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-[11px]">v{update.version} available</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-[11px]"
+                      onClick={installUpdate}
+                    >
+                      Download &amp; install
+                    </Button>
+                  </>
+                )
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2.5 text-[11px]"
+                  onClick={checkUpdate}
+                  disabled={checking}
+                >
+                  {checking ? "Checking…" : "Check for updates"}
+                </Button>
+              )}
+            </span>
+          </Row>
+          {update?.notes ? (
+            <div className="whitespace-pre-wrap text-[11px] text-mut">{update.notes}</div>
+          ) : null}
+          {err ? <div className="text-[11px] text-red-400">{err}</div> : null}
         </div>
       </div>
     </section>

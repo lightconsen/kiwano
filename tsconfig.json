@@ -12,6 +12,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo",
     "jsx": "react-jsx",
 
     /* Path aliases (shadcn/ui first; since TS6, paths resolve relative to tsconfig and baseUrl is deprecated) */

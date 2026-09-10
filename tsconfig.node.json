@@ -4,7 +4,13 @@
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    // Composite projects must emit; send it to a scratch dir so the
+    // byproducts never land next to vite.config.ts (a stale
+    // vite.config.js would shadow the real config, since Vite
+    // resolves .js before .ts).
+    "outDir": "node_modules/.tmp/tsconfig.node",
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
   "include": ["vite.config.ts"]
 }

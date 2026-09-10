@@ -18,3 +18,4 @@ src-tauri/gen/schemas
 .idea
 .vscode/*
 !.vscode/extensions.json
+models/

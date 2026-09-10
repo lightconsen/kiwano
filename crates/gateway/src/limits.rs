@@ -137,6 +137,53 @@ pub fn period_limit_usage(
     }))
 }
 
+/// `providers.plan_limits`: percent ceilings on the plan's own windows.
+#[derive(Debug, serde::Deserialize)]
+pub struct PlanLimits {
+    five_hour: Option<f64>,
+    weekly: Option<f64>,
+}
+
+impl PlanLimits {
+    /// Parse a provider's ceilings. `None` when absent, unreadable, or when
+    /// neither window is configured — a row that limits nothing.
+    pub fn parse(raw: Option<&str>) -> Option<PlanLimits> {
+        let limits: PlanLimits = serde_json::from_str(raw?).ok()?;
+        (limits.five_hour.is_some() || limits.weekly.is_some()).then_some(limits)
+    }
+}
+
+/// The first configured window whose live utilization has reached its ceiling,
+/// as (window, utilization, ceiling). A window the report does not mention
+/// counts as not over: no evidence is not evidence of a hit.
+pub fn window_over(
+    report: &crate::plan_quota::PlanQuotaReport,
+    limits: &PlanLimits,
+) -> Option<(&'static str, f64, f64)> {
+    let tier_util = |name: &str| {
+        report
+            .tiers
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.utilization)
+    };
+    if let Some(pct) = limits.five_hour {
+        if let Some(util) = tier_util("five_hour") {
+            if util >= pct {
+                return Some(("five_hour", util, pct));
+            }
+        }
+    }
+    if let Some(pct) = limits.weekly {
+        if let Some(util) = tier_util("weekly_limit") {
+            if util >= pct {
+                return Some(("weekly", util, pct));
+            }
+        }
+    }
+    None
+}
+
 /// Why a provider is out of service.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockReason {
@@ -242,8 +289,91 @@ pub fn evaluate(store: &Store) -> LimitState {
                 );
             }
         }
+        // The percent half reads only what the refresh step cached. Fetching
+        // here would make `GatewayState::new` block on N provider endpoints,
+        // and would put a network round trip in a path that runs every tick.
+        if p.billing == crate::store::Billing::Subscription {
+            let over = PlanLimits::parse(p.plan_limits.as_deref()).and_then(|limits| {
+                crate::plan_quota::cached_report(store, &p.id)
+                    .and_then(|report| window_over(&report, &limits))
+            });
+            if let Some((window, util, pct)) = over {
+                blocked.insert(
+                    p.id.clone(),
+                    BlockReason::PlanWindow {
+                        window: window.to_string(),
+                        util,
+                        pct,
+                    },
+                );
+            }
+        }
     }
     LimitState { blocked }
+}
+
+/// The KV markers the desktop app wrote when *it* disabled a provider for
+/// exceeding a limit. Nothing produces them any more.
+const LEGACY_DISABLE_MARKERS: [&str; 2] = ["plan_limit_disabled:", "spend_limit_disabled:"];
+
+/// Undo the old app-side enforcement, once at startup.
+///
+/// Those markers were how the app told its own doing from the user's, so it
+/// could re-enable safely. Enforcement moved here and no longer disables
+/// anything, which means nothing would ever clear them: a provider the old app
+/// switched off would stay off, with no marker UI to explain why and no code
+/// left to restore it.
+pub fn clear_legacy_disables(store: &Store) -> usize {
+    let mut restored = 0;
+    for prefix in LEGACY_DISABLE_MARKERS {
+        let Ok(rows) = store.app_settings_with_prefix(prefix) else {
+            continue;
+        };
+        for (key, _) in rows {
+            let Some(id) = key.strip_prefix(prefix) else {
+                continue;
+            };
+            if let Ok(Some(mut p)) = store.get_provider(id) {
+                if !p.enabled {
+                    p.enabled = true;
+                    p.updated_at = crate::store::now_rfc3339();
+                    if store.update_provider(&p).is_ok() {
+                        restored += 1;
+                        tracing::info!(
+                            provider = %id,
+                            "re-enabled: it was disabled by an older limit patrol, which the gateway now owns"
+                        );
+                    }
+                }
+            }
+            let _ = store.delete_app_setting(&key);
+        }
+    }
+    restored
+}
+
+/// Refresh the cached plan reports for providers that have a query to run.
+///
+/// Blocking HTTP — the caller runs it off the async runtime — and it is what
+/// keeps `evaluate` free of network calls. A provider whose endpoint is down
+/// keeps its previous cached answer (or none), so a flaky endpoint never
+/// fabricates a block.
+pub fn refresh_plan_reports(store: &Store) {
+    let providers = match store.list_providers() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "plan-quota refresh skipped: providers unreadable");
+            return;
+        }
+    };
+    for p in providers {
+        if !p.enabled || p.plan_query.is_none() {
+            continue;
+        }
+        if let Err(e) = crate::plan_quota::get_plan_quota_report(store, &p.id, false) {
+            tracing::debug!(provider = %p.id, error = %e, "plan quota refresh failed");
+        }
+    }
 }
 
 /// How often the limits are re-evaluated. The plan half rides a 5-minute
@@ -255,22 +385,33 @@ pub const LIMIT_INTERVAL: StdDuration = StdDuration::from_secs(30);
 /// other thing here that has to look at the world outside a request.
 pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
     loop {
-        let prev = state.limits();
-        let current = state.set_limits(evaluate(&state.store));
-        // Transitions only: this is the line that answers "why did my request
-        // start failing?" without turning the log into a per-tick heartbeat.
-        for (id, reason) in current.entries() {
-            if prev.blocked(id).is_none() {
-                tracing::warn!(
-                    provider = %id,
-                    reason = %reason.describe(),
-                    "provider is over its limit; routing around it"
-                );
+        // Off the async runtime: the refresh does blocking HTTP against
+        // provider endpoints. The evaluation itself is store reads only.
+        let store = state.store.clone();
+        let evaluated = tokio::task::spawn_blocking(move || {
+            refresh_plan_reports(&store);
+            evaluate(&store)
+        })
+        .await;
+
+        if let Ok(next) = evaluated {
+            let prev = state.limits();
+            let current = state.set_limits(next);
+            // Transitions only: this is the line that answers "why did my
+            // request start failing?" without a per-tick heartbeat.
+            for (id, reason) in current.entries() {
+                if prev.blocked(id).is_none() {
+                    tracing::warn!(
+                        provider = %id,
+                        reason = %reason.describe(),
+                        "provider is over its limit; routing around it"
+                    );
+                }
             }
-        }
-        for (id, _) in prev.entries() {
-            if current.blocked(id).is_none() {
-                tracing::info!(provider = %id, "provider is back under its limit");
+            for (id, _) in prev.entries() {
+                if current.blocked(id).is_none() {
+                    tracing::info!(provider = %id, "provider is back under its limit");
+                }
             }
         }
         tokio::time::sleep(interval).await;
@@ -356,6 +497,26 @@ mod tests {
         // there is no state to clear — that is the point of not persisting it.)
         let s2 = store_with_spend("payg-1", 30.0, 29.0);
         assert!(evaluate(&s2).blocked("payg-1").is_none());
+    }
+
+    #[test]
+    fn the_legacy_disable_markers_are_undone_once() {
+        let s = store_with_spend("payg-1", 30.0, 31.0);
+        let mut p = s.get_provider("payg-1").unwrap().unwrap();
+        p.enabled = false;
+        s.update_provider(&p).unwrap();
+        // What the old app-side patrol left behind.
+        s.set_app_setting("spend_limit_disabled:payg-1", "31.00/30.00")
+            .unwrap();
+        s.set_app_setting("plan_limit_disabled:payg-1", "five_hour")
+            .unwrap();
+
+        assert_eq!(clear_legacy_disables(&s), 1, "one provider restored");
+        assert!(s.get_provider("payg-1").unwrap().unwrap().enabled);
+        assert!(s.app_setting("spend_limit_disabled:payg-1").is_none());
+        assert!(s.app_setting("plan_limit_disabled:payg-1").is_none());
+        // Idempotent — it runs on every gateway start.
+        assert_eq!(clear_legacy_disables(&s), 0);
     }
 
     #[test]

@@ -67,6 +67,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    // Before the first snapshot is taken: a provider the old app-side patrol
+    // disabled carries a marker nothing would ever clear now.
+    kiwano_gateway::limits::clear_legacy_disables(&store);
+
     let state = match GatewayState::new(store) {
         Ok(s) => Arc::new(s),
         Err(e) => {

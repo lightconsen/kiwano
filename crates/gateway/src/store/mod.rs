@@ -193,6 +193,15 @@ CREATE TABLE IF NOT EXISTS gateway_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- The GUI's KV, created here too. It used to be the GUI's alone, so the
+-- gateway could assume it existed; it now reads and writes it (the plan-quota
+-- cache, the tz offset), and on a fresh install the gateway can start first.
+-- The definition must stay identical to `Aux::init_tables`'s.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 "#;
 
 /// v7: per-protocol endpoints on one provider — a single provider row can now
@@ -1703,6 +1712,20 @@ impl Store {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    /// Every `app_settings` row whose key starts with `prefix`, as
+    /// (key, value). For the one-time sweeps that have to find keys they did
+    /// not write themselves.
+    pub fn app_settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT key, value FROM app_settings WHERE key LIKE ?1")?;
+        let rows = stmt
+            .query_map(params![format!("{prefix}%")], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn delete_app_setting(&self, key: &str) -> Result<bool> {

@@ -7,7 +7,7 @@
 //! OpenCode Go / Volcengine). `get_plan_quota` executes the template's
 //! HTTP call with the provider's API key (plus per-template credential
 //! fields), parses the usage windows into utilization tiers, and caches
-//! the report in the Aux KV for 5 minutes.
+//! the report in the shared `app_settings` KV for 5 minutes.
 //!
 //! Error channels (same contract as cc-switch): transient transport
 //! failures (network / read interruption) return `Err` so the frontend
@@ -15,11 +15,10 @@
 //! key, business error, unknown shape) return a report with
 //! `success: false` carrying the user-facing reason.
 
-use crate::vm::Aux;
-use kiwano_gateway::store::Store;
+use crate::store::Store;
 use std::collections::HashMap;
 
-/// Aux KV cache TTL for one provider's plan quota report.
+/// `app_settings` KV cache TTL for one provider's plan quota report.
 const CACHE_TTL_MS: i64 = 5 * 60 * 1000;
 
 // ── VM types ──
@@ -1130,14 +1129,21 @@ fn run_template(
     }
 }
 
-// ── Cache (Aux KV, 5-minute TTL) ──
+// ── Cache (`app_settings` KV, 5-minute TTL) ──
 
 fn cache_key(provider_id: &str) -> String {
     format!("plan_quota_cache:{provider_id}")
 }
 
-fn cache_read(aux: &Aux, provider_id: &str) -> Option<PlanQuotaReport> {
-    let raw = aux.get_setting(&cache_key(provider_id))?;
+/// The still-fresh cached report for a provider, if there is one. No network:
+/// the enforcement path reads what the refresh step put here, so a slow or
+/// dead provider endpoint cannot stall a routing decision.
+pub fn cached_report(store: &Store, provider_id: &str) -> Option<PlanQuotaReport> {
+    cache_read(store, provider_id)
+}
+
+fn cache_read(store: &Store, provider_id: &str) -> Option<PlanQuotaReport> {
+    let raw = store.app_setting(&cache_key(provider_id))?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let ts = v.get("ts")?.as_i64()?;
     if now_millis() - ts > CACHE_TTL_MS {
@@ -1148,9 +1154,9 @@ fn cache_read(aux: &Aux, provider_id: &str) -> Option<PlanQuotaReport> {
     Some(report)
 }
 
-fn cache_write(aux: &Aux, provider_id: &str, report: &PlanQuotaReport) {
+fn cache_write(store: &Store, provider_id: &str, report: &PlanQuotaReport) {
     let v = serde_json::json!({ "ts": now_millis(), "report": report });
-    let _ = aux.set_setting(&cache_key(provider_id), &v.to_string());
+    let _ = store.set_app_setting(&cache_key(provider_id), &v.to_string());
 }
 
 /// Query one provider's plan quota. Cached for 5 minutes unless `force`.
@@ -1158,12 +1164,11 @@ fn cache_write(aux: &Aux, provider_id: &str, report: &PlanQuotaReport) {
 /// as a `success: false` report.
 pub fn get_plan_quota_report(
     store: &Store,
-    aux: &Aux,
     provider_id: &str,
     force: bool,
 ) -> Result<PlanQuotaReport, String> {
     if !force {
-        if let Some(hit) = cache_read(aux, provider_id) {
+        if let Some(hit) = cache_read(store, provider_id) {
             return Ok(hit);
         }
     }
@@ -1211,24 +1216,10 @@ pub fn get_plan_quota_report(
         },
     };
     if report.success {
-        cache_write(aux, provider_id, &report);
+        cache_write(store, provider_id, &report);
     }
     report.provider_id = provider_id.to_string();
     Ok(report)
-}
-
-#[tauri::command(async)]
-pub fn get_plan_quota(
-    state: tauri::State<'_, crate::AppState>,
-    provider_id: String,
-    force: Option<bool>,
-) -> Result<PlanQuotaReport, String> {
-    get_plan_quota_report(
-        &state.store,
-        &state.aux,
-        &provider_id,
-        force.unwrap_or(false),
-    )
 }
 
 #[cfg(test)]

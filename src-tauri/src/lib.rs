@@ -8,7 +8,6 @@ mod creds;
 mod csv;
 mod detect;
 mod import;
-mod plan_quota;
 mod pricing;
 mod share;
 mod sidecar;
@@ -386,6 +385,22 @@ fn update_settings(
     Ok(vm)
 }
 
+// ── Plan quota (the reader itself lives in the gateway crate: the same code
+//    enforces the ceiling, so the display and the block cannot disagree) ──
+
+#[tauri::command(async)]
+fn get_plan_quota(
+    state: State<AppState>,
+    provider_id: String,
+    force: Option<bool>,
+) -> Result<kiwano_gateway::plan_quota::PlanQuotaReport, String> {
+    kiwano_gateway::plan_quota::get_plan_quota_report(
+        &state.store,
+        &provider_id,
+        force.unwrap_or(false),
+    )
+}
+
 // ── Request logs (full data-plane audit trail, migration V5) ──
 
 #[tauri::command]
@@ -644,19 +659,12 @@ fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
 /// Polled periodically by the frontend; hits not yet notified are returned so
 /// the frontend can raise a system notification (KV dedup prevents repeats).
 ///
-/// Also the enforcement pass: providers over a plan percent ceiling or a
-/// spending limit are disabled, and the gateway routes are reloaded when
-/// either touched one. Enforcement runs regardless of the notification
-/// setting — wanting no alerts is not wanting to spend past the limit.
+/// Notification only: the gateway enforces the limits, from its own timer, so
+/// they hold whether or not this app is running. Nothing here disables a
+/// provider any more.
 #[tauri::command]
 fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, String> {
-    let alerts = vm::check_usage_alerts(&state.store, &state.aux)?;
-    let (plan_alerts, plan_mutated) = vm::enforce_plan_limits(&state.store, &state.aux)?;
-    let spend_mutated = vm::enforce_amount_limits(&state.store, &state.aux)?;
-    if plan_mutated || spend_mutated {
-        after_mutation(&state);
-    }
-    Ok(alerts.into_iter().chain(plan_alerts).collect())
+    vm::check_usage_alerts(&state.store, &state.aux)
 }
 
 // ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──
@@ -837,7 +845,7 @@ pub fn run() {
             update::download_and_install_app_update,
             get_pending_update,
             pricing::get_currency_meta,
-            plan_quota::get_plan_quota,
+            get_plan_quota,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: intercept CloseRequested and hide the window

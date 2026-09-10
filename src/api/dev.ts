@@ -1161,7 +1161,7 @@ export const devApi: KiwanoApi = {
       today_requests: 1284,
       today_tokens: 1_900_000,
       hub_synced: true,
-      version: "v0.1.0",
+      version: "v0.1.2",
     };
   },
 

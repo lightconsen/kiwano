@@ -2648,7 +2648,11 @@ pub fn build_dashboard(
     })
 }
 
-pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, String> {
+pub fn build_footer_stats(
+    store: &Store,
+    aux: &Aux,
+    version: &str,
+) -> Result<FooterStatsVm, String> {
     let today = day_key(unix_now());
     let since = format!("{today}T00:00:00Z");
     let t = store.usage_totals(None, None, Some(&since)).map_err(e2s)?;
@@ -2662,7 +2666,7 @@ pub fn build_footer_stats(store: &Store, aux: &Aux) -> Result<FooterStatsVm, Str
         today_requests: t.requests,
         today_tokens: t.input_tokens + t.output_tokens,
         hub_synced,
-        version: "v0.1.0".into(),
+        version: version.to_string(),
     })
 }
 

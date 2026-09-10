@@ -111,10 +111,18 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         let store = kiwano_gateway::store::Store::open_in_memory().unwrap();
         // never synced → false
-        assert!(!vm::build_footer_stats(&store, &aux).unwrap().hub_synced);
+        assert!(
+            !vm::build_footer_stats(&store, &aux, "v0.0.0")
+                .unwrap()
+                .hub_synced
+        );
         // just synced (timestamp uses the same now as production) → true
         aux.save_hub_cache("{}", &vm::rfc3339(vm::unix_now()))
             .unwrap();
-        assert!(vm::build_footer_stats(&store, &aux).unwrap().hub_synced);
+        assert!(
+            vm::build_footer_stats(&store, &aux, "v0.0.0")
+                .unwrap()
+                .hub_synced
+        );
     }
 }

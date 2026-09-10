@@ -19,7 +19,7 @@ mod vm;
 use std::sync::Mutex;
 
 use kiwano_gateway::store::Store;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 use detect::{detect_agents, probe_agent_versions};
@@ -351,8 +351,11 @@ fn set_agent_takeover(state: State<AppState>, agent: String, enabled: bool) -> R
 }
 
 #[tauri::command]
-fn get_footer_stats(state: State<AppState>) -> Result<vm::FooterStatsVm, String> {
-    vm::build_footer_stats(&state.store, &state.aux)
+fn get_footer_stats(app: AppHandle, state: State<AppState>) -> Result<vm::FooterStatsVm, String> {
+    // tauri.conf.json is the single source of truth for the app version —
+    // the same one the updater compares against.
+    let version = format!("v{}", app.package_info().version);
+    vm::build_footer_stats(&state.store, &state.aux, &version)
 }
 
 // ── Agent strategies (tech.md §4.7: strategy types / candidate ordering) ──

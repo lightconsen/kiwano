@@ -1,6 +1,6 @@
 [package]
 name = "kiwano"
-version = "0.1.0"
+version.workspace = true
 description = "Kiwano — local-first AI model Provider manager"
 authors = ["john2ai <john@lightconsen.com>"]
 edition = "2021"

@@ -86,3 +86,17 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      # Mirror the built installers to Cloudflare R2 under releases/ (served
+      # at hub.kiwano.cc/releases). GitHub Releases stays the updater's
+      # authoritative manifest source; R2 is the download mirror for the site.
+      - name: Mirror artifacts to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
+        # Single line on purpose: the Windows runner's shell is PowerShell,
+        # where a backslash does not continue a line. --exclude drops the raw
+        # .app bundle tree (dmg + updater tar.gz are what matter).
+        run: aws s3 sync target/release/bundle s3://kiwano-hub/releases --no-progress --exclude "*.app" --exclude "*.app/*"

@@ -152,6 +152,8 @@ export const tauriApi: KiwanoApi = {
 
   checkAppUpdate: () => invoke<UpdateInfo | null>("check_app_update"),
 
+  getPendingUpdate: () => invoke<UpdateInfo | null>("get_pending_update"),
+
   downloadAndInstallAppUpdate: () => invoke<void>("download_and_install_app_update"),
 
   onUpdateProgress: (cb: (p: UpdateProgress) => void) =>

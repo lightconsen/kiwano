@@ -586,6 +586,8 @@ export interface KiwanoApi {
   getFooterStats(): Promise<FooterStats>;
   /** Check GitHub Releases for a newer version; null = up to date */
   checkAppUpdate(): Promise<UpdateInfo | null>;
+  /** Update found by the silent startup check; null = none found (or disabled) */
+  getPendingUpdate(): Promise<UpdateInfo | null>;
   /** Download, verify and install the pending update, then relaunch */
   downloadAndInstallAppUpdate(): Promise<void>;
   /** Subscribe to download progress; returns an unsubscribe function */

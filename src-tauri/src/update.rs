@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 /// A pending update discovered on the release channel.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct UpdateInfoVm {
     pub version: String,
     pub notes: Option<String>,

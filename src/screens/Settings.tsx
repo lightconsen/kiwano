@@ -42,6 +42,14 @@ export default function Settings() {
     api.getSettings().then(setS);
     api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
     api.getFooterStats().then((f) => setVersion(f.version)).catch(() => {});
+    // The silent startup check may already have found an update; pick it up so
+    // the About block says the same thing as the notification the user saw.
+    api
+      .getPendingUpdate()
+      .then((u) => {
+        if (u) setUpdate(u);
+      })
+      .catch(() => {});
     api.onUpdateProgress((p) => {
       setProgress(p.total ? Math.round((p.downloaded / p.total) * 100) : null);
     }).catch(() => {});

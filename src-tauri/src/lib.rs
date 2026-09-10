@@ -31,6 +31,9 @@ struct AppState {
     child: Mutex<Option<std::process::Child>>,
     admin_port: u16,
     data_port: u16,
+    /// Update found by the silent startup check, so the UI can show it without
+    /// the user running a check by hand (see `get_pending_update`).
+    pending_update: Mutex<Option<update::UpdateInfoVm>>,
 }
 
 fn env_port(name: &str, default: u16) -> u16 {
@@ -391,6 +394,18 @@ fn get_footer_stats(app: AppHandle, state: State<AppState>) -> Result<vm::Footer
     vm::build_footer_stats(&state.store, &state.aux, &version)
 }
 
+/// The update the silent startup check found, if any. The About block reads
+/// this on mount so a user who just saw the "update available" notification
+/// finds the same version waiting in Settings.
+#[tauri::command]
+fn get_pending_update(state: State<AppState>) -> Option<update::UpdateInfoVm> {
+    state
+        .pending_update
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+}
+
 // ── Agent strategies (tech.md §4.7: strategy types / candidate ordering) ──
 
 #[tauri::command]
@@ -621,6 +636,7 @@ pub fn run() {
                 child: Mutex::new(child),
                 admin_port,
                 data_port,
+                pending_update: Mutex::new(None),
             });
             spawn_watchdog(app.handle().clone());
             // Hub catalog: one-shot conditional sync (skips the download when
@@ -637,11 +653,20 @@ pub fn run() {
             sync_autostart(app.handle(), ui.autostart);
 
             // Self-update: silent startup check (opt-out in Settings). Failures
-            // are ignored; a found update raises a system notification only.
+            // are ignored — a check that cannot reach the release channel looks
+            // exactly like "you are current", so it must not nag about it.
+            // A hit is both stored for the UI and announced: the notification
+            // alone left Settings offering "Check for updates" as if nothing
+            // had been found, contradicting the notification the user just saw.
             if ui.auto_check_update {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     if let Ok(Some(info)) = update::check_app_update(handle.clone()).await {
+                        if let Some(state) = handle.try_state::<AppState>() {
+                            if let Ok(mut slot) = state.pending_update.lock() {
+                                *slot = Some(info.clone());
+                            }
+                        }
                         let _ = handle
                             .notification()
                             .builder()
@@ -692,6 +717,7 @@ pub fn run() {
             probe_agent_versions,
             update::check_app_update,
             update::download_and_install_app_update,
+            get_pending_update,
             pricing::get_currency_meta,
             plan_quota::get_plan_quota,
         ])

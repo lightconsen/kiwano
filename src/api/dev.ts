@@ -1181,6 +1181,11 @@ export const devApi: KiwanoApi = {
     return null;
   },
 
+  async getPendingUpdate(): Promise<UpdateInfo | null> {
+    await delay();
+    return null;
+  },
+
   async downloadAndInstallAppUpdate(): Promise<void> {
     await delay();
   },

@@ -51,7 +51,9 @@ fn hub_asset_url(hub_url: &str, name: &str) -> Result<String, String> {
     let dir = if path.ends_with('/') {
         path.trim_end_matches('/').to_string()
     } else {
-        path.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default()
+        path.rsplit_once('/')
+            .map(|(d, _)| d.to_string())
+            .unwrap_or_default()
     };
     url.set_path(&format!("{dir}/{name}"));
     Ok(url.to_string())
@@ -117,7 +119,11 @@ fn parse_manifest(raw: &str) -> HubManifest {
 /// Never fails: an unreachable or malformed manifest means "fetch the catalog
 /// unconditionally", exactly as before this existed.
 fn fetch_manifest(client: &reqwest::blocking::Client, manifest_url: &str) -> HubManifest {
-    let Ok(resp) = client.get(manifest_url).send().and_then(|r| r.error_for_status()) else {
+    let Ok(resp) = client
+        .get(manifest_url)
+        .send()
+        .and_then(|r| r.error_for_status())
+    else {
         return HubManifest::default();
     };
     match resp.text() {
@@ -240,8 +246,8 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
         let verified = remote_sha
             .as_deref()
             .is_some_and(|sha| sha256_hex(&bytes) == sha);
-        let body = std::str::from_utf8(&bytes)
-            .map_err(|e| format!("Hub response is not UTF-8: {e}"))?;
+        let body =
+            std::str::from_utf8(&bytes).map_err(|e| format!("Hub response is not UTF-8: {e}"))?;
         let list = parse_catalog(body)?;
         if !verified && remote_sha.is_some() && attempt == 0 {
             attempt += 1;
@@ -447,8 +453,14 @@ mod tests {
             SyncAction::Skip
         );
         // Any missing half falls through to the full fetch.
-        assert_eq!(sync_action(None, Some(&sha), Some("cached")), SyncAction::Fetch);
-        assert_eq!(sync_action(Some(&sha), None, Some("cached")), SyncAction::Fetch);
+        assert_eq!(
+            sync_action(None, Some(&sha), Some("cached")),
+            SyncAction::Fetch
+        );
+        assert_eq!(
+            sync_action(Some(&sha), None, Some("cached")),
+            SyncAction::Fetch
+        );
         assert_eq!(sync_action(Some(&sha), Some(&sha), None), SyncAction::Fetch);
         // A changed remote means fetch.
         assert_eq!(
@@ -476,7 +488,10 @@ mod tests {
         let pretty = catalog_body(true);
         let reserialized = serde_json::to_string(&parse_catalog(&pretty).unwrap()).unwrap();
         assert_ne!(pretty, reserialized, "fixture must differ byte-wise");
-        assert_ne!(sha256_hex(pretty.as_bytes()), sha256_hex(reserialized.as_bytes()));
+        assert_ne!(
+            sha256_hex(pretty.as_bytes()),
+            sha256_hex(reserialized.as_bytes())
+        );
     }
 
     #[test]
@@ -484,7 +499,8 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         let store = kiwano_gateway::store::Store::open_in_memory().unwrap();
         let payload = catalog_body(false);
-        aux.save_hub_cache(&payload, "2020-01-01T00:00:00Z").unwrap();
+        aux.save_hub_cache(&payload, "2020-01-01T00:00:00Z")
+            .unwrap();
 
         assert!(
             !vm::build_footer_stats(&store, &aux, "v0.0.0")
@@ -520,7 +536,10 @@ mod tests {
         let sha = "c".repeat(64);
 
         record_catalog_sha(&aux, Some(&sha), true).unwrap();
-        assert_eq!(aux.get_setting(HUB_CATALOG_SHA_KEY).as_deref(), Some(&sha[..]));
+        assert_eq!(
+            aux.get_setting(HUB_CATALOG_SHA_KEY).as_deref(),
+            Some(&sha[..])
+        );
 
         // Unverified bytes drop the gate so the next sync re-fetches.
         record_catalog_sha(&aux, Some(&sha), false).unwrap();
@@ -529,6 +548,9 @@ mod tests {
         // No manifest leaves whatever was stored alone.
         aux.set_setting(HUB_CATALOG_SHA_KEY, &sha).unwrap();
         record_catalog_sha(&aux, None, false).unwrap();
-        assert_eq!(aux.get_setting(HUB_CATALOG_SHA_KEY).as_deref(), Some(&sha[..]));
+        assert_eq!(
+            aux.get_setting(HUB_CATALOG_SHA_KEY).as_deref(),
+            Some(&sha[..])
+        );
     }
 }

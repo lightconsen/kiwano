@@ -1027,22 +1027,23 @@ export default function Providers({
         <span className="ml-1.5 text-[11.5px] text-mut">
           {providers.length} providers · {agentsBound} agents bound
         </span>
-        {providers.some((p) => p.plan_query) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto h-7 w-7 px-0 text-mut"
-            aria-label="Refresh plan quotas"
-            title="Refresh plan quotas (bypasses the 5-min cache)"
-            disabled={quotaBusy}
-            onClick={refreshQuotas}
-          >
-            <RefreshCw className={`h-3.5 w-3.5${quotaBusy ? " animate-spin" : ""}`} />
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7 w-7 px-0 text-mut"
+          aria-label="Refresh"
+          title="Refresh providers and plan quotas (bypasses the 5-min quota cache)"
+          disabled={quotaBusy}
+          onClick={() => {
+            refetch();
+            refreshQuotas();
+          }}
+        >
+          <RefreshCw className={`h-3.5 w-3.5${quotaBusy ? " animate-spin" : ""}`} />
+        </Button>
         <Button
           size="sm"
-          className={`h-7 gap-1 px-2.5 text-[12px] font-semibold${providers.some((p) => p.plan_query) ? "" : " ml-auto"}`}
+          className="h-7 gap-1 px-2.5 text-[12px] font-semibold"
           onClick={onAdd}
         >
           <Plus className="h-3.5 w-3.5" />

@@ -14,15 +14,9 @@ Kiwano is a desktop app that sits between your coding agents and your AI provide
 
 Your keys stay in the OS keychain. Requests never touch a Kiwano server.
 
-## Screenshots
+![Kiwano's Apps screen: providers with their bound agents, usage and quota for the day](docs/screenshots/apps.png)
 
-| Apps — providers, usage and bound agents | Models — Hub catalog, one click to add |
-| --- | --- |
-| ![Apps screen](docs/screenshots/01-apps.png) | ![Models screen](docs/screenshots/02-models.png) |
-| **Dashboard** — spend and usage by provider and agent | **Settings** — gateway, agent takeover, updates |
-| ![Dashboard screen](docs/screenshots/03-dashboard.png) | ![Settings screen](docs/screenshots/04-settings.png) |
-
-> Screenshots show the bundled sample data set shipped with the development build.
+> Captured from the development build with its bundled sample data set.
 
 ## Features
 

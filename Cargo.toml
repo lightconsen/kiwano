@@ -3,7 +3,7 @@ resolver = "2"
 members = ["src-tauri", "crates/gateway", "crates/adapters", "crates/cli"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["john2ai <john@lightconsen.com>"]
 

@@ -12,6 +12,7 @@ import {
 import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
+import { hubLogoUrl, useHubUrl } from "../lib/hub";
 
 // Chip icons speak the category's meaning; colors match the per-tag badge
 // palette used in the table (tagChipStyle below)
@@ -165,18 +166,21 @@ function compare(key: SortKey, a: CatalogEntry, b: CatalogEntry): number {
 
 function Row({
   entry,
+  hubUrl,
   onAdd,
   onOpen,
 }: {
   entry: CatalogEntry;
+  hubUrl: string | null;
   onAdd: (e: CatalogEntry) => void;
   onOpen: (e: CatalogEntry) => void;
 }) {
+  const logo = entry.logo && hubUrl ? hubLogoUrl(hubUrl, entry.logo) : undefined;
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className="px-4 py-2">
         <div className="flex items-center gap-2">
-          <ProviderLogo icon={entry.icon} name={entry.name} color={entry.logo_color} />
+          <ProviderLogo logo={logo} icon={entry.icon} name={entry.name} color={entry.logo_color} />
           <span className="truncate text-[12.5px] font-semibold" title={entry.name}>
             {entry.name}
           </span>
@@ -219,13 +223,16 @@ function Row({
     every per-protocol endpoint with its models, pricing and an Add shortcut. */
 function DetailDialog({
   entry,
+  hubUrl,
   onClose,
   onAdd,
 }: {
   entry: CatalogEntry;
+  hubUrl: string | null;
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
+  const logo = entry.logo && hubUrl ? hubLogoUrl(hubUrl, entry.logo) : undefined;
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),
@@ -236,7 +243,7 @@ function DetailDialog({
       <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-x-hidden overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
         <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line pl-4 pr-12">
           <DialogTitle className="flex items-center gap-2 text-[13px] font-semibold">
-            <ProviderLogo icon={entry.icon} name={entry.name} color={entry.logo_color} size={18} />
+            <ProviderLogo logo={logo} icon={entry.icon} name={entry.name} color={entry.logo_color} size={18} />
             {entry.name}
           </DialogTitle>
         </DialogHeader>
@@ -298,6 +305,7 @@ function DetailDialog({
 }
 
 export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void }) {
+  const hubUrl = useHubUrl();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
   const [query, setQuery] = useState("");
@@ -376,7 +384,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         </thead>
         <tbody>
           {filtered.map((e) => (
-            <Row key={e.id} entry={e} onAdd={onAdd} onOpen={setDetail} />
+            <Row key={e.id} entry={e} hubUrl={hubUrl} onAdd={onAdd} onOpen={setDetail} />
           ))}
           {filtered.length === 0 && (
             <tr>
@@ -390,6 +398,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
       {detail && (
         <DetailDialog
           entry={detail}
+          hubUrl={hubUrl}
           onClose={() => setDetail(null)}
           onAdd={(e) => {
             setDetail(null);

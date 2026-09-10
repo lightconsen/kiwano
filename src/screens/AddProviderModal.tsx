@@ -33,6 +33,7 @@ import {
 } from "../api/types";
 import { AgentChip } from "@/components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
+import { hubLogoUrl, useHubUrl } from "../lib/hub";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
   { id: "plan", label: "Plan" },
@@ -74,6 +75,7 @@ export default function AddProviderModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const hubUrl = useHubUrl();
   const [mode, setMode] = useState<"shelf" | "custom">("shelf");
   // Catalog entry chosen in the "From Models" mode (preset pre-seeds it when
   // the modal opens from the Models page; otherwise picked in-modal)
@@ -491,7 +493,13 @@ export default function AddProviderModal({
                         applyShelf(e);
                       }}
                     >
-                      <ProviderLogo icon={e.icon} name={e.name} color={e.logo_color} size={16} />
+                      <ProviderLogo
+                        logo={e.logo && hubUrl ? hubLogoUrl(hubUrl, e.logo) : undefined}
+                        icon={e.icon}
+                        name={e.name}
+                        color={e.logo_color}
+                        size={16}
+                      />
                       <span className="min-w-0 truncate text-[12px] font-medium">{e.name}</span>
                     </button>
                   ))}
@@ -508,7 +516,13 @@ export default function AddProviderModal({
           {/* Chosen catalog entry (with a way back to the picker) */}
           {!edit && mode === "shelf" && shelf && (
             <div className="mt-3 flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
-              <ProviderLogo icon={shelf.icon} name={shelf.name} color={shelf.logo_color} size={16} />
+              <ProviderLogo
+                logo={shelf.logo && hubUrl ? hubLogoUrl(hubUrl, shelf.logo) : undefined}
+                icon={shelf.icon}
+                name={shelf.name}
+                color={shelf.logo_color}
+                size={16}
+              />
               <span className="min-w-0 truncate text-[12px] font-medium">{shelf.name}</span>
               <button
                 className="ml-auto flex-none text-[11px] font-medium"

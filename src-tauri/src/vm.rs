@@ -520,6 +520,10 @@ pub struct CatalogEntryVm {
     /// absent entries fall back to the letter avatar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Hub-relative logo path ("logos/<id>.<ext>"); the frontend resolves it
+    /// against hub_url. Absent = fall back to `icon` / letter avatar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
     /// Protocol fingerprint (anthropic | openai | gemini); entries predate the
     /// multi-protocol catalog, so older payloads default to openai.
     #[serde(default = "default_catalog_protocol")]

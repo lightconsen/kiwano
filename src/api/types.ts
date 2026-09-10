@@ -247,6 +247,9 @@ export interface CatalogEntry {
   logo_border?: boolean;
   /** Brand-mark key in src/components/icons registry; missing = letter avatar */
   icon?: string;
+  /** Hub-relative logo path ("logos/<id>.<ext>"), resolved against hub_url;
+      missing/offline falls back to `icon` then the letter avatar */
+  logo?: string;
   /** Tag category shown on the card's top-right label (Models page chip filter) */
   tag: "official" | "aggregate" | "third" | "free" | "local";
   tag_label: string;

@@ -24,6 +24,7 @@ function useIsDarkTheme(): boolean {
 }
 
 export function ProviderLogo({
+  logo,
   icon,
   name,
   color,
@@ -31,6 +32,9 @@ export function ProviderLogo({
   size = 24,
   className = "",
 }: {
+  /** Absolute hub-hosted logo URL (resolved from the catalog's relative
+      `logo` path); on load failure falls through to `icon` / letter avatar. */
+  logo?: string | null;
   icon?: string | null;
   name: string;
   color?: string;
@@ -42,6 +46,25 @@ export function ProviderLogo({
   const dark = useIsDarkTheme();
   const box: React.CSSProperties = { width: size, height: size };
   const useDark = dark && !!icon && hasDarkVariant(icon);
+  const [failedLogo, setFailedLogo] = useState<string | null>(null);
+
+  // Reset the failure marker when the logo URL changes (the component is
+  // reused across catalog rows/entries without remounting).
+  useEffect(() => {
+    setFailedLogo(null);
+  }, [logo]);
+
+  if (logo && failedLogo !== logo) {
+    return (
+      <img
+        src={logo}
+        alt={name}
+        onError={() => setFailedLogo(logo)}
+        className={`shrink-0 rounded-[5px] object-contain ${className}`}
+        style={box}
+      />
+    );
+  }
 
   if (icon && hasIcon(icon)) {
     if (isUrlIcon(icon) || useDark) {

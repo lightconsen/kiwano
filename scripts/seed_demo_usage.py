@@ -29,7 +29,12 @@ import json
 import pathlib
 import sqlite3
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+
+# Rows land at 12:00 *local* on each day: the app's day boundaries follow the
+# user's clock (settings.tz_offset_minutes), so a UTC-noon row would belong to
+# the wrong local day for most of the world.
+LOCAL = datetime.now().astimezone().tzinfo
 
 ROWS_BASE = 5
 ROWS_CYCLE = 7
@@ -39,9 +44,13 @@ PROVIDERS = ["demo-alpha", "demo-beta"]
 AGENTS = ["claude", "codex"]
 
 
-def day_keys(days):
-    now = datetime.now(timezone.utc)
-    return [now - timedelta(days=d) for d in range(days)]
+def day_boundaries(days):
+    """Noon local on each of the last `days` local dates, oldest first."""
+    today = datetime.now(LOCAL).date()
+    return [
+        datetime.combine(today - timedelta(days=d), time(12), tzinfo=LOCAL).astimezone(timezone.utc)
+        for d in range(days)
+    ]
 
 
 def rows_on(day_index):
@@ -57,14 +66,12 @@ def seed(db, days, clear):
 
     now = datetime.now(timezone.utc)
     inserted = 0
-    for day_index, day in enumerate(day_keys(days)):
+    for day_index, day in enumerate(day_boundaries(days)):
         count = rows_on(day_index)
         for i in range(count):
-            # Today's rows go in the recent past: 12:00 UTC could still be
+            # Today's rows go in the recent past: local noon could still be
             # ahead of "now", and a future timestamp would count as today's.
-            ts = now - timedelta(minutes=2 + i) if day_index == 0 else (
-                day.replace(hour=12, minute=i)
-            )
+            ts = now - timedelta(seconds=2 + i) if day_index == 0 else day + timedelta(minutes=i)
             stamp = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
             provider = PROVIDERS[i % len(PROVIDERS)]
             agent = AGENTS[i % len(AGENTS)]
@@ -122,7 +129,8 @@ def main():
     rate = rate_for(currency, repo)
 
     def sums(window_days):
-        # Today is the current UTC day, not the last 24h — mirror that here.
+        # Today is the current local day; "7 days" is today plus the six before
+        # it — the same whole days the chart draws a point for.
         if window_days == 1:
             rows = rows_on(0)
         else:
@@ -134,9 +142,9 @@ def main():
     print()
     print(f"{'window':8} {'requests':>9} {'in tokens':>11} {'out tokens':>11} {'cost':>12}")
     for label, days, note in (
-        ("Today", 1, "current UTC day only"),
-        ("7 days", 7, "rolling 7x24h, 7 chart points"),
-        ("30 days", 30, "rolling 30x24h, 6 chart points (5-day buckets)"),
+        ("Today", 1, "current local day only"),
+        ("7 days", 7, "today + the 6 before it, 7 chart points"),
+        ("30 days", 30, "today + the 29 before it, 6 chart points (5-day buckets)"),
     ):
         r, i, o, c = sums(days)
         print(f"{label:8} {r:9} {i:11} {o:11} {c * rate:11.2f} {currency}")

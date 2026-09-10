@@ -343,6 +343,10 @@ export interface AppSettings {
   auto_check_update: boolean;
   /** Version the user dismissed in the update banner (a newer one shows again) */
   dismissed_update: string | null;
+  /** Minutes east of UTC (UTC+8 → 480). Day boundaries — "today", the daily
+      chart buckets, alert reset periods — follow the user's day, not UTC's;
+      the frontend keeps this current at startup. */
+  tz_offset_minutes: number;
   hub_logged_in: boolean;
   /** Hub catalog sync endpoint (protocol v0: static JSON) */
   hub_url: string;

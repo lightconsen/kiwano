@@ -1378,16 +1378,21 @@ impl Store {
     }
 
     /// Daily aggregation (UTC day = first 10 chars of the RFC3339 ts).
+    /// Daily totals, bucketed by the caller's local day: `tz_offset_minutes`
+    /// is minutes east of UTC, applied as an SQLite modifier before the date is
+    /// taken (stored timestamps are UTC).
     pub fn usage_daily(
         &self,
         agent: Option<&str>,
         provider_id: Option<&str>,
         since: Option<&str>,
+        tz_offset_minutes: i64,
     ) -> Result<Vec<DailyUsage>> {
         let (cond, params) = Self::usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
-            "SELECT SUBSTR(ts, 1, 10) AS day, COUNT(*), COALESCE(SUM(input_tokens),0),
+            "SELECT strftime('%Y-%m-%d', ts, '{tz_offset_minutes:+} minutes') AS day, COUNT(*),
+                    COALESCE(SUM(input_tokens),0),
                     COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
                     COALESCE(SUM(cache_creation_tokens),0)
              FROM usage WHERE 1=1{cond}
@@ -2507,7 +2512,10 @@ mod tests {
         assert_eq!(one_provider.len(), 1);
         assert_eq!(one_provider[0].provider_id, "p2");
 
-        let daily = store.usage_daily(Some("claude"), None, None).unwrap();
+        // tz 0 = UTC: the timestamps below are already UTC dates, so the
+        // buckets are unchanged. A non-zero offset is covered by the dashboard
+        // test in vm.rs, where the window and the chart must agree on it.
+        let daily = store.usage_daily(Some("claude"), None, None, 0).unwrap();
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].day, "2026-09-06");
         assert_eq!(daily[1].day, "2026-09-07");

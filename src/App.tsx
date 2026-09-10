@@ -67,11 +67,19 @@ export default function App() {
   }, []);
 
   // Settings own the theme. The pre-paint script in index.html only had the
-  // cached copy, so this is what decides it for real.
+  // cached copy, so this is what decides it for real. Same round trip keeps the
+  // backend's day boundaries on the user's clock: `getTimezoneOffset()` counts
+  // minutes to *subtract* to reach UTC, the backend wants minutes east of it.
   useEffect(() => {
     api
       .getSettings()
-      .then((s) => applyTheme(s.theme))
+      .then((s) => {
+        applyTheme(s.theme);
+        const tz = -new Date().getTimezoneOffset();
+        if (s.tz_offset_minutes !== tz) {
+          api.updateSettings({ tz_offset_minutes: tz }).catch(() => {});
+        }
+      })
       .catch(() => {});
   }, []);
 

@@ -506,6 +506,7 @@ const settings: AppSettings = {
   preferred_currency: "CNY",
   auto_check_update: true,
   dismissed_update: null,
+  tz_offset_minutes: 480,
   hub_logged_in: false,
   hub_url: "https://hub.kiwano.cc/catalog.json",
 };

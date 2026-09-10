@@ -108,9 +108,49 @@ fn day_key(epoch_secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// Inverse of `civil_from_days` (Howard Hinnant's `days_from_civil`): the day
+/// index of a calendar date, so a period boundary can be turned back into the
+/// instant a filter needs.
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m as i64 + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 /// `MM-DD` label for the dashboard trend axis.
 fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
+}
+
+// Day boundaries are the user's, not UTC's: a UTC+8 user's "today" runs from
+// 08:00 local yesterday to 08:00 today if we bucket by UTC. Everything that
+// asks "which day is this in" goes through these two, with the offset the
+// frontend reports (`getTimezoneOffset()`, negated to mean "east of UTC").
+
+/// The local calendar date (`YYYY-MM-DD`) containing a unix timestamp.
+fn local_day_key(offset_minutes: i64, epoch_secs: i64) -> String {
+    day_key(epoch_secs + offset_minutes * 60)
+}
+
+/// The stored UTC offset (minutes east of UTC) the frontend keeps current.
+fn tz_offset(aux: &Aux) -> i64 {
+    ui_settings(aux).tz_offset_minutes
+}
+
+/// The first instant of that local day, as the RFC3339 UTC value a `ts >=`
+/// filter needs — stored timestamps are UTC, so the boundary has to be too.
+fn local_day_start(offset_minutes: i64, epoch_secs: i64) -> String {
+    let local = epoch_secs + offset_minutes * 60;
+    local_day_start_from(offset_minutes, local.div_euclid(86_400))
+}
+
+/// Same, from a local day index (which is what the calendar math produces).
+fn local_day_start_from(offset_minutes: i64, local_day: i64) -> String {
+    rfc3339(local_day * 86_400 - offset_minutes * 60)
 }
 
 // ── "In use" helpers: which candidate would serve a request issued right now,
@@ -147,7 +187,7 @@ fn in_window(now_min: u32, start: &str, end: &str) -> bool {
 /// Whether the quota config puts `provider_id` over threshold for the current
 /// UTC day — counted exactly like the gateway's select_quota (requests, or
 /// input+output tokens; cache reads excluded). No/invalid config → under.
-fn quota_over_threshold(store: &Store, config: Option<&str>, provider_id: &str) -> bool {
+fn quota_over_threshold(store: &Store, aux: &Aux, config: Option<&str>, provider_id: &str) -> bool {
     #[derive(Deserialize)]
     struct QuotaCfg {
         limit: f64,
@@ -160,7 +200,7 @@ fn quota_over_threshold(store: &Store, config: Option<&str>, provider_id: &str) 
     let Some(cfg) = config.and_then(|c| serde_json::from_str::<QuotaCfg>(c).ok()) else {
         return false;
     };
-    let since = format!("{}T00:00:00Z", day_key(unix_now()));
+    let since = local_day_start(tz_offset(aux), unix_now());
     let Ok(t) = store.usage_totals_for_provider(provider_id, Some(&since)) else {
         return false;
     };
@@ -176,8 +216,14 @@ fn quota_over_threshold(store: &Store, config: Option<&str>, provider_id: &str) 
 /// plus a dedup key. Returns (since, period_key); reset_period NULL = no
 /// reset → (None, "all"). Day math: 1970-01-01 was a Thursday, so
 /// `(days + 3) % 7 == 0` lands on Monday.
-fn period_start(epoch_secs: i64, reset_period: Option<&str>) -> (Option<String>, String) {
-    let days = epoch_secs.div_euclid(86_400);
+fn period_start(
+    epoch_secs: i64,
+    reset_period: Option<&str>,
+    tz_offset_minutes: i64,
+) -> (Option<String>, String) {
+    // Reset periods follow the user's day too: a daily limit resetting at
+    // 00:00 UTC is 08:00 for a UTC+8 user.
+    let days = (epoch_secs + tz_offset_minutes * 60).div_euclid(86_400);
     let (y, m, _) = civil_from_days(days);
     match reset_period {
         None => (None, "all".into()),
@@ -185,16 +231,28 @@ fn period_start(epoch_secs: i64, reset_period: Option<&str>) -> (Option<String>,
             let monday = days - (days + 3).rem_euclid(7);
             let (wy, wm, wd) = civil_from_days(monday);
             let key = format!("{wy:04}-{wm:02}-{wd:02}");
-            (Some(format!("{key}T00:00:00Z")), key)
+            (Some(local_day_start_from(tz_offset_minutes, monday)), key)
         }
         Some("yearly") => {
             let key = format!("{y:04}");
-            (Some(format!("{key}-01-01T00:00:00Z")), key)
+            (
+                Some(local_day_start_from(
+                    tz_offset_minutes,
+                    days_from_civil(y, 1, 1),
+                )),
+                key,
+            )
         }
         // monthly and any unexpected values all fall back to monthly
         _ => {
             let key = format!("{y:04}-{m:02}");
-            (Some(format!("{key}-01T00:00:00Z")), key)
+            (
+                Some(local_day_start_from(
+                    tz_offset_minutes,
+                    days_from_civil(y, m, 1),
+                )),
+                key,
+            )
         }
     }
 }
@@ -828,6 +886,13 @@ pub struct SettingsVm {
     /// does not re-announce itself on every launch — a newer one will show.
     #[serde(default)]
     pub dismissed_update: Option<String>,
+    /// Minutes east of UTC (UTC+8 → 480). Every day boundary in the UI — the
+    /// dashboard's "today", its daily chart buckets, the footer, and usage-alert
+    /// reset periods — is the user's day, not UTC's. The frontend keeps it
+    /// current; 0 (UTC) is the fallback for a settings blob written before this
+    /// existed.
+    #[serde(default)]
+    pub tz_offset_minutes: i64,
 }
 
 pub(crate) fn default_preferred_currency() -> String {
@@ -863,6 +928,7 @@ impl Default for SettingsVm {
             preferred_currency: default_preferred_currency(),
             auto_check_update: true,
             dismissed_update: None,
+            tz_offset_minutes: 0,
         }
     }
 }
@@ -1095,7 +1161,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             }
             // under threshold → primary; over → first backup in line
             StrategyType::Quota => {
-                let over = quota_over_threshold(store, strategy.config.as_deref(), &head);
+                let over = quota_over_threshold(store, aux, strategy.config.as_deref(), &head);
                 HashSet::from([if over {
                     enabled
                         .get(1)
@@ -2475,7 +2541,7 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
             Some(u) if u.len() == 3 => u,
             _ => "requests",
         };
-        let (since, period_key) = period_start(now, p.reset_period.as_deref());
+        let (since, period_key) = period_start(now, p.reset_period.as_deref(), tz_offset(aux));
         let used = match unit {
             "wan_tokens" => {
                 let t = store
@@ -2685,10 +2751,15 @@ pub fn build_dashboard(
     agent: Option<&str>,
 ) -> Result<DashboardVm, String> {
     let now = unix_now();
+    let tz = tz_offset(aux);
+    // Whole local calendar days, so a stat and its chart describe the same
+    // span: 7 days is today plus the six before it, not a rolling 168 hours
+    // (which would count the hours between 6 and 7 days back that the chart's
+    // seven daily points cannot show).
     let (window, since, days) = match window {
-        "today" => ("today", day_key(now) + "T00:00:00Z", 1),
-        "30d" => ("30d", rfc3339(now - 30 * 86_400), 30),
-        _ => ("7d", rfc3339(now - 7 * 86_400), 7),
+        "today" => ("today", local_day_start(tz, now), 1),
+        "30d" => ("30d", local_day_start(tz, now - 29 * 86_400), 30),
+        _ => ("7d", local_day_start(tz, now - 6 * 86_400), 7),
     };
 
     let cur = store
@@ -2741,26 +2812,29 @@ pub fn build_dashboard(
     // trend: daily totals zero-filled over the window (30d buckets by 5 days)
     let mut daily: HashMap<String, UsageTotals> = HashMap::new();
     for d in store
-        .usage_daily(agent, provider_id, Some(&since))
+        .usage_daily(agent, provider_id, Some(&since), tz)
         .map_err(e2s)?
     {
         daily.insert(d.day, d.totals);
     }
     let mut trend = Vec::new();
     if window == "today" {
-        let t = daily.get(&day_key(now)).cloned().unwrap_or_default();
+        let today = local_day_key(tz, now);
+        let t = daily.get(&today).cloned().unwrap_or_default();
         trend.push(TrendVm {
-            date: mmdd(&day_key(now)),
+            date: mmdd(&today),
             requests: t.requests,
             tokens: t.input_tokens + t.output_tokens,
         });
     } else {
         let bucket = if window == "30d" { 5 } else { 1 };
-        let today_days = now.div_euclid(86_400);
+        // Local day index: the buckets have to be the same days the window
+        // above selected, or the chart and its stat disagree again.
+        let today_days = (now + tz * 60).div_euclid(86_400);
         let mut b_req = 0i64;
         let mut b_tok = 0i64;
         for i in (0..days).rev() {
-            let key = day_key((today_days - i) * 86_400);
+            let key = local_day_key(tz, (today_days - i) * 86_400);
             let t = daily.get(&key).cloned().unwrap_or_default();
             b_req += t.requests;
             b_tok += t.input_tokens + t.output_tokens;
@@ -2876,7 +2950,7 @@ pub fn build_footer_stats(
     aux: &Aux,
     version: &str,
 ) -> Result<FooterStatsVm, String> {
-    let today = day_key(unix_now());
+    let today = local_day_key(tz_offset(aux), unix_now());
     let since = format!("{today}T00:00:00Z");
     let t = store.usage_totals(None, None, Some(&since)).map_err(e2s)?;
     // hub_synced = catalog synced today (first 10 chars of the cache
@@ -3724,8 +3798,14 @@ mod tests {
     fn seed_usage_at(s: &Store, offset_days: i64, requests: i64, tokens: i64) {
         let now = unix_now();
         let day = now.div_euclid(86_400) - offset_days;
+        seed_usage_rows(s, day * 86_400 + 23 * 3600, requests, tokens);
+    }
+
+    /// `requests` rows starting at `first_secs`, as the gateway would have
+    /// written them: a usage row and its request_logs twin.
+    fn seed_usage_rows(s: &Store, first_secs: i64, requests: i64, tokens: i64) {
         for i in 0..requests {
-            let ts = rfc3339(day * 86_400 + 23 * 3600 + i);
+            let ts = rfc3339(first_secs + i);
             s.record_usage(&kiwano_gateway::store::UsageRecord {
                 ts: ts.clone(),
                 agent: "claude".into(),
@@ -3799,18 +3879,19 @@ mod tests {
         assert_eq!(today.trend.len(), 1);
         assert_eq!(today.trend[0].requests, 2);
 
-        // 7d is a rolling 7x24h window: today (2) + 3 days back (4) + the
-        // 7-day-old row (1) = 7 requests; tokens 2k + 8k + 5k.
+        // 7d is today plus the six days before it, so the chart's seven points
+        // cover exactly the same span as the stat above them.
         let week = d("7d");
-        assert_eq!((week.requests, week.input_tokens), (7, 15_000));
+        assert_eq!((week.requests, week.input_tokens), (6, 10_000));
         assert_eq!(week.trend.len(), 7);
-        // ...but the chart buckets by UTC calendar day, so its oldest point is
-        // 6 days back, not 7: the 7-day-old row is in the headline and not in
-        // the chart. Pinned deliberately — see the note in the summary.
-        assert_eq!(week.trend.iter().map(|p| p.requests).sum::<i64>(), 6);
+        assert_eq!(
+            week.trend.iter().map(|p| p.requests).sum::<i64>(),
+            week.requests,
+            "the chart covers the stat's whole window"
+        );
 
-        // 30d adds the 10-day-old group (6) and still excludes the 40-day-old
-        // one: 7 + 6 = 13 requests, 15k + 18k tokens.
+        // 30d adds the 7- and 10-day-old groups (1 + 6) and still excludes the
+        // 40-day-old one: 6 + 7 = 13 requests, 10k + 5k + 18k tokens.
         let month = d("30d");
         assert_eq!((month.requests, month.input_tokens), (13, 33_000));
         assert_eq!(month.trend.len(), 6, "30d buckets five days at a time");
@@ -3818,6 +3899,30 @@ mod tests {
 
         // Cost is summed in the window and converted for display (default CNY).
         assert!((month.cost - month.requests as f64 * 0.5 * 7.1).abs() < 0.01);
+    }
+
+    #[test]
+    fn day_boundaries_follow_the_configured_offset() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        // 23:00 UTC yesterday: still yesterday in UTC — and already 07:00 this
+        // morning at UTC+8, which is the whole point of the offset.
+        let yesterday_late = (unix_now().div_euclid(86_400) - 1) * 86_400 + 23 * 3600;
+        seed_usage_rows(&s, yesterday_late, 1, 1_000);
+
+        // UTC (the default, and what an older settings blob yields): not today.
+        assert_eq!(
+            build_dashboard(&s, &aux, "today", None, None)
+                .unwrap()
+                .requests,
+            0
+        );
+
+        update_settings(&s, &aux, &serde_json::json!({ "tz_offset_minutes": 480 })).unwrap();
+        let shifted = build_dashboard(&s, &aux, "today", None, None).unwrap();
+        assert_eq!(shifted.requests, 1, "at UTC+8 that row is this morning's");
+        assert_eq!(shifted.trend.len(), 1);
+        assert_eq!(shifted.trend[0].requests, 1, "the chart's today agrees");
     }
 
     #[test]
@@ -4363,17 +4468,17 @@ mod tests {
     fn period_start_keys() {
         // 2026-09-07T12:34:56Z (Monday)
         let t = 1_788_784_496_i64;
-        let (since, key) = period_start(t, Some("monthly"));
+        let (since, key) = period_start(t, Some("monthly"), 0);
         assert_eq!(since.as_deref(), Some("2026-09-01T00:00:00Z"));
         assert_eq!(key, "2026-09");
-        let (since, key) = period_start(t, Some("weekly"));
+        let (since, key) = period_start(t, Some("weekly"), 0);
         assert_eq!(since.as_deref(), Some("2026-09-07T00:00:00Z"));
         assert_eq!(key, "2026-09-07");
-        let (since, key) = period_start(t, Some("yearly"));
+        let (since, key) = period_start(t, Some("yearly"), 0);
         assert_eq!(since.as_deref(), Some("2026-01-01T00:00:00Z"));
         assert_eq!(key, "2026");
         // no reset → all-time totals
-        let (since, key) = period_start(t, None);
+        let (since, key) = period_start(t, None, 0);
         assert_eq!(since, None);
         assert_eq!(key, "all");
     }

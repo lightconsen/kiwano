@@ -162,6 +162,26 @@ export default function Settings() {
               </SelectContent>
             </Select>
           </Row>
+          {/* Costs are printed in this currency across the app, so it reads as
+              a display preference — it sits with language, not with the
+              usage-threshold settings it used to live among. */}
+          <Row label="Display currency" note="For cost cards and usage limits">
+            <Select
+              value={s.preferred_currency}
+              onValueChange={(v) => patch({ preferred_currency: v ?? "CNY" })}
+            >
+              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(currencies.length ? currencies : [s.preferred_currency]).map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Row>
           <Row label="Theme" note="Dark only">
             <Select value="dark" disabled>
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
@@ -255,23 +275,6 @@ export default function Settings() {
           </Row>
           <Row label="Cost alert" note="System notification when a period limit is reached">
             <Switch checked={s.cost_alert} onCheckedChange={(v) => patch({ cost_alert: v })} />
-          </Row>
-          <Row label="Display currency" note="For cost cards and usage limits">
-            <Select
-              value={s.preferred_currency}
-              onValueChange={(v) => patch({ preferred_currency: v ?? "CNY" })}
-            >
-              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(currencies.length ? currencies : [s.preferred_currency]).map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </Row>
         </div>
       </div>

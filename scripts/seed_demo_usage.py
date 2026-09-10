@@ -40,6 +40,10 @@ ROWS_BASE = 5
 ROWS_CYCLE = 7
 IN_TOKENS, OUT_TOKENS, CACHE_READ = 1000, 200, 100
 COST_USD, LATENCY_BASE = 0.02, 200
+# Tokens per request vary (requests do not scale with them), so the two trend
+# lines — each normalised to its own maximum — actually diverge instead of
+# lying on top of each other.
+TOKEN_SPREAD = 7
 PROVIDERS = ["demo-alpha", "demo-beta"]
 AGENTS = ["claude", "codex"]
 
@@ -66,8 +70,10 @@ def seed(db, days, clear):
 
     now = datetime.now(timezone.utc)
     inserted = 0
+    per_day: list[tuple[int, int, int, float]] = []
     for day_index, day in enumerate(day_boundaries(days)):
         count = rows_on(day_index)
+        day_tokens = [0, 0, 0.0]  # in, out, cost
         for i in range(count):
             # Today's rows go in the recent past: local noon could still be
             # ahead of "now", and a future timestamp would count as today's.
@@ -76,12 +82,19 @@ def seed(db, days, clear):
             provider = PROVIDERS[i % len(PROVIDERS)]
             agent = AGENTS[i % len(AGENTS)]
             latency = LATENCY_BASE + day_index
+            scale = 1 + ((day_index * 3 + i) % TOKEN_SPREAD)
+            in_tokens, out_tokens, cache_read = (
+                IN_TOKENS * scale, OUT_TOKENS * scale, CACHE_READ * scale,
+            )
+            day_tokens[0] += in_tokens
+            day_tokens[1] += out_tokens
+            day_tokens[2] += COST_USD
             conn.execute(
                 """INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
                                       cache_read_tokens, cache_creation_tokens, latency_ms, status,
                                       cost, cost_currency)
                    VALUES (?,?,?,?,?,?,?,?,?, 'ok', ?, 'USD')""",
-                (stamp, agent, provider, "demo-model", IN_TOKENS, OUT_TOKENS, CACHE_READ, 0,
+                (stamp, agent, provider, "demo-model", in_tokens, out_tokens, cache_read, 0,
                  latency, COST_USD),
             )
             conn.execute(
@@ -90,12 +103,13 @@ def seed(db, days, clear):
                                             cache_read_tokens, cache_creation_tokens, latency_ms)
                    VALUES (?, 'POST', '/v1/messages', ?, 'kw-ag-demo', ?, 'demo-model',
                            200, 0, ?, ?, ?, 0, ?)""",
-                (stamp, agent, provider, IN_TOKENS, OUT_TOKENS, CACHE_READ, latency),
+                (stamp, agent, provider, in_tokens, out_tokens, cache_read, latency),
             )
             inserted += 1
+        per_day.append((count, day_tokens[0], day_tokens[1], day_tokens[2]))
     conn.commit()
     conn.close()
-    return inserted
+    return inserted, per_day
 
 
 def preferred_currency(db):
@@ -124,18 +138,17 @@ def main():
     args = parser.parse_args()
 
     repo = pathlib.Path(__file__).resolve().parent.parent
-    inserted = seed(args.db, args.days, args.clear)
+    inserted, per_day = seed(args.db, args.days, args.clear)
     currency = preferred_currency(args.db)
     rate = rate_for(currency, repo)
 
     def sums(window_days):
         # Today is the current local day; "7 days" is today plus the six before
-        # it — the same whole days the chart draws a point for.
-        if window_days == 1:
-            rows = rows_on(0)
-        else:
-            rows = sum(rows_on(d) for d in range(window_days))
-        return rows, rows * IN_TOKENS, rows * OUT_TOKENS, rows * COST_USD
+        # it — the same whole days the chart draws a point for. Summed from
+        # what was inserted, not from the constants, since tokens vary per row.
+        window = per_day[:window_days]
+        rows = sum(d[0] for d in window)
+        return rows, sum(d[1] for d in window), sum(d[2] for d in window), sum(d[3] for d in window)
 
     print(f"seeded {inserted} request(s) over {args.days} days into {args.db}")
     print(f"display currency: {currency} (rate {rate} per USD)")

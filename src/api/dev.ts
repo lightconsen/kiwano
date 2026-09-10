@@ -410,9 +410,9 @@ const dashboard7d: DashboardData = {
     { date: "09-07", requests: 254, tokens: 1_600_000 },
   ],
   by_provider: [
-    { name: "DeepSeek", color: "#4D6BFE", pct: 62, cost: 28.6 },
-    { name: "Kimi", color: "#555555", pct: 23, cost: 10.9 },
-    { name: "GLM", color: "#3859FF", pct: 15, cost: 6.7 },
+    { name: "DeepSeek", color: "#4D6BFE", requests: 731, pct: 62, cost: 28.6 },
+    { name: "Kimi", color: "#555555", requests: 271, pct: 23, cost: 10.9 },
+    { name: "GLM", color: "#3859FF", requests: 177, pct: 15, cost: 6.7 },
   ],
   by_agent: [
     { agent: "claude", label: "Claude Code", requests: 943, tokens: "6.2M", cost: 33.4 },
@@ -447,8 +447,8 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
       { date: "20:00", requests: 32, tokens: 200_000 },
     ],
     by_provider: [
-      { name: "DeepSeek", color: "#4D6BFE", pct: 78, cost: 8.4 },
-      { name: "Kimi", color: "#555555", pct: 22, cost: 2.4 },
+      { name: "DeepSeek", color: "#4D6BFE", requests: 224, pct: 78, cost: 8.4 },
+      { name: "Kimi", color: "#555555", requests: 64, pct: 22, cost: 2.4 },
     ],
     by_agent: [
       { agent: "claude", label: "Claude Code", requests: 201, tokens: "1.5M", cost: 8.1 },

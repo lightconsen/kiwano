@@ -89,6 +89,73 @@ function TrendChart({ data }: { data: DashboardData }) {
   );
 }
 
+/** Share donut. Each segment is a circle whose dash length is its slice of the
+    circumference — same hand-rolled SVG as the trend chart, no chart library.
+    A hair of gap keeps adjacent segments apart; a lone segment is drawn whole. */
+function Donut({
+  slices,
+  total,
+  size = 108,
+  thickness = 15,
+}: {
+  slices: { color: string; pct: number }[];
+  total: number;
+  size?: number;
+  thickness?: number;
+}) {
+  const r = (size - thickness) / 2;
+  const circumference = 2 * Math.PI * r;
+  let used = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke="var(--surface2)"
+        strokeWidth={thickness}
+      />
+      <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+        {slices.map((s, i) => {
+          const gap = slices.length > 1 ? 1.5 : 0;
+          const len = Math.max(0, (s.pct / 100) * circumference - gap);
+          const dash = `${len} ${circumference - len}`;
+          const offset = -(used / 100) * circumference;
+          used += s.pct;
+          return (
+            <circle
+              key={i}
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={thickness}
+              strokeDasharray={dash}
+              strokeDashoffset={offset}
+            />
+          );
+        })}
+      </g>
+      <text
+        x="50%"
+        y="48%"
+        textAnchor="middle"
+        fill="var(--ink)"
+        fontSize="16"
+        fontWeight="600"
+        fontFamily="JetBrains Mono"
+      >
+        {total}
+      </text>
+      <text x="50%" y="62%" textAnchor="middle" fill="var(--mut)" fontSize="9">
+        requests
+      </text>
+    </svg>
+  );
+}
+
 function Delta({ pct, invert }: { pct: number; invert?: boolean }) {
   const up = pct >= 0;
   const good = invert ? !up : up;
@@ -251,24 +318,29 @@ export default function Dashboard() {
           {/* Provider breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
             <h3 className="text-[12.5px] font-semibold">By provider</h3>
-            <div className="mt-2.5 space-y-2.5">
-              {data.by_provider.map((p) => (
-                <div key={p.name}>
-                  <div className="flex items-center justify-between text-[11.5px]">
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: p.color }} />
-                      {p.name}
-                    </span>
-                    <span className="font-mono text-mut">
-                      {p.pct}% · {fmtMoney(p.cost, pref)}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-1 rounded-full" style={{ background: "var(--surface2)" }}>
-                    <div className="h-full rounded-full" style={{ width: `${p.pct}%`, background: p.color }} />
-                  </div>
+            {data.by_provider.length === 0 ? (
+              <div className="mt-3 text-[11.5px] text-mut">No traffic in this window.</div>
+            ) : (
+              <div className="mt-2.5 flex items-center gap-4">
+                <Donut
+                  slices={data.by_provider.map((p) => ({ color: p.color, pct: p.pct }))}
+                  total={data.by_provider.reduce((sum, p) => sum + p.requests, 0)}
+                />
+                <div className="min-w-0 flex-1 space-y-2">
+                  {data.by_provider.map((p) => (
+                    <div key={p.name} className="flex items-center justify-between gap-2 text-[11.5px]">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: p.color }} />
+                        <span className="truncate">{p.name}</span>
+                      </span>
+                      <span className="shrink-0 font-mono text-mut">
+                        {p.pct}% · {fmtMoney(p.cost, pref)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
           {/* Agent breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">

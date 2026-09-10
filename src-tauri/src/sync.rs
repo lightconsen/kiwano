@@ -342,8 +342,7 @@ fn sync_pricing(
     }
 
     let bytes = fetch_bytes(client, &hub_asset_url(hub_url, "models.json")?)?;
-    let body =
-        std::str::from_utf8(&bytes).map_err(|e| format!("Hub pricing is not UTF-8: {e}"))?;
+    let body = std::str::from_utf8(&bytes).map_err(|e| format!("Hub pricing is not UTF-8: {e}"))?;
     let doc: ModelsDoc = serde_json::from_str(body)
         .map_err(|e| format!("Hub pricing is not a valid models doc: {e}"))?;
     if let Some(why) = pricing_doc_error(&doc) {
@@ -628,16 +627,26 @@ mod tests {
     fn hub_models_cache_roundtrip() {
         let aux = Aux::open_in_memory().unwrap();
         assert_eq!(aux.load_hub_models_cache(), None);
-        aux.save_hub_models_cache(7, "{\"version\":7}", &"a".repeat(64), "2026-01-01T00:00:00Z")
-            .unwrap();
+        aux.save_hub_models_cache(
+            7,
+            "{\"version\":7}",
+            &"a".repeat(64),
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
         let (version, payload, sha, synced_at) = aux.load_hub_models_cache().unwrap();
         assert_eq!(version, 7);
         assert_eq!(payload, "{\"version\":7}");
         assert_eq!(sha, "a".repeat(64));
         assert_eq!(synced_at, "2026-01-01T00:00:00Z");
         // A second write replaces the row (single-row table).
-        aux.save_hub_models_cache(8, "{\"version\":8}", &"b".repeat(64), "2026-01-02T00:00:00Z")
-            .unwrap();
+        aux.save_hub_models_cache(
+            8,
+            "{\"version\":8}",
+            &"b".repeat(64),
+            "2026-01-02T00:00:00Z",
+        )
+        .unwrap();
         assert_eq!(aux.load_hub_models_cache().unwrap().0, 8);
     }
 

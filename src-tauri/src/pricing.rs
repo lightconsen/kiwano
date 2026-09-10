@@ -137,9 +137,12 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
     // Record the content half so an unchanged Hub document is not re-seeded;
     // a bundled seed clears it, keeping the legacy version-only gate.
     match sha.as_deref() {
-        Some(s) => aux.set_setting(SEEDED_SHA_KEY, s).map_err(|e| e.to_string())?,
+        Some(s) => aux
+            .set_setting(SEEDED_SHA_KEY, s)
+            .map_err(|e| e.to_string())?,
         None => {
-            aux.delete_setting(SEEDED_SHA_KEY).map_err(|e| e.to_string())?;
+            aux.delete_setting(SEEDED_SHA_KEY)
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(SeededReport {
@@ -258,8 +261,13 @@ mod tests {
 
     /// Pretend the Hub delivered this doc.
     fn cache_hub(aux: &Aux, version: i64, price: &str, sha: &str) {
-        aux.save_hub_models_cache(version, &doc_json(version, price), sha, "2026-01-01T00:00:00Z")
-            .unwrap();
+        aux.save_hub_models_cache(
+            version,
+            &doc_json(version, price),
+            sha,
+            "2026-01-01T00:00:00Z",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -267,7 +275,10 @@ mod tests {
         assert!(shas_match(Some("a"), Some("a")));
         assert!(!shas_match(Some("a"), Some("b")));
         assert!(!shas_match(Some("a"), None), "Hub content never seeded");
-        assert!(!shas_match(None, Some("a")), "source changed back to bundled");
+        assert!(
+            !shas_match(None, Some("a")),
+            "source changed back to bundled"
+        );
         assert!(shas_match(None, None), "legacy version-only gate");
     }
 
@@ -378,9 +389,11 @@ mod tests {
         seed_model_pricing(&aux).unwrap();
         let conn = aux.conn.lock().unwrap();
         let source: String = conn
-            .query_row("SELECT source FROM model_pricing WHERE model_id = 'm1'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT source FROM model_pricing WHERE model_id = 'm1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(source, "hub");
     }

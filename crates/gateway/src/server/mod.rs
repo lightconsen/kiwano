@@ -50,7 +50,9 @@ pub struct GatewayState {
 /// it only means the seeder has not run yet.
 fn resolve_pricing(store: &Store) -> kiwano_adapters::model_pricing::PricingTable {
     match store.load_model_pricing() {
-        Ok(rows) if !rows.is_empty() => kiwano_adapters::model_pricing::PricingTable::from_entries(rows),
+        Ok(rows) if !rows.is_empty() => {
+            kiwano_adapters::model_pricing::PricingTable::from_entries(rows)
+        }
         _ => kiwano_adapters::model_pricing::PricingTable::bundled(),
     }
 }
@@ -278,7 +280,13 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         store.upsert_model_pricing(&entry("kw-test-model")).unwrap();
         let table = resolve_pricing(&store);
-        assert!(table.find("kw-test-model").is_some(), "mirror row is served");
-        assert!(table.find(BUNDLED_MODEL).is_none(), "mirror replaces bundled");
+        assert!(
+            table.find("kw-test-model").is_some(),
+            "mirror row is served"
+        );
+        assert!(
+            table.find(BUNDLED_MODEL).is_none(),
+            "mirror replaces bundled"
+        );
     }
 }

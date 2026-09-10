@@ -156,7 +156,9 @@ export default function Settings() {
           <Row label="Language" note="English only">
             <Select value="en" disabled>
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
-                <SelectValue />
+                {/* A bare <SelectValue /> renders the raw value ("en"), not the
+                    item's label. */}
+                <SelectValue>{(v) => (v === "en" ? "EN" : String(v ?? ""))}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="en">English</SelectItem>
@@ -194,7 +196,8 @@ export default function Settings() {
               }}
             >
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
-                <SelectValue />
+                {/* Same reason as Language: the value is lowercase ("dark"). */}
+                <SelectValue>{(v) => (v === "light" ? "Light" : "Dark")}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="dark">Dark</SelectItem>
@@ -274,7 +277,8 @@ export default function Settings() {
               onValueChange={(v) => patch({ log_retention_days: Number(v) })}
             >
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
-                <SelectValue />
+                {/* Would otherwise read "30" rather than "30 days". */}
+                <SelectValue>{(v) => `${v ?? ""} days`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="7">7 days</SelectItem>

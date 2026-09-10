@@ -21,12 +21,31 @@ const SEEDED_SHA_KEY: &str = "pricing_seeded_sha256";
 /// Currency metadata for the Settings selector + UI conversion.
 #[derive(serde::Serialize)]
 pub struct CurrencyMetaVm {
-    /// ISO codes present in the bundled price table (rates map keys).
+    /// The codes the selector offers: the rate table's keys, plus the current
+    /// preference if the table has no rate for it.
     pub currencies: Vec<String>,
     /// currency -> units of that currency per 1 USD (e.g. CNY: 7.1).
     pub exchange_rates: HashMap<String, f64>,
     /// The user's preferred display currency (Settings).
     pub preferred: String,
+}
+
+/// The currencies a user may display in. The rate table's keys are the ones
+/// conversion can actually target; `models[].currency` says what things are
+/// *priced* in, which is a different question — every bundled model is priced
+/// in USD, so deriving the list from it offered USD alone while the default
+/// preference was CNY, and picking USD left nothing to switch back to.
+///
+/// The current preference is kept on the list even when no rate names it: a
+/// selector that cannot show its own value is a dead end.
+pub fn displayable_currencies(rates: &HashMap<String, f64>, preferred: &str) -> Vec<String> {
+    let mut out: Vec<String> = rates.keys().cloned().collect();
+    if !out.iter().any(|c| c == preferred) {
+        out.push(preferred.to_string());
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 #[derive(serde::Serialize)]
@@ -168,13 +187,12 @@ pub fn get_currency_meta(
     // selectable, and a bundled-only currency must not be offered once the Hub
     // table has replaced it — the list has to describe what was seeded.
     let doc = effective_doc(&state.aux).0;
-    let mut currencies: Vec<String> = doc.models.iter().map(|m| m.currency.clone()).collect();
-    currencies.sort();
-    currencies.dedup();
+    let preferred = preferred_currency(&state.aux);
+    let currencies = displayable_currencies(&doc.exchange_rates, &preferred);
     Ok(CurrencyMetaVm {
         currencies,
         exchange_rates: doc.exchange_rates,
-        preferred: preferred_currency(&state.aux),
+        preferred,
     })
 }
 
@@ -216,6 +234,27 @@ mod tests {
 
     fn rates() -> HashMap<String, f64> {
         HashMap::from([("USD".to_string(), 1.0), ("CNY".to_string(), 7.1)])
+    }
+
+    #[test]
+    fn displayable_currencies_come_from_the_rate_table() {
+        let list = displayable_currencies(&rates(), "CNY");
+        assert_eq!(list, vec!["CNY".to_string(), "USD".to_string()]);
+    }
+
+    #[test]
+    fn a_preference_with_no_rate_still_stays_selectable() {
+        // The reported bug in miniature: every bundled model is priced in USD,
+        // so a list built from those offered USD alone while the default
+        // preference was CNY — pick USD and there was nothing to switch back
+        // to. Whatever is selected has to stay on its own list.
+        let usd_only = HashMap::from([("USD".to_string(), 1.0)]);
+        let list = displayable_currencies(&usd_only, "CNY");
+        assert!(
+            list.contains(&"CNY".to_string()),
+            "the selection survives: {list:?}"
+        );
+        assert!(list.contains(&"USD".to_string()));
     }
 
     #[test]

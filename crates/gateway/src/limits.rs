@@ -56,6 +56,9 @@ pub fn period_start(
 
     match reset_period {
         None => (None, "all".into()),
+        // The quota strategy's `period: "day"`. Same boundary as every other
+        // period here, because "100 requests a day" means the user's day.
+        Some("day") => (Some(midnight_utc(day)), day.format("%Y-%m-%d").to_string()),
         Some("weekly") => {
             let monday = day - Duration::days(day.weekday().num_days_from_monday() as i64);
             (
@@ -215,11 +218,21 @@ impl BlockReason {
 #[derive(Debug, Default)]
 pub struct LimitState {
     blocked: std::collections::HashMap<String, BlockReason>,
+    /// The user's UTC offset, carried along so the routing path can work out
+    /// what "today" means without reading settings on every request. It rides
+    /// the snapshot, so it is at worst one refresh interval stale — and it
+    /// comes from the same place the billing limits read, so the two cannot
+    /// disagree about when a day starts.
+    tz_offset_minutes: i64,
 }
 
 impl LimitState {
     pub fn blocked(&self, provider_id: &str) -> Option<&BlockReason> {
         self.blocked.get(provider_id)
+    }
+
+    pub fn tz_offset_minutes(&self) -> i64 {
+        self.tz_offset_minutes
     }
 
     pub fn entries(&self) -> impl Iterator<Item = (&str, &BlockReason)> {
@@ -232,6 +245,7 @@ impl LimitState {
     pub fn from_reasons(reasons: impl IntoIterator<Item = (String, BlockReason)>) -> Self {
         LimitState {
             blocked: reasons.into_iter().collect(),
+            tz_offset_minutes: 0,
         }
     }
 }
@@ -264,6 +278,7 @@ pub fn without_blocked(
 /// which is a worse failure than one more request against the cap.
 pub fn evaluate(store: &Store) -> LimitState {
     let mut blocked = std::collections::HashMap::new();
+    let tz_offset_minutes = store.ui_tz_offset_minutes();
     let providers = match store.list_providers() {
         Ok(p) => p,
         Err(e) => {
@@ -309,7 +324,10 @@ pub fn evaluate(store: &Store) -> LimitState {
             }
         }
     }
-    LimitState { blocked }
+    LimitState {
+        blocked,
+        tz_offset_minutes,
+    }
 }
 
 /// The KV markers the desktop app wrote when *it* disabled a provider for
@@ -550,6 +568,24 @@ mod tests {
         s.update_provider(&p).unwrap();
         assert!(evaluate(&s).blocked("payg-1").is_none());
         let _ = &mut s;
+    }
+
+    #[test]
+    fn the_quota_day_is_the_local_day() {
+        // 2026-09-30T20:00:00Z is already 04:00 on the 1st at UTC+8.
+        let t = 1_790_798_400_i64;
+        let (since, key) = period_start(t, Some("day"), 480);
+        assert_eq!(key, "2026-10-01");
+        assert_eq!(
+            since.as_deref(),
+            Some("2026-09-30T16:00:00Z"),
+            "local midnight, in UTC"
+        );
+        let (_, key) = period_start(t, Some("day"), 0);
+        assert_eq!(
+            key, "2026-09-30",
+            "the same instant is a different day in UTC"
+        );
     }
 
     #[test]

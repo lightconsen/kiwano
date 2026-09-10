@@ -70,8 +70,8 @@ fn in_window(now_min: u32, start: &str, end: &str) -> bool {
 
 /// Config payload of the quota strategy (agent_strategies.config JSON).
 ///
-/// `period` currently supports only `day` (UTC calendar day); other values are treated
-/// as day and warned about in engine logs. The cost unit opens up once the §8 billing model lands.
+/// `period` currently supports only `day` (the user's local day); other values are
+/// treated as day and warned about in engine logs. The cost unit opens up once the §8 billing model lands.
 #[derive(Debug, Deserialize)]
 struct QuotaConfig {
     limit: f64,
@@ -106,11 +106,6 @@ impl QuotaConfig {
             _ => t.requests as f64,
         }
     }
-}
-
-/// Start-of-day (UTC) timestamp, compatible with lexicographic comparison against the usage table's RFC3339 ts.
-fn today_start_utc() -> String {
-    format!("{}T00:00:00Z", chrono::Utc::now().format("%Y-%m-%d"))
 }
 
 /// Per-Agent strategy runtime: breaker registry + roundrobin sticky table.
@@ -214,7 +209,7 @@ impl StrategyEngine {
             StrategyType::Failover => self.select_failover(usable).await,
             StrategyType::Roundrobin => self.select_roundrobin(usable, session).await,
             StrategyType::Timewindow => Ok(self.select_timewindow(usable)),
-            StrategyType::Quota => self.select_quota(store, usable).await,
+            StrategyType::Quota => self.select_quota(store, usable, limits).await,
         }
     }
 
@@ -306,6 +301,7 @@ impl StrategyEngine {
         &self,
         store: &Store,
         route: &AgentRoute,
+        limits: &crate::limits::LimitState,
     ) -> Result<crate::router::UpstreamProvider> {
         let Some(cfg) = QuotaConfig::parse(route.config.as_deref()) else {
             tracing::warn!(
@@ -315,7 +311,16 @@ impl StrategyEngine {
             return Self::primary(route);
         };
         let primary = &route.candidates[0];
-        let totals = store.usage_totals_for_provider(&primary.id, Some(&today_start_utc()))?;
+        // The user's day, from the snapshot — the same boundary the provider
+        // billing limits use. It used to be UTC's, which for a UTC+8 user
+        // resets "today's quota" at 08:00 and cannot be reasoned about without
+        // knowing that.
+        let (since, _) = crate::limits::period_start(
+            chrono::Utc::now().timestamp(),
+            Some("day"),
+            limits.tz_offset_minutes(),
+        );
+        let totals = store.usage_totals_for_provider(&primary.id, since.as_deref())?;
         if cfg.consumed(&totals) < cfg.limit {
             return Ok(primary.clone());
         }
@@ -729,6 +734,86 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(picked.id, "a");
+    }
+
+    #[tokio::test]
+    async fn the_quota_day_is_the_users_day() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        // The offset the rest of the product runs on, from the same blob.
+        s.set_app_setting("ui", r#"{"tz_offset_minutes":480}"#)
+            .unwrap();
+        s.insert_provider(&crate::store::Provider {
+            id: "a".into(),
+            name: "a".into(),
+            protocol: Protocol::Anthropic,
+            base_url: "https://a.example.com".into(),
+            api_path: None,
+            endpoints: Vec::new(),
+            api_key: None,
+            billing: crate::store::Billing::Metered,
+            period_limit: None,
+            limit_unit: None,
+            reset_period: None,
+            plan_query: None,
+            plan_limits: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
+            enabled: true,
+            created_at: now_rfc3339(),
+            updated_at: now_rfc3339(),
+        })
+        .unwrap();
+
+        let mut r = route(
+            StrategyType::Quota,
+            vec![candidate("a", 1, None), candidate("b", 1, None)],
+        );
+        r.config = Some(r#"{"limit": 5, "unit": "requests"}"#.into());
+
+        // A row the two boundaries date differently — and which direction that
+        // is depends on the hour. While the local date still matches UTC's, the
+        // local day's early hours are the previous UTC day, so the user's rule
+        // counts a row UTC's does not. Once the local date has rolled over,
+        // it is UTC's morning that is local yesterday, and the user's rule
+        // counts one fewer. Either way this row is the difference.
+        let now = chrono::Utc::now().timestamp();
+        let utc_day = now.div_euclid(86_400);
+        let local_day = (now + 480 * 60).div_euclid(86_400);
+        let (row_ts, expected) = if local_day == utc_day {
+            (local_day * 86_400 - 480 * 60 + 3_600, "b") // 01:00 local, UTC yesterday
+        } else {
+            (utc_day * 86_400 + 12 * 3_600, "a") // UTC noon, local yesterday
+        };
+        for i in 0..5 {
+            let mut row = usage_row("a");
+            row.ts = chrono::DateTime::from_timestamp(row_ts + i, 0)
+                .expect("a valid instant")
+                .to_rfc3339();
+            s.record_usage(&row).unwrap();
+        }
+        assert!(
+            crate::limits::period_start(row_ts, Some("day"), 0)
+                .0
+                .as_deref()
+                != crate::limits::period_start(row_ts, Some("day"), 480)
+                    .0
+                    .as_deref(),
+            "the row must be one the two boundaries date differently, or this proves nothing"
+        );
+
+        let limits = crate::limits::evaluate(&s);
+        assert_eq!(
+            limits.tz_offset_minutes(),
+            480,
+            "the snapshot carries the offset"
+        );
+        assert_eq!(
+            engine.select(&s, &r, None, &limits).await.unwrap().id,
+            expected,
+            "the quota's day is the user's day, not UTC's"
+        );
     }
 
     #[tokio::test]

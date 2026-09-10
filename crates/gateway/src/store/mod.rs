@@ -568,9 +568,11 @@ pub struct ProviderUsage {
     pub totals: UsageTotals,
 }
 
-/// Per-day aggregation result (sparkline / dashboard, tech.md §2.4 A).
+/// Per-bucket aggregation result (sparkline / dashboard, tech.md §2.4 A).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DailyUsage {
+    /// The bucket the totals belong to: `YYYY-MM-DD` from `usage_daily`,
+    /// `YYYY-MM-DDTHH` from `usage_hourly`. Doubles as the sort key.
     pub day: String,
     pub totals: UsageTotals,
 }
@@ -1380,7 +1382,7 @@ impl Store {
     /// Daily aggregation (UTC day = first 10 chars of the RFC3339 ts).
     /// Daily totals, bucketed by the caller's local day: `tz_offset_minutes`
     /// is minutes east of UTC, applied as an SQLite modifier before the date is
-    /// taken (stored timestamps are UTC).
+    /// taken (stored timestamps are UTC). Keys are `YYYY-MM-DD`.
     pub fn usage_daily(
         &self,
         agent: Option<&str>,
@@ -1388,15 +1390,43 @@ impl Store {
         since: Option<&str>,
         tz_offset_minutes: i64,
     ) -> Result<Vec<DailyUsage>> {
+        self.usage_bucketed(agent, provider_id, since, tz_offset_minutes, "%Y-%m-%d")
+    }
+
+    /// Hourly aggregation — same filters and columns as [`Self::usage_daily`],
+    /// but `strftime` stops at the hour, so keys are `YYYY-MM-DDTHH`. This is
+    /// what the dashboard's "today" window plots; sharing the query with the
+    /// daily one keeps the two from drifting in what they filter or sum.
+    pub fn usage_hourly(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+        tz_offset_minutes: i64,
+    ) -> Result<Vec<DailyUsage>> {
+        self.usage_bucketed(agent, provider_id, since, tz_offset_minutes, "%Y-%m-%dT%H")
+    }
+
+    /// The one bucketing query behind `usage_daily`/`usage_hourly`: `fmt` is
+    /// the `strftime` format that names a bucket, and the returned `DailyUsage`
+    /// carries that key in `day` whatever its granularity.
+    fn usage_bucketed(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+        tz_offset_minutes: i64,
+        fmt: &str,
+    ) -> Result<Vec<DailyUsage>> {
         let (cond, params) = Self::usage_filters(agent, provider_id, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
-            "SELECT strftime('%Y-%m-%d', ts, '{tz_offset_minutes:+} minutes') AS day, COUNT(*),
+            "SELECT strftime('{fmt}', ts, '{tz_offset_minutes:+} minutes') AS bucket, COUNT(*),
                     COALESCE(SUM(input_tokens),0),
                     COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
                     COALESCE(SUM(cache_creation_tokens),0)
              FROM usage WHERE 1=1{cond}
-             GROUP BY day ORDER BY day ASC",
+             GROUP BY bucket ORDER BY bucket ASC",
         ))?;
 
         let map_row = |row: &rusqlite::Row<'_>| {

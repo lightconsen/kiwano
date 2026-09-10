@@ -42,8 +42,8 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
   // Empty DB gives max=0 → division yields NaN → SVG error; clamp with max(1, ·)
   const max = Math.max(1, ...data.trend.map(value));
   const slot = (right - left) / Math.max(1, n);
-  // Thin marks with a 2px gap between them, and a cap so a one-bucket window
-  // ("today") does not draw a single slab the width of the card.
+  // Thin marks with a 2px gap between them, and a cap so a short window does
+  // not draw slabs the width of the card.
   const barWidth = Math.max(2, Math.min(slot - 2, 44));
   const color = metric === "requests" ? "var(--kiwi)" : "var(--orange)";
   const ticks = [
@@ -52,6 +52,10 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
     { y: bottom, v: 0 },
   ];
   const tick = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
+  // "today" is 24 hourly bars: printing every label would overlap them into a
+  // smear, so keep roughly eight (00:00, 03:00, …). Shorter windows are
+  // unchanged — the divisor bottoms out at 1.
+  const labelEvery = Math.ceil(n / 8);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" style={{ height: 128 }}>
@@ -84,11 +88,13 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
             {tick(t.v)}
           </text>
         ))}
-        {data.trend.map((t, i) => (
-          <text key={t.date} x={left + slot * (i + 0.5)} y={H - 8} textAnchor="middle">
-            {t.date}
-          </text>
-        ))}
+        {data.trend.map((t, i) =>
+          i % labelEvery === 0 ? (
+            <text key={t.date} x={left + slot * (i + 0.5)} y={H - 8} textAnchor="middle">
+              {t.date}
+            </text>
+          ) : null,
+        )}
       </g>
     </svg>
   );

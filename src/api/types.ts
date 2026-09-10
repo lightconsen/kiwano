@@ -286,6 +286,8 @@ export interface CatalogList {
 }
 
 export interface TrendPoint {
+  /** Axis label for the bucket: `MM-DD` when bucketed by day, `HH:00` when
+   *  the "today" window buckets by hour. */
   date: string;
   requests: number;
   tokens: number;

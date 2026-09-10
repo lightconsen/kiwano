@@ -144,6 +144,16 @@ fn day_key(epoch_secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// `YYYY-MM-DDTHH` — the bucket key `Store::usage_hourly` groups by, from local
+/// time already shifted by the caller's offset.
+fn hour_key(local_secs: i64) -> String {
+    let (y, m, d) = civil_from_days(local_secs.div_euclid(86_400));
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}",
+        local_secs.rem_euclid(86_400) / 3600
+    )
+}
+
 /// Inverse of `civil_from_days` (Howard Hinnant's `days_from_civil`): the day
 /// index of a calendar date, so a period boundary can be turned back into the
 /// instant a filter needs.
@@ -160,6 +170,13 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 /// `MM-DD` label for the dashboard trend axis.
 fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
+}
+
+/// `HH:00` label for the dashboard trend axis when it plots hours.
+fn hh00(hour: &str) -> String {
+    hour.get(11..13)
+        .map(|h| format!("{h}:00"))
+        .unwrap_or_else(|| hour.to_string())
 }
 
 // Day boundaries are the user's, not UTC's: a UTC+8 user's "today" runs from
@@ -2848,24 +2865,39 @@ pub fn build_dashboard(
         *cost_by_pid.entry(pid).or_default() += c;
     }
 
-    // trend: daily totals zero-filled over the window (30d buckets by 5 days)
-    let mut daily: HashMap<String, UsageTotals> = HashMap::new();
-    for d in store
-        .usage_daily(agent, provider_id, Some(&since), tz)
-        .map_err(e2s)?
-    {
-        daily.insert(d.day, d.totals);
-    }
     let mut trend = Vec::new();
     if window == "today" {
-        let today = local_day_key(tz, now);
-        let t = daily.get(&today).cloned().unwrap_or_default();
-        trend.push(TrendVm {
-            date: mmdd(&today),
-            requests: t.requests,
-            tokens: t.input_tokens + t.output_tokens,
-        });
+        // "today" plots the day's hours, not one bar for the whole day: 24 local
+        // hour buckets, zero-filled exactly like the daily axis so the chart
+        // spans the same day the stat above it counts (and its bars still sum
+        // to that stat).
+        let mut hourly: HashMap<String, UsageTotals> = HashMap::new();
+        for b in store
+            .usage_hourly(agent, provider_id, Some(&since), tz)
+            .map_err(e2s)?
+        {
+            hourly.insert(b.day, b.totals);
+        }
+        // The local day index, turned back into the 24 hour keys of that day.
+        let today_days = (now + tz * 60).div_euclid(86_400);
+        for h in 0..24 {
+            let key = hour_key(today_days * 86_400 + h * 3_600);
+            let t = hourly.get(&key).cloned().unwrap_or_default();
+            trend.push(TrendVm {
+                date: hh00(&key),
+                requests: t.requests,
+                tokens: t.input_tokens + t.output_tokens,
+            });
+        }
     } else {
+        // trend: daily totals zero-filled over the window (30d buckets by 5 days)
+        let mut daily: HashMap<String, UsageTotals> = HashMap::new();
+        for d in store
+            .usage_daily(agent, provider_id, Some(&since), tz)
+            .map_err(e2s)?
+        {
+            daily.insert(d.day, d.totals);
+        }
         let bucket = if window == "30d" { 5 } else { 1 };
         // Local day index: the buckets have to be the same days the window
         // above selected, or the chart and its stat disagree again.
@@ -3919,11 +3951,19 @@ mod tests {
         let d = |w: &str| build_dashboard(&s, &aux, w, None, None).unwrap();
 
         // Today: the current UTC day only — the 23:00 rows of the days before
-        // it stay out, and so does the one from 40 days back.
+        // it stay out, and so does the one from 40 days back. The chart splits
+        // that day into its 24 hours, so the 23:00 rows land in the last bucket.
         let today = d("today");
         assert_eq!((today.requests, today.input_tokens), (2, 2_000));
-        assert_eq!(today.trend.len(), 1);
-        assert_eq!(today.trend[0].requests, 2);
+        assert_eq!(today.trend.len(), 24, "today plots one bar per hour");
+        assert_eq!(today.trend[23].date, "23:00");
+        assert_eq!(today.trend[23].requests, 2);
+        assert_eq!(today.trend[0].requests, 0, "an idle hour is still a bucket");
+        assert_eq!(
+            today.trend.iter().map(|p| p.requests).sum::<i64>(),
+            today.requests,
+            "the hourly bars cover the stat's whole window"
+        );
 
         // 7d is today plus the six days before it, so the chart's seven points
         // cover exactly the same span as the stat above them.
@@ -3967,8 +4007,9 @@ mod tests {
         update_settings(&s, &aux, &serde_json::json!({ "tz_offset_minutes": 480 })).unwrap();
         let shifted = build_dashboard(&s, &aux, "today", None, None).unwrap();
         assert_eq!(shifted.requests, 1, "at UTC+8 that row is this morning's");
-        assert_eq!(shifted.trend.len(), 1);
-        assert_eq!(shifted.trend[0].requests, 1, "the chart's today agrees");
+        assert_eq!(shifted.trend.len(), 24);
+        assert_eq!(shifted.trend[7].date, "07:00", "23:00Z is 07:00 at UTC+8");
+        assert_eq!(shifted.trend[7].requests, 1, "the chart's hour agrees");
     }
 
     #[test]
@@ -4211,6 +4252,12 @@ mod tests {
         assert_eq!(day_key(0), "1970-01-01");
         assert_eq!(mmdd("2026-09-07"), "09-07");
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+        // Hour keys match the `YYYY-MM-DDTHH` shape `usage_hourly` groups by,
+        // and roll over at midnight like `day_key` does.
+        assert_eq!(hour_key(0), "1970-01-01T00");
+        assert_eq!(hour_key(7 * 3_600 + 59 * 60), "1970-01-01T07");
+        assert_eq!(hour_key(86_400 + 3_600), "1970-01-02T01");
+        assert_eq!(hh00("1970-01-01T07"), "07:00");
     }
 
     #[test]

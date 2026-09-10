@@ -300,7 +300,10 @@ async fn send_upstream(
         match outcome {
             Ok(upstream) => {
                 let status = upstream.status();
-                state.engine.record(agent, &provider.id, status.is_success()).await;
+                state
+                    .engine
+                    .record(agent, &provider.id, status.is_success())
+                    .await;
                 if !last && is_retryable_status(status) {
                     tracing::warn!(
                         attempt,
@@ -608,10 +611,7 @@ pub async fn forward(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
-                cache_inclusive: matches!(
-                    provider.protocol,
-                    Protocol::OpenAI | Protocol::Gemini
-                ),
+                cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -738,7 +738,12 @@ async fn forward_anthropic_via_openai(
                 "invalid_request",
                 message.clone(),
             );
-            return error_response(inbound, StatusCode::BAD_REQUEST, "invalid_request", &message);
+            return error_response(
+                inbound,
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &message,
+            );
         }
     };
     let mut openai_body = match anthropic_to_openai(converted_body) {
@@ -1322,7 +1327,11 @@ mod tests {
         ));
         // Neither endpoint nor conversion → clean mismatch.
         assert!(matches!(
-            resolve_inbound(&plain, Some(Protocol::Gemini), "/v1beta/models/gemini-pro:generateContent"),
+            resolve_inbound(
+                &plain,
+                Some(Protocol::Gemini),
+                "/v1beta/models/gemini-pro:generateContent"
+            ),
             InboundResolution::Mismatch { .. }
         ));
         // Legacy anthropic paths have no OpenAI equivalent.
@@ -1411,7 +1420,10 @@ mod tests {
         assert_eq!(headers.get("x-good").unwrap(), "kept");
         assert!(headers.get("connection").is_none());
         // host/content-length are never settable via custom headers
-        assert_ne!(headers.get("host").map(|v| v.to_str().unwrap()), Some("evil.example.com"));
+        assert_ne!(
+            headers.get("host").map(|v| v.to_str().unwrap()),
+            Some("evil.example.com")
+        );
         assert!(headers.get("x-bad-value").is_none());
     }
 
@@ -1433,10 +1445,9 @@ mod tests {
     fn missing_provider_key_fails_cleanly() {
         let mut p = provider(Protocol::Anthropic, None);
         p.api_key = None;
-        let state = crate::server::GatewayState::new(
-            crate::store::Store::open_in_memory().expect("store"),
-        )
-        .expect("state");
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
         let err = select_upstream_key(&state, &p).unwrap_err();
         assert!(matches!(err, GatewayError::Upstream(_)));
     }
@@ -1445,10 +1456,9 @@ mod tests {
     fn record_sample_costs_priced_models_and_skips_unknown() {
         use crate::store::Protocol;
 
-        let state = crate::server::GatewayState::new(
-            crate::store::Store::open_in_memory().expect("store"),
-        )
-        .expect("state");
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
         state
             .store
             .insert_provider(&crate::store::Provider {
@@ -1463,7 +1473,7 @@ mod tests {
                 period_limit: None,
                 limit_unit: None,
                 plan_query: None,
-            plan_limits: None,
+                plan_limits: None,
                 timeout_secs: None,
                 retries: None,
                 headers: None,
@@ -1498,7 +1508,10 @@ mod tests {
         assert_eq!(totals.requests, 3);
         // Only the priced model contributes; cost is stored in the price
         // entry's currency (1M fresh input @ 5 USD/M = 5.0).
-        let costs = state.store.usage_cost_by_currency(None, None, None).unwrap();
+        let costs = state
+            .store
+            .usage_cost_by_currency(None, None, None)
+            .unwrap();
         assert_eq!(costs.len(), 1);
         assert_eq!(costs[0].0.as_deref(), Some("USD"));
         assert!((costs[0].1 - 5.0).abs() < 1e-9, "got {}", costs[0].1);
@@ -1506,10 +1519,9 @@ mod tests {
 
     #[test]
     fn multi_key_pool_rotates_per_request() {
-        let state = crate::server::GatewayState::new(
-            crate::store::Store::open_in_memory().expect("store"),
-        )
-        .expect("state");
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
         let mut p = provider(Protocol::OpenAI, None);
         p.extra_keys = vec!["sk-two".into(), "sk-three".into()];
 

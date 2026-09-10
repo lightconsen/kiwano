@@ -1544,7 +1544,8 @@ impl Store {
                         request_size, response_size, truncated
                  FROM request_logs WHERE id = ?1",
             )?;
-            stmt.query_row(params![id], request_log_from_row).optional()?
+            stmt.query_row(params![id], request_log_from_row)
+                .optional()?
         };
         let Some(entry) = entry else {
             return Ok(None);
@@ -1928,7 +1929,12 @@ mod tests {
         assert_eq!(cny.limit_unit.as_deref(), Some("CNY"));
         assert_eq!(cny.plan_query, None);
         assert_eq!(
-            store.get_provider("p-req").unwrap().unwrap().limit_unit.as_deref(),
+            store
+                .get_provider("p-req")
+                .unwrap()
+                .unwrap()
+                .limit_unit
+                .as_deref(),
             Some("requests")
         );
         // Bindings survive the rebuild.
@@ -2018,8 +2024,14 @@ mod tests {
         p.billing = Billing::Subscription;
         p.plan_limits = Some(r#"{"five_hour":20,"weekly":60}"#.to_string());
         store.insert_provider(&p).unwrap();
-        let got = store.get_provider("p-plan").unwrap().expect("plan provider");
-        assert_eq!(got.plan_limits.as_deref(), Some(r#"{"five_hour":20,"weekly":60}"#));
+        let got = store
+            .get_provider("p-plan")
+            .unwrap()
+            .expect("plan provider");
+        assert_eq!(
+            got.plan_limits.as_deref(),
+            Some(r#"{"five_hour":20,"weekly":60}"#)
+        );
         p.plan_limits = None;
         store.update_provider(&p).unwrap();
         assert_eq!(
@@ -2045,7 +2057,10 @@ mod tests {
         let got = store.get_provider("p-dual").unwrap().unwrap();
         assert_eq!(got.endpoints.len(), 1);
         assert_eq!(got.endpoints[0].protocol, Protocol::Anthropic);
-        assert_eq!(got.endpoints[0].base_url, "https://api.example.com/anthropic");
+        assert_eq!(
+            got.endpoints[0].base_url,
+            "https://api.example.com/anthropic"
+        );
         // list reads them too
         assert_eq!(store.list_providers().unwrap()[0].endpoints.len(), 1);
 
@@ -2066,13 +2081,21 @@ mod tests {
         store.update_provider(&updated).unwrap();
         let got = store.get_provider("p-dual").unwrap().unwrap();
         assert_eq!(got.endpoints.len(), 2);
-        assert_eq!(got.endpoints[0].base_url, "https://api.example.com/anthropic/v2");
+        assert_eq!(
+            got.endpoints[0].base_url,
+            "https://api.example.com/anthropic/v2"
+        );
 
         // empty list clears every additional endpoint
         let mut cleared = got.clone();
         cleared.endpoints.clear();
         store.update_provider(&cleared).unwrap();
-        assert!(store.get_provider("p-dual").unwrap().unwrap().endpoints.is_empty());
+        assert!(store
+            .get_provider("p-dual")
+            .unwrap()
+            .unwrap()
+            .endpoints
+            .is_empty());
 
         // rows cascade away with the provider
         let mut p2 = sample_provider("p-cascade", Protocol::OpenAI);
@@ -2111,7 +2134,10 @@ mod tests {
         let listed = &store.list_providers().unwrap()[0];
         assert_eq!(listed.timeout_secs, Some(120));
         assert_eq!(listed.retries, Some(2));
-        assert_eq!(listed.headers.as_deref(), Some(r#"{"api-key":"azure-key"}"#));
+        assert_eq!(
+            listed.headers.as_deref(),
+            Some(r#"{"api-key":"azure-key"}"#)
+        );
 
         // update clears them (None = cleared, not "keep")
         let mut cleared = got.clone();
@@ -2396,7 +2422,9 @@ mod tests {
         let provider_totals = store.usage_totals(None, Some("p1"), None).unwrap();
         assert_eq!(provider_totals.requests, 3);
         // Combined agent + provider filter ANDs both conditions.
-        let combined = store.usage_totals(Some("claude"), Some("p1"), None).unwrap();
+        let combined = store
+            .usage_totals(Some("claude"), Some("p1"), None)
+            .unwrap();
         assert_eq!(combined.requests, 2);
 
         let since_totals = store
@@ -2541,12 +2569,24 @@ mod tests {
     #[test]
     fn request_log_insert_list_detail_roundtrip() {
         let (_dir, store) = temp_store();
-        store.insert_request_log(&sample_log("2026-09-07T10:00:00+00:00", Some("claude"), 200)).unwrap();
-        store.insert_request_log(&sample_log("2026-09-07T11:00:00+00:00", Some("codex"), 502)).unwrap();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-07T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log("2026-09-07T11:00:00+00:00", Some("codex"), 502))
+            .unwrap();
         // Pre-attribution failure: no agent/provider at all.
-        store.insert_request_log(&sample_log("2026-09-07T12:00:00+00:00", None, 404)).unwrap();
+        store
+            .insert_request_log(&sample_log("2026-09-07T12:00:00+00:00", None, 404))
+            .unwrap();
 
-        let (rows, total) = store.list_request_logs(1, 10, RequestLogFilter::default()).unwrap();
+        let (rows, total) = store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
         assert_eq!(total, 3);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].status_code, 404); // newest first
@@ -2554,19 +2594,51 @@ mod tests {
         let detail = store.get_request_log(rows[0].id).unwrap().unwrap();
         assert_eq!(detail.entry.status_code, 404);
         assert_eq!(detail.entry.error_kind.as_deref(), Some("upstream_error"));
-        assert_eq!(detail.request_body.as_deref(), Some(r#"{"model":"claude-sonnet-4-5"}"#));
+        assert_eq!(
+            detail.request_body.as_deref(),
+            Some(r#"{"model":"claude-sonnet-4-5"}"#)
+        );
         assert_eq!(detail.response_body.as_deref(), Some(r#"{"ok":true}"#));
 
         // Filters.
-        let (_, n) = store.list_request_logs(1, 10, RequestLogFilter { agent: Some("claude"), ..Default::default() }).unwrap();
+        let (_, n) = store
+            .list_request_logs(
+                1,
+                10,
+                RequestLogFilter {
+                    agent: Some("claude"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert_eq!(n, 1);
-        let (_, n) = store.list_request_logs(1, 10, RequestLogFilter { status: Some("error"), ..Default::default() }).unwrap();
+        let (_, n) = store
+            .list_request_logs(
+                1,
+                10,
+                RequestLogFilter {
+                    status: Some("error"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert_eq!(n, 2); // 502 + 404
-        let (_, n) = store.list_request_logs(1, 10, RequestLogFilter { status: Some("ok"), ..Default::default() }).unwrap();
+        let (_, n) = store
+            .list_request_logs(
+                1,
+                10,
+                RequestLogFilter {
+                    status: Some("ok"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert_eq!(n, 1);
 
         // Pagination.
-        let (rows, _) = store.list_request_logs(2, 2, RequestLogFilter::default()).unwrap();
+        let (rows, _) = store
+            .list_request_logs(2, 2, RequestLogFilter::default())
+            .unwrap();
         assert_eq!(rows.len(), 1);
 
         // Bodyless insert (capture_bodies=false) still lists; detail has no bodies.
@@ -2584,41 +2656,83 @@ mod tests {
     #[test]
     fn count_request_logs_windows_by_ts() {
         let (_dir, store) = temp_store();
-        store.insert_request_log(&sample_log("2026-09-01T10:00:00+00:00", Some("claude"), 200)).unwrap();
-        store.insert_request_log(&sample_log("2026-09-07T10:00:00+00:00", Some("claude"), 503)).unwrap();
-        store.insert_request_log(&sample_log("2026-09-08T10:00:00+00:00", None, 404)).unwrap();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-01T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-07T10:00:00+00:00",
+                Some("claude"),
+                503,
+            ))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log("2026-09-08T10:00:00+00:00", None, 404))
+            .unwrap();
 
         assert_eq!(store.count_request_logs(None, None, None).unwrap(), 3);
         // Failures count too — the dashboard headline uses this.
         assert_eq!(
-            store.count_request_logs(None, None, Some("2026-09-07T00:00:00Z")).unwrap(),
+            store
+                .count_request_logs(None, None, Some("2026-09-07T00:00:00Z"))
+                .unwrap(),
             2
         );
         assert_eq!(
-            store.count_request_logs(None, None, Some("2026-09-09T00:00:00Z")).unwrap(),
+            store
+                .count_request_logs(None, None, Some("2026-09-09T00:00:00Z"))
+                .unwrap(),
             0
         );
         // Agent / provider filters: the agentless row (no provider either) is
         // only counted in the unfiltered totals.
-        assert_eq!(store.count_request_logs(Some("claude"), None, None).unwrap(), 2);
+        assert_eq!(
+            store
+                .count_request_logs(Some("claude"), None, None)
+                .unwrap(),
+            2
+        );
         assert_eq!(store.count_request_logs(None, Some("p1"), None).unwrap(), 2);
     }
 
     #[test]
     fn request_log_prune_and_clear() {
         let (_dir, store) = temp_store();
-        store.insert_request_log(&sample_log("2026-08-01T10:00:00+00:00", Some("claude"), 200)).unwrap();
-        store.insert_request_log(&sample_log(now_rfc3339().as_str(), Some("claude"), 200)).unwrap();
+        store
+            .insert_request_log(&sample_log(
+                "2026-08-01T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+        store
+            .insert_request_log(&sample_log(now_rfc3339().as_str(), Some("claude"), 200))
+            .unwrap();
 
         // Old row (plus its bodies) goes; fresh row stays.
         assert_eq!(store.prune_request_logs(30).unwrap(), 1);
-        let (rows, total) = store.list_request_logs(1, 10, RequestLogFilter::default()).unwrap();
+        let (rows, total) = store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
         assert_eq!(total, 1);
         let detail = store.get_request_log(rows[0].id).unwrap().unwrap();
-        assert_eq!(detail.request_body.as_deref(), Some(r#"{"model":"claude-sonnet-4-5"}"#));
+        assert_eq!(
+            detail.request_body.as_deref(),
+            Some(r#"{"model":"claude-sonnet-4-5"}"#)
+        );
 
         assert_eq!(store.clear_request_logs().unwrap(), 1);
-        assert_eq!(store.list_request_logs(1, 10, RequestLogFilter::default()).unwrap().1, 0);
+        assert_eq!(
+            store
+                .list_request_logs(1, 10, RequestLogFilter::default())
+                .unwrap()
+                .1,
+            0
+        );
     }
 
     #[test]
@@ -2626,10 +2740,22 @@ mod tests {
         let (_dir, store) = temp_store();
         assert_eq!(store.load_log_config().unwrap(), LogConfig::default());
 
-        store.save_log_config(&LogConfig { enabled: false, capture_bodies: false, retain_days: 7, max_body_bytes: 1024 }).unwrap();
+        store
+            .save_log_config(&LogConfig {
+                enabled: false,
+                capture_bodies: false,
+                retain_days: 7,
+                max_body_bytes: 1024,
+            })
+            .unwrap();
         assert_eq!(
             store.load_log_config().unwrap(),
-            LogConfig { enabled: false, capture_bodies: false, retain_days: 7, max_body_bytes: 1024 }
+            LogConfig {
+                enabled: false,
+                capture_bodies: false,
+                retain_days: 7,
+                max_body_bytes: 1024
+            }
         );
 
         // Corrupt JSON falls back to defaults instead of breaking the gateway.

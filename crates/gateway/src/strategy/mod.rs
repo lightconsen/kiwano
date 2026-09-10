@@ -192,10 +192,7 @@ impl StrategyEngine {
 
     /// failover: take the first breaker-available candidate in priority order; when all are open,
     /// fall back to the primary (the request fails at the real upstream, not gateway-side — cc-switch queue semantics).
-    async fn select_failover(
-        &self,
-        route: &AgentRoute,
-    ) -> Result<crate::router::UpstreamProvider> {
+    async fn select_failover(&self, route: &AgentRoute) -> Result<crate::router::UpstreamProvider> {
         for i in 0..route.candidates.len() {
             if self.candidate_available(route, i).await {
                 return Ok(route.candidates[i].clone());
@@ -290,8 +287,7 @@ impl StrategyEngine {
             return Self::primary(route);
         };
         let primary = &route.candidates[0];
-        let totals =
-            store.usage_totals_for_provider(&primary.id, Some(&today_start_utc()))?;
+        let totals = store.usage_totals_for_provider(&primary.id, Some(&today_start_utc()))?;
         if cfg.consumed(&totals) < cfg.limit {
             return Ok(primary.clone());
         }
@@ -434,7 +430,10 @@ mod tests {
         // Same session stays sticky
         let first = engine.select(&s, &r, Some("sess-1")).await.unwrap().id;
         for _ in 0..5 {
-            assert_eq!(engine.select(&s, &r, Some("sess-1")).await.unwrap().id, first);
+            assert_eq!(
+                engine.select(&s, &r, Some("sess-1")).await.unwrap().id,
+                first
+            );
         }
 
         // New sessions advance on the weighted ring: with weights 3:1, 4 new sessions should pick a 3 times, b once
@@ -487,10 +486,7 @@ mod tests {
         let (s2, e2) = narrow_future_window();
         let r2 = route(
             StrategyType::Timewindow,
-            vec![
-                candidate("a", 1, None),
-                candidate("b", 1, Some((s2, e2))),
-            ],
+            vec![candidate("a", 1, None), candidate("b", 1, Some((s2, e2)))],
         );
         assert_eq!(engine.select(&s, &r2, None).await.unwrap().id, "a");
     }
@@ -507,7 +503,10 @@ mod tests {
             let m = m % (24 * 60);
             format!("{:02}:{:02}", m / 60, m % 60)
         };
-        (Box::leak(fmt(s).into_boxed_str()), Box::leak(fmt(e).into_boxed_str()))
+        (
+            Box::leak(fmt(s).into_boxed_str()),
+            Box::leak(fmt(e).into_boxed_str()),
+        )
     }
 
     #[tokio::test]

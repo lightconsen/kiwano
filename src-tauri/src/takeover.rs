@@ -226,13 +226,18 @@ fn rewrite_claude(original: &str, base: &str, port: u16, key: &str) -> Result<St
     let mut v: Value = if original.trim().is_empty() {
         Value::Object(serde_json::Map::new())
     } else {
-        serde_json::from_str(original).map_err(|e| format!("settings.json is not valid JSON: {e}"))?
+        serde_json::from_str(original)
+            .map_err(|e| format!("settings.json is not valid JSON: {e}"))?
     };
-    let obj = v.as_object_mut().ok_or("settings.json top level is not an object")?;
+    let obj = v
+        .as_object_mut()
+        .ok_or("settings.json top level is not an object")?;
     let env = obj
         .entry("env")
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let env = env.as_object_mut().ok_or("settings.json env is not an object")?;
+    let env = env
+        .as_object_mut()
+        .ok_or("settings.json env is not an object")?;
     env.insert(
         "ANTHROPIC_BASE_URL".into(),
         Value::String(format!("{base}:{port}")),
@@ -259,7 +264,8 @@ fn rewrite_codex_toml(original: &str, base: &str, port: u16) -> Result<String, S
     }
     if !found {
         return Err(
-            "no base_url in config.toml — configure a custom provider for Codex before takeover".into(),
+            "no base_url in config.toml — configure a custom provider for Codex before takeover"
+                .into(),
         );
     }
     let mut s = out.join("\n");
@@ -276,7 +282,9 @@ fn rewrite_codex_auth(original: &str, key: &str) -> Result<String, String> {
     } else {
         serde_json::from_str(original).map_err(|e| format!("auth.json is not valid JSON: {e}"))?
     };
-    let obj = v.as_object_mut().ok_or("auth.json top level is not an object")?;
+    let obj = v
+        .as_object_mut()
+        .ok_or("auth.json top level is not an object")?;
     obj.insert("OPENAI_API_KEY".into(), Value::String(key.into()));
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }

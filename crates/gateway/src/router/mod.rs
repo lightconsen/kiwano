@@ -437,7 +437,9 @@ mod tests {
 
         let table = RouteTable::load(&store).unwrap();
         let codex = table.routes.get(AGENT_CODEX).unwrap();
-        let got = codex.candidates[0].endpoint_for(Protocol::Anthropic).expect("alt endpoint");
+        let got = codex.candidates[0]
+            .endpoint_for(Protocol::Anthropic)
+            .expect("alt endpoint");
         assert_eq!(got.base_url, "https://p-oai.example.com/anthropic");
         assert!(codex.candidates[0].endpoint_for(Protocol::Gemini).is_none());
     }
@@ -459,7 +461,11 @@ mod tests {
         assert_eq!(got.timeout_secs, Some(120));
         assert_eq!(got.retries, Some(2));
         assert_eq!(
-            got.headers.as_ref().unwrap().get("api-key").map(String::as_str),
+            got.headers
+                .as_ref()
+                .unwrap()
+                .get("api-key")
+                .map(String::as_str),
             Some("azure-key")
         );
         assert!(!got.headers.as_ref().unwrap().contains_key(""));

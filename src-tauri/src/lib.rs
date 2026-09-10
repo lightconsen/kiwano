@@ -321,7 +321,10 @@ fn list_request_logs(
 }
 
 #[tauri::command]
-fn get_request_log(state: State<AppState>, id: i64) -> Result<Option<vm::RequestLogDetailVm>, String> {
+fn get_request_log(
+    state: State<AppState>,
+    id: i64,
+) -> Result<Option<vm::RequestLogDetailVm>, String> {
     vm::get_request_log(&state.store, id)
 }
 
@@ -392,7 +395,14 @@ fn update_agent_binding(
     win_start: Option<String>,
     win_end: Option<String>,
 ) -> Result<(), String> {
-    vm::update_agent_binding(&state.store, &agent, &provider_id, weight, win_start, win_end)?;
+    vm::update_agent_binding(
+        &state.store,
+        &agent,
+        &provider_id,
+        weight,
+        win_start,
+        win_end,
+    )?;
     after_mutation(&state);
     Ok(())
 }
@@ -423,11 +433,7 @@ fn remove_agent_binding(
 /// Copy another agent's whole route (strategy + ordered candidates) onto
 /// this one, replacing whatever it had.
 #[tauri::command]
-fn apply_agent_route(
-    state: State<AppState>,
-    target: String,
-    source: String,
-) -> Result<(), String> {
+fn apply_agent_route(state: State<AppState>, target: String, source: String) -> Result<(), String> {
     vm::apply_agent_route(&state.store, &target, &source)?;
     after_mutation(&state);
     Ok(())
@@ -563,7 +569,10 @@ pub fn run() {
             // Seed the bundled model price table into model_pricing
             // (version-gated no-op after the first run).
             match pricing::seed_model_pricing(&aux) {
-                Ok(r) if !r.skipped => println!("kiwano: model pricing seeded v{} ({} rows changed)", r.version, r.seeded),
+                Ok(r) if !r.skipped => println!(
+                    "kiwano: model pricing seeded v{} ({} rows changed)",
+                    r.version, r.seeded
+                ),
                 Err(e) => eprintln!("kiwano: model pricing seed failed: {e}"),
                 _ => {}
             }

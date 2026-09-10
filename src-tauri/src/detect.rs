@@ -137,7 +137,9 @@ fn parse_probe_output(out: &str) -> BTreeMap<String, String> {
         if !CLI_AGENTS.iter().any(|(_, cli)| *cli == tool) || !path.starts_with('/') {
             continue;
         }
-        found.entry(tool.to_string()).or_insert_with(|| path.to_string());
+        found
+            .entry(tool.to_string())
+            .or_insert_with(|| path.to_string());
     }
     found
 }
@@ -158,7 +160,10 @@ fn probe_version(bin: &str) -> Option<String> {
 }
 
 fn parse_version_output(out: &str) -> Option<String> {
-    out.lines().map(str::trim).find(|l| !l.is_empty()).map(String::from)
+    out.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(String::from)
 }
 
 /// Poll `try_wait` until exit or deadline; on timeout the child is killed and
@@ -241,7 +246,10 @@ mod tests {
             parse_version_output("2.1.83 (Claude Code)"),
             Some("2.1.83 (Claude Code)".into())
         );
-        assert_eq!(parse_version_output("\n  \n0.5.12\nmore"), Some("0.5.12".into()));
+        assert_eq!(
+            parse_version_output("\n  \n0.5.12\nmore"),
+            Some("0.5.12".into())
+        );
         assert_eq!(parse_version_output(""), None);
     }
 }

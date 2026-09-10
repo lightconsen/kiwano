@@ -109,7 +109,11 @@ fn millis_to_iso8601(ms: i64) -> Option<String> {
 }
 
 fn field_str<'a>(fields: &'a HashMap<String, serde_json::Value>, key: &str) -> &'a str {
-    fields.get(key).and_then(|v| v.as_str()).unwrap_or("").trim()
+    fields
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
 }
 
 /// Fold a received HTTP response: outer `Err` = transient (network), inner
@@ -119,7 +123,9 @@ fn fold_response(
 ) -> Result<Result<serde_json::Value, String>, String> {
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Ok(Err(format!("Auth failed (HTTP {status}): the API key is invalid or expired")));
+        return Ok(Err(format!(
+            "Auth failed (HTTP {status}): the API key is invalid or expired"
+        )));
     }
     if !status.is_success() {
         let body = resp.text().unwrap_or_default();
@@ -178,7 +184,11 @@ fn parse_kimi_tiers(body: &serde_json::Value) -> Vec<PlanTierVm> {
         let remaining = obj.get("remaining").and_then(parse_f64).unwrap_or(0.0);
         let resets_at = obj.get("resetTime").and_then(extract_reset_time);
         let used = (limit - remaining).max(0.0);
-        let utilization = if limit > 0.0 { used / limit * 100.0 } else { 0.0 };
+        let utilization = if limit > 0.0 {
+            used / limit * 100.0
+        } else {
+            0.0
+        };
         tiers.push(PlanTierVm {
             name: name.to_string(),
             utilization,
@@ -240,7 +250,10 @@ fn parse_zhipu_token_tiers(data: &serde_json::Value) -> Vec<PlanTierVm> {
             {
                 continue;
             }
-            let percentage = item.get("percentage").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let percentage = item
+                .get("percentage")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
             let reset_ms = item.get("nextResetTime").and_then(|v| v.as_i64());
             let reset_iso = reset_ms.and_then(millis_to_iso8601);
             let entry = (reset_ms, percentage, reset_iso);
@@ -311,11 +324,18 @@ fn zhipu_outcome(body: &serde_json::Value) -> QuotaOutcome {
     }
 }
 
-fn query_zhipu(client: &reqwest::blocking::Client, base_url: &str, api_key: &str) -> Result<QuotaOutcome, String> {
+fn query_zhipu(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    api_key: &str,
+) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
         return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
-    let url = format!("{}/api/monitor/usage/quota/limit", zhipu_quota_base(base_url));
+    let url = format!(
+        "{}/api/monitor/usage/quota/limit",
+        zhipu_quota_base(base_url)
+    );
     // Zhipu does NOT use a Bearer prefix.
     let req = client
         .get(&url)
@@ -388,7 +408,9 @@ fn query_minimax(
                 .get("status_msg")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown error");
-            return Ok(QuotaOutcome::Failed(format!("Endpoint error (code {code}): {msg}")));
+            return Ok(QuotaOutcome::Failed(format!(
+                "Endpoint error (code {code}): {msg}"
+            )));
         }
     }
     Ok(QuotaOutcome::Ok {
@@ -482,17 +504,25 @@ fn query_zenmux(
         return Ok(QuotaOutcome::Failed(format!("Endpoint error: {msg}")));
     }
     let Some(data) = body.get("data") else {
-        return Ok(QuotaOutcome::Failed("Response is missing the data field".to_string()));
+        return Ok(QuotaOutcome::Failed(
+            "Response is missing the data field".to_string(),
+        ));
     };
 
     let mut tiers = Vec::new();
-    for (key, name) in [("quota_5_hour", "five_hour"), ("quota_7_day", "weekly_limit")] {
+    for (key, name) in [
+        ("quota_5_hour", "five_hour"),
+        ("quota_7_day", "weekly_limit"),
+    ] {
         let Some(q) = data.get(key) else { continue };
         let usage_pct = q.get("usage_percentage").and_then(parse_f64).unwrap_or(0.0);
         tiers.push(PlanTierVm {
             name: name.to_string(),
             utilization: usage_pct * 100.0,
-            resets_at: q.get("resets_at").and_then(|v| v.as_str()).map(String::from),
+            resets_at: q
+                .get("resets_at")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             used: q.get("used_value_usd").and_then(parse_f64),
             limit: q.get("max_value_usd").and_then(parse_f64),
             unit: Some("USD".to_string()),
@@ -589,7 +619,9 @@ fn query_opencode_go(
     // No window parsed = shape unrecognized (the endpoint changed shape once
     // on launch day) — fail loudly instead of rendering an empty card.
     if tiers.is_empty() {
-        return Ok(QuotaOutcome::Failed("Unrecognized response shape".to_string()));
+        return Ok(QuotaOutcome::Failed(
+            "Unrecognized response shape".to_string(),
+        ));
     }
     Ok(QuotaOutcome::Ok { tiers, note: None })
 }
@@ -815,7 +847,9 @@ fn volcengine_openapi_call(
 
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return VolcCall::Auth(format!("Auth failed (HTTP {status}). {VOLCENGINE_AKSK_HINT}"));
+        return VolcCall::Auth(format!(
+            "Auth failed (HTTP {status}). {VOLCENGINE_AKSK_HINT}"
+        ));
     }
     if !status.is_success() {
         // The gateway returns 4xx (often 400) with the same
@@ -848,7 +882,9 @@ fn volcengine_openapi_call(
     // Business errors arrive as 200 + ResponseMetadata.Error.
     if let Some((code, msg)) = volcengine_response_error(&body) {
         if volcengine_is_auth_error_code(&code) {
-            return VolcCall::Auth(format!("Auth failed ({code}): {msg}. {VOLCENGINE_AKSK_HINT}"));
+            return VolcCall::Auth(format!(
+                "Auth failed ({code}): {msg}. {VOLCENGINE_AKSK_HINT}"
+            ));
         }
         return VolcCall::Soft(format!("Endpoint error ({code}): {msg}"));
     }
@@ -958,7 +994,13 @@ fn query_volcengine(
     };
 
     // 1) Agent Plan: GetAFPUsage
-    match volcengine_openapi_call(client, &region, access_key_id, secret_access_key, "GetAFPUsage") {
+    match volcengine_openapi_call(
+        client,
+        &region,
+        access_key_id,
+        secret_access_key,
+        "GetAFPUsage",
+    ) {
         VolcCall::Auth(detail) => return Ok(QuotaOutcome::Failed(detail)),
         VolcCall::Transient(detail) => return Err(format!("GetAFPUsage: {detail}")),
         VolcCall::Soft(detail) => soft_errors.push(format!("GetAFPUsage: {detail}")),
@@ -979,8 +1021,13 @@ fn query_volcengine(
     }
 
     // 2) Coding Plan: GetCodingPlanUsage
-    match volcengine_openapi_call(client, &region, access_key_id, secret_access_key, "GetCodingPlanUsage")
-    {
+    match volcengine_openapi_call(
+        client,
+        &region,
+        access_key_id,
+        secret_access_key,
+        "GetCodingPlanUsage",
+    ) {
         VolcCall::Auth(detail) => return Ok(QuotaOutcome::Failed(detail)),
         VolcCall::Transient(detail) => return Err(format!("GetCodingPlanUsage: {detail}")),
         VolcCall::Soft(detail) => soft_errors.push(format!("GetCodingPlanUsage: {detail}")),
@@ -1077,7 +1124,9 @@ fn run_template(
         "grok" => Ok(QuotaOutcome::Failed(
             "Grok plan queries are not supported yet (the gRPC-web API is not adapted)".to_string(),
         )),
-        other => Ok(QuotaOutcome::Failed(format!("Unknown plan query template: {other}"))),
+        other => Ok(QuotaOutcome::Failed(format!(
+            "Unknown plan query template: {other}"
+        ))),
     }
 }
 
@@ -1278,14 +1327,20 @@ mod tests {
             zhipu_quota_base("https://open.bigmodel.cn/api/paas/v4"),
             "https://open.bigmodel.cn"
         );
-        assert_eq!(zhipu_quota_base("https://api.z.ai/api/paas/v4"), "https://api.z.ai");
+        assert_eq!(
+            zhipu_quota_base("https://api.z.ai/api/paas/v4"),
+            "https://api.z.ai"
+        );
         // Case-insensitive, matching the preset URL handling.
         assert_eq!(
             zhipu_quota_base("HTTPS://OPEN.BIGMODEL.CN/api/paas/v4"),
             "https://open.bigmodel.cn"
         );
         // Unknown hosts default to the international endpoint.
-        assert_eq!(zhipu_quota_base("https://example.com/zhipu"), "https://api.z.ai");
+        assert_eq!(
+            zhipu_quota_base("https://example.com/zhipu"),
+            "https://api.z.ai"
+        );
     }
 
     #[test]
@@ -1461,7 +1516,9 @@ mod tests {
         );
         assert_eq!(x_date, "20240621T000000Z");
         // No AWS4 prefix, scope suffix `request`, fixed SignedHeaders order.
-        assert!(auth.starts_with("HMAC-SHA256 Credential=AKLTtest/20240621/cn-beijing/ark/request,"));
+        assert!(
+            auth.starts_with("HMAC-SHA256 Credential=AKLTtest/20240621/cn-beijing/ark/request,")
+        );
         assert!(auth.contains("SignedHeaders=host;x-date;x-content-sha256;content-type,"));
         let sig = auth.rsplit("Signature=").next().unwrap();
         assert_eq!(sig.len(), 64);
@@ -1510,7 +1567,13 @@ mod tests {
             QuotaOutcome::Failed(m) => assert!(m.contains("ZenMux")),
             _ => panic!("zenmux needs quota_url"),
         }
-        match run_template("volcengine", &empty, "https://ark.cn-beijing.volces.com/api/coding", "").unwrap()
+        match run_template(
+            "volcengine",
+            &empty,
+            "https://ark.cn-beijing.volces.com/api/coding",
+            "",
+        )
+        .unwrap()
         {
             QuotaOutcome::Failed(m) => assert!(m.contains("AccessKey")),
             _ => panic!("volcengine needs AK/SK"),
@@ -1520,10 +1583,7 @@ mod tests {
     #[test]
     fn price_hint_only_for_known_templates() {
         let pq = json!({ "template": "opencode_go", "fields": {} }).to_string();
-        assert_eq!(
-            plan_monthly_price(Some(&pq)).as_deref(),
-            Some("$10/mo")
-        );
+        assert_eq!(plan_monthly_price(Some(&pq)).as_deref(), Some("$10/mo"));
         let pq2 = json!({ "template": "kimi", "fields": {} }).to_string();
         assert_eq!(plan_monthly_price(Some(&pq2)), None);
         assert_eq!(plan_monthly_price(None), None);

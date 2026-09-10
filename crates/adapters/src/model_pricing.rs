@@ -410,7 +410,10 @@ mod tests {
             normalize_model_id("anthropic/claude-sonnet-4-5:beta"),
             "claude-sonnet-4-5"
         );
-        assert_eq!(normalize_model_id("  GLM-4.6@20250101 "), "glm-4.6-20250101");
+        assert_eq!(
+            normalize_model_id("  GLM-4.6@20250101 "),
+            "glm-4.6-20250101"
+        );
         assert_eq!(normalize_model_id("claude-sonnet-4[1m]"), "claude-sonnet-4");
         assert!(is_placeholder_pricing_model("Unknown"));
     }
@@ -438,10 +441,7 @@ mod tests {
             vec!["gpt-5.1-high", "gpt-5.1"]
         );
         // Dot normalization for claude ids.
-        assert!(
-            pricing_candidates("claude-4.5-sonnet")
-                .contains(&"claude-4-5-sonnet".to_string())
-        );
+        assert!(pricing_candidates("claude-4.5-sonnet").contains(&"claude-4-5-sonnet".to_string()));
     }
 
     #[test]

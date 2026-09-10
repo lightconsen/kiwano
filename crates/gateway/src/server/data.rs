@@ -283,7 +283,11 @@ mod tests {
 
         let empty = axum::http::HeaderMap::new();
         assert_eq!(
-            session_hint(&empty, br#"{"metadata":{"user_id":"user_acct__session_xyz"}}"#).as_deref(),
+            session_hint(
+                &empty,
+                br#"{"metadata":{"user_id":"user_acct__session_xyz"}}"#
+            )
+            .as_deref(),
             Some("user_acct__session_xyz")
         );
         assert_eq!(

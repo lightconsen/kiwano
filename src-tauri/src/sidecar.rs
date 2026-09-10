@@ -184,7 +184,11 @@ fn apply_auth(
 /// Works without an API key.
 /// Async on purpose: commands run on the tokio runtime, and a blocking
 /// client (which owns its own runtime) panics when dropped inside one.
-pub async fn probe_endpoint(protocol: &str, endpoint: &str, api_key: Option<&str>) -> Result<ProbeReport, String> {
+pub async fn probe_endpoint(
+    protocol: &str,
+    endpoint: &str,
+    api_key: Option<&str>,
+) -> Result<ProbeReport, String> {
     let url = probe_url(protocol, endpoint)?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
@@ -217,7 +221,10 @@ pub async fn probe_endpoint(protocol: &str, endpoint: &str, api_key: Option<&str
         s if (200..300).contains(&s) => {
             if !is_json {
                 // A marketing page answers 200 on anything — not an API.
-                ("error".into(), "endpoint returned HTML, not an API".to_string())
+                (
+                    "error".into(),
+                    "endpoint returned HTML, not an API".to_string(),
+                )
             } else {
                 let models = count_models(&body);
                 match models {
@@ -291,7 +298,11 @@ fn parse_models(body: &str) -> (Vec<String>, Option<String>) {
 /// key (cloud providers reject anonymous /models calls). Follows gemini's
 /// nextPageToken pagination; openai/anthropic answer in one page. Sorted and
 /// deduped for the dropdown.
-pub async fn fetch_model_names(protocol: &str, endpoint: &str, api_key: &str) -> Result<Vec<String>, String> {
+pub async fn fetch_model_names(
+    protocol: &str,
+    endpoint: &str,
+    api_key: &str,
+) -> Result<Vec<String>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("API key required".into());
@@ -392,14 +403,8 @@ mod tests {
 
     #[test]
     fn count_models_reads_both_shapes() {
-        assert_eq!(
-            count_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#),
-            Some(2)
-        );
-        assert_eq!(
-            count_models(r#"{"models":[{"name":"m1"}]}"#),
-            Some(1)
-        );
+        assert_eq!(count_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#), Some(2));
+        assert_eq!(count_models(r#"{"models":[{"name":"m1"}]}"#), Some(1));
         assert_eq!(count_models(r#"{"error":{}}"#), None);
         assert_eq!(count_models("<html>"), None);
     }
@@ -409,9 +414,8 @@ mod tests {
         let (names, token) = parse_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#);
         assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(token, None);
-        let (names, token) = parse_models(
-            r#"{"models":[{"name":"models/gemini-2.0-flash"}],"nextPageToken":"Pg"}"#,
-        );
+        let (names, token) =
+            parse_models(r#"{"models":[{"name":"models/gemini-2.0-flash"}],"nextPageToken":"Pg"}"#);
         assert_eq!(names, vec!["gemini-2.0-flash".to_string()]);
         assert_eq!(token, Some("Pg".to_string()));
         let (names, token) = parse_models("<html>");

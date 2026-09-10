@@ -98,7 +98,10 @@ pub fn run_import(
         // Skip official placeholders / empty configs
         if raw.base_url.is_empty() || raw.api_key.as_deref().unwrap_or("").is_empty() {
             skipped += 1;
-            detail.push(format!("skip {}/{}: missing endpoint or key", raw.app, raw.cc_id));
+            detail.push(format!(
+                "skip {}/{}: missing endpoint or key",
+                raw.app, raw.cc_id
+            ));
             continue;
         }
         let id = format!("ccs-{}-{}", raw.app, slug(&raw.cc_id));

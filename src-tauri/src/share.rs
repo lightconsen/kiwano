@@ -86,7 +86,10 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
     let share: ConfigShare =
         serde_json::from_str(json).map_err(|e| format!("Not a valid Kiwano config file: {e}"))?;
     if share.kiwano_config != FORMAT_VERSION {
-        return Err(format!("Unsupported config version {}", share.kiwano_config));
+        return Err(format!(
+            "Unsupported config version {}",
+            share.kiwano_config
+        ));
     }
 
     let now = vm::rfc3339(vm::unix_now());

@@ -181,14 +181,16 @@ mod tests {
         assert_eq!(c.request_size, 5);
 
         // Body capture off: size recorded, text omitted.
-        let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
-            .unwrap();
+        let mut c =
+            RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new()).unwrap();
         c.set_body(b"hello", false, 1024);
         assert_eq!(c.request_body, None);
         assert!(!c.truncated);
         assert_eq!(c.request_size, 5);
 
         // Logging disabled → no capture at all.
-        assert!(RequestCapture::start(false, "POST", "/v1/messages", None, &HeaderMap::new()).is_none());
+        assert!(
+            RequestCapture::start(false, "POST", "/v1/messages", None, &HeaderMap::new()).is_none()
+        );
     }
 }

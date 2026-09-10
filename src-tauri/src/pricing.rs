@@ -100,13 +100,11 @@ pub fn preferred_currency(aux: &Aux) -> String {
 /// Persist the preferred display currency into the ui settings JSON.
 /// (Writes go through vm::update_settings, which validates the code.)
 #[tauri::command]
-pub fn get_currency_meta(state: tauri::State<'_, crate::AppState>) -> Result<CurrencyMetaVm, String> {
+pub fn get_currency_meta(
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<CurrencyMetaVm, String> {
     let doc = bundled_doc();
-    let mut currencies: Vec<String> = doc
-        .models
-        .iter()
-        .map(|m| m.currency.clone())
-        .collect();
+    let mut currencies: Vec<String> = doc.models.iter().map(|m| m.currency.clone()).collect();
     currencies.sort();
     currencies.dedup();
     Ok(CurrencyMetaVm {
@@ -134,7 +132,11 @@ pub fn convert_amount(amount: f64, from: &str, to: &str, rates: &HashMap<String,
 }
 
 /// Sum per-currency cost buckets into one amount denominated in `to`.
-pub fn convert_cost_buckets(buckets: &[(Option<String>, f64)], to: &str, rates: &HashMap<String, f64>) -> f64 {
+pub fn convert_cost_buckets(
+    buckets: &[(Option<String>, f64)],
+    to: &str,
+    rates: &HashMap<String, f64>,
+) -> f64 {
     buckets
         .iter()
         .map(|(currency, cost)| match currency {

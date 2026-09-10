@@ -493,7 +493,7 @@ fn cmd_providers_add(store: &Store, args: &AddArgs) -> Result<(), String> {
             _ => None,
         },
         plan_query: None,
-            plan_limits: None,
+        plan_limits: None,
         timeout_secs: None,
         retries: None,
         headers: None,
@@ -1038,7 +1038,7 @@ mod tests {
                 limit_unit: None,
                 reset_period: None,
                 plan_query: None,
-            plan_limits: None,
+                plan_limits: None,
                 timeout_secs: None,
                 retries: None,
                 headers: None,
@@ -1156,7 +1156,9 @@ mod tests {
         assert_eq!(totals.input_tokens, 1_500_000);
         assert_eq!(fmt_tokens(totals.input_tokens), "1.5M");
 
-        let by_agent = store.usage_totals(Some("codex"), None, Some(&since)).unwrap();
+        let by_agent = store
+            .usage_totals(Some("codex"), None, Some(&since))
+            .unwrap();
         assert_eq!(by_agent.requests, 0);
     }
 

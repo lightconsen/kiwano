@@ -45,10 +45,9 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
             home.join(".config").join("opencode").join("opencode.json"),
             |c| kiwano_adapters::gateway_takeover::read_opencode_current(c),
         ),
-        "openclaw" => read_additive_one(
-            home.join(".openclaw").join("openclaw.json"),
-            |c| kiwano_adapters::gateway_takeover::read_openclaw_current(c),
-        ),
+        "openclaw" => read_additive_one(home.join(".openclaw").join("openclaw.json"), |c| {
+            kiwano_adapters::gateway_takeover::read_openclaw_current(c)
+        }),
         "hermes" => {
             let dir = std::env::var_os("HERMES_HOME")
                 .map(|v| v.to_string_lossy().trim().to_string())
@@ -77,7 +76,12 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
 /// gateway (post-takeover config) or another local proxy — both would loop.
 fn sanitize(creds: CurrentCreds) -> Option<CurrentCreds> {
     let host = host_of(&creds.base_url).to_ascii_lowercase();
-    if host.is_empty() || host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+    if host.is_empty()
+        || host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "[::1]"
+    {
         return None;
     }
     Some(creds)
@@ -155,7 +159,10 @@ pub fn brand_name_for_host(host: &str) -> Option<&'static str> {
         ("github", "GitHub"),
     ];
     let h = host.to_ascii_lowercase();
-    RULES.iter().find(|(needle, _)| h.contains(needle)).map(|(_, name)| *name)
+    RULES
+        .iter()
+        .find(|(needle, _)| h.contains(needle))
+        .map(|(_, name)| *name)
 }
 
 fn from_additive(p: CurrentProvider) -> CurrentCreds {
@@ -189,7 +196,12 @@ fn read_claude(home: &Path) -> Option<CurrentCreds> {
     if api_key.trim().is_empty() {
         return None;
     }
-    Some(CurrentCreds { base_url, api_key, name: None, protocol: "anthropic" })
+    Some(CurrentCreds {
+        base_url,
+        api_key,
+        name: None,
+        protocol: "anthropic",
+    })
 }
 
 /// codex: any `base_url = "…"` line in config.toml (same scan as the rewrite)
@@ -212,7 +224,12 @@ fn read_codex(home: &Path) -> Option<CurrentCreds> {
     if api_key.is_empty() {
         return None;
     }
-    Some(CurrentCreds { base_url, api_key, name: None, protocol: "openai" })
+    Some(CurrentCreds {
+        base_url,
+        api_key,
+        name: None,
+        protocol: "openai",
+    })
 }
 
 /// gemini: .env GOOGLE_GEMINI_BASE_URL + GEMINI_API_KEY.
@@ -224,7 +241,12 @@ fn read_gemini(home: &Path) -> Option<CurrentCreds> {
     if base_url.is_empty() || api_key.is_empty() {
         return None;
     }
-    Some(CurrentCreds { base_url, api_key, name: None, protocol: "gemini" })
+    Some(CurrentCreds {
+        base_url,
+        api_key,
+        name: None,
+        protocol: "gemini",
+    })
 }
 
 /// grokbuild: the selected model's base_url + credentials (adapter handles
@@ -232,7 +254,12 @@ fn read_gemini(home: &Path) -> Option<CurrentCreds> {
 fn read_grokbuild(home: &Path) -> Option<CurrentCreds> {
     let toml = std::fs::read_to_string(home.join(".grok").join("config.toml")).ok()?;
     let (base_url, api_key) = kiwano_adapters::grok_config::extract_credentials(&toml)?;
-    Some(CurrentCreds { base_url, api_key, name: None, protocol: "openai" })
+    Some(CurrentCreds {
+        base_url,
+        api_key,
+        name: None,
+        protocol: "openai",
+    })
 }
 
 #[cfg(test)]
@@ -261,7 +288,10 @@ mod tests {
         assert_eq!(brand_name_for_host("api.moonshot.cn"), Some("Kimi"));
         assert_eq!(brand_name_for_host("open.bigmodel.cn"), Some("Zhipu GLM"));
         assert_eq!(brand_name_for_host("dashscope.aliyuncs.com"), Some("Qwen"));
-        assert_eq!(brand_name_for_host("generativelanguage.googleapis.com"), Some("Google Gemini"));
+        assert_eq!(
+            brand_name_for_host("generativelanguage.googleapis.com"),
+            Some("Google Gemini")
+        );
         assert_eq!(brand_name_for_host("api.x.ai"), Some("xAI"));
         assert_eq!(brand_name_for_host("example.com"), None);
     }

@@ -40,12 +40,13 @@ fn parse_jsonc(content: &str, label: &str) -> Result<Value, String> {
     if content.trim().is_empty() {
         return Ok(Value::Object(Map::new()));
     }
-    json5::from_str(content)
-        .map_err(|e| format!("{label} is not valid JSON/JSONC: {e}"))
+    json5::from_str(content).map_err(|e| format!("{label} is not valid JSON/JSONC: {e}"))
 }
 
 fn require_object(v: Value, label: &str) -> Result<Map<String, Value>, String> {
-    v.as_object().map(|o| o.clone()).ok_or(format!("{label} root must be a JSON object"))
+    v.as_object()
+        .map(|o| o.clone())
+        .ok_or(format!("{label} root must be a JSON object"))
 }
 
 // ── opencode (~/.config/opencode/opencode.json, JSONC) ──
@@ -141,7 +142,11 @@ pub fn read_opencode_current(content: &str) -> Option<CurrentProvider> {
     let entry = obj.get("provider")?.get(&id)?;
     let base_url = entry.get("options")?.get("baseURL")?.as_str()?.to_string();
     let api_key = entry.get("options")?.get("apiKey")?.as_str()?.to_string();
-    Some(CurrentProvider { name: id, base_url, api_key })
+    Some(CurrentProvider {
+        name: id,
+        base_url,
+        api_key,
+    })
 }
 
 /// openclaw: `agents.defaults.model.primary`'s provider entry.
@@ -163,7 +168,11 @@ pub fn read_openclaw_current(content: &str) -> Option<CurrentProvider> {
     let entry = obj.get("models")?.get("providers")?.get(&id)?;
     let base_url = entry.get("baseUrl")?.as_str()?.to_string();
     let api_key = entry.get("apiKey")?.as_str()?.to_string();
-    Some(CurrentProvider { name: id, base_url, api_key })
+    Some(CurrentProvider {
+        name: id,
+        base_url,
+        api_key,
+    })
 }
 
 /// hermes: the `model.provider` name's entry in `custom_providers`.
@@ -173,7 +182,11 @@ pub fn read_hermes_current(content: &str) -> Option<CurrentProvider> {
     let model_key = serde_yaml::Value::String("model".into());
     let provider_key = serde_yaml::Value::String("provider".into());
     let providers_key = serde_yaml::Value::String("custom_providers".into());
-    let provider = root.get(&model_key)?.get(&provider_key)?.as_str()?.to_string();
+    let provider = root
+        .get(&model_key)?
+        .get(&provider_key)?
+        .as_str()?
+        .to_string();
     if provider.is_empty() || provider == GATEWAY_PROVIDER_ID {
         return None;
     }
@@ -183,7 +196,11 @@ pub fn read_hermes_current(content: &str) -> Option<CurrentProvider> {
         .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(provider.as_str()))?;
     let base_url = entry.get("base_url")?.as_str()?.to_string();
     let api_key = entry.get("api_key")?.as_str()?.to_string();
-    Some(CurrentProvider { name: provider, base_url, api_key })
+    Some(CurrentProvider {
+        name: provider,
+        base_url,
+        api_key,
+    })
 }
 
 /// pi: `settings.json` `defaultProvider`'s entry in `models.json`.
@@ -199,7 +216,11 @@ pub fn read_pi_current(models_content: &str, settings_content: &str) -> Option<C
     let entry = models.get("providers")?.get(&id)?;
     let base_url = entry.get("baseUrl")?.as_str()?.to_string();
     let api_key = entry.get("apiKey")?.as_str()?.to_string();
-    Some(CurrentProvider { name: id, base_url, api_key })
+    Some(CurrentProvider {
+        name: id,
+        base_url,
+        api_key,
+    })
 }
 
 // ── hermes (~/.hermes/config.yaml, HERMES_HOME honored by the caller) ──
@@ -213,8 +234,7 @@ pub fn upsert_hermes_gateway(content: &str, base_url: &str, key: &str) -> Result
     let yaml: serde_yaml::Value = if content.trim().is_empty() {
         serde_yaml::Value::Mapping(Default::default())
     } else {
-        serde_yaml::from_str(content)
-            .map_err(|e| format!("config.yaml is not valid YAML: {e}"))?
+        serde_yaml::from_str(content).map_err(|e| format!("config.yaml is not valid YAML: {e}"))?
     };
     let mut root = yaml
         .as_mapping()
@@ -250,15 +270,15 @@ pub fn upsert_hermes_gateway(content: &str, base_url: &str, key: &str) -> Result
         Some(i) => providers[i] = entry,
         None => providers.push(entry),
     }
-    root.insert(
-        name_key,
-        serde_yaml::Value::Sequence(providers),
-    );
+    root.insert(name_key, serde_yaml::Value::Sequence(providers));
 
     // model.provider = kiwano-gateway (create the section when absent)
     let model_key = serde_yaml::Value::String("model".into());
     if !root.get(&model_key).is_some_and(|v| v.is_mapping()) {
-        root.insert(model_key.clone(), serde_yaml::Value::Mapping(Default::default()));
+        root.insert(
+            model_key.clone(),
+            serde_yaml::Value::Mapping(Default::default()),
+        );
     }
     if let Some(model) = root.get_mut(&model_key).and_then(|v| v.as_mapping_mut()) {
         model.insert(
@@ -277,7 +297,11 @@ pub fn upsert_hermes_gateway(content: &str, base_url: &str, key: &str) -> Result
 /// entry declares an empty model list: Pi keeps its own `defaultModel` and the
 /// gateway forwards model names verbatim (documented deviation from
 /// cc-switch, which manages models per provider row).
-pub fn upsert_pi_models_gateway(content: &str, base_url: &str, key: &str) -> Result<String, String> {
+pub fn upsert_pi_models_gateway(
+    content: &str,
+    base_url: &str,
+    key: &str,
+) -> Result<String, String> {
     let root = parse_jsonc(content, "models.json")?;
     let mut obj = require_object(root, "models.json")?;
 
@@ -321,8 +345,9 @@ mod tests {
     "deepseek": { "npm": "@ai-sdk/openai", "options": { "apiKey": "sk-old" } }
   },
 }"#;
-        let out = upsert_opencode_gateway(original, "http://127.0.0.1:8317/v1", "kw-ag-opencode-abcd")
-            .unwrap();
+        let out =
+            upsert_opencode_gateway(original, "http://127.0.0.1:8317/v1", "kw-ag-opencode-abcd")
+                .unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["theme"], "dark");
         assert_eq!(v["model"], "kiwano-gateway/deepseek-chat");
@@ -337,8 +362,7 @@ mod tests {
 
     #[test]
     fn opencode_without_model_selector_only_adds_entry() {
-        let out =
-            upsert_opencode_gateway("{}", "http://127.0.0.1:8317/v1", "kw").unwrap();
+        let out = upsert_opencode_gateway("{}", "http://127.0.0.1:8317/v1", "kw").unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert!(v["provider"][GATEWAY_PROVIDER_ID].is_object());
         assert!(v.get("model").is_none());
@@ -368,8 +392,8 @@ mod tests {
     #[test]
     fn hermes_appends_provider_and_sets_model_provider() {
         let original = "model:\n  default: anthropic/claude-opus-4-8\n  provider: openrouter\nagent:\n  max_turns: 50\ncustom_providers:\n  - name: openrouter\n    base_url: https://openrouter.ai/api/v1\n    api_key: sk-or\n";
-        let out = upsert_hermes_gateway(original, "http://127.0.0.1:8317", "kw-ag-hermes-abcd")
-            .unwrap();
+        let out =
+            upsert_hermes_gateway(original, "http://127.0.0.1:8317", "kw-ag-hermes-abcd").unwrap();
         let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(v["model"]["provider"], "kiwano-gateway");
         assert_eq!(v["model"]["default"], "anthropic/claude-opus-4-8"); // preserved

@@ -96,7 +96,10 @@ fn to_pretty(obj: Map<String, Value>) -> Result<String, String> {
 /// Set `deploymentMode` in a claude_desktop_config.json (missing or non-object
 /// files are normalized to `{}`, all other keys survive).
 pub fn set_deployment_mode(content: &str, mode: &str) -> Result<String, String> {
-    let mut obj = require_object(parse_jsonc(content, "claude_desktop_config.json")?, "claude_desktop_config.json")?;
+    let mut obj = require_object(
+        parse_jsonc(content, "claude_desktop_config.json")?,
+        "claude_desktop_config.json",
+    )?;
     obj.insert("deploymentMode".into(), json!(mode));
     to_pretty(obj)
 }
@@ -211,10 +214,7 @@ mod tests {
         assert_eq!(v["version"], 3); // untouched key survives
         let entries = v["entries"].as_array().unwrap();
         assert_eq!(entries.len(), 2); // other entry kept, stale copy replaced
-        let ours = entries
-            .iter()
-            .find(|e| e["id"] == PROFILE_ID)
-            .unwrap();
+        let ours = entries.iter().find(|e| e["id"] == PROFILE_ID).unwrap();
         assert_eq!(ours["name"], PROFILE_NAME);
     }
 

@@ -922,7 +922,10 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             StrategyType::Quota => {
                 let over = quota_over_threshold(&store, strategy.config.as_deref(), &head);
                 HashSet::from([if over {
-                    enabled.get(1).map(|b| b.provider_id.clone()).unwrap_or(head)
+                    enabled
+                        .get(1)
+                        .map(|b| b.provider_id.clone())
+                        .unwrap_or(head)
                 } else {
                     head
                 }])
@@ -935,7 +938,10 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
 
     // provider → 7d usage totals
     let mut usage_by_id: HashMap<String, UsageTotals> = HashMap::new();
-    for pu in store.usage_by_provider(None, None, Some(&since7)).map_err(e2s)? {
+    for pu in store
+        .usage_by_provider(None, None, Some(&since7))
+        .map_err(e2s)?
+    {
         usage_by_id.insert(pu.provider_id, pu.totals);
     }
 
@@ -1008,7 +1014,10 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 billing: billing_to_ui(p.billing).to_string(),
                 plan_price: crate::plan_quota::plan_monthly_price(p.plan_query.as_deref()),
                 limit_unit: p.limit_unit.clone(),
-                plan_limits: p.plan_limits.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+                plan_limits: p
+                    .plan_limits
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok()),
                 enabled: p.enabled,
                 agents,
                 serving_agents,
@@ -1018,7 +1027,10 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 health,
                 usage,
                 advanced: advanced_vm(&p),
-                plan_query: p.plan_query.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+                plan_query: p
+                    .plan_query
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok()),
             }
         })
         .collect();
@@ -1178,7 +1190,10 @@ pub fn update_agent_binding(
     }
     // Both bounds are set/cleared together: a half window would never match.
     if win_start.is_some() || win_end.is_some() {
-        let (s, e) = (win_start.filter(|v| !v.is_empty()), win_end.filter(|v| !v.is_empty()));
+        let (s, e) = (
+            win_start.filter(|v| !v.is_empty()),
+            win_end.filter(|v| !v.is_empty()),
+        );
         match (s, e) {
             (Some(s), Some(e)) => {
                 b.win_start = Some(s);
@@ -1404,7 +1419,10 @@ fn usage_vm(
                     "wan_tokens",
                 ),
                 // Currency limits ring against the converted usage cost.
-                Some(u) if u.len() == 3 => (crate::pricing::convert_cost_buckets(&cost_buckets, u, &rates), u),
+                Some(u) if u.len() == 3 => (
+                    crate::pricing::convert_cost_buckets(&cost_buckets, u, &rates),
+                    u,
+                ),
                 _ => (t.requests as f64, "requests"),
             };
             QuotaVm {
@@ -1477,8 +1495,7 @@ fn advanced_columns(adv: &AdvancedInput) -> (Option<i64>, Option<i64>, Option<St
                 .filter(|(k, v)| !k.trim().is_empty() && !v.is_empty())
                 .map(|(k, v)| (k.trim().to_string(), serde_json::Value::String(v.clone())))
                 .collect();
-            (!sanitized.is_empty())
-                .then(|| serde_json::Value::Object(sanitized).to_string())
+            (!sanitized.is_empty()).then(|| serde_json::Value::Object(sanitized).to_string())
         })
         .unwrap_or(None);
     (timeout_secs, retries, headers)
@@ -1568,7 +1585,11 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
         billing: billing_to_db(&input.billing),
-        period_limit: if is_plan { None } else { input.billing_config.limit_value },
+        period_limit: if is_plan {
+            None
+        } else {
+            input.billing_config.limit_value
+        },
         limit_unit: if is_plan {
             None
         } else {
@@ -1739,7 +1760,11 @@ pub fn update_provider(
     // Plan rows carry percent limits in plan_limits and NULL the legacy
     // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
     let is_plan = p.billing == kiwano_gateway::store::Billing::Subscription;
-    p.period_limit = if is_plan { None } else { input.billing_config.limit_value };
+    p.period_limit = if is_plan {
+        None
+    } else {
+        input.billing_config.limit_value
+    };
     p.limit_unit = if is_plan {
         None
     } else {
@@ -2073,7 +2098,10 @@ pub fn set_agent_takeover(
 /// base_url (trailing slash ignored) reuses the existing row — that shared
 /// provider then also serves other agents; otherwise insert a new PAYG row
 /// named after the config's provider key (or the URL host).
-fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) -> Result<String, String> {
+fn import_current_provider(
+    store: &Store,
+    creds: &crate::creds::CurrentCreds,
+) -> Result<String, String> {
     let base = creds.base_url.trim().trim_end_matches('/');
     for p in store.list_providers().map_err(e2s)? {
         if p.base_url.trim().trim_end_matches('/') == base {
@@ -2086,11 +2114,19 @@ fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) ->
         crate::creds::brand_name_for_host(&host)
             .map(String::from)
             .unwrap_or_else(|| {
-                if host.is_empty() { "Imported provider".into() } else { host }
+                if host.is_empty() {
+                    "Imported provider".into()
+                } else {
+                    host
+                }
             })
     });
     let provider = Provider {
-        id: format!("{}-{}", slug(&name), &uuid::Uuid::new_v4().simple().to_string()[..6]),
+        id: format!(
+            "{}-{}",
+            slug(&name),
+            &uuid::Uuid::new_v4().simple().to_string()[..6]
+        ),
         name,
         protocol: kiwano_gateway::store::Protocol::from_str(creds.protocol)
             .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
@@ -2240,10 +2276,12 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
                     .unwrap_or_default();
                 crate::pricing::convert_cost_buckets(&buckets, u, &rates)
             }
-            _ => store
-                .usage_totals_for_provider(&p.id, since.as_deref())
-                .map_err(e2s)?
-                .requests as f64,
+            _ => {
+                store
+                    .usage_totals_for_provider(&p.id, since.as_deref())
+                    .map_err(e2s)?
+                    .requests as f64
+            }
         };
         if used < limit {
             continue;
@@ -2432,7 +2470,9 @@ pub fn build_dashboard(
         _ => ("7d", rfc3339(now - 7 * 86_400), 7),
     };
 
-    let cur = store.usage_totals(agent, provider_id, Some(&since)).map_err(e2s)?;
+    let cur = store
+        .usage_totals(agent, provider_id, Some(&since))
+        .map_err(e2s)?;
     // Headline request count shares the Logs card's source (request_logs):
     // usage rows only cover forwarded requests, so failures before the forward
     // leg (no provider bound, protocol mismatch…) would vanish from the top
@@ -2652,7 +2692,9 @@ pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
     for e in &mut list.entries {
         let mut endpoints = vec![&e.endpoint];
         endpoints.extend(e.endpoints.iter().map(|x| &x.endpoint));
-        e.added = endpoints.iter().any(|url| keys.contains(&endpoint_key(url)));
+        e.added = endpoints
+            .iter()
+            .any(|url| keys.contains(&endpoint_key(url)));
     }
     list
 }
@@ -2854,8 +2896,12 @@ mod tests {
             protocol: "openai",
         };
         // trailing-slash variants dedup to one row
-        let id1 = import_current_provider(&s, &creds("https://api.deepseek.com/v1/", Some("deepseek"))).unwrap();
-        let id2 = import_current_provider(&s, &creds("https://api.deepseek.com/v1", Some("deepseek"))).unwrap();
+        let id1 =
+            import_current_provider(&s, &creds("https://api.deepseek.com/v1/", Some("deepseek")))
+                .unwrap();
+        let id2 =
+            import_current_provider(&s, &creds("https://api.deepseek.com/v1", Some("deepseek")))
+                .unwrap();
         assert_eq!(id1, id2);
         let list = s.list_providers().unwrap();
         assert_eq!(list.len(), 1);
@@ -2942,12 +2988,21 @@ mod tests {
     #[test]
     fn standby_flag_follows_strategy() {
         let s = store();
-        for (id, name) in [("a1", "Alpha"), ("b1", "Beta"), ("c1", "Gamma"), ("d1", "Delta")] {
-            s.insert_provider(&provider(id, name, Billing::Metered)).unwrap();
+        for (id, name) in [
+            ("a1", "Alpha"),
+            ("b1", "Beta"),
+            ("c1", "Gamma"),
+            ("d1", "Delta"),
+        ] {
+            s.insert_provider(&provider(id, name, Billing::Metered))
+                .unwrap();
         }
-        s.upsert_strategy("codex", StrategyType::Roundrobin, None).unwrap();
-        s.upsert_strategy("gemini", StrategyType::Timewindow, None).unwrap();
-        s.upsert_strategy("hermes", StrategyType::Timewindow, None).unwrap();
+        s.upsert_strategy("codex", StrategyType::Roundrobin, None)
+            .unwrap();
+        s.upsert_strategy("gemini", StrategyType::Timewindow, None)
+            .unwrap();
+        s.upsert_strategy("hermes", StrategyType::Timewindow, None)
+            .unwrap();
         let bind = |agent: &str, pid: &str, priority: i64, win: Option<(&str, &str)>| Binding {
             agent: agent.into(),
             provider_id: pid.into(),
@@ -2962,7 +3017,8 @@ mod tests {
         s.upsert_binding(&bind("codex", "b1", 1, None)).unwrap();
         // windowed timewindow tail: serves its own window → not a standby
         s.upsert_binding(&bind("gemini", "a1", 0, None)).unwrap();
-        s.upsert_binding(&bind("gemini", "c1", 1, Some(("22:00", "06:00")))).unwrap();
+        s.upsert_binding(&bind("gemini", "c1", 1, Some(("22:00", "06:00"))))
+            .unwrap();
         // windowless timewindow tail: never picked → still a standby
         s.upsert_binding(&bind("hermes", "a1", 0, None)).unwrap();
         s.upsert_binding(&bind("hermes", "d1", 1, None)).unwrap();
@@ -2984,10 +3040,13 @@ mod tests {
     #[test]
     fn apply_agent_route_copies_strategy_and_candidates() {
         let s = store();
-        s.insert_provider(&provider("a1", "Alpha", Billing::Metered)).unwrap();
-        s.insert_provider(&provider("b1", "Beta", Billing::Subscription)).unwrap();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
+            .unwrap();
+        s.insert_provider(&provider("b1", "Beta", Billing::Subscription))
+            .unwrap();
         // source: roundrobin with tuned weights and a windowed tail
-        s.upsert_strategy("codex", StrategyType::Roundrobin, None).unwrap();
+        s.upsert_strategy("codex", StrategyType::Roundrobin, None)
+            .unwrap();
         s.upsert_binding(&Binding {
             agent: "codex".into(),
             provider_id: "a1".into(),
@@ -3009,7 +3068,8 @@ mod tests {
         })
         .unwrap();
         // target: an unrelated failover route that gets replaced wholesale
-        s.upsert_strategy("gemini", StrategyType::Failover, None).unwrap();
+        s.upsert_strategy("gemini", StrategyType::Failover, None)
+            .unwrap();
         s.upsert_binding(&Binding {
             agent: "gemini".into(),
             provider_id: "a1".into(),
@@ -3597,11 +3657,7 @@ mod tests {
     #[test]
     fn roundrobin_strategy_seeds_even_weights() {
         let s = store();
-        for (pid, name, pr) in [
-            ("a1", "Alpha", 0),
-            ("b1", "Beta", 1),
-            ("c1", "Gamma", 2),
-        ] {
+        for (pid, name, pr) in [("a1", "Alpha", 0), ("b1", "Beta", 1), ("c1", "Gamma", 2)] {
             s.insert_provider(&provider(pid, name, Billing::Metered))
                 .unwrap();
             s.upsert_binding(&Binding {
@@ -3703,8 +3759,13 @@ mod tests {
         assert_eq!(in_use(&s), (true, false));
 
         // quota: head under threshold; over → first backup (windows ignored)
-        set_agent_strategy(&s, "claude", "quota", Some(r#"{"limit":5,"unit":"requests"}"#))
-            .unwrap();
+        set_agent_strategy(
+            &s,
+            "claude",
+            "quota",
+            Some(r#"{"limit":5,"unit":"requests"}"#),
+        )
+        .unwrap();
         assert_eq!(in_use(&s), (true, false));
         for _ in 0..5 {
             s.record_usage(&kiwano_gateway::store::UsageRecord {

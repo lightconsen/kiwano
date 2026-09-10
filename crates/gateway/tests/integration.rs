@@ -159,7 +159,7 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         period_limit: None,
         limit_unit: None,
         plan_query: None,
-            plan_limits: None,
+        plan_limits: None,
         timeout_secs: None,
         retries: None,
         headers: None,
@@ -285,13 +285,19 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
     drop(captured);
 
     // Usage metered into SQLite, attributed to agent + provider.
-    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
+    let totals = state
+        .store
+        .usage_totals(Some("claude"), None, None)
+        .unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 2095);
     assert_eq!(totals.output_tokens, 503);
     assert_eq!(totals.cache_creation_tokens, 2095);
 
-    let by_provider = state.store.usage_by_provider(Some("claude"), None, None).unwrap();
+    let by_provider = state
+        .store
+        .usage_by_provider(Some("claude"), None, None)
+        .unwrap();
     assert_eq!(by_provider.len(), 1);
     assert_eq!(by_provider[0].provider_id, "p-ant");
 }
@@ -584,7 +590,10 @@ async fn anthropic_inbound_converts_non_streaming_to_openai_upstream() {
     assert!(sent[0].get("system").is_none());
 
     // Usage metered from the upstream OpenAI usage block.
-    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
+    let totals = state
+        .store
+        .usage_totals(Some("claude"), None, None)
+        .unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 42);
     assert_eq!(totals.output_tokens, 7);
@@ -749,7 +758,10 @@ async fn gemini_inbound_passthrough_meters_usage_metadata() {
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["modelVersion"], "gemini-2.5-pro");
-    assert_eq!(body["candidates"][0]["content"]["parts"][0]["text"], "hello");
+    assert_eq!(
+        body["candidates"][0]["content"]["parts"][0]["text"],
+        "hello"
+    );
 
     // The real key went upstream as x-goog-api-key; the placeholder never left.
     let captured = captured.lock().unwrap();
@@ -760,13 +772,19 @@ async fn gemini_inbound_passthrough_meters_usage_metadata() {
     drop(captured);
 
     // usageMetadata metered into SQLite, attributed to the gemini agent.
-    let totals = state.store.usage_totals(Some("gemini"), None, None).unwrap();
+    let totals = state
+        .store
+        .usage_totals(Some("gemini"), None, None)
+        .unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(totals.input_tokens, 88);
     assert_eq!(totals.output_tokens, 31);
     assert_eq!(totals.cache_read_tokens, 12);
 
-    let by_provider = state.store.usage_by_provider(Some("gemini"), None, None).unwrap();
+    let by_provider = state
+        .store
+        .usage_by_provider(Some("gemini"), None, None)
+        .unwrap();
     assert_eq!(by_provider.len(), 1);
     assert_eq!(by_provider[0].provider_id, "p-gem");
 }
@@ -795,7 +813,10 @@ async fn unknown_key_on_anthropic_path_falls_back_to_claude() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Fallback attribution still meters to the claude agent.
-    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
+    let totals = state
+        .store
+        .usage_totals(Some("claude"), None, None)
+        .unwrap();
     assert_eq!(totals.requests, 1);
     assert_eq!(captured.lock().unwrap().len(), 1);
 }
@@ -830,7 +851,13 @@ async fn request_log_captures_bodies_and_metadata() {
     let app = data_plane_router(state.clone());
 
     let request_body = r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#;
-    let response = post_json(&app, "/v1/messages", Some("kw-ag-claude-test"), request_body).await;
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        request_body,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let response_bytes = response_body(response).await;
 
@@ -985,7 +1012,10 @@ async fn request_log_disabled_records_nothing() {
         .unwrap();
     assert_eq!(total, 0);
 
-    let totals = state.store.usage_totals(Some("claude"), None, None).unwrap();
+    let totals = state
+        .store
+        .usage_totals(Some("claude"), None, None)
+        .unwrap();
     assert_eq!(totals.requests, 1);
 }
 

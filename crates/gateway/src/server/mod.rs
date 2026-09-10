@@ -69,10 +69,7 @@ impl GatewayState {
     /// Current price-table snapshot (cheap clone; bundled data is static but
     /// a future backend-fed table swaps here on `/reload`).
     pub fn pricing(&self) -> kiwano_adapters::model_pricing::PricingTable {
-        self.pricing
-            .read()
-            .expect("pricing lock poisoned")
-            .clone()
+        self.pricing.read().expect("pricing lock poisoned").clone()
     }
 
     /// Current route table snapshot (cheap `Arc` clone).

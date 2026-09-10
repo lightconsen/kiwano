@@ -18,7 +18,7 @@ import type {
   Provider,
 } from "./api/types";
 import { Dot } from "./components/bits";
-import { fmtTokens } from "./lib/format";
+import { fmtMoney, fmtTokens } from "./lib/format";
 import logoUrl from "./assets/kiwano-logo.svg";
 import Providers from "./screens/Providers";
 import Shelf from "./screens/Shelf";
@@ -102,7 +102,11 @@ export default function App() {
             if (st !== "granted") return;
           }
           const used =
-            a.unit === "wan_tokens" ? `${(a.used * 10).toLocaleString()}k tokens` : `${a.used.toLocaleString()} requests`;
+            a.unit === "wan_tokens"
+              ? `${(a.used * 10).toLocaleString()}k tokens`
+              : a.unit === "requests"
+                ? `${a.used.toLocaleString()} requests`
+                : fmtMoney(a.used, a.unit);
           sendNotification({
             title: "Kiwano cost alert",
             body: `${a.provider_name} used ${used} this period and has hit its limit of ${a.limit} — watch your spending`,

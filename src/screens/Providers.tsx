@@ -1,7 +1,7 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
 import { useCallback, useEffect, useMemo, useState, type FocusEvent, type ReactNode } from "react";
 
-import { ArrowDown, ArrowUp, Pencil, Pin, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Pin, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,9 +14,12 @@ import {
 import { api } from "../api/client";
 import {
   AGENTS,
+  PLAN_TIER_LABELS,
   type AgentDetect,
   type AgentId,
   type AgentRoute,
+  type CurrencyMeta,
+  type PlanQuotaReport,
   type Provider,
   type StrategyBinding,
 } from "../api/types";
@@ -24,7 +27,7 @@ import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bi
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { iconForEndpoint } from "@/components/icons/infer";
 import StrategyPanel, { CopyRouteRow } from "../components/StrategyPanel";
-import { fmtCny, fmtLatency, fmtTokens } from "../lib/format";
+import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
 
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
@@ -140,36 +143,79 @@ function usageTitle(p: Provider): string {
   if (!u) return "";
   if (p.billing === "plan" && u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
-    return `Plan · ${u.quota.used}/${u.quota.limit} requests this period (${pct}%) · resets ${u.quota.resets_at ?? ""} · in ${fmtTokens(u.input_tokens)} · out ${fmtTokens(u.output_tokens)}`;
+    const unitLabel = u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? u.quota.unit : u.quota.unit;
+    return `Plan · ${u.quota.used}/${u.quota.limit} ${unitLabel} this period (${pct}%) · resets ${u.quota.resets_at ?? ""} · in ${fmtTokens(u.input_tokens)} · out ${fmtTokens(u.output_tokens)}`;
   }
   if (p.billing === "unl") return "Local inference · no cost metering · works offline";
   if (u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
-    return `Pay as you go · ${fmtCny(u.cost ?? 0)} / ${fmtCny(u.quota.limit)} this period (${pct}%) · in ${fmtTokens(u.input_tokens)} (cache ${fmtTokens(u.cache_read_tokens)}, billed at 1/10) · out ${fmtTokens(u.output_tokens)} · latency ${fmtLatency(u.latency_ms)}`;
+    return `Pay as you go · ${fmtMoney(u.quota.used, u.quota.unit)} / ${fmtMoney(u.quota.limit, u.quota.unit)} this period (${pct}%) · in ${fmtTokens(u.input_tokens)} (cache ${fmtTokens(u.cache_read_tokens)}, billed at 1/10) · out ${fmtTokens(u.output_tokens)} · latency ${fmtLatency(u.latency_ms)}`;
   }
   return "Pay as you go · no limit set · 7-day usage trend";
 }
 
-function UsageCell({ p }: { p: Provider }) {
+/** Quota amount text: counted units render raw, currencies via fmtMoney */
+function quotaAmountText(used: number, limit: number, unit: string): string {
+  if (unit === "requests") return `${used}/${limit}`;
+  if (unit === "wan_tokens") return `${used}/${limit}`;
+  return `${fmtMoney(used, unit)} / ${fmtMoney(limit, unit)}`;
+}
+
+function UsageCell({
+  p,
+  plan,
+  pref,
+}: {
+  p: Provider;
+  /** Plan-quota report for providers with a plan query (undefined = not fetched yet) */
+  plan?: PlanQuotaReport;
+  /** Preferred display currency (Settings) for cost-only payg cells */
+  pref: string;
+}) {
   const u = p.usage;
   if (!u) return <div className="w-[22%]" />;
   const title = usageTitle(p);
 
   if (p.billing === "plan" && u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
+    const planLine = plan?.success
+      ? plan.tiers
+          .map((t) => `${PLAN_TIER_LABELS[t.name] ?? t.name} ${Math.round(t.utilization)}%`)
+          .join(" · ")
+      : plan && !plan.success
+        ? plan.error
+        : null;
+    const maxUtil = plan?.success ? Math.max(...plan.tiers.map((t) => t.utilization), 0) : 0;
     return (
       <div className="flex w-[22%] items-center gap-2" title={title}>
         <Ring pct={pct} color={ringColor("plan", pct)} />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
             <BillTag billing="plan" />
-            {u.quota.used}/{u.quota.limit} <span className="font-normal text-mut">req</span>
+            {u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? (
+              <>
+                {u.quota.used}/{u.quota.limit}{" "}
+                <span className="font-normal text-mut">{u.quota.unit === "requests" ? "req" : "万 tok"}</span>
+              </>
+            ) : (
+              <span>{quotaAmountText(u.quota.used, u.quota.limit, u.quota.unit)}</span>
+            )}
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
             {[p.plan_price, u.quota.resets_at ? `resets ${u.quota.resets_at.slice(5)}` : null]
               .filter(Boolean)
               .join(" · ")}
           </div>
+          {/* Live plan quota (套餐查询): per-window utilization from the provider's own endpoint */}
+          {planLine && (
+            <div
+              className="mt-0.5 truncate text-[10.5px]"
+              style={{ color: maxUtil >= 95 ? "var(--red)" : maxUtil >= 80 ? "var(--amber)" : "var(--mut)" }}
+              title={plan && !plan.success ? (plan.error ?? "") : `${plan?.template}${plan?.cached ? " · cached" : ""}`}
+            >
+              {planLine}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -197,7 +243,10 @@ function UsageCell({ p }: { p: Provider }) {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
             <BillTag billing="payg" />
-            {fmtCny(u.cost ?? 0)} <span className="font-normal text-mut">/ {fmtCny(u.quota.limit)} limit</span>
+            {quotaAmountText(u.quota.used, u.quota.limit, u.quota.unit).split(" / ")[0]}{" "}
+            <span className="font-normal text-mut">
+              / {u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? u.quota.limit : fmtMoney(u.quota.limit, u.quota.unit)} limit
+            </span>
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
             {fmtTokens(u.input_tokens + u.output_tokens)} tokens · latency {fmtLatency(u.latency_ms)}
@@ -211,7 +260,7 @@ function UsageCell({ p }: { p: Provider }) {
     <div className="w-[22%]" title={title}>
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
         <BillTag billing="payg" />
-        {fmtCny(u.cost ?? 0)} <span className="font-normal text-mut">· {u.requests} req</span>
+        {fmtMoney(u.cost ?? 0, pref)} <span className="font-normal text-mut">· {u.requests} req</span>
       </div>
       {u.spark && (
         <span className="mt-1 block w-20">
@@ -279,10 +328,14 @@ function HealthCell({ p }: { p: Provider }) {
 
 function ProviderRow({
   p,
+  plan,
+  pref,
   onEdit,
   onDelete,
 }: {
   p: Provider;
+  plan?: PlanQuotaReport;
+  pref: string;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
@@ -318,7 +371,7 @@ function ProviderRow({
         )}
       </div>
 
-      <UsageCell p={p} />
+      <UsageCell p={p} plan={plan} pref={pref} />
 
       <HealthCell p={p} />
 
@@ -550,6 +603,8 @@ function BindingRow({
   route,
   b,
   idx,
+  plan,
+  pref,
   onMove,
   onChanged,
 }: {
@@ -557,6 +612,8 @@ function BindingRow({
   route: AgentRoute;
   b: StrategyBinding;
   idx: number;
+  plan?: PlanQuotaReport;
+  pref: string;
   onMove: (idx: number, dir: -1 | 1) => void;
   onChanged: () => void;
 }) {
@@ -582,7 +639,7 @@ function BindingRow({
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
 
-      <UsageCell p={p} />
+      <UsageCell p={p} plan={plan} pref={pref} />
 
       <HealthCell p={p} />
 
@@ -736,6 +793,11 @@ export default function Providers({
   const [seg, setSeg] = useState<AgentId | "all">(initialAgent ?? "all");
   const [takenOver, setTakenOver] = useState<Set<AgentId> | null>(null);
   const [enabling, setEnabling] = useState(false);
+  // Plan-quota reports per provider (套餐查询), auto-refreshed on load
+  const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
+  const [quotaBusy, setQuotaBusy] = useState(false);
+  // Currency metadata (preferred display currency for cost cells)
+  const [currencyMeta, setCurrencyMeta] = useState<CurrencyMeta | null>(null);
 
   // Segment switch that keeps the #providers/<agent> deep link truthful
   const pickSeg = (id: AgentId | "all") => {
@@ -759,6 +821,44 @@ export default function Providers({
       .catch(() => {});
   }, []);
   useEffect(refetch, [refetch]);
+
+  // Currency metadata: preferred display currency + conversion rates
+  useEffect(() => {
+    api.getCurrencyMeta().then(setCurrencyMeta).catch(() => {});
+  }, []);
+
+  // Auto plan-quota refresh on load: one cached call per provider configured
+  // with a plan query (the 5-min backend cache keeps this cheap)
+  useEffect(() => {
+    if (!providers) return;
+    for (const p of providers) {
+      if (!p.plan_query) continue;
+      api
+        .getPlanQuota(p.id)
+        .then((r) => setPlanQuotas((m) => ({ ...m, [p.id]: r })))
+        .catch(() => {});
+    }
+  }, [providers]);
+
+  // Manual refresh: bypasses the backend's 5-minute quota cache
+  const refreshQuotas = async () => {
+    if (!providers || quotaBusy) return;
+    setQuotaBusy(true);
+    try {
+      const results = await Promise.all(
+        providers
+          .filter((p) => p.plan_query)
+          .map((p) => api.getPlanQuota(p.id, true).then((r) => [p.id, r] as const).catch(() => null)),
+      );
+      const fresh: Record<string, PlanQuotaReport> = {};
+      for (const r of results) {
+        if (r) fresh[r[0]] = r[1];
+      }
+      setPlanQuotas((m) => ({ ...m, ...fresh }));
+    } finally {
+      setQuotaBusy(false);
+    }
+  };
 
   // Only agents that phase 1 detected as installed get a segment; a failed
   // probe (null) keeps every agent visible.
@@ -846,7 +946,24 @@ export default function Providers({
         <span className="ml-1.5 text-[11.5px] text-mut">
           {providers.length} providers · {agentsBound} agents bound
         </span>
-        <Button size="sm" className="ml-auto h-7 gap-1 px-2.5 text-[12px] font-semibold" onClick={onAdd}>
+        {providers.some((p) => p.plan_query) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 w-7 px-0 text-mut"
+            aria-label="Refresh plan quotas"
+            title="Refresh plan quotas (bypasses the 5-min cache)"
+            disabled={quotaBusy}
+            onClick={refreshQuotas}
+          >
+            <RefreshCw className={`h-3.5 w-3.5${quotaBusy ? " animate-spin" : ""}`} />
+          </Button>
+        )}
+        <Button
+          size="sm"
+          className={`h-7 gap-1 px-2.5 text-[12px] font-semibold${providers.some((p) => p.plan_query) ? "" : " ml-auto"}`}
+          onClick={onAdd}
+        >
           <Plus className="h-3.5 w-3.5" />
           Add provider
         </Button>
@@ -878,11 +995,28 @@ export default function Providers({
                 const p = byId.get(b.provider_id);
                 // Skip a binding whose provider row vanished (deleted mid-session)
                 return p ? (
-                  <BindingRow key={b.provider_id} p={p} route={route} b={b} idx={i} onMove={onMoveBinding} onChanged={refetch} />
+                  <BindingRow
+                    key={b.provider_id}
+                    p={p}
+                    route={route}
+                    b={b}
+                    idx={i}
+                    plan={planQuotas[p.id]}
+                    pref={currencyMeta?.preferred ?? "CNY"}
+                    onMove={onMoveBinding}
+                    onChanged={refetch}
+                  />
                 ) : null;
               })
             : filtered.map((p) => (
-                <ProviderRow key={p.id} p={p} onEdit={onEdit} onDelete={onDelete} />
+                <ProviderRow
+                  key={p.id}
+                  p={p}
+                  plan={planQuotas[p.id]}
+                  pref={currencyMeta?.preferred ?? "CNY"}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                />
               ))}
 
           {/* Bind-one-more entry under the candidate queue of an agent tab */}

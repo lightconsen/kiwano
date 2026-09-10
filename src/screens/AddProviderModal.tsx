@@ -22,6 +22,7 @@ import {
 import { api } from "../api/client";
 import {
   AGENTS,
+  PLAN_QUERY_TEMPLATES,
   type AgentId,
   type ApiKeyEntry,
   type Billing,
@@ -101,7 +102,12 @@ export default function AddProviderModal({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [billing, setBilling] = useState<Billing>("payg");
   const [limitValue, setLimitValue] = useState("");
-  const [limitUnit, setLimitUnit] = useState<"requests" | "wan_tokens" | "cny">("cny");
+  // Plan limit unit: requests / wan_tokens / 3-letter ISO currency
+  const [limitUnit, setLimitUnit] = useState<"requests" | "wan_tokens" | (string & {})>("CNY");
+  // Pay-as-you-go spending-limit currency (kept separate: the plan unit can be requests/tokens)
+  const [paygCurrency, setPaygCurrency] = useState("CNY");
+  // ISO codes offered by the unit/currency selects (bundled price table)
+  const [currencies, setCurrencies] = useState<string[]>([]);
   const [resetPeriod, setResetPeriod] = useState<"monthly" | "weekly" | "yearly" | "none">("monthly");
   const [agents, setAgents] = useState<AgentId[]>([]);
   // Multi-select dropdown for agent binding (rows = logo + name)
@@ -122,6 +128,11 @@ export default function AddProviderModal({
   const [advTimeout, setAdvTimeout] = useState("");
   const [advRetries, setAdvRetries] = useState("");
   const [advHeaders, setAdvHeaders] = useState<{ name: string; value: string }[]>([]);
+  // Plan-quota query config (edit mode): "" = not configured. Fields are the
+  // selected template's extra credentials (org/project IDs, AK/SK, quota URL).
+  const [pqOpen, setPqOpen] = useState(false);
+  const [pqTemplate, setPqTemplate] = useState("");
+  const [pqFields, setPqFields] = useState<Record<string, string>>({});
 
   // Prefill the form from a catalog entry (Models-page preset or in-modal pick)
   const applyShelf = (e: CatalogEntry) => {
@@ -134,11 +145,15 @@ export default function AddProviderModal({
     setModel(e.models[0] ?? "");
     setBilling(e.billing);
     setLimitValue(e.billing === "payg" ? "50" : "");
-    setLimitUnit("cny");
+    setLimitUnit("CNY");
+    setPaygCurrency("CNY");
     setResetPeriod("monthly");
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
     setFetchedModels(null);
     setFetchError(null);
+    setPqTemplate("");
+    setPqFields({});
+    setPqOpen(false);
     resetAdvanced();
   };
 
@@ -235,9 +250,21 @@ export default function AddProviderModal({
       setBilling(edit.billing);
       const q = edit.usage?.quota;
       setLimitValue(q ? String(q.limit) : "");
-      setLimitUnit(q?.unit === "requests" ? "requests" : "cny");
+      // Plan quota unit is authoritative; payg providers have no quota row,
+      // so restore their stored currency from limit_unit.
+      const unit = q?.unit ?? edit.limit_unit;
+      setLimitUnit(
+        unit === "requests" || unit === "wan_tokens" || (unit && unit.length === 3)
+          ? (unit as string)
+          : "CNY",
+      );
+      setPaygCurrency(edit.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : "CNY");
       setResetPeriod("monthly");
       setAgents([...edit.agents]);
+      const pq = edit.plan_query;
+      setPqTemplate(pq?.template ?? "");
+      setPqFields(pq?.fields ? { ...pq.fields } : {});
+      setPqOpen(!!pq);
       setAdvOpen(!!edit.advanced);
       setAdvTimeout(edit.advanced?.timeout_secs != null ? String(edit.advanced.timeout_secs) : "");
       setAdvRetries(edit.advanced?.retries != null ? String(edit.advanced.retries) : "");
@@ -263,11 +290,22 @@ export default function AddProviderModal({
       setModel("");
       setBilling("payg");
       setLimitValue("");
-      setLimitUnit("cny");
+      setLimitUnit("CNY");
+      setPaygCurrency("CNY");
+      setPqTemplate("");
+      setPqFields({});
+      setPqOpen(false);
       setResetPeriod("monthly");
       setAgents([]);
     }
   }, [open, preset, edit]);
+
+  // Currency codes for the limit-unit / plan-query selects (fetched once)
+  useEffect(() => {
+    if (open && currencies.length === 0) {
+      api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
+    }
+  }, [open, currencies.length]);
 
   // Catalog loads lazily, the first time the in-modal picker is shown
   useEffect(() => {
@@ -288,6 +326,17 @@ export default function AddProviderModal({
   }, [agentsOpen]);
 
   const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
+
+  // Non-empty credential fields of the selected template (empty rows dropped)
+  const pqFieldInputs = (): Record<string, string> => {
+    const def = PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate);
+    const out: Record<string, string> = {};
+    for (const f of def?.fields ?? []) {
+      const v = (pqFields[f.key] ?? "").trim();
+      if (v !== "") out[f.key] = v;
+    }
+    return out;
+  };
 
   const maskKey = (k: string) => (k.length > 12 ? `${k.slice(0, 6)}…${k.slice(-4)}` : k);
 
@@ -344,7 +393,7 @@ export default function AddProviderModal({
         billing,
         billing_config: {
           limit_value: limitValue ? Number(limitValue) : undefined,
-          limit_unit: billing === "plan" ? limitUnit : billing === "payg" ? "cny" : undefined,
+          limit_unit: billing === "plan" ? limitUnit : billing === "payg" ? paygCurrency : undefined,
           reset_period: billing === "plan" ? resetPeriod : undefined,
         },
         agents,
@@ -354,6 +403,8 @@ export default function AddProviderModal({
           retries: advRetries ? Number(advRetries) : null,
           headers: Object.keys(headerMap).length > 0 ? headerMap : undefined,
         },
+        // Edit only: "" = clear the config, a template = authoritative snapshot.
+        plan_query: edit ? (pqTemplate ? { template: pqTemplate, fields: pqFieldInputs() } : null) : undefined,
       };
       if (edit) {
         await api.updateProvider(edit.id, input);
@@ -701,7 +752,11 @@ export default function AddProviderModal({
                       <SelectContent>
                         <SelectItem value="requests">Requests</SelectItem>
                         <SelectItem value="wan_tokens">10k tokens</SelectItem>
-                        <SelectItem value="cny">¥ amount</SelectItem>
+                        {(currencies.length ? currencies : ["CNY"]).map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {c}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -731,12 +786,26 @@ export default function AddProviderModal({
                 <Label className="text-[11px] font-medium text-mut">
                   Spending limit <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>optional · leave blank to show the usage trend</span>
                 </Label>
-                <Input
-                  className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                  value={limitValue}
-                  onChange={(e) => setLimitValue(e.target.value)}
-                  placeholder="¥"
-                />
+                <div className="mt-1 flex gap-1.5">
+                  <Input
+                    className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+                    value={limitValue}
+                    onChange={(e) => setLimitValue(e.target.value)}
+                    placeholder="50"
+                  />
+                  <Select value={paygCurrency} onValueChange={(v) => setPaygCurrency(v ?? "CNY")}>
+                    <SelectTrigger className="w-[84px] bg-bg text-[12px] dark:bg-bg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(currencies.length ? currencies : [paygCurrency]).map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
 
@@ -861,6 +930,69 @@ export default function AddProviderModal({
                     </Button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Plan quota query (edit mode): queries the provider's own plan
+                usage endpoint for quota chips. Extra credentials render per
+                template; templates without them reuse the primary API key. */}
+            {edit && (
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-full justify-between text-[11.5px] text-mut"
+                  onClick={() => setPqOpen((o) => !o)}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Gauge className="h-3 w-3" />
+                    Plan quota query
+                    {pqTemplate && (
+                      <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>
+                        {PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate)?.label ?? pqTemplate}
+                      </span>
+                    )}
+                  </span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${pqOpen ? "rotate-180" : ""}`} />
+                </Button>
+                {pqOpen && (
+                  <div className="mt-2 space-y-2.5">
+                    <div>
+                      <Label className="text-[10.5px] font-medium text-mut">Template</Label>
+                      {/* "none" sentinel: Radix SelectItem rejects empty values */}
+                      <Select
+                        value={pqTemplate === "" ? "none" : pqTemplate}
+                        onValueChange={(v) => setPqTemplate(v === "none" || v == null ? "" : v)}
+                      >
+                        <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {PLAN_QUERY_TEMPLATES.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {(PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate)?.fields ?? []).map((f) => (
+                      <div key={f.key}>
+                        <Label className="text-[10.5px] font-medium text-mut">{f.label}</Label>
+                        <Input
+                          className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+                          value={pqFields[f.key] ?? ""}
+                          onChange={(e) => setPqFields((m) => ({ ...m, [f.key]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                    <p className="text-[10.5px] text-mut">
+                      Queries the plan usage with the provider's API key (5-min cache);
+                      quota chips refresh on the Providers page.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

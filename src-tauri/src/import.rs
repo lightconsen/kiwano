@@ -115,6 +115,7 @@ pub fn run_import(
             period_limit: None,
             limit_unit: None,
             reset_period: None,
+            plan_query: None,
             timeout_secs: None,
             retries: None,
             headers: None,

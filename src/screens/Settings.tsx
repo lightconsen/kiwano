@@ -27,9 +27,11 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 
 export default function Settings() {
   const [s, setS] = useState<AppSettings | null>(null);
+  const [currencies, setCurrencies] = useState<string[]>([]);
 
   useEffect(() => {
     api.getSettings().then(setS);
+    api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
   }, []);
 
   if (!s) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
@@ -141,6 +143,23 @@ export default function Settings() {
           </Row>
           <Row label="Cost alert" note="System notification when a period limit is reached">
             <Switch checked={s.cost_alert} onCheckedChange={(v) => patch({ cost_alert: v })} />
+          </Row>
+          <Row label="Display currency" note="For cost cards and usage limits">
+            <Select
+              value={s.preferred_currency}
+              onValueChange={(v) => patch({ preferred_currency: v ?? "CNY" })}
+            >
+              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(currencies.length ? currencies : [s.preferred_currency]).map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Row>
         </div>
       </div>

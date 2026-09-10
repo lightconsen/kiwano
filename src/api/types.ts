@@ -50,8 +50,9 @@ export interface ProviderHealth {
 export interface QuotaState {
   used: number;
   limit: number;
-  /** requests=counted by requests (subscription) cny=counted by amount (payg limit) */
-  unit: "requests" | "cny";
+  /** requests=counted by requests (subscription) · wan_tokens=counted by 万 tokens ·
+      otherwise a 3-letter ISO currency code (limit denominated in that currency) */
+  unit: "requests" | "wan_tokens" | (string & {});
   /** Reset date YYYY-MM-DD (subscription period); null for payg limits */
   resets_at: string | null;
 }
@@ -70,6 +71,93 @@ export interface UsageSummary {
   spark: number[] | null;
 }
 
+/** Plan-quota query config (providers.plan_query JSON, 套餐查询): one of the
+    known templates plus its extra credential fields. Templates without extra
+    credentials authenticate with the provider's own API key. */
+export interface PlanQuery {
+  template: string;
+  fields?: Record<string, string>;
+}
+
+/** Templates offered by the plan-query modal section (Grok is backend-stubbed
+    and intentionally absent). Fields render per-template credential inputs. */
+export const PLAN_QUERY_TEMPLATES: {
+  id: string;
+  label: string;
+  fields: { key: string; label: string }[];
+}[] = [
+  { id: "kimi", label: "Kimi (monthly plan)", fields: [] },
+  { id: "zhipu", label: "Zhipu GLM (personal)", fields: [] },
+  {
+    id: "zhipu_team",
+    label: "Zhipu GLM (team)",
+    fields: [
+      { key: "organization_id", label: "Org ID" },
+      { key: "project_id", label: "Project ID" },
+    ],
+  },
+  { id: "minimax", label: "MiniMax", fields: [] },
+  {
+    id: "zenmux",
+    label: "ZenMux",
+    fields: [{ key: "quota_url", label: "Usage endpoint URL" }],
+  },
+  { id: "opencode_go", label: "OpenCode Go", fields: [] },
+  {
+    id: "volcengine",
+    label: "Volcengine Ark",
+    fields: [
+      { key: "access_key_id", label: "AccessKey ID" },
+      { key: "secret_access_key", label: "Secret AccessKey" },
+    ],
+  },
+];
+
+/** Canonical tier-name -> display label (backend emits machine keys) */
+export const PLAN_TIER_LABELS: Record<string, string> = {
+  five_hour: "5h window",
+  weekly_limit: "Weekly",
+  monthly: "Monthly",
+};
+
+/** One usage window of a token plan (5h / weekly / monthly …) */
+export interface PlanTier {
+  name: string;
+  /** Percent of the window already used (unclamped — upstream's honest number) */
+  utilization: number;
+  resets_at: string | null;
+  /** Absolute used / window cap when the endpoint reports amounts; percentage-only endpoints leave both null */
+  used: number | null;
+  limit: number | null;
+  unit: string | null;
+}
+
+/** Result of one plan quota query (possibly served from the 5-min backend cache) */
+export interface PlanQuotaReport {
+  provider_id: string;
+  template: string;
+  /** false = deterministic failure; error carries the user-facing reason */
+  success: boolean;
+  error: string | null;
+  /** Plan metadata from the endpoint (Zhipu level, ZenMux tier, Volcengine plan) */
+  note: string | null;
+  tiers: PlanTier[];
+  /** Epoch millis of the original query */
+  queried_at: number;
+  /** true when served from the 5-minute cache */
+  cached: boolean;
+}
+
+/** Currency metadata from the bundled price table (Settings selector + client conversion) */
+export interface CurrencyMeta {
+  /** ISO codes present in the bundled price table */
+  currencies: string[];
+  /** currency -> units of that currency per 1 USD (e.g. CNY: 7.1) */
+  exchange_rates: Record<string, number>;
+  /** The user's preferred display currency (Settings) */
+  preferred: string;
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -85,6 +173,10 @@ export interface Provider {
   billing: Billing;
   /** Price row for subscription types (plan): ¥49/month */
   plan_price?: string;
+  /** Raw limit unit (requests | wan_tokens | ISO currency) for edit prefill */
+  limit_unit?: string;
+  /** Plan-quota query config (套餐查询); absent = not configured */
+  plan_query?: PlanQuery | null;
   enabled: boolean;
   /** Derived from agent_bindings */
   agents: AgentId[];
@@ -116,12 +208,15 @@ export interface NewProviderInput {
   billing: Billing;
   billing_config: {
     limit_value?: number;
-    limit_unit?: "requests" | "wan_tokens" | "cny";
+    /** requests | wan_tokens | 3-letter ISO currency code */
+    limit_unit?: "requests" | "wan_tokens" | (string & {});
     reset_period?: "monthly" | "weekly" | "yearly" | "none";
   };
   agents: AgentId[];
   /** Additional per-protocol endpoints to persist alongside the primary */
   endpoints?: { protocol: Protocol; endpoint: string }[];
+  /** Plan-quota query config (套餐查询); null clears an existing config */
+  plan_query?: PlanQuery | null;
   /**
    * Advanced forwarding settings. Absent in an update = keep existing
    * values; a present object is an authoritative snapshot (null clears).
@@ -223,6 +318,8 @@ export interface AppSettings {
   telemetry: boolean;
   /** Cost alert (spec §4.1 P1): system notification when usage reaches the per-period limit */
   cost_alert: boolean;
+  /** Preferred display currency for costs (ISO code; converted via the bundled rates) */
+  preferred_currency: string;
   hub_logged_in: boolean;
   /** Hub catalog sync endpoint (protocol v0: static JSON) */
   hub_url: string;
@@ -405,6 +502,10 @@ export interface KiwanoApi {
   syncHub(): Promise<HubSyncReport>;
   /** Cost alert patrol (backend KV dedupe: returned at most once per Provider per reset period) */
   checkUsageAlerts(): Promise<UsageAlert[]>;
+  /** Token-plan quota query (套餐查询); 5-min backend cache, force bypasses it */
+  getPlanQuota(providerId: string, force?: boolean): Promise<PlanQuotaReport>;
+  /** Currency metadata for the Settings selector + client-side conversion */
+  getCurrencyMeta(): Promise<CurrencyMeta>;
   /** A Provider's list of rotating keys (excluding the primary key) */
   listApiKeys(providerId: string): Promise<ApiKeyEntry[]>;
   /** Append a rotating key (the gateway's key pool hot-reloads immediately) */

@@ -7,6 +7,7 @@ import type {
   ConfigShareReport,
   CatalogEntry,
   CatalogList,
+  CurrencyMeta,
   DashboardData,
   DashboardWindow,
   FooterStats,
@@ -15,6 +16,7 @@ import type {
   ImportReport,
   KiwanoApi,
   NewProviderInput,
+  PlanQuotaReport,
   ProbeReport,
   Protocol,
   Provider,
@@ -72,6 +74,7 @@ const providers: Provider[] = [
     protocol: "openai",
     endpoints: [{ protocol: "anthropic", endpoint: "api.deepseek.com/anthropic" }],
     billing: "payg",
+    limit_unit: "CNY",
     enabled: true,
     agents: ["claude", "codex"],
     serving_agents: [],
@@ -85,7 +88,7 @@ const providers: Provider[] = [
       output_tokens: 800_000,
       cost: 28.6,
       latency_ms: 1100,
-      quota: { used: 28.6, limit: 50, unit: "cny", resets_at: null },
+      quota: { used: 28.6, limit: 50, unit: "CNY", resets_at: null },
       spark: null,
     },
   },
@@ -100,6 +103,8 @@ const providers: Provider[] = [
     protocol: "openai",
     billing: "plan",
     plan_price: "¥49/mo",
+    limit_unit: "requests",
+    plan_query: { template: "kimi" },
     enabled: true,
     agents: ["claude"],
     serving_agents: [],
@@ -483,6 +488,7 @@ const settings: AppSettings = {
   log_retention_days: 30,
   telemetry: false,
   cost_alert: true,
+  preferred_currency: "CNY",
   hub_logged_in: false,
   hub_url: "https://hub.kiwano.app/catalog.json",
 };
@@ -760,6 +766,7 @@ export const devApi: KiwanoApi = {
       protocol: input.protocol,
       endpoints,
       billing: input.billing,
+      limit_unit: input.billing_config.limit_unit,
       enabled: true,
       agents: input.agents,
       // Optimistic, mirrors vm::add_provider; listProviders recomputes
@@ -771,6 +778,7 @@ export const devApi: KiwanoApi = {
       health: { state: "ok", latency_ms: null },
       usage: null,
       advanced: input.advanced,
+      plan_query: input.plan_query ?? null,
     };
     providers.unshift(p);
     return p;
@@ -795,6 +803,8 @@ export const devApi: KiwanoApi = {
     t.agents_note = t.agents.length ? `${t.agents.length} agent(s)` : undefined;
     // Absent `advanced` keeps existing values (mirrors vm::update_provider).
     if (input.advanced !== undefined) t.advanced = input.advanced;
+    if (input.plan_query !== undefined) t.plan_query = input.plan_query;
+    t.limit_unit = input.billing_config.limit_unit;
     return t;
   },
 
@@ -959,6 +969,46 @@ export const devApi: KiwanoApi = {
   async checkUsageAlerts(): Promise<UsageAlert[]> {
     await delay();
     return [];
+  },
+
+  async getPlanQuota(providerId: string, force?: boolean): Promise<PlanQuotaReport> {
+    await delay(600);
+    const p = providers.find((x) => x.id === providerId);
+    const template = p?.plan_query?.template ?? "kimi";
+    if (!p?.plan_query) {
+      return {
+        provider_id: providerId,
+        template,
+        success: false,
+        error: "该 Provider 未配置套餐查询",
+        note: null,
+        tiers: [],
+        queried_at: Date.now(),
+        cached: false,
+      };
+    }
+    return {
+      provider_id: providerId,
+      template,
+      success: true,
+      error: null,
+      note: "Standard plan",
+      tiers: [
+        { name: "five_hour", utilization: 42.5, resets_at: "2026-09-10T18:00:00Z", used: null, limit: null, unit: null },
+        { name: "monthly", utilization: 18.3, resets_at: "2026-09-30", used: 295, limit: 460, unit: "requests" },
+      ],
+      queried_at: Date.now(),
+      cached: !force && Math.random() < 0.5,
+    };
+  },
+
+  async getCurrencyMeta(): Promise<CurrencyMeta> {
+    await delay();
+    return {
+      currencies: ["USD", "CNY"],
+      exchange_rates: { USD: 1.0, CNY: 7.1 },
+      preferred: settings.preferred_currency,
+    };
   },
 
   async listApiKeys(providerId: string): Promise<ApiKeyEntry[]> {

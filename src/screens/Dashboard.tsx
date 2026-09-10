@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "../api/client";
 import type { DashboardData, DashboardWindow } from "../api/types";
-import { fmtCny, fmtTokens } from "../lib/format";
+import { fmtMoney, fmtTokens } from "../lib/format";
 import RequestLogs from "./RequestLogs";
 
 const WINDOWS: { id: DashboardWindow; label: string }[] = [
@@ -106,6 +106,12 @@ export default function Dashboard() {
   const [providerFilter, setProviderFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
   const [data, setData] = useState<DashboardData | null>(null);
+  // Costs arrive already converted to the preferred currency (Settings)
+  const [pref, setPref] = useState("CNY");
+
+  useEffect(() => {
+    api.getCurrencyMeta().then((m) => setPref(m.preferred)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api
@@ -209,7 +215,7 @@ export default function Dashboard() {
               Est. cost
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
-              {fmtCny(data.cost, 2)} <span className="text-[10.5px] font-normal text-mut">at Hub price</span>
+              {fmtMoney(data.cost, pref)} <span className="text-[10.5px] font-normal text-mut">at Hub price</span>
             </div>
           </div>
           <div className="flex-1 p-3">
@@ -254,7 +260,7 @@ export default function Dashboard() {
                       {p.name}
                     </span>
                     <span className="font-mono text-mut">
-                      {p.pct}% · {fmtCny(p.cost)}
+                      {p.pct}% · {fmtMoney(p.cost, pref)}
                     </span>
                   </div>
                   <div className="mt-1 h-1 rounded-full" style={{ background: "var(--surface2)" }}>
@@ -282,7 +288,7 @@ export default function Dashboard() {
                     <td className="py-1.5 font-sans">{a.label}</td>
                     <td className="text-right">{a.requests}</td>
                     <td className="text-right">{a.tokens}</td>
-                    <td className="text-right">{fmtCny(a.cost)}</td>
+                    <td className="text-right">{fmtMoney(a.cost, pref)}</td>
                   </tr>
                 ))}
               </tbody>

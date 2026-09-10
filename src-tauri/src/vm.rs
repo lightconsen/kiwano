@@ -430,7 +430,7 @@ pub struct HealthVm {
 
 #[derive(Serialize)]
 pub struct QuotaVm {
-    pub used: i64,
+    pub used: f64,
     pub limit: f64,
     pub unit: String,
     pub resets_at: Option<String>,
@@ -473,6 +473,9 @@ pub struct ProviderVm {
     pub billing: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_price: Option<String>,
+    /// Raw limit unit (requests | wan_tokens | ISO currency) for edit prefill.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_unit: Option<String>,
     pub enabled: bool,
     pub agents: Vec<String>,
     /// Agents this provider would serve a request for right now (per-agent
@@ -489,6 +492,9 @@ pub struct ProviderVm {
     pub usage: Option<UsageVm>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub advanced: Option<ProviderAdvancedVm>,
+    /// Token-plan quota query JSON (edit prefill); None = not configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_query: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -638,6 +644,14 @@ pub struct SettingsVm {
     pub hub_logged_in: bool,
     #[serde(default = "default_hub_url")]
     pub hub_url: String,
+    /// Preferred display currency (ISO code); per-provider amounts convert
+    /// into it via the bundled exchange rates.
+    #[serde(default = "default_preferred_currency")]
+    pub preferred_currency: String,
+}
+
+pub(crate) fn default_preferred_currency() -> String {
+    "CNY".into()
 }
 
 pub(crate) fn default_hub_url() -> String {
@@ -660,6 +674,7 @@ impl Default for SettingsVm {
             cost_alert: true,
             hub_logged_in: false,
             hub_url: default_hub_url(),
+            preferred_currency: default_preferred_currency(),
         }
     }
 }
@@ -742,6 +757,10 @@ pub struct NewProviderInput {
     /// authoritative snapshot whose null fields clear values.
     #[serde(default)]
     pub advanced: Option<AdvancedInput>,
+    /// Token-plan quota query `{"template":"kimi","fields":{...}}`. Absent in
+    /// an update = keep existing; null clears; a present object replaces.
+    #[serde(default)]
+    pub plan_query: Option<serde_json::Value>,
 }
 
 // ── Billing mapping (UI plan/payg/unl ↔ DB subscription/metered/unlimited) ──
@@ -928,7 +947,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             };
 
             let health = health_vm(store, &p);
-            let usage = usage_vm(aux, &p, usage_by_id.get(&p.id), &since7);
+            let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7);
 
             ProviderVm {
                 id: p.id.clone(),
@@ -941,7 +960,8 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 endpoint_note: endpoint_note(&p),
                 endpoints: vm_endpoints(&p),
                 billing: billing_to_ui(p.billing).to_string(),
-                plan_price: None, // no price metadata until Hub price tables land
+                plan_price: crate::plan_quota::plan_monthly_price(p.plan_query.as_deref()),
+                limit_unit: p.limit_unit.clone(),
                 enabled: p.enabled,
                 agents,
                 serving_agents,
@@ -951,6 +971,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 health,
                 usage,
                 advanced: advanced_vm(&p),
+                plan_query: p.plan_query.as_deref().and_then(|s| serde_json::from_str(s).ok()),
             }
         })
         .collect();
@@ -1287,46 +1308,62 @@ fn derive_health(p: &Provider, latency: Option<i64>) -> HealthVm {
 /// Normalize the user-entered per-period limit unit (tech.md §2.4 A). With a
 /// limit set but no unit chosen, fall back to the legacy behavior of counting
 /// "requests"; with no limit the unit is meaningless and stored as NULL.
+/// Units are the two counting units plus any 3-letter currency code (stored
+/// uppercase; the v9 CHECK constraint enforces the same shape).
 fn normalize_limit_unit(unit: Option<&str>, has_limit: bool) -> Option<String> {
     if !has_limit {
         return None;
     }
-    Some(
-        match unit {
-            Some("wan_tokens") => "wan_tokens",
-            Some("cny") => "cny",
-            _ => "requests",
+    match unit {
+        Some("wan_tokens") => Some("wan_tokens".into()),
+        Some("requests") => Some("requests".into()),
+        Some(u) => {
+            let code = u.trim().to_ascii_uppercase();
+            if code.len() == 3 && code.chars().all(|c| c.is_ascii_alphabetic()) {
+                Some(code)
+            } else {
+                Some("requests".into())
+            }
         }
-        .to_string(),
-    )
+        None => Some("requests".into()),
+    }
 }
 
 fn usage_vm(
+    store: &Store,
     aux: &Aux,
     p: &Provider,
     totals: Option<&UsageTotals>,
     since7: &str,
 ) -> Option<UsageVm> {
     let t = totals?;
+    // Cost sums carry their own currency (the price entry's); convert into
+    // the user's preferred currency for the single displayed number.
+    let rates = crate::pricing::bundled_doc().exchange_rates;
+    let pref = crate::pricing::preferred_currency(aux);
+    let cost_buckets = store
+        .usage_cost_by_currency(None, Some(&p.id), Some(since7))
+        .unwrap_or_default();
+    let cost = crate::pricing::convert_cost_buckets(&cost_buckets, &pref, &rates);
     let quota = match (p.billing, p.limit_unit.as_deref()) {
-        // CNY amount limits can't be estimated without a price table (wired
-        // up when Hub price tables land); ring not shown
-        (Billing::Subscription, Some("cny")) => None,
         (Billing::Subscription, unit) => p.period_limit.map(|limit| {
-            let used = match unit {
-                Some("wan_tokens") => {
+            let (used, unit) = match unit {
+                Some("wan_tokens") => (
                     (t.input_tokens
                         + t.output_tokens
                         + t.cache_read_tokens
                         + t.cache_creation_tokens) as f64
-                        / 10_000.0
-                }
-                _ => t.requests as f64,
+                        / 10_000.0,
+                    "wan_tokens",
+                ),
+                // Currency limits ring against the converted usage cost.
+                Some(u) if u.len() == 3 => (crate::pricing::convert_cost_buckets(&cost_buckets, u, &rates), u),
+                _ => (t.requests as f64, "requests"),
             };
             QuotaVm {
-                used: used as i64,
+                used: (used * 100.0).round() / 100.0,
                 limit,
-                unit: unit.unwrap_or("requests").to_string(),
+                unit: unit.to_string(),
                 resets_at: None, // reset-cycle tracking lands with the quota strategy (P2)
             }
         }),
@@ -1346,7 +1383,7 @@ fn usage_vm(
         input_tokens: t.input_tokens,
         cache_read_tokens: t.cache_read_tokens,
         output_tokens: t.output_tokens,
-        cost: None, // cost estimation needs per-provider price tables (Hub, P1)
+        cost: Some((cost * 1e6).round() / 1e6),
         latency_ms: aux.avg_latency(Some(&p.id), None, Some(since7), None),
         quota,
         spark,
@@ -1466,6 +1503,11 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         .as_ref()
         .map(advanced_columns)
         .unwrap_or((None, None, None));
+    let plan_query_json = input
+        .plan_query
+        .as_ref()
+        .filter(|v| !v.is_null())
+        .map(|v| v.to_string());
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
@@ -1481,6 +1523,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
             input.billing_config.limit_unit.as_deref(),
             input.billing_config.limit_value.is_some(),
         ),
+        plan_query: plan_query_json,
         reset_period,
         timeout_secs,
         retries,
@@ -1547,6 +1590,8 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         endpoints: vm_endpoints,
         billing: vm_billing,
         plan_price: None,
+        limit_unit: None,
+        plan_query: input.plan_query.clone(),
         enabled: true,
         agents: input.agents.clone(),
         // Optimistic: strategy serving is only computed by build_provider_vms;
@@ -1652,6 +1697,10 @@ pub fn update_provider(
         p.timeout_secs = timeout_secs;
         p.retries = retries;
         p.headers = headers;
+    }
+    // Plan quota query: same absent-keeps semantics; null clears.
+    if let Some(pq) = &input.plan_query {
+        p.plan_query = (!pq.is_null()).then(|| pq.to_string());
     }
     p.updated_at = rfc3339(unix_now());
     store.update_provider(&p).map_err(e2s)?;
@@ -1808,9 +1857,20 @@ pub fn update_settings(
     if let (Some(obj), Some(p)) = (merged.as_object_mut(), patch.as_object()) {
         for (k, v) in p {
             // takeovers are managed through set_agent_takeover, not this patch
-            if k != "takeovers" {
-                obj.insert(k.clone(), v.clone());
+            if k == "takeovers" {
+                continue;
             }
+            // preferred currency: normalize + validate the ISO code
+            if k == "preferred_currency" {
+                let Some(code) = v.as_str() else { continue };
+                let code = code.trim().to_ascii_uppercase();
+                if code.len() != 3 || !code.chars().all(|c| c.is_ascii_alphabetic()) {
+                    return Err(format!("invalid currency code: {code}"));
+                }
+                obj.insert(k.clone(), serde_json::Value::String(code));
+                continue;
+            }
+            obj.insert(k.clone(), v.clone());
         }
     }
     aux.save_settings_json(&merged).map_err(e2s)?;
@@ -1966,6 +2026,7 @@ fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) ->
         period_limit: None,
         limit_unit: None,
         reset_period: None,
+        plan_query: None,
         timeout_secs: None,
         retries: None,
         headers: None,
@@ -2052,47 +2113,60 @@ pub fn delete_api_key(store: &Store, id: i64) -> Result<bool, String> {
 pub struct UsageAlertVm {
     pub provider_id: String,
     pub provider_name: String,
-    pub used: i64,
+    pub used: f64,
     pub limit: f64,
-    /// requests | wan_tokens
+    /// requests | wan_tokens | 3-letter ISO currency code
     pub unit: String,
 }
 
 /// Check whether enabled providers' usage this period has reached the
 /// user-set per-period limit (period_limit). Hits not yet notified this
 /// period are recorded under a dedup key and returned (the frontend turns
-/// them into system notifications). CNY amount limits have no price table
-/// yet (Hub price tables, P1) and are skipped to avoid false positives.
+/// them into system notifications). Currency limits compare the cost spent
+/// this period (converted into the limit's currency) against the limit.
 pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>, String> {
     if !ui_settings(aux).cost_alert {
         return Ok(Vec::new());
     }
     let now = unix_now();
+    let rates = crate::pricing::bundled_doc().exchange_rates;
     let mut alerts = Vec::new();
     for p in store.list_providers().map_err(e2s)? {
-        let (Some(limit), _) = (p.period_limit, p.limit_unit.as_deref()) else {
+        let Some(limit) = p.period_limit else {
             continue;
         };
         if !p.enabled || limit <= 0.0 {
             continue;
         }
+        // NULL unit normalizes to requests (same source as the ring
+        // percentage, compatible with v1 rows).
         let unit = match p.limit_unit.as_deref() {
             Some("wan_tokens") => "wan_tokens",
-            Some("cny") => continue,
-            // NULL normalizes to requests (same source as the ring percentage, compatible with v1 rows)
+            // Currency limit: compare spent cost (converted into the limit
+            // currency) against the limit.
+            Some(u) if u.len() == 3 => u,
             _ => "requests",
         };
         let (since, period_key) = period_start(now, p.reset_period.as_deref());
-        let t = store
-            .usage_totals_for_provider(&p.id, since.as_deref())
-            .map_err(e2s)?;
         let used = match unit {
             "wan_tokens" => {
+                let t = store
+                    .usage_totals_for_provider(&p.id, since.as_deref())
+                    .map_err(e2s)?;
                 (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
                     as f64
                     / 10_000.0
             }
-            _ => t.requests as f64,
+            u if u.len() == 3 => {
+                let buckets = store
+                    .usage_cost_by_currency(None, Some(&p.id), since.as_deref())
+                    .unwrap_or_default();
+                crate::pricing::convert_cost_buckets(&buckets, u, &rates)
+            }
+            _ => store
+                .usage_totals_for_provider(&p.id, since.as_deref())
+                .map_err(e2s)?
+                .requests as f64,
         };
         if used < limit {
             continue;
@@ -2106,7 +2180,7 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         alerts.push(UsageAlertVm {
             provider_id: p.id,
             provider_name: p.name,
-            used: used as i64,
+            used: (used * 100.0).round() / 100.0,
             limit,
             unit: unit.to_string(),
         });
@@ -2146,6 +2220,34 @@ pub fn build_dashboard(
         .iter()
         .map(|p| (p.id.clone(), p.name.clone()))
         .collect();
+
+    // Cost rolls up per-currency buckets (each row's cost_currency) into the
+    // user's preferred display currency via the bundled exchange rates.
+    let rates = crate::pricing::bundled_doc().exchange_rates;
+    let pref = crate::pricing::preferred_currency(aux);
+    let cost_of = |buckets: &[(Option<String>, f64)]| {
+        crate::pricing::convert_cost_buckets(buckets, &pref, &rates)
+    };
+
+    // Headline cost for the window.
+    let cost = cost_of(
+        &store
+            .usage_cost_by_currency(agent, provider_id, Some(&since))
+            .map_err(e2s)?,
+    );
+
+    // Per-provider cost for the distribution card.
+    let mut cost_by_pid: HashMap<String, f64> = HashMap::new();
+    for (pid, currency, c) in store
+        .usage_cost_by_provider(agent, Some(&since))
+        .map_err(e2s)?
+    {
+        let c = match currency.as_deref() {
+            Some(cur) => crate::pricing::convert_amount(c, cur, &pref, &rates),
+            None => 0.0,
+        };
+        *cost_by_pid.entry(pid).or_default() += c;
+    }
 
     // trend: daily totals zero-filled over the window (30d buckets by 5 days)
     let mut daily: HashMap<String, UsageTotals> = HashMap::new();
@@ -2203,7 +2305,8 @@ pub fn build_dashboard(
                 name,
                 color: palette_color(&pu.provider_id).to_string(),
                 pct: (pu.totals.requests * 100 / total_req) as i64,
-                cost: 0.0,
+                cost: (cost_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
+                    / 1e6,
             }
         })
         .collect();
@@ -2215,12 +2318,15 @@ pub fn build_dashboard(
             .usage_totals(Some(name), provider_id, Some(&since))
             .map_err(e2s)?;
         if t.requests > 0 {
+            let buckets = store
+                .usage_cost_by_currency(Some(name), provider_id, Some(&since))
+                .unwrap_or_default();
             by_agent.push(AgentDistVm {
                 agent: name.to_string(),
                 label: label.to_string(),
                 requests: t.requests,
                 tokens: fmt_tokens(t.input_tokens + t.output_tokens),
-                cost: 0.0,
+                cost: (cost_of(&buckets) * 1e6).round() / 1e6,
             });
         }
     }
@@ -2265,7 +2371,7 @@ pub fn build_dashboard(
         input_tokens: cur.input_tokens,
         cache_read_tokens: cur.cache_read_tokens,
         output_tokens: cur.output_tokens,
-        cost: 0.0,
+        cost: (cost * 1e6).round() / 1e6,
         latency_ms: latency,
         latency_delta_pct,
         trend,
@@ -2368,6 +2474,7 @@ mod tests {
             period_limit: None,
             limit_unit: None,
             reset_period: None,
+            plan_query: None,
             timeout_secs: None,
             retries: None,
             headers: None,
@@ -2698,6 +2805,7 @@ mod tests {
             agents: vec!["codex".into()],
             endpoints: Vec::new(),
             advanced: None,
+            plan_query: None,
         };
         let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
@@ -2741,6 +2849,7 @@ mod tests {
                 },
             ],
             advanced: None,
+            plan_query: None,
         };
         add_provider(&s, &input).unwrap();
 
@@ -2778,6 +2887,7 @@ mod tests {
                 endpoint: "https://qianfan.baidubce.com/anthropic/coding".into(),
             }],
             advanced: None,
+            plan_query: None,
         };
         let vm = add_provider(&s, &input).unwrap();
         assert_eq!(vm.endpoints.len(), 1);
@@ -2842,6 +2952,7 @@ mod tests {
             agents: vec!["codex".into()], // rebind: claude dropped
             endpoints: Vec::new(),
             advanced: None,
+            plan_query: None,
         };
         let vm = update_provider(&s, &aux, "p1", &input).unwrap();
         assert_eq!(vm.name, "P One Renamed");
@@ -2982,6 +3093,8 @@ mod tests {
             cache_creation_tokens: 0,
             latency_ms: Some(1200),
             status: "ok".into(),
+            cost: None,
+            cost_currency: None,
         })
         .unwrap();
         // Seed the request-log rows the headline counts: the forwarded request
@@ -3013,6 +3126,8 @@ mod tests {
             request_size: 0,
             response_size: 0,
             truncated: false,
+            cost: None,
+            cost_currency: None,
         };
         s.insert_request_log(&log(200, (1000, 500))).unwrap();
         s.insert_request_log(&log(503, (0, 0))).unwrap();
@@ -3255,6 +3370,8 @@ mod tests {
                 cache_creation_tokens: 0,
                 latency_ms: None,
                 status: "ok".into(),
+                cost: None,
+                cost_currency: None,
             })
             .unwrap();
         }
@@ -3273,6 +3390,8 @@ mod tests {
             cache_creation_tokens: 0,
             latency_ms: None,
             status: "ok".into(),
+            cost: None,
+            cost_currency: None,
         }
     }
 
@@ -3311,7 +3430,7 @@ mod tests {
     }
 
     #[test]
-    fn cost_alert_skips_unlimited_rows_and_cny_unit() {
+    fn cost_alert_skips_unlimited_rows_and_converts_currency_limits() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
 
@@ -3321,17 +3440,24 @@ mod tests {
 
         let mut cny = provider("glm-1", "GLM", Billing::Subscription);
         cny.period_limit = Some(50.0);
-        cny.limit_unit = Some("cny".into()); // no price table, no estimate
+        cny.limit_unit = Some("CNY".into()); // currency limit: compares spent cost
         s.insert_provider(&cny).unwrap();
 
-        // 6 requests each: payg hits the threshold and alerts; cny is skipped
+        // 6 rows each: payg hits the request threshold; the CNY limit compares
+        // the period's spent cost (¥10/row → ¥60) against ¥50.
         for _ in 0..6 {
             s.record_usage(&usage_row("ds-1")).unwrap();
-            s.record_usage(&usage_row("glm-1")).unwrap();
+            let mut row = usage_row("glm-1");
+            row.cost = Some(10.0);
+            row.cost_currency = Some("CNY".into());
+            s.record_usage(&row).unwrap();
         }
         let alerts = check_usage_alerts(&s, &aux).unwrap();
-        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts.len(), 2);
         assert_eq!(alerts[0].provider_id, "ds-1");
+        assert_eq!(alerts[1].provider_id, "glm-1");
+        assert_eq!(alerts[1].unit, "CNY");
+        assert!((alerts[1].used - 60.0).abs() < 1e-6);
     }
 
     #[test]

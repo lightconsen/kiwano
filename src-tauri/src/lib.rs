@@ -7,6 +7,8 @@
 mod creds;
 mod detect;
 mod import;
+mod plan_quota;
+mod pricing;
 mod share;
 mod sidecar;
 mod sync;
@@ -548,6 +550,13 @@ pub fn run() {
             };
 
             let ui = vm::ui_settings(&aux);
+            // Seed the bundled model price table into model_pricing
+            // (version-gated no-op after the first run).
+            match pricing::seed_model_pricing(&aux) {
+                Ok(r) if !r.skipped => println!("kiwano: model pricing seeded v{} ({} rows changed)", r.version, r.seeded),
+                Err(e) => eprintln!("kiwano: model pricing seed failed: {e}"),
+                _ => {}
+            }
             app.manage(AppState {
                 store,
                 aux,
@@ -607,6 +616,8 @@ pub fn run() {
             import_config,
             detect_agents,
             probe_agent_versions,
+            pricing::get_currency_meta,
+            plan_quota::get_plan_quota,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: intercept CloseRequested and hide the window

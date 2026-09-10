@@ -9,6 +9,7 @@ import type {
   AppSettings,
   CatalogList,
   ConfigShareReport,
+  CurrencyMeta,
   DashboardData,
   DashboardWindow,
   FooterStats,
@@ -17,6 +18,7 @@ import type {
   ImportReport,
   KiwanoApi,
   NewProviderInput,
+  PlanQuotaReport,
   ProbeReport,
   Protocol,
   Provider,
@@ -67,6 +69,11 @@ export const tauriApi: KiwanoApi = {
   syncHub: () => invoke<HubSyncReport>("sync_hub"),
 
   checkUsageAlerts: () => invoke<UsageAlert[]>("check_usage_alerts"),
+
+  getPlanQuota: (providerId: string, force?: boolean) =>
+    invoke<PlanQuotaReport>("get_plan_quota", { providerId, force: force ?? null }),
+
+  getCurrencyMeta: () => invoke<CurrencyMeta>("get_currency_meta"),
 
   listApiKeys: (providerId: string) => invoke<ApiKeyEntry[]>("list_api_keys", { providerId }),
 

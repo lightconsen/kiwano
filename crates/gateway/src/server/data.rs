@@ -266,6 +266,9 @@ mod tests {
             weight: 1,
             win_start: None,
             win_end: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
         }
     }
 

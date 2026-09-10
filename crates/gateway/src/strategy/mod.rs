@@ -340,6 +340,9 @@ mod tests {
             weight,
             win_start: win.map(|w| w.0.into()),
             win_end: win.map(|w| w.1.into()),
+            timeout_secs: None,
+            retries: None,
+            headers: None,
         }
     }
 
@@ -529,6 +532,9 @@ mod tests {
             billing: Billing::Metered,
             period_limit: None,
             limit_unit: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
             reset_period: None,
             enabled: true,
             created_at: now_rfc3339(),

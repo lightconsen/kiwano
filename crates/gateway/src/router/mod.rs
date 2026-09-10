@@ -6,7 +6,7 @@
 //! binding. The schema already carries candidates/priorities/weights so P1
 //! strategies (failover/roundrobin) slot in without another migration.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::error::{GatewayError, Result};
 use crate::store::{Protocol, ProviderEndpoint, Store, StrategyType};
@@ -39,6 +39,36 @@ pub struct UpstreamProvider {
     /// timewindow local window `HH:MM` (passed through from agent_bindings).
     pub win_start: Option<String>,
     pub win_end: Option<String>,
+    /// Per-provider cap on the wait for upstream response headers, seconds
+    /// (migration v8; normalized: non-positive values dropped). None = the
+    /// gateway defaults (10s connect / 300s read) apply.
+    pub timeout_secs: Option<u64>,
+    /// Same-provider re-attempts before the strategy layer moves on (v8,
+    /// normalized: non-positive values dropped).
+    pub retries: Option<u32>,
+    /// Custom request headers merged after credential injection (v8) —
+    /// `insert`-replace, so these can override the injected credentials.
+    pub headers: Option<BTreeMap<String, String>>,
+}
+
+/// Parse the provider's stored custom-headers JSON (`{"Name":"value"}`) into
+/// an ordered map. Malformed JSON degrades to None with a warning; empty
+/// names/values are dropped.
+fn parse_advanced_headers(raw: Option<&str>) -> Option<BTreeMap<String, String>> {
+    let raw = raw?;
+    match serde_json::from_str::<BTreeMap<String, String>>(raw) {
+        Ok(map) => {
+            let map: BTreeMap<String, String> = map
+                .into_iter()
+                .filter(|(k, v)| !k.trim().is_empty() && !v.is_empty())
+                .collect();
+            (!map.is_empty()).then_some(map)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "malformed provider headers JSON; ignoring");
+            None
+        }
+    }
 }
 
 /// Routing configuration for one agent.
@@ -153,6 +183,9 @@ impl RouteTable {
                         weight: b.weight,
                         win_start: b.win_start,
                         win_end: b.win_end,
+                        timeout_secs: p.timeout_secs.filter(|&s| s > 0).map(|s| s as u64),
+                        retries: p.retries.filter(|&r| r > 0).map(|r| r as u32),
+                        headers: parse_advanced_headers(p.headers.as_deref()),
                     }),
                     Some(_) => tracing::warn!(
                         agent = %agent,
@@ -294,6 +327,9 @@ mod tests {
             billing: Billing::Metered,
             period_limit: None,
             limit_unit: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
             reset_period: None,
             enabled,
             created_at: now_rfc3339(),
@@ -402,6 +438,41 @@ mod tests {
         let got = codex.candidates[0].endpoint_for(Protocol::Anthropic).expect("alt endpoint");
         assert_eq!(got.base_url, "https://p-oai.example.com/anthropic");
         assert!(codex.candidates[0].endpoint_for(Protocol::Gemini).is_none());
+    }
+
+    /// Per-provider advanced forwarding settings (migration v8) flow into
+    /// candidates normalized; malformed header JSON degrades to None.
+    #[test]
+    fn route_table_carries_advanced_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = seeded_store(&dir);
+        let mut p = provider("p-ant", Protocol::Anthropic, true);
+        p.timeout_secs = Some(120);
+        p.retries = Some(2);
+        p.headers = Some(r#"{"api-key":"azure-key","":"dropped"}"#.into());
+        store.update_provider(&p).unwrap();
+
+        let table = RouteTable::load(&store).unwrap();
+        let got = &table.routes.get(AGENT_CLAUDE).unwrap().candidates[0];
+        assert_eq!(got.timeout_secs, Some(120));
+        assert_eq!(got.retries, Some(2));
+        assert_eq!(
+            got.headers.as_ref().unwrap().get("api-key").map(String::as_str),
+            Some("azure-key")
+        );
+        assert!(!got.headers.as_ref().unwrap().contains_key(""));
+
+        // Non-positive values normalize to None (use the gateway defaults).
+        let mut p = provider("p-ant", Protocol::Anthropic, true);
+        p.timeout_secs = Some(0);
+        p.retries = Some(-3);
+        p.headers = Some("not json".into());
+        store.update_provider(&p).unwrap();
+        let table = RouteTable::load(&store).unwrap();
+        let got = &table.routes.get(AGENT_CLAUDE).unwrap().candidates[0];
+        assert_eq!(got.timeout_secs, None);
+        assert_eq!(got.retries, None);
+        assert_eq!(got.headers, None);
     }
 
     #[test]

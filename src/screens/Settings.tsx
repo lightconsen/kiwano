@@ -1,6 +1,6 @@
 // Settings (design/index.html #s-settings)
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Check, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -167,19 +167,6 @@ export default function Settings() {
           </div>
         </div>
       </div>
-
-      {/* Advanced collapsible placeholder (the sliders hint row in the prototype, implemented with the add modal) */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-8 w-full justify-between px-2.5 text-[11.5px] text-mut"
-      >
-        <span className="flex items-center gap-1.5">
-          <SlidersHorizontal className="h-3 w-3" />
-          Advanced (timeout / retries / headers)
-        </span>
-        <ChevronDown className="h-3.5 w-3.5" />
-      </Button>
     </section>
   );
 }

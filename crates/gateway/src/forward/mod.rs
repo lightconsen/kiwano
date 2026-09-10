@@ -14,7 +14,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
@@ -163,7 +163,156 @@ fn build_upstream_headers(
             out.insert("x-goog-api-key", value);
         }
     }
+
+    // Custom per-provider headers (migration v8): merged after credential
+    // injection with insert-replace semantics, so they can override the
+    // injected credentials and defaults (e.g. an Azure `api-key` or an
+    // `OpenAI-Organization`). Framing/hop-by-hop names are refused; invalid
+    // names or values are skipped with a warning rather than failing the
+    // whole forward.
+    if let Some(custom) = &provider.headers {
+        for (name, value) in custom {
+            let Ok(hn) = axum::http::HeaderName::from_bytes(name.as_bytes()) else {
+                tracing::warn!(provider = %provider.id, header = %name, "invalid custom header name; skipping");
+                continue;
+            };
+            if is_hop_by_hop(&hn)
+                || hn == axum::http::header::HOST
+                || hn == axum::http::header::CONTENT_LENGTH
+            {
+                continue;
+            }
+            match HeaderValue::from_str(value) {
+                Ok(hv) => {
+                    out.insert(hn, hv);
+                }
+                Err(e) => {
+                    tracing::warn!(provider = %provider.id, header = %name, error = %e, "invalid custom header value; skipping");
+                }
+            }
+        }
+    }
     Ok(out)
+}
+
+/// Whether an upstream status warrants a same-provider retry (migration v8):
+/// request timeout, rate limiting, and server-side errors. Client errors
+/// (4xx besides 408/429) are deterministic — retrying cannot help.
+fn is_retryable_status(status: StatusCode) -> bool {
+    status == StatusCode::REQUEST_TIMEOUT
+        || status == StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
+/// A failed send attempt: either the per-provider response-header timeout
+/// elapsed or the transport itself broke (connect/DNS/reset).
+enum SendFailure {
+    Timeout(u64),
+    Transport(reqwest::Error),
+}
+
+impl SendFailure {
+    fn message(&self, url: &str) -> String {
+        match self {
+            SendFailure::Timeout(secs) => format!("request to `{url}` timed out after {secs}s"),
+            SendFailure::Transport(e) => format!("request to `{url}` failed: {e}"),
+        }
+    }
+}
+
+/// Send one request upstream with the provider's advanced forwarding settings
+/// (migration v8): a per-provider timeout bounding the wait for response
+/// headers, and same-provider retries for retryable failures.
+///
+/// The timeout wraps the `send()` future rather than using
+/// `RequestBuilder::timeout()` on purpose: reqwest's per-request timeout is a
+/// total deadline that includes the body read and would abort long SSE
+/// streams. Wrapping `send()` bounds only time-to-response-headers; body
+/// reads stay under the client-wide 300s read timeout.
+///
+/// Each attempt records breaker feedback exactly once (success is judged at
+/// response-header time, tech.md §4.7). A retryable outcome (transport error,
+/// 408/429/5xx) with attempts left backs off briefly and re-sends the same
+/// request to the same provider; the strategy layer only takes over after
+/// this loop gives up. The loop returns before any byte reaches the client,
+/// so in-flight streams are never retried; body-read failures after headers
+/// are also not retried (the breaker was already fed at header time).
+async fn send_upstream(
+    state: &GatewayState,
+    provider: &UpstreamProvider,
+    agent: &str,
+    attribution: &str,
+    method: Method,
+    url: &str,
+    headers: HeaderMap,
+    body: Bytes,
+    inbound: Option<Protocol>,
+    capture: Option<&RequestCapture>,
+) -> Result<reqwest::Response, Response> {
+    let attempts = provider.retries.map_or(1, |r| r as usize + 1);
+    for attempt in 1..=attempts {
+        let last = attempt == attempts;
+        let send = state
+            .http
+            .request(method.clone(), url)
+            .headers(headers.clone())
+            .body(body.clone())
+            .send();
+        let outcome: Result<reqwest::Response, SendFailure> = match provider.timeout_secs {
+            Some(secs) => match tokio::time::timeout(Duration::from_secs(secs), send).await {
+                Ok(r) => r.map_err(SendFailure::Transport),
+                Err(_) => Err(SendFailure::Timeout(secs)),
+            },
+            None => send.await.map_err(SendFailure::Transport),
+        };
+
+        match outcome {
+            Ok(upstream) => {
+                let status = upstream.status();
+                state.engine.record(agent, &provider.id, status.is_success()).await;
+                if !last && is_retryable_status(status) {
+                    tracing::warn!(
+                        attempt,
+                        status = status.as_u16(),
+                        provider = %provider.id,
+                        "retryable upstream status; retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis((300 * attempt as u64).min(2000)))
+                        .await;
+                    continue;
+                }
+                return Ok(upstream);
+            }
+            Err(failure) => {
+                let message = failure.message(url);
+                state.engine.record(agent, &provider.id, false).await;
+                if !last {
+                    tracing::warn!(
+                        attempt,
+                        provider = %provider.id,
+                        error = %message,
+                        "upstream attempt failed; retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis((300 * attempt as u64).min(2000)))
+                        .await;
+                    continue;
+                }
+                let resp = error_into_response(GatewayError::Upstream(message.clone()), inbound);
+                crate::log_capture::persist_failure(
+                    &state.store,
+                    capture,
+                    Some(agent.to_string()),
+                    Some(attribution.to_string()),
+                    Some(provider.id.clone()),
+                    resp.status(),
+                    "upstream_error",
+                    message,
+                );
+                return Err(resp);
+            }
+        }
+    }
+    unreachable!("retry loop always returns or continues")
 }
 
 /// Copy upstream response headers onto a gateway response, dropping framing
@@ -366,41 +515,25 @@ pub async fn forward(
         }
     };
 
-    let upstream = match state
-        .http
-        .request(method, &url)
-        .headers(headers)
-        .body(body.clone())
-        .send()
-        .await
+    let upstream = match send_upstream(
+        &state,
+        provider,
+        &routed.agent,
+        &attribution_str(routed.attribution),
+        method,
+        &url,
+        headers,
+        body.clone(),
+        inbound,
+        log.as_ref().map(|l| &l.capture),
+    )
+    .await
     {
         Ok(r) => r,
-        Err(e) => {
-            state.engine.record(&routed.agent, &provider.id, false).await;
-            let resp = error_into_response(
-                GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
-                inbound,
-            );
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
-                resp.status(),
-                "upstream_error",
-                format!("request to `{url}` failed: {e}"),
-            );
-            return resp;
-        }
+        Err(resp) => return resp,
     };
 
     let status = upstream.status();
-    // Breaker feedback (tech.md §4.7): success/failure is judged at response-header time — a mid-stream abort is not counted retroactively.
-    state
-        .engine
-        .record(&routed.agent, &provider.id, status.is_success())
-        .await;
     let is_sse = upstream
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -655,40 +788,25 @@ async fn forward_anthropic_via_openai(
         }
     };
 
-    let upstream = match state
-        .http
-        .request(method, &url)
-        .headers(headers)
-        .body(openai_bytes)
-        .send()
-        .await
+    let upstream = match send_upstream(
+        &state,
+        provider,
+        &routed.agent,
+        &attribution_str(routed.attribution),
+        method,
+        &url,
+        headers,
+        Bytes::from(openai_bytes),
+        inbound,
+        log.as_ref().map(|l| &l.capture),
+    )
+    .await
     {
         Ok(r) => r,
-        Err(e) => {
-            state.engine.record(&routed.agent, &provider.id, false).await;
-            let resp = error_into_response(
-                GatewayError::Upstream(format!("request to `{url}` failed: {e}")),
-                inbound,
-            );
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
-                resp.status(),
-                "upstream_error",
-                format!("request to `{url}` failed: {e}"),
-            );
-            return resp;
-        }
+        Err(resp) => return resp,
     };
 
     let status = upstream.status();
-    state
-        .engine
-        .record(&routed.agent, &provider.id, status.is_success())
-        .await;
     let is_sse = upstream
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -1110,6 +1228,9 @@ mod tests {
             weight: 1,
             win_start: None,
             win_end: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
         }
     }
 
@@ -1208,6 +1329,58 @@ mod tests {
         );
         // x-api-key from the inbound request is stripped, not forwarded.
         assert!(headers.get("x-api-key").is_none());
+    }
+
+    #[test]
+    fn custom_provider_headers_override_injected_credentials() {
+        // A vendor (Azure-style) that wants `api-key` plus an overriding
+        // x-api-key: custom headers merge after credential injection.
+        let mut p = provider(Protocol::Anthropic, None);
+        let mut custom = std::collections::BTreeMap::new();
+        custom.insert("api-key".to_string(), "azure-key".to_string());
+        custom.insert("x-api-key".to_string(), "override".to_string());
+        custom.insert("OpenAI-Organization".to_string(), "org-1".to_string());
+        p.headers = Some(custom);
+
+        let headers = build_upstream_headers(&inbound_headers(), &p, "sk-real-key").unwrap();
+        assert_eq!(headers.get("x-api-key").unwrap(), "override");
+        assert_eq!(headers.get("api-key").unwrap(), "azure-key");
+        assert_eq!(headers.get("openai-organization").unwrap(), "org-1");
+        assert_eq!(headers.get("anthropic-version").unwrap(), "2023-06-01");
+    }
+
+    #[test]
+    fn custom_provider_headers_skip_framing_and_invalid() {
+        let mut p = provider(Protocol::OpenAI, None);
+        let mut custom = std::collections::BTreeMap::new();
+        custom.insert("connection".to_string(), "close".to_string());
+        custom.insert("host".to_string(), "evil.example.com".to_string());
+        custom.insert("content-length".to_string(), "0".to_string());
+        custom.insert("x-good".to_string(), "kept".to_string());
+        // Header names are case-insensitive per HTTP; an invalid value is skipped.
+        custom.insert("x-bad-value".to_string(), "\n\r inject".to_string());
+        p.headers = Some(custom);
+
+        let headers = build_upstream_headers(&inbound_headers(), &p, "sk-real-key").unwrap();
+        assert_eq!(headers.get("x-good").unwrap(), "kept");
+        assert!(headers.get("connection").is_none());
+        // host/content-length are never settable via custom headers
+        assert_ne!(headers.get("host").map(|v| v.to_str().unwrap()), Some("evil.example.com"));
+        assert!(headers.get("x-bad-value").is_none());
+    }
+
+    #[test]
+    fn retryable_status_classification() {
+        assert!(is_retryable_status(StatusCode::REQUEST_TIMEOUT));
+        assert!(is_retryable_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(is_retryable_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(is_retryable_status(StatusCode::BAD_GATEWAY));
+        assert!(is_retryable_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_retryable_status(StatusCode::OK));
+        assert!(!is_retryable_status(StatusCode::BAD_REQUEST));
+        assert!(!is_retryable_status(StatusCode::UNAUTHORIZED));
+        assert!(!is_retryable_status(StatusCode::FORBIDDEN));
+        assert!(!is_retryable_status(StatusCode::NOT_FOUND));
     }
 
     #[test]

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 7;
+pub const SCHEMA_VERSION: i32 = 8;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -209,6 +209,17 @@ CREATE TABLE IF NOT EXISTS provider_endpoints (
 );
 "#;
 
+/// v8: per-provider advanced forwarding settings — NULL everywhere means the
+/// gateway defaults apply. `timeout_secs` bounds the wait for upstream
+/// response headers (never aborts an in-flight stream body); `retries` counts
+/// same-provider re-attempts before the strategy layer moves on; `headers` is
+/// a JSON object of custom request headers merged after credential injection.
+const MIGRATION_V8: &str = r#"
+ALTER TABLE providers ADD COLUMN timeout_secs INTEGER;
+ALTER TABLE providers ADD COLUMN retries INTEGER;
+ALTER TABLE providers ADD COLUMN headers TEXT;
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -336,6 +347,17 @@ pub struct Provider {
     /// `default` keeps v1 export files deserializable (config share, share.rs).
     #[serde(default)]
     pub limit_unit: Option<String>,
+    /// Per-provider cap on the wait for upstream response headers, seconds
+    /// (migration v8). NULL = gateway defaults (10s connect / 300s read).
+    #[serde(default)]
+    pub timeout_secs: Option<i64>,
+    /// Same-provider re-attempts before the strategy layer moves on (v8).
+    #[serde(default)]
+    pub retries: Option<i64>,
+    /// Custom request headers as a JSON object {"Name":"value"} (v8); merged
+    /// after credential injection, so they can override the defaults.
+    #[serde(default)]
+    pub headers: Option<String>,
     pub reset_period: Option<String>,
     pub enabled: bool,
     pub created_at: String,
@@ -672,6 +694,9 @@ impl Store {
         if version < 7 {
             conn.execute_batch(MIGRATION_V7)?;
         }
+        if version < 8 {
+            conn.execute_batch(MIGRATION_V8)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -685,9 +710,10 @@ impl Store {
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
-                                    billing, period_limit, limit_unit, reset_period,
+                                    billing, period_limit, limit_unit, timeout_secs,
+                                    retries, headers, reset_period,
                                     enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 p.id,
                 p.name,
@@ -698,6 +724,9 @@ impl Store {
                 p.billing.as_str(),
                 p.period_limit,
                 p.limit_unit,
+                p.timeout_secs,
+                p.retries,
+                p.headers,
                 p.reset_period,
                 p.enabled as i64,
                 p.created_at,
@@ -713,7 +742,8 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, limit_unit, reset_period, enabled, created_at, updated_at
+                    period_limit, limit_unit, timeout_secs, retries, headers,
+                    reset_period, enabled, created_at, updated_at
              FROM providers WHERE id = ?1",
         )?;
         let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -727,7 +757,8 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, limit_unit, reset_period, enabled, created_at, updated_at
+                    period_limit, limit_unit, timeout_secs, retries, headers,
+                    reset_period, enabled, created_at, updated_at
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -753,7 +784,8 @@ impl Store {
         tx.execute(
             "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
                     api_key = ?6, billing = ?7, period_limit = ?8, limit_unit = ?9,
-                    reset_period = ?10, enabled = ?11, updated_at = ?12
+                    timeout_secs = ?10, retries = ?11, headers = ?12,
+                    reset_period = ?13, enabled = ?14, updated_at = ?15
              WHERE id = ?1",
             params![
                 p.id,
@@ -765,6 +797,9 @@ impl Store {
                 p.billing.as_str(),
                 p.period_limit,
                 p.limit_unit,
+                p.timeout_secs,
+                p.retries,
+                p.headers,
                 p.reset_period,
                 p.enabled as i64,
                 updated,
@@ -1460,10 +1495,13 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         billing: Billing::from_str(&billing_str).unwrap_or(Billing::Metered),
         period_limit: row.get(7)?,
         limit_unit: row.get(8)?,
-        reset_period: row.get(9)?,
-        enabled: row.get::<_, i64>(10)? != 0,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        timeout_secs: row.get(9)?,
+        retries: row.get(10)?,
+        headers: row.get(11)?,
+        reset_period: row.get(12)?,
+        enabled: row.get::<_, i64>(13)? != 0,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
@@ -1578,6 +1616,9 @@ mod tests {
             billing: Billing::Metered,
             period_limit: Some(50.0),
             limit_unit: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
             reset_period: Some("monthly".to_string()),
             enabled: true,
             created_at: now_rfc3339(),
@@ -1733,6 +1774,41 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM provider_endpoints", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    /// v8: per-provider advanced forwarding settings (timeout / retries /
+    /// custom headers) round-trip through insert, get, list, and update.
+    #[test]
+    fn provider_advanced_settings_roundtrip() {
+        let (_dir, store) = temp_store();
+
+        let mut p = sample_provider("p-adv", Protocol::OpenAI);
+        p.timeout_secs = Some(120);
+        p.retries = Some(2);
+        p.headers = Some(r#"{"api-key":"azure-key"}"#.to_string());
+        store.insert_provider(&p).unwrap();
+
+        // get reads all three
+        let got = store.get_provider("p-adv").unwrap().unwrap();
+        assert_eq!(got.timeout_secs, Some(120));
+        assert_eq!(got.retries, Some(2));
+        assert_eq!(got.headers.as_deref(), Some(r#"{"api-key":"azure-key"}"#));
+        // list reads them too (everything here is positional SQL)
+        let listed = &store.list_providers().unwrap()[0];
+        assert_eq!(listed.timeout_secs, Some(120));
+        assert_eq!(listed.retries, Some(2));
+        assert_eq!(listed.headers.as_deref(), Some(r#"{"api-key":"azure-key"}"#));
+
+        // update clears them (None = cleared, not "keep")
+        let mut cleared = got.clone();
+        cleared.timeout_secs = None;
+        cleared.retries = None;
+        cleared.headers = None;
+        store.update_provider(&cleared).unwrap();
+        let got = store.get_provider("p-adv").unwrap().unwrap();
+        assert_eq!(got.timeout_secs, None);
+        assert_eq!(got.retries, None);
+        assert_eq!(got.headers, None);
     }
 
     /// A database stamped v5 by an early dev build but missing the v3 api_keys

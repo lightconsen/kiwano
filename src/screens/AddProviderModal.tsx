@@ -1,7 +1,7 @@
 // Add/edit provider modal (design/index.html #modal, cc-switch AddProviderDialog pattern)
 // Base controls use shadcn/ui (Dialog/Input/Label/Select/Button); the segmented pills are kept as design language
 import { useEffect, useState } from "react";
-import { Eye, Gauge, Infinity as InfinityIcon, Plus, Store, XIcon } from "lucide-react";
+import { ChevronDown, Eye, Gauge, Infinity as InfinityIcon, Plus, Store, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -104,6 +104,12 @@ export default function AddProviderModal({
   const [newKey, setNewKey] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
+  // Advanced forwarding settings (per provider): response-header timeout,
+  // same-provider retries before failover, custom upstream headers
+  const [advOpen, setAdvOpen] = useState(false);
+  const [advTimeout, setAdvTimeout] = useState("");
+  const [advRetries, setAdvRetries] = useState("");
+  const [advHeaders, setAdvHeaders] = useState<{ name: string; value: string }[]>([]);
 
   // Prefill the form from a catalog entry (Models-page preset or in-modal pick)
   const applyShelf = (e: CatalogEntry) => {
@@ -119,6 +125,7 @@ export default function AddProviderModal({
     setLimitUnit("cny");
     setResetPeriod("monthly");
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
+    resetAdvanced();
   };
 
   // Default model options: primary models ∪ each additional endpoint's models
@@ -141,6 +148,21 @@ export default function AddProviderModal({
     const next = PROTOCOL_OPTIONS.find((p) => !used.has(p.id));
     if (!next) return;
     setAltEndpoints((rows) => [...rows, { protocol: next.id, endpoint: "" }]);
+  };
+
+  const setHeader = (i: number, patch: Partial<{ name: string; value: string }>) =>
+    setAdvHeaders((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  const removeHeader = (i: number) =>
+    setAdvHeaders((rows) => rows.filter((_, j) => j !== i));
+
+  const addHeader = () => setAdvHeaders((rows) => [...rows, { name: "", value: "" }]);
+
+  const resetAdvanced = () => {
+    setAdvOpen(false);
+    setAdvTimeout("");
+    setAdvRetries("");
+    setAdvHeaders([]);
   };
 
   const testAlt = async (i: number) => {
@@ -184,11 +206,18 @@ export default function AddProviderModal({
       setLimitUnit(q?.unit === "requests" ? "requests" : "cny");
       setResetPeriod("monthly");
       setAgents([...edit.agents]);
+      setAdvOpen(!!edit.advanced);
+      setAdvTimeout(edit.advanced?.timeout_secs != null ? String(edit.advanced.timeout_secs) : "");
+      setAdvRetries(edit.advanced?.retries != null ? String(edit.advanced.retries) : "");
+      setAdvHeaders(
+        Object.entries(edit.advanced?.headers ?? {}).map(([hName, hValue]) => ({ name: hName, value: hValue })),
+      );
       api.listApiKeys(edit.id).then(setPollKeys).catch(() => setPollKeys([]));
       return;
     }
     setMode(preset ? "shelf" : "custom");
     setShelf(preset);
+    resetAdvanced();
     if (preset) {
       applyShelf(preset);
     } else {
@@ -255,6 +284,12 @@ export default function AddProviderModal({
         used.add(r.protocol);
         altInputs.push({ protocol: r.protocol, endpoint: ep });
       }
+      // Authoritative advanced snapshot: prefilled from edit.advanced, so
+      // re-sending it round-trips untouched values; nulls clear fields.
+      const headerMap: Record<string, string> = {};
+      for (const r of advHeaders) {
+        if (r.name.trim() !== "" && r.value.trim() !== "") headerMap[r.name.trim()] = r.value.trim();
+      }
       const input = {
         name: name.trim(),
         api_key: apiKey,
@@ -269,6 +304,11 @@ export default function AddProviderModal({
         },
         agents,
         endpoints: altInputs,
+        advanced: {
+          timeout_secs: advTimeout ? Number(advTimeout) : null,
+          retries: advRetries ? Number(advRetries) : null,
+          headers: Object.keys(headerMap).length > 0 ? headerMap : undefined,
+        },
       };
       if (edit) {
         await api.updateProvider(edit.id, input);
@@ -740,17 +780,104 @@ export default function AddProviderModal({
               </div>
             )}
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 w-full justify-between text-[11.5px] text-mut"
-            >
-              <span className="flex items-center gap-1.5">
-                <Gauge className="h-3 w-3" />
-                Advanced (timeout / retries / headers)
-              </span>
-              <XIcon className="h-3.5 w-3.5 rotate-45" />
-            </Button>
+            {/* Advanced forwarding settings (per provider, gateway defaults
+                when blank): timeout = time to response headers, never aborts
+                an in-flight stream; retries cover failures before any bytes
+                reach the client; headers merge over injected credentials */}
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-full justify-between text-[11.5px] text-mut"
+                onClick={() => setAdvOpen((o) => !o)}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Gauge className="h-3 w-3" />
+                  Advanced (timeout / retries / headers)
+                </span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${advOpen ? "rotate-180" : ""}`}
+                />
+              </Button>
+              {advOpen && (
+                <div className="mt-2 space-y-2.5">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div>
+                      <Label className="text-[10.5px] font-medium text-mut">Timeout (s)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={3600}
+                        className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+                        value={advTimeout}
+                        onChange={(e) => setAdvTimeout(e.target.value)}
+                        placeholder="10"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[10.5px] font-medium text-mut">Retries</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={5}
+                        className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+                        value={advRetries}
+                        onChange={(e) => setAdvRetries(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10.5px] text-mut">
+                    Blank = gateway default · timeout caps time to response headers, never an
+                    in-flight stream · retries apply to this provider before failover
+                  </p>
+                  <div>
+                    <Label className="text-[10.5px] font-medium text-mut">
+                      Custom headers{" "}
+                      <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                        merged last · can override the API key header
+                      </span>
+                    </Label>
+                    <div className="mt-1 space-y-1.5">
+                      {advHeaders.map((r, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <Input
+                            className="h-8 w-[38%] min-w-0 flex-none bg-bg font-mono text-[12px] dark:bg-bg"
+                            value={r.name}
+                            onChange={(e) => setHeader(i, { name: e.target.value })}
+                            placeholder="Header-Name"
+                          />
+                          <Input
+                            className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+                            value={r.value}
+                            onChange={(e) => setHeader(i, { value: e.target.value })}
+                            placeholder="value"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="flex-none text-mut"
+                            aria-label="Remove header"
+                            onClick={() => removeHeader(i)}
+                          >
+                            <XIcon />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 w-full gap-1 text-[11px] text-mut"
+                        onClick={addHeader}
+                      >
+                        <Plus className="h-3 w-3" />
+                        Add header
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

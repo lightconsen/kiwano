@@ -770,6 +770,7 @@ export const devApi: KiwanoApi = {
         : undefined,
       health: { state: "ok", latency_ms: null },
       usage: null,
+      advanced: input.advanced,
     };
     providers.unshift(p);
     return p;
@@ -792,6 +793,8 @@ export const devApi: KiwanoApi = {
     t.serving_agents = t.agents.filter((a) => servingNow().has(`${a}/${t.id}`));
     t.is_current = t.serving_agents.length > 0;
     t.agents_note = t.agents.length ? `${t.agents.length} agent(s)` : undefined;
+    // Absent `advanced` keeps existing values (mirrors vm::update_provider).
+    if (input.advanced !== undefined) t.advanced = input.advanced;
     return t;
   },
 

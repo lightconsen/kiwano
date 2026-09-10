@@ -99,6 +99,12 @@ export interface Provider {
   agents_note?: string;
   health: ProviderHealth;
   usage: UsageSummary | null;
+  /** Advanced forwarding settings (timeout / retries / custom headers); absent = all defaults */
+  advanced?: {
+    timeout_secs?: number | null;
+    retries?: number | null;
+    headers?: Record<string, string>;
+  };
 }
 
 export interface NewProviderInput {
@@ -116,6 +122,15 @@ export interface NewProviderInput {
   agents: AgentId[];
   /** Additional per-protocol endpoints to persist alongside the primary */
   endpoints?: { protocol: Protocol; endpoint: string }[];
+  /**
+   * Advanced forwarding settings. Absent in an update = keep existing
+   * values; a present object is an authoritative snapshot (null clears).
+   */
+  advanced?: {
+    timeout_secs?: number | null;
+    retries?: number | null;
+    headers?: Record<string, string>;
+  };
 }
 
 export interface CatalogEntry {

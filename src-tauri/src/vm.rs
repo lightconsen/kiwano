@@ -448,6 +448,14 @@ pub struct UsageVm {
     pub spark: Option<Vec<f64>>,
 }
 
+/// Advanced forwarding settings echoed back to the modal for edit prefill.
+#[derive(Serialize, Clone)]
+pub struct ProviderAdvancedVm {
+    pub timeout_secs: Option<i64>,
+    pub retries: Option<i64>,
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
 #[derive(Serialize)]
 pub struct ProviderVm {
     pub id: String,
@@ -479,6 +487,8 @@ pub struct ProviderVm {
     pub agents_note: Option<String>,
     pub health: HealthVm,
     pub usage: Option<UsageVm>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advanced: Option<ProviderAdvancedVm>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -686,6 +696,17 @@ pub struct BillingConfigInput {
     pub reset_period: Option<String>,
 }
 
+/// Per-provider advanced forwarding settings (timeout / retries / custom
+/// headers), edited in the provider modal's Advanced section. Custom header
+/// names/values are sanitized before they reach the gateway.
+#[derive(Deserialize)]
+pub struct AdvancedInput {
+    pub timeout_secs: Option<i64>,
+    pub retries: Option<i64>,
+    /// Header name → value; serialized to a JSON object column.
+    pub headers: Option<std::collections::BTreeMap<String, String>>,
+}
+
 /// An additional per-protocol endpoint of a provider (migration v7): the
 /// gateway forwards natively here when an inbound request speaks `protocol`.
 #[derive(Serialize)]
@@ -716,6 +737,11 @@ pub struct NewProviderInput {
     /// skipped (defaulting one to openai could collide with the primary).
     #[serde(default)]
     pub endpoints: Vec<NewEndpointInput>,
+    /// Advanced forwarding settings. Absent in an update = keep existing
+    /// (mirrors the empty-api_key semantics); a present object is an
+    /// authoritative snapshot whose null fields clear values.
+    #[serde(default)]
+    pub advanced: Option<AdvancedInput>,
 }
 
 // ── Billing mapping (UI plan/payg/unl ↔ DB subscription/metered/unlimited) ──
@@ -924,6 +950,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 agents_note: note,
                 health,
                 usage,
+                advanced: advanced_vm(&p),
             }
         })
         .collect();
@@ -1347,6 +1374,51 @@ pub(crate) fn slug(name: &str) -> String {
     }
 }
 
+/// Map the advanced input to the three store columns: timeout clamps to
+/// 1..=3600 (else unset = gateway defaults), retries to 0..=5 (0 = "no retry"
+/// stored as NULL), headers serialize to a sanitized JSON object (dropping
+/// empty names/values; empty object → NULL).
+fn advanced_columns(adv: &AdvancedInput) -> (Option<i64>, Option<i64>, Option<String>) {
+    let timeout_secs = adv.timeout_secs.filter(|s| (1..=3600).contains(s));
+    let retries = adv
+        .retries
+        .filter(|r| (0..=5).contains(r))
+        .filter(|&r| r > 0);
+    let headers = adv
+        .headers
+        .as_ref()
+        .map(|map| {
+            let sanitized: serde_json::Map<String, serde_json::Value> = map
+                .iter()
+                .filter(|(k, v)| !k.trim().is_empty() && !v.is_empty())
+                .map(|(k, v)| (k.trim().to_string(), serde_json::Value::String(v.clone())))
+                .collect();
+            (!sanitized.is_empty())
+                .then(|| serde_json::Value::Object(sanitized).to_string())
+        })
+        .unwrap_or(None);
+    (timeout_secs, retries, headers)
+}
+
+/// Parse a provider row's advanced columns back into the VM (for edit prefill).
+fn advanced_vm(p: &Provider) -> Option<ProviderAdvancedVm> {
+    if p.timeout_secs.is_none() && p.retries.is_none() && p.headers.is_none() {
+        return None;
+    }
+    let headers = p
+        .headers
+        .as_deref()
+        .and_then(|raw| {
+            serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw).ok()
+        })
+        .unwrap_or_default();
+    Some(ProviderAdvancedVm {
+        timeout_secs: p.timeout_secs,
+        retries: p.retries,
+        headers,
+    })
+}
+
 /// Map the user-supplied additional endpoints to store rows; unknown protocol
 /// strings are skipped (defaulting one to openai could collide with the
 /// primary's protocol in provider_endpoints' PK).
@@ -1389,6 +1461,11 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         }
         _ => None,
     };
+    let (timeout_secs, retries, adv_headers) = input
+        .advanced
+        .as_ref()
+        .map(advanced_columns)
+        .unwrap_or((None, None, None));
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
@@ -1405,6 +1482,9 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
             input.billing_config.limit_value.is_some(),
         ),
         reset_period,
+        timeout_secs,
+        retries,
+        headers: adv_headers,
         enabled: true,
         created_at: now.clone(),
         updated_at: now,
@@ -1419,6 +1499,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     let vm_endpoints = vm_endpoints(&provider);
     let vm_billing = billing_to_ui(provider.billing).to_string();
     let vm_health = derive_health(&provider, None);
+    let vm_advanced = advanced_vm(&provider);
 
     for agent in &input.agents {
         store
@@ -1476,6 +1557,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         agents_note: (!input.agents.is_empty()).then(|| format!("{} agent(s)", input.agents.len())),
         health: vm_health,
         usage: None,
+        advanced: vm_advanced,
     })
 }
 
@@ -1562,6 +1644,14 @@ pub fn update_provider(
     };
     if !input.api_key.trim().is_empty() {
         p.api_key = Some(input.api_key.clone());
+    }
+    // Advanced: absent = keep existing (same semantics as an empty api_key);
+    // a present object is an authoritative snapshot — null fields clear values.
+    if let Some(adv) = &input.advanced {
+        let (timeout_secs, retries, headers) = advanced_columns(adv);
+        p.timeout_secs = timeout_secs;
+        p.retries = retries;
+        p.headers = headers;
     }
     p.updated_at = rfc3339(unix_now());
     store.update_provider(&p).map_err(e2s)?;
@@ -1876,6 +1966,9 @@ fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) ->
         period_limit: None,
         limit_unit: None,
         reset_period: None,
+        timeout_secs: None,
+        retries: None,
+        headers: None,
         enabled: true,
         created_at: now.clone(),
         updated_at: now,
@@ -2275,6 +2368,9 @@ mod tests {
             period_limit: None,
             limit_unit: None,
             reset_period: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
             enabled: true,
             created_at: "2026-09-07T00:00:00Z".into(),
             updated_at: "2026-09-07T00:00:00Z".into(),
@@ -2601,6 +2697,7 @@ mod tests {
             },
             agents: vec!["codex".into()],
             endpoints: Vec::new(),
+            advanced: None,
         };
         let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
@@ -2643,6 +2740,7 @@ mod tests {
                     endpoint: "https://x.example.com".into(),
                 },
             ],
+            advanced: None,
         };
         add_provider(&s, &input).unwrap();
 
@@ -2679,6 +2777,7 @@ mod tests {
                 protocol: "anthropic".into(),
                 endpoint: "https://qianfan.baidubce.com/anthropic/coding".into(),
             }],
+            advanced: None,
         };
         let vm = add_provider(&s, &input).unwrap();
         assert_eq!(vm.endpoints.len(), 1);
@@ -2742,6 +2841,7 @@ mod tests {
             },
             agents: vec!["codex".into()], // rebind: claude dropped
             endpoints: Vec::new(),
+            advanced: None,
         };
         let vm = update_provider(&s, &aux, "p1", &input).unwrap();
         assert_eq!(vm.name, "P One Renamed");

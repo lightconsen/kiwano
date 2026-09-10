@@ -54,15 +54,23 @@ AGENTS = ["claude", "codex"]
 # invisible on the Providers page, so the quota cells had nothing to draw — and
 # one of each billing mode is what makes those cells testable.
 #
-#   demo-alpha  subscription — a monthly cap in the provider's own currency
-#   demo-beta   metered      — a spending cap, the same shape one mode over
+#   demo-alpha  subscription — percent ceilings on the plan's own windows
+#   demo-beta   metered      — a spending cap in the provider's own currency
 #   demo-local  unlimited    — no metering at all
 #
-# id, name, protocol, base_url, billing, period_limit, limit_unit, reset_period
+# A plan's limit is a *percentage* of the provider's own plan quota, not an
+# amount: the Add-provider modal only offers percent fields for plan, and
+# vm::add_provider clears period_limit/limit_unit for plan rows on save. An
+# amount limit on a subscription row is legacy data the UI can no longer set.
+#
+# id, name, protocol, base_url, billing, period_limit, limit_unit, reset_period, plan_limits
 PROVIDER_ROWS = [
-    ("demo-alpha", "Demo Alpha", "anthropic", "https://alpha.demo.invalid", "subscription", 50.0, "CNY", "monthly"),
-    ("demo-beta", "Demo Beta", "openai", "https://beta.demo.invalid", "metered", 30.0, "CNY", "monthly"),
-    ("demo-local", "Demo Local", "openai", "http://127.0.0.1:11434/v1", "unlimited", None, None, None),
+    ("demo-alpha", "Demo Alpha", "anthropic", "https://alpha.demo.invalid", "subscription",
+     None, None, None, '{"five_hour":20,"weekly":60}'),
+    ("demo-beta", "Demo Beta", "openai", "https://beta.demo.invalid", "metered",
+     30.0, "CNY", "monthly", None),
+    ("demo-local", "Demo Local", "openai", "http://127.0.0.1:11434/v1", "unlimited",
+     None, None, None, None),
 ]
 
 
@@ -88,17 +96,18 @@ def provider_rotation(conn):
 def upsert_providers(conn):
     """Create the demo providers, leaving any existing row's key untouched."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for pid, name, protocol, base_url, billing, limit, unit, reset in PROVIDER_ROWS:
+    for pid, name, protocol, base_url, billing, limit, unit, reset, limits in PROVIDER_ROWS:
         conn.execute(
             """INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
                                       billing, period_limit, limit_unit, plan_query,
-                                      reset_period, enabled, created_at, updated_at)
-               VALUES (?,?,?,?,NULL,?,?,?,?,NULL,?,1,?,?)
+                                      reset_period, enabled, created_at, updated_at, plan_limits)
+               VALUES (?,?,?,?,NULL,?,?,?,?,NULL,?,1,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                   name = excluded.name, billing = excluded.billing,
                   period_limit = excluded.period_limit, limit_unit = excluded.limit_unit,
-                  reset_period = excluded.reset_period, updated_at = excluded.updated_at""",
-            (pid, name, protocol, base_url, f"sk-demo-{pid}", billing, limit, unit, reset, now, now),
+                  reset_period = excluded.reset_period, plan_limits = excluded.plan_limits,
+                  updated_at = excluded.updated_at""",
+            (pid, name, protocol, base_url, f"sk-demo-{pid}", billing, limit, unit, reset, now, now, limits),
         )
 
 

@@ -262,6 +262,9 @@ export interface CatalogEntry {
   protocol: Protocol;
   /** Price line: ¥4 /M in · ¥16 /M out etc. */
   price_line: string;
+  /** The currency this provider bills in; the spending limit is denominated
+      in it. Older catalog entries omit it → the app falls back to USD. */
+  currency?: string;
   price_note?: string;
   billing: Billing;
   users: string;

@@ -679,6 +679,11 @@ pub struct CatalogEntryVm {
     pub rating: f64,
     pub endpoint: String,
     pub price_line: String,
+    /// The currency this provider bills in. Its price rows — and therefore its
+    /// spending limit — are denominated in it. Catalogs published before the
+    /// field existed fall back to USD, the price table's base currency.
+    #[serde(default = "default_catalog_currency")]
+    pub currency: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_note: Option<String>,
     /// Billing mode; unknown Hub tags survive as `CatalogBilling::Other`.
@@ -827,6 +832,12 @@ pub struct SettingsVm {
 
 pub(crate) fn default_preferred_currency() -> String {
     "CNY".into()
+}
+
+/// Provider currency assumed when a catalog entry does not declare one — the
+/// same default `generate.mjs` applies on the Hub side.
+pub(crate) fn default_catalog_currency() -> String {
+    "USD".into()
 }
 
 pub(crate) fn default_hub_url() -> String {
@@ -1109,11 +1120,6 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
         usage_by_id.insert(pu.provider_id, pu.totals);
     }
 
-    // Read once, outside the per-provider closure: `effective_doc` parses the
-    // whole price table, and the exchange rates are the Hub's when it has
-    // published any — the same table the currency selector reports.
-    let rates = crate::pricing::effective_doc(aux).0.exchange_rates;
-
     let vms = providers
         .into_iter()
         .map(|p| {
@@ -1168,7 +1174,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             };
 
             let health = health_vm(store, &p);
-            let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7, &rates);
+            let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7);
 
             ProviderVm {
                 id: p.id.clone(),
@@ -1583,17 +1589,13 @@ fn provider_cost(buckets: &[(Option<String>, f64)]) -> (Option<f64>, Option<Stri
     }
 }
 
-/// Usage cell for one provider. `rates` are the effective price table's
-/// exchange rates (Hub-supplied when there is one): only the
-/// currency-denominated quota ring needs them, and it must agree with the
-/// currency selector rather than with the compiled-in snapshot.
+/// Usage cell for one provider.
 fn usage_vm(
     store: &Store,
     aux: &Aux,
     p: &Provider,
     totals: Option<&UsageTotals>,
     since7: &str,
-    rates: &HashMap<String, f64>,
 ) -> Option<UsageVm> {
     let t = totals?;
     // The cost stays in the currency this provider's usage was priced in: it
@@ -1616,11 +1618,11 @@ fn usage_vm(
                         / 10_000.0,
                     "wan_tokens",
                 ),
-                // Currency limits ring against the converted usage cost.
-                Some(u) if u.len() == 3 => (
-                    crate::pricing::convert_cost_buckets(&cost_buckets, u, rates),
-                    u,
-                ),
+                // A currency limit rings against the period's cost as recorded:
+                // the limit is denominated in the provider's own currency (the
+                // price table's), so no rate is involved. Converting would make
+                // the threshold move with the exchange rate.
+                Some(u) if u.len() == 3 => (cost.unwrap_or(0.0), u),
                 _ => (t.requests as f64, "requests"),
             };
             QuotaVm {
@@ -2456,7 +2458,6 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         return Ok(Vec::new());
     }
     let now = unix_now();
-    let rates = crate::pricing::effective_doc(aux).0.exchange_rates;
     let mut alerts = Vec::new();
     for p in store.list_providers().map_err(e2s)? {
         let Some(limit) = p.period_limit else {
@@ -2485,10 +2486,16 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
                     / 10_000.0
             }
             u if u.len() == 3 => {
-                let buckets = store
+                // A spending limit is denominated in the provider's own
+                // currency — the one the price table quotes its models in — so
+                // the period's cost compares directly. Converting here would
+                // make the limit mean whatever the rate said that day.
+                store
                     .usage_cost_by_currency(None, Some(&p.id), since.as_deref())
-                    .unwrap_or_default();
-                crate::pricing::convert_cost_buckets(&buckets, u, &rates)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|(currency, cost)| currency.as_deref().map(|_| cost))
+                    .sum()
             }
             _ => {
                 store

@@ -105,10 +105,15 @@ export default function AddProviderModal({
   const [billing, setBilling] = useState<Billing>("payg");
   // Payg spending-limit number (plan providers use the percent pair below)
   const [limitValue, setLimitValue] = useState("");
-  // Pay-as-you-go spending-limit currency
-  const [paygCurrency, setPaygCurrency] = useState("CNY");
-  // ISO codes offered by the currency selects (bundled price table)
-  const [currencies, setCurrencies] = useState<string[]>([]);
+  // The spending limit is denominated in the currency its provider bills in —
+  // declared by the catalog entry, never picked here: a limit the user cannot
+  // reconcile with the prices it is compared against fires at the wrong time.
+  // Entries published before the field existed fall back to USD; editing a
+  // provider keeps the currency its limit was saved with, so re-labelling it
+  // is a deliberate move rather than a side effect of opening the modal.
+  const savedCurrency =
+    edit?.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : null;
+  const limitCurrency = savedCurrency ?? shelf?.currency ?? "USD";
   const [agents, setAgents] = useState<AgentId[]>([]);
   // Multi-select dropdown for agent binding (rows = logo + name)
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -149,7 +154,6 @@ export default function AddProviderModal({
     setModel(e.models[0] ?? "");
     setBilling(e.billing);
     setLimitValue(e.billing === "payg" ? "50" : "");
-    setPaygCurrency("CNY");
     setPlanFiveHour("");
     setPlanWeekly("");
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
@@ -255,7 +259,6 @@ export default function AddProviderModal({
       const q = edit.usage?.quota;
       // Payg spending limit (plan providers now carry percent limits instead)
       setLimitValue(edit.billing === "payg" && q ? String(q.limit) : "");
-      setPaygCurrency(edit.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : "CNY");
       setPlanFiveHour(edit.plan_limits?.five_hour != null ? String(edit.plan_limits.five_hour) : "");
       setPlanWeekly(edit.plan_limits?.weekly != null ? String(edit.plan_limits.weekly) : "");
       setAgents([...edit.agents]);
@@ -288,7 +291,6 @@ export default function AddProviderModal({
       setModel("");
       setBilling("payg");
       setLimitValue("");
-      setPaygCurrency("CNY");
       setPqTemplate("");
       setPqFields({});
       setPqOpen(false);
@@ -297,13 +299,6 @@ export default function AddProviderModal({
       setAgents([]);
     }
   }, [open, preset, edit]);
-
-  // Currency codes for the limit-unit / plan-query selects (fetched once)
-  useEffect(() => {
-    if (open && currencies.length === 0) {
-      api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
-    }
-  }, [open, currencies.length]);
 
   // Catalog loads lazily, the first time the in-modal picker is shown
   useEffect(() => {
@@ -412,7 +407,7 @@ export default function AddProviderModal({
               }
             : {
                 limit_value: limitValue ? Number(limitValue) : undefined,
-                limit_unit: billing === "payg" ? paygCurrency : undefined,
+                limit_unit: billing === "payg" ? limitCurrency : undefined,
               },
         agents,
         endpoints: altInputs,
@@ -830,16 +825,17 @@ export default function AddProviderModal({
                     onChange={(e) => setLimitValue(e.target.value)}
                     placeholder="50"
                   />
-                  <Select value={paygCurrency} onValueChange={(v) => setPaygCurrency(v ?? "CNY")}>
-                    <SelectTrigger className="w-[84px] bg-bg text-[12px] dark:bg-bg">
+                  {/* Read-only on purpose: the limit is denominated in the
+                      provider's own currency, so there is nothing to pick. */}
+                  <Select value={limitCurrency} disabled>
+                    <SelectTrigger
+                      className="w-[84px] bg-bg text-[12px] dark:bg-bg"
+                      title={`${limitCurrency} — the currency this provider bills in`}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {(currencies.length ? currencies : [paygCurrency]).map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value={limitCurrency}>{limitCurrency}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

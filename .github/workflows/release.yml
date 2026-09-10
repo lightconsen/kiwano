@@ -1,10 +1,12 @@
 # Tag-triggered release pipeline (docs/upgrade.md phase 3).
 #
-# Pushing a `v*` tag builds all four targets (macOS aarch64 + x86_64, Windows,
-# Linux), signs the updater artifacts, uploads them to a draft release, then
-# publishes it automatically once every platform has landed — the tag push is
-# the only manual step. Builds are unsigned: macOS Gatekeeper needs
-# right-click → Open, and Windows SmartScreen shows a warning.
+# Pushing a `v*` tag runs the same checks as CI (`verify`), then builds all four
+# targets (macOS aarch64 + x86_64, Windows, Linux), signs the updater artifacts,
+# uploads them to a draft release, and publishes it automatically once every
+# platform has landed — the tag push is the only manual step. Because publishing
+# needs no human, `verify` is what stops a tag on a red commit from shipping.
+# Builds are unsigned: macOS Gatekeeper needs right-click → Open, and Windows
+# SmartScreen shows a warning.
 #
 # Two outputs: the GitHub release (the updater's authoritative manifest source)
 # and a Cloudflare R2 mirror under releases/, whose paths carry no version so
@@ -25,7 +27,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate: publishing is automatic now, so a tag pushed onto a red commit would
+  # otherwise ship itself. Mirrors the checks in ci.yml (kept deliberately the
+  # same commands — update both together). Linux-only is enough: a macOS- or
+  # Windows-only compile error still fails its build leg, and `publish` needs
+  # every leg, so nothing ships.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Tauri system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      # Version pinned in rust-toolchain.toml — keep the two in sync.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Typecheck and build frontend
+        run: pnpm build
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:

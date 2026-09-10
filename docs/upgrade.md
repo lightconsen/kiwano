@@ -129,6 +129,8 @@ tauri-plugin-process = "2"   # relaunch 用
   不解决 Gatekeeper**，macOS 分发要过公证需另行配置（可作为后续迭代，v0 先 developer 自用）；
 - 产出 draft release：各平台安装包 + `.sig` + `latest.json`；所有平台上传完毕后由 `publish`
   job 自动转正（推 tag 是唯一的人工动作），避免半成品 release 与残缺 `latest.json` 外泄；
+- 发布前置闸门：`verify` job 先跑与 CI 相同的 fmt / clippy / tests / 前端构建，
+  不过则不进入构建——自动发布之后，这是唯一阻止「红 commit 自行发版」的关卡；
 - 镜像：安装包与 `latest.json` 同步到 R2（`hub.kiwano.cc/releases/`，文件名不带版本号）。
 
 配套：版本号目前散在 `package.json` / `tauri.conf.json` / `Cargo.toml` 三处（均为 0.1.0），

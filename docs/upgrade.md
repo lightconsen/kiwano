@@ -127,7 +127,9 @@ tauri-plugin-process = "2"   # relaunch 用
 - **Secrets**：`TAURI_SIGNING_PRIVATE_KEY` / `..._PASSWORD`、`GITHUB_TOKEN`；
   macOS 追加 Apple 签名公证 secrets（`APPLE_CERTIFICATE` 等）——**updater 只验 minisign 签名，
   不解决 Gatekeeper**，macOS 分发要过公证需另行配置（可作为后续迭代，v0 先 developer 自用）；
-- 产出 draft release：各平台安装包 + `.sig` + `latest.json`，人工核对后 publish。
+- 产出 draft release：各平台安装包 + `.sig` + `latest.json`；所有平台上传完毕后由 `publish`
+  job 自动转正（推 tag 是唯一的人工动作），避免半成品 release 与残缺 `latest.json` 外泄；
+- 镜像：安装包与 `latest.json` 同步到 R2（`hub.kiwano.cc/releases/`，文件名不带版本号）。
 
 配套：版本号目前散在 `package.json` / `tauri.conf.json` / `Cargo.toml` 三处（均为 0.1.0），
 加一个 `scripts/release.sh`（或 Makefile 目标）一次性 bump 三处 + 生成 tag，避免漂移。
@@ -148,7 +150,7 @@ tauri-plugin-process = "2"   # relaunch 用
 - [ ] `Cargo.toml` / `package.json` / capabilities / `lib.rs` / `tauri.conf.json` 五处接入完成
 - [ ] `update.rs` 两命令 + `UpdateInfoVm`，`types.ts` / `tauri.ts` / `dev.ts` 同步
 - [ ] 设置页「关于/更新」区块：版本号、手动检查、进度条、relaunch、启动检查开关
-- [ ] `release.yml` tag 触发出 draft release，含 `latest.json` 与 `.sig`
+- [ ] `release.yml` tag 触发构建，含 `latest.json` 与 `.sig`，全平台就绪后自动 publish
 - [ ] 版本 bump 脚本统一三处版本号
 - [ ] §6 五项测试全部通过
 

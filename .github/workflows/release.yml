@@ -1,9 +1,14 @@
-# Tag-triggered release build (docs/upgrade.md phase 3, lightweight variant).
-# Pushing a `v*` tag builds all three platforms and opens a DRAFT release;
-# inspect and publish it manually. Updater artifacts (latest.json + .sig)
-# land here once tauri-plugin-updater is wired up (phase 0+1). Builds are
-# unsigned for now: macOS Gatekeeper needs right-click → Open, Windows
-# SmartScreen shows a warning.
+# Tag-triggered release pipeline (docs/upgrade.md phase 3).
+#
+# Pushing a `v*` tag builds all four targets (macOS aarch64 + x86_64, Windows,
+# Linux), signs the updater artifacts, uploads them to a draft release, then
+# publishes it automatically once every platform has landed — the tag push is
+# the only manual step. Builds are unsigned: macOS Gatekeeper needs
+# right-click → Open, and Windows SmartScreen shows a warning.
+#
+# Two outputs: the GitHub release (the updater's authoritative manifest source)
+# and a Cloudflare R2 mirror under releases/, whose paths carry no version so
+# they stay valid across releases. See the `mirror-*` and `publish` jobs.
 
 name: Release
 
@@ -85,6 +90,10 @@ jobs:
 
             macOS 请按芯片选择：aarch64 = Apple Silicon（M 系列），
             x86_64 = Intel。
+          # Each platform uploads into a draft; the `publish` job below flips it
+          # public once every platform has landed. Publishing from here would
+          # expose a half-filled release — and a latest.json missing platforms,
+          # which reads as "you are up to date" to whoever checks in that window.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
@@ -165,3 +174,19 @@ jobs:
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
         run: aws s3 cp manifest/latest.json s3://kiwano-hub/releases/latest.json --no-progress
+
+  # No human in the loop: publishing is a tag push and nothing else.
+  # `needs: build` only (not the mirror jobs) — the release is the deliverable,
+  # so a mirror hiccup must not leave it stranded as a draft.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release edit "${{ github.ref_name }}"
+          -R "${{ github.repository }}"
+          --draft=false --latest

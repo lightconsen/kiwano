@@ -89,17 +89,79 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
-      # Mirror the built installers to Cloudflare R2 under releases/ (served
-      # at hub.kiwano.cc/releases). GitHub Releases stays the updater's
-      # authoritative manifest source; R2 is the download mirror for the site.
+      # Mirror the built installers to Cloudflare R2 under releases/ (served at
+      # hub.kiwano.cc/releases). Only the newest build lives there: names are
+      # version-stripped so every release overwrites the same keys instead of
+      # accumulating history. GitHub Releases stays the updater's authoritative
+      # manifest source; R2 is the download mirror.
+      # shell: bash on every runner (Windows included) so the staging logic is
+      # one script rather than a PowerShell rewrite.
       - name: Mirror artifacts to Cloudflare R2
+        shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
-        # Single line on purpose: the Windows runner's shell is PowerShell,
-        # where a backslash does not continue a line. --exclude drops the raw
-        # .app bundle tree (dmg + updater tar.gz are what matter).
-        # The build passes --target, so bundles land under target/<triple>/.
-        run: aws s3 sync target/${{ matrix.target }}/release/bundle s3://kiwano-hub/releases --no-progress --exclude "*.app" --exclude "*.app/*"
+        run: |
+          set -euo pipefail
+          # The build passes --target, so bundles land under target/<triple>/.
+          bundle="target/${{ matrix.target }}/release/bundle"
+          version=$(node -p "require('./package.json').version")
+
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin)     arch=aarch64 ;;
+            x86_64-apple-darwin)      arch=x64 ;;
+            x86_64-unknown-linux-gnu) arch=amd64 ;;
+            x86_64-pc-windows-msvc)   arch=x64 ;;
+          esac
+
+          # Whitelist of real artifacts — create-dmg's support files (share/,
+          # *.sh, *.icns, *.xml) never reach the staging dir, so no --exclude
+          # patchwork is needed.
+          mkdir -p mirror
+          find "$bundle" -type f \
+            \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \
+               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+               -o -name '*.exe' -o -name '*.msi' \) -exec cp {} mirror/ \;
+
+          # Drop the version from every name (Kiwano_0.1.2_x64.dmg →
+          # Kiwano_x64.dmg; rpms spell it Kiwano-0.1.2-1.<arch>.rpm), then tag
+          # the macOS updater pair with its arch: Tauri names both the Intel
+          # and the Apple Silicon build `Kiwano.app.tar.gz`, so without this
+          # they would overwrite each other on the mirror.
+          for f in mirror/*; do
+            name=$(basename "$f" | sed -e "s/_${version}//" -e "s/-${version}-/-/")
+            case "$name" in
+              Kiwano.app.tar.gz*) name="Kiwano_${arch}.${name#Kiwano.}" ;;
+            esac
+            [ "$name" = "$(basename "$f")" ] || mv "$f" "mirror/$name"
+          done
+
+          aws s3 sync mirror s3://kiwano-hub/releases --no-progress
+
+  # latest.json is assembled by tauri-action as each platform uploads its entry,
+  # so mirroring it from the build jobs would race: whichever finished first
+  # would publish a manifest missing the other platforms — that is exactly how
+  # darwin-x86_64 went missing from the previous release. Fetch it once, after
+  # every platform has landed.
+  mirror-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download the merged updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release download "${{ github.ref_name }}"
+          -R "${{ github.repository }}"
+          --pattern latest.json --dir manifest --clobber
+
+      - name: Mirror it to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
+        run: aws s3 cp manifest/latest.json s3://kiwano-hub/releases/latest.json --no-progress

@@ -998,7 +998,15 @@ export default function AddProviderModal({
                         onValueChange={(v) => setPqTemplate(v === "none" || v == null ? "" : v)}
                       >
                         <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
-                          <SelectValue />
+                          {/* The value is the template's id, and "none" is a
+                              sentinel rather than a template. */}
+                          <SelectValue>
+                            {(v) =>
+                              v == null || v === "none"
+                                ? "None"
+                                : (PLAN_QUERY_TEMPLATES.find((t) => t.id === v)?.label ?? String(v))
+                            }
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">None</SelectItem>

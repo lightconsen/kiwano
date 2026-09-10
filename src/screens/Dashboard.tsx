@@ -424,7 +424,10 @@ export default function Dashboard() {
             window), independent of the current selection */}
         <Select value={providerFilter} onValueChange={(v) => setProviderFilter(v ?? "all")}>
           <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
-            <SelectValue />
+            {/* The value is an id; a bare <SelectValue /> would print it. */}
+            <SelectValue>
+              {(v) => data.filter_providers.find((p) => p.id === v)?.label ?? "All providers"}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All providers</SelectItem>
@@ -437,7 +440,9 @@ export default function Dashboard() {
         </Select>
         <Select value={agentFilter} onValueChange={(v) => setAgentFilter(v ?? "all")}>
           <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
-            <SelectValue />
+            <SelectValue>
+              {(v) => data.filter_agents.find((a) => a.id === v)?.label ?? "All agents"}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All agents</SelectItem>

@@ -118,7 +118,9 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
                 size="sm"
                 className="h-6 gap-1 bg-transparent px-1 text-[11px] dark:bg-transparent [&_svg:not([class*='size-'])]:size-3"
               >
-                <SelectValue />
+                {/* The value is the bare unit ("tokens"); the menu adds the
+                    "/day" the reader needs. */}
+                <SelectValue>{(v) => (v === "tokens" ? "tokens/day" : "requests/day")}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="requests">requests/day</SelectItem>

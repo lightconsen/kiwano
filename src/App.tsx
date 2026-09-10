@@ -9,6 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { applyTheme } from "./lib/theme";
 import { onOpenSettings } from "./lib/updateEvents";
 import { AGENTS } from "./api/types";
 import type {
@@ -63,6 +64,15 @@ export default function App() {
     const onHash = () => setRoute(routeFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Settings own the theme. The pre-paint script in index.html only had the
+  // cached copy, so this is what decides it for real.
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => applyTheme(s.theme))
+      .catch(() => {});
   }, []);
 
   // Tray → "Update to vX…": the About block reads the pending update on mount,

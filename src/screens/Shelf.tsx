@@ -24,9 +24,9 @@ const CHIPS: {
 }[] = [
   { id: "all", label: "All" },
   { id: "official", label: "Official", icon: ShieldCheck, icon_color: "var(--kiwi)" },
-  { id: "aggregate", label: "Aggregator", icon: Layers, icon_color: "oklch(0.75 0.14 300)" },
-  { id: "third", label: "Third-party", icon: Boxes, icon_color: "oklch(0.72 0.12 250)" },
-  { id: "free", label: "Free tier", icon: Gift, icon_color: "oklch(0.82 0.13 85)" },
+  { id: "aggregate", label: "Aggregator", icon: Layers, icon_color: "var(--violet)" },
+  { id: "third", label: "Third-party", icon: Boxes, icon_color: "var(--blue)" },
+  { id: "free", label: "Free tier", icon: Gift, icon_color: "var(--amber)" },
 ];
 
 function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
@@ -34,20 +34,20 @@ function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
     case "official":
       return { background: "var(--kiwi-soft)", color: "var(--kiwi)" };
     case "free":
-      return { background: "oklch(0.8 0.15 85 / .12)", color: "oklch(0.82 0.13 85)" };
+      return { background: "var(--amber-soft)", color: "var(--amber)" };
     case "aggregate":
-      return { background: "oklch(0.62 0.16 300 / .18)", color: "oklch(0.75 0.14 300)" };
+      return { background: "var(--violet-soft)", color: "var(--violet)" };
     case "third":
-      return { background: "oklch(0.62 0.14 250 / .16)", color: "oklch(0.72 0.12 250)" };
+      return { background: "var(--blue-soft)", color: "var(--blue)" };
     case "local":
       return { background: "var(--surface2)", color: "var(--mut)" };
   }
 }
 
 const PROTO_STYLE: Record<Protocol, React.CSSProperties> = {
-  anthropic: { background: "oklch(0.68 0.11 55 / .14)", color: "oklch(0.72 0.11 55)" },
+  anthropic: { background: "var(--orange-soft)", color: "var(--orange)" },
   openai: { background: "var(--surface2)", color: "var(--mut)" },
-  gemini: { background: "oklch(0.62 0.14 260 / .16)", color: "oklch(0.7 0.13 260)" },
+  gemini: { background: "var(--indigo-soft)", color: "var(--indigo)" },
 };
 
 const TAG_RANK: Record<CatalogEntry["tag"], number> = {
@@ -90,7 +90,7 @@ function probeChipStyle(verdict: ProbeReport["verdict"]): React.CSSProperties {
       return { background: "var(--surface2)", color: "var(--mut)" };
     case "error":
     case "unreachable":
-      return { background: "oklch(0.6 0.2 25 / .14)", color: "oklch(0.62 0.2 25)" };
+      return { background: "oklch(0.6 0.2 25 / .14)", color: "var(--red)" };
   }
 }
 

@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/kiwano-logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kiwano</title>
+    <!-- Theme before first paint: the setting lives in the backend, so without
+         this cached copy the window would flash the default theme on launch.
+         Dark stays the default, matching the class on <html> above. -->
+    <script>
+      try {
+        if (localStorage.getItem("kiwano.theme") === "light") {
+          document.documentElement.classList.remove("dark");
+        }
+      } catch (e) {
+        /* storage disabled: keep the default */
+      }
+    </script>
   </head>
 
   <body>

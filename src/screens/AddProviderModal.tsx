@@ -59,7 +59,7 @@ const PROBE_TEXT: Record<ProbeReport["verdict"], string> = {
 };
 
 function probeColor(verdict: ProbeReport["verdict"]): string {
-  return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "oklch(0.62 0.2 25)";
+  return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
 }
 
 export default function AddProviderModal({
@@ -730,7 +730,7 @@ export default function AddProviderModal({
                 />
               )}
               {fetchError && (
-                <p className="mt-1 text-[10.5px]" style={{ color: "oklch(0.62 0.2 25)" }} title={fetchError}>
+                <p className="mt-1 text-[10.5px]" style={{ color: "var(--red)" }} title={fetchError}>
                   {fetchError}
                 </p>
               )}

@@ -65,20 +65,20 @@ function TrendChart({ data }: { data: DashboardData }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" style={{ height: 118 }}>
       <defs>
         <linearGradient id="gk" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="oklch(0.8 0.19 132)" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="oklch(0.8 0.19 132)" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--kiwi)" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="var(--kiwi)" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <g stroke="oklch(0.27 0.012 260)" strokeDasharray="3 4">
+      <g stroke="var(--line)" strokeDasharray="3 4">
         <line x1="0" y1="32" x2={W} y2="32" />
         <line x1="0" y1="65" x2={W} y2="65" />
         <line x1="0" y1="98" x2={W} y2="98" />
       </g>
       <path d={areaPath} fill="url(#gk)" />
-      <path d={reqPath} fill="none" stroke="oklch(0.8 0.19 132)" strokeWidth="1.8" />
-      <path d={smoothPath(tokPts)} fill="none" stroke="oklch(0.62 0.14 250)" strokeWidth="1.3" strokeDasharray="5 4" />
-      {last && <circle cx={last[0]} cy={last[1]} r="3" fill="oklch(0.8 0.19 132)" stroke="oklch(0.13 0.01 260)" strokeWidth="1.5" />}
-      <g fill="oklch(0.58 0.01 260)" fontSize="9.5" fontFamily="JetBrains Mono">
+      <path d={reqPath} fill="none" stroke="var(--kiwi)" strokeWidth="1.8" />
+      <path d={smoothPath(tokPts)} fill="none" stroke="var(--blue)" strokeWidth="1.3" strokeDasharray="5 4" />
+      {last && <circle cx={last[0]} cy={last[1]} r="3" fill="var(--kiwi)" stroke="var(--bg)" strokeWidth="1.5" />}
+      <g fill="var(--mut)" fontSize="9.5" fontFamily="JetBrains Mono">
         {data.trend.map((t, i) => (
           <text key={t.date} x={x(i) - 14} y="126">
             {t.date}
@@ -239,7 +239,7 @@ export default function Dashboard() {
                 Requests
               </span>
               <span className="flex items-center gap-1">
-                <span className="h-1 w-2 rounded-full" style={{ background: "oklch(0.62 0.14 250)" }} />
+                <span className="h-1 w-2 rounded-full" style={{ background: "var(--blue)" }} />
                 Tokens(×10k)
               </span>
             </div>

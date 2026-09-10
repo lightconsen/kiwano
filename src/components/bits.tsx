@@ -97,7 +97,7 @@ export function Sparkline({ points }: { points: number[] }) {
   const pts = points.map((y, i) => `${(i * 80) / (n - 1)},${y}`).join(" ");
   return (
     <svg viewBox="0 0 80 14" className="h-3.5 w-20">
-      <polyline points={pts} fill="none" stroke="oklch(0.62 0.14 250)" strokeWidth="1.5" />
+      <polyline points={pts} fill="none" stroke="var(--blue)" strokeWidth="1.5" />
     </svg>
   );
 }

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
+import { applyTheme } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
 import type { AgentId, AppSettings, UpdateInfo } from "../api/types";
 
@@ -182,13 +183,22 @@ export default function Settings() {
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Theme" note="Dark only">
-            <Select value="dark" disabled>
+          <Row label="Theme">
+            <Select
+              value={s.theme}
+              onValueChange={(v) => {
+                if (!v) return;
+                // Apply now, persist after: the switch should feel immediate.
+                applyTheme(v);
+                patch({ theme: v });
+              }}
+            >
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="dark">Dark</SelectItem>
+                <SelectItem value="light">Light</SelectItem>
               </SelectContent>
             </Select>
           </Row>

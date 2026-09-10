@@ -6,36 +6,53 @@
 
 /* Kiwano design tokens — mirrored from design/index.html (SSOT), see tech.md §4.8.
    Brand colors are plain CSS variables; inline styles can use var(--kiwi) directly;
-   shadcn/ui semantic variables (--background/--primary/…) map onto the Kiwano palette,
-   dark-only: values are written straight into :root, and .dark on html makes the dark: variants work inside components.
-   @theme inline maps them to Tailwind utilities (bg-kiwi, text-mut, border-line …). */
+   shadcn/ui semantic variables (--background/--primary/…) map onto the Kiwano palette.
+   Two themes: :root is the light palette, .dark (set on <html> from the Settings
+   choice) overrides it. The semantic vars below are indirections, so they follow
+   either theme on their own; only the two literal-valued ones are repeated.
+   @theme inline maps them to Tailwind utilities (bg-kiwi, text-mut, border-line …),
+   and the `dark:` variant is keyed on the same .dark class. */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  --bg: oklch(0.15 0.008 260);
-  --surface: oklch(0.185 0.01 260);
-  --surface2: oklch(0.225 0.012 260);
-  --line: oklch(0.27 0.012 260);
-  --ink: oklch(0.93 0.005 260);
-  --mut: oklch(0.58 0.01 260);
-  --kiwi: oklch(0.80 0.19 132);
-  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
-  --kiwi-dim: oklch(0.55 0.14 132);
+  --bg: oklch(0.975 0.003 260);
+  --surface: oklch(1 0 0);
+  --surface2: oklch(0.955 0.004 260);
+  --line: oklch(0.9 0.006 260);
+  --ink: oklch(0.23 0.012 260);
+  --mut: oklch(0.53 0.012 260);
+  /* Brand green, darkened: the dark theme's 0.80 lightness is unreadable as
+     text on a white surface, and 0.62 keeps the hue while clearing AA. */
+  --kiwi: oklch(0.62 0.16 132);
+  --kiwi-soft: oklch(0.62 0.16 132 / 0.1);
+  --kiwi-dim: oklch(0.72 0.13 132);
   /* status colors (design.md §5) */
-  --blue: oklch(0.72 0.13 245);
-  --amber: oklch(0.78 0.15 80);
-  --red: oklch(0.65 0.2 25);
+  --blue: oklch(0.55 0.15 245);
+  --amber: oklch(0.64 0.13 80);
+  --red: oklch(0.55 0.2 25);
+  --violet: oklch(0.55 0.17 300);
+  /* Chips and protocol badges: a colour plus its tinted background. The tinted
+     halves are tokens rather than inline `oklch(… / .14)` because the tint has
+     to sit on either surface — the dark theme's pale tints vanish on white. */
+  --amber-soft: oklch(0.64 0.13 80 / 0.14);
+  --violet-soft: oklch(0.55 0.17 300 / 0.14);
+  --blue-soft: oklch(0.55 0.15 245 / 0.12);
+  --orange: oklch(0.58 0.13 55);
+  --orange-soft: oklch(0.58 0.13 55 / 0.14);
+  --indigo: oklch(0.52 0.16 268);
+  --indigo-soft: oklch(0.52 0.16 268 / 0.14);
+
 
   /* shadcn/ui semantic vars → Kiwano palette */
   --background: var(--bg);
   --foreground: var(--ink);
   --card: var(--surface);
   --card-foreground: var(--ink);
-  --popover: oklch(0.21 0.012 260); /* dropdown/popover: one level above surface */
+  --popover: oklch(1 0 0); /* dropdown/popover: one level above surface */
   --popover-foreground: var(--ink);
   --primary: var(--kiwi);
-  --primary-foreground: oklch(0.18 0.03 132);
+  --primary-foreground: oklch(0.99 0.02 132); /* ink on the green button */
   --secondary: var(--surface2);
   --secondary-foreground: var(--ink);
   --muted: var(--surface2);
@@ -47,6 +64,37 @@
   --input: var(--line);
   --ring: var(--kiwi-dim);
   --radius: 0.625rem;
+}
+
+/* The dark palette, unchanged: the app shipped dark-only, so this is the
+   original set, now reachable through a class instead of being the only one. */
+.dark {
+  color-scheme: dark;
+
+  --bg: oklch(0.15 0.008 260);
+  --surface: oklch(0.185 0.01 260);
+  --surface2: oklch(0.225 0.012 260);
+  --line: oklch(0.27 0.012 260);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.8 0.19 132);
+  --kiwi-soft: oklch(0.8 0.19 132 / 0.13);
+  --kiwi-dim: oklch(0.55 0.14 132);
+  --blue: oklch(0.72 0.13 245);
+  --amber: oklch(0.78 0.15 80);
+  --red: oklch(0.65 0.2 25);
+  --violet: oklch(0.75 0.14 300);
+  --amber-soft: oklch(0.8 0.15 85 / 0.12);
+  --violet-soft: oklch(0.62 0.16 300 / 0.18);
+  --blue-soft: oklch(0.62 0.14 250 / 0.16);
+  --orange: oklch(0.72 0.11 55);
+  --orange-soft: oklch(0.68 0.11 55 / 0.14);
+  --indigo: oklch(0.7 0.13 260);
+  --indigo-soft: oklch(0.62 0.14 260 / 0.16);
+
+  /* The two semantic vars that are literals rather than indirections. */
+  --popover: oklch(0.21 0.012 260);
+  --primary-foreground: oklch(0.18 0.03 132);
 }
 
 @theme inline {
@@ -63,6 +111,7 @@
   --color-blue: var(--blue);
   --color-amber: var(--amber);
   --color-red: var(--red);
+  --color-violet: var(--violet);
   /* shadcn semantic */
   --color-background: var(--background);
   --color-foreground: var(--foreground);

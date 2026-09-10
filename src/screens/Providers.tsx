@@ -131,7 +131,7 @@ function AgentOnboarding({
 }
 
 function ringColor(billing: Provider["billing"], pct: number): string {
-  if (billing === "plan") return "oklch(0.78 0.12 300)";
+  if (billing === "plan") return "var(--violet)";
   if (pct >= 95) return "var(--red)";
   if (pct >= 80) return "var(--amber)";
   return "var(--kiwi)";

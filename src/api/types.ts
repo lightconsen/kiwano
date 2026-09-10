@@ -158,6 +158,13 @@ export interface CurrencyMeta {
   preferred: string;
 }
 
+/** Plan-mode percent limits (providers.plan_limits JSON): per-window
+    utilization ceilings enforced by the app patrol. */
+export interface PlanLimits {
+  five_hour?: number;
+  weekly?: number;
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -177,6 +184,8 @@ export interface Provider {
   limit_unit?: string;
   /** Plan-quota query config; absent = not configured */
   plan_query?: PlanQuery | null;
+  /** Percent-of-window ceilings for plan providers; absent = none set */
+  plan_limits?: PlanLimits | null;
   enabled: boolean;
   /** Derived from agent_bindings */
   agents: AgentId[];
@@ -211,6 +220,8 @@ export interface NewProviderInput {
     /** requests | wan_tokens | 3-letter ISO currency code */
     limit_unit?: "requests" | "wan_tokens" | (string & {});
     reset_period?: "monthly" | "weekly" | "yearly" | "none";
+    /** Plan providers only: percent-of-window ceilings */
+    plan_limits?: PlanLimits | null;
   };
   agents: AgentId[];
   /** Additional per-protocol endpoints to persist alongside the primary */

@@ -102,14 +102,19 @@ export default function App() {
             if (st !== "granted") return;
           }
           const used =
-            a.unit === "wan_tokens"
-              ? `${(a.used * 10).toLocaleString()}k tokens`
-              : a.unit === "requests"
-                ? `${a.used.toLocaleString()} requests`
-                : fmtMoney(a.used, a.unit);
+            a.unit === "plan_pct"
+              ? `${a.used}% of its plan window`
+              : a.unit === "wan_tokens"
+                ? `${(a.used * 10).toLocaleString()}k tokens`
+                : a.unit === "requests"
+                  ? `${a.used.toLocaleString()} requests`
+                  : fmtMoney(a.used, a.unit);
           sendNotification({
-            title: "Kiwano cost alert",
-            body: `${a.provider_name} used ${used} this period and has hit its limit of ${a.limit} — watch your spending`,
+            title: a.unit === "plan_pct" ? "Kiwano plan limit" : "Kiwano cost alert",
+            body:
+              a.unit === "plan_pct"
+                ? `${a.provider_name} is at ${used} and has reached its ${a.limit}% limit — it is disabled until usage drops back under`
+                : `${a.provider_name} used ${used} this period and has hit its limit of ${a.limit} — watch your spending`,
           });
         }
       } catch {

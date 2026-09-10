@@ -141,6 +141,16 @@ function ringColor(billing: Provider["billing"], pct: number): string {
 function usageTitle(p: Provider): string {
   const u = p.usage;
   if (!u) return "";
+  if (p.billing === "plan" && p.plan_limits) {
+    const l = p.plan_limits;
+    const parts = [
+      l.five_hour != null ? `5h window ≤ ${l.five_hour}%` : null,
+      l.weekly != null ? `weekly window ≤ ${l.weekly}%` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return `Plan · limit ${parts} · enforced against the provider's plan-quota utilization · in ${fmtTokens(u.input_tokens)} · out ${fmtTokens(u.output_tokens)}`;
+  }
   if (p.billing === "plan" && u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
     const unitLabel = u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? u.quota.unit : u.quota.unit;
@@ -206,6 +216,59 @@ function UsageCell({
               .filter(Boolean)
               .join(" · ")}
           </div>
+          {/* Live plan quota: per-window utilization from the provider's own endpoint */}
+          {planLine && (
+            <div
+              className="mt-0.5 truncate text-[10.5px]"
+              style={{ color: maxUtil >= 95 ? "var(--red)" : maxUtil >= 80 ? "var(--amber)" : "var(--mut)" }}
+              title={plan && !plan.success ? (plan.error ?? "") : `${plan?.template}${plan?.cached ? " · cached" : ""}`}
+            >
+              {planLine}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Percent-limit rows: the ring tracks how close the live utilization is to
+  // its configured ceiling (tightest window wins); legacy used/limit rows
+  // render above.
+  if (p.billing === "plan" && p.plan_limits) {
+    const l = p.plan_limits;
+    const util = (name: string) =>
+      plan?.success ? plan.tiers.find((t) => t.name === name)?.utilization : undefined;
+    const five = util("five_hour");
+    const week = util("weekly_limit");
+    const ratios = [
+      l.five_hour != null && five != null ? (five / l.five_hour) * 100 : 0,
+      l.weekly != null && week != null ? (week / l.weekly) * 100 : 0,
+    ];
+    const pct = Math.min(100, Math.round(Math.max(...ratios, 0)));
+    const color = pct >= 95 ? "var(--red)" : pct >= 80 ? "var(--amber)" : "var(--kiwi)";
+    const limitLine = [
+      l.five_hour != null ? `5h ≤ ${l.five_hour}%` : null,
+      l.weekly != null ? `wk ≤ ${l.weekly}%` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const planLine = plan?.success
+      ? plan.tiers
+          .map((t) => `${PLAN_TIER_LABELS[t.name] ?? t.name} ${Math.round(t.utilization)}%`)
+          .join(" · ")
+      : plan && !plan.success
+        ? plan.error
+        : null;
+    const maxUtil = plan?.success ? Math.max(...plan.tiers.map((t) => t.utilization), 0) : 0;
+    return (
+      <div className="flex w-[22%] items-center gap-2" title={title}>
+        <Ring pct={pct} color={color} />
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
+            <BillTag billing="plan" />
+            <span>{limitLine}</span>
+          </div>
+          <div className="mt-0.5 text-[10.5px] text-mut">{p.plan_price ?? ""}</div>
           {/* Live plan quota: per-window utilization from the provider's own endpoint */}
           {planLine && (
             <div

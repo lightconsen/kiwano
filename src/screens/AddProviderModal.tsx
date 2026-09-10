@@ -101,14 +101,12 @@ export default function AddProviderModal({
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [billing, setBilling] = useState<Billing>("payg");
+  // Payg spending-limit number (plan providers use the percent pair below)
   const [limitValue, setLimitValue] = useState("");
-  // Plan limit unit: requests / wan_tokens / 3-letter ISO currency
-  const [limitUnit, setLimitUnit] = useState<"requests" | "wan_tokens" | (string & {})>("CNY");
-  // Pay-as-you-go spending-limit currency (kept separate: the plan unit can be requests/tokens)
+  // Pay-as-you-go spending-limit currency
   const [paygCurrency, setPaygCurrency] = useState("CNY");
-  // ISO codes offered by the unit/currency selects (bundled price table)
+  // ISO codes offered by the currency selects (bundled price table)
   const [currencies, setCurrencies] = useState<string[]>([]);
-  const [resetPeriod, setResetPeriod] = useState<"monthly" | "weekly" | "yearly" | "none">("monthly");
   const [agents, setAgents] = useState<AgentId[]>([]);
   // Multi-select dropdown for agent binding (rows = logo + name)
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -133,6 +131,10 @@ export default function AddProviderModal({
   const [pqOpen, setPqOpen] = useState(false);
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
+  // Plan-mode percent limits: per-window utilization ceilings over the
+  // vendor's rolling 5-hour / weekly windows (blank = no limit on it).
+  const [planFiveHour, setPlanFiveHour] = useState("");
+  const [planWeekly, setPlanWeekly] = useState("");
 
   // Prefill the form from a catalog entry (Models-page preset or in-modal pick)
   const applyShelf = (e: CatalogEntry) => {
@@ -145,9 +147,9 @@ export default function AddProviderModal({
     setModel(e.models[0] ?? "");
     setBilling(e.billing);
     setLimitValue(e.billing === "payg" ? "50" : "");
-    setLimitUnit("CNY");
     setPaygCurrency("CNY");
-    setResetPeriod("monthly");
+    setPlanFiveHour("");
+    setPlanWeekly("");
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
     setFetchedModels(null);
     setFetchError(null);
@@ -249,17 +251,11 @@ export default function AddProviderModal({
       setModel("");
       setBilling(edit.billing);
       const q = edit.usage?.quota;
-      setLimitValue(q ? String(q.limit) : "");
-      // Plan quota unit is authoritative; payg providers have no quota row,
-      // so restore their stored currency from limit_unit.
-      const unit = q?.unit ?? edit.limit_unit;
-      setLimitUnit(
-        unit === "requests" || unit === "wan_tokens" || (unit && unit.length === 3)
-          ? (unit as string)
-          : "CNY",
-      );
+      // Payg spending limit (plan providers now carry percent limits instead)
+      setLimitValue(edit.billing === "payg" && q ? String(q.limit) : "");
       setPaygCurrency(edit.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : "CNY");
-      setResetPeriod("monthly");
+      setPlanFiveHour(edit.plan_limits?.five_hour != null ? String(edit.plan_limits.five_hour) : "");
+      setPlanWeekly(edit.plan_limits?.weekly != null ? String(edit.plan_limits.weekly) : "");
       setAgents([...edit.agents]);
       const pq = edit.plan_query;
       setPqTemplate(pq?.template ?? "");
@@ -290,12 +286,12 @@ export default function AddProviderModal({
       setModel("");
       setBilling("payg");
       setLimitValue("");
-      setLimitUnit("CNY");
       setPaygCurrency("CNY");
       setPqTemplate("");
       setPqFields({});
       setPqOpen(false);
-      setResetPeriod("monthly");
+      setPlanFiveHour("");
+      setPlanWeekly("");
       setAgents([]);
     }
   }, [open, preset, edit]);
@@ -397,11 +393,20 @@ export default function AddProviderModal({
         protocol,
         model_default: model,
         billing,
-        billing_config: {
-          limit_value: limitValue ? Number(limitValue) : undefined,
-          limit_unit: billing === "plan" ? limitUnit : billing === "payg" ? paygCurrency : undefined,
-          reset_period: billing === "plan" ? resetPeriod : undefined,
-        },
+        billing_config:
+          billing === "plan"
+            ? {
+                // Percent limits only; the backend clears the legacy
+                // number+unit+reset columns for plan rows.
+                plan_limits: {
+                  five_hour: planFiveHour.trim() ? Number(planFiveHour) : undefined,
+                  weekly: planWeekly.trim() ? Number(planWeekly) : undefined,
+                },
+              }
+            : {
+                limit_value: limitValue ? Number(limitValue) : undefined,
+                limit_unit: billing === "payg" ? paygCurrency : undefined,
+              },
         agents,
         endpoints: altInputs,
         advanced: {
@@ -752,51 +757,40 @@ export default function AddProviderModal({
             </div>
 
             {billing === "plan" && (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-[11px] font-medium text-mut">Per-period limit</Label>
-                  <div className="mt-1 flex gap-1.5">
+              <div>
+                <Label className="text-[11px] font-medium text-mut">
+                  Usage limits
+                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                    optional · % of each plan window
+                  </span>
+                </Label>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <div>
                     <Input
-                      className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                      value={limitValue}
-                      onChange={(e) => setLimitValue(e.target.value)}
+                      className="h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+                      value={planFiveHour}
+                      onChange={(e) => setPlanFiveHour(e.target.value)}
+                      placeholder="e.g. 20 · blank = no limit"
+                      inputMode="decimal"
                     />
-                    <Select
-                      value={limitUnit}
-                      onValueChange={(v) => setLimitUnit(v as typeof limitUnit)}
-                    >
-                      <SelectTrigger className="w-[104px] bg-bg text-[12px] dark:bg-bg">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="requests">Requests</SelectItem>
-                        <SelectItem value="wan_tokens">10k tokens</SelectItem>
-                        {(currencies.length ? currencies : ["CNY"]).map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <p className="mt-1 text-[10px] text-mut">5-hour window</p>
+                  </div>
+                  <div>
+                    <Input
+                      className="h-8 bg-bg font-mono text-[12px] dark:bg-bg"
+                      value={planWeekly}
+                      onChange={(e) => setPlanWeekly(e.target.value)}
+                      placeholder="e.g. 60 · blank = no limit"
+                      inputMode="decimal"
+                    />
+                    <p className="mt-1 text-[10px] text-mut">Weekly window</p>
                   </div>
                 </div>
-                <div>
-                  <Label className="text-[11px] font-medium text-mut">Reset cycle</Label>
-                  <Select
-                    value={resetPeriod}
-                    onValueChange={(v) => setResetPeriod(v as typeof resetPeriod)}
-                  >
-                    <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="yearly">Yearly</SelectItem>
-                      <SelectItem value="none">Never</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <p className="mt-1.5 text-[10.5px] text-mut">
+                  Kiwano stops routing to this provider once its live plan-quota
+                  utilization for a window reaches the percent, and resumes when
+                  usage drops back under. Takes effect when a plan query is configured.
+                </p>
               </div>
             )}
 

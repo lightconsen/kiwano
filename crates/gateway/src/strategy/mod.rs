@@ -535,6 +535,7 @@ mod tests {
             period_limit: None,
             limit_unit: None,
             plan_query: None,
+            plan_limits: None,
             timeout_secs: None,
             retries: None,
             headers: None,

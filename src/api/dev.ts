@@ -779,6 +779,7 @@ export const devApi: KiwanoApi = {
       usage: null,
       advanced: input.advanced,
       plan_query: input.plan_query ?? null,
+      plan_limits: input.billing_config.plan_limits ?? null,
     };
     providers.unshift(p);
     return p;
@@ -805,6 +806,7 @@ export const devApi: KiwanoApi = {
     if (input.advanced !== undefined) t.advanced = input.advanced;
     if (input.plan_query !== undefined) t.plan_query = input.plan_query;
     t.limit_unit = input.billing_config.limit_unit;
+    t.plan_limits = input.billing_config.plan_limits ?? null;
     return t;
   },
 

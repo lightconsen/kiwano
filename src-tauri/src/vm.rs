@@ -332,6 +332,13 @@ impl Aux {
         Ok(())
     }
 
+    /// Drop a KV entry (plan-limit enforcement markers, expired dedup…).
+    pub fn delete_setting(&self, key: &str) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        let n = conn.execute("DELETE FROM app_settings WHERE key = ?1", [key])?;
+        Ok(n > 0)
+    }
+
     /// Hub catalog cache: single-row upsert (RFC3339 synced_at).
     pub fn save_hub_cache(&self, payload: &str, synced_at: &str) -> rusqlite::Result<()> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
@@ -495,6 +502,10 @@ pub struct ProviderVm {
     /// Token-plan quota query JSON (edit prefill); None = not configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_query: Option<serde_json::Value>,
+    /// Plan-mode percent limits JSON `{"five_hour":20,"weekly":60}` (edit
+    /// prefill); None = not set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_limits: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -703,12 +714,39 @@ pub struct FooterStatsVm {
     pub version: String,
 }
 
+/// Plan-mode percent limits (modal form): utilization ceilings over the
+/// vendor's rolling 5h / weekly windows. Both optional; both absent = none.
+#[derive(Deserialize, Clone)]
+pub struct PlanLimitsInput {
+    pub five_hour: Option<f64>,
+    pub weekly: Option<f64>,
+}
+
 #[derive(Deserialize)]
 pub struct BillingConfigInput {
     pub limit_value: Option<f64>,
     #[allow(dead_code)]
     pub limit_unit: Option<String>,
     pub reset_period: Option<String>,
+    pub plan_limits: Option<PlanLimitsInput>,
+}
+
+/// Serialize the percent limits into the `providers.plan_limits` JSON shape.
+/// Non-positive / absent percents are dropped; an empty object reads as NULL.
+fn plan_limits_json(input: Option<&PlanLimitsInput>) -> Option<String> {
+    let input = input?;
+    let mut obj = serde_json::Map::new();
+    if let Some(pct) = input.five_hour.filter(|p| *p > 0.0 && *p <= 100.0) {
+        obj.insert("five_hour".into(), serde_json::json!(pct));
+    }
+    if let Some(pct) = input.weekly.filter(|p| *p > 0.0 && *p <= 100.0) {
+        obj.insert("weekly".into(), serde_json::json!(pct));
+    }
+    if obj.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(obj).to_string())
+    }
 }
 
 /// Per-provider advanced forwarding settings (timeout / retries / custom
@@ -962,6 +1000,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 billing: billing_to_ui(p.billing).to_string(),
                 plan_price: crate::plan_quota::plan_monthly_price(p.plan_query.as_deref()),
                 limit_unit: p.limit_unit.clone(),
+                plan_limits: p.plan_limits.as_deref().and_then(|s| serde_json::from_str(s).ok()),
                 enabled: p.enabled,
                 agents,
                 serving_agents,
@@ -1508,6 +1547,9 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         .as_ref()
         .filter(|v| !v.is_null())
         .map(|v| v.to_string());
+    // Plan rows carry percent limits in plan_limits; the legacy
+    // number+unit+reset-cycle columns are left NULL (v10 form dropped them).
+    let is_plan = billing_to_db(&input.billing) == kiwano_gateway::store::Billing::Subscription;
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
@@ -1518,13 +1560,22 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
         billing: billing_to_db(&input.billing),
-        period_limit: input.billing_config.limit_value,
-        limit_unit: normalize_limit_unit(
-            input.billing_config.limit_unit.as_deref(),
-            input.billing_config.limit_value.is_some(),
-        ),
+        period_limit: if is_plan { None } else { input.billing_config.limit_value },
+        limit_unit: if is_plan {
+            None
+        } else {
+            normalize_limit_unit(
+                input.billing_config.limit_unit.as_deref(),
+                input.billing_config.limit_value.is_some(),
+            )
+        },
         plan_query: plan_query_json,
-        reset_period,
+        plan_limits: if is_plan {
+            plan_limits_json(input.billing_config.plan_limits.as_ref())
+        } else {
+            None
+        },
+        reset_period: if is_plan { None } else { reset_period },
         timeout_secs,
         retries,
         headers: adv_headers,
@@ -1592,6 +1643,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         plan_price: None,
         limit_unit: None,
         plan_query: input.plan_query.clone(),
+        plan_limits: None,
         enabled: true,
         agents: input.agents.clone(),
         // Optimistic: strategy serving is only computed by build_provider_vms;
@@ -1676,16 +1728,32 @@ pub fn update_provider(
         .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
     p.endpoints = input_endpoints(input);
     p.billing = billing_to_db(&input.billing);
-    p.period_limit = input.billing_config.limit_value;
-    p.limit_unit = normalize_limit_unit(
-        input.billing_config.limit_unit.as_deref(),
-        input.billing_config.limit_value.is_some(),
-    );
-    p.reset_period = match input.billing_config.reset_period.as_deref() {
-        Some("monthly") | Some("weekly") | Some("yearly") => {
-            input.billing_config.reset_period.clone()
+    // Plan rows carry percent limits in plan_limits and NULL the legacy
+    // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
+    let is_plan = p.billing == kiwano_gateway::store::Billing::Subscription;
+    p.period_limit = if is_plan { None } else { input.billing_config.limit_value };
+    p.limit_unit = if is_plan {
+        None
+    } else {
+        normalize_limit_unit(
+            input.billing_config.limit_unit.as_deref(),
+            input.billing_config.limit_value.is_some(),
+        )
+    };
+    p.plan_limits = if is_plan {
+        plan_limits_json(input.billing_config.plan_limits.as_ref())
+    } else {
+        None
+    };
+    p.reset_period = if is_plan {
+        None
+    } else {
+        match input.billing_config.reset_period.as_deref() {
+            Some("monthly") | Some("weekly") | Some("yearly") => {
+                input.billing_config.reset_period.clone()
+            }
+            _ => None,
         }
-        _ => None,
     };
     if !input.api_key.trim().is_empty() {
         p.api_key = Some(input.api_key.clone());
@@ -2027,6 +2095,7 @@ fn import_current_provider(store: &Store, creds: &crate::creds::CurrentCreds) ->
         limit_unit: None,
         reset_period: None,
         plan_query: None,
+        plan_limits: None,
         timeout_secs: None,
         retries: None,
         headers: None,
@@ -2186,6 +2255,155 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         });
     }
     Ok(alerts)
+}
+
+// ── Plan percent-limit enforcement (per-window utilization ceilings) ──
+
+/// Aux KV marker written when the patrol disables a provider for exceeding a
+/// plan percent limit (value = the exceeded window). Only a marker-bearing
+/// provider is auto re-enabled, so a manual user disable is never overridden.
+fn plan_limit_marker(provider_id: &str) -> String {
+    format!("plan_limit_disabled:{provider_id}")
+}
+
+/// Flip a provider's enabled flag in place. Distinct from the route-takeover
+/// `enable_provider` command (that one promotes the provider to primary).
+fn set_provider_enabled(store: &Store, id: &str, enabled: bool) -> Result<bool, String> {
+    let Some(mut p) = store.get_provider(id).map_err(e2s)? else {
+        return Ok(false);
+    };
+    if p.enabled == enabled {
+        return Ok(false);
+    }
+    p.enabled = enabled;
+    p.updated_at = rfc3339(unix_now());
+    store.update_provider(&p).map_err(e2s)?;
+    Ok(true)
+}
+
+#[derive(Deserialize)]
+struct PlanLimitsParsed {
+    five_hour: Option<f64>,
+    weekly: Option<f64>,
+}
+
+/// Live plan-quota report for enforcement, or None when there is nothing to
+/// judge on this tick (transient network error, deterministic query failure
+/// like a missing plan query, or auth problems). Enforcement stays dormant
+/// rather than acting on a report it could not read.
+fn plan_report_for_enforcement(
+    store: &Store,
+    aux: &Aux,
+    provider_id: &str,
+) -> Result<Option<crate::plan_quota::PlanQuotaReport>, String> {
+    match crate::plan_quota::get_plan_quota_report(store, aux, provider_id, false) {
+        Ok(report) if report.success => Ok(Some(report)),
+        _ => Ok(None),
+    }
+}
+
+/// First configured window whose tier utilization has reached its percent
+/// ceiling (five_hour ↔ the `five_hour` tier, weekly ↔ the `weekly_limit`
+/// tier). A window absent from the report counts as not over — no evidence,
+/// no enforcement.
+fn window_over(
+    report: &crate::plan_quota::PlanQuotaReport,
+    limits: &PlanLimitsParsed,
+) -> Option<(&'static str, f64, f64)> {
+    let tier_util = |name: &str| {
+        report
+            .tiers
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.utilization)
+    };
+    if let Some(pct) = limits.five_hour {
+        if let Some(util) = tier_util("five_hour") {
+            if util >= pct {
+                return Some(("five_hour", util, pct));
+            }
+        }
+    }
+    if let Some(pct) = limits.weekly {
+        if let Some(util) = tier_util("weekly_limit") {
+            if util >= pct {
+                return Some(("weekly", util, pct));
+            }
+        }
+    }
+    None
+}
+
+/// Enforce the plan-mode percent limits (`providers.plan_limits`, JSON
+/// `{"five_hour":20,"weekly":60}`): when a window tier's live plan-quota
+/// utilization (5-minute cached report) reaches the configured percent, the
+/// provider is disabled — dropped from the gateway route table once the
+/// routes are reloaded. Once every configured window falls back under its
+/// percent, the provider re-enables automatically. Only providers Kiwano
+/// disabled carry the marker, so a manual user disable is never overridden.
+///
+/// Returns alerts (fired only on the under→over transition — disabling the
+/// provider is itself the dedup) and a mutated flag telling the caller to
+/// reload the gateway routes.
+pub fn enforce_plan_limits(store: &Store, aux: &Aux) -> Result<(Vec<UsageAlertVm>, bool), String> {
+    let mut alerts = Vec::new();
+    let mut mutated = false;
+    for p in store.list_providers().map_err(e2s)? {
+        if p.billing != Billing::Subscription {
+            continue;
+        }
+        let limits = p
+            .plan_limits
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<PlanLimitsParsed>(s).ok())
+            .filter(|l| l.five_hour.is_some() || l.weekly.is_some());
+        let marker = plan_limit_marker(&p.id);
+        let disabled_by_us = aux
+            .get_setting(&marker)
+            .as_deref()
+            .is_some_and(|v| !v.is_empty());
+
+        // Percents removed (or row corrupted) while Kiwano had disabled it →
+        // restore the provider and drop the marker.
+        if disabled_by_us && limits.is_none() {
+            mutated |= set_provider_enabled(store, &p.id, true)?;
+            aux.delete_setting(&marker).map_err(e2s)?;
+            continue;
+        }
+        let Some(limits) = limits else { continue };
+
+        if !p.enabled {
+            // Recovery pass: re-enable only what Kiwano disabled, once every
+            // configured window is back under its percent.
+            if !disabled_by_us {
+                continue;
+            }
+            if let Some(report) = plan_report_for_enforcement(store, aux, &p.id)? {
+                if window_over(&report, &limits).is_none() {
+                    mutated |= set_provider_enabled(store, &p.id, true)?;
+                    aux.delete_setting(&marker).map_err(e2s)?;
+                }
+            }
+            continue;
+        }
+
+        let Some(report) = plan_report_for_enforcement(store, aux, &p.id)? else {
+            continue;
+        };
+        let Some((window, util, pct)) = window_over(&report, &limits) else {
+            continue;
+        };
+        mutated |= set_provider_enabled(store, &p.id, false)?;
+        aux.set_setting(&marker, window).map_err(e2s)?;
+        alerts.push(UsageAlertVm {
+            provider_id: p.id,
+            provider_name: p.name,
+            used: (util * 10.0).round() / 10.0,
+            limit: pct,
+            unit: "plan_pct".to_string(),
+        });
+    }
+    Ok((alerts, mutated))
 }
 
 // ── Dashboard ──
@@ -2475,6 +2693,7 @@ mod tests {
             limit_unit: None,
             reset_period: None,
             plan_query: None,
+            plan_limits: None,
             timeout_secs: None,
             retries: None,
             headers: None,
@@ -2491,6 +2710,123 @@ mod tests {
         assert_eq!(fmt_tokens(200_000), "200k");
         assert_eq!(fmt_tokens(31), "31");
         assert_eq!(fmt_tokens(15_000_000), "15M");
+    }
+
+    /// Seed the plan-quota cache (Aux KV, same shape plan_quota.rs writes) so
+    /// the patrol reads canned tier utilizations instead of hitting network.
+    fn seed_quota_cache(aux: &Aux, provider_id: &str, five_hour_util: f64) {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let report = serde_json::json!({
+            "provider_id": provider_id,
+            "template": "zhipu",
+            "success": true,
+            "error": null,
+            "note": null,
+            "tiers": [{
+                "name": "five_hour",
+                "utilization": five_hour_util,
+                "resets_at": null,
+                "used": null,
+                "limit": null,
+                "unit": null
+            }],
+            "queried_at": ts,
+            "cached": true
+        });
+        aux.set_setting(
+            &format!("plan_quota_cache:{provider_id}"),
+            &serde_json::json!({ "ts": ts, "report": report }).to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn plan_limit_patrol_disables_and_recovers() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("plan-a", "PlanA", Billing::Subscription);
+        p.plan_limits = Some(r#"{"five_hour":20}"#.into());
+        s.insert_provider(&p).unwrap();
+
+        // Over the ceiling: disabled + marker + one alert…
+        seed_quota_cache(&aux, "plan-a", 85.0);
+        let (alerts, mutated) = enforce_plan_limits(&s, &aux).unwrap();
+        assert!(mutated);
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].provider_id, "plan-a");
+        assert_eq!(alerts[0].unit, "plan_pct");
+        assert_eq!(alerts[0].used, 85.0);
+        assert_eq!(alerts[0].limit, 20.0);
+        assert!(!s.get_provider("plan-a").unwrap().unwrap().enabled);
+        assert_eq!(
+            aux.get_setting("plan_limit_disabled:plan-a").as_deref(),
+            Some("five_hour")
+        );
+
+        // …and the next tick stays quiet (no re-alert, stays disabled).
+        let (alerts, mutated) = enforce_plan_limits(&s, &aux).unwrap();
+        assert!(!mutated);
+        assert!(alerts.is_empty());
+        assert!(!s.get_provider("plan-a").unwrap().unwrap().enabled);
+
+        // Utilization back under: re-enabled + marker cleared.
+        seed_quota_cache(&aux, "plan-a", 10.0);
+        let (alerts, mutated) = enforce_plan_limits(&s, &aux).unwrap();
+        assert!(mutated);
+        assert!(alerts.is_empty());
+        assert!(s.get_provider("plan-a").unwrap().unwrap().enabled);
+        assert!(aux.get_setting("plan_limit_disabled:plan-a").is_none());
+    }
+
+    #[test]
+    fn plan_limit_patrol_respects_manual_disable_and_skips_others() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+
+        // User disabled this one by hand (no marker): never re-enabled.
+        let mut manual = provider("plan-manual", "Manual", Billing::Subscription);
+        manual.plan_limits = Some(r#"{"five_hour":20}"#.into());
+        manual.enabled = false;
+        s.insert_provider(&manual).unwrap();
+
+        // Metered provider with percents is skipped entirely.
+        let mut payg = provider("payg-a", "Payg", Billing::Metered);
+        payg.plan_limits = Some(r#"{"five_hour":50}"#.into());
+        s.insert_provider(&payg).unwrap();
+
+        seed_quota_cache(&aux, "plan-manual", 90.0);
+        seed_quota_cache(&aux, "payg-a", 90.0);
+        let (alerts, mutated) = enforce_plan_limits(&s, &aux).unwrap();
+        assert!(!mutated);
+        assert!(alerts.is_empty());
+        assert!(!s.get_provider("plan-manual").unwrap().unwrap().enabled);
+        assert!(s.get_provider("payg-a").unwrap().unwrap().enabled);
+    }
+
+    #[test]
+    fn plan_limit_patrol_restores_when_percents_removed() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("plan-a", "PlanA", Billing::Subscription);
+        p.plan_limits = Some(r#"{"five_hour":20}"#.into());
+        s.insert_provider(&p).unwrap();
+
+        // Kiwano disables…
+        seed_quota_cache(&aux, "plan-a", 85.0);
+        let (_, mutated) = enforce_plan_limits(&s, &aux).unwrap();
+        assert!(mutated);
+
+        // …then the user clears the percents → restored on the next tick.
+        let mut row = s.get_provider("plan-a").unwrap().unwrap();
+        row.plan_limits = None;
+        s.update_provider(&row).unwrap();
+        let (_, mutated) = enforce_plan_limits(&s, &aux).unwrap();
+        assert!(mutated);
+        assert!(s.get_provider("plan-a").unwrap().unwrap().enabled);
+        assert!(aux.get_setting("plan_limit_disabled:plan-a").is_none());
     }
 
     #[test]
@@ -2801,6 +3137,7 @@ mod tests {
                 limit_value: Some(460.0),
                 limit_unit: Some("requests".into()),
                 reset_period: Some("monthly".into()),
+                plan_limits: None,
             },
             agents: vec!["codex".into()],
             endpoints: Vec::new(),
@@ -2835,6 +3172,7 @@ mod tests {
                 limit_value: None,
                 limit_unit: None,
                 reset_period: None,
+                plan_limits: None,
             },
             agents: vec![],
             endpoints: vec![
@@ -2880,6 +3218,7 @@ mod tests {
                 limit_value: None,
                 limit_unit: None,
                 reset_period: None,
+                plan_limits: None,
             },
             agents: vec![],
             endpoints: vec![NewEndpointInput {
@@ -2948,6 +3287,7 @@ mod tests {
                 limit_value: None,
                 limit_unit: None,
                 reset_period: None,
+                plan_limits: None,
             },
             agents: vec!["codex".into()], // rebind: claude dropped
             endpoints: Vec::new(),

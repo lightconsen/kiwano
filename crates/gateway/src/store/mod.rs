@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 9;
+pub const SCHEMA_VERSION: i32 = 10;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -293,6 +293,17 @@ ALTER TABLE providers_new RENAME TO providers;
 PRAGMA foreign_keys=ON;
 "#;
 
+/// v10: percent-of-window plan limits. `providers.plan_limits` holds the
+/// plan-mode limit as JSON `{"five_hour":20,"weekly":60}` — per-window
+/// utilization ceilings (percent of the vendor's rolling 5h / weekly window)
+/// replacing the old number+unit+reset-cycle form for plan providers. Legacy
+/// v9 columns (period_limit/limit_unit/reset_period) keep rendering for old
+/// rows but are no longer written by the plan form; a plain nullable column
+/// needs no rebuild.
+const MIGRATION_V10: &str = r#"
+ALTER TABLE providers ADD COLUMN plan_limits TEXT;
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -425,6 +436,11 @@ pub struct Provider {
     /// (migration v9). NULL = no plan quota configured.
     #[serde(default)]
     pub plan_query: Option<String>,
+    /// Plan-mode percent limits as JSON `{"five_hour":20,"weekly":60}`
+    /// (migration v10): utilization ceilings over the vendor's rolling 5h /
+    /// weekly windows. NULL = no percent limit set.
+    #[serde(default)]
+    pub plan_limits: Option<String>,
     /// Per-provider cap on the wait for upstream response headers, seconds
     /// (migration v8). NULL = gateway defaults (10s connect / 300s read).
     #[serde(default)]
@@ -786,6 +802,9 @@ impl Store {
         if version < 9 {
             conn.execute_batch(MIGRATION_V9)?;
         }
+        if version < 10 {
+            conn.execute_batch(MIGRATION_V10)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -800,9 +819,9 @@ impl Store {
         tx.execute(
             "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
                                     billing, period_limit, limit_unit, plan_query,
-                                    timeout_secs, retries, headers, reset_period,
-                                    enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                                    plan_limits, timeout_secs, retries, headers,
+                                    reset_period, enabled, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 p.id,
                 p.name,
@@ -814,6 +833,7 @@ impl Store {
                 p.period_limit,
                 p.limit_unit,
                 p.plan_query,
+                p.plan_limits,
                 p.timeout_secs,
                 p.retries,
                 p.headers,
@@ -832,7 +852,8 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, limit_unit, plan_query, timeout_secs, retries, headers,
+                    period_limit, limit_unit, plan_query, plan_limits,
+                    timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at
              FROM providers WHERE id = ?1",
         )?;
@@ -847,7 +868,8 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
-                    period_limit, limit_unit, plan_query, timeout_secs, retries, headers,
+                    period_limit, limit_unit, plan_query, plan_limits,
+                    timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
@@ -874,8 +896,9 @@ impl Store {
         tx.execute(
             "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
                     api_key = ?6, billing = ?7, period_limit = ?8, limit_unit = ?9,
-                    plan_query = ?10, timeout_secs = ?11, retries = ?12, headers = ?13,
-                    reset_period = ?14, enabled = ?15, updated_at = ?16
+                    plan_query = ?10, plan_limits = ?11, timeout_secs = ?12,
+                    retries = ?13, headers = ?14,
+                    reset_period = ?15, enabled = ?16, updated_at = ?17
              WHERE id = ?1",
             params![
                 p.id,
@@ -888,6 +911,7 @@ impl Store {
                 p.period_limit,
                 p.limit_unit,
                 p.plan_query,
+                p.plan_limits,
                 p.timeout_secs,
                 p.retries,
                 p.headers,
@@ -1646,13 +1670,14 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         period_limit: row.get(7)?,
         limit_unit: row.get(8)?,
         plan_query: row.get(9)?,
-        timeout_secs: row.get(10)?,
-        retries: row.get(11)?,
-        headers: row.get(12)?,
-        reset_period: row.get(13)?,
-        enabled: row.get::<_, i64>(14)? != 0,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
+        plan_limits: row.get(10)?,
+        timeout_secs: row.get(11)?,
+        retries: row.get(12)?,
+        headers: row.get(13)?,
+        reset_period: row.get(14)?,
+        enabled: row.get::<_, i64>(15)? != 0,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 
@@ -1768,6 +1793,7 @@ mod tests {
             period_limit: Some(50.0),
             limit_unit: None,
             plan_query: None,
+            plan_limits: None,
             timeout_secs: None,
             retries: None,
             headers: None,
@@ -1951,6 +1977,55 @@ mod tests {
         let got = store.get_provider("p-usd").unwrap().expect("usd provider");
         assert_eq!(got.limit_unit.as_deref(), Some("USD"));
         assert_eq!(got.plan_query.as_deref(), Some(r#"{"template":"kimi"}"#));
+    }
+
+    /// v9 → v10: rows survive and gain a NULL plan_limits column; the percent
+    /// limits JSON round-trips through insert/update/get.
+    #[test]
+    fn migration_v10_adds_plan_limits_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v9 database with a provider in it.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(MIGRATION_V1).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute_batch(MIGRATION_V3).unwrap();
+            conn.execute_batch(MIGRATION_V4).unwrap();
+            conn.execute_batch(MIGRATION_V5).unwrap();
+            conn.execute_batch(MIGRATION_V7).unwrap();
+            conn.execute_batch(MIGRATION_V8).unwrap();
+            conn.execute_batch(MIGRATION_V9).unwrap();
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing,
+                                        period_limit, limit_unit, created_at, updated_at)
+                 VALUES ('p-old', 'Old', 'openai', 'https://api.example.com', 'metered',
+                         10.0, 'requests', 't0', 't0');
+                 PRAGMA user_version = 9;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        // v9 row survives with its data; plan_limits reads as NULL.
+        let old = store.get_provider("p-old").unwrap().expect("kept");
+        assert_eq!(old.limit_unit.as_deref(), Some("requests"));
+        assert_eq!(old.plan_limits, None);
+
+        // Percent limits round-trip; NULL clears.
+        let mut p = sample_provider("p-plan", Protocol::Anthropic);
+        p.billing = Billing::Subscription;
+        p.plan_limits = Some(r#"{"five_hour":20,"weekly":60}"#.to_string());
+        store.insert_provider(&p).unwrap();
+        let got = store.get_provider("p-plan").unwrap().expect("plan provider");
+        assert_eq!(got.plan_limits.as_deref(), Some(r#"{"five_hour":20,"weekly":60}"#));
+        p.plan_limits = None;
+        store.update_provider(&p).unwrap();
+        assert_eq!(
+            store.get_provider("p-plan").unwrap().unwrap().plan_limits,
+            None
+        );
     }
 
     /// v7: additional per-protocol endpoints round-trip with the provider row

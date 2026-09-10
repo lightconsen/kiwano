@@ -470,9 +470,16 @@ fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
 
 /// Polled periodically by the frontend; hits not yet notified are returned so
 /// the frontend can raise a system notification (KV dedup prevents repeats).
+/// Also runs the plan percent-limit enforcement pass (disable on over, reload
+/// the gateway routes when the patrol touched a provider).
 #[tauri::command]
 fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, String> {
-    vm::check_usage_alerts(&state.store, &state.aux)
+    let alerts = vm::check_usage_alerts(&state.store, &state.aux)?;
+    let (plan_alerts, mutated) = vm::enforce_plan_limits(&state.store, &state.aux)?;
+    if mutated {
+        after_mutation(&state);
+    }
+    Ok(alerts.into_iter().chain(plan_alerts).collect())
 }
 
 // ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──

@@ -135,6 +135,8 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
                     reset_period: sp.reset_period.clone(),
                     // Plan-query credentials are intentionally not shared.
                     plan_query: None,
+                    // Percent limits carry over (no credentials inside).
+                    plan_limits: sp.plan_limits.clone(),
                     timeout_secs: sp.timeout_secs,
                     retries: sp.retries,
                     headers: sp.headers.clone(),
@@ -199,6 +201,7 @@ mod tests {
             limit_unit: None,
             reset_period: None,
             plan_query: None,
+            plan_limits: None,
             timeout_secs: None,
             retries: None,
             headers: None,

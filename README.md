@@ -1,26 +1,105 @@
 <div align="center">
   <img src="public/kiwano-logo.svg" width="112" alt="Kiwano logo" />
   <h1>Kiwano</h1>
-  <p>Local-first AI provider manager — manage all your AI providers on one machine and route coding agents through a local gateway.</p>
+  <p><strong>Local-first AI provider manager.</strong><br/>
+  Keep every provider key on your own machine, point all your coding agents at one local gateway, and see what they actually cost.</p>
+  <p>
+    <a href="https://github.com/lightconsen/kiwano/releases/latest"><img src="https://img.shields.io/github/v/release/lightconsen/kiwano?label=download&sort=semver" alt="Latest release"></a>
+    <a href="https://github.com/lightconsen/kiwano/actions/workflows/ci.yml"><img src="https://github.com/lightconsen/kiwano/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+    <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0 license">
+  </p>
 </div>
+
+Kiwano is a desktop app that sits between your coding agents and your AI providers. You register providers once, it runs a local gateway on `127.0.0.1:8317`, and every agent — Claude Code, Codex, Gemini CLI and others — talks to that one port. The gateway normalizes protocols, routes each request through the strategy you picked, meters what it cost, and records what happened.
+
+Your keys stay in the OS keychain. Requests never touch a Kiwano server.
+
+## Screenshots
+
+| Apps — providers, usage and bound agents | Models — Hub catalog, one click to add |
+| --- | --- |
+| ![Apps screen](docs/screenshots/01-apps.png) | ![Models screen](docs/screenshots/02-models.png) |
+| **Dashboard** — spend and usage by provider and agent | **Settings** — gateway, agent takeover, updates |
+| ![Dashboard screen](docs/screenshots/03-dashboard.png) | ![Settings screen](docs/screenshots/04-settings.png) |
+
+> Screenshots show the bundled sample data set shipped with the development build.
 
 ## Features
 
-- **Provider management** — add, switch and delete provider configs; gateway routing with failover / roundrobin / timewindow / quota strategies.
-- **Agent takeover** — one-click connect Claude Code, Codex, Gemini CLI and more to the local gateway (`127.0.0.1:8317`); disabling restores each agent's original configuration.
-- **Local gateway** — a single always-on port with protocol normalization (anthropic / openai / gemini); every request is routed and metered.
-- **Usage dashboard** — 7-day trends of requests, tokens, cost and latency, attributed per provider and agent.
-- **Provider shelf** — built-in Hub catalog (177 providers, filterable by official / aggregator / third-party / free), one-click add.
-- **cc-switch import** — read existing cc-switch configs and migrate seamlessly.
+- **Provider management** — add, edit, switch and delete provider configs. Route with `single`, `failover`, `roundrobin`, `timewindow` or `quota` strategies, each with its own candidate weights and windows.
+- **Agent takeover** — connect Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes and Pi to the local gateway in one click. Each agent's original config is backed up and restored when you switch it off.
+- **Local gateway** — one always-on port with protocol normalization (anthropic / openai / gemini), so a provider that speaks one dialect can serve an agent that speaks another. Hot-reloads on change; the daemon outlives the GUI.
+- **Usage and cost** — 7-day trends for requests, tokens, cost and latency, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts.
+- **Models shelf** — a built-in Hub catalog of 82 providers (official / aggregator / third-party / free), with live search and one-click add. The catalog syncs conditionally: a manifest hash skips the download when nothing changed, and the bundled copy keeps it working offline.
+- **Request logs** — every gateway request with status, latency and token accounting; filter down to errors.
+- **cc-switch import** — read an existing cc-switch configuration and migrate it in.
+- **Self-update** — signed releases (minisign); the app checks at startup and updates in place. 0.1.2 and later update themselves to newer versions.
+
+## Download
+
+Latest release: **https://github.com/lightconsen/kiwano/releases/latest**
+
+| Platform | File |
+| --- | --- |
+| macOS — Apple Silicon (M series) | [`Kiwano_aarch64.dmg`](https://hub.kiwano.cc/releases/Kiwano_aarch64.dmg) |
+| macOS — Intel | [`Kiwano_x64.dmg`](https://hub.kiwano.cc/releases/Kiwano_x64.dmg) |
+| Windows — installer | [`Kiwano_x64-setup.exe`](https://hub.kiwano.cc/releases/Kiwano_x64-setup.exe) |
+| Windows — MSI | [`Kiwano_x64_en-US.msi`](https://hub.kiwano.cc/releases/Kiwano_x64_en-US.msi) |
+| Linux — AppImage | [`Kiwano_amd64.AppImage`](https://hub.kiwano.cc/releases/Kiwano_amd64.AppImage) |
+| Linux — Debian / Ubuntu | [`Kiwano_amd64.deb`](https://hub.kiwano.cc/releases/Kiwano_amd64.deb) |
+| Linux — Fedora / RHEL | [`Kiwano-1.x86_64.rpm`](https://hub.kiwano.cc/releases/Kiwano-1.x86_64.rpm) |
+
+Those links are served from Cloudflare R2 and always point at the newest build — no version in the URL, so they stay valid across releases. The same files are attached to every [GitHub release](https://github.com/lightconsen/kiwano/releases) as a mirror.
+
+**Builds are not code-signed or notarized.** On first launch:
+
+- **macOS** — right-click the app and choose **Open**, then confirm. On Apple Silicon pick the `aarch64` build; `x64` is for Intel Macs (it runs under Rosetta, but the updater expects the build matching your chip).
+- **Windows** — SmartScreen will warn; choose **More info → Run anyway**.
+- **Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager.
+
+Updates are delivered as `*.app.tar.gz` / `*-setup.exe` / `AppImage` artifacts from the release manifest (`latest.json`), signature-checked against the public key compiled into the app.
+
+## Privacy
+
+Kiwano is local-first by design, and the code is the specification:
+
+- API keys are stored in the **OS keychain**, and provider credentials are only ever sent to the provider you configured.
+- Requests, prompts and responses **never pass through a Kiwano server** — the gateway runs on your machine.
+- Usage history lives in a **local SQLite database** (`~/.kiwano/kiwano.db`). Nothing is uploaded.
+- The Hub only ever serves **catalog metadata** (provider names, endpoints, prices). It sees no keys and no request data.
+- There is no analytics or telemetry in the app. Update checks are a plain HTTPS request for a static JSON manifest.
+
+## Requirements
+
+- macOS (Apple Silicon or Intel), Windows 10 or later, or Linux x86_64
+- Rust **1.98.0** to build — pinned by `rust-toolchain.toml`, so `rustup` picks it up automatically
+- Node 24 and pnpm 10 for the frontend
 
 ## Development
 
 ```bash
 pnpm install
-pnpm dev         # frontend dev server
-pnpm tauri dev   # desktop app in dev mode
-pnpm build       # frontend production build
+pnpm dev         # frontend dev server on :1420 (browser, mocked data)
+pnpm tauri dev   # desktop app in dev mode (real SQLite + gateway sidecar)
+
+pnpm build       # frontend typecheck + production build
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo fmt --all -- --check
 ```
+
+CI runs exactly those four Rust checks on Linux and macOS, plus a frontend typecheck and build. The toolchain version is pinned in `rust-toolchain.toml` and in every workflow, so a new clippy release can't turn the build red on code nobody touched.
+
+Layout:
+
+| Path | What lives there |
+| --- | --- |
+| `src/` | React UI (screens, components, the `api/` layer) |
+| `src-tauri/` | Tauri app: commands, view models, updater, agent discovery; the bundled provider catalog is `src-tauri/src/catalog.json` |
+| `crates/gateway/` | The gateway daemon: routing, strategies, metering, store |
+| `crates/adapters/` | Protocol conversion, agent config take-over, pricing table (`resources/models.json`) |
+| `crates/cli/` | `kiwano` command-line client |
+| `site/`, `design/` | Marketing site, and the original UI design prototype |
 
 ## License
 

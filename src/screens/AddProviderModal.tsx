@@ -327,6 +327,12 @@ export default function AddProviderModal({
 
   const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
 
+  // Billing is intrinsic to the provider: locked to the catalog entry when
+  // adding from Models, and to the stored value when editing. Vendors that
+  // support several modes get one catalog entry per mode. Custom providers
+  // (no catalog entry behind the form) pick freely at creation.
+  const billingLocked = !!edit || (mode === "shelf" && !!shelf);
+
   // Non-empty credential fields of the selected template (empty rows dropped)
   const pqFieldInputs = (): Record<string, string> => {
     const def = PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate);
@@ -712,24 +718,37 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">Billing</Label>
-              <div className="mt-1 grid grid-cols-3 gap-1.5">
-                {BILL_OPTIONS.map((b) => {
-                  const active = billing === b.id;
-                  return (
-                    <button
-                      key={b.id}
-                      className="btn h-8 cursor-pointer rounded-md border text-[11.5px]"
-                      style={active
-                        ? { borderColor: "var(--kiwi-dim)", background: "var(--kiwi-soft)", color: "var(--kiwi)" }
-                        : { borderColor: "var(--line)", color: "var(--mut)" }}
-                      onClick={() => setBilling(b.id)}
-                    >
-                      {b.label}
-                    </button>
-                  );
-                })}
-              </div>
+              <Label className="text-[11px] font-medium text-mut">
+                Billing
+                {billingLocked && (
+                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                    {edit ? "fixed for this provider" : "from the catalog"}
+                  </span>
+                )}
+              </Label>
+              {billingLocked ? (
+                <div className="mt-1 flex h-8 items-center rounded-md border border-line bg-surface2 px-2.5 text-[11.5px] text-ink">
+                  {BILL_OPTIONS.find((b) => b.id === billing)?.label ?? billing}
+                </div>
+              ) : (
+                <div className="mt-1 grid grid-cols-3 gap-1.5">
+                  {BILL_OPTIONS.map((b) => {
+                    const active = billing === b.id;
+                    return (
+                      <button
+                        key={b.id}
+                        className="btn h-8 cursor-pointer rounded-md border text-[11.5px]"
+                        style={active
+                          ? { borderColor: "var(--kiwi-dim)", background: "var(--kiwi-soft)", color: "var(--kiwi)" }
+                          : { borderColor: "var(--line)", color: "var(--mut)" }}
+                        onClick={() => setBilling(b.id)}
+                      >
+                        {b.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {billing === "plan" && (

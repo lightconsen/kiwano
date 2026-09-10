@@ -164,7 +164,7 @@ def main():
     for label, days, note in (
         ("Today", 1, "current local day only"),
         ("7 days", 7, "today + the 6 before it, 7 chart points"),
-        ("30 days", 30, "today + the 29 before it, 6 chart points (5-day buckets)"),
+        ("30 days", 30, "today + the 29 before it, 30 chart points"),
     ):
         r, i, o, c = sums(days)
         print(f"{label:8} {r:9} {i:11} {o:11} {c * rate:11.2f} {currency}")

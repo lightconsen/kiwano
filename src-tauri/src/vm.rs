@@ -2890,7 +2890,11 @@ pub fn build_dashboard(
             });
         }
     } else {
-        // trend: daily totals zero-filled over the window (30d buckets by 5 days)
+        // One bar per local day, zero-filled: the chart draws exactly the days
+        // the window selected, so its bars sum to the stat above it and each
+        // label names the one day its own bar covers. Merging days (30d used to
+        // draw six five-day blocks) made a bar mean something the axis could
+        // not say.
         let mut daily: HashMap<String, UsageTotals> = HashMap::new();
         for d in store
             .usage_daily(agent, provider_id, Some(&since), tz)
@@ -2898,27 +2902,17 @@ pub fn build_dashboard(
         {
             daily.insert(d.day, d.totals);
         }
-        let bucket = if window == "30d" { 5 } else { 1 };
         // Local day index: the buckets have to be the same days the window
         // above selected, or the chart and its stat disagree again.
         let today_days = (now + tz * 60).div_euclid(86_400);
-        let mut b_req = 0i64;
-        let mut b_tok = 0i64;
         for i in (0..days).rev() {
             let key = local_day_key(tz, (today_days - i) * 86_400);
             let t = daily.get(&key).cloned().unwrap_or_default();
-            b_req += t.requests;
-            b_tok += t.input_tokens + t.output_tokens;
-            let is_bucket_end = (days - 1 - i) % bucket == bucket - 1 || i == 0;
-            if is_bucket_end {
-                trend.push(TrendVm {
-                    date: mmdd(&key),
-                    requests: b_req,
-                    tokens: b_tok,
-                });
-                b_req = 0;
-                b_tok = 0;
-            }
+            trend.push(TrendVm {
+                date: mmdd(&key),
+                requests: t.requests,
+                tokens: t.input_tokens + t.output_tokens,
+            });
         }
     }
 
@@ -3980,8 +3974,18 @@ mod tests {
         // 40-day-old one: 6 + 7 = 13 requests, 10k + 5k + 18k tokens.
         let month = d("30d");
         assert_eq!((month.requests, month.input_tokens), (13, 33_000));
-        assert_eq!(month.trend.len(), 6, "30d buckets five days at a time");
+        assert_eq!(month.trend.len(), 30, "30d is one bar per day");
         assert_eq!(month.trend.iter().map(|p| p.requests).sum::<i64>(), 13);
+        // Bar i is the day 29 - i days ago, so each seeded group lands where its
+        // own label says it does — no bar covering more than the day it names.
+        assert_eq!(month.trend[29].requests, 2, "the last bar is today");
+        assert_eq!(month.trend[26].requests, 4, "three days back");
+        assert_eq!(month.trend[22].requests, 1, "seven days back");
+        assert_eq!(month.trend[19].requests, 6, "ten days back");
+        assert_eq!(
+            month.trend[18].requests, 0,
+            "and the quiet days are bars too"
+        );
 
         // Cost is summed in the window and converted for display (default CNY).
         assert!((month.cost - month.requests as f64 * 0.5 * 7.1).abs() < 0.01);

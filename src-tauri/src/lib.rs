@@ -133,6 +133,25 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
     });
 }
 
+/// One-shot Hub catalog sync at startup. Runs on a plain thread for the same
+/// reason `sync_hub` is not `async`: the sync uses blocking reqwest. Failures
+/// are logged and nothing else — the Hub is an enhancement, and the cached or
+/// bundled catalog always works offline.
+fn spawn_hub_sync(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let Some(state) = handle.try_state::<AppState>() else {
+            return;
+        };
+        let hub_url = vm::ui_settings(&state.aux).hub_url;
+        match sync::sync_from_hub(&state.aux, &hub_url) {
+            // Already current: the manifest sha matched the cache.
+            Ok(r) if r.unchanged => {}
+            Ok(r) => println!("kiwano: hub catalog synced ({} providers)", r.fetched),
+            Err(e) => eprintln!("kiwano: hub sync failed: {e}"),
+        }
+    });
+}
+
 // ── Tray / autostart (tech.md §3 P1: tray + close-to-tray + launch at login) ──
 
 /// Sync the persisted autostart setting to the OS login items (idempotent;
@@ -442,8 +461,11 @@ fn apply_agent_route(state: State<AppState>, target: String, source: String) -> 
     Ok(())
 }
 
-/// Hub catalog sync (network IO → runs on the async command thread, no UI blocking).
-#[tauri::command(async)]
+/// Hub catalog sync. Deliberately a *synchronous* command: Tauri dispatches
+/// those onto its blocking thread pool, which is where a blocking reqwest
+/// client belongs — an `async` command would run it on the tokio runtime, and
+/// dropping a blocking client there panics (see sidecar.rs on the same trap).
+#[tauri::command]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     let hub_url = vm::ui_settings(&state.aux).hub_url;
     sync::sync_from_hub(&state.aux, &hub_url)
@@ -587,6 +609,10 @@ pub fn run() {
                 data_port,
             });
             spawn_watchdog(app.handle().clone());
+            // Hub catalog: one-shot conditional sync (skips the download when
+            // the manifest sha matches the cache). Silent, opt-out-free, and
+            // failure-tolerant — the bundled catalog is the offline fallback.
+            spawn_hub_sync(app.handle().clone());
 
             // Tray + login items (the autostart/close_to_tray settings become real from here on)
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -612,10 +638,6 @@ pub fn run() {
                 });
             }
 
-            // Hub catalog uses local JSON for now (bundled catalog.json +
-            // hub_cache); network sync protocol v0 is implemented (sync.rs /
-            // sync_hub command) but disabled — startup sync and the
-            // settings-page entry return once a real Hub is live.
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

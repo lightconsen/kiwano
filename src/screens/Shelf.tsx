@@ -12,7 +12,7 @@ import {
 import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
-import { hubLogoUrl, useHubUrl } from "../lib/hub";
+import { hubAssetUrl, useHubUrl } from "../lib/hub";
 
 // Chip icons speak the category's meaning; colors match the per-tag badge
 // palette used in the table (tagChipStyle below)
@@ -175,7 +175,7 @@ function Row({
   onAdd: (e: CatalogEntry) => void;
   onOpen: (e: CatalogEntry) => void;
 }) {
-  const logo = entry.logo && hubUrl ? hubLogoUrl(hubUrl, entry.logo) : undefined;
+  const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className="px-4 py-2">
@@ -232,7 +232,7 @@ function DetailDialog({
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
-  const logo = entry.logo && hubUrl ? hubLogoUrl(hubUrl, entry.logo) : undefined;
+  const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),

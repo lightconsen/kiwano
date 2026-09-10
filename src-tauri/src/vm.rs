@@ -361,6 +361,18 @@ impl Aux {
         .ok()
     }
 
+    /// Refresh only the cache timestamp, leaving the payload untouched — the
+    /// conditional-sync path (manifest sha matched, nothing to re-download).
+    /// Returns false when there is no cache row (never synced).
+    pub fn touch_hub_synced_at(&self, synced_at: &str) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        let n = conn.execute(
+            "UPDATE hub_cache SET synced_at = ?1 WHERE id = 1",
+            rusqlite::params![synced_at],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Average `latency_ms` over a window, optionally per provider and/or
     /// agent. `from`/`to` are RFC3339 (store ts strings compare
     /// lexicographically).
@@ -572,6 +584,10 @@ pub struct SyncReportVm {
     pub fetched: i64,
     pub synced_at: String,
     pub hub_url: String,
+    /// Conditional sync: the manifest sha256 matched the cached catalog, so
+    /// catalog.json was not re-downloaded. `synced_at` still refreshed — the
+    /// app confirmed it is current, which is what the footer badge claims.
+    pub unchanged: bool,
 }
 
 #[derive(Serialize)]

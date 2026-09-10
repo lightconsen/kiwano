@@ -34,6 +34,9 @@ export default function Settings() {
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [syncErr, setSyncErr] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSettings().then(setS);
@@ -58,6 +61,23 @@ export default function Settings() {
       .then(setUpdate)
       .catch((e) => setErr(String(e)))
       .finally(() => setChecking(false));
+  };
+
+  // Conditional catalog sync: the backend compares the Hub manifest's sha256
+  // with the cached catalog and skips the download when they match.
+  const syncNow = () => {
+    setSyncing(true);
+    setSyncErr(null);
+    setSyncNote(null);
+    api
+      .syncHub()
+      .then((r) =>
+        setSyncNote(
+          r.unchanged ? `Up to date · ${r.fetched} providers` : `Synced ${r.fetched} providers`,
+        ),
+      )
+      .catch((e) => setSyncErr(String(e)))
+      .finally(() => setSyncing(false));
   };
 
   const installUpdate = () => {
@@ -214,6 +234,35 @@ export default function Settings() {
               API keys never leave your device
             </div>
           </div>
+        </div>
+      </div>
+      {/* Hub catalog — model/provider list source */}
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-[12.5px] font-semibold">Kiwano Hub</h3>
+        <div className="space-y-2.5 text-[12.5px]">
+          <Row label="Catalog source">
+            <span
+              className="max-w-[280px] truncate font-mono text-[11px] text-mut"
+              title={s.hub_url}
+            >
+              {s.hub_url}
+            </span>
+          </Row>
+          <Row label="Catalog" note="skips the download when unchanged">
+            <span className="flex items-center gap-2">
+              {syncNote && <span className="text-[11px] text-mut">{syncNote}</span>}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[11px]"
+                onClick={syncNow}
+                disabled={syncing}
+              >
+                {syncing ? "Syncing…" : "Sync now"}
+              </Button>
+            </span>
+          </Row>
+          {syncErr ? <div className="text-[11px] text-red-400">{syncErr}</div> : null}
         </div>
       </div>
       {/* About / update */}

@@ -346,6 +346,8 @@ export interface HubSyncReport {
   fetched: number;
   synced_at: string;
   hub_url: string;
+  /** The manifest hash matched the cache, so the catalog was not re-downloaded */
+  unchanged: boolean;
 }
 
 export interface GatewayStatus {

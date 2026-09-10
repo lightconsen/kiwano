@@ -1,17 +1,18 @@
 // Hub catalog asset helpers — resolve the hub_url base and build absolute
-// URLs for hub-hosted files (provider logos).
+// URLs for hub-hosted files (provider logos, the manifest).
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 
-/** Resolve a hub-relative path ("logos/foo.png") against the hub_url base,
-    stripping the trailing catalog filename (e.g. "/catalog.json"). */
-export function hubLogoUrl(hubUrl: string, logo: string): string {
+/** Resolve a hub-relative path ("logos/foo.png", "manifest.json") against the
+    hub_url base, replacing the trailing catalog filename (e.g. "/catalog.json").
+    Mirrors the backend's `sync::hub_asset_url` so both sides resolve alike. */
+export function hubAssetUrl(hubUrl: string, path: string): string {
   try {
     const u = new URL(hubUrl);
     const dir = u.pathname.replace(/\/[^/]*$/, "");
-    return `${u.origin}${dir}/${logo}`;
+    return `${u.origin}${dir}/${path}`;
   } catch {
-    return logo;
+    return path;
   }
 }
 

@@ -493,10 +493,13 @@ const settings: AppSettings = {
   preferred_currency: "CNY",
   auto_check_update: true,
   hub_logged_in: false,
-  hub_url: "https://hub.kiwano.app/catalog.json",
+  hub_url: "https://hub.kiwano.cc/catalog.json",
 };
 
 let idSeq = 100;
+
+/** Dev-only: flips after the first syncHub() so the conditional path is visible. */
+let devHubSynced = false;
 
 // Dev storage for rotating keys (spec §4.1 P1 multi-key rotation)
 type DevApiKeyRow = ApiKeyEntry & { provider_id: string };
@@ -964,10 +967,16 @@ export const devApi: KiwanoApi = {
 
   async syncHub(): Promise<HubSyncReport> {
     await delay(500);
+    // Mirror the real conditional sync: the first call downloads, later ones
+    // report "unchanged" (manifest sha matched) so both UI branches are
+    // reachable in dev.
+    const unchanged = devHubSynced;
+    devHubSynced = true;
     return {
       fetched: 42,
       synced_at: new Date().toISOString(),
       hub_url: settings.hub_url,
+      unchanged,
     };
   },
 

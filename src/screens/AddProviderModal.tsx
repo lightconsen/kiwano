@@ -33,7 +33,7 @@ import {
 } from "../api/types";
 import { AgentChip } from "@/components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
-import { hubLogoUrl, useHubUrl } from "../lib/hub";
+import { hubAssetUrl, useHubUrl } from "../lib/hub";
 
 const BILL_OPTIONS: { id: Billing; label: string }[] = [
   { id: "plan", label: "Plan" },
@@ -494,7 +494,7 @@ export default function AddProviderModal({
                       }}
                     >
                       <ProviderLogo
-                        logo={e.logo && hubUrl ? hubLogoUrl(hubUrl, e.logo) : undefined}
+                        logo={e.logo && hubUrl ? hubAssetUrl(hubUrl, e.logo) : undefined}
                         icon={e.icon}
                         name={e.name}
                         color={e.logo_color}
@@ -517,7 +517,7 @@ export default function AddProviderModal({
           {!edit && mode === "shelf" && shelf && (
             <div className="mt-3 flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
               <ProviderLogo
-                logo={shelf.logo && hubUrl ? hubLogoUrl(hubUrl, shelf.logo) : undefined}
+                logo={shelf.logo && hubUrl ? hubAssetUrl(hubUrl, shelf.logo) : undefined}
                 icon={shelf.icon}
                 name={shelf.name}
                 color={shelf.logo_color}

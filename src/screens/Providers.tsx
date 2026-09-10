@@ -18,7 +18,6 @@ import {
   type AgentDetect,
   type AgentId,
   type AgentRoute,
-  type CurrencyMeta,
   type PlanQuotaReport,
   type Provider,
   type StrategyBinding,
@@ -167,6 +166,13 @@ function usageTitle(p: Provider): string {
   return "Pay as you go · no limit set · 7-day usage trend";
 }
 
+/** The provider's own billing currency, when its limit unit names one.
+    Counted units ("requests", "wan_tokens") are not currencies. */
+function providerCurrency(p: Provider): string | undefined {
+  const unit = p.limit_unit;
+  return unit && unit.length === 3 ? unit : undefined;
+}
+
 /** Quota amount text: counted units render raw, currencies via fmtMoney */
 function quotaAmountText(used: number, limit: number, unit: string): string {
   if (unit === "requests") return `${used}/${limit}`;
@@ -235,13 +241,10 @@ function planPercentCell(
 function UsageCell({
   p,
   plan,
-  pref,
 }: {
   p: Provider;
   /** Plan-quota report for providers with a plan query (undefined = not fetched yet) */
   plan?: PlanQuotaReport;
-  /** Preferred display currency (Settings) for cost-only payg cells */
-  pref: string;
 }) {
   const u = p.usage;
 
@@ -341,7 +344,8 @@ function UsageCell({
     <div className="w-[22%]" title={title}>
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
         <BillTag billing="payg" />
-        {fmtMoney(u.cost ?? 0, pref)} <span className="font-normal text-mut">· {u.requests} req</span>
+        {fmtMoney(u.cost ?? 0, u.cost_currency ?? providerCurrency(p) ?? "USD")}{" "}
+        <span className="font-normal text-mut">· {u.requests} req</span>
       </div>
       {u.spark && (
         <span className="mt-1 block w-20">
@@ -410,13 +414,11 @@ function HealthCell({ p }: { p: Provider }) {
 function ProviderRow({
   p,
   plan,
-  pref,
   onEdit,
   onDelete,
 }: {
   p: Provider;
   plan?: PlanQuotaReport;
-  pref: string;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
@@ -452,7 +454,7 @@ function ProviderRow({
         )}
       </div>
 
-      <UsageCell p={p} plan={plan} pref={pref} />
+      <UsageCell p={p} plan={plan} />
 
       <HealthCell p={p} />
 
@@ -685,7 +687,6 @@ function BindingRow({
   b,
   idx,
   plan,
-  pref,
   onMove,
   onChanged,
 }: {
@@ -694,7 +695,6 @@ function BindingRow({
   b: StrategyBinding;
   idx: number;
   plan?: PlanQuotaReport;
-  pref: string;
   onMove: (idx: number, dir: -1 | 1) => void;
   onChanged: () => void;
 }) {
@@ -720,7 +720,7 @@ function BindingRow({
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
 
-      <UsageCell p={p} plan={plan} pref={pref} />
+      <UsageCell p={p} plan={plan} />
 
       <HealthCell p={p} />
 
@@ -877,8 +877,6 @@ export default function Providers({
   // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
   const [quotaBusy, setQuotaBusy] = useState(false);
-  // Currency metadata (preferred display currency for cost cells)
-  const [currencyMeta, setCurrencyMeta] = useState<CurrencyMeta | null>(null);
 
   // Segment switch that keeps the #providers/<agent> deep link truthful
   const pickSeg = (id: AgentId | "all") => {
@@ -902,11 +900,6 @@ export default function Providers({
       .catch(() => {});
   }, []);
   useEffect(refetch, [refetch]);
-
-  // Currency metadata: preferred display currency + conversion rates
-  useEffect(() => {
-    api.getCurrencyMeta().then(setCurrencyMeta).catch(() => {});
-  }, []);
 
   // Auto plan-quota refresh on load: one cached call per provider configured
   // with a plan query (the 5-min backend cache keeps this cheap)
@@ -1084,7 +1077,6 @@ export default function Providers({
                     b={b}
                     idx={i}
                     plan={planQuotas[p.id]}
-                    pref={currencyMeta?.preferred ?? "CNY"}
                     onMove={onMoveBinding}
                     onChanged={refetch}
                   />
@@ -1095,7 +1087,6 @@ export default function Providers({
                   key={p.id}
                   p={p}
                   plan={planQuotas[p.id]}
-                  pref={currencyMeta?.preferred ?? "CNY"}
                   onEdit={onEdit}
                   onDelete={onDelete}
                 />

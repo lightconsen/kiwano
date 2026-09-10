@@ -536,6 +536,10 @@ pub struct UsageVm {
     pub cache_read_tokens: i64,
     pub output_tokens: i64,
     pub cost: Option<f64>,
+    /// Currency of `cost` — the provider's own, never converted. Absent when
+    /// no usage row carried a price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_currency: Option<String>,
     pub latency_ms: Option<i64>,
     pub quota: Option<QuotaVm>,
     pub spark: Option<Vec<f64>>,
@@ -1551,6 +1555,29 @@ fn normalize_limit_unit(unit: Option<&str>, has_limit: bool) -> Option<String> {
     }
 }
 
+/// Cost of one provider, in the currency its usage was priced in.
+///
+/// No conversion: a provider bills in one currency and this number is read
+/// beside that provider's own limits. Should usage ever be priced in more than
+/// one currency (a price-table currency change mid-period), the currency
+/// carrying the most money names the total — the alternatives are folding
+/// other currencies in at a rate nobody asked for, or inventing a second line
+/// for a case that does not occur in practice. Unpriced rows (`None`)
+/// contribute nothing, exactly as they did when the sum was converted.
+fn provider_cost(buckets: &[(Option<String>, f64)]) -> (Option<f64>, Option<String>) {
+    let mut per_currency: HashMap<&str, f64> = HashMap::new();
+    for (currency, cost) in buckets {
+        let Some(currency) = currency.as_deref() else {
+            continue;
+        };
+        *per_currency.entry(currency).or_default() += cost;
+    }
+    match per_currency.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
+        Some((currency, total)) => (Some(total), Some(currency.to_string())),
+        None => (None, None),
+    }
+}
+
 fn usage_vm(
     store: &Store,
     aux: &Aux,
@@ -1559,14 +1586,16 @@ fn usage_vm(
     since7: &str,
 ) -> Option<UsageVm> {
     let t = totals?;
-    // Cost sums carry their own currency (the price entry's); convert into
-    // the user's preferred currency for the single displayed number.
+    // The cost stays in the currency this provider's usage was priced in: it
+    // is read next to that provider's own limits, and converting it into the
+    // user's display currency made the two disagree. Rolling several
+    // providers into one number is the Dashboard's job, and converting there
+    // is what the display currency is for.
     let rates = crate::pricing::bundled_doc().exchange_rates;
-    let pref = crate::pricing::preferred_currency(aux);
     let cost_buckets = store
         .usage_cost_by_currency(None, Some(&p.id), Some(since7))
         .unwrap_or_default();
-    let cost = crate::pricing::convert_cost_buckets(&cost_buckets, &pref, &rates);
+    let (cost, cost_currency) = provider_cost(&cost_buckets);
     let quota = match (p.billing, p.limit_unit.as_deref()) {
         (Billing::Subscription, unit) => p.period_limit.map(|limit| {
             let (used, unit) = match unit {
@@ -1608,7 +1637,8 @@ fn usage_vm(
         input_tokens: t.input_tokens,
         cache_read_tokens: t.cache_read_tokens,
         output_tokens: t.output_tokens,
-        cost: Some((cost * 1e6).round() / 1e6),
+        cost: cost.map(|c| (c * 1e6).round() / 1e6),
+        cost_currency,
         latency_ms: aux.avg_latency(Some(&p.id), None, Some(since7), None),
         quota,
         spark,
@@ -3669,6 +3699,26 @@ mod tests {
     fn delete_unknown_provider_is_noop() {
         let s = store();
         assert!(!delete_provider(&s, "nope").unwrap());
+    }
+
+    #[test]
+    fn provider_cost_stays_in_its_own_currency() {
+        let (cost, currency) = provider_cost(&[
+            (Some("USD".into()), 1.5),
+            (Some("USD".into()), 0.5),
+            (None, 9.0), // unpriced row: no currency, contributes nothing
+        ]);
+        assert_eq!(cost, Some(2.0));
+        assert_eq!(currency.as_deref(), Some("USD"));
+
+        // Mixed currencies: the one carrying the most money names the total.
+        let (cost, currency) =
+            provider_cost(&[(Some("USD".into()), 1.0), (Some("CNY".into()), 40.0)]);
+        assert_eq!(cost, Some(40.0));
+        assert_eq!(currency.as_deref(), Some("CNY"));
+
+        assert_eq!(provider_cost(&[]), (None, None));
+        assert_eq!(provider_cost(&[(None, 3.0)]), (None, None));
     }
 
     #[test]

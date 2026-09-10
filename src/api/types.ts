@@ -63,8 +63,10 @@ export interface UsageSummary {
   input_tokens: number;
   cache_read_tokens: number;
   output_tokens: number;
-  /** Estimated cost (¥); null for unl since it is not billed */
+  /** Estimated cost, in the provider's own currency; null for unl (not billed) */
   cost: number | null;
+  /** Currency of `cost` — the provider's, never converted; absent when unpriced */
+  cost_currency?: string | null;
   latency_ms: number | null;
   quota: QuotaState | null;
   /** Last-7-days trend samples (sparkline for payg types without a limit), y normalized to 0-14 */

@@ -43,7 +43,7 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
         "grokbuild" => read_grokbuild(home),
         "opencode" => read_additive_one(
             home.join(".config").join("opencode").join("opencode.json"),
-            |c| kiwano_adapters::gateway_takeover::read_opencode_current(c),
+            kiwano_adapters::gateway_takeover::read_opencode_current,
         ),
         "openclaw" => read_additive_one(home.join(".openclaw").join("openclaw.json"), |c| {
             kiwano_adapters::gateway_takeover::read_openclaw_current(c)

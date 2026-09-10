@@ -920,7 +920,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             }
             // under threshold → primary; over → first backup in line
             StrategyType::Quota => {
-                let over = quota_over_threshold(&store, strategy.config.as_deref(), &head);
+                let over = quota_over_threshold(store, strategy.config.as_deref(), &head);
                 HashSet::from([if over {
                     enabled
                         .get(1)
@@ -1124,7 +1124,7 @@ pub fn set_agent_strategy(
     strategy: &str,
     config: Option<&str>,
 ) -> Result<(), String> {
-    let kind = StrategyType::from_str(strategy)
+    let kind = StrategyType::parse_str(strategy)
         .ok_or_else(|| format!("unknown strategy type: {strategy}"))?;
     store.upsert_strategy(agent, kind, config).map_err(e2s)?;
     // Entering roundrobin: seed the weights as an even split of 100 (2
@@ -1528,7 +1528,7 @@ fn input_endpoints(input: &NewProviderInput) -> Vec<kiwano_gateway::store::Provi
         .endpoints
         .iter()
         .filter_map(|e| {
-            kiwano_gateway::store::Protocol::from_str(&e.protocol).map(|p| {
+            kiwano_gateway::store::Protocol::parse_str(&e.protocol).map(|p| {
                 kiwano_gateway::store::ProviderEndpoint {
                     protocol: p,
                     base_url: e.endpoint.trim().to_string(),
@@ -1578,7 +1578,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
-        protocol: kiwano_gateway::store::Protocol::from_str(&input.protocol)
+        protocol: kiwano_gateway::store::Protocol::parse_str(&input.protocol)
             .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
         base_url: input.endpoint.trim().to_string(),
         api_path: None,
@@ -1753,7 +1753,7 @@ pub fn update_provider(
 
     p.name = input.name.trim().to_string();
     p.base_url = input.endpoint.trim().to_string();
-    p.protocol = kiwano_gateway::store::Protocol::from_str(&input.protocol)
+    p.protocol = kiwano_gateway::store::Protocol::parse_str(&input.protocol)
         .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
     p.endpoints = input_endpoints(input);
     p.billing = billing_to_db(&input.billing);
@@ -2079,12 +2079,12 @@ pub fn set_agent_takeover(
         store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
         // Rewrite the Agent config (backup → base_url → placeholder key); on
         // failure roll back the key registration to stay consistent
-        if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, &home) {
+        if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, home) {
             let _ = store.delete_placeholder_key(&key);
             return Err(e);
         }
     } else {
-        crate::takeover::disable(aux, agent, &home)?;
+        crate::takeover::disable(aux, agent, home)?;
         for k in store.list_placeholder_keys().map_err(e2s)? {
             if k.agent == agent {
                 store.delete_placeholder_key(&k.key).map_err(e2s)?;
@@ -2128,7 +2128,7 @@ fn import_current_provider(
             &uuid::Uuid::new_v4().simple().to_string()[..6]
         ),
         name,
-        protocol: kiwano_gateway::store::Protocol::from_str(creds.protocol)
+        protocol: kiwano_gateway::store::Protocol::parse_str(creds.protocol)
             .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
         base_url: base.to_string(),
         api_path: None,

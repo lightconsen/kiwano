@@ -177,7 +177,7 @@ fn build_upstream_headers(
     match provider.protocol {
         Protocol::Anthropic => {
             let value =
-                HeaderValue::from_str(&key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
+                HeaderValue::from_str(key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
             out.insert("x-api-key", value);
             if !out.contains_key("anthropic-version") {
                 out.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
@@ -190,7 +190,7 @@ fn build_upstream_headers(
         }
         Protocol::Gemini => {
             let value =
-                HeaderValue::from_str(&key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
+                HeaderValue::from_str(key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
             out.insert("x-goog-api-key", value);
         }
     }
@@ -268,6 +268,7 @@ impl SendFailure {
 /// this loop gives up. The loop returns before any byte reaches the client,
 /// so in-flight streams are never retried; body-read failures after headers
 /// are also not retried (the breaker was already fed at header time).
+#[allow(clippy::too_many_arguments)] // every argument is a distinct routing input
 async fn send_upstream(
     state: &GatewayState,
     provider: &UpstreamProvider,
@@ -428,6 +429,7 @@ fn resolve_inbound(
 /// Forward one resolved request to its provider and return the client-facing
 /// response, metering usage on the way. `capture` carries the request-side
 /// full-log context (None while request logging is disabled).
+#[allow(clippy::too_many_arguments)] // entry point: the request's own fields
 pub async fn forward(
     state: Arc<GatewayState>,
     method: Method,
@@ -526,7 +528,7 @@ pub async fn forward(
                 Some(provider.id.clone()),
                 resp.status(),
                 "upstream_error",
-                format!("selecting upstream key failed"),
+                "selecting upstream key failed".to_string(),
             );
             return resp;
         }
@@ -543,7 +545,7 @@ pub async fn forward(
                 Some(provider.id.clone()),
                 resp.status(),
                 "upstream_error",
-                format!("building upstream headers failed"),
+                "building upstream headers failed".to_string(),
             );
             return resp;
         }
@@ -758,7 +760,7 @@ async fn forward_anthropic_via_openai(
                 Some(provider.id.clone()),
                 resp.status(),
                 "conversion_failed",
-                format!("adapters conversion failed"),
+                "adapters conversion failed".to_string(),
             );
             return resp;
         }
@@ -806,7 +808,7 @@ async fn forward_anthropic_via_openai(
                 Some(provider.id.clone()),
                 resp.status(),
                 "upstream_error",
-                format!("selecting upstream key failed"),
+                "selecting upstream key failed".to_string(),
             );
             return resp;
         }
@@ -823,7 +825,7 @@ async fn forward_anthropic_via_openai(
                 Some(provider.id.clone()),
                 resp.status(),
                 "upstream_error",
-                format!("building upstream headers failed"),
+                "building upstream headers failed".to_string(),
             );
             return resp;
         }

@@ -181,13 +181,9 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
             }
         }
     }
-    let usage = if scanner.usage == Usage::default() && model.is_none() {
-        None
-    } else if scanner.usage == Usage::default() {
-        None
-    } else {
-        Some(scanner.usage)
-    };
+    // No usage recorded → report none, regardless of whether a model id was
+    // seen (an all-default Usage carries no numbers worth reporting).
+    let usage = (scanner.usage != Usage::default()).then_some(scanner.usage);
     (usage, model)
 }
 

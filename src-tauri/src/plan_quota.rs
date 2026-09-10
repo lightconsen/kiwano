@@ -726,13 +726,13 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     }
     let mut inner = Sha256::new();
     for b in &norm {
-        inner.update(&[b ^ 0x36]);
+        inner.update([b ^ 0x36]);
     }
     inner.update(data);
     let inner = inner.finalize();
     let mut outer = Sha256::new();
     for b in &norm {
-        outer.update(&[b ^ 0x5c]);
+        outer.update([b ^ 0x5c]);
     }
     outer.update(inner);
     outer.finalize().into()

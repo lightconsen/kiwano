@@ -242,7 +242,7 @@ impl StrategyEngine {
         let ring: Vec<usize> = weights
             .iter()
             .enumerate()
-            .flat_map(|(i, w)| std::iter::repeat(i).take((*w / g) as usize))
+            .flat_map(|(i, w)| std::iter::repeat_n(i, (*w / g) as usize))
             .collect();
         let ring_len = ring.len().max(1) as u64;
         for _ in 0..ring_len {

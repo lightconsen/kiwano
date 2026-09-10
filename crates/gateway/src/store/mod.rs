@@ -322,7 +322,8 @@ impl Protocol {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Inverse of `as_str`; `None` on an unrecognized tag.
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "anthropic" => Some(Protocol::Anthropic),
             "openai" => Some(Protocol::OpenAI),
@@ -350,7 +351,8 @@ impl Billing {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Inverse of `as_str`; `None` on an unrecognized tag.
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "subscription" => Some(Billing::Subscription),
             "metered" => Some(Billing::Metered),
@@ -382,7 +384,8 @@ impl StrategyType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Inverse of `as_str`; `None` on an unrecognized tag.
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "single" => Some(StrategyType::Single),
             "failover" => Some(StrategyType::Failover),
@@ -957,7 +960,7 @@ impl Store {
                 let type_str: String = row.get(1)?;
                 Ok(Strategy {
                     agent: row.get(0)?,
-                    kind: StrategyType::from_str(&type_str).unwrap_or(StrategyType::Single),
+                    kind: StrategyType::parse_str(&type_str).unwrap_or(StrategyType::Single),
                     config: row.get(2)?,
                 })
             })
@@ -1662,12 +1665,12 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
     Ok(Provider {
         id: row.get(0)?,
         name: row.get(1)?,
-        protocol: Protocol::from_str(&protocol_str).unwrap_or(Protocol::Anthropic),
+        protocol: Protocol::parse_str(&protocol_str).unwrap_or(Protocol::Anthropic),
         base_url: row.get(3)?,
         api_path: row.get(4)?,
         endpoints: Vec::new(),
         api_key: row.get(5)?,
-        billing: Billing::from_str(&billing_str).unwrap_or(Billing::Metered),
+        billing: Billing::parse_str(&billing_str).unwrap_or(Billing::Metered),
         period_limit: row.get(7)?,
         limit_unit: row.get(8)?,
         plan_query: row.get(9)?,
@@ -1692,7 +1695,7 @@ fn read_endpoints(conn: &Connection, provider_id: &str) -> Result<Vec<ProviderEn
     let rows = stmt.query_map(params![provider_id], |row| {
         let protocol_str: String = row.get(0)?;
         Ok(ProviderEndpoint {
-            protocol: Protocol::from_str(&protocol_str).unwrap_or(Protocol::OpenAI),
+            protocol: Protocol::parse_str(&protocol_str).unwrap_or(Protocol::OpenAI),
             base_url: row.get(1)?,
             api_path: row.get(2)?,
         })

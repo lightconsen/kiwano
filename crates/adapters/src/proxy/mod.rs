@@ -12,7 +12,7 @@
 //! - [`json_canonical`]: stable JSON serialization helpers
 //! - [`tool_media`]: tool-result image media rectification
 //! - [`error`]: trimmed `ProxyError` (same variant names as upstream)
-//! - [`types`]: `OptimizerConfig`
+//! - [`types`][]: `OptimizerConfig`
 
 pub mod cache_injector;
 pub mod error;

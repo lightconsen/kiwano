@@ -54,9 +54,11 @@ pub struct PricingTable {
     pub version: i64,
 }
 
-impl PricingTable {
-    /// Parse a models.json document.
-    pub fn from_str(json: &str) -> Result<Self, serde_json::Error> {
+/// Parse a models.json document (`json.parse::<PricingTable>()`).
+impl std::str::FromStr for PricingTable {
+    type Err = serde_json::Error;
+
+    fn from_str(json: &str) -> Result<Self, Self::Err> {
         let doc: ModelsDoc = serde_json::from_str(json)?;
         let mut rows = HashMap::with_capacity(doc.models.len());
         for entry in doc.models {
@@ -71,10 +73,12 @@ impl PricingTable {
             version: doc.version,
         })
     }
+}
 
+impl PricingTable {
     /// The bundled snapshot compiled into the binary.
     pub fn bundled() -> Self {
-        Self::from_str(MODELS_JSON).expect("bundled models.json is valid")
+        MODELS_JSON.parse().expect("bundled models.json is valid")
     }
 
     pub fn exchange_rates(&self) -> &HashMap<String, f64> {

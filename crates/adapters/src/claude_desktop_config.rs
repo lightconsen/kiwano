@@ -85,7 +85,7 @@ fn parse_jsonc(content: &str, label: &str) -> Result<Value, String> {
 
 fn require_object(v: Value, label: &str) -> Result<Map<String, Value>, String> {
     v.as_object()
-        .map(|o| o.clone())
+        .cloned()
         .ok_or(format!("{label} root must be a JSON object"))
 }
 

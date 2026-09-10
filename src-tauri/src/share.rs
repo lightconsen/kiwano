@@ -156,7 +156,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
 
     let mut routes_applied = 0usize;
     for r in &share.routes {
-        let kind = StrategyType::from_str(&r.strategy).unwrap_or(StrategyType::Single);
+        let kind = StrategyType::parse_str(&r.strategy).unwrap_or(StrategyType::Single);
         store
             .upsert_strategy(&r.agent, kind, r.config.as_deref())
             .map_err(|e| e.to_string())?;

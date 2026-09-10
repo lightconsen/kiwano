@@ -317,7 +317,7 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
         "event: message_stop\n",
         "data: {\"type\":\"message_stop\"}\n\n",
     ];
-    let (upstream_url, captured) = mock_anthropic(MockReply::Sse(chunks.clone())).await;
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Sse(chunks.clone())).await;
 
     store
         .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
@@ -349,8 +349,6 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     let body = response_body(response).await;
     let expected: String = chunks.concat();
     assert_eq!(String::from_utf8(body.to_vec()).unwrap(), expected);
-
-    let _guard = captured.lock().unwrap();
 
     let totals = wait_for_usage(&state, "claude", 1).await;
     assert_eq!(totals.input_tokens, 25);
@@ -679,13 +677,16 @@ async fn anthropic_inbound_converts_openai_sse_stream_to_anthropic_events() {
 
     // The upstream saw a converted streaming OpenAI request that asks for
     // usage in the stream (adapters injects stream_options.include_usage).
-    let sent = bodies.lock().unwrap();
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0]["stream"], true);
-    assert_eq!(
-        sent[0]["stream_options"]["include_usage"], true,
-        "usage capture depends on include_usage injection"
-    );
+    // Scoped: the guard must be released before the await below.
+    {
+        let sent = bodies.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["stream"], true);
+        assert_eq!(
+            sent[0]["stream_options"]["include_usage"], true,
+            "usage capture depends on include_usage injection"
+        );
+    }
 
     // Usage metered from the converted Anthropic usage events
     // (cache-conserved values, matching what the client observed).

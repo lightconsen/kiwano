@@ -122,12 +122,12 @@ fn parse_providers_add(mut words: Vec<String>) -> Result<AddArgs, String> {
     let endpoint = require(&mut words, "--endpoint", "providers add")?;
     let key = take1(&mut words, "--key")?.filter(|k| !k.trim().is_empty());
     let protocol = match take1(&mut words, "--protocol")? {
-        Some(v) => Protocol::from_str(&v)
+        Some(v) => Protocol::parse_str(&v)
             .ok_or_else(|| format!("invalid --protocol: {v} (openai|anthropic|gemini)"))?,
         None => Protocol::OpenAI,
     };
     let billing = match take1(&mut words, "--billing")? {
-        Some(v) => Billing::from_str(&v)
+        Some(v) => Billing::parse_str(&v)
             .ok_or_else(|| format!("invalid --billing: {v} (subscription|metered|unlimited)"))?,
         None => Billing::Metered,
     };

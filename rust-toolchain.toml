@@ -1,0 +1,7 @@
+# Pinned so CI and local dev compile with the same rustc/clippy. Tracking
+# `stable` meant a new clippy lint (e.g. result_large_err in 1.98.0) turned
+# main red on code nobody had touched, while local builds stayed green.
+# CI workflows read this file's version too. Bump deliberately.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]

@@ -1,6 +1,7 @@
 // Dashboard (design/index.html #s-dashboard)
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -14,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
-import type { DashboardData, DashboardWindow } from "../api/types";
+import type { DashboardData, DashboardWindow, GatewayStatus } from "../api/types";
 import { fmtMoney, fmtTokens } from "../lib/format";
 import RequestLogs from "./RequestLogs";
 
@@ -211,7 +212,7 @@ function Donut({
   size = 108,
   thickness = 15,
 }: {
-  slices: { color: string; pct: number; value: number; label: string }[];
+  slices: { color: string; pct: number; value: number; label: string; dim?: boolean }[];
   total: number;
   active: number | null;
   onHover: (i: number | null) => void;
@@ -261,7 +262,7 @@ function Donut({
             strokeWidth={thickness}
             strokeDasharray={dash}
             strokeDashoffset={offset}
-            opacity={active === null || active === i ? 1 : 0.35}
+            opacity={(active === null || active === i ? 1 : 0.35) * (slices[i].dim ? 0.4 : 1)}
           />
         ))}
       </g>
@@ -311,9 +312,12 @@ function Donut({
 function ProviderBreakdown({
   rows,
   pref,
+  blocked,
 }: {
   rows: DashboardData["by_provider"];
   pref: string;
+  /** provider id -> why the gateway is refusing to route there */
+  blocked: Record<string, string>;
 }) {
   const [active, setActive] = useState<number | null>(null);
   return (
@@ -324,6 +328,7 @@ function ProviderBreakdown({
           pct: p.pct,
           value: p.requests,
           label: p.name,
+          dim: Boolean(blocked[p.id]),
         }))}
         total={rows.reduce((sum, p) => sum + p.requests, 0)}
         active={active}
@@ -342,9 +347,23 @@ function ProviderBreakdown({
             onFocus={() => setActive(i)}
             onBlur={() => setActive(null)}
           >
-            <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={`flex min-w-0 items-center gap-1.5${blocked[p.id] ? " opacity-55" : ""}`}
+              title={blocked[p.id] ? `Not routing here: ${blocked[p.id]}` : undefined}
+            >
               <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: p.color }} />
               <span className="truncate">{p.name}</span>
+              {blocked[p.id] && (
+                <span
+                  className="shrink-0 rounded px-1 py-px text-[9.5px] font-medium"
+                  style={{
+                    background: "color-mix(in srgb, var(--red) 14%, transparent)",
+                    color: "var(--red)",
+                  }}
+                >
+                  Blocked
+                </span>
+              )}
             </span>
             <span className="shrink-0 font-mono text-mut">
               {p.pct}% · {fmtMoney(p.cost, pref)}
@@ -367,8 +386,14 @@ function Delta({ pct, invert }: { pct: number; invert?: boolean }) {
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null } = {}) {
   const [win, setWin] = useState<DashboardWindow>("7d");
+  // The gateway decides which providers it will not route to, and reports it;
+  // this card reads that rather than working out its own answer.
+  const blocked = useMemo(
+    () => Object.fromEntries((gateway?.blocked ?? []).map((b) => [b.id, b.reason])),
+    [gateway],
+  );
   // "all" = no filter; otherwise the provider id / agent id
   const [providerFilter, setProviderFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
@@ -529,7 +554,7 @@ export default function Dashboard() {
             {data.by_provider.length === 0 ? (
               <div className="mt-3 text-[11.5px] text-mut">No traffic in this window.</div>
             ) : (
-              <ProviderBreakdown rows={data.by_provider} pref={pref} />
+              <ProviderBreakdown rows={data.by_provider} pref={pref} blocked={blocked} />
             )}
           </div>
           {/* Agent breakdown */}

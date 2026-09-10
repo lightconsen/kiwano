@@ -306,7 +306,14 @@ export interface DashboardData {
   latency_ms: number;
   latency_delta_pct: number;
   trend: TrendPoint[];
-  by_provider: { name: string; color: string; requests: number; pct: number; cost: number }[];
+  by_provider: {
+    id: string;
+    name: string;
+    color: string;
+    requests: number;
+    pct: number;
+    cost: number;
+  }[];
   by_agent: { agent: AgentId; label: string; requests: number; tokens: string; cost: number }[];
   /** Filter select options: providers/agents with traffic in the window,
       computed independent of the active filter */

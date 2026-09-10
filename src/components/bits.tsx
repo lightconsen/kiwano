@@ -36,13 +36,22 @@ export function Logo({
   );
 }
 
-export function Dot({ state, size = "w-[6px] h-[6px]" }: { state: "ok" | "idle" | "off"; size?: string }) {
+export function Dot({
+  state,
+  size = "w-[6px] h-[6px]",
+}: {
+  /** `error` is not a health state: it reads "this row is not serving you". */
+  state: "ok" | "idle" | "off" | "error";
+  size?: string;
+}) {
   const style =
     state === "ok"
       ? { background: "var(--kiwi)", boxShadow: "0 0 6px oklch(0.8 0.19 132 / .5)" }
       : state === "idle"
         ? { background: "oklch(0.55 0.12 250)" }
-        : { background: "oklch(0.42 0.01 260)" };
+        : state === "error"
+          ? { background: "var(--red)" }
+          : { background: "oklch(0.42 0.01 260)" };
   return <span className={`dot ${size}`} style={style} />;
 }
 

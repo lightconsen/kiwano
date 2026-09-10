@@ -215,7 +215,7 @@ function planPercentCell(
       : null;
   const maxUtil = plan?.success ? Math.max(...plan.tiers.map((t) => t.utilization), 0) : 0;
   return (
-    <div className="flex w-[28%] items-center gap-2" title={title}>
+    <div className="flex w-full items-center gap-2" title={title}>
       <Ring pct={pct} color={color} />
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
@@ -238,40 +238,37 @@ function planPercentCell(
   );
 }
 
+/** Sits in the Usage/quota column.
+ *
+ * A provider the gateway is refusing to route keeps its numbers here, dimmed:
+ * what the period cost is still true and still worth seeing, it is just no
+ * longer what is happening. The block itself belongs in the status column,
+ * which is the one that answers "what is this row doing right now". */
 function UsageCell({
   p,
   plan,
   blocked,
 }: {
   p: Provider;
-  /** Plan-quota report for providers with a plan query (undefined = not fetched yet) */
   plan?: PlanQuotaReport;
   /** Why the gateway is refusing to route here, when it is. */
   blocked?: string;
 }) {
-  const u = p.usage;
+  return (
+    <div
+      className={`w-[28%]${blocked ? " opacity-55" : ""}`}
+      title={blocked ? `Not routing here: ${blocked}` : undefined}
+    >
+      <UsageCellBody p={p} plan={plan} />
+    </div>
+  );
+}
 
-  // First, because it overrides everything the rest of this cell would say:
-  // whatever the numbers are, the gateway is not sending requests here, and a
-  // ring claiming "57% of budget" beside that would be a lie.
-  if (blocked) {
-    return (
-      <div className="w-[28%]" title={`Not routing here: ${blocked}`}>
-        <div className="flex items-center gap-1.5">
-          <span
-            className="rounded px-1.5 py-px text-[10px] font-medium"
-            style={{
-              background: "color-mix(in srgb, var(--red) 14%, transparent)",
-              color: "var(--red)",
-            }}
-          >
-            Blocked
-          </span>
-          <span className="truncate font-mono text-[11px] text-mut">{blocked}</span>
-        </div>
-      </div>
-    );
-  }
+function UsageCellBody({ p, plan }: { p: Provider;
+  /** Plan-quota report for providers with a plan query (undefined = not fetched yet) */
+  plan?: PlanQuotaReport;
+}) {
+  const u = p.usage;
 
   // Percent-limit rows render even before the provider has any usage
   // history (usage summary still null): the ring/limit line need no totals.
@@ -279,7 +276,7 @@ function UsageCell({
     return planPercentCell(p, plan, usageTitle(p));
   }
 
-  if (!u) return <div className="w-[28%]" />;
+  if (!u) return <div className="w-full" />;
   const title = usageTitle(p);
 
   if (p.billing === "plan" && u.quota) {
@@ -293,7 +290,7 @@ function UsageCell({
         : null;
     const maxUtil = plan?.success ? Math.max(...plan.tiers.map((t) => t.utilization), 0) : 0;
     return (
-      <div className="flex w-[28%] items-center gap-2" title={title}>
+      <div className="flex w-full items-center gap-2" title={title}>
         <Ring pct={pct} color={ringColor("plan", pct)} />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
@@ -332,7 +329,7 @@ function UsageCell({
   // ceiling (tightest window wins); legacy used/limit rows render above.
   if (p.billing === "unl") {
     return (
-      <div className="w-[28%]" title={title}>
+      <div className="w-full" title={title}>
         <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
           <BillTag billing="unl" />
           {u.requests} <span className="font-normal text-mut">req · {fmtTokens(u.input_tokens + u.output_tokens)} tok</span>
@@ -347,7 +344,7 @@ function UsageCell({
   if (u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
     return (
-      <div className="flex w-[28%] items-center gap-2" title={title}>
+      <div className="flex w-full items-center gap-2" title={title}>
         <Ring pct={pct} color={ringColor("payg", pct)} />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
@@ -366,7 +363,7 @@ function UsageCell({
   }
 
   return (
-    <div className="w-[28%]" title={title}>
+    <div className="w-full" title={title}>
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
         <BillTag billing="payg" />
         {fmtMoney(u.cost ?? 0, u.cost_currency ?? providerCurrency(p) ?? "USD")}{" "}
@@ -420,7 +417,20 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
 }
 
 /** Health cell: green dot + latency when healthy, muted note otherwise. */
-function HealthCell({ p }: { p: Provider }) {
+function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
+  // The provider is up and reachable — that is not what changed. What changed
+  // is whether Kiwano will use it, which is this column's question.
+  if (blocked) {
+    return (
+      <div className="w-[14%]" title={`Not routing here: ${blocked}`}>
+        <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--red)" }}>
+          <Dot state="error" />
+          Blocked
+        </span>
+        <div className="mt-0.5 truncate text-[10.5px] text-mut">{blocked}</div>
+      </div>
+    );
+  }
   return (
     <div className="w-[14%]">
       {p.health.state === "ok" ? (
@@ -484,7 +494,7 @@ function ProviderRow({
 
       <UsageCell p={p} plan={plan} blocked={blocked} />
 
-      <HealthCell p={p} />
+      <HealthCell p={p} blocked={blocked} />
 
       {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
           or while a delete confirmation is pending. Binding / unbinding happens
@@ -752,7 +762,7 @@ function BindingRow({
 
       <UsageCell p={p} plan={plan} blocked={blocked} />
 
-      <HealthCell p={p} />
+      <HealthCell p={p} blocked={blocked} />
 
       {/* Candidate ordering / membership is the only action here — provider
           management (edit / enable / delete) stays on the All tab. Actions

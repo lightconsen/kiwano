@@ -209,7 +209,7 @@ export default function App() {
           />
         )}
         {route.route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset, edit: null })} />}
-        {route.route === "dashboard" && <Dashboard key={`d${tick}`} />}
+        {route.route === "dashboard" && <Dashboard key={`d${tick}`} gateway={gw} />}
         {route.route === "settings" && <Settings key={`c${tick}`} />}
       </main>
 

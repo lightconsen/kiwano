@@ -164,7 +164,10 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
             y={0}
             width={slot}
             height={H}
-            fill="transparent"
+            // Hit the geometry without painting it: `all` ignores paint, where a
+            // transparent fill rests on the engine counting zero alpha as ink.
+            fill="none"
+            style={{ pointerEvents: "all" }}
             onPointerEnter={() => pointAt(i)}
           />
         ))}
@@ -194,23 +197,50 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
 
 /** Share donut. Each segment is a circle whose dash length is its slice of the
     circumference — same hand-rolled SVG as the trend chart, no chart library.
-    A hair of gap keeps adjacent segments apart; a lone segment is drawn whole. */
+    A hair of gap keeps adjacent segments apart; a lone segment is drawn whole.
+
+    Hovering a segment (or its legend row, which shares the state) dims the
+    others and moves the centre readout onto that slice. The centre rather than
+    a floating tooltip: the hole is empty space right beside the pointer, and a
+    15px ring is too thin to hang a label off. */
 function Donut({
   slices,
   total,
+  active,
+  onHover,
   size = 108,
   thickness = 15,
 }: {
-  slices: { color: string; pct: number }[];
+  slices: { color: string; pct: number; value: number; label: string }[];
   total: number;
+  active: number | null;
+  onHover: (i: number | null) => void;
   size?: number;
   thickness?: number;
 }) {
   const r = (size - thickness) / 2;
   const circumference = 2 * Math.PI * r;
+  // The hole is 78px across at the default size; a provider name longer than
+  // this would run under the ring, so it gets clipped with an ellipsis.
+  const shown = active === null ? null : slices[active];
+  const label = shown && (shown.label.length > 10 ? `${shown.label.slice(0, 9)}…` : shown.label);
   let used = 0;
+  const arcs = slices.map((s, i) => {
+    const gap = slices.length > 1 ? 1.5 : 0;
+    const len = Math.max(0, (s.pct / 100) * circumference - gap);
+    used += s.pct;
+    return { i, dash: `${len} ${circumference - len}`, offset: -((used - s.pct) / 100) * circumference };
+  });
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className="shrink-0"
+      role="img"
+      aria-label={`By provider · ${total} requests`}
+      onPointerLeave={() => onHover(null)}
+    >
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -220,26 +250,39 @@ function Donut({
         strokeWidth={thickness}
       />
       <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-        {slices.map((s, i) => {
-          const gap = slices.length > 1 ? 1.5 : 0;
-          const len = Math.max(0, (s.pct / 100) * circumference - gap);
-          const dash = `${len} ${circumference - len}`;
-          const offset = -(used / 100) * circumference;
-          used += s.pct;
-          return (
-            <circle
-              key={i}
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={thickness}
-              strokeDasharray={dash}
-              strokeDashoffset={offset}
-            />
-          );
-        })}
+        {arcs.map(({ i, dash, offset }) => (
+          <circle
+            key={i}
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={slices[i].color}
+            strokeWidth={thickness}
+            strokeDasharray={dash}
+            strokeDashoffset={offset}
+            opacity={active === null || active === i ? 1 : 0.35}
+          />
+        ))}
+      </g>
+      {/* Hit rings after the painted ones: a wider invisible stroke, so the
+          pointer only has to be near the ring, not on its 15px face. */}
+      <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+        {arcs.map(({ i, dash, offset }) => (
+          <circle
+            key={`hit-${i}`}
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="none"
+            strokeWidth={thickness + 12}
+            strokeDasharray={dash}
+            strokeDashoffset={offset}
+            style={{ pointerEvents: "stroke", cursor: "pointer" }}
+            onPointerEnter={() => onHover(i)}
+          />
+        ))}
       </g>
       <text
         x="50%"
@@ -250,12 +293,66 @@ function Donut({
         fontWeight="600"
         fontFamily="JetBrains Mono"
       >
-        {total}
+        {shown ? shown.value : total}
       </text>
       <text x="50%" y="62%" textAnchor="middle" fill="var(--mut)" fontSize="9">
-        requests
+        {shown ? label : "requests"}
       </text>
     </svg>
+  );
+}
+
+/** "By provider": the donut and its legend are one control.
+ *
+ * Pointing at a ring segment or at a legend row sets the same state, so the
+ * pair lifts together and the donut's centre becomes that provider's readout.
+ * The legend rows are the wide target and the keyboard's way in — the ring is
+ * 15px thick, which is not something to ask anyone to hit. */
+function ProviderBreakdown({
+  rows,
+  pref,
+}: {
+  rows: DashboardData["by_provider"];
+  pref: string;
+}) {
+  const [active, setActive] = useState<number | null>(null);
+  return (
+    <div className="mt-2.5 flex items-center gap-4">
+      <Donut
+        slices={rows.map((p) => ({
+          color: p.color,
+          pct: p.pct,
+          value: p.requests,
+          label: p.name,
+        }))}
+        total={rows.reduce((sum, p) => sum + p.requests, 0)}
+        active={active}
+        onHover={setActive}
+      />
+      {/* Clearing on the list's leave rather than each row's keeps a move
+          between rows from blanking the readout on the way. */}
+      <div className="min-w-0 flex-1 space-y-1" onPointerLeave={() => setActive(null)}>
+        {rows.map((p, i) => (
+          <div
+            key={p.name}
+            tabIndex={0}
+            className="-mx-1.5 flex items-center justify-between gap-2 rounded px-1.5 py-0.5 text-[11.5px]"
+            style={{ background: active === i ? "var(--surface2)" : "transparent" }}
+            onPointerEnter={() => setActive(i)}
+            onFocus={() => setActive(i)}
+            onBlur={() => setActive(null)}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: p.color }} />
+              <span className="truncate">{p.name}</span>
+            </span>
+            <span className="shrink-0 font-mono text-mut">
+              {p.pct}% · {fmtMoney(p.cost, pref)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -427,25 +524,7 @@ export default function Dashboard() {
             {data.by_provider.length === 0 ? (
               <div className="mt-3 text-[11.5px] text-mut">No traffic in this window.</div>
             ) : (
-              <div className="mt-2.5 flex items-center gap-4">
-                <Donut
-                  slices={data.by_provider.map((p) => ({ color: p.color, pct: p.pct }))}
-                  total={data.by_provider.reduce((sum, p) => sum + p.requests, 0)}
-                />
-                <div className="min-w-0 flex-1 space-y-2">
-                  {data.by_provider.map((p) => (
-                    <div key={p.name} className="flex items-center justify-between gap-2 text-[11.5px]">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: p.color }} />
-                        <span className="truncate">{p.name}</span>
-                      </span>
-                      <span className="shrink-0 font-mono text-mut">
-                        {p.pct}% · {fmtMoney(p.cost, pref)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <ProviderBreakdown rows={data.by_provider} pref={pref} />
             )}
           </div>
           {/* Agent breakdown */}

@@ -643,13 +643,17 @@ fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
 
 /// Polled periodically by the frontend; hits not yet notified are returned so
 /// the frontend can raise a system notification (KV dedup prevents repeats).
-/// Also runs the plan percent-limit enforcement pass (disable on over, reload
-/// the gateway routes when the patrol touched a provider).
+///
+/// Also the enforcement pass: providers over a plan percent ceiling or a
+/// spending limit are disabled, and the gateway routes are reloaded when
+/// either touched one. Enforcement runs regardless of the notification
+/// setting — wanting no alerts is not wanting to spend past the limit.
 #[tauri::command]
 fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, String> {
     let alerts = vm::check_usage_alerts(&state.store, &state.aux)?;
-    let (plan_alerts, mutated) = vm::enforce_plan_limits(&state.store, &state.aux)?;
-    if mutated {
+    let (plan_alerts, plan_mutated) = vm::enforce_plan_limits(&state.store, &state.aux)?;
+    let spend_mutated = vm::enforce_amount_limits(&state.store, &state.aux)?;
+    if plan_mutated || spend_mutated {
         after_mutation(&state);
     }
     Ok(alerts.into_iter().chain(plan_alerts).collect())

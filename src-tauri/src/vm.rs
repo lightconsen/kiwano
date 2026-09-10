@@ -2608,61 +2608,94 @@ pub struct UsageAlertVm {
     pub unit: String,
 }
 
+/// What a provider's per-period limit is measured in, and how much of the
+/// period is spent. One reader for the notification and the enforcement, so
+/// the two can never disagree about the same number.
+struct PeriodLimit {
+    used: f64,
+    limit: f64,
+    /// "requests" | "wan_tokens" | an ISO currency code — the limit's own unit.
+    unit: String,
+    /// The reset period's identity (e.g. "2026-09"), for notification dedup.
+    period_key: String,
+}
+
+/// Read one provider's period limit and how much of it is spent. None when the
+/// provider has no limit worth measuring.
+fn period_limit_usage(
+    store: &Store,
+    aux: &Aux,
+    p: &Provider,
+) -> Result<Option<PeriodLimit>, String> {
+    let Some(limit) = p.period_limit.filter(|l| *l > 0.0) else {
+        return Ok(None);
+    };
+    // NULL unit normalizes to requests (same source as the ring percentage,
+    // compatible with v1 rows).
+    let unit = match p.limit_unit.as_deref() {
+        Some("wan_tokens") => "wan_tokens",
+        // A spending limit is denominated in the provider's own currency — the
+        // one the price table quotes its models in — so the period's cost
+        // compares directly. Converting here would make the limit mean
+        // whatever the rate said that day.
+        Some(u) if u.len() == 3 => u,
+        _ => "requests",
+    };
+    let (since, period_key) = period_start(unix_now(), p.reset_period.as_deref(), tz_offset(aux));
+    let used = match unit {
+        "wan_tokens" => {
+            let t = store
+                .usage_totals_for_provider(&p.id, since.as_deref())
+                .map_err(e2s)?;
+            (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                as f64
+                / 10_000.0
+        }
+        u if u.len() == 3 => store
+            .usage_cost_by_currency(None, Some(&p.id), since.as_deref())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|(currency, cost)| currency.as_deref().map(|_| *cost))
+            .sum(),
+        _ => {
+            store
+                .usage_totals_for_provider(&p.id, since.as_deref())
+                .map_err(e2s)?
+                .requests as f64
+        }
+    };
+    Ok(Some(PeriodLimit {
+        used,
+        limit,
+        unit: unit.to_string(),
+        period_key,
+    }))
+}
+
 /// Check whether enabled providers' usage this period has reached the
 /// user-set per-period limit (period_limit). Hits not yet notified this
 /// period are recorded under a dedup key and returned (the frontend turns
-/// them into system notifications). Currency limits compare the cost spent
-/// this period (converted into the limit's currency) against the limit.
+/// them into system notifications).
+///
+/// Notification only — `enforce_amount_limits` is what acts on it, and runs
+/// whether or not the user wants to be told.
 pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>, String> {
     if !ui_settings(aux).cost_alert {
         return Ok(Vec::new());
     }
-    let now = unix_now();
     let mut alerts = Vec::new();
     for p in store.list_providers().map_err(e2s)? {
-        let Some(limit) = p.period_limit else {
-            continue;
-        };
-        if !p.enabled || limit <= 0.0 {
+        if !p.enabled {
             continue;
         }
-        // NULL unit normalizes to requests (same source as the ring
-        // percentage, compatible with v1 rows).
-        let unit = match p.limit_unit.as_deref() {
-            Some("wan_tokens") => "wan_tokens",
-            // Currency limit: compare spent cost (converted into the limit
-            // currency) against the limit.
-            Some(u) if u.len() == 3 => u,
-            _ => "requests",
-        };
-        let (since, period_key) = period_start(now, p.reset_period.as_deref(), tz_offset(aux));
-        let used = match unit {
-            "wan_tokens" => {
-                let t = store
-                    .usage_totals_for_provider(&p.id, since.as_deref())
-                    .map_err(e2s)?;
-                (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
-                    as f64
-                    / 10_000.0
-            }
-            u if u.len() == 3 => {
-                // A spending limit is denominated in the provider's own
-                // currency — the one the price table quotes its models in — so
-                // the period's cost compares directly. Converting here would
-                // make the limit mean whatever the rate said that day.
-                store
-                    .usage_cost_by_currency(None, Some(&p.id), since.as_deref())
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|(currency, cost)| currency.as_deref().map(|_| cost))
-                    .sum()
-            }
-            _ => {
-                store
-                    .usage_totals_for_provider(&p.id, since.as_deref())
-                    .map_err(e2s)?
-                    .requests as f64
-            }
+        let Some(PeriodLimit {
+            used,
+            limit,
+            unit,
+            period_key,
+        }) = period_limit_usage(store, aux, &p)?
+        else {
+            continue;
         };
         if used < limit {
             continue;
@@ -2678,7 +2711,7 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
             provider_name: p.name,
             used: (used * 100.0).round() / 100.0,
             limit,
-            unit: unit.to_string(),
+            unit,
         });
     }
     Ok(alerts)
@@ -2831,6 +2864,67 @@ pub fn enforce_plan_limits(store: &Store, aux: &Aux) -> Result<(Vec<UsageAlertVm
         });
     }
     Ok((alerts, mutated))
+}
+
+/// Aux KV marker written when the patrol disables a provider for reaching its
+/// spending limit. Only a marker-bearing provider is auto re-enabled, so a
+/// manual user disable is never overridden.
+fn spend_limit_marker(provider_id: &str) -> String {
+    format!("spend_limit_disabled:{provider_id}")
+}
+
+/// Enforce the amount limits (`providers.period_limit`): a metered provider's
+/// spending cap, and the legacy amount a subscription row may still carry.
+///
+/// Reaching the number disables the provider, so it drops out of the gateway
+/// route table on the next reload; the period rolling over puts it back. Same
+/// machinery as the plan percent ceilings, and for the same reason: the Apps
+/// card draws both as a ring against a limit, so both have to be a wall — an
+/// alert that kept serving made "¥10 / ¥50 limit" a decoration.
+///
+/// Unlimited has nothing to measure and is left alone. Returns whether a
+/// provider was touched, so the caller can reload the routes.
+pub fn enforce_amount_limits(store: &Store, aux: &Aux) -> Result<bool, String> {
+    let mut mutated = false;
+    for p in store.list_providers().map_err(e2s)? {
+        if p.billing == Billing::Unlimited {
+            continue;
+        }
+        let marker = spend_limit_marker(&p.id);
+        let disabled_by_us = aux
+            .get_setting(&marker)
+            .as_deref()
+            .is_some_and(|v| !v.is_empty());
+        let measured = period_limit_usage(store, aux, &p)?;
+
+        // Limit removed (or row corrupted) while Kiwano had disabled it →
+        // restore the provider and drop the marker.
+        if disabled_by_us && measured.is_none() {
+            mutated |= set_provider_enabled(store, &p.id, true)?;
+            aux.delete_setting(&marker).map_err(e2s)?;
+            continue;
+        }
+        let Some(PeriodLimit { used, limit, .. }) = measured else {
+            continue;
+        };
+
+        if !p.enabled {
+            // Recovery pass: re-enable only what Kiwano disabled, once the
+            // period's usage is back under the limit.
+            if disabled_by_us && used < limit {
+                mutated |= set_provider_enabled(store, &p.id, true)?;
+                aux.delete_setting(&marker).map_err(e2s)?;
+            }
+            continue;
+        }
+        if used < limit {
+            continue;
+        }
+        mutated |= set_provider_enabled(store, &p.id, false)?;
+        aux.set_setting(&marker, &format!("{used:.2}/{limit:.2}"))
+            .map_err(e2s)?;
+    }
+    Ok(mutated)
 }
 
 // ── Dashboard ──
@@ -4683,6 +4777,104 @@ mod tests {
             cost: None,
             cost_currency: None,
         }
+    }
+
+    #[test]
+    fn a_spent_limit_blocks_the_provider_until_the_limit_is_lifted() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("payg-1", "Payg", Billing::Metered);
+        p.period_limit = Some(5.0);
+        p.limit_unit = Some("requests".into());
+        p.reset_period = Some("monthly".into());
+        s.insert_provider(&p).unwrap();
+
+        for _ in 0..4 {
+            s.record_usage(&usage_row("payg-1")).unwrap();
+        }
+        assert!(
+            !enforce_amount_limits(&s, &aux).unwrap(),
+            "4/5 is not a hit"
+        );
+        assert!(s.get_provider("payg-1").unwrap().unwrap().enabled);
+
+        // 5/5 — the number the ring counts up to is a wall, so the provider
+        // leaves the route table on the next reload.
+        s.record_usage(&usage_row("payg-1")).unwrap();
+        assert!(enforce_amount_limits(&s, &aux).unwrap());
+        assert!(!s.get_provider("payg-1").unwrap().unwrap().enabled);
+        assert_eq!(
+            aux.get_setting("spend_limit_disabled:payg-1").as_deref(),
+            Some("5.00/5.00")
+        );
+
+        // Still over and already off → nothing left to change.
+        assert!(!enforce_amount_limits(&s, &aux).unwrap());
+
+        // Lifting the limit is one way back; a period rollover is the other,
+        // and both land in the same branch.
+        let mut p = s.get_provider("payg-1").unwrap().unwrap();
+        p.period_limit = None;
+        p.limit_unit = None;
+        s.update_provider(&p).unwrap();
+        assert!(enforce_amount_limits(&s, &aux).unwrap());
+        assert!(
+            s.get_provider("payg-1").unwrap().unwrap().enabled,
+            "re-enabled once the limit is gone"
+        );
+        assert!(
+            aux.get_setting("spend_limit_disabled:payg-1").is_none(),
+            "and the marker with it"
+        );
+    }
+
+    #[test]
+    fn a_provider_back_under_its_limit_is_re_enabled() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("payg-2", "Payg", Billing::Metered);
+        p.period_limit = Some(10.0);
+        p.limit_unit = Some("requests".into());
+        p.reset_period = Some("monthly".into());
+        p.enabled = false;
+        s.insert_provider(&p).unwrap();
+        // We disabled it last period; the reset took the usage out of the
+        // window, so only 1 of the 10 is counted now.
+        aux.set_setting("spend_limit_disabled:payg-2", "10.00/10.00")
+            .unwrap();
+        s.record_usage(&usage_row("payg-2")).unwrap();
+
+        assert!(enforce_amount_limits(&s, &aux).unwrap());
+        assert!(s.get_provider("payg-2").unwrap().unwrap().enabled);
+        assert!(aux.get_setting("spend_limit_disabled:payg-2").is_none());
+    }
+
+    #[test]
+    fn the_spend_patrol_leaves_alone_what_it_did_not_disable() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+
+        // Switched off by the user, over its limit, no marker of ours: a
+        // manual disable is not ours to undo.
+        let mut manual = provider("payg-manual", "Manual", Billing::Metered);
+        manual.period_limit = Some(1.0);
+        manual.limit_unit = Some("requests".into());
+        manual.enabled = false;
+        s.insert_provider(&manual).unwrap();
+        s.record_usage(&usage_row("payg-manual")).unwrap();
+        assert!(!enforce_amount_limits(&s, &aux).unwrap());
+        assert!(!s.get_provider("payg-manual").unwrap().unwrap().enabled);
+
+        // Unlimited meters nothing, limit or no limit.
+        let mut unl = provider("unl-1", "Local", Billing::Unlimited);
+        unl.period_limit = Some(1.0);
+        unl.limit_unit = Some("requests".into());
+        s.insert_provider(&unl).unwrap();
+        for _ in 0..3 {
+            s.record_usage(&usage_row("unl-1")).unwrap();
+        }
+        assert!(!enforce_amount_limits(&s, &aux).unwrap());
+        assert!(s.get_provider("unl-1").unwrap().unwrap().enabled);
     }
 
     #[test]

@@ -842,6 +842,22 @@ export const devApi: KiwanoApi = {
     return { verdict: "ok", status: 200, latency_ms, detail: "12 models listed (dev)" };
   },
 
+  // Dev model list: resolves through the catalog entry matching the endpoint
+  // (primary or per-protocol), falling back to a canned OpenAI-style list
+  async listModels(_protocol: Protocol, endpoint: string, apiKey: string): Promise<string[]> {
+    await delay(600);
+    if (!apiKey.trim()) throw new Error("auth failed — check the API key");
+    const ep = endpoint.trim();
+    const hit = catalog.find(
+      (e) =>
+        e.endpoint === ep || (e.endpoints ?? []).some((x) => x.endpoint === ep),
+    );
+    if (hit) {
+      return Array.from(new Set([...hit.models, ...(hit.endpoints ?? []).flatMap((x) => x.models ?? [])]));
+    }
+    return ["gpt-5.2", "gpt-5.2-mini", "o4-mini", "text-embedding-3-large"];
+  },
+
   async listCatalog(): Promise<CatalogList> {
     await delay();
     // Mirror the backend: `added` derives from the provider list at read

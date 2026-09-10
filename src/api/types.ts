@@ -394,6 +394,9 @@ export interface KiwanoApi {
   /** Protocol-aware probe: GET the protocol's models route; 401/403 still
       proves the protocol route exists (works without a key) */
   testEndpoint(protocol: Protocol, endpoint: string, apiKey?: string): Promise<ProbeReport>;
+  /** Live model-name list from a provider endpoint (the API key is required:
+      cloud providers reject anonymous /models calls) */
+  listModels(protocol: Protocol, endpoint: string, apiKey: string): Promise<string[]>;
   listCatalog(): Promise<CatalogList>;
   getDashboard(window: DashboardWindow, providerId?: string, agentId?: string): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;

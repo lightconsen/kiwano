@@ -148,6 +148,36 @@ fn probe_url(protocol: &str, base: &str) -> Result<String, String> {
     Ok(url)
 }
 
+/// Attach the protocol's canonical auth headers to a GET request. A blank or
+/// missing key is allowed (anonymous probe); an unknown protocol is an error.
+fn apply_auth(
+    protocol: &str,
+    mut req: reqwest::RequestBuilder,
+    api_key: Option<&str>,
+) -> Result<reqwest::RequestBuilder, String> {
+    let key = api_key.map(str::trim).filter(|k| !k.is_empty());
+    match protocol {
+        "openai" => {
+            if let Some(k) = key {
+                req = req.bearer_auth(k);
+            }
+        }
+        "anthropic" => {
+            if let Some(k) = key {
+                req = req.header("x-api-key", k);
+            }
+            req = req.header("anthropic-version", "2023-06-01");
+        }
+        "gemini" => {
+            if let Some(k) = key {
+                req = req.header("x-goog-api-key", k);
+            }
+        }
+        other => return Err(format!("unknown protocol: {other}")),
+    }
+    Ok(req)
+}
+
 /// Probe one endpoint for protocol support: GET the protocol's models route
 /// with its canonical auth headers. A 401/403 still proves the route exists
 /// (protocol supported, key missing/invalid); only 404/405 means unsupported.
@@ -160,26 +190,7 @@ pub async fn probe_endpoint(protocol: &str, endpoint: &str, api_key: Option<&str
         .timeout(Duration::from_secs(8))
         .build()
         .map_err(|e| e.to_string())?;
-    let mut req = client.get(&url);
-    match protocol {
-        "openai" => {
-            if let Some(k) = api_key.filter(|k| !k.trim().is_empty()) {
-                req = req.bearer_auth(k.trim());
-            }
-        }
-        "anthropic" => {
-            if let Some(k) = api_key.filter(|k| !k.trim().is_empty()) {
-                req = req.header("x-api-key", k.trim());
-            }
-            req = req.header("anthropic-version", "2023-06-01");
-        }
-        "gemini" => {
-            if let Some(k) = api_key.filter(|k| !k.trim().is_empty()) {
-                req = req.header("x-goog-api-key", k.trim());
-            }
-        }
-        other => return Err(format!("unknown protocol: {other}")),
-    }
+    let req = apply_auth(protocol, client.get(&url), api_key)?;
 
     let start = std::time::Instant::now();
     let resp = match req.send().await {
@@ -245,6 +256,83 @@ fn count_models(body: &str) -> Option<usize> {
         return Some(arr.len());
     }
     None
+}
+
+/// Extract the model ids from a models-list body (openai/anthropic: `data[].id`,
+/// gemini: `models[].name` with a `models/` prefix) plus gemini's pagination
+/// token when more pages follow.
+fn parse_models(body: &str) -> (Vec<String>, Option<String>) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return (Vec::new(), None);
+    };
+    let arr = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| v.get("models").and_then(|d| d.as_array()));
+    let names = arr
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let id = m
+                .get("id")
+                .and_then(|x| x.as_str())
+                .or_else(|| m.get("name").and_then(|x| x.as_str()))?;
+            Some(id.strip_prefix("models/").unwrap_or(id).to_string())
+        })
+        .collect();
+    let token = v
+        .get("nextPageToken")
+        .and_then(|t| t.as_str())
+        .map(String::from);
+    (names, token)
+}
+
+/// Fetch the live model-name list from a provider endpoint. Requires the API
+/// key (cloud providers reject anonymous /models calls). Follows gemini's
+/// nextPageToken pagination; openai/anthropic answer in one page. Sorted and
+/// deduped for the dropdown.
+pub async fn fetch_model_names(protocol: &str, endpoint: &str, api_key: &str) -> Result<Vec<String>, String> {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err("API key required".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut names: Vec<String> = Vec::new();
+    let mut page_token: Option<String> = None;
+    // Gemini pages at ~50 entries; 5 pages = 250 models, plenty for a picker
+    for _ in 0..5 {
+        let mut url = probe_url(protocol, endpoint)?;
+        if let Some(t) = &page_token {
+            url.push_str(&format!("?pageToken={t}"));
+        }
+        let req = apply_auth(protocol, client.get(&url), Some(key))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("connection failed: {e}"))?;
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        if !(200..300).contains(&status) {
+            return Err(match status {
+                401 | 403 => "auth failed — check the API key".into(),
+                404 | 405 => "route not found — protocol not supported".into(),
+                s if (500..600).contains(&s) => format!("upstream error {s}"),
+                s => format!("unexpected status {s}"),
+            });
+        }
+        let (page, token) = parse_models(&body);
+        names.extend(page);
+        page_token = token;
+        if page_token.is_none() {
+            break;
+        }
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
 }
 
 #[cfg(test)]
@@ -314,5 +402,20 @@ mod tests {
         );
         assert_eq!(count_models(r#"{"error":{}}"#), None);
         assert_eq!(count_models("<html>"), None);
+    }
+
+    #[test]
+    fn parse_models_reads_ids_names_and_pagination() {
+        let (names, token) = parse_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#);
+        assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(token, None);
+        let (names, token) = parse_models(
+            r#"{"models":[{"name":"models/gemini-2.0-flash"}],"nextPageToken":"Pg"}"#,
+        );
+        assert_eq!(names, vec!["gemini-2.0-flash".to_string()]);
+        assert_eq!(token, Some("Pg".to_string()));
+        let (names, token) = parse_models("<html>");
+        assert!(names.is_empty());
+        assert_eq!(token, None);
     }
 }

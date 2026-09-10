@@ -1,7 +1,7 @@
 // Add/edit provider modal (design/index.html #modal, cc-switch AddProviderDialog pattern)
 // Base controls use shadcn/ui (Dialog/Input/Label/Select/Button); the segmented pills are kept as design language
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Eye, Gauge, Infinity as InfinityIcon, Plus, Store, XIcon } from "lucide-react";
+import { Check, ChevronDown, Eye, Gauge, Infinity as InfinityIcon, Plus, RefreshCw, Store, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -93,6 +93,12 @@ export default function AddProviderModal({
   // Controlled open state: the model select must never pop open on its own
   // when the modal is prefilled from a catalog entry
   const [modelOpen, setModelOpen] = useState(false);
+  // Live model list fetched from the endpoint (Fetch button): overrides the
+  // catalog options when present, and upgrades the free-text input in
+  // custom/edit mode to a dropdown
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [billing, setBilling] = useState<Billing>("payg");
   const [limitValue, setLimitValue] = useState("");
   const [limitUnit, setLimitUnit] = useState<"requests" | "wan_tokens" | "cny">("cny");
@@ -131,13 +137,18 @@ export default function AddProviderModal({
     setLimitUnit("cny");
     setResetPeriod("monthly");
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
+    setFetchedModels(null);
+    setFetchError(null);
     resetAdvanced();
   };
 
-  // Default model options: primary models ∪ each additional endpoint's models
+  // Default model options: a fetched live list wins over the catalog's
+  // (primary models ∪ each additional endpoint's models)
   const shelfModelOptions = shelf
     ? Array.from(new Set([...shelf.models, ...(shelf.endpoints ?? []).flatMap((x) => x.models ?? [])]))
     : [];
+  const modelOptions = fetchedModels ?? shelfModelOptions;
+  const showModelSelect = (fetchedModels?.length ?? 0) > 0 || (!edit && mode === "shelf" && !!shelf);
 
   // Protocols this provider serves: the primary + every additional endpoint's
   const supportedProtocols = new Set<Protocol>([protocol, ...altEndpoints.map((r) => r.protocol)]);
@@ -155,6 +166,31 @@ export default function AddProviderModal({
     setAdvTimeout("");
     setAdvRetries("");
     setAdvHeaders([]);
+  };
+
+  // Fetch the live model-name list from the primary endpoint. Requires the
+  // API key (cloud providers reject anonymous /models calls) — a missing key
+  // surfaces as an inline error instead of a doomed request.
+  const fetchModels = async () => {
+    if (fetching || !endpoint.trim()) return;
+    if (!apiKey.trim()) {
+      setFetchError("Enter the API key first — providers reject anonymous model lists");
+      return;
+    }
+    setFetching(true);
+    setFetchError(null);
+    try {
+      const list = await api.listModels(protocol, endpoint.trim(), apiKey.trim());
+      if (list.length === 0) {
+        setFetchError("The endpoint returned no models");
+      } else {
+        setFetchedModels(list);
+      }
+    } catch (e) {
+      setFetchError(String(e));
+    } finally {
+      setFetching(false);
+    }
   };
 
   const testAlt = async (i: number) => {
@@ -181,6 +217,8 @@ export default function AddProviderModal({
     setProbe(null);
     setAgentsOpen(false);
     setModelOpen(false);
+    setFetchedModels(null);
+    setFetchError(null);
     setNewKey("");
     setNewKeyLabel("");
     setQuery("");
@@ -506,6 +544,9 @@ export default function AddProviderModal({
                     onChange={(e) => {
                       setEndpoint(e.target.value);
                       setProbe(null);
+                      // The fetched list belongs to the old endpoint
+                      setFetchedModels(null);
+                      setFetchError(null);
                     }}
                   />
                   <Button
@@ -576,14 +617,28 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">Default model</Label>
-              {!edit && mode === "shelf" && shelf ? (
+              <div className="flex items-center justify-between">
+                <Label className="text-[11px] font-medium text-mut">Default model</Label>
+                {/* Pulls the live model list from the primary endpoint; needs
+                    the API key, so a click without one shows an inline error */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-[10.5px] text-mut"
+                  disabled={fetching || !endpoint.trim()}
+                  onClick={fetchModels}
+                >
+                  <RefreshCw className={`h-3 w-3${fetching ? " animate-spin" : ""}`} />
+                  {fetching ? "Fetching…" : "Fetch"}
+                </Button>
+              </div>
+              {showModelSelect ? (
                 <Select value={model} open={modelOpen} onOpenChange={setModelOpen} onValueChange={(v) => setModel(v ?? "")}>
                   <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {shelfModelOptions.map((m) => (
+                    {modelOptions.map((m) => (
                       <SelectItem key={m} value={m}>
                         {m}
                       </SelectItem>
@@ -597,6 +652,11 @@ export default function AddProviderModal({
                   onChange={(e) => setModel(e.target.value)}
                   placeholder="model-id"
                 />
+              )}
+              {fetchError && (
+                <p className="mt-1 text-[10.5px]" style={{ color: "oklch(0.62 0.2 25)" }} title={fetchError}>
+                  {fetchError}
+                </p>
               )}
             </div>
 

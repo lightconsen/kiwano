@@ -239,6 +239,17 @@ async fn test_endpoint(
     sidecar::probe_endpoint(&protocol, &endpoint, api_key.as_deref()).await
 }
 
+/// Live model-name list for the Default model picker (requires the API key:
+/// cloud providers reject anonymous /models calls).
+#[tauri::command]
+async fn list_models(
+    protocol: String,
+    endpoint: String,
+    api_key: String,
+) -> Result<Vec<String>, String> {
+    sidecar::fetch_model_names(&protocol, &endpoint, &api_key).await
+}
+
 #[tauri::command]
 fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
     vm::load_catalog(&state.store, &state.aux)
@@ -569,6 +580,7 @@ pub fn run() {
             enable_provider,
             test_latency,
             test_endpoint,
+            list_models,
             list_catalog,
             get_dashboard,
             get_settings,

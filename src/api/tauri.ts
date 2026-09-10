@@ -50,6 +50,9 @@ export const tauriApi: KiwanoApi = {
   testEndpoint: (protocol: Protocol, endpoint: string, apiKey?: string) =>
     invoke<ProbeReport>("test_endpoint", { protocol, endpoint, apiKey: apiKey ?? null }),
 
+  listModels: (protocol: Protocol, endpoint: string, apiKey: string) =>
+    invoke<string[]>("list_models", { protocol, endpoint, apiKey }),
+
   listCatalog: () => invoke<CatalogList>("list_catalog"),
 
   // Invoke args must be camelCase to reach the command's snake_case params

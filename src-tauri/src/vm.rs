@@ -2949,6 +2949,13 @@ pub fn build_dashboard(
 
     let mut by_agent = Vec::new();
     for (name, label) in AGENTS {
+        // The agent filter narrows this breakdown like every other panel,
+        // leaving one row at 100% when one agent is selected. `name` is the
+        // loop's, not the filter's, so skipping here is what applies it — a
+        // table that kept every agent would total more than the headline.
+        if agent.is_some_and(|a| a != name) {
+            continue;
+        }
         let t = store
             .usage_totals(Some(name), provider_id, Some(&since))
             .map_err(e2s)?;
@@ -4292,6 +4299,47 @@ mod tests {
         assert_eq!(fo.requests, 0);
         assert!(fo.by_provider.is_empty());
         assert!(fo.by_agent.is_empty());
+    }
+
+    #[test]
+    fn the_agent_filter_narrows_its_own_breakdown() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let now = unix_now();
+        // Two agents with traffic, so the table has something it could fail to
+        // leave out. Only the first gets the request_logs twin the headline
+        // counts — the filtered slice's total is all this needs.
+        seed_usage_rows(&s, now - 90, 3, 1_000);
+        for i in 0..2 {
+            s.record_usage(&kiwano_gateway::store::UsageRecord {
+                ts: rfc3339(now - 60 - i),
+                agent: "codex".into(),
+                provider_id: "demo-alpha".into(),
+                model: Some("demo-model".into()),
+                input_tokens: 100,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: Some(100),
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+            })
+            .unwrap();
+        }
+
+        let all = build_dashboard(&s, &aux, "7d", None, None).unwrap();
+        assert_eq!(all.by_agent.len(), 2, "both agents have traffic");
+
+        let one = build_dashboard(&s, &aux, "7d", None, Some("claude")).unwrap();
+        assert_eq!(one.by_agent.len(), 1, "the table narrows with the filter");
+        assert_eq!(one.by_agent[0].agent, "claude");
+        assert_eq!(one.by_agent[0].requests, 3);
+        assert_eq!(
+            one.by_agent.iter().map(|a| a.requests).sum::<i64>(),
+            one.requests,
+            "the breakdown totals the same slice the headline counts"
+        );
     }
 
     #[test]

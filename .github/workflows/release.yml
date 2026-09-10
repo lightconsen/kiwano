@@ -26,8 +26,11 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            target: universal-apple-darwin # one dmg for Apple Silicon + Intel
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            target: aarch64-apple-darwin # Apple Silicon (M series)
+            rust_targets: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin # Intel
+            rust_targets: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             rust_targets: x86_64-unknown-linux-gnu
@@ -60,8 +63,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          # universal-apple-darwin is a Tauri bundling target, not a rustup
-          # target — install the two real arch std libs for it instead.
           targets: ${{ matrix.rust_targets }}
 
       - uses: Swatinem/rust-cache@v2
@@ -79,6 +80,9 @@ jobs:
           releaseBody: >-
             安装包未做代码签名：macOS 首次打开需右键 → 打开，
             Windows SmartScreen 出现提示时选择“仍要运行”。
+
+            macOS 请按芯片选择：aarch64 = Apple Silicon（M 系列），
+            x86_64 = Intel。
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}

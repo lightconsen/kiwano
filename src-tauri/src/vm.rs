@@ -3719,6 +3719,107 @@ mod tests {
         assert!(!delete_provider(&s, "nope").unwrap());
     }
 
+    /// Seed `requests` rows `offset_days` back (at 23:00 UTC of that calendar
+    /// day, so day-bucket boundaries are unambiguous), each with `tokens` in.
+    fn seed_usage_at(s: &Store, offset_days: i64, requests: i64, tokens: i64) {
+        let now = unix_now();
+        let day = now.div_euclid(86_400) - offset_days;
+        for i in 0..requests {
+            let ts = rfc3339(day * 86_400 + 23 * 3600 + i);
+            s.record_usage(&kiwano_gateway::store::UsageRecord {
+                ts: ts.clone(),
+                agent: "claude".into(),
+                provider_id: "demo-alpha".into(),
+                model: Some("demo-model".into()),
+                input_tokens: tokens,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: Some(100),
+                status: "ok".into(),
+                cost: Some(0.5),
+                cost_currency: Some("USD".into()),
+            })
+            .unwrap();
+            // The headline count reads request_logs, not usage: seed both, as
+            // the gateway does for a forwarded request.
+            s.insert_request_log(&kiwano_gateway::store::RequestLogNew {
+                ts,
+                method: "POST".into(),
+                path: "/v1/messages".into(),
+                query: None,
+                agent: Some("claude".into()),
+                attribution: Some("key".into()),
+                provider_id: Some("demo-alpha".into()),
+                model: Some("demo-model".into()),
+                status_code: 200,
+                error_kind: None,
+                error_message: None,
+                session_id: None,
+                is_streaming: false,
+                input_tokens: tokens,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: Some(100),
+                first_token_ms: None,
+                request_headers: None,
+                response_headers: None,
+                request_body: None,
+                response_body: None,
+                request_size: 0,
+                response_size: 0,
+                truncated: false,
+                cost: Some(0.5),
+                cost_currency: Some("USD".into()),
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn dashboard_windows_cover_the_right_days() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        // Distinct magnitudes per age so a window that is too wide or too
+        // narrow cannot cancel out: today 2, 3 days back 4, 10 days back 6,
+        // 40 days back 8, plus one row 7 calendar days back.
+        seed_usage_at(&s, 0, 2, 1_000);
+        seed_usage_at(&s, 3, 4, 2_000);
+        seed_usage_at(&s, 10, 6, 3_000);
+        seed_usage_at(&s, 40, 8, 4_000);
+        seed_usage_at(&s, 7, 1, 5_000);
+
+        let d = |w: &str| build_dashboard(&s, &aux, w, None, None).unwrap();
+
+        // Today: the current UTC day only — the 23:00 rows of the days before
+        // it stay out, and so does the one from 40 days back.
+        let today = d("today");
+        assert_eq!((today.requests, today.input_tokens), (2, 2_000));
+        assert_eq!(today.trend.len(), 1);
+        assert_eq!(today.trend[0].requests, 2);
+
+        // 7d is a rolling 7x24h window: today (2) + 3 days back (4) + the
+        // 7-day-old row (1) = 7 requests; tokens 2k + 8k + 5k.
+        let week = d("7d");
+        assert_eq!((week.requests, week.input_tokens), (7, 15_000));
+        assert_eq!(week.trend.len(), 7);
+        // ...but the chart buckets by UTC calendar day, so its oldest point is
+        // 6 days back, not 7: the 7-day-old row is in the headline and not in
+        // the chart. Pinned deliberately — see the note in the summary.
+        assert_eq!(week.trend.iter().map(|p| p.requests).sum::<i64>(), 6);
+
+        // 30d adds the 10-day-old group (6) and still excludes the 40-day-old
+        // one: 7 + 6 = 13 requests, 15k + 18k tokens.
+        let month = d("30d");
+        assert_eq!((month.requests, month.input_tokens), (13, 33_000));
+        assert_eq!(month.trend.len(), 6, "30d buckets five days at a time");
+        assert_eq!(month.trend.iter().map(|p| p.requests).sum::<i64>(), 13);
+
+        // Cost is summed in the window and converted for display (default CNY).
+        assert!((month.cost - month.requests as f64 * 0.5 * 7.1).abs() < 0.01);
+    }
+
     #[test]
     fn provider_cost_stays_in_its_own_currency() {
         let (cost, currency) = provider_cost(&[

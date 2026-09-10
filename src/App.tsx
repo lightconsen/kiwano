@@ -8,6 +8,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
+import { onOpenSettings } from "./lib/updateEvents";
 import { AGENTS } from "./api/types";
 import type {
   AgentDetect,
@@ -62,6 +63,16 @@ export default function App() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // Tray → "Update to vX…": the About block reads the pending update on mount,
+  // so routing to Settings is all it takes to show it.
+  useEffect(
+    () =>
+      onOpenSettings(() => {
+        window.location.hash = "#settings";
+      }),
+    [],
+  );
 
   const refresh = useCallback(() => {
     setTick((t) => t + 1);

@@ -19,7 +19,7 @@ mod vm;
 use std::sync::Mutex;
 
 use kiwano_gateway::store::Store;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 use detect::{detect_agents, probe_agent_versions};
@@ -179,9 +179,16 @@ fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
     let _ = if enabled { mgr.enable() } else { mgr.disable() };
 }
 
-fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
+/// Tray menu. `update` adds an entry naming the version the silent check found:
+/// tauri-plugin-notification exposes no click callback on desktop (its action
+/// API is mobile-only), so the notification can only inform — the tray item is
+/// what turns "an update exists" into one click.
+fn tray_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    data_port: u16,
+    update: Option<&str>,
+) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-    use tauri::tray::TrayIconBuilder;
 
     let open = MenuItem::with_id(app, "open", "Open Kiwano", true, None::<&str>)?;
     let gw = MenuItem::with_id(
@@ -192,19 +199,62 @@ fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let sep = PredefinedMenuItem::separator(app)?;
+    let upd = match update {
+        Some(v) => Some(MenuItem::with_id(
+            app,
+            "update",
+            format!("Update to {v}…"),
+            true,
+            None::<&str>,
+        )?),
+        None => None,
+    };
     let quit = MenuItem::with_id(app, "quit", "Quit Kiwano", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &gw, &sep, &quit])?;
+
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&open, &gw, &sep];
+    if let Some(u) = upd.as_ref() {
+        items.push(u);
+    }
+    items.push(&quit);
+    Menu::with_items(app, &items)
+}
+
+/// Rebuild the tray menu, e.g. after the startup check found an update.
+fn refresh_tray<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    data_port: u16,
+    update: Option<&str>,
+) -> tauri::Result<()> {
+    if let Some(tray) = app.tray_by_id("kiwano-tray") {
+        tray.set_menu(Some(tray_menu(app, data_port, update)?))?;
+    }
+    Ok(())
+}
+
+fn show_main<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
+    use tauri::tray::TrayIconBuilder;
+
+    let menu = tray_menu(app.handle(), data_port, None)?;
 
     TrayIconBuilder::with_id("kiwano-tray")
         .icon(app.default_window_icon().expect("bundle icon").clone())
         .tooltip(format!("Kiwano — local gateway :{data_port}"))
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "open" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
+            "open" => show_main(app),
+            "update" => {
+                // The About block reads the pending update on mount, so landing
+                // on Settings is enough to show it.
+                show_main(app);
+                let _ = app.emit("open-settings", ());
             }
             "quit" => app.exit(0), // the daemon outlives the GUI (tech.md §2.4 B)
             _ => {}
@@ -666,12 +716,22 @@ pub fn run() {
                             if let Ok(mut slot) = state.pending_update.lock() {
                                 *slot = Some(info.clone());
                             }
+                            let port = state.data_port;
+                            // The desktop notification cannot be clicked, so the
+                            // tray item is the actionable entry point.
+                            let _ = refresh_tray(&handle, port, Some(&info.version));
                         }
+                        // Nudge an already-open Settings page; it re-reads the
+                        // pending update rather than trusting this payload.
+                        let _ = handle.emit("update-available", ());
                         let _ = handle
                             .notification()
                             .builder()
                             .title("Kiwano update available")
-                            .body(format!("Version {} is ready to install", info.version))
+                            .body(format!(
+                                "Version {} is ready to install — open it from the tray menu",
+                                info.version
+                            ))
                             .show();
                     }
                 });

@@ -90,6 +90,9 @@ export default function AddProviderModal({
   const [altProbes, setAltProbes] = useState<Record<number, ProbeReport | null>>({});
   const [altTesting, setAltTesting] = useState<Record<number, boolean>>({});
   const [model, setModel] = useState("");
+  // Controlled open state: the model select must never pop open on its own
+  // when the modal is prefilled from a catalog entry
+  const [modelOpen, setModelOpen] = useState(false);
   const [billing, setBilling] = useState<Billing>("payg");
   const [limitValue, setLimitValue] = useState("");
   const [limitUnit, setLimitUnit] = useState<"requests" | "wan_tokens" | "cny">("cny");
@@ -118,7 +121,7 @@ export default function AddProviderModal({
   const applyShelf = (e: CatalogEntry) => {
     setName(e.name);
     setProtocol(e.protocol); // catalog entries carry their protocol fingerprint
-    setApiKey("sk-9f3e21a7c8d4b6e05a12");
+    setApiKey("");
     setEndpoint(e.endpoint);
     setAltEndpoints((e.endpoints ?? []).map((x) => ({ protocol: x.protocol, endpoint: x.endpoint })));
     setAltProbes({});
@@ -136,22 +139,8 @@ export default function AddProviderModal({
     ? Array.from(new Set([...shelf.models, ...(shelf.endpoints ?? []).flatMap((x) => x.models ?? [])]))
     : [];
 
-  const setAlt = (i: number, patch: Partial<{ protocol: Protocol; endpoint: string }>) => {
-    setAltEndpoints((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-    setAltProbes((m) => ({ ...m, [i]: null }));
-  };
-
-  const removeAlt = (i: number) => {
-    setAltEndpoints((rows) => rows.filter((_, j) => j !== i));
-    setAltProbes({});
-  };
-
-  const addAlt = () => {
-    const used = new Set<Protocol>([protocol, ...altEndpoints.map((r) => r.protocol)]);
-    const next = PROTOCOL_OPTIONS.find((p) => !used.has(p.id));
-    if (!next) return;
-    setAltEndpoints((rows) => [...rows, { protocol: next.id, endpoint: "" }]);
-  };
+  // Protocols this provider serves: the primary + every additional endpoint's
+  const supportedProtocols = new Set<Protocol>([protocol, ...altEndpoints.map((r) => r.protocol)]);
 
   const setHeader = (i: number, patch: Partial<{ name: string; value: string }>) =>
     setAdvHeaders((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -191,6 +180,7 @@ export default function AddProviderModal({
     setShowKey(false);
     setProbe(null);
     setAgentsOpen(false);
+    setModelOpen(false);
     setNewKey("");
     setNewKeyLabel("");
     setQuery("");
@@ -442,18 +432,22 @@ export default function AddProviderModal({
 
             <div>
               <Label className="text-[11px] font-medium text-mut">Protocol</Label>
-              <Select value={protocol} onValueChange={(v) => { setProtocol(v as Protocol); setProbe(null); }}>
-                <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROTOCOL_OPTIONS.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Read-only coverage: every supported protocol renders as a lit
+                  badge (primary + each additional endpoint), the rest dimmed.
+                  The authoritative selection is the per-endpoint rows below. */}
+              <div className="mt-1 flex gap-1.5">
+                {PROTOCOL_OPTIONS.map((p) => (
+                  <span
+                    key={p.id}
+                    className="flex h-7 cursor-default items-center rounded-md border px-2 text-[11.5px]"
+                    style={supportedProtocols.has(p.id)
+                      ? { borderColor: "var(--kiwi-dim)", background: "var(--kiwi-soft)", color: "var(--kiwi)" }
+                      : { borderColor: "var(--line)", color: "var(--mut)" }}
+                  >
+                    {p.label}
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div>
@@ -483,76 +477,78 @@ export default function AddProviderModal({
               </div>
             </div>
 
-            <div>
-              <Label className="text-[11px] font-medium text-mut">Endpoint URL</Label>
-              <div className="mt-1 flex gap-1.5">
-                <Input
-                  className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                  value={endpoint}
-                  onChange={(e) => {
-                    setEndpoint(e.target.value);
-                    setProbe(null);
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1 px-2.5 text-[11px]"
-                  disabled={testing}
-                  onClick={async () => {
-                    setTesting(true);
-                    try {
-                      setProbe(await api.testEndpoint(protocol, endpoint.trim(), apiKey.trim() || undefined));
-                    } catch (e) {
-                      // A rejected invoke (e.g. command missing in a stale app
-                      // binary) must still land as a visible verdict, not vanish
-                      setProbe({ verdict: "error", status: null, latency_ms: 0, detail: String(e) });
-                    } finally {
-                      setTesting(false);
-                    }
-                  }}
-                >
-                  <Gauge className="h-3 w-3" />
-                  Test{" "}
-                  {probe && (
-                    <span className="font-mono" style={{ color: probeColor(probe.verdict) }} title={probe.detail}>
-                      {probe.verdict === "ok" ? `${probe.latency_ms}ms` : PROBE_TEXT[probe.verdict]}
-                    </span>
-                  )}
-                </Button>
-              </div>
-            </div>
-
-            {/* Additional per-protocol endpoints: agents speaking another
-                protocol hit their endpoint natively (same API key pool) */}
+            {/* Endpoint URLs, one row per protocol: protocol badge + URL +
+                Test. The first row is the primary endpoint, the rest serve
+                agents speaking another protocol natively (same API key pool).
+                The list comes from the catalog (shelf) or the stored provider
+                (edit) — read-only, no add/remove. */}
             <div>
               <Label className="text-[11px] font-medium text-mut">
-                Additional endpoints{" "}
+                Endpoint URL{" "}
                 <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                  one per protocol · shares the API key
+                  {!edit && mode === "shelf" && shelf
+                    ? "from the catalog · one per protocol · shares the API key"
+                    : "one per protocol · shares the API key"}
                 </span>
               </Label>
               <div className="mt-1 space-y-1.5">
+                {/* Primary endpoint row */}
+                <div className="flex items-center gap-1.5">
+                  <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
+                    <span className="truncate">
+                      {PROTOCOL_OPTIONS.find((p) => p.id === protocol)?.label ?? protocol}
+                    </span>
+                  </span>
+                  <Input
+                    className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+                    value={endpoint}
+                    readOnly={!edit && mode === "shelf" && !!shelf}
+                    onChange={(e) => {
+                      setEndpoint(e.target.value);
+                      setProbe(null);
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 flex-none gap-1 px-2.5 text-[11px]"
+                    disabled={testing}
+                    onClick={async () => {
+                      setTesting(true);
+                      try {
+                        setProbe(await api.testEndpoint(protocol, endpoint.trim(), apiKey.trim() || undefined));
+                      } catch (e) {
+                        // A rejected invoke (e.g. command missing in a stale app
+                        // binary) must still land as a visible verdict, not vanish
+                        setProbe({ verdict: "error", status: null, latency_ms: 0, detail: String(e) });
+                      } finally {
+                        setTesting(false);
+                      }
+                    }}
+                  >
+                    <Gauge className="h-3 w-3" />
+                    Test{" "}
+                    {probe && (
+                      <span className="font-mono" style={{ color: probeColor(probe.verdict) }} title={probe.detail}>
+                        {probe.verdict === "ok" ? `${probe.latency_ms}ms` : PROBE_TEXT[probe.verdict]}
+                      </span>
+                    )}
+                  </Button>
+                </div>
                 {altEndpoints.map((r, i) => (
                   <div key={i} className="flex items-center gap-1.5">
-                    <Select value={r.protocol} onValueChange={(v) => setAlt(i, { protocol: v as Protocol })}>
-                      <SelectTrigger className="h-8 w-[108px] flex-none bg-bg text-[11.5px] dark:bg-bg">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROTOCOL_OPTIONS.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                      value={r.endpoint}
-                      onChange={(e) => setAlt(i, { endpoint: e.target.value })}
-                      placeholder="https://…"
-                    />
+                    <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
+                      <span className="truncate">
+                        {PROTOCOL_OPTIONS.find((p) => p.id === r.protocol)?.label ?? r.protocol}
+                      </span>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <Input
+                        className="h-8 w-full bg-bg font-mono text-[12px] dark:bg-bg"
+                        value={r.endpoint}
+                        readOnly
+                      />
+                    </span>
                     <Button
                       variant="outline"
                       size="sm"
@@ -574,35 +570,15 @@ export default function AddProviderModal({
                         </span>
                       )}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="flex-none text-mut"
-                      aria-label="Remove endpoint"
-                      onClick={() => removeAlt(i)}
-                    >
-                      <XIcon />
-                    </Button>
                   </div>
                 ))}
-                {altEndpoints.length < PROTOCOL_OPTIONS.length - 1 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-full gap-1 text-[11px] text-mut"
-                    onClick={addAlt}
-                  >
-                    <Plus className="h-3 w-3" />
-                    Add endpoint
-                  </Button>
-                )}
               </div>
             </div>
 
             <div>
               <Label className="text-[11px] font-medium text-mut">Default model</Label>
               {!edit && mode === "shelf" && shelf ? (
-                <Select value={model} onValueChange={(v) => setModel(v ?? "")}>
+                <Select value={model} open={modelOpen} onOpenChange={setModelOpen} onValueChange={(v) => setModel(v ?? "")}>
                   <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
                     <SelectValue />
                   </SelectTrigger>

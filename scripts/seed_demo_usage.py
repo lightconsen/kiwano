@@ -10,15 +10,17 @@ Two traps it handles for you:
   * the headline request count comes from `request_logs`, while tokens, cost
     and latency come from `usage`. Seeding one table alone gives "0 requests,
     8.8M tokens".
-  * costs are stored in the price table's currency (USD) and converted for
-    display, so the printed expectations include the conversion into your
-    preferred currency and the rate used.
+  * the Providers page rings a period limit against the period's cost, so a
+    provider's cost is written in the currency its limit is denominated in.
+    A USD figure under a CNY ceiling reads as a bug in the quota cell.
 
 Shape: day offset d holds `5 + d % 7` requests — each 1000 in / 200 out / 100
-cache-read tokens times a per-day scale, $0.02, latency 200 + d ms — spread
-between two providers and two agents. Today's rows are spread over the local
-hours already elapsed, so the hourly "today" chart has a shape to draw — and so
-none of them can land after "now".
+cache-read tokens times a per-day scale, a per-request cost, latency 200 + d ms
+— spread over every provider in the database and two agents. The demo
+providers it creates cover one billing mode each (subscription, metered,
+unlimited), so the Usage/quota column has one of every cell to draw. Today's
+rows are spread over the local hours already elapsed, so the hourly "today"
+chart has a shape to draw — and so none of them can land after "now".
 
 Usage:
   cp ~/.kiwano/kiwano.db /tmp/kiwano-demo.db   # keeps providers + settings
@@ -40,7 +42,10 @@ LOCAL = datetime.now().astimezone().tzinfo
 ROWS_BASE = 5
 ROWS_CYCLE = 7
 IN_TOKENS, OUT_TOKENS, CACHE_READ = 1000, 200, 100
-COST_USD, LATENCY_BASE = 0.02, 200
+# Per request, in the provider's own billing currency (see `currencies` below).
+# Sized so a period's spend lands mid-range against the demo providers' limits:
+# a ring pinned near zero demonstrates nothing about a limit cell.
+COST, LATENCY_BASE = 1.0, 200
 PROVIDERS = ["demo-alpha", "demo-beta", "demo-local"]
 AGENTS = ["claude", "codex"]
 
@@ -59,6 +64,25 @@ PROVIDER_ROWS = [
     ("demo-beta", "Demo Beta", "openai", "https://beta.demo.invalid", "metered", 30.0, "CNY", "monthly"),
     ("demo-local", "Demo Local", "openai", "http://127.0.0.1:11434/v1", "unlimited", None, None, None),
 ]
+
+
+def provider_currencies(conn):
+    """provider id → the currency its limit is denominated in (USD otherwise)."""
+    out = {}
+    for pid, unit in conn.execute("SELECT id, limit_unit FROM providers"):
+        out[pid] = unit if unit and len(unit) == 3 else "USD"
+    return out
+
+
+def provider_rotation(conn):
+    """Every provider in the database, demo ones included.
+
+    Traffic spread over only the demo providers leaves whatever was already in
+    the copied database — usually the real ones — with an empty Usage/quota
+    cell beside populated rows, which reads as a bug rather than as a fixture.
+    """
+    ids = [r[0] for r in conn.execute("SELECT id FROM providers ORDER BY id")]
+    return ids or [row[0] for row in PROVIDER_ROWS]
 
 
 def upsert_providers(conn):
@@ -116,6 +140,8 @@ def seed(db, days, clear):
         conn.commit()
     upsert_providers(conn)
     conn.commit()
+    providers = provider_rotation(conn)
+    currencies = provider_currencies(conn)
 
     now = datetime.now(timezone.utc)
     # Today's rows spread across the local hours already elapsed, so the hourly
@@ -138,23 +164,27 @@ def seed(db, days, clear):
                 else day + timedelta(minutes=i)
             )
             stamp = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-            provider = PROVIDERS[i % len(PROVIDERS)]
+            provider = providers[i % len(providers)]
             agent = AGENTS[i % len(AGENTS)]
             latency = LATENCY_BASE + day_index
             scale = day_token_scale(day_index)
             in_tokens, out_tokens, cache_read = (
                 IN_TOKENS * scale, OUT_TOKENS * scale, CACHE_READ * scale,
             )
+            # The cost has to be in the currency the provider's limit is
+            # denominated in, or the quota cell rings a USD figure against a CNY
+            # ceiling. A provider with no currency limit bills as recorded (USD).
+            currency = currencies.get(provider, "USD")
             day_tokens[0] += in_tokens
             day_tokens[1] += out_tokens
-            day_tokens[2] += COST_USD
+            day_tokens[2] += COST
             conn.execute(
                 """INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
                                       cache_read_tokens, cache_creation_tokens, latency_ms, status,
                                       cost, cost_currency)
-                   VALUES (?,?,?,?,?,?,?,?,?, 'ok', ?, 'USD')""",
+                   VALUES (?,?,?,?,?,?,?,?,?, 'ok', ?, ?)""",
                 (stamp, agent, provider, "demo-model", in_tokens, out_tokens, cache_read, 0,
-                 latency, COST_USD),
+                 latency, COST, currency),
             )
             conn.execute(
                 """INSERT INTO request_logs (ts, method, path, agent, attribution, provider_id, model,

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
+import { onUpdateAvailable } from "../lib/updateEvents";
 import type { AppSettings, UpdateInfo } from "../api/types";
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
@@ -34,6 +35,7 @@ export default function Settings() {
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [upToDate, setUpToDate] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
@@ -42,18 +44,36 @@ export default function Settings() {
     api.getSettings().then(setS);
     api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
     api.getFooterStats().then((f) => setVersion(f.version)).catch(() => {});
-    // The silent startup check may already have found an update; pick it up so
-    // the About block says the same thing as the notification the user saw.
-    api
-      .getPendingUpdate()
-      .then((u) => {
-        if (u) setUpdate(u);
-      })
-      .catch(() => {});
-    api.onUpdateProgress((p) => {
+
+    // About is the one place that answers "is there an update?", so it reads
+    // what the silent startup check found — and re-reads when the check finds
+    // one while this page is already open.
+    const pullPendingUpdate = () => {
+      api
+        .getPendingUpdate()
+        .then((u) => {
+          if (u) setUpdate(u);
+        })
+        .catch(() => {});
+    };
+    pullPendingUpdate();
+    const offUpdate = onUpdateAvailable(pullPendingUpdate);
+
+    const offProgress = api.onUpdateProgress((p) => {
       setProgress(p.total ? Math.round((p.downloaded / p.total) * 100) : null);
-    }).catch(() => {});
+    });
+    return () => {
+      offUpdate();
+      offProgress.then((off) => off()).catch(() => {});
+    };
   }, []);
+
+  // "Up to date" is a confirmation, not a mode: it clears itself.
+  useEffect(() => {
+    if (!upToDate) return;
+    const t = setTimeout(() => setUpToDate(false), 5000);
+    return () => clearTimeout(t);
+  }, [upToDate]);
 
   if (!s) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
 
@@ -65,8 +85,14 @@ export default function Settings() {
     setChecking(true);
     setErr(null);
     setUpdate(null);
-    api.checkAppUpdate()
-      .then(setUpdate)
+    setUpToDate(false);
+    api
+      .checkAppUpdate()
+      .then((u) => {
+        setUpdate(u);
+        // Silence used to be the answer to "no update"; say so instead.
+        if (!u) setUpToDate(true);
+      })
       .catch((e) => setErr(String(e)))
       .finally(() => setChecking(false));
   };
@@ -291,9 +317,20 @@ export default function Settings() {
             <span className="flex items-center gap-2">
               {update ? (
                 installing ? (
-                  <span className="text-[11px] text-mut">
-                    {progress == null ? "Downloading…" : `${progress}%`}
-                  </span>
+                  <>
+                    <span
+                      className="h-1 w-24 overflow-hidden rounded-full"
+                      style={{ background: "var(--surface2)" }}
+                    >
+                      <span
+                        className="block h-full rounded-full transition-[width] duration-200"
+                        style={{ width: `${progress ?? 0}%`, background: "var(--kiwi)" }}
+                      />
+                    </span>
+                    <span className="text-[11px] text-mut">
+                      {progress == null ? "Downloading…" : `${progress}%`}
+                    </span>
+                  </>
                 ) : (
                   <>
                     <span className="text-[11px]">v{update.version} available</span>
@@ -303,20 +340,24 @@ export default function Settings() {
                       className="h-7 px-2.5 text-[11px]"
                       onClick={installUpdate}
                     >
-                      Download &amp; install
+                      {/* Same button, honest label: a failure lands back here. */}
+                      {err ? "Retry download" : "Download & install"}
                     </Button>
                   </>
                 )
               ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2.5 text-[11px]"
-                  onClick={checkUpdate}
-                  disabled={checking}
-                >
-                  {checking ? "Checking…" : "Check for updates"}
-                </Button>
+                <>
+                  {upToDate ? <span className="text-[11px] text-mut">Up to date</span> : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-[11px]"
+                    onClick={checkUpdate}
+                    disabled={checking}
+                  >
+                    {checking ? "Checking…" : "Check for updates"}
+                  </Button>
+                </>
               )}
             </span>
           </Row>

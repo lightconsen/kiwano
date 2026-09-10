@@ -39,30 +39,37 @@ function smoothPath(pts: [number, number][]): string {
 
 function TrendChart({ data }: { data: DashboardData }) {
   const W = 900;
-  const H = 130;
-  const top = 25;
-  const bottom = 120;
-  const left = 20;
-  const right = 880;
+  const H = 140;
+  const top = 22;
+  const bottom = 112;
+  // Both units get their own scale and their own tick column: requests on the
+  // left, tokens on the right. Sharing one axis meant normalising each series
+  // to its own maximum with nothing to read against, so two series that move
+  // together — which requests and tokens usually do — drew one line.
+  const left = 38;
+  const right = 862;
   const n = data.trend.length;
   const x = (i: number) => left + (i * (right - left)) / Math.max(1, n - 1);
   // Empty DB gives max=0 → division yields NaN → SVG error; clamp with max(1, ·)
-  const yReq = (v: number) => {
-    const max = Math.max(1, ...data.trend.map((t) => t.requests));
-    return bottom - (v / max) * (bottom - top);
-  };
-  const yTok = (v: number) => {
-    const max = Math.max(1, ...data.trend.map((t) => t.tokens));
-    return bottom - (v / max) * (bottom - top);
-  };
+  const reqMax = Math.max(1, ...data.trend.map((t) => t.requests));
+  const tokMax = Math.max(1, ...data.trend.map((t) => t.tokens));
+  const yReq = (v: number) => bottom - (v / reqMax) * (bottom - top);
+  const yTok = (v: number) => bottom - (v / tokMax) * (bottom - top);
   const reqPts = data.trend.map((t, i) => [x(i), yReq(t.requests)] as [number, number]);
   const tokPts = data.trend.map((t, i) => [x(i), yTok(t.tokens)] as [number, number]);
   const reqPath = smoothPath(reqPts);
   const areaPath = `${reqPath} L${right},${bottom} L${left},${bottom} Z`;
   const last = reqPts[reqPts.length - 1];
+  // Grid and ticks are the same three levels, so a label always sits on a line.
+  const ticks = [
+    { y: top, req: reqMax, tok: tokMax },
+    { y: (top + bottom) / 2, req: reqMax / 2, tok: tokMax / 2 },
+    { y: bottom, req: 0, tok: 0 },
+  ];
+  const tick = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" style={{ height: 118 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" style={{ height: 128 }}>
       <defs>
         <linearGradient id="gk" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="var(--kiwi)" stopOpacity="0.22" />
@@ -70,17 +77,27 @@ function TrendChart({ data }: { data: DashboardData }) {
         </linearGradient>
       </defs>
       <g stroke="var(--line)" strokeDasharray="3 4">
-        <line x1="0" y1="32" x2={W} y2="32" />
-        <line x1="0" y1="65" x2={W} y2="65" />
-        <line x1="0" y1="98" x2={W} y2="98" />
+        {ticks.map((t) => (
+          <line key={t.y} x1={left} y1={t.y} x2={right} y2={t.y} />
+        ))}
       </g>
       <path d={areaPath} fill="url(#gk)" />
       <path d={reqPath} fill="none" stroke="var(--kiwi)" strokeWidth="1.8" />
       <path d={smoothPath(tokPts)} fill="none" stroke="var(--blue)" strokeWidth="1.3" strokeDasharray="5 4" />
       {last && <circle cx={last[0]} cy={last[1]} r="3" fill="var(--kiwi)" stroke="var(--bg)" strokeWidth="1.5" />}
       <g fill="var(--mut)" fontSize="9.5" fontFamily="JetBrains Mono">
+        {ticks.map((t) => (
+          <g key={t.y}>
+            <text x={left - 6} y={t.y + 3} textAnchor="end">
+              {tick(t.req)}
+            </text>
+            <text x={right + 6} y={t.y + 3} textAnchor="start">
+              {tick(t.tok)}
+            </text>
+          </g>
+        ))}
         {data.trend.map((t, i) => (
-          <text key={t.date} x={x(i) - 14} y="126">
+          <text key={t.date} x={x(i) - 14} y={H - 8}>
             {t.date}
           </text>
         ))}
@@ -307,7 +324,7 @@ export default function Dashboard() {
               </span>
               <span className="flex items-center gap-1">
                 <span className="h-1 w-2 rounded-full" style={{ background: "var(--blue)" }} />
-                Tokens(×10k)
+                Tokens
               </span>
             </div>
           </div>

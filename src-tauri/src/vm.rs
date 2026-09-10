@@ -794,6 +794,10 @@ pub struct SettingsVm {
     /// Auto-check for app updates at startup (opt-out; silent, notification only).
     #[serde(default = "default_true")]
     pub auto_check_update: bool,
+    /// Version the user closed in the update banner. Remembered so one release
+    /// does not re-announce itself on every launch — a newer one will show.
+    #[serde(default)]
+    pub dismissed_update: Option<String>,
 }
 
 pub(crate) fn default_preferred_currency() -> String {
@@ -822,6 +826,7 @@ impl Default for SettingsVm {
             hub_url: default_hub_url(),
             preferred_currency: default_preferred_currency(),
             auto_check_update: true,
+            dismissed_update: None,
         }
     }
 }

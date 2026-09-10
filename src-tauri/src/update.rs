@@ -24,10 +24,13 @@ pub struct UpdateProgressVm {
     pub total: Option<u64>,
 }
 
-/// Check GitHub Releases for a newer version; `None` means up to date.
+/// Check the release channel for a newer version; `None` means up to date.
 /// Network IO → async command thread (lib.rs convention).
-#[tauri::command]
-pub async fn check_app_update(app: AppHandle) -> Result<Option<UpdateInfoVm>, String> {
+///
+/// Deliberately not a command: lib.rs wraps it in `check_app_update`, which
+/// records the answer for the UI before returning it. Two commands of the same
+/// name would collide on the macro-generated symbols.
+pub async fn check(app: AppHandle) -> Result<Option<UpdateInfoVm>, String> {
     let updater = app.updater().map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
         return Ok(None);

@@ -492,6 +492,7 @@ const settings: AppSettings = {
   cost_alert: true,
   preferred_currency: "CNY",
   auto_check_update: true,
+  dismissed_update: null,
   hub_logged_in: false,
   hub_url: "https://hub.kiwano.cc/catalog.json",
 };

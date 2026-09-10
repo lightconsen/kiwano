@@ -336,6 +336,8 @@ export interface AppSettings {
   preferred_currency: string;
   /** Auto-check for app updates at startup (silent; notification only) */
   auto_check_update: boolean;
+  /** Version the user dismissed in the update banner (a newer one shows again) */
+  dismissed_update: string | null;
   hub_logged_in: boolean;
   /** Hub catalog sync endpoint (protocol v0: static JSON) */
   hub_url: string;

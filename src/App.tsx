@@ -8,6 +8,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { onOpenSettings } from "./lib/updateEvents";
 import { AGENTS } from "./api/types";
 import type {
@@ -175,6 +176,8 @@ export default function App() {
           </Button>
         </div>
       </header>
+
+      <UpdateBanner />
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         {route.route === "providers" && (

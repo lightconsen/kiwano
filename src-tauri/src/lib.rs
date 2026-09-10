@@ -456,6 +456,34 @@ fn get_pending_update(state: State<AppState>) -> Option<update::UpdateInfoVm> {
         .and_then(|slot| slot.clone())
 }
 
+/// Everything that must happen when a check returns. Kept in one place so the
+/// startup check and the manual one cannot drift: both record the result (the
+/// update banner and About read it), refresh the tray entry, and tell an open
+/// UI.
+fn record_update_check(app: &AppHandle, info: Option<&update::UpdateInfoVm>) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut slot) = state.pending_update.lock() {
+            // A check that finds nothing clears a previous hit: the pending
+            // value always describes the latest answer, not the best one.
+            *slot = info.cloned();
+        }
+        let port = state.data_port;
+        let _ = refresh_tray(app, port, info.map(|i| i.version.as_str()));
+    }
+    if info.is_some() {
+        let _ = app.emit("update-available", ());
+    }
+}
+
+/// Settings' "Check for updates". A thin wrapper over the module function so
+/// every check — startup or manual — goes through `record_update_check`.
+#[tauri::command]
+async fn check_app_update(app: AppHandle) -> Result<Option<update::UpdateInfoVm>, String> {
+    let info = update::check(app.clone()).await?;
+    record_update_check(&app, info.as_ref());
+    Ok(info)
+}
+
 // ── Agent strategies (tech.md §4.7: strategy types / candidate ordering) ──
 
 #[tauri::command]
@@ -711,19 +739,11 @@ pub fn run() {
             if ui.auto_check_update {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Ok(Some(info)) = update::check_app_update(handle.clone()).await {
-                        if let Some(state) = handle.try_state::<AppState>() {
-                            if let Ok(mut slot) = state.pending_update.lock() {
-                                *slot = Some(info.clone());
-                            }
-                            let port = state.data_port;
-                            // The desktop notification cannot be clicked, so the
-                            // tray item is the actionable entry point.
-                            let _ = refresh_tray(&handle, port, Some(&info.version));
-                        }
-                        // Nudge an already-open Settings page; it re-reads the
-                        // pending update rather than trusting this payload.
-                        let _ = handle.emit("update-available", ());
+                    if let Ok(Some(info)) = update::check(handle.clone()).await {
+                        // Records it for the banner and About, refreshes the tray
+                        // entry (a desktop notification cannot be clicked), and
+                        // nudges an open UI.
+                        record_update_check(&handle, Some(&info));
                         let _ = handle
                             .notification()
                             .builder()
@@ -775,7 +795,7 @@ pub fn run() {
             import_config,
             detect_agents,
             probe_agent_versions,
-            update::check_app_update,
+            check_app_update,
             update::download_and_install_app_update,
             get_pending_update,
             pricing::get_currency_meta,

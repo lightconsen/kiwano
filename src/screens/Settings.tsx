@@ -326,14 +326,6 @@ export default function Settings() {
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">Kiwano Hub</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          <Row label="Catalog source">
-            <span
-              className="max-w-[280px] truncate font-mono text-[11px] text-mut"
-              title={s.hub_url}
-            >
-              {s.hub_url}
-            </span>
-          </Row>
           <Row label="Catalog" note="skips the download when unchanged">
             <span className="flex items-center gap-2">
               {syncNote && <span className="text-[11px] text-mut">{syncNote}</span>}

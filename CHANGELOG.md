@@ -116,6 +116,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   database's write-ahead log is checkpointed — and the bundled one takes its
   place. A gateway that matches is still adopted untouched.
 
+### Changed
+
+- **Settings no longer prints the Hub catalog URL.** It was a display-only row
+  for a value nothing in the app can change, so it read as a setting you could
+  edit and were not allowed to. The Hub card now says what the sync does and
+  offers the button.
+
 ## [0.1.7] - 2026-09-11
 
 ### Added

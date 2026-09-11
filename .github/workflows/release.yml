@@ -13,6 +13,12 @@
 # unsigned-build warning is appended, because that is about the artifacts rather
 # than the release.
 #
+# A tag with a prerelease suffix (`v0.2.0-rc.1`) is a rehearsal: it runs every
+# check and build, then stops. It publishes nothing, mirrors nothing, and
+# repoints no manifest — so the signing pipeline can be exercised end to end
+# without touching what users are running. See the gates on the mirror and
+# publish jobs.
+#
 # Two outputs: the GitHub release (the updater's authoritative manifest source)
 # and a Cloudflare R2 mirror under releases/, whose paths carry no version so
 # they stay valid across releases. See the `mirror-*` and `publish` jobs.
@@ -80,6 +86,33 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+      # A tag is now expected to yield a signed, notarized build. Shipping
+      # unsigned was the old normal; it is a regression now, and nothing
+      # downstream would notice — publishing has no human in it. Fail cheaply
+      # here, on Linux, instead of four builds later.
+      #
+      # To deliberately ship unsigned (a hotfix while the Apple membership is
+      # mid-conversion), delete this step. It is the only gate.
+      - name: Signing credentials are present
+        run: |
+          missing=""
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                   APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+            [ -n "${!v:-}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing secrets:$missing — add them, or delete this step deliberately"
+            exit 1
+          fi
+          echo "all six Apple signing secrets are set"
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+
   # The release body, read from the changelog section for this tag. Its own job
   # so it runs once rather than per platform, and so a missing section fails in
   # seconds instead of after four builds — `build` needs it, so nothing ships
@@ -101,19 +134,29 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          # From "## [<version>]" up to the next "## [" heading. The heading
-          # itself is dropped: the release is already titled "Kiwano v<version>".
-          awk -v v="$version" '
-            index($0, "## [" v "]") == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          # Whitespace-only counts as empty: a heading with nothing under it
-          # would otherwise publish a release with no notes at all.
-          grep -q '[^[:space:]]' notes.md || {
-            echo "::error::CHANGELOG.md has no '$version' section with content — write it, commit it, then re-tag"
-            exit 1
-          }
+          case "$GITHUB_REF_NAME" in
+            # A rehearsed tag (see the gates on the mirror and publish jobs)
+            # never becomes a release, so requiring release notes for it would
+            # be requiring prose nobody reads. Say what it is instead.
+            *-*)
+              printf 'Rehearsal build tagged `%s`. It signs and notarizes to exercise the release pipeline; it is not a release and is never published.\n' "$GITHUB_REF_NAME" > notes.md
+              ;;
+            *)
+              # From "## [<version>]" up to the next "## [" heading. The heading
+              # itself is dropped: the release is already titled "Kiwano v<version>".
+              awk -v v="$version" '
+                index($0, "## [" v "]") == 1 { found = 1; next }
+                found && /^## \[/ { exit }
+                found { print }
+              ' CHANGELOG.md > notes.md
+              # Whitespace-only counts as empty: a heading with nothing under it
+              # would otherwise publish a release with no notes at all.
+              grep -q '[^[:space:]]' notes.md || {
+                echo "::error::CHANGELOG.md has no '$version' section with content — write it, commit it, then re-tag"
+                exit 1
+              }
+              ;;
+          esac
           {
             echo 'body<<KIWANO_CHANGELOG_EOF'
             cat notes.md
@@ -172,11 +215,46 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # Both Apple blobs are decoded verbatim by Tauri, and their exact bytes
+      # depend on how they were pasted into the secret — a trailing newline in
+      # APPLE_CERTIFICATE surfaces as a base64 error that reads like a wrong
+      # password. Normalize once, here, instead of debugging that later.
+      - name: Prepare the Apple signing material
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CERT_RAW: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Base64, so whitespace is never meaningful; strip it all.
+          cert=$(printf '%s' "$CERT_RAW" | tr -d '[:space:]')
+          echo "APPLE_CERTIFICATE=$cert" >> "$GITHUB_ENV"
+
+          # The .p8 has to exist as a file: Tauri takes its *path* in
+          # APPLE_API_KEY_PATH, while APPLE_API_KEY is the Key ID, not the key.
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple signing + notarization. Tauri imports the .p12 into a
+          # temporary keychain itself, so there is no security(1) dance here.
+          # The identity is a secret rather than a tauri.conf.json value because
+          # it carries a personal name, and this is expected to become the LLC's
+          # when the membership converts.
+          APPLE_CERTIFICATE: ${{ env.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Kiwano ${{ github.ref_name }}"
@@ -187,18 +265,96 @@ jobs:
 
             ---
 
-            安装包未做代码签名：macOS 首次打开需右键 → 打开，
-            Windows SmartScreen 出现提示时选择“仍要运行”。
+            **Builds are not code-signed or notarized.** On first launch:
 
-            macOS 请按芯片选择：aarch64 = Apple Silicon（M 系列），
-            x86_64 = Intel。
+            - **macOS** — right-click the app and choose **Open**, then confirm.
+            - **Windows** — SmartScreen will warn; choose **More info → Run anyway**.
+
+            On macOS pick the build for your chip: `Kiwano_aarch64.dmg` is Apple
+            Silicon (M series), `Kiwano_x64.dmg` is Intel.
           # Each platform uploads into a draft; the `publish` job below flips it
           # public once every platform has landed. Publishing from here would
           # expose a half-filled release — and a latest.json missing platforms,
           # which reads as "you are up to date" to whoever checks in that window.
           releaseDraft: true
-          prerelease: false
+          # A tag carrying a prerelease suffix (`v0.2.0-rc.1`) is a rehearsal:
+          # it builds and verifies, then stops. See the gates below.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: --target ${{ matrix.target }}
+
+      # Tauri notarizes and staples the .app, then builds the .dmg *from* it and
+      # never submits the image itself. Gatekeeper assesses a disk image on its
+      # own signature, so the download most macOS users actually take came back
+      # `rejected — Unnotarized Developer ID` while the app inside was fine.
+      # Submit the image too, staple it, and replace the copy tauri-action has
+      # already attached to the release, or the two sources would disagree.
+      - name: Notarize and staple the DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bundle="target/${{ matrix.target }}/release/bundle"
+          dmg=$(find "$bundle" -maxdepth 3 -name '*.dmg' | head -n 1)
+          [ -n "$dmg" ] || { echo "::error::no .dmg under $bundle"; exit 1; }
+
+          xcrun notarytool submit "$dmg" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+
+          # tauri-action uploaded the pre-staple image; replace it so the GitHub
+          # asset and the stapled file the mirror job uploads are the same bytes.
+          gh release upload "${{ github.ref_name }}" "$dmg" --clobber
+
+      # Publishing is automatic, so nothing downstream will notice a build that
+      # quietly lost its signature — only the user's Gatekeeper dialog would.
+      # Prove the signature, the notarization ticket and the staple here, while
+      # a failure still costs a release instead of a support thread.
+      - name: Verify the signed artifacts
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="target/${{ matrix.target }}/release/bundle"
+          app=$(find "$bundle" -maxdepth 3 -name '*.app' -type d | head -n 1)
+          [ -n "$app" ] || { echo "::error::no .app under $bundle"; exit 1; }
+
+          # Deliberately *not* `--strict`: that treats a stray FinderInfo xattr
+          # as fatal, and a healthy notarized app in /Applications fails it. A
+          # gate that cries wolf on a good build gets deleted, not fixed.
+          codesign --verify --deep --verbose=2 "$app"
+
+          # The seals prove integrity; the authority line proves it was *us*
+          # and not an ad-hoc signature that happens to verify.
+          info=$(codesign -dv --verbose=4 "$app" 2>&1)
+          printf '%s\n' "$info" | grep -q '^Authority=Developer ID Application' \
+            || { echo "::error::$app is not signed with a Developer ID"; printf '%s\n' "$info"; exit 1; }
+
+          # stapler is the deterministic proof that notarization happened: if
+          # the credentials were missing, Tauri signs and skips notarizing, and
+          # this is what notices.
+          xcrun stapler validate "$app"
+
+          # The end-to-end Gatekeeper verdict — what the user's first launch
+          # actually consults.
+          spctl --assess --type execute --verbose=2 "$app"
+
+          # The image is assessed on its own signature and notarizing the app
+          # inside does not cover it, so this is the check that catches a DMG
+          # shipping unnoticed — and it fails an unstabled image on purpose.
+          dmg=$(find "$bundle" -maxdepth 3 -name '*.dmg' | head -n 1)
+          if [ -n "$dmg" ]; then
+            xcrun stapler validate "$dmg"
+            spctl --assess --type open --context context:primary-signature -v "$dmg"
+          fi
+          echo "signed, notarized and stapled: $app"
 
       # Mirror the built installers to Cloudflare R2 under releases/ (served at
       # hub.kiwano.cc/releases). Only the newest build lives there: names are
@@ -207,7 +363,10 @@ jobs:
       # manifest source; R2 is the download mirror.
       # shell: bash on every runner (Windows included) so the staging logic is
       # one script rather than a PowerShell rewrite.
+      # Not on a rehearsal tag: the mirror's paths carry no version, so a test
+      # build would overwrite the download every user is pointed at.
       - name: Mirror artifacts to Cloudflare R2
+        if: ${{ !contains(github.ref_name, '-') }}
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -258,6 +417,9 @@ jobs:
   # every platform has landed.
   mirror-manifest:
     needs: build
+    # Same reason as the artifact mirror: the R2 manifest is what the app's
+    # updater reads, so a rehearsal must not repoint it.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -306,6 +468,10 @@ jobs:
   # so a mirror hiccup must not leave it stranded as a draft.
   publish:
     needs: build
+    # A prerelease suffix makes this a rehearsal: the release stays a draft for
+    # the author to inspect and delete, and never becomes what `latest` points
+    # at — which would hand every installed copy an RC via the updater.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

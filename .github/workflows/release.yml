@@ -20,9 +20,11 @@
 # without touching what users are running. See the gates on the mirror and
 # publish jobs.
 #
-# Two outputs: the GitHub release (the updater's authoritative manifest source)
-# and a Cloudflare R2 mirror under releases/, whose paths carry no version so
-# they stay valid across releases. See the `mirror-*` and `publish` jobs.
+# Two outputs: the GitHub release (where the manifest is authored, and the page
+# a user lands on) and a Cloudflare R2 mirror under releases/, whose paths carry
+# no version so they stay valid across releases. R2 is the updater's *first*
+# endpoint, so the release is published before the mirror is repointed at it —
+# see the `mirror-*` and `publish` jobs.
 
 name: Release
 
@@ -258,6 +260,135 @@ jobs:
           chmod 600 "$key"
           echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
 
+      # The updater key gets the same treatment as the Apple blobs above, for
+      # the same reason — but the shape here is easy to get wrong, so it is
+      # checked rather than just tidied.
+      #
+      # `tauri build` reads TAURI_SIGNING_PRIVATE_KEY as one environment string
+      # and does exactly two things with it: if the value names an existing file
+      # it reads that file, and either way it hands the result to a *strict*
+      # base64 decoder whose output must be the two-line rsign/minisign
+      # secret-key box (`untrusted comment: ...` then the `RW...` key line).
+      # `pnpm tauri signer generate -w ~/.tauri/kiwano.key` already writes that
+      # base64 into the key file, so the secret is meant to be that file's
+      # bytes — and a trailing newline, a CR, or a paste that wraps the line
+      # then fails *inside* Tauri as "failed to decode base64 key", which reads
+      # like a wrong key rather than one stray byte. Normalize it here, where
+      # the diagnostic can say what was actually wrong.
+      #
+      # Shapes accepted, in the order they are told apart: base64 of the key
+      # file (whitespace ignored); the key file's own two lines; and the bare
+      # `RW...` key line on its own. Anything else fails instead of being
+      # passed through to fail later as a bad key.
+      #
+      # The key is never echoed, not even a prefix: the secret arrives by env
+      # var (never interpolated into this script), and the only things printed
+      # below are a shape name and a length.
+      - name: Normalize the updater signing key
+        shell: bash
+        env:
+          KEY_RAW: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          fail() { echo "::error::$*"; exit 1; }
+
+          # Base64 of whole 4-character groups, with any padding only at the
+          # end. Worth asserting before a decoder ever sees the value: macOS's
+          # base64 silently drops an incomplete trailing group where GNU's
+          # errors out, so without this a truncated secret could decode to
+          # something plausible on one runner and fail cryptically on another.
+          base64_shape() {
+            case "$1" in
+              ''|*[!A-Za-z0-9+/=]*) return 1 ;;
+            esac
+            [ $(( ${#1} % 4 )) -eq 0 ] || return 1
+            printf '%s' "$1" | grep -Eq '^[A-Za-z0-9+/]*={0,2}$'
+          }
+
+          [ -n "${KEY_RAW:-}" ] || fail "TAURI_SIGNING_PRIVATE_KEY is empty or unset"
+
+          work="$RUNNER_TEMP/updater-key"
+          mkdir -p "$work"
+          printf '%s' "$KEY_RAW" > "$work/raw"
+
+          first_line=$(head -n 1 "$work/raw" | tr -d '\r')
+          case "$first_line" in
+            # The key file's own contents. Nothing to decode; just drop CRs so a
+            # Windows checkout of the secret is not a line-length difference. A
+            # wrapped key line shows up below as a third line, which the box
+            # check rejects rather than silently truncating the key.
+            'untrusted comment:'*)
+              shape="two-line key file"
+              tr -d '\r' < "$work/raw" > "$work/box"
+              ;;
+
+            # The bare key line with the comment stripped. Not a box Tauri can
+            # parse, but unambiguous, so put the comment line back — minisign
+            # ignores its text — and say so, because it means the secret was
+            # copied from somewhere that lost the first line.
+            RW*)
+              compact=$(tr -d '[:space:]' < "$work/raw")
+              base64_shape "$compact" \
+                || fail "TAURI_SIGNING_PRIVATE_KEY starts with the key material but is not complete base64 — it is probably truncated"
+              shape="bare key line (comment line restored)"
+              printf 'untrusted comment: rsign encrypted secret key\n%s\n' "$compact" > "$work/box"
+              ;;
+
+            # base64 of the key file. Whitespace is never meaningful in base64,
+            # but Tauri's decoder rejects it instead of ignoring it — which is
+            # the whole bug this step exists for — so strip all of it first.
+            *)
+              compact=$(tr -d '[:space:]' < "$work/raw")
+              [ -n "$compact" ] || fail "TAURI_SIGNING_PRIVATE_KEY is empty or only whitespace"
+              base64_shape "$compact" \
+                || fail "TAURI_SIGNING_PRIVATE_KEY is neither a two-line key file nor complete base64 — refusing to guess at a truncated or wrong secret"
+              shape="base64 of the key file"
+              printf '%s' "$compact" > "$work/compact"
+              # Decode dialect: GNU spells it --decode, BSD -D, and macOS's
+              # base64 takes no file argument, so both read the file on stdin.
+              # Each attempt truncates its output, so a failed first try cannot
+              # leave half a decode behind for the fallback to append to.
+              if ! base64 --decode < "$work/compact" > "$work/box" 2>/dev/null; then
+                base64 -D < "$work/compact" > "$work/box" 2>/dev/null \
+                  || fail "TAURI_SIGNING_PRIVATE_KEY is base64-shaped but does not decode — it is probably truncated"
+              fi
+              ;;
+          esac
+
+          # Every branch above now holds the two-line box. Prove that before
+          # re-encoding, because a box of the wrong shape is what makes Tauri's
+          # error read like a wrong key: line count, the comment, and a key line
+          # that is base64 starting with the rsign `RW` prefix.
+          lines=$(grep -c '[^[:space:]]' "$work/box" || true)
+          [ "$lines" -eq 2 ] \
+            || fail "the updater signing key is not a two-line key box (found $lines non-blank lines) — the secret should be the base64 of ~/.tauri/kiwano.key"
+          box_comment=$(head -n 1 "$work/box" | tr -d '\r')
+          box_key=$(sed -n '2p' "$work/box" | tr -d '\r')
+          case "$box_comment" in
+            'untrusted comment:'*) ;;
+            *) fail "the updater signing key's first line is not an 'untrusted comment:' line — refusing to pass it through" ;;
+          esac
+          case "$box_key" in
+            '') fail "the updater signing key has no key line — only the comment line survived" ;;
+            RW*) base64_shape "$box_key" \
+                   || fail "the updater signing key's key line is not complete base64 — it is probably truncated" ;;
+            *) fail "the updater signing key's second line does not start with 'RW' (rsign), so it is not an updater secret key" ;;
+          esac
+
+          # Hand Tauri base64 produced by our own encoder, always a single
+          # canonically padded line whatever shape the secret arrived in: the
+          # encoder wraps at 76 columns, so unfold it. The length check is the
+          # self-check on that unfolding.
+          normalized=$(base64 < "$work/box" | tr -d '\r\n')
+          size=$(wc -c < "$work/box" | tr -d '[:space:]')
+          expected=$(( (size + 2) / 3 * 4 ))
+          [ "${#normalized}" -eq "$expected" ] \
+            || fail "internal error: normalized key is ${#normalized} characters, expected $expected"
+          printf 'TAURI_SIGNING_PRIVATE_KEY=%s\n' "$normalized" >> "$GITHUB_ENV"
+          echo "updater signing key normalized and checked (source shape: $shape)"
+
       # The app alone is not a runnable Kiwano: the gateway daemon is an
       # `externalBin`, and Tauri bundles whatever
       # src-tauri/binaries/kiwano-gateway-<triple> happens to exist — which,
@@ -277,7 +408,11 @@ jobs:
           # wrapper would stage the *host* triple, and on the x86_64 leg of an
           # arm64 runner Tauri would then look for a file that does not exist.
           KIWANO_SIDECAR_TARGET: ${{ matrix.target }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Deliberately no TAURI_SIGNING_PRIVATE_KEY here: the normalization
+          # step above exports it through $GITHUB_ENV, which is in this step's
+          # environment already, and an expression here would only be a second
+          # place to get it wrong. See the note on that step for what Tauri
+          # accepts and why a stray newline reads like a wrong key.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Apple signing + notarization. Tauri imports the .p12 into a
           # temporary keychain itself, so there is no security(1) dance here.
@@ -336,11 +471,32 @@ jobs:
           dmg=$(find "$bundle" -maxdepth 3 -name '*.dmg' | head -n 1)
           [ -n "$dmg" ] || { echo "::error::no .dmg under $bundle"; exit 1; }
 
-          xcrun notarytool submit "$dmg" \
-            --key "$APPLE_API_KEY_PATH" \
-            --key-id "$APPLE_API_KEY" \
-            --issuer "$APPLE_API_ISSUER" \
-            --wait
+          # Apple's notary service has transient bad days: a submit that fails
+          # to reach it at all, or a `--wait` that comes back `Invalid` while
+          # the log says nothing is wrong with the submission. One attempt turns
+          # a few minutes of their downtime into a failed release, so try three
+          # times with 60s/120s of backoff, and fail the step only when the last
+          # attempt does. Staple only after a submit has actually succeeded —
+          # stapling an un-notarized image would just move the failure to the
+          # spctl check further down.
+          max_attempts=3
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "notarytool submit: attempt $attempt/$max_attempts"
+            if xcrun notarytool submit "$dmg" \
+              --key "$APPLE_API_KEY_PATH" \
+              --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" \
+              --wait; then
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "::error::notarization failed after $max_attempts attempts"
+              exit 1
+            fi
+            backoff=$(( attempt * 60 ))
+            echo "notarization failed; retrying in ${backoff}s"
+            sleep "$backoff"
+          done
           xcrun stapler staple "$dmg"
           xcrun stapler validate "$dmg"
 
@@ -450,8 +606,9 @@ jobs:
       # Mirror the built installers to Cloudflare R2 under releases/ (served at
       # hub.kiwano.cc/releases). Only the newest build lives there: names are
       # version-stripped so every release overwrites the same keys instead of
-      # accumulating history. GitHub Releases stays the updater's authoritative
-      # manifest source; R2 is the download mirror.
+      # accumulating history. GitHub Releases is where the release is published
+      # and where the updater manifest is authored; R2 is the download mirror
+      # the updater reads first, so `mirror-manifest` runs after `publish`.
       # shell: bash on every runner (Windows included) so the staging logic is
       # one script rather than a PowerShell rewrite.
       # Not on a rehearsal tag: the mirror's paths carry no version, so a test
@@ -506,8 +663,26 @@ jobs:
   # would publish a manifest missing the other platforms — that is exactly how
   # darwin-x86_64 went missing from the previous release. Fetch it once, after
   # every platform has landed.
+  #
+  # `needs:` the published release, not just the build, so R2 can never get
+  # ahead of what it describes. R2 is the *first* endpoint in tauri.conf.json's
+  # updater list and the updater stops at the first manifest that parses, so the
+  # mirror is what most installed copies are handed:
+  #   - mirrored before published → the app is offered a version whose release
+  #     page still says "draft", with no download page behind it. Nothing
+  #     downstream can take that back once the manifest is out.
+  #   - published but unmirrored → the R2 key is missing, and the app falls
+  #     through to the GitHub endpoint, still second in the list and still
+  #     correct. Stale is the worse half of this one — it parses, so nothing
+  #     falls through and the update is simply never offered — but it is
+  #     recoverable: `mirror-manifest.yml` re-mirrors any published tag on
+  #     demand. That repair path is exactly why the mirror must still *run*,
+  #     deterministically after publishing, rather than be first past the post.
+  # The old ordering put the mirror first so a mirror hiccup could not strand
+  # the release as a draft. That is now the wrong trade: an unmirrored release
+  # has a repair path, an unreleased mirror does not.
   mirror-manifest:
-    needs: build
+    needs: [build, publish]
     # Same reason as the artifact mirror: the R2 manifest is what the app's
     # updater reads, so a rehearsal must not repoint it.
     if: ${{ !contains(github.ref_name, '-') }}
@@ -555,8 +730,11 @@ jobs:
         run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress
 
   # No human in the loop: publishing is a tag push and nothing else.
-  # `needs: build` only (not the mirror jobs) — the release is the deliverable,
-  # so a mirror hiccup must not leave it stranded as a draft.
+  # `needs: build` only, never the mirror jobs — this job is what the mirror
+  # orders itself behind (`mirror-manifest` needs: this one), so waiting on the
+  # mirror here would be circular, and a mirror hiccup must not leave the
+  # release stranded as a draft. The release is the deliverable; the mirror is
+  # downstream of it.
   publish:
     needs: build
     # A prerelease suffix makes this a rehearsal: the release stays a draft for

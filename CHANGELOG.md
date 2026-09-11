@@ -19,6 +19,42 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Security
+
+- **The gateway's loopback planes no longer accept any local process.** A
+  request to the data plane (:8317) whose API key was missing or unknown used to
+  be attributed to an agent from the URL path and forwarded upstream on the
+  operator's own credentials — so any program on the machine could spend through
+  their providers. Such a request is now refused with 401 and is never
+  forwarded; the only keys that route are the `kw-ag-…` placeholder keys
+  Kiwano mints for agents it has taken over, and an agent that was not taken
+  over talks to its real upstream directly and never touches the gateway.
+  The admin plane (:8310) requires a token on `POST /reload` and
+  `POST /shutdown`. The gateway mints it on first run and both sides read it
+  from the database they already share, so there is nothing to configure.
+  `GET /status` still answers without it — the app's liveness and version
+  checks have to work against a gateway from an older build — but an
+  unauthenticated caller now gets only the gateway's identity, version and
+  uptime, not the route table, provider ids or blocked reasons. Both planes
+  stay loopback-bound: the token stops local processes, the bind stops the
+  network.
+- **Credentials are stripped out of the request log.** Headers were already
+  redacted, but the body was stored exactly as it arrived — so a key pasted into
+  a prompt was written to the database in the clear and shown in the Logs detail
+  panel. Bodies are now scrubbed: values under a secret-shaped key name, and
+  anything matching a known credential shape (`sk-…`, the GitHub and Slack token
+  prefixes, JWTs, and Kiwano's own `kw-ag-…` placeholders). It is a filter over
+  what it recognises, not a detector — a credential in a shape it does not know
+  is still stored as it was.
+- **The database is owner-only on Windows too.** The Unix hardening (0700
+  directory, 0600 file) has always been Unix-only, leaving the database that
+  holds every provider key with inherited permissions on Windows. It now gets a
+  protected ACL granting the current user alone.
+- **Exporting a configuration no longer writes your API keys to the file.**
+  The export is a dormant feature — no screen calls it yet — but it would have
+  written every key in the clear the moment one did. Keys are left out unless
+  explicitly asked for.
+
 ### Fixed
 
 - **A fresh install now has a working gateway.** Every build up to 0.1.7 bundled
@@ -30,6 +66,23 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   so a first install works on a machine that has never had Kiwano on it. Anyone
   already affected is fixed by updating: the update check runs in the app and
   never needed the gateway.
+- **Taking over is reported from what is actually in the config file, not from
+  a flag written beside it.** The switch was recorded before the agent's config
+  was rewritten, so the Apps list could say an agent was taken over while its
+  config was still untouched — and, after an interrupted takeover, the reverse.
+  The state now comes from the config itself.
+- **Restoring always reports the truth.** Turning a takeover off used to
+  succeed silently when the saved original was gone, leaving the agent pointed
+  at the local gateway with a placeholder key while the app said it had been
+  restored. It now falls back — to the current provider, then to stripping the
+  gateway route — and if it cannot restore you, it says so instead of claiming
+  success.
+- **A Codex configuration that Codex would refuse to start on is rejected
+  before it is written,** rather than written and then blamed on Codex. Codex
+  rejects a whole config over a missing provider name, a stale reserved provider
+  id, or a key with no provider table to carry it; those are now caught (and,
+  where it is lossless, repaired) before the switch, and the error says which
+  one it was and what to change.
 
 ### Added
 

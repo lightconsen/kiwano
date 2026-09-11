@@ -130,7 +130,8 @@ export const tauriApi: KiwanoApi = {
   applyAgentRoute: (target: AgentId, source: AgentId) =>
     invoke<void>("apply_agent_route", { target, source }),
 
-  exportConfig: (path: string) => invoke<number>("export_config", { path }),
+  exportConfig: (path: string, includeKeys?: boolean) =>
+    invoke<number>("export_config", { path, includeKeys }),
 
   importConfig: (path: string) =>
     invoke<ConfigShareReport>("import_config", { path }),

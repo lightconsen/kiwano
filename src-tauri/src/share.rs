@@ -1,9 +1,13 @@
 //! Config sharing (spec §4.1 P1): one-click export/import of a config scheme.
 //!
 //! File format kiwano-config v1:
-//! `providers` (full gateway Provider rows, including api_key — for local
-//! backup / cross-device migration; redact before sharing with others)
-//! + `routes` (per-Agent strategy and candidate order).
+//! `providers` (gateway Provider rows) + `routes` (per-Agent strategy and
+//! candidate order). Credentials are **omitted by default**: `api_key` is
+//! only written when the caller opts in (`export_config(store, true)`), for
+//! the local-backup / cross-device migration case where the file never leaves
+//! the machine. An export without keys still imports cleanly — matching is by
+//! `(name, base_url)`, and a key is only backfilled into a local row that has
+//! none.
 //!
 //! Import semantics (merge, not overwrite): match existing providers by
 //! `(name, base_url)` — on a hit the local row is kept and the key is only
@@ -50,8 +54,18 @@ pub struct ImportReport {
 }
 
 /// Export all providers and per-Agent route schemes as shareable JSON.
-pub fn export_config(store: &Store) -> Result<String, String> {
-    let providers = store.list_providers().map_err(|e| e.to_string())?;
+///
+/// `include_keys` is the explicit opt-in for credentials. It is `false` on the
+/// registered `export_config` IPC command — that surface is dormant (no
+/// frontend screen calls it) and must not leak when it is finally wired up.
+/// Pass `true` only for a local backup that never leaves the machine.
+pub fn export_config(store: &Store, include_keys: bool) -> Result<String, String> {
+    let mut providers = store.list_providers().map_err(|e| e.to_string())?;
+    if !include_keys {
+        for p in providers.iter_mut() {
+            p.api_key = None;
+        }
+    }
     let mut routes = Vec::new();
     for agent in store.bound_agents().map_err(|e| e.to_string())? {
         let (strategy, config) = store
@@ -249,7 +263,7 @@ mod tests {
             })
             .unwrap();
         }
-        let json = export_config(&src).unwrap();
+        let json = export_config(&src, true).unwrap();
         assert!(json.contains("kiwano_config"));
 
         // Import into an empty DB → everything is created fresh + route remapping takes effect
@@ -287,5 +301,113 @@ mod tests {
         let s = Store::open_in_memory().unwrap();
         assert!(import_config(&s, "not json").is_err());
         assert!(import_config(&s, r#"{"kiwano_config": 99}"#).is_err());
+    }
+
+    /// A store with two keyed providers and one bound agent.
+    fn seeded_store() -> Store {
+        let src = Store::open_in_memory().unwrap();
+        src.insert_provider(&provider(
+            "p1",
+            "Alpha",
+            "https://a.example.com",
+            Some("sk-a"),
+        ))
+        .unwrap();
+        src.insert_provider(&provider(
+            "p2",
+            "Beta",
+            "https://b.example.com",
+            Some("sk-b"),
+        ))
+        .unwrap();
+        src.upsert_strategy("claude", StrategyType::Failover, None)
+            .unwrap();
+        for (pid, pr) in [("p1", 0), ("p2", 1)] {
+            src.upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: pid.into(),
+                priority: pr,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        }
+        src
+    }
+
+    #[test]
+    fn export_omits_credentials_unless_opted_in() {
+        let src = seeded_store();
+
+        // Default: no key material anywhere in the file.
+        let json = export_config(&src, false).unwrap();
+        assert!(!json.contains("sk-a"), "{json}");
+        assert!(!json.contains("sk-b"), "{json}");
+        // Provider identity and routes still travel.
+        assert!(json.contains("Alpha"));
+        assert!(json.contains("https://b.example.com"));
+        assert!(json.contains("claude"));
+
+        // Opt-in (local backup): keys are present and round-trip.
+        let json = export_config(&src, true).unwrap();
+        assert!(json.contains("sk-a"));
+        assert!(json.contains("sk-b"));
+
+        let dst = Store::open_in_memory().unwrap();
+        import_config(&dst, &json).unwrap();
+        let by_name = |name: &str| {
+            dst.list_providers()
+                .unwrap()
+                .into_iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .api_key
+        };
+        assert_eq!(by_name("Alpha").as_deref(), Some("sk-a"));
+        assert_eq!(by_name("Beta").as_deref(), Some("sk-b"));
+    }
+
+    #[test]
+    fn keyless_export_still_merges() {
+        let json = export_config(&seeded_store(), false).unwrap();
+
+        // Fresh DB: rows are created, routes remap, keys are simply absent.
+        let dst = Store::open_in_memory().unwrap();
+        let report = import_config(&dst, &json).unwrap();
+        assert_eq!(report.providers_added, 2);
+        assert_eq!(report.routes_applied, 1);
+        assert_eq!(dst.bindings_for_agent("claude").unwrap().len(), 2);
+        assert!(dst.list_providers().unwrap().iter().all(|p| p
+            .api_key
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()));
+
+        // Existing local row *with* a key: the import must not clear it.
+        let dst2 = Store::open_in_memory().unwrap();
+        dst2.insert_provider(&provider(
+            "local-1",
+            "Alpha",
+            "https://a.example.com",
+            Some("sk-local"),
+        ))
+        .unwrap();
+        let report2 = import_config(&dst2, &json).unwrap();
+        assert_eq!(report2.providers_kept, 1);
+        assert_eq!(report2.providers_added, 1);
+        assert_eq!(
+            dst2.get_provider("local-1")
+                .unwrap()
+                .unwrap()
+                .api_key
+                .as_deref(),
+            Some("sk-local")
+        );
+        assert_eq!(
+            dst2.primary_provider_id("claude").unwrap().as_deref(),
+            Some("local-1")
+        );
     }
 }

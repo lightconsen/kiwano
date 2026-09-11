@@ -610,8 +610,12 @@ export interface KiwanoApi {
   removeAgentBinding(agent: AgentId, providerId: string): Promise<void>;
   /** Copy another agent's whole route (strategy + ordered candidates) onto this one, replacing what it had */
   applyAgentRoute(target: AgentId, source: AgentId): Promise<void>;
-  /** Export the config plan to the given path (including API keys); returns the Provider count */
-  exportConfig(path: string): Promise<number>;
+  /**
+   * Export the config plan to the given path; returns the Provider count.
+   * API keys are omitted unless `includeKeys` is set — that flag is for a local
+   * backup that never leaves the machine, not for a file that gets shared.
+   */
+  exportConfig(path: string, includeKeys?: boolean): Promise<number>;
   /** Import a config plan from a file (merged by name+base_url); returns a count report */
   importConfig(path: string): Promise<ConfigShareReport>;
   /** Phase 1 agent detection: installed state per agent (fast; null path = probed unavailable) */

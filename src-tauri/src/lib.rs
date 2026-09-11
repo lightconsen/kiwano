@@ -751,9 +751,14 @@ fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, S
 // ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──
 
 /// The frontend picks the target path via the dialog plugin first; this writes the file (file IO → async).
+/// Credentials are omitted unless `include_keys` is set (local backup only).
 #[tauri::command(async)]
-fn export_config(state: State<AppState>, path: String) -> Result<usize, String> {
-    let json = share::export_config(&state.store)?;
+fn export_config(
+    state: State<AppState>,
+    path: String,
+    include_keys: Option<bool>,
+) -> Result<usize, String> {
+    let json = share::export_config(&state.store, include_keys.unwrap_or(false))?;
     std::fs::write(&path, &json).map_err(|e| e.to_string())?;
     Ok(state
         .store

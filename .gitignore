@@ -26,3 +26,8 @@ __pycache__/
 
 # Screenshots dropped in the repo root for review, never project content
 ScreenShot_*.png
+
+# Apple signing credentials — Developer ID .p12, App Store Connect .p8, and the
+# passwords that unlock them. Never project content, and never publishable: the
+# private key is what lets a build claim to be this developer.
+apple/

@@ -34,5 +34,56 @@ cc-switch
   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-(Ported files will be listed here as extraction milestones land — none yet
-as of M0.)
+Files
+-----
+Every file below carries the declaration in its own header, naming its
+upstream source and the date it was taken. This list is the index to those
+headers, not a replacement for them.
+
+Copied whole — 20 files, all 2026-09-07. Header declaration only.
+
+  crates/adapters/src/config.rs
+  crates/adapters/src/error.rs
+  crates/adapters/src/model_capabilities.rs
+  crates/adapters/src/provider.rs
+  crates/adapters/src/claude_desktop_config.rs
+  crates/adapters/src/gemini_config.rs
+  crates/adapters/src/grok_config.rs
+  crates/adapters/src/opencode_config.rs
+  crates/adapters/src/gateway_takeover.rs
+  crates/adapters/src/proxy/cache_injector.rs
+  crates/adapters/src/proxy/error.rs
+  crates/adapters/src/proxy/error_mapper.rs
+  crates/adapters/src/proxy/json_canonical.rs
+  crates/adapters/src/proxy/model_mapper.rs
+  crates/adapters/src/proxy/sse.rs
+  crates/adapters/src/proxy/tool_media.rs
+  crates/adapters/src/proxy/types.rs
+  crates/adapters/src/proxy/providers/streaming.rs
+  crates/adapters/src/proxy/providers/transform.rs
+  crates/gateway/src/strategy/circuit_breaker.rs
+
+  Two of these are not a one-to-one rename. `gateway_takeover.rs` folds four
+  upstream files — `src-tauri/src/{opencode,openclaw,hermes,pi}_config.rs` —
+  into one, and `crates/gateway/src/strategy/circuit_breaker.rs` comes from
+  `src-tauri/src/proxy/circuit_breaker.rs`, which lives outside the `proxy`
+  tree the rest were taken from. Both say so in their own headers.
+
+Ported function by function — 1 file. Header declaration plus a
+`// Ported from cc-switch: <upstream path>::<function>` annotation above
+each ported function, so any one of them can be diffed against its origin.
+
+  crates/adapters/src/codex_config.rs
+      Copied on 2026-09-07 as the config write core. The gates and repairs
+      around that writer — the ones that decide whether a configuration
+      Codex would refuse to load ever reaches disk — were ported on
+      2026-09-11; the file's header lists both. The ~6k lines of
+      managed-OAuth logic remain deliberately unported, because Kiwano
+      hosts no OAuth: there is no CLI-rotated token to preserve, which is
+      what that logic exists to protect.
+
+Upstream of both crates is the same project and the same licence, so the
+notice above covers all 21 files. Nothing outside `crates/adapters` and
+`crates/gateway` is derived from cc-switch — the app, the gateway server,
+the routing and the UI are Kiwano's own, and deliberately carry no
+declaration so the provenance of a file can be read off its header.

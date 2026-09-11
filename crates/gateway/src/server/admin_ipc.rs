@@ -525,9 +525,13 @@ fn create_pipe_instance(
         SetEntriesInAclW, EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, TRUSTEE_IS_SID,
         TRUSTEE_IS_USER, TRUSTEE_W,
     };
+    // `NO_INHERITANCE` is declared in `Win32::Security`, not in the
+    // `Authorization` submodule the rest of the ACL API comes from. Getting
+    // that wrong is invisible on every platform but Windows, which is the only
+    // one that compiles this fn.
     use windows_sys::Win32::Security::{
-        InitializeSecurityDescriptor, SetSecurityDescriptorDacl, ACL, SECURITY_ATTRIBUTES,
-        SECURITY_DESCRIPTOR,
+        InitializeSecurityDescriptor, SetSecurityDescriptorDacl, ACL, NO_INHERITANCE,
+        SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
     };
 
     let Some(sid) = current_user_sid() else {

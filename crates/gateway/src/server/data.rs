@@ -1,9 +1,10 @@
 //! Data plane (:8317): agent clients → upstream providers (tech.md §4.1).
 //!
 //! Per request: classify path → protocol, attribute the placeholder key to an
-//! agent (key map, fallback by path), select the bound provider (single
-//! strategy), then forward transparently. The forward leg lives in
-//! [`crate::forward`].
+//! agent (401 if it is missing or unknown — that key is the whole of this
+//! plane's inbound auth, see `crate::router::route_agent`), select the bound
+//! provider (strategy engine), then forward transparently. The forward leg
+//! lives in [`crate::forward`].
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
@@ -146,12 +147,13 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     if let Some(c) = capture.as_mut() {
         c.session_id = session.clone();
     }
+    // The inbound protocol is passed to `forward` below, not to attribution:
+    // it decides which upstream endpoint is spoken to, never which agent pays.
     let routed = match resolve_via_engine(
         &table,
         &state.engine,
         &state.store,
         &state.limits(),
-        inbound,
         key.as_deref(),
         session.as_deref(),
     )
@@ -161,6 +163,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         Err(e) => {
             let message = e.to_string();
             let (agent, kind) = match &e {
+                crate::error::GatewayError::Unauthorized(_) => (None, "unauthorized"),
                 crate::error::GatewayError::NoBinding(a) => (Some(a.clone()), "no_provider_bound"),
                 crate::error::GatewayError::AllOverLimit { agent, .. } => {
                     (Some(agent.clone()), "provider_over_limit")

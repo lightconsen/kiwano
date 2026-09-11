@@ -3,12 +3,20 @@
 //! The GUI spawns `kiwano-gateway` as a child process sharing the same
 //! SQLite file; control-channel calls are raw loopback HTTP so no extra
 //! HTTP client dependency is needed.
+//!
+//! `/reload` and `/shutdown` need the admin token the gateway minted for
+//! itself ([`ADMIN_TOKEN_KEY`]); it is read from that same SQLite file, so the
+//! two processes agree without any new IPC. The one exception is the liveness
+//! probe — see [`ping_admin`].
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
+
+use kiwano_gateway::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
+use kiwano_gateway::store::Store;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -67,6 +75,84 @@ pub fn spawn() -> std::io::Result<Child> {
     })
 }
 
+/// The SQLite file this app and the gateway share. Resolution matches the
+/// gateway's `db_path_from_env` and the CLI's `--db` default: `KIWANO_DB_PATH`,
+/// else `~/.kiwano/kiwano.db`. The app sets no environment for the child, so
+/// the spawned gateway inherits `KIWANO_DB_PATH` and the two agree by
+/// construction.
+fn shared_db_path() -> PathBuf {
+    if let Ok(p) = std::env::var("KIWANO_DB_PATH") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".kiwano").join("kiwano.db")
+}
+
+/// The admin token, read out of the row the gateway minted it into.
+///
+/// `None` when there is no database yet or the row is not there: on a fresh
+/// install the app is up before the gateway has ever run. Deliberately never
+/// creates the file — an empty database conjured up by a token lookup would
+/// then be migrated by whichever process got there first.
+fn read_admin_token(path: &Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    Store::open(path)
+        .ok()?
+        .app_setting(ADMIN_TOKEN_KEY)
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// [`read_admin_token`] against the shared database, cached once found.
+///
+/// The row does not change under a running gateway, so the first success is
+/// kept; a miss is retried, because the gateway may simply not have started
+/// yet. Two opens at most, in the ordinary case where the app starts first.
+fn admin_token() -> Option<String> {
+    static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(token) = CACHED.get() {
+        return Some(token.clone());
+    }
+    let token = read_admin_token(&shared_db_path())?;
+    let _ = CACHED.set(token.clone());
+    Some(token)
+}
+
+/// The token header for one raw request, or nothing when there is no token to
+/// send. A gateway that predates the token ignores the header; a caller that
+/// has none is answered as an older gateway would answer (liveness-only
+/// `/status`, 401 from `/reload`), which is why this is not an error.
+fn token_header(token: Option<&str>) -> String {
+    match token {
+        Some(token) => format!("{ADMIN_TOKEN_HEADER}: {token}\r\n"),
+        None => String::new(),
+    }
+}
+
+fn status_request(port: u16, token: Option<&str>) -> String {
+    format!(
+        "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}Connection: close\r\n\r\n",
+        token_header(token)
+    )
+}
+
+fn shutdown_request(port: u16, token: Option<&str>) -> String {
+    format!(
+        "POST /shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+        token_header(token)
+    )
+}
+
+fn reload_request(port: u16, token: Option<&str>) -> String {
+    format!(
+        "POST /reload HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+        token_header(token)
+    )
+}
+
 fn loopback_http(port: u16, request: &str) -> Option<String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(CONNECT_TIMEOUT)).ok()?;
@@ -93,25 +179,28 @@ fn loopback_body(port: u16, request: &str) -> Option<String> {
 
 /// The gateway's own `/status` report. None when it is not answering, or says
 /// something we cannot read — the caller then shows less, never a guess.
+///
+/// The token, when there is one, buys the full report; without it the gateway
+/// answers with the liveness subset (identity, version, uptime), which the
+/// status chip renders as a gateway that is up but not described. A gateway
+/// older than the token ignores the header and answers in full either way.
 pub fn gateway_status(admin_port: u16) -> Option<serde_json::Value> {
     let body = loopback_body(
         admin_port,
-        &format!(
-            "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nConnection: close\r\n\r\n"
-        ),
+        &status_request(admin_port, admin_token().as_deref()),
     )?;
     serde_json::from_str(&body).ok()
 }
 
 /// `GET /status` — true when the admin plane answers.
+///
+/// Deliberately sends no token. `/status` answers 200 to an unauthenticated
+/// caller by design (see `server::admin`), and this is the probe the watchdog
+/// runs every few seconds: it must be able to tell "a gateway is here" from
+/// "nothing is here" without a readable database, and without depending on a
+/// row that only exists once a token-aware gateway has started.
 pub fn ping_admin(admin_port: u16) -> bool {
-    loopback_http(
-        admin_port,
-        &format!(
-            "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nConnection: close\r\n\r\n"
-        ),
-    )
-    .is_some_and(|l| l.contains("200"))
+    loopback_http(admin_port, &status_request(admin_port, None)).is_some_and(|l| l.contains("200"))
 }
 
 /// `POST /shutdown` — ask a running gateway to stop, then wait for it to let go
@@ -119,13 +208,16 @@ pub fn ping_admin(admin_port: u16) -> bool {
 /// must not read as "it is stopped".
 ///
 /// A gateway older than this endpoint answers 404, so this is genuinely a
-/// capability probe as much as a request.
+/// capability probe as much as a request. Two more failures land in the same
+/// `false`: a token-aware gateway refusing the token (401, which is what an
+/// unreadable `app_settings` row looks like) and one that predates the token
+/// but ignores the header harmlessly. `restart` treats all of them the same
+/// way — `force_stop` sends SIGTERM, which the gateway handles, so even the
+/// degraded path checkpoints the write-ahead log.
 pub fn request_shutdown(admin_port: u16) -> bool {
     let accepted = loopback_http(
         admin_port,
-        &format!(
-            "POST /shutdown HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        ),
+        &shutdown_request(admin_port, admin_token().as_deref()),
     )
     .is_some_and(|line| line.contains("200"));
     if !accepted {
@@ -148,6 +240,14 @@ pub fn request_shutdown(admin_port: u16) -> bool {
 /// Factored out because the mismatch branch cannot be reached by hand without
 /// an old binary, and it is the branch that decides whether the app runs beside
 /// a daemon that disagrees with it about the database schema.
+///
+/// The decision reads `name` + `version` out of `GET /status`, and those are
+/// in the liveness subset the gateway returns to an unauthenticated caller —
+/// so this works across an upgrade in both directions. Meeting a 0.1.7-era
+/// gateway, there is no token row to send and the old build would ignore the
+/// header regardless; meeting a token-aware one whose row cannot be read, the
+/// subset still arrives. The replace path then either gets `/shutdown` (new
+/// gateway) or falls back to `force_stop` (old one) — see `restart`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum StartupAction {
     /// Same version — leave it alone and adopt it.
@@ -243,11 +343,13 @@ fn force_stop(_admin_port: u16) -> bool {
 }
 
 /// `POST /reload` — ask the gateway to rebuild its route table from SQLite.
-/// Fire-and-forget: route hot-reload failures surface in gateway logs.
+/// Fire-and-forget: route hot-reload failures surface in gateway logs, and a
+/// refusal (no token readable) means the gateway keeps routing what it has
+/// until the next start, which is why this returns nothing to check.
 pub fn notify_reload(admin_port: u16) {
     let _ = loopback_http(
         admin_port,
-        &format!("POST /reload HTTP/1.1\r\nHost: 127.0.0.1:{admin_port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+        &reload_request(admin_port, admin_token().as_deref()),
     );
 }
 
@@ -526,6 +628,60 @@ pub async fn fetch_model_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The admin plane refuses `/reload` and `/shutdown` without the token, so
+    /// these three requests have to carry it — and must still be well-formed
+    /// when the app has none (a fresh install, or an old gateway's database),
+    /// rather than dropping the header line and the blank line with it.
+    #[test]
+    fn admin_requests_carry_the_token_when_we_have_one() {
+        let header = format!("{ADMIN_TOKEN_HEADER}: tok-123\r\n");
+
+        let status = status_request(8310, Some("tok-123"));
+        assert!(status.starts_with("GET /status HTTP/1.1\r\n"));
+        assert!(status.contains(&header));
+        assert!(status.ends_with("Connection: close\r\n\r\n"));
+
+        let shutdown = shutdown_request(8310, Some("tok-123"));
+        assert!(shutdown.starts_with("POST /shutdown HTTP/1.1\r\n"));
+        assert!(shutdown.contains(&header));
+
+        let reload = reload_request(8310, Some("tok-123"));
+        assert!(reload.starts_with("POST /reload HTTP/1.1\r\n"));
+        assert!(reload.contains(&header));
+
+        // No token: same requests, no header — a gateway that has no token to
+        // check them against is exactly the one that does not need them.
+        for request in [
+            status_request(8310, None),
+            shutdown_request(8310, None),
+            reload_request(8310, None),
+        ] {
+            assert!(!request.contains(ADMIN_TOKEN_HEADER));
+            assert!(request.ends_with("\r\n\r\n"));
+        }
+    }
+
+    /// The token comes out of the row the gateway writes, in the database the
+    /// two processes share. A database without one — or without a file — is
+    /// None, not an error and not a new empty database.
+    #[test]
+    fn admin_token_reads_the_gateway_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let store = Store::open(&path).unwrap();
+        assert_eq!(read_admin_token(&path), None);
+        store.set_app_setting(ADMIN_TOKEN_KEY, "tok-abc").unwrap();
+        drop(store);
+        assert_eq!(read_admin_token(&path), Some("tok-abc".to_string()));
+
+        let missing = dir.path().join("not-yet.db");
+        assert_eq!(read_admin_token(&missing), None);
+        assert!(
+            !missing.exists(),
+            "a token lookup must not bring a database into being"
+        );
+    }
 
     #[test]
     fn ping_admin_refuses_dead_port() {

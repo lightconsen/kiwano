@@ -98,6 +98,11 @@ pub enum Attribution {
     /// A registered placeholder key in the auth headers.
     PlaceholderKey,
     /// Key missing/unknown → fell back by path protocol (+ warning log).
+    ///
+    /// No longer produced: the fallback was an open door on a loopback port
+    /// (see [`route_agent`]) and is refused now. The variant stays because
+    /// `request_logs.attribution` rows written before that are still rendered
+    /// with it — the log UI and CSV export read the stored string.
     PathFallback,
 }
 
@@ -218,20 +223,6 @@ impl RouteTable {
         self.keys.get(key).map(String::as_str)
     }
 
-    /// Fallback attribution when the key is missing/unknown (tech.md §4.6):
-    /// Anthropic paths → Claude Code, OpenAI paths → Codex, Gemini paths →
-    /// Gemini CLI. Ambiguous paths default to the primary (Claude) agent.
-    /// With 9 supported agents this is only a best-effort guess — placeholder
-    /// keys are mandatory for correct per-agent attribution (unknown keys on
-    /// OpenAI-family paths attribute to Codex with a warning, see route_agent).
-    pub fn fallback_agent(protocol: Option<Protocol>) -> &'static str {
-        match protocol {
-            Some(Protocol::OpenAI) => AGENT_CODEX,
-            Some(Protocol::Gemini) => AGENT_GEMINI,
-            _ => AGENT_CLAUDE,
-        }
-    }
-
     /// Select the upstream provider for an agent under its strategy.
     ///
     /// Single/legacy path: always the first (primary) candidate. The live
@@ -249,30 +240,52 @@ impl RouteTable {
     }
 }
 
-/// Attribute an inbound request to an agent (placeholder key, fallback by
-/// path protocol) and return its route.
-fn route_agent<'t>(
-    table: &'t RouteTable,
-    protocol_hint: Option<Protocol>,
-    placeholder_key: Option<&str>,
-) -> Result<(&'t AgentRoute, Attribution)> {
-    let (agent, attribution) = match placeholder_key.and_then(|k| table.agent_for_key(k)) {
-        Some(a) => (a.to_string(), Attribution::PlaceholderKey),
-        None => {
-            let fb = RouteTable::fallback_agent(protocol_hint);
+/// Attribute an inbound request to its agent by placeholder key, or refuse it.
+///
+/// The key is the *only* attribution source. A request that carries no key, or
+/// one this gateway did not mint, is rejected here and is never forwarded —
+/// this is the data plane's inbound auth, and it is deliberately unforgiving.
+/// Both planes bind loopback, but loopback is not a boundary: any local
+/// process can open a socket to :8317, and the path-protocol fallback that
+/// used to catch an unknown key sent that request upstream **on the operator's
+/// real credentials**. A wrong guess about which agent the caller is cost
+/// nothing to the caller and real money to the operator.
+///
+/// Nothing legitimate relied on the fallback. An agent only reaches this port
+/// after a takeover, and `takeover::enable` always does two things together:
+/// it rewrites the agent's config to point here and injects the key it minted
+/// into that same config (`kw-ag-<agent>-<rand>`, the `placeholder_keys` row
+/// this lookup reads). An agent that was never taken over talks to its real
+/// upstream directly and never touches the gateway at all. The one header
+/// shape to watch is a client that carries its key somewhere the gateway does
+/// not read — [`crate::server::extract_placeholder_key`] covers the canonical
+/// `x-api-key` / `Authorization: Bearer` / `x-goog-api-key`, which is what
+/// every protocol the gateway speaks uses.
+///
+/// The inbound protocol is no longer consulted: it never decided *which* agent
+/// to charge, only *which guess* to make when the key was unusable. Which
+/// upstream speaks it is still decided downstream, in `crate::forward`.
+fn route_agent<'t>(table: &'t RouteTable, placeholder_key: Option<&str>) -> Result<&'t AgentRoute> {
+    let agent = placeholder_key
+        .and_then(|k| table.agent_for_key(k))
+        .ok_or_else(|| {
+            // The key itself is never logged: an agent pointed at the wrong
+            // port (or an operator pasting a real upstream key) would otherwise
+            // write a live credential into the gateway log.
             tracing::warn!(
                 key_present = placeholder_key.is_some(),
-                fallback_agent = fb,
-                "placeholder key missing/unknown; attributing by path protocol"
+                "data-plane request refused: placeholder key missing or unknown"
             );
-            (fb.to_string(), Attribution::PathFallback)
-        }
-    };
-    let route = table
+            GatewayError::Unauthorized(if placeholder_key.is_some() {
+                "unknown API key".to_string()
+            } else {
+                "missing API key".to_string()
+            })
+        })?;
+    table
         .routes
-        .get(&agent)
-        .ok_or_else(|| GatewayError::NoBinding(agent))?;
-    Ok((route, attribution))
+        .get(agent)
+        .ok_or_else(|| GatewayError::NoBinding(agent.to_string()))
 }
 
 /// Resolve agent attribution + provider selection for one inbound request
@@ -282,31 +295,28 @@ pub async fn resolve_via_engine(
     engine: &crate::strategy::StrategyEngine,
     store: &crate::store::Store,
     limits: &crate::limits::LimitState,
-    protocol_hint: Option<Protocol>,
     placeholder_key: Option<&str>,
     session: Option<&str>,
 ) -> Result<RoutedRequest> {
-    let (route, attribution) = route_agent(table, protocol_hint, placeholder_key)?;
+    let route = route_agent(table, placeholder_key)?;
     let provider = engine.select(store, route, session, limits).await?;
     Ok(RoutedRequest {
         agent: route.agent.clone(),
-        attribution,
+        // The only attribution a routed request can have now; the variant
+        // remains for historical `request_logs` rows.
+        attribution: Attribution::PlaceholderKey,
         provider,
     })
 }
 
 /// Attribution-only resolution with single-strategy selection (kept for
 /// tests and tooling; the data plane routes through the strategy engine).
-pub fn resolve(
-    table: &RouteTable,
-    protocol_hint: Option<Protocol>,
-    placeholder_key: Option<&str>,
-) -> Result<RoutedRequest> {
-    let (route, attribution) = route_agent(table, protocol_hint, placeholder_key)?;
+pub fn resolve(table: &RouteTable, placeholder_key: Option<&str>) -> Result<RoutedRequest> {
+    let route = route_agent(table, placeholder_key)?;
     let provider = table.select(&route.agent)?.clone();
     Ok(RoutedRequest {
         agent: route.agent.clone(),
-        attribution,
+        attribution: Attribution::PlaceholderKey,
         provider,
     })
 }
@@ -490,12 +500,7 @@ mod tests {
         let store = seeded_store(&dir);
         let table = RouteTable::load(&store).unwrap();
 
-        let routed = resolve(
-            &table,
-            Some(Protocol::Anthropic),
-            Some("kw-ag-claude-abc123"),
-        )
-        .unwrap();
+        let routed = resolve(&table, Some("kw-ag-claude-abc123")).unwrap();
         assert_eq!(routed.agent, AGENT_CLAUDE);
         assert_eq!(routed.attribution, Attribution::PlaceholderKey);
         assert_eq!(routed.provider.id, "p-ant");
@@ -505,69 +510,47 @@ mod tests {
             .upsert_binding(&binding("claude", "p-ant", 0, false))
             .unwrap();
         let table = RouteTable::load(&store).unwrap();
-        let routed = resolve(
-            &table,
-            Some(Protocol::Anthropic),
-            Some("kw-ag-claude-abc123"),
-        )
-        .unwrap();
+        let routed = resolve(&table, Some("kw-ag-claude-abc123")).unwrap();
         assert_eq!(routed.provider.id, "p-backup");
     }
 
+    /// The data plane's inbound auth: a key the gateway did not mint is
+    /// refused, whatever the path protocol says the caller is. Before this,
+    /// `sk-not-ours` on an OpenAI path was attributed to Codex and forwarded
+    /// on the operator's own key.
     #[test]
-    fn key_attribution_falls_back_by_protocol() {
+    fn unknown_and_missing_keys_are_refused() {
         let dir = tempfile::tempdir().unwrap();
         let store = seeded_store(&dir);
         let table = RouteTable::load(&store).unwrap();
 
-        // Unknown key → path fallback (warn logged).
-        let routed = resolve(&table, Some(Protocol::OpenAI), Some("sk-not-ours")).unwrap();
-        assert_eq!(routed.agent, AGENT_CODEX);
-        assert_eq!(routed.attribution, Attribution::PathFallback);
-        assert_eq!(routed.provider.id, "p-oai");
+        // A key that is not ours, on a path that would have guessed Codex.
+        let err = resolve(&table, Some("sk-not-ours")).unwrap_err();
+        assert!(matches!(err, GatewayError::Unauthorized(m) if m == "unknown API key"));
 
-        // No key at all → same fallback.
-        let routed = resolve(&table, Some(Protocol::Anthropic), None).unwrap();
-        assert_eq!(routed.agent, AGENT_CLAUDE);
-        assert_eq!(routed.provider.id, "p-ant");
+        // No key at all: the same refusal, not a guess.
+        let err = resolve(&table, None).unwrap_err();
+        assert!(matches!(err, GatewayError::Unauthorized(m) if m == "missing API key"));
 
-        // Ambiguous path without key defaults to the primary agent.
-        let routed = resolve(&table, None, None).unwrap();
-        assert_eq!(routed.agent, AGENT_CLAUDE);
+        // A real placeholder key still routes, and to its own agent.
+        assert_eq!(
+            resolve(&table, Some("kw-ag-codex-xyz789")).unwrap().agent,
+            AGENT_CODEX
+        );
     }
 
     #[test]
     fn select_errors_without_binding() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path().join("t.db")).unwrap();
-        let table = RouteTable::load(&store).unwrap();
 
-        let err = resolve(&table, Some(Protocol::Anthropic), None).unwrap_err();
-        assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_CLAUDE));
-
-        // Key registered but agent has no bindings → same clean failure.
+        // Key registered but agent has no bindings → a clean 503, not a 401:
+        // the caller is identified, it simply has nothing to route to.
         store
             .upsert_placeholder_key("kw-ag-gemini-1", AGENT_GEMINI)
             .unwrap();
         let table = RouteTable::load(&store).unwrap();
-        let err = resolve(&table, None, Some("kw-ag-gemini-1")).unwrap_err();
+        let err = resolve(&table, Some("kw-ag-gemini-1")).unwrap_err();
         assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_GEMINI));
-    }
-
-    #[test]
-    fn fallback_agent_mapping() {
-        assert_eq!(
-            RouteTable::fallback_agent(Some(Protocol::Anthropic)),
-            AGENT_CLAUDE
-        );
-        assert_eq!(
-            RouteTable::fallback_agent(Some(Protocol::OpenAI)),
-            AGENT_CODEX
-        );
-        assert_eq!(
-            RouteTable::fallback_agent(Some(Protocol::Gemini)),
-            AGENT_GEMINI
-        );
-        assert_eq!(RouteTable::fallback_agent(None), AGENT_CLAUDE);
     }
 }

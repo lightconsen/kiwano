@@ -228,7 +228,7 @@ fn dispatch(globals: Globals) -> Result<i32, String> {
         }
         "reload" => {
             ensure_empty(&words)?;
-            cmd_reload(admin_port)
+            cmd_reload(admin_port, &db)
         }
         "providers" => {
             let sub = positional(
@@ -267,8 +267,10 @@ fn fail(message: &str) -> i32 {
     2
 }
 
-fn open_store(db: &Option<String>) -> Result<Store, String> {
-    let path = match db {
+/// The shared SQLite file: `--db`, else `KIWANO_DB_PATH`, else
+/// `~/.kiwano/kiwano.db` — the same resolution the gateway uses.
+fn db_path(db: &Option<String>) -> std::path::PathBuf {
+    match db {
         Some(p) => std::path::PathBuf::from(p),
         None => match std::env::var("KIWANO_DB_PATH") {
             Ok(v) if !v.is_empty() => std::path::PathBuf::from(v),
@@ -279,7 +281,11 @@ fn open_store(db: &Option<String>) -> Result<Store, String> {
                     .join("kiwano.db")
             }
         },
-    };
+    }
+}
+
+fn open_store(db: &Option<String>) -> Result<Store, String> {
+    let path = db_path(db);
     if let Some(dir) = path.parent() {
         if !dir.as_os_str().is_empty() {
             let _ = std::fs::create_dir_all(dir);
@@ -288,12 +294,36 @@ fn open_store(db: &Option<String>) -> Result<Store, String> {
     Store::open(&path).map_err(|e| format!("cannot open database {}: {e}", path.display()))
 }
 
-/// Best-effort hot-reload of a running gateway after a mutation.
-fn after_mutation(admin_port: u16) {
-    match admin::post_reload(admin_port) {
-        Some(v) => println!(
+/// The gateway's admin token, read from the row it minted into the shared
+/// database. None when there is no database yet (the gateway has not run) or
+/// no row (a gateway older than the token) — in both cases the admin plane is
+/// answered as an older build answers it, and `/reload` comes back refused.
+fn admin_token(db: &Option<String>) -> Option<String> {
+    let path = db_path(db);
+    if !path.is_file() {
+        return None;
+    }
+    Store::open(&path)
+        .ok()?
+        .app_setting(kiwano_gateway::server::ADMIN_TOKEN_KEY)
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// Best-effort hot-reload of a running gateway after a mutation. A refusal
+/// (wrong or missing token) is reported rather than counted as a reload: the
+/// gateway is still routing the previous table, and saying "0 agents" would
+/// read as "reloaded, but nothing is configured".
+fn after_mutation(admin_port: u16, db: &Option<String>) {
+    let token = admin_token(db);
+    match admin::post_reload(admin_port, token.as_deref()) {
+        Some(v) if v["ok"].as_bool() == Some(true) => println!(
             "gateway route table reloaded ({} agents)",
             v["agents_routed"].as_u64().unwrap_or(0)
+        ),
+        Some(v) => println!(
+            "note: gateway refused the reload ({}); it keeps routing the previous table \
+             until it is restarted",
+            v["error"].as_str().unwrap_or("no reason given")
         ),
         None => {
             println!("note: gateway not reachable on :{admin_port}; changes apply on next start")
@@ -304,7 +334,9 @@ fn after_mutation(admin_port: u16) {
 // ── commands ----------------------------------------------------------------
 
 fn cmd_status(admin_port: u16, db: &Option<String>, json: bool) -> Result<i32, String> {
-    match admin::get_status(admin_port) {
+    // With the token this is the full report; without it the gateway answers
+    // the liveness subset (version and uptime, no route table).
+    match admin::get_status(admin_port, admin_token(db).as_deref()) {
         Some(v) => {
             if json {
                 println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
@@ -327,15 +359,19 @@ fn cmd_status(admin_port: u16, db: &Option<String>, json: bool) -> Result<i32, S
     }
 }
 
-fn cmd_reload(admin_port: u16) -> Result<i32, String> {
-    match admin::post_reload(admin_port) {
-        Some(v) => {
+fn cmd_reload(admin_port: u16, db: &Option<String>) -> Result<i32, String> {
+    match admin::post_reload(admin_port, admin_token(db).as_deref()) {
+        Some(v) if v["ok"].as_bool() == Some(true) => {
             println!(
                 "reloaded: {} agents routed",
                 v["agents_routed"].as_u64().unwrap_or(0)
             );
             Ok(0)
         }
+        Some(v) => Err(format!(
+            "gateway refused the reload: {}",
+            v["error"].as_str().unwrap_or("no reason given")
+        )),
         None => Err(format!("gateway not reachable on :{admin_port}")),
     }
 }
@@ -358,7 +394,7 @@ fn cmd_providers(
             let args = parse_providers_add(words)?;
             let store = open_store(db)?;
             cmd_providers_add(&store, &args)?;
-            after_mutation(admin_port);
+            after_mutation(admin_port, db);
             Ok(())
         }
         "use" => {
@@ -367,7 +403,7 @@ fn cmd_providers(
             ensure_empty(&words)?;
             let store = open_store(db)?;
             cmd_providers_use(&store, &id, &agent)?;
-            after_mutation(admin_port);
+            after_mutation(admin_port, db);
             Ok(())
         }
         "remove" => {
@@ -375,7 +411,7 @@ fn cmd_providers(
             ensure_empty(&words)?;
             let store = open_store(db)?;
             cmd_providers_remove(&store, &id)?;
-            after_mutation(admin_port);
+            after_mutation(admin_port, db);
             Ok(())
         }
         other => Err(format!("unknown providers subcommand: {other}")),
@@ -666,7 +702,7 @@ fn cmd_keys(
                 .insert_api_key(&provider, key.trim(), label.as_deref().map(str::trim))
                 .map_err(|e| e.to_string())?;
             println!("added key #{id} for {provider}");
-            after_mutation(admin_port);
+            after_mutation(admin_port, db);
             Ok(())
         }
         "remove" => {
@@ -676,7 +712,7 @@ fn cmd_keys(
                 return Err(format!("key not found: #{id}"));
             }
             println!("removed key #{id}");
-            after_mutation(admin_port);
+            after_mutation(admin_port, db);
             Ok(())
         }
         other => Err(format!("unknown keys subcommand: {other}")),
@@ -823,10 +859,19 @@ fn render_status(v: &serde_json::Value, admin_port: u16) -> String {
         v["version"].as_str().unwrap_or("?"),
         v["uptime_secs"].as_u64().unwrap_or(0)
     ));
-    out.push_str(&format!(
-        "store: providers {} · bindings {} · placeholder_keys {} · usage_rows {}\n",
-        v["providers"], v["bindings"], v["placeholder_keys"], v["usage_rows"]
-    ));
+    // The token is what turns a liveness answer into the full report; without
+    // it these fields are absent rather than zero, and printing "null" would
+    // read as a store that has nothing in it.
+    if v.get("providers").is_some() {
+        out.push_str(&format!(
+            "store: providers {} · bindings {} · placeholder_keys {} · usage_rows {}\n",
+            v["providers"], v["bindings"], v["placeholder_keys"], v["usage_rows"]
+        ));
+    } else {
+        out.push_str(
+            "store: not reported (no gateway token — point --db at the shared database)\n",
+        );
+    }
     if let Some(routes) = v["routes"].as_array() {
         if !routes.is_empty() {
             out.push_str("routes:\n");

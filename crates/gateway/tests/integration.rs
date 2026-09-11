@@ -12,7 +12,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use futures_core::Stream;
-use kiwano_gateway::server::{admin_plane_router, data_plane_router, GatewayState};
+use kiwano_gateway::server::{
+    admin_plane_router, data_plane_router, GatewayState, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY,
+};
 use kiwano_gateway::store::{
     now_rfc3339, Billing, Binding, LogConfig, Protocol, Provider, RequestLogEntry,
     RequestLogFilter, Store,
@@ -357,21 +359,15 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     assert_eq!(totals.cache_creation_tokens, 3);
 }
 
+/// The OpenAI-shaped path with no key at all: this is the request that used to
+/// be attributed to Codex by path protocol and forwarded upstream on the
+/// operator's real key. It is refused now, and the upstream is never called.
 #[tokio::test]
-async fn openai_path_without_key_falls_back_to_codex_agent() {
+async fn openai_path_without_key_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
-    let upstream_body = json!({
-        "id": "chatcmpl-1",
-        "object": "chat.completion",
-        "model": "gpt-4o",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 42, "completion_tokens": 7,
-                  "prompt_tokens_details": {"cached_tokens": 32}, "total_tokens": 49}
-    });
-    let (upstream_url, captured) = mock_openai(MockReply::Json(upstream_body)).await;
-
+    let (upstream_url, captured) = mock_openai(MockReply::Json(json!({"id": "x"}))).await;
     store
         .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
         .unwrap();
@@ -380,7 +376,6 @@ async fn openai_path_without_key_falls_back_to_codex_agent() {
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
 
-    // No auth header at all: tech.md §4.6 fallback attributes by path protocol.
     let response = post_json(
         &app,
         "/v1/chat/completions",
@@ -388,24 +383,13 @@ async fn openai_path_without_key_falls_back_to_codex_agent() {
         r#"{"model":"gpt-4o","messages":[]}"#,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(body["object"], "chat.completion");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    // OpenAI auth style: real key injected as Bearer.
-    let expected_auth = format!("Bearer {REAL_KEY}");
-    let captured = captured.lock().unwrap();
-    assert_eq!(
-        captured.last().map(|(k, v)| (k.as_str(), v.as_str())),
-        Some(("authorization", expected_auth.as_str()))
-    );
-    drop(captured);
-
-    let totals = state.store.usage_totals(Some("codex"), None, None).unwrap();
-    assert_eq!(totals.requests, 1);
-    assert_eq!(totals.input_tokens, 42);
-    assert_eq!(totals.output_tokens, 7);
-    assert_eq!(totals.cache_read_tokens, 32);
+    // The claim that matters: the provider was never called, so nothing was
+    // spent on the operator's account.
+    assert!(captured.lock().unwrap().is_empty());
+    let totals = state.store.usage_totals(None, None, None).unwrap();
+    assert_eq!(totals.requests, 0);
 }
 
 #[tokio::test]
@@ -452,12 +436,17 @@ async fn admin_reload_switches_provider_without_restart() {
         .store
         .upsert_binding(&bind("claude", "p-b", 0))
         .unwrap();
+    let token = state
+        .store
+        .app_setting(ADMIN_TOKEN_KEY)
+        .expect("the gateway mints its admin token at startup");
     let response = admin
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/reload")
+                .header(ADMIN_TOKEN_HEADER, &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -790,8 +779,10 @@ async fn gemini_inbound_passthrough_meters_usage_metadata() {
     assert_eq!(by_provider[0].provider_id, "p-gem");
 }
 
+/// A foreign key on the Anthropic path is refused for the same reason as the
+/// OpenAI one: the fallback attributed it to claude and forwarded it.
 #[tokio::test]
-async fn unknown_key_on_anthropic_path_falls_back_to_claude() {
+async fn unknown_key_on_anthropic_path_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
@@ -811,15 +802,11 @@ async fn unknown_key_on_anthropic_path_falls_back_to_claude() {
         r#"{"model":"m"}"#,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    // Fallback attribution still meters to the claude agent.
-    let totals = state
-        .store
-        .usage_totals(Some("claude"), None, None)
-        .unwrap();
-    assert_eq!(totals.requests, 1);
-    assert_eq!(captured.lock().unwrap().len(), 1);
+    assert!(captured.lock().unwrap().is_empty());
+    let totals = state.store.usage_totals(None, None, None).unwrap();
+    assert_eq!(totals.requests, 0);
 }
 
 /// A completed non-streaming request lands a full request_logs row: metadata,
@@ -920,6 +907,10 @@ async fn request_log_records_failures_without_usage() {
     store
         .upsert_placeholder_key("kw-ag-codex-test", "codex")
         .unwrap();
+    // Registered, but no binding: identified, with nothing to route to.
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -933,9 +924,19 @@ async fn request_log_records_failures_without_usage() {
     .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
 
-    // Unknown key on the Anthropic path falls back to claude, which has no
-    // binding: the gateway answers 503 without touching any provider.
+    // A key the gateway did not mint: refused, without touching any provider
+    // and without guessing an agent from the path.
     let response = post_json(&app, "/v1/messages", Some("sk-foreign"), r#"{"model":"m"}"#).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // A key it did mint, for an agent with no binding: 503, also untouched.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     // Paths with no route at all hit the axum fallback and are audited too.
@@ -946,7 +947,7 @@ async fn request_log_records_failures_without_usage() {
         .store
         .list_request_logs(1, 10, RequestLogFilter::default())
         .unwrap();
-    assert_eq!(total, 3);
+    assert_eq!(total, 4);
     let unknown = rows.iter().find(|r| r.path == "/v1/nope").unwrap();
     assert_eq!(unknown.status_code, 404);
     assert_eq!(unknown.error_kind.as_deref(), Some("unsupported_path"));
@@ -956,6 +957,10 @@ async fn request_log_records_failures_without_usage() {
     assert_eq!(mismatch.error_kind.as_deref(), Some("protocol_mismatch"));
     assert_eq!(mismatch.agent.as_deref(), Some("codex"));
     assert_eq!(mismatch.provider_id.as_deref(), Some("p-ant"));
+
+    let refused = rows.iter().find(|r| r.status_code == 401).unwrap();
+    assert_eq!(refused.error_kind.as_deref(), Some("unauthorized"));
+    assert_eq!(refused.agent, None);
 
     let unbound = rows.iter().find(|r| r.status_code == 503).unwrap();
     assert_eq!(unbound.error_kind.as_deref(), Some("no_provider_bound"));

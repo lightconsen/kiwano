@@ -6,7 +6,7 @@
 pub mod admin;
 pub mod data;
 
-pub use admin::admin_plane_router;
+pub use admin::{admin_plane_router, ensure_admin_token, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
 pub use data::data_plane_router;
 
 use std::sync::{Arc, RwLock};
@@ -80,6 +80,11 @@ impl GatewayState {
         // than being served in the window before the task's first tick.
         let pricing = resolve_pricing(&store);
         let limits = crate::limits::evaluate(&store);
+        // The admin plane's token, minted before either listener can bind so
+        // the row the GUI reads to authenticate is on disk before the port
+        // answers. A store that cannot hold it is a gateway that cannot
+        // enforce anything — the same class of failure as the route table.
+        admin::ensure_admin_token(&store)?;
         let (shutdown, _) = tokio::sync::watch::channel(false);
         Ok(GatewayState {
             store: Arc::new(store),
@@ -233,6 +238,10 @@ pub fn error_response(
 /// Map a [`GatewayError`] onto a client-facing response.
 pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Response {
     let (status, kind) = match &err {
+        // The data plane's inbound auth: no placeholder key, or not one of
+        // ours. 401 so an agent client reports an auth problem instead of
+        // retrying a request the gateway will never forward.
+        GatewayError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
         GatewayError::NoBinding(_) => (StatusCode::SERVICE_UNAVAILABLE, "no_provider_bound"),
         // 429 rather than 503: the provider exists and works, the caller has
         // simply spent what it was allowed to for this period.
@@ -247,7 +256,14 @@ pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Resp
         }
         GatewayError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io_error"),
     };
-    tracing::error!(error = %err, status = %status, "request failed");
+    // A rejected caller is not a gateway fault, and a misconfigured agent can
+    // retry this endpoint every few seconds — logging each refusal as an error
+    // would bury the failures that are ours.
+    if status.is_client_error() {
+        tracing::warn!(error = %err, status = %status, "request refused");
+    } else {
+        tracing::error!(error = %err, status = %status, "request failed");
+    }
     error_response(inbound, status, kind, &err.to_string())
 }
 

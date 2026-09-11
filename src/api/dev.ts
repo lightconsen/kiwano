@@ -540,9 +540,25 @@ let idSeq = 100;
 /** Dev-only: flips after the first syncHub() so the conditional path is visible. */
 let devHubSynced = false;
 
-// Dev storage for rotating keys (spec §4.1 P1 multi-key rotation)
-type DevApiKeyRow = ApiKeyEntry & { provider_id: string };
+// Dev storage for rotating keys (spec §4.1 P1 multi-key rotation).
+// Keeps the raw key the way the database does, and masks on the way out — the
+// same contract the Rust side enforces, so the UI cannot come to depend on
+// reading a real key here and break against the desktop build.
+type DevApiKeyRow = Omit<ApiKeyEntry, "masked"> & { provider_id: string; key: string };
 const devApiKeys: DevApiKeyRow[] = [];
+
+/** Mirrors `mask_key` in src-tauri/src/vm.rs. */
+function maskKey(key: string): string {
+  const n = key.length;
+  if (n > 12) return `${key.slice(0, 6)}…${key.slice(-4)}`;
+  if (n > 4) return `…${key.slice(-4)}`;
+  return "•".repeat(n);
+}
+
+const toApiKeyEntry = ({ provider_id: _p, key, ...rest }: DevApiKeyRow): ApiKeyEntry => ({
+  ...rest,
+  masked: maskKey(key),
+});
 
 async function delay(ms = 120) {
   return new Promise((r) => setTimeout(r, ms));
@@ -1085,21 +1101,21 @@ export const devApi: KiwanoApi = {
 
   async listApiKeys(providerId: string): Promise<ApiKeyEntry[]> {
     await delay();
-    return devApiKeys.filter((k) => k.provider_id === providerId);
+    return devApiKeys.filter((k) => k.provider_id === providerId).map(toApiKeyEntry);
   },
 
   async addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry> {
     await delay();
-    const row: ApiKeyEntry & { provider_id: string } = {
+    const row: DevApiKeyRow = {
       id: ++idSeq,
       provider_id: providerId,
-      api_key: apiKey.trim(),
+      key: apiKey.trim(),
       label: label?.trim() || undefined,
       enabled: true,
       created_at: new Date().toISOString(),
     };
     devApiKeys.push(row);
-    return row;
+    return toApiKeyEntry(row);
   },
 
   async deleteApiKey(id: number): Promise<void> {

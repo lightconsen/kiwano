@@ -406,7 +406,8 @@ export interface ConfigShareReport {
 /** A Provider's rotating keys (spec §4.1 P1 multi-key rotation; the primary key lives on the Provider) */
 export interface ApiKeyEntry {
   id: number;
-  api_key: string;
+  /** Display form (e.g. `sk-liv…mnop`) — the backend never sends the key itself. */
+  masked: string;
   label?: string;
   enabled: boolean;
   created_at: string;

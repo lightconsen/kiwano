@@ -342,7 +342,6 @@ export default function AddProviderModal({
     return out;
   };
 
-  const maskKey = (k: string) => (k.length > 12 ? `${k.slice(0, 6)}…${k.slice(-4)}` : k);
 
   const addPollKey = async () => {
     if (!edit || !newKey.trim() || keyBusy) return;
@@ -924,7 +923,7 @@ export default function AddProviderModal({
                       className="flex h-8 items-center justify-between rounded-md border border-line px-2.5"
                     >
                       <span className="flex items-center gap-2">
-                        <span className="font-mono text-[11.5px]">{maskKey(k.api_key)}</span>
+                        <span className="font-mono text-[11.5px]">{k.masked}</span>
                         {k.label && <span className="text-[10.5px] text-mut">{k.label}</span>}
                       </span>
                       <Button

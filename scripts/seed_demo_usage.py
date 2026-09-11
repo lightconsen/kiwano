@@ -23,9 +23,15 @@ rows are spread over the local hours already elapsed, so the hourly "today"
 chart has a shape to draw — and so none of them can land after "now".
 
 Usage:
-  cp ~/.kiwano/kiwano.db /tmp/kiwano-demo.db   # keeps providers + settings
-  scripts/seed_demo_usage.py /tmp/kiwano-demo.db --clear
-  KIWANO_DB_PATH=/tmp/kiwano-demo.db pnpm tauri dev
+  # Keep the scratch copy out of /tmp: macOS clears it on every boot, and the
+  # app then starts against a file that no longer exists — SQLite creates an
+  # empty one, which reads as "all my providers and agents vanished".
+  #
+  # `.backup` rather than `cp`: the live database has a WAL, and copying the
+  # `.db` alone silently gives you a snapshot that predates it.
+  sqlite3 ~/.kiwano/kiwano.db ".backup $HOME/.kiwano/demo.db"   # keeps providers + settings
+  scripts/seed_demo_usage.py ~/.kiwano/demo.db --clear
+  KIWANO_DB_PATH=~/.kiwano/demo.db pnpm tauri dev
 """
 import argparse
 import json

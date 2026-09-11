@@ -146,17 +146,17 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
                 match sidecar::spawn() {
                     Ok(c) => {
                         if respawns == 1 {
-                            println!("kiwano: gateway respawned by watchdog");
+                            tracing::info!("gateway respawned by watchdog");
                         } else {
-                            eprintln!(
-                                "kiwano: gateway respawned again ({respawns} in a row); \
-                                 backing off to {}s",
-                                watchdog_delay(respawns).as_secs()
+                            tracing::warn!(
+                                respawns,
+                                backoff_secs = watchdog_delay(respawns).as_secs(),
+                                "gateway respawned again; backing off"
                             );
                         }
                         *child = Some(c);
                     }
-                    Err(e) => eprintln!("kiwano: watchdog respawn failed: {e}"),
+                    Err(e) => tracing::error!(error = %e, "watchdog respawn failed"),
                 }
             }
         }
@@ -188,15 +188,12 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
                 // Already current: the manifest sha matched the cache.
                 Ok(r) => {
                     if !r.unchanged {
-                        println!("kiwano: hub catalog synced ({} providers)", r.fetched);
+                        tracing::info!(providers = r.fetched, "hub catalog synced");
                     }
                     break;
                 }
                 Err(e) if attempt == RETRY_SECS.len() - 1 => {
-                    eprintln!(
-                        "kiwano: hub sync failed after {} attempts: {e}",
-                        attempt + 1
-                    )
+                    tracing::warn!(attempts = attempt + 1, error = %e, "hub sync failed")
                 }
                 Err(_) => {} // another attempt is coming
             }
@@ -206,13 +203,14 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
         // daemon so its in-memory table is rebuilt from the mirror.
         match pricing::seed_model_pricing(&state.aux) {
             Ok(r) if r.seeded > 0 => {
-                println!(
-                    "kiwano: hub model pricing seeded v{} ({} rows changed)",
-                    r.version, r.seeded
+                tracing::info!(
+                    version = r.version,
+                    rows = r.seeded,
+                    "hub model pricing seeded"
                 );
                 sidecar::notify_reload(state.admin_port);
             }
-            Err(e) => eprintln!("kiwano: model pricing seed failed: {e}"),
+            Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
             _ => {}
         }
     });
@@ -781,7 +779,28 @@ fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// ── Logs ──
+
+/// Reveal the log directory in the OS file manager. The path follows the
+/// database, which only this side knows, so the UI asks rather than guesses.
+#[tauri::command]
+fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = kiwano_gateway::logging::log_dir(&db_path());
+    // It may not exist yet — nothing has been logged before the directory is
+    // made, and an empty folder explains itself better than an error does.
+    let _ = std::fs::create_dir_all(&dir);
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() {
+    // Before anything that can fail, and before the webview: a packaged app is
+    // started by launchd, where stdout goes to /dev/null, so without this the
+    // only way to read what happened is to run it from a terminal.
+    kiwano_gateway::logging::init(&db_path());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -803,16 +822,16 @@ pub fn run() {
             // watchdog then keeps it alive for the GUI's lifetime.
             let already_running = sidecar::ping_admin(admin_port);
             let child = if already_running {
-                println!("kiwano: adopting running gateway on admin :{admin_port}");
+                tracing::info!(port = admin_port, "adopting running gateway");
                 None
             } else {
                 match sidecar::spawn() {
                     Ok(c) => {
-                        println!("kiwano: gateway sidecar spawned");
+                        tracing::info!("gateway sidecar spawned");
                         Some(c)
                     }
                     Err(e) => {
-                        eprintln!("kiwano: gateway sidecar unavailable: {e}");
+                        tracing::error!(error = %e, "gateway sidecar unavailable");
                         None
                     }
                 }
@@ -822,11 +841,10 @@ pub fn run() {
             // Seed the bundled model price table into model_pricing
             // (version-gated no-op after the first run).
             match pricing::seed_model_pricing(&aux) {
-                Ok(r) if !r.skipped => println!(
-                    "kiwano: model pricing seeded v{} ({} rows changed)",
-                    r.version, r.seeded
-                ),
-                Err(e) => eprintln!("kiwano: model pricing seed failed: {e}"),
+                Ok(r) if !r.skipped => {
+                    tracing::info!(version = r.version, rows = r.seeded, "model pricing seeded")
+                }
+                Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
                 _ => {}
             }
             app.manage(AppState {
@@ -922,6 +940,7 @@ pub fn run() {
             get_pending_update,
             pricing::get_currency_meta,
             get_plan_quota,
+            open_log_folder,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: intercept CloseRequested and hide the window

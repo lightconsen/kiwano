@@ -211,6 +211,18 @@ export default function Settings() {
           <Row label="Minimize to tray on close">
             <Switch checked={s.close_to_tray} onCheckedChange={(v) => patch({ close_to_tray: v })} />
           </Row>
+          {/* The app's own trail — sidecar starts, sync failures, panics — which
+              a packaged app has nowhere to print. */}
+          <Row label="Logs" note="Errors and warnings, one file, seven days">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-[11px]"
+              onClick={() => api.openLogFolder().catch(() => {})}
+            >
+              Open folder
+            </Button>
+          </Row>
         </div>
       </div>
 

@@ -10,6 +10,7 @@ pub mod error;
 pub mod forward;
 pub mod limits;
 pub mod log_capture;
+pub mod logging;
 pub mod meter;
 pub mod plan_quota;
 pub mod protocol;

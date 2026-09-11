@@ -36,10 +36,7 @@ pub fn spawn() -> std::io::Result<Child> {
         ));
     };
     Command::new(&bin).spawn().inspect_err(|e| {
-        eprintln!(
-            "kiwano: cannot spawn gateway sidecar {}: {e}",
-            bin.display()
-        );
+        tracing::error!(binary = %bin.display(), error = %e, "cannot spawn gateway sidecar");
     })
 }
 

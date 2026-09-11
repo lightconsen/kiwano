@@ -42,16 +42,13 @@ fn db_path_from_env() -> PathBuf {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let data_port = env_port("KIWANO_DATA_PORT", DEFAULT_DATA_PORT);
     let admin_port = env_port("KIWANO_ADMIN_PORT", DEFAULT_ADMIN_PORT);
     let db_path = db_path_from_env();
+
+    // Logging first, and beside the database: everything below can fail, and a
+    // packaged app has no stdout to fail onto.
+    kiwano_gateway::logging::init(&db_path);
 
     if let Some(dir) = db_path.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {

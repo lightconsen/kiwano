@@ -166,6 +166,8 @@ export const tauriApi: KiwanoApi = {
 
   clearRequestLogs: () => invoke<void>("clear_request_logs"),
 
+  openLogFolder: () => invoke<void>("open_log_folder"),
+
   getFooterStats: () => invoke<FooterStats>("get_footer_stats"),
 
   checkAppUpdate: () => invoke<UpdateInfo | null>("check_app_update"),

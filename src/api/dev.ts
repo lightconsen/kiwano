@@ -1296,6 +1296,11 @@ export const devApi: KiwanoApi = {
     return { rows_written: matchingLogs(filter).length, truncated: false };
   },
 
+  async openLogFolder(): Promise<void> {
+    // The browser mock has no filesystem to reveal.
+    await delay();
+  },
+
   async clearRequestLogs(): Promise<void> {
     await delay();
     requestLogs.length = 0;

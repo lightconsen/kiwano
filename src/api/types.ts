@@ -627,6 +627,8 @@ export interface KiwanoApi {
   exportRequestLogs(path: string, filter?: RequestLogFilter): Promise<RequestLogExport>;
   /** Delete every request-log row (bodies cascade) */
   clearRequestLogs(): Promise<void>;
+  /** Reveal the app's log directory in the OS file manager */
+  openLogFolder(): Promise<void>;
   getFooterStats(): Promise<FooterStats>;
   /** Check GitHub Releases for a newer version; null = up to date */
   checkAppUpdate(): Promise<UpdateInfo | null>;

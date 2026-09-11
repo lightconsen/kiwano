@@ -835,7 +835,13 @@ mod tests {
     }
 
     /// Kills the stub even when an assertion panics.
+    ///
+    /// Gated with the test that uses it, not merely placed next to it: a
+    /// struct whose only constructor sits behind `#[cfg(unix)]` is dead code
+    /// everywhere else, and `-D warnings` makes dead code a build failure.
+    #[cfg(unix)]
     struct StubGuard(std::process::Child);
+    #[cfg(unix)]
     impl Drop for StubGuard {
         fn drop(&mut self) {
             let _ = self.0.kill();

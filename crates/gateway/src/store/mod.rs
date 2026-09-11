@@ -4,6 +4,9 @@
 //! provider/binding configuration, the gateway reads it and writes usage.
 //! The database file is opened in WAL mode so both processes can share it;
 //! `busy_timeout` guards against transient cross-process lock contention.
+//!
+//! The file is also the home of every upstream credential (see `Provider`), so
+//! it is owner-only by construction — see `harden_permissions`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -773,6 +776,52 @@ pub fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
 
+/// Restrict the database and its directory to the owning user.
+///
+/// `providers.api_key` is the upstream credential, and it is written to disk in
+/// the clear (see the field's own note: a keychain is planned, not done). The
+/// realistic leak is not a determined local attacker — anyone who can read a
+/// file the app must decrypt unattended can read the key too — but the mundane
+/// ones: another account on a shared machine, a backup or sync client that
+/// sweeps `$HOME`, a support bundle. 0700/0600 costs nothing and closes them.
+///
+/// The directory mode carries most of the weight: `~/.kiwano` also holds
+/// `backups/` (the agent configs takeover replaced, credentials included) and
+/// `logs/`, and 0700 stops traversal into all of it whatever the files inside
+/// are set to. The per-file modes are the second line — they survive someone
+/// loosening the directory, and cover a database placed outside it entirely.
+///
+/// Best-effort by design: a filesystem without POSIX modes is not a reason to
+/// refuse to start. Note the directory chmod follows `KIWANO_DB_PATH`, so a
+/// database pointed somewhere unusual narrows that directory too.
+fn harden_permissions(db_path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let owner_only = |path: &Path, mode: u32| {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+        };
+
+        if let Some(dir) = db_path.parent() {
+            owner_only(dir, 0o700);
+        }
+        owner_only(db_path, 0o600);
+        // Both exist by now — `journal_mode = WAL` above created them — and
+        // both hold copies of every credential row until the next checkpoint.
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = PathBuf::from(format!("{}{suffix}", db_path.display()));
+            if sidecar.exists() {
+                owner_only(&sidecar, 0o600);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = db_path;
+    }
+}
+
 /// Thin handle around a SQLite connection (WAL, shared with the Tauri app).
 pub struct Store {
     conn: Mutex<Connection>,
@@ -789,6 +838,10 @@ impl Store {
             path: Some(path.as_ref().to_path_buf()),
         };
         store.configure_and_migrate()?;
+        // After migrate, not before: WAL mode is what creates -wal and -shm,
+        // and they carry the same credential rows as the database until the
+        // next checkpoint.
+        harden_permissions(path.as_ref());
         Ok(store)
     }
 
@@ -2035,6 +2088,34 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open(dir.path().join("kiwano.db")).expect("open store");
         (dir, store)
+    }
+
+    /// The database carries every upstream credential, and `-wal`/`-shm` carry
+    /// copies of those rows until the next checkpoint.
+    #[cfg(unix)]
+    #[test]
+    fn open_restricts_the_database_to_the_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        // tempdir() already hands back 0700, so loosen it first — otherwise
+        // the directory assertion would pass without the code under test.
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.path().join("kiwano.db");
+        let _store = Store::open(&path).expect("open store");
+
+        let mode =
+            |p: &std::path::Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o777;
+
+        assert_eq!(mode(dir.path()), 0o700, "data directory");
+        assert_eq!(mode(&path), 0o600, "database");
+        // Both are created by journal_mode=WAL above, so both must be present
+        // — the assertion is what would catch hardening running too early.
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+            assert!(sidecar.exists(), "{suffix} missing");
+            assert_eq!(mode(&sidecar), 0o600, "sidecar {suffix}");
+        }
     }
 
     #[test]

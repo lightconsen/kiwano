@@ -19,7 +19,25 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
     Router::new()
         .route("/status", get(status))
         .route("/reload", post(reload))
+        .route("/shutdown", post(shutdown))
         .with_state(state)
+}
+
+/// Stop this process.
+///
+/// The app calls this when the gateway answering :8310 is not the version it
+/// ships. The daemon outlives the GUI on purpose, so the one it finds is
+/// usually not its child and there is no handle to kill — and killing it
+/// outright would skip the store's write-ahead-log checkpoint, which is the
+/// whole reason this plane exists rather than a signal. Loopback-bound like
+/// everything else here; `POST /reload` is the more powerful endpoint anyway,
+/// since it reroutes traffic through a provider of the caller's choosing.
+async fn shutdown(State(state): State<Arc<GatewayState>>) -> Response {
+    tracing::info!("shutdown requested on the admin plane");
+    state.request_shutdown();
+    // Returns before the process exits: axum's graceful shutdown stops
+    // accepting and then waits for in-flight responses to finish.
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn status(State(state): State<Arc<GatewayState>>) -> Response {
@@ -180,6 +198,37 @@ mod tests {
         assert_eq!(v["routes"][0]["agent"], "claude");
         assert_eq!(v["routes"][0]["primary_provider"], "p-ant");
         assert_eq!(v["routes"][0]["strategy"], "single");
+    }
+
+    /// The app replaces a gateway it adopted rather than spawned by asking it
+    /// to stop — the daemon is not its child, so there is no handle to kill.
+    #[tokio::test]
+    async fn shutdown_flips_the_stop_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        // Subscribed before the request: `watch` only delivers to receivers
+        // that already exist, and `main`'s serve loops are that receiver.
+        let mut rx = state.shutdown_rx();
+        assert!(!*rx.borrow_and_update(), "starts running");
+
+        let v = body_json(
+            admin_plane_router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/shutdown")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(v["ok"], true);
+
+        rx.changed().await.expect("stop signal delivered");
+        assert!(*rx.borrow_and_update(), "stop requested");
     }
 
     #[tokio::test]

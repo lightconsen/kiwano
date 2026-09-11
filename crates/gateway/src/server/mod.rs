@@ -46,6 +46,11 @@ pub struct GatewayState {
     limits: RwLock<Arc<crate::limits::LimitState>>,
     pub started_at: Instant,
     pub version: &'static str,
+    /// Flipped by the signal handler and by `POST /shutdown`. Owned here so the
+    /// admin plane can request a graceful stop — the app needs that to replace
+    /// a gateway left over from another version, and a daemon it adopted is not
+    /// its child, so there is no handle to kill.
+    shutdown: tokio::sync::watch::Sender<bool>,
 }
 
 /// The price table to serve from: the GUI-seeded `model_pricing` mirror when it
@@ -75,6 +80,7 @@ impl GatewayState {
         // than being served in the window before the task's first tick.
         let pricing = resolve_pricing(&store);
         let limits = crate::limits::evaluate(&store);
+        let (shutdown, _) = tokio::sync::watch::channel(false);
         Ok(GatewayState {
             store: Arc::new(store),
             http,
@@ -86,7 +92,20 @@ impl GatewayState {
             limits: RwLock::new(Arc::new(limits)),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
+            shutdown,
         })
+    }
+
+    /// A receiver the serve loops await; resolves once a stop is requested.
+    /// `subscribe` rather than a stored receiver so `main` needs no plumbing.
+    pub fn shutdown_rx(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.shutdown.subscribe()
+    }
+
+    /// Ask both planes to stop. Idempotent — a second request is still fine,
+    /// since the serve loops may not have dropped their receivers yet.
+    pub fn request_shutdown(&self) {
+        let _ = self.shutdown.send(true);
     }
 
     /// Current price-table snapshot (cheap clone; bundled data is static but

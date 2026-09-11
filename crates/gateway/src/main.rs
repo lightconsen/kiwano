@@ -150,18 +150,25 @@ async fn main() {
     // connection is what checkpoints the write-ahead log back into the
     // database, and a process the OS terminates outright never runs that — the
     // database is then left with a WAL beside it. Being signalled is the normal
-    // way this daemon stops (the app sends one on quit, `kill` sends one by
-    // hand), so `cp`ing the `.db` alone routinely yielded a stale snapshot.
-    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
-    tokio::spawn(async move {
-        shutdown_signal().await;
-        tracing::info!("shutdown signal received");
-        let _ = stop_tx.send(true);
-    });
+    // way this daemon stops (`kill` sends one by hand), so `cp`ing the `.db`
+    // alone routinely yielded a stale snapshot.
+    //
+    // The same channel carries `POST /shutdown`, which is how the app replaces
+    // a gateway it adopted rather than spawned — see `GatewayState::request_shutdown`.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            shutdown_signal().await;
+            tracing::info!("shutdown signal received");
+            state.request_shutdown();
+        });
+    }
 
     let served = tokio::try_join!(
-        axum::serve(data_listener, data_app).with_graceful_shutdown(wait_for_stop(stop_rx.clone())),
-        axum::serve(admin_listener, admin_app).with_graceful_shutdown(wait_for_stop(stop_rx)),
+        axum::serve(data_listener, data_app)
+            .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
+        axum::serve(admin_listener, admin_app)
+            .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
     );
     if let Err(e) = served {
         tracing::error!(error = %e, "gateway terminated");

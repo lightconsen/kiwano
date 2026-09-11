@@ -67,6 +67,13 @@ fn after_mutation(state: &State<AppState>) {
 // kill it on exit, must adopt an already-running instance at startup, and a
 // watchdog must respawn it after a crash. `/status` pings (below) are the
 // reconnect mechanism.
+//
+// Startup treats a version mismatch as a replace (see `sidecar::startup_action`).
+// The watchdog below does not: its adopt paths only ask whether the admin port
+// answers. That is deliberate — it ticks every few seconds, and killing a
+// process because one `/status` call came back odd is worse than running a
+// gateway a version behind. Skew cannot appear mid-session anyway: the port is
+// held by whatever this app spawned or adopted at startup.
 
 /// Watchdog decision for one tick, factored out for testing.
 #[derive(Debug, PartialEq, Eq)]
@@ -817,15 +824,44 @@ pub fn run() {
             let data_port = env_port("KIWANO_DATA_PORT", 8317);
             let admin_port = env_port("KIWANO_ADMIN_PORT", 8310);
 
-            // Sidecar lifecycle (tech.md §4.6): adopt an already-running
-            // daemon first; only spawn when the admin port is silent. The
-            // watchdog then keeps it alive for the GUI's lifetime.
-            let already_running = sidecar::ping_admin(admin_port);
-            let child = if already_running {
-                tracing::info!(port = admin_port, "adopting running gateway");
-                None
-            } else {
-                match sidecar::spawn() {
+            // Sidecar lifecycle (tech.md §4.6): adopt an already-running daemon
+            // — but only one of our own version. The daemon deliberately
+            // outlives the GUI, so an upgrade meets its predecessor still
+            // holding the port, and the two share a SQLite file whose schema
+            // only one of them may understand. `gateway_status` doubles as the
+            // liveness probe here: None means nothing is answering.
+            let ours = env!("CARGO_PKG_VERSION");
+            let status = sidecar::gateway_status(admin_port);
+            let child = match sidecar::startup_action(status.as_ref(), ours) {
+                sidecar::StartupAction::Adopt => {
+                    tracing::info!(
+                        port = admin_port,
+                        version = ours,
+                        "adopting running gateway"
+                    );
+                    None
+                }
+                sidecar::StartupAction::Restart => {
+                    let running = status
+                        .as_ref()
+                        .and_then(|s| s.get("version"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    tracing::warn!(
+                        running,
+                        ours,
+                        port = admin_port,
+                        "the running gateway is a different version; replacing it"
+                    );
+                    match sidecar::restart(admin_port) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            tracing::error!(error = %e, "could not replace the running gateway");
+                            None
+                        }
+                    }
+                }
+                sidecar::StartupAction::Spawn => match sidecar::spawn() {
                     Ok(c) => {
                         tracing::info!("gateway sidecar spawned");
                         Some(c)
@@ -834,7 +870,7 @@ pub fn run() {
                         tracing::error!(error = %e, "gateway sidecar unavailable");
                         None
                     }
-                }
+                },
             };
 
             let ui = vm::ui_settings(&aux);

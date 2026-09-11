@@ -1,6 +1,6 @@
 // Models: Kiwano Hub cloud catalog as a sortable table (desktop-tool density)
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, Gauge, Gift, Layers, Search, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Boxes, Check, Gauge, Gift, Layers, RefreshCw, Search, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -318,10 +318,42 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   // Catalog row clicked → model detail dialog
   const [detail, setDetail] = useState<CatalogEntry | null>(null);
+  // Hub refresh: "busy" spins the glyph, "done" flashes a check. The header
+  // bar has no room for a toast, so success is the icon and only a failure
+  // takes up words.
+  const [hub, setHub] = useState<"idle" | "busy" | "done">("idle");
+  const [hubErr, setHubErr] = useState<string | null>(null);
 
   useEffect(() => {
     api.listCatalog().then(setCatalog);
   }, []);
+
+  /** Pull the Hub catalog into the local cache, then re-read it. The sync is
+      conditional on the Hub's side (manifest sha): a Hub that has not changed
+      is still a successful check, it just skips the download. */
+  const refreshFromHub = () => {
+    setHub("busy");
+    setHubErr(null);
+    api
+      .syncHub()
+      .then(() => api.listCatalog())
+      .then((c) => {
+        setCatalog(c);
+        setHub("done");
+      })
+      .catch((e) => {
+        setHubErr(String(e));
+        setHub("idle");
+      });
+  };
+
+  // The check is an acknowledgement, not a state to read: fall back to the
+  // refresh glyph. An error has no such timer — it holds until the next try.
+  useEffect(() => {
+    if (hub !== "done") return;
+    const t = setTimeout(() => setHub("idle"), 1600);
+    return () => clearTimeout(t);
+  }, [hub]);
 
   const filtered = useMemo(() => {
     if (!catalog) return [];
@@ -361,14 +393,42 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
             </button>
           ))}
         </div>
-        <div className="relative ml-auto">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mut" />
-          <input
-            className="h-7 w-[190px] rounded-md border border-line bg-surface pl-7 pr-2 text-[12px]"
-            placeholder="Search providers…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+        <div className="ml-auto flex items-center gap-2">
+          {/* A failed sync is worth the room it takes; the search box shifts
+              left to make it, which is the point. */}
+          {hubErr && (
+            <span
+              className="max-w-[220px] truncate text-[11px]"
+              style={{ color: "var(--red)" }}
+              title={hubErr}
+            >
+              {hubErr}
+            </span>
+          )}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mut" />
+            <input
+              className="h-7 w-[190px] rounded-md border border-line bg-surface pl-7 pr-2 text-[12px]"
+              placeholder="Search providers…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 flex-none px-0 text-mut"
+            aria-label="Refresh from Hub"
+            title="Fetch the latest catalog from Kiwano Hub"
+            disabled={hub === "busy"}
+            onClick={refreshFromHub}
+          >
+            {hub === "done" ? (
+              <Check className="h-3.5 w-3.5" style={{ color: "var(--kiwi)" }} />
+            ) : (
+              <RefreshCw className={`h-3.5 w-3.5${hub === "busy" ? " animate-spin" : ""}`} />
+            )}
+          </Button>
         </div>
       </div>
       <table className="w-full border-collapse">

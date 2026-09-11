@@ -19,6 +19,14 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A refresh button on Models**, beside the search box: it re-syncs the catalog
+  from the Hub, so a provider published there since launch shows up without a
+  restart. The icon spins while it checks and a failure reports itself in red;
+  the sync is conditional on the Hub's side, so an unchanged catalog is still a
+  completed check.
+
 ## [0.1.6] - 2026-09-11
 
 ### Added

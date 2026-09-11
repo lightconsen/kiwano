@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-11
+
 ### Added
 
 - **Light mode**, alongside dark.
@@ -47,6 +49,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 - **Licence: Apache-2.0 → GPL-3.0-or-later.**
 - Costs and limits are converted with the Hub's published rates, not a snapshot
   compiled into the binary.
+
+### Removed
+
+- **Two claims about privacy that were not true.** An *Anonymous usage reporting*
+  switch, backed by no collection at all — the setting was declared and read by
+  nothing, so it promised a pipeline that did not exist and implied the choice
+  mattered. And "API keys never leave your device", when a key goes to the
+  provider on every request, which is the point of the app. Settings now says
+  what actually happens: nothing about your usage is sent, the only outbound
+  requests are the Hub catalog and the update check, and a key reaches the
+  provider it belongs to and no one else.
 
 ### Fixed
 

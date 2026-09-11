@@ -21,24 +21,38 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Security
 
-- **The gateway's loopback planes no longer accept any local process.** A
-  request to the data plane (:8317) whose API key was missing or unknown used to
-  be attributed to an agent from the URL path and forwarded upstream on the
-  operator's own credentials — so any program on the machine could spend through
-  their providers. Such a request is now refused with 401 and is never
-  forwarded; the only keys that route are the `kw-ag-…` placeholder keys
-  Kiwano mints for agents it has taken over, and an agent that was not taken
-  over talks to its real upstream directly and never touches the gateway.
-  The admin plane (:8310) requires a token on `POST /reload` and
-  `POST /shutdown`. The gateway mints it on first run and both sides read it
-  from the database they already share, so there is nothing to configure.
-  `GET /status` still answers without it — the app's liveness and version
-  checks have to work against a gateway from an older build — but an
-  unauthenticated caller now gets only the gateway's identity, version and
-  uptime, not the route table, provider ids or blocked reasons. Both planes
-  stay loopback-bound: the token stops local processes, the bind stops the
-  network.
-- **Credentials are stripped out of the request log.** Headers were already
+- **The data plane no longer forwards a request it cannot attribute.** A
+  request to :8317 whose API key was missing or unknown used to be attributed
+  to an agent from the URL path and forwarded upstream on the operator's own
+  credentials — so any program on the machine could spend through their
+  providers. Such a request is now refused with 401 and is never forwarded; the
+  only keys that route are the `kw-ag-…` placeholder keys Kiwano mints for
+  agents it has taken over, and an agent that was not taken over talks to its
+  real upstream directly and never touches the gateway.
+- **The admin plane is no longer a port at all.** It was loopback TCP on :8310,
+  where any local process could reach it. It is now a unix domain socket
+  (`~/.kiwano/admin.sock` — 0700 directory, 0600 socket) or, on Windows, a
+  per-user named pipe with an explicit ACL, so only a process running as you can
+  reach it. `POST /reload` and `POST /shutdown` still require the token the
+  gateway mints for itself on first run, but as a second layer rather than the
+  only one: anything that can open the socket can also read the token out of the
+  database, so it is the endpoint's permissions that keep other users out, and
+  the token is what still applies if the two ever come apart. `GET /status`
+  still answers without it — the app's liveness and version checks have to work
+  against a gateway from an older build — but an unauthenticated caller gets
+  only the gateway's identity, version and uptime, not the route table, provider
+  ids or blocked reasons.
+- **Credentials are stripped out of the request log.** The log keeps a row for
+  every request the gateway routes, and several of its columns took whatever
+  arrived. Query-string parameters were stored verbatim, so a `?key=…` — the
+  shape several providers use — sat in the clear in a column the CSV export
+  writes out. Headers were redacted only if their name was one of five, so a
+  credential under any other name went through. And the upstream error text, the
+  response header block, and the URL inside a transport-failure message each
+  carried a copy of the query back in. All of them now go through one filter: a
+  parameter or header whose name means "credential" has its value replaced, and
+  the URL in an error message is the redacted one.
+- **Credentials are stripped out of the body too.** Headers were already
   redacted, but the body was stored exactly as it arrived — so a key pasted into
   a prompt was written to the database in the clear and shown in the Logs detail
   panel. Bodies are now scrubbed: values under a secret-shaped key name, and
@@ -46,8 +60,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   prefixes, JWTs, and Kiwano's own `kw-ag-…` placeholders). Responses are
   scrubbed the same way — a provider that names the key it rejected puts it in
   the log by the same route a prompt would. It is a filter over what it
-  recognises, not a detector — a credential in a shape it does not know is
-  still stored as it was.
+  recognises, not a detector: a credential in a shape it does not know is still
+  stored as it was.
 - **The database is owner-only on Windows too.** The Unix hardening (0700
   directory, 0600 file) has always been Unix-only, leaving the database that
   holds every provider key with inherited permissions on Windows. It now gets a
@@ -88,6 +102,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **The CSV export can include request and response bodies.** Bodies are always
+  recorded — that is the point of the log — but a file you might share should not
+  carry them unless you say so. The export asks; off, the file is the same 27
+  metadata columns as before, and on, the two body columns are appended and the
+  header row grows with them. (The setting that used to govern this was
+  unreachable and only half-wired: turning it off silenced the request and left
+  the response.)
 - **A gateway left over from another version is replaced at startup.** The
   daemon deliberately outlives the app, so an upgrade can meet its predecessor
   still holding the port. A gateway whose version is not the app's own is now

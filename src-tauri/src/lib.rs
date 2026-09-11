@@ -92,9 +92,24 @@ fn watchdog_decision(child_exited: Option<bool>, admin_alive: bool) -> WatchdogA
     }
 }
 
+/// How long to wait before the next tick. Five seconds while things are fine;
+/// a gateway that cannot start (port taken, database locked, binary missing)
+/// would otherwise be respawned every five seconds for as long as the app runs,
+/// each attempt printing its own line. A healthy tick clears the streak, so a
+/// one-off crash still comes back promptly.
+fn watchdog_delay(consecutive_respawns: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(match consecutive_respawns {
+        0 => 5,
+        1 => 15,
+        2 => 45,
+        _ => 120,
+    })
+}
+
 fn spawn_watchdog(handle: tauri::AppHandle) {
+    let mut respawns = 0u32;
     std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        std::thread::sleep(watchdog_delay(respawns));
         let Some(state) = handle.try_state::<AppState>() else {
             return;
         };
@@ -108,8 +123,10 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
         };
         let admin_alive = sidecar::ping_admin(state.admin_port);
         match watchdog_decision(child_exited, admin_alive) {
-            WatchdogAction::None => {}
+            // Serving: whatever streak there was is over.
+            WatchdogAction::None => respawns = 0,
             WatchdogAction::ClearChild => {
+                respawns = 0;
                 if let Ok(mut child) = state.child.lock() {
                     *child = None;
                 }
@@ -122,11 +139,21 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
                 };
                 if sidecar::ping_admin(state.admin_port) {
                     *child = None;
+                    respawns = 0;
                     continue;
                 }
+                respawns += 1;
                 match sidecar::spawn() {
                     Ok(c) => {
-                        println!("kiwano: gateway respawned by watchdog");
+                        if respawns == 1 {
+                            println!("kiwano: gateway respawned by watchdog");
+                        } else {
+                            eprintln!(
+                                "kiwano: gateway respawned again ({respawns} in a row); \
+                                 backing off to {}s",
+                                watchdog_delay(respawns).as_secs()
+                            );
+                        }
                         *child = Some(c);
                     }
                     Err(e) => eprintln!("kiwano: watchdog respawn failed: {e}"),
@@ -917,7 +944,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{watchdog_decision, WatchdogAction};
+    use super::{watchdog_decision, watchdog_delay, WatchdogAction};
 
     #[test]
     fn watchdog_matrix() {
@@ -938,5 +965,18 @@ mod tests {
         assert_eq!(watchdog_decision(None, true), WatchdogAction::None);
         // spawn failed at startup → retry
         assert_eq!(watchdog_decision(None, false), WatchdogAction::Respawn);
+    }
+
+    #[test]
+    fn watchdog_backs_off_only_while_respawns_keep_failing() {
+        use std::time::Duration;
+        // The common case — a tick after a healthy one — stays at the base.
+        assert_eq!(watchdog_delay(0), Duration::from_secs(5));
+        // And each respawn without a healthy tick between them waits longer,
+        // up to a ceiling rather than growing without bound.
+        assert!(watchdog_delay(1) > watchdog_delay(0));
+        assert!(watchdog_delay(2) > watchdog_delay(1));
+        assert_eq!(watchdog_delay(3), watchdog_delay(50));
+        assert_eq!(watchdog_delay(50), Duration::from_secs(120));
     }
 }

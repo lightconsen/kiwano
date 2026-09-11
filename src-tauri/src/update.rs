@@ -1,5 +1,11 @@
 //! Self-update (docs/upgrade.md): check + download-and-install against the
-//! GitHub Releases manifest (`latest.json`, endpoint from tauri.conf.json).
+//! release manifest (`latest.json`, endpoints from tauri.conf.json).
+//!
+//! Endpoint order decides which host serves the bytes: the plugin keeps the
+//! first manifest that answers and downloads from the URL baked into it, never
+//! falling back afterwards. R2 is listed first because the GitHub asset URL
+//! redirects to release-assets.githubusercontent.com, which stalls for users
+//! who cannot reach it.
 //! Progress streams to the UI over `update-progress` events; install then
 //! relaunches the app. The gateway daemon outlives the GUI (lib.rs bottom
 //! comment) and is adopted back on the next launch.

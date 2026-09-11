@@ -132,6 +132,11 @@ tauri-plugin-process = "2"   # relaunch 用
 - 发布前置闸门：`verify` job 先跑与 CI 相同的 fmt / clippy / tests / 前端构建，
   不过则不进入构建——自动发布之后，这是唯一阻止「红 commit 自行发版」的关卡；
 - 镜像：安装包与 `latest.json` 同步到 R2（`hub.kiwano.cc/releases/`，文件名不带版本号）。
+- **端点顺序即下载源**：`tauri.conf.json` 的 `endpoints` 里 R2 排第一、GitHub 排第二。updater 只取
+  **第一个应答的清单**，下载地址烤死在那份清单里，**之后不再回退到另一个端点**——所以顺序决定用户
+  从哪台机器取字节。GitHub 那份的资产 URL 会 302 到 `release-assets.githubusercontent.com`，该域名
+  在国内常表现为连接建立、字节不流动（设置页进度条停在 0% 不动），R2 走 Cloudflare 可达性更好。
+  注意改动只随新版本生效：已发布版本的顺序编在二进制里，改仓库追不回来。
 
 配套：版本号目前散在 `package.json` / `tauri.conf.json` / `Cargo.toml` 三处（均为 0.1.0），
 加一个 `scripts/release.sh`（或 Makefile 目标）一次性 bump 三处 + 生成 tag，避免漂移。

@@ -42,8 +42,8 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCNkM5NTZGMUI3REI2MDcKUldRSHRuMGJiNVZzZXpzdnZzN0xaczY1cjZrVHhQbElkN0lSK0hnUmVmTHZDclE5eENUeURuQ1YK",
       "endpoints": [
-        "https://github.com/lightconsen/kiwano/releases/latest/download/latest.json",
-        "https://hub.kiwano.cc/releases/latest.json"
+        "https://hub.kiwano.cc/releases/latest.json",
+        "https://github.com/lightconsen/kiwano/releases/latest/download/latest.json"
       ]
     }
   }

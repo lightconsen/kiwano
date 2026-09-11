@@ -136,21 +136,43 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
     });
 }
 
-/// One-shot Hub sync at startup: catalog + pricing. Runs on a plain thread for
-/// the same reason `sync_hub` is not `async` (blocking reqwest). Failures are
-/// logged and nothing else — the Hub is an enhancement, and the cached or
-/// bundled data always works offline.
+/// Hub sync at startup: catalog + pricing, retried briefly so a login that
+/// beats the network does not settle for the cache. Runs on a plain thread for
+/// the same reason `sync_hub` is not `async` (blocking reqwest). Exhausting the
+/// retries is logged and nothing else — the Hub is an enhancement, and the
+/// cached or bundled data always works offline.
 fn spawn_hub_sync(handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let Some(state) = handle.try_state::<AppState>() else {
             return;
         };
         let hub_url = vm::ui_settings(&state.aux).hub_url;
-        match sync::sync_from_hub(&state.aux, &hub_url) {
-            // Already current: the manifest sha matched the cache.
-            Ok(r) if r.unchanged => {}
-            Ok(r) => println!("kiwano: hub catalog synced ({} providers)", r.fetched),
-            Err(e) => eprintln!("kiwano: hub sync failed: {e}"),
+        // Launched at login, this runs while Wi-Fi is often still associating:
+        // one attempt then leaves the catalog on whatever was cached for the
+        // rest of the session, which is indistinguishable from the Hub being
+        // down. Retry across the first minute or so instead — long enough for
+        // the network to arrive, short enough to give up quietly if it does not.
+        const RETRY_SECS: [u64; 5] = [0, 2, 6, 20, 60];
+        for (attempt, delay) in RETRY_SECS.iter().enumerate() {
+            if *delay > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(*delay));
+            }
+            match sync::sync_from_hub(&state.aux, &hub_url) {
+                // Already current: the manifest sha matched the cache.
+                Ok(r) => {
+                    if !r.unchanged {
+                        println!("kiwano: hub catalog synced ({} providers)", r.fetched);
+                    }
+                    break;
+                }
+                Err(e) if attempt == RETRY_SECS.len() - 1 => {
+                    eprintln!(
+                        "kiwano: hub sync failed after {} attempts: {e}",
+                        attempt + 1
+                    )
+                }
+                Err(_) => {} // another attempt is coming
+            }
         }
         // The Hub may have brought a newer price table. Re-run the seed (a
         // no-op when the version and content are unchanged) and reload the
@@ -171,11 +193,21 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
 
 // ── Tray / autostart (tech.md §3 P1: tray + close-to-tray + launch at login) ──
 
-/// Sync the persisted autostart setting to the OS login items (idempotent;
-/// failures are silent — realigned on next launch).
+/// Sync the persisted autostart setting to the OS login items.
+///
+/// Only writes when it actually differs. Registering a login item rewrites its
+/// plist, and macOS announces every rewrite with a "Background Items Added"
+/// notice — so calling `enable()` on a launch that is *already* launched by
+/// that item, and again on every settings save (the whole object round-trips,
+/// the field with it), turns one registration into a stream of them.
+///
+/// Failures stay silent; the next launch realigns.
 fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
     use tauri_plugin_autostart::ManagerExt;
     let mgr = app.autolaunch();
+    if mgr.is_enabled().is_ok_and(|current| current == enabled) {
+        return;
+    }
     let _ = if enabled { mgr.enable() } else { mgr.disable() };
 }
 

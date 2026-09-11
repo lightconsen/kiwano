@@ -19,6 +19,27 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fresh install now has a working gateway.** Every build up to 0.1.7 bundled
+  only the app, so on a machine that had never compiled Kiwano from source the
+  gateway daemon was simply absent: the app opened, showed the gateway as down,
+  and retried a spawn that could never succeed. The gateway is now built as part
+  of the app build and placed beside the app binary — `Contents/MacOS/` in the
+  macOS app, `usr/bin/` in the Linux packages, next to `kiwano.exe` on Windows —
+  so a first install works on a machine that has never had Kiwano on it. Anyone
+  already affected is fixed by updating: the update check runs in the app and
+  never needed the gateway.
+
+### Added
+
+- **A gateway left over from another version is replaced at startup.** The
+  daemon deliberately outlives the app, so an upgrade can meet its predecessor
+  still holding the port. A gateway whose version is not the app's own is now
+  stopped over the private control channel — the graceful path, so the
+  database's write-ahead log is checkpointed — and the bundled one takes its
+  place. A gateway that matches is still adopted untouched.
+
 ## [0.1.7] - 2026-09-11
 
 ### Added

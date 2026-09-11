@@ -82,6 +82,13 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all -- --check
 ```
 
+The app does not contain the gateway; it spawns it as a sidecar daemon, and the
+two are built and shipped together. `pnpm tauri` builds the gateway for the host
+before handing over to the CLI, so the first `pnpm tauri dev` on a clean tree
+compiles it before the frontend starts. For a cross build, name the target:
+`KIWANO_SIDECAR_TARGET=x86_64-apple-darwin pnpm tauri build`. At runtime
+`KIWANO_GATEWAY_BIN` overrides which binary the app looks for.
+
 CI runs exactly those four Rust checks on Linux and macOS, plus a frontend typecheck and build. The toolchain version is pinned in `rust-toolchain.toml` and in every workflow, so a new clippy release can't turn the build red on code nobody touched.
 
 Layout:

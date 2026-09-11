@@ -264,16 +264,24 @@ export default function RequestLogs({
   const [range, setRange] = useState<RangeId>("any");
   const [fromDate, setFromDate] = useState(todayLocalDate);
   const [toDate, setToDate] = useState(todayLocalDate);
+  const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // One filter, built in one place: the table and the export both read it, so
-  // the file can never cover a different slice from the one on screen.
+  // What the table is showing: the status tab plus the page's own filters.
   const buildFilter = (): RequestLogFilter => ({
     ...(filter === "all" ? {} : { status: filter }),
     agent,
     provider_id: providerId,
+  });
+
+  // What the file covers: the above, narrowed by the range chosen in the
+  // export dialog. Deliberately not the same slice as the table — the range
+  // belongs to the report, and asking for it up front meant committing to one
+  // before knowing what you were exporting.
+  const exportFilter = (): RequestLogFilter => ({
+    ...buildFilter(),
     ...(range === "any"
       ? {}
       : {
@@ -285,7 +293,7 @@ export default function RequestLogs({
   // The page filters change what the result set is, not just which rows of it
   // are on screen, so the pager has to go back to the start. Keyed by value
   // because the props are plain strings by the time they arrive.
-  const scope = `${agent ?? ""} ${providerId ?? ""} ${range} ${fromDate} ${toDate}`;
+  const scope = `${agent ?? ""} ${providerId ?? ""}`;
   useEffect(() => {
     setPage(1);
     setOpenId(null);
@@ -337,13 +345,14 @@ export default function RequestLogs({
         setExporting(false);
         return;
       }
-      const r = await api.exportRequestLogs(path, buildFilter());
+      const r = await api.exportRequestLogs(path, exportFilter());
       if (r.truncated) {
         setErr(
           `Capped at ${r.rows_written.toLocaleString()} rows — narrow the range for the rest.`,
         );
       } else {
         setNotice(`Exported ${r.rows_written.toLocaleString()} rows`);
+        setExportOpen(false);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -380,49 +389,6 @@ export default function RequestLogs({
             </button>
           ))}
         </div>
-        {/* The range scopes the table and the export alike: one control, one
-            truth, so the row count on screen is the row count in the file. */}
-        <div className="flex items-center gap-1.5">
-          <Select value={range} onValueChange={(v) => applyRange((v ?? "any") as RangeId)}>
-            <SelectTrigger
-              size="sm"
-              className="h-6 bg-surface text-[11px] text-mut dark:bg-surface"
-            >
-              {/* A bare <SelectValue /> renders the raw id ("any"), which
-                  reads as noise next to the status tabs. */}
-              <SelectValue>
-                {(v) => RANGES.find((r) => r.id === v)?.label ?? "Any time"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {RANGES.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {range === "custom" && (
-            <span className="flex items-center gap-1 text-[11px] text-mut">
-              <Input
-                type="date"
-                value={fromDate}
-                max={toDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="h-6 w-[112px] px-1.5 text-[11px]"
-              />
-              <span>→</span>
-              <Input
-                type="date"
-                value={toDate}
-                min={fromDate}
-                max={todayLocalDate()}
-                onChange={(e) => setToDate(e.target.value)}
-                className="h-6 w-[112px] px-1.5 text-[11px]"
-              />
-            </span>
-          )}
-        </div>
         <span className="ml-auto flex items-center gap-3 text-[11px] text-mut">
           {/* Feedback lives here rather than in a toast: a transient clip that
               fades, or the error until the next attempt. */}
@@ -433,16 +399,16 @@ export default function RequestLogs({
             variant="outline"
             size="sm"
             className="h-6 gap-1 px-2 text-[11px]"
-            disabled={!loaded || total === 0 || exporting}
-            onClick={onExport}
-            title={
-              total === 0
-                ? "Nothing to export in this slice"
-                : "Write these rows to a CSV file"
-            }
+            disabled={!loaded}
+            onClick={() => {
+              setErr(null);
+              setNotice(null);
+              setExportOpen(true);
+            }}
+            title="Choose a date range and write it to a CSV file"
           >
             <Download className="h-3 w-3" />
-            {exporting ? "Exporting…" : "Export CSV"}
+            Export CSV
           </Button>
         </span>
       </div>
@@ -521,6 +487,100 @@ export default function RequestLogs({
         )}
 
         {openLog && <LogDialog entry={openLog} onClose={() => setOpenId(null)} />}
+
+        {/* The range lives here, not in the toolbar: the table is for browsing
+            and the file is a report, and asking for the range up front made you
+            commit to one before you knew what you were exporting. */}
+        <Dialog open={exportOpen} onOpenChange={(o) => !o && setExportOpen(false)}>
+          <DialogContent className="max-w-[360px]">
+            <DialogHeader>
+              <DialogTitle className="text-[13px]">Export logs</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 px-5 pb-4 pt-1">
+              <div>
+                <div className="mb-1 text-[10px] font-medium text-mut">DATE RANGE</div>
+                <Select
+                  value={range}
+                  onValueChange={(v) => applyRange((v ?? "any") as RangeId)}
+                >
+                  <SelectTrigger className="w-full bg-surface2 text-[12px] dark:bg-surface2">
+                    <SelectValue>
+                      {(v) => RANGES.find((r) => r.id === v)?.label ?? "All time"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RANGES.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {range === "custom" && (
+                <div className="flex items-center gap-2 text-[11px] text-mut">
+                  <Input
+                    type="date"
+                    value={fromDate}
+                    max={toDate}
+                    onChange={(e) => {
+                      setFromDate(e.target.value);
+                      // The native calendar stays open once a day is picked,
+                      // and there is nothing left to do in it — close it rather
+                      // than making the reader dismiss it by hand.
+                      e.target.blur();
+                    }}
+                    className="h-8 flex-1 text-[11px]"
+                  />
+                  <span>→</span>
+                  <Input
+                    type="date"
+                    value={toDate}
+                    min={fromDate}
+                    max={todayLocalDate()}
+                    onChange={(e) => {
+                      setToDate(e.target.value);
+                      e.target.blur();
+                    }}
+                    className="h-8 flex-1 text-[11px]"
+                  />
+                </div>
+              )}
+
+              {/* The file is not the page: say so, or the range reads as a
+                  filter on the table behind the dialog. */}
+              <p className="text-[11px] leading-relaxed text-mut">
+                Every request in the range is written, not just the {PAGE_SIZE} on screen.
+              </p>
+              {err && (
+                <div className="text-[11px]" style={{ color: "var(--red)" }}>
+                  {err}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-3 text-[12px]"
+                  onClick={() => setExportOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-7 gap-1 px-3 text-[12px] font-semibold"
+                  disabled={exporting}
+                  onClick={onExport}
+                >
+                  <Download className="h-3 w-3" />
+                  {exporting ? "Exporting…" : "Export CSV"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

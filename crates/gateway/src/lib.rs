@@ -3,7 +3,7 @@
 //! Layout (tech.md §4.4): `store/` (SQLite), `router/` (route table +
 //! attribution), `strategy/` (multi-provider engine: failover/roundrobin/
 //! timewindow/quota + circuit breaker + health prober, tech.md §4.7),
-//! `server/` (data plane :8317 + admin plane :8310), `meter/` (usage
+//! `server/` (data plane :8317 + admin plane on a socket/pipe), `meter/` (usage
 //! capture), `main.rs` (binary entry).
 
 pub mod error;

@@ -1,13 +1,41 @@
 //! Gateway sidecar lifecycle + admin plane client (tech.md §4.1/§4.6).
 //!
 //! The GUI spawns `kiwano-gateway` as a child process sharing the same
-//! SQLite file; control-channel calls are raw loopback HTTP so no extra
-//! HTTP client dependency is needed.
+//! SQLite file. The admin plane is a local IPC endpoint — a unix domain socket,
+//! or a per-user named pipe on Windows — not a TCP port, so the control-channel
+//! calls are raw HTTP written to that endpoint. Both ends of that transport live
+//! in `kiwano_gateway::server::admin_ipc`, which this module re-exports
+//! [`AdminEndpoint`] from: the plane is defined once, and the app inherits the
+//! endpoint from the database path rather than from a port number. No extra HTTP
+//! client dependency is needed, and no other process on the machine can reach
+//! the plane to begin with.
 //!
 //! `/reload` and `/shutdown` need the admin token the gateway minted for
 //! itself ([`ADMIN_TOKEN_KEY`]); it is read from that same SQLite file, so the
 //! two processes agree without any new IPC. The one exception is the liveness
 //! probe — see [`ping_admin`].
+//!
+//! # The transport change of 0.1.8, and the TCP window around it
+//!
+//! A gateway built *before* the admin plane moved to IPC listens on loopback TCP
+//! `:8310` (or whatever `KIWANO_ADMIN_PORT` named). An upgrade has to be able to
+//! recognise and stop one: the daemon outlives the GUI, so the app meets its own
+//! predecessor still holding the data port, and a new gateway spawned beside it
+//! would fail to bind and exit. So the *startup* path — [`running_gateway_status`]
+//! and [`restart`] — tries the IPC endpoint first and falls back to that port,
+//! and [`notify_reload`] does the same so an old gateway the app could not
+//! replace still picks up route changes. Nothing else consults it; the
+//! steady-state admin client is IPC-only.
+//!
+//! The whole fallback is deletable, and should be deleted once no pre-0.1.8
+//! gateway can still be running. No *shipped* release before 0.1.8 contained a
+//! gateway binary at all, so the population it reaches is hand-built workspace
+//! binaries and a developer's stale `target/debug/kiwano-gateway` — which is
+//! exactly why it is worth keeping for one release and not longer. The release
+//! after 0.1.8 is the natural point: delete [`legacy_admin_port`],
+//! `tcp_gateway_status`, `tcp_ping`, `legacy_request_shutdown`, the legacy
+//! branches in [`running_gateway_status`] / [`restart`] / [`notify_reload`], and
+//! the tests that cover them.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -18,7 +46,22 @@ use std::time::Duration;
 use kiwano_gateway::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
 use kiwano_gateway::store::Store;
 
+/// The endpoint type itself, so callers in this crate name
+/// `sidecar::AdminEndpoint` and do not need to know the gateway crate's module
+/// layout.
+pub use kiwano_gateway::server::AdminEndpoint;
+
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
+
+/// The `Host` header for a request over the IPC endpoint. Its value is
+/// arbitrary — the admin router does no `Host` filtering — but HTTP/1.1
+/// requires the header to be there.
+const IPC_HOST: &str = "localhost";
+
+/// The port a *pre-0.1.8* gateway listens on when `KIWANO_ADMIN_PORT` says
+/// nothing else. It was the gateway's own default before the plane moved off
+/// TCP, and it is the port the old binary will still have chosen.
+const DEFAULT_LEGACY_ADMIN_PORT: u16 = 8310;
 
 #[cfg(windows)]
 const GATEWAY_BIN_NAMES: &[&str] = &["kiwano-gateway.exe", "kiwano-gateway"];
@@ -34,8 +77,8 @@ const GATEWAY_BIN_NAMES: &[&str] = &["kiwano-gateway"];
 /// (`target/<profile>/kiwano-gateway`, next to `target/<profile>/kiwano`).
 ///
 /// Deliberately no `PATH` search: a `kiwano-gateway` from somewhere else is a
-/// different version answering the same port, and version skew is handled by
-/// replacing it (see `startup_action`), not by quietly running it.
+/// different version answering the same admin endpoint, and version skew is
+/// handled by replacing it (see `startup_action`), not by quietly running it.
 fn gateway_bin_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("KIWANO_GATEWAY_BIN") {
         if !p.is_empty() {
@@ -90,6 +133,18 @@ fn shared_db_path() -> PathBuf {
     PathBuf::from(home).join(".kiwano").join("kiwano.db")
 }
 
+/// The admin plane endpoint this app and its gateway share.
+///
+/// Resolved exactly the way the gateway resolves it — the same function, on the
+/// same database path — so the two cannot disagree, and `KIWANO_ADMIN_SOCKET`
+/// moves both at once. The child needs no argument for it: it inherits this
+/// process's environment and derives the same default from the same file
+/// location. `KIWANO_ADMIN_PORT` plays no part here; it survives only as the
+/// port a legacy gateway is looked for on.
+pub fn admin_endpoint() -> AdminEndpoint {
+    AdminEndpoint::from_env(&shared_db_path())
+}
+
 /// The admin token, read out of the row the gateway minted it into.
 ///
 /// `None` when there is no database yet or the row is not there: on a fresh
@@ -132,25 +187,60 @@ fn token_header(token: Option<&str>) -> String {
     }
 }
 
-fn status_request(port: u16, token: Option<&str>) -> String {
+/// The three admin requests, built for whichever transport is asking. `host` is
+/// [`IPC_HOST`] over the endpoint and `127.0.0.1:{port}` over the legacy port;
+/// everything else about the request is transport-independent, which is the
+/// point of keeping the HTTP framing over a socket.
+fn status_request(host: &str, token: Option<&str>) -> String {
     format!(
-        "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}Connection: close\r\n\r\n",
+        "GET /status HTTP/1.1\r\nHost: {host}\r\n{}Connection: close\r\n\r\n",
         token_header(token)
     )
 }
 
-fn shutdown_request(port: u16, token: Option<&str>) -> String {
+fn shutdown_request(host: &str, token: Option<&str>) -> String {
     format!(
-        "POST /shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+        "POST /shutdown HTTP/1.1\r\nHost: {host}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
         token_header(token)
     )
 }
 
-fn reload_request(port: u16, token: Option<&str>) -> String {
+fn reload_request(host: &str, token: Option<&str>) -> String {
     format!(
-        "POST /reload HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+        "POST /reload HTTP/1.1\r\nHost: {host}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
         token_header(token)
     )
+}
+
+/// The host header for a request over the legacy loopback port.
+fn loopback_host(port: u16) -> String {
+    format!("127.0.0.1:{port}")
+}
+
+/// One raw HTTP request over the admin endpoint, read to EOF.
+///
+/// `None` when the endpoint does not answer at all (nothing is listening, or the
+/// path/pipe is not there) — the same "no gateway" answer a refused TCP connect
+/// used to be. The connect is bounded by [`CONNECT_TIMEOUT`], and on unix so is
+/// every read and write after it (see `AdminEndpoint::connect`).
+fn endpoint_body(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
+    let mut stream = endpoint.connect(CONNECT_TIMEOUT).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut raw = String::new();
+    BufReader::new(stream).read_to_string(&mut raw).ok()?;
+    // Drop the status line and headers: the body follows the blank line.
+    raw.split_once("\r\n\r\n").map(|(_, body)| body.to_string())
+}
+
+/// The response's first line only — all the liveness probe and the
+/// "did it answer 200" checks need, without waiting on a body.
+fn endpoint_http(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
+    let mut stream = endpoint.connect(CONNECT_TIMEOUT).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    Some(line)
 }
 
 fn loopback_http(port: u16, request: &str) -> Option<String> {
@@ -177,17 +267,51 @@ fn loopback_body(port: u16, request: &str) -> Option<String> {
     raw.split_once("\r\n\r\n").map(|(_, body)| body.to_string())
 }
 
-/// The gateway's own `/status` report. None when it is not answering, or says
-/// something we cannot read — the caller then shows less, never a guess.
+/// The gateway's own `/status` report, off the admin endpoint. None when it is
+/// not answering, or says something we cannot read — the caller then shows less,
+/// never a guess.
 ///
 /// The token, when there is one, buys the full report; without it the gateway
 /// answers with the liveness subset (identity, version, uptime), which the
-/// status chip renders as a gateway that is up but not described. A gateway
-/// older than the token ignores the header and answers in full either way.
-pub fn gateway_status(admin_port: u16) -> Option<serde_json::Value> {
+/// status chip renders as a gateway that is up but not described.
+pub fn gateway_status(endpoint: &AdminEndpoint) -> Option<serde_json::Value> {
+    let body = endpoint_body(
+        endpoint,
+        &status_request(IPC_HOST, admin_token().as_deref()),
+    )?;
+    serde_json::from_str(&body).ok()
+}
+
+/// The gateway's `/status`, IPC first and the legacy TCP port second.
+///
+/// This is the *startup* question — "is a gateway of ours already running, and
+/// which version?" — and the only place the legacy port is consulted besides
+/// [`restart`] and [`notify_reload`]. Both answers are the same JSON, so the
+/// caller does not have to know which side of the transport change it met; a
+/// legacy gateway is never adopted (its version differs by definition), it is
+/// replaced. See the module doc for when this fallback can be deleted.
+pub fn running_gateway_status(endpoint: &AdminEndpoint) -> Option<serde_json::Value> {
+    if let Some(status) = gateway_status(endpoint) {
+        return Some(status);
+    }
+    let port = legacy_admin_port()?;
+    let status = tcp_gateway_status(port);
+    if status.is_some() {
+        tracing::warn!(
+            port,
+            "a pre-0.1.8 gateway is answering on TCP; it will be replaced"
+        );
+    }
+    status
+}
+
+/// `GET /status` off the legacy loopback port. Split out from
+/// [`running_gateway_status`] so the transition has a test that binds its own
+/// port instead of depending on what happens to hold `:8310` on the machine.
+fn tcp_gateway_status(port: u16) -> Option<serde_json::Value> {
     let body = loopback_body(
-        admin_port,
-        &status_request(admin_port, admin_token().as_deref()),
+        port,
+        &status_request(&loopback_host(port), admin_token().as_deref()),
     )?;
     serde_json::from_str(&body).ok()
 }
@@ -199,25 +323,36 @@ pub fn gateway_status(admin_port: u16) -> Option<serde_json::Value> {
 /// runs every few seconds: it must be able to tell "a gateway is here" from
 /// "nothing is here" without a readable database, and without depending on a
 /// row that only exists once a token-aware gateway has started.
-pub fn ping_admin(admin_port: u16) -> bool {
-    loopback_http(admin_port, &status_request(admin_port, None)).is_some_and(|l| l.contains("200"))
+///
+/// IPC-only on purpose, unlike the startup path: the watchdog ticks every five
+/// seconds, and a legacy gateway can only survive startup if replacing it
+/// failed. Answering "alive" for one here would freeze the version skew in place
+/// for the rest of the session; leaving it to the respawn path is louder, and
+/// wrong-version-forever is worse than noisy.
+pub fn ping_admin(endpoint: &AdminEndpoint) -> bool {
+    endpoint_http(endpoint, &status_request(IPC_HOST, None))
+        .is_some_and(|line| line.contains("200"))
+}
+
+/// `GET /status` off the legacy port — [`ping_admin`]'s TCP twin. Exists so the
+/// legacy shutdown below can watch for the port being released.
+fn tcp_ping(port: u16) -> bool {
+    loopback_http(port, &status_request(&loopback_host(port), None))
+        .is_some_and(|line| line.contains("200"))
 }
 
 /// `POST /shutdown` — ask a running gateway to stop, then wait for it to let go
-/// of the admin port. False means it could not be stopped, which the caller
-/// must not read as "it is stopped".
+/// of the endpoint. False means it could not be stopped, which the caller must
+/// not read as "it is stopped".
 ///
-/// A gateway older than this endpoint answers 404, so this is genuinely a
-/// capability probe as much as a request. Two more failures land in the same
-/// `false`: a token-aware gateway refusing the token (401, which is what an
-/// unreadable `app_settings` row looks like) and one that predates the token
-/// but ignores the header harmlessly. `restart` treats all of them the same
-/// way — `force_stop` sends SIGTERM, which the gateway handles, so even the
-/// degraded path checkpoints the write-ahead log.
-pub fn request_shutdown(admin_port: u16) -> bool {
-    let accepted = loopback_http(
-        admin_port,
-        &shutdown_request(admin_port, admin_token().as_deref()),
+/// A gateway that refuses the token (401 — what an unreadable `app_settings` row
+/// looks like) lands in the same `false`, as does one that does not answer at
+/// all. [`restart`] treats all of them the same way, and then tries the legacy
+/// port before giving up.
+pub fn request_shutdown(endpoint: &AdminEndpoint) -> bool {
+    let accepted = endpoint_http(
+        endpoint,
+        &shutdown_request(IPC_HOST, admin_token().as_deref()),
     )
     .is_some_and(|line| line.contains("200"));
     if !accepted {
@@ -225,9 +360,9 @@ pub fn request_shutdown(admin_port: u16) -> bool {
     }
     // The reply is written before the serve loop returns, but the listener is
     // not necessarily closed the instant the status line arrives — and the
-    // replacement has to bind the same port.
+    // replacement has to bind the same endpoint.
     for _ in 0..50 {
-        if !ping_admin(admin_port) {
+        if !ping_admin(endpoint) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -235,19 +370,80 @@ pub fn request_shutdown(admin_port: u16) -> bool {
     false
 }
 
-/// What to do about a gateway that may already be answering the admin port.
+/// `POST /shutdown` on the legacy loopback port, and wait for the port to be
+/// let go. [`request_shutdown`] over TCP, for the startup path only.
+///
+/// A pre-0.1.8 gateway predating `/shutdown` answers 404 here and this reports
+/// `false`; there is no signal-based fallback any more, and `restart` explains
+/// why. `None` (no legacy port to look for) is also `false`.
+fn legacy_request_shutdown(port: Option<u16>) -> bool {
+    let Some(port) = port else {
+        return false;
+    };
+    let accepted = loopback_http(
+        port,
+        &shutdown_request(&loopback_host(port), admin_token().as_deref()),
+    )
+    .is_some_and(|line| line.contains("200"));
+    if !accepted {
+        return false;
+    }
+    for _ in 0..50 {
+        if !tcp_ping(port) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
+/// The port a pre-0.1.8 gateway is looked for on, from `KIWANO_ADMIN_PORT`.
+///
+/// This env var no longer names anything the admin plane listens on — the plane
+/// is not a port any more, and `KIWANO_ADMIN_SOCKET` is what moves it. It is
+/// read for one purpose only: to find the old gateway during the transition
+/// described in the module doc, for the app whose operator had pointed
+/// `KIWANO_ADMIN_PORT` somewhere non-default. `None` means "do not look for a
+/// legacy gateway at all" — a value that is not a port.
+fn legacy_admin_port() -> Option<u16> {
+    legacy_admin_port_from(std::env::var("KIWANO_ADMIN_PORT").ok().as_deref())
+}
+
+/// [`legacy_admin_port`] with the environment passed in, so the parse is
+/// testable without setting a process-wide variable.
+fn legacy_admin_port_from(value: Option<&str>) -> Option<u16> {
+    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        // Unset is the normal case, and it means the default port: the old
+        // gateway chose 8310 itself when the operator said nothing.
+        return Some(DEFAULT_LEGACY_ADMIN_PORT);
+    };
+    match value.parse::<u16>() {
+        Ok(port) if port > 0 => Some(port),
+        _ => {
+            tracing::warn!(
+                value,
+                default = DEFAULT_LEGACY_ADMIN_PORT,
+                "invalid KIWANO_ADMIN_PORT; not looking for a legacy gateway"
+            );
+            None
+        }
+    }
+}
+
+/// What to do about a gateway that may already be serving the admin plane.
 ///
 /// Factored out because the mismatch branch cannot be reached by hand without
 /// an old binary, and it is the branch that decides whether the app runs beside
 /// a daemon that disagrees with it about the database schema.
 ///
-/// The decision reads `name` + `version` out of `GET /status`, and those are
-/// in the liveness subset the gateway returns to an unauthenticated caller —
-/// so this works across an upgrade in both directions. Meeting a 0.1.7-era
-/// gateway, there is no token row to send and the old build would ignore the
-/// header regardless; meeting a token-aware one whose row cannot be read, the
-/// subset still arrives. The replace path then either gets `/shutdown` (new
-/// gateway) or falls back to `force_stop` (old one) — see `restart`.
+/// The decision reads `name` + `version` out of `GET /status`, and those are in
+/// the liveness subset the gateway returns to an unauthenticated caller — so
+/// this works across the transport change in both directions. Meeting a
+/// pre-0.1.8 gateway (over TCP, see [`running_gateway_status`]) there is no
+/// token row to send and the old build ignores the header regardless; meeting a
+/// token-aware one whose row cannot be read, the subset still arrives. The
+/// replace path then gets `/shutdown` — over IPC for a new gateway, over TCP for
+/// an old one — see [`restart`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum StartupAction {
     /// Same version — leave it alone and adopt it.
@@ -262,11 +458,12 @@ pub fn startup_action(status: Option<&serde_json::Value>, ours: &str) -> Startup
     let Some(status) = status else {
         return StartupAction::Spawn;
     };
-    // The port may be held by something else entirely. Not ours to stop; the
-    // spawn that follows will fail to bind, and say so.
+    // The endpoint may be held by something else entirely — a pipe or socket
+    // another program happens to own, or a stranger on the legacy port. Not ours
+    // to stop; the spawn that follows will fail to bind, and say so.
     if status.get("name").and_then(|n| n.as_str()) != Some("kiwano-gateway") {
         tracing::error!(
-            "the admin port is held by something that is not kiwano-gateway; leaving it alone"
+            "the admin endpoint is held by something that is not kiwano-gateway; leaving it alone"
         );
         return StartupAction::Spawn;
     }
@@ -278,9 +475,46 @@ pub fn startup_action(status: Option<&serde_json::Value>, ours: &str) -> Startup
     }
 }
 
-/// Stop the gateway on `admin_port` and start the bundled one in its place.
-pub fn restart(admin_port: u16) -> std::io::Result<Child> {
-    if !request_shutdown(admin_port) && !force_stop(admin_port) {
+/// Stop the gateway serving the admin plane and start the bundled one in its
+/// place. Returns `Err` when the old one would not stop, rather than starting a
+/// second gateway that cannot bind the data port.
+///
+/// `/shutdown` over IPC is the normal path, and the one that matters for every
+/// gateway this release ships. The legacy TCP call after it covers an upgrade
+/// meeting a pre-0.1.8 gateway, which has no endpoint to be asked on.
+///
+/// # Why there is no signal-based fallback any more
+///
+/// There used to be a `force_stop`, which found the gateway through
+/// `lsof -iTCP:<port> -sTCP:LISTEN` and sent it SIGTERM. It existed for a
+/// gateway built before `POST /shutdown` existed. Three things made it the wrong
+/// thing to keep:
+///
+/// - The population it served shrank to almost nothing. No shipped release
+///   before 0.1.8 contained a gateway binary at all, so the only gateway that
+///   can neither be asked over IPC nor over TCP is one someone built from the
+///   workspace by hand — a stale `target/debug/kiwano-gateway`. The legacy TCP
+///   `/shutdown` above covers the realistic upgrade case.
+/// - The rework it would have taken — `lsof -U` on the socket path — is strictly
+///   worse than the TCP form it replaces. `-U` matches *every* unix socket the
+///   process holds (including client connections), and the path a listening
+///   socket was bound to is not reliably in `lsof`'s output; the TCP form could
+///   match on a port that only one process can hold. A last-resort path that
+///   sometimes kills the wrong thing, or nothing, is worse than a clear error.
+/// - And it was never the safe path anyway: it existed to reach a daemon whose
+///   write-ahead log the graceful stop is what checkpoints. When nothing can ask
+///   the gateway to stop, the honest outcome is to say so and let the operator
+///   stop it by hand, which is what the error below does.
+///
+/// It is worth adding back only if a gateway that answers neither `/shutdown`
+/// nor anything else is ever shipped, and the intended lesson from the paths
+/// above is that it will not be.
+pub fn restart(endpoint: &AdminEndpoint) -> std::io::Result<Child> {
+    if !request_shutdown(endpoint) && !legacy_request_shutdown(legacy_admin_port()) {
+        tracing::error!(
+            endpoint = %endpoint.describe(),
+            "the running gateway would not stop; stop it by hand (pkill -f kiwano-gateway)"
+        );
         return Err(std::io::Error::other(
             "the running gateway would not stop; not starting a second one on the same ports",
         ));
@@ -288,68 +522,31 @@ pub fn restart(admin_port: u16) -> std::io::Result<Child> {
     spawn()
 }
 
-/// Last resort for a gateway predating `POST /shutdown`.
-///
-/// No *shipped* build before this one contains a gateway at all, so the only
-/// machines that reach here are ones where someone built the workspace by hand
-/// — a stale `target/debug/kiwano-gateway` left over from `cargo test`. That is
-/// common enough in development to be worth handling, and the `lsof`/`kill`
-/// pair needs no new dependency. Unix only: the gateway watches SIGTERM there
-/// and ctrl-C alone on Windows.
-#[cfg(unix)]
-fn force_stop(admin_port: u16) -> bool {
-    let out = match Command::new("lsof")
-        .args(["-nP", "-t", &format!("-iTCP:{admin_port}"), "-sTCP:LISTEN"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::warn!(error = %e, "lsof unavailable; cannot stop a gateway without /shutdown");
-            return false;
-        }
-    };
-    let pids: Vec<String> = String::from_utf8_lossy(&out.stdout)
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-    if pids.is_empty() {
-        return true; // nothing listening any more
-    }
-    tracing::warn!(
-        ?pids,
-        port = admin_port,
-        "gateway predates /shutdown; sending SIGTERM"
-    );
-    for pid in &pids {
-        let _ = Command::new("kill").arg(pid).status();
-    }
-    for _ in 0..30 {
-        if !ping_admin(admin_port) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    tracing::error!(
-        ?pids,
-        "gateway ignored SIGTERM; stop it by hand (pkill -f kiwano-gateway)"
-    );
-    false
-}
-
-#[cfg(not(unix))]
-fn force_stop(_admin_port: u16) -> bool {
-    tracing::error!("a running gateway predates /shutdown and cannot be stopped from here");
-    false
-}
-
 /// `POST /reload` — ask the gateway to rebuild its route table from SQLite.
 /// Fire-and-forget: route hot-reload failures surface in gateway logs, and a
 /// refusal (no token readable) means the gateway keeps routing what it has
 /// until the next start, which is why this returns nothing to check.
-pub fn notify_reload(admin_port: u16) {
+///
+/// Falls back to the legacy port when the endpoint does not answer at all: a
+/// pre-0.1.8 gateway this app could not replace is still routing the operator's
+/// traffic, and a mutation that does not reach it is a mutation the user cannot
+/// see taking effect. Only a *silent* endpoint falls through — an answer we do
+/// not like is still an answer.
+pub fn notify_reload(endpoint: &AdminEndpoint) {
+    if endpoint_http(
+        endpoint,
+        &reload_request(IPC_HOST, admin_token().as_deref()),
+    )
+    .is_some()
+    {
+        return;
+    }
+    let Some(port) = legacy_admin_port() else {
+        return;
+    };
     let _ = loopback_http(
-        admin_port,
-        &reload_request(admin_port, admin_token().as_deref()),
+        port,
+        &reload_request(&loopback_host(port), admin_token().as_deref()),
     );
 }
 
@@ -628,6 +825,23 @@ pub async fn fetch_model_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(unix)]
+    use std::sync::{Arc, Mutex};
+
+    /// An endpoint nothing is serving, unique to this test.
+    ///
+    /// `parse`, not `beside_db`: on Windows `beside_db` resolves to the real
+    /// per-user pipe name, which the gateway this developer is running right now
+    /// may well be holding — the test would then be talking to it.
+    fn dead_endpoint(dir: &Path) -> AdminEndpoint {
+        let unique = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "endpoint".to_string());
+        AdminEndpoint::parse(&format!("kiwano-test-dead-{unique}"))
+    }
 
     /// The admin plane refuses `/reload` and `/shutdown` without the token, so
     /// these three requests have to carry it — and must still be well-formed
@@ -637,29 +851,41 @@ mod tests {
     fn admin_requests_carry_the_token_when_we_have_one() {
         let header = format!("{ADMIN_TOKEN_HEADER}: tok-123\r\n");
 
-        let status = status_request(8310, Some("tok-123"));
+        let status = status_request(IPC_HOST, Some("tok-123"));
         assert!(status.starts_with("GET /status HTTP/1.1\r\n"));
         assert!(status.contains(&header));
         assert!(status.ends_with("Connection: close\r\n\r\n"));
 
-        let shutdown = shutdown_request(8310, Some("tok-123"));
+        let shutdown = shutdown_request(IPC_HOST, Some("tok-123"));
         assert!(shutdown.starts_with("POST /shutdown HTTP/1.1\r\n"));
         assert!(shutdown.contains(&header));
 
-        let reload = reload_request(8310, Some("tok-123"));
+        let reload = reload_request(IPC_HOST, Some("tok-123"));
         assert!(reload.starts_with("POST /reload HTTP/1.1\r\n"));
         assert!(reload.contains(&header));
 
         // No token: same requests, no header — a gateway that has no token to
         // check them against is exactly the one that does not need them.
         for request in [
-            status_request(8310, None),
-            shutdown_request(8310, None),
-            reload_request(8310, None),
+            status_request(IPC_HOST, None),
+            shutdown_request(IPC_HOST, None),
+            reload_request(IPC_HOST, None),
         ] {
             assert!(!request.contains(ADMIN_TOKEN_HEADER));
             assert!(request.ends_with("\r\n\r\n"));
         }
+
+        // The transport is the only difference: the same three requests over the
+        // legacy port carry the same bytes apart from the `Host` header. HTTP/1.1
+        // requires that header, and what is in it is all the router ignores.
+        let over_tcp = status_request(&loopback_host(8310), Some("tok-123"));
+        assert!(over_tcp.contains("Host: 127.0.0.1:8310\r\n"));
+        assert!(over_tcp.contains(&header));
+        assert_eq!(
+            over_tcp.replace("Host: 127.0.0.1:8310", "Host: localhost"),
+            status,
+            "the request is transport-independent apart from its Host"
+        );
     }
 
     /// The token comes out of the row the gateway writes, in the database the
@@ -683,15 +909,63 @@ mod tests {
         );
     }
 
+    /// Nothing is listening on the endpoint, so every admin call has to report
+    /// "no gateway" rather than panic or invent one. This is the shape the old
+    /// `ping_admin_refuses_dead_port` had, and the failure it guards is a client
+    /// that treats an unreachable endpoint as an error instead of an answer.
     #[test]
-    fn ping_admin_refuses_dead_port() {
-        assert!(!ping_admin(1));
+    fn a_dead_endpoint_reads_as_no_gateway() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = dead_endpoint(dir.path());
+
+        assert!(!ping_admin(&endpoint), "the liveness probe answers false");
+        assert!(
+            gateway_status(&endpoint).is_none(),
+            "and there is no report to read"
+        );
+        assert!(
+            !request_shutdown(&endpoint),
+            "nothing was stopped, so this is not a success"
+        );
+        notify_reload(&endpoint); // must not panic
+
+        // `running_gateway_status` also probes the legacy port, which on a
+        // developer's machine may well be a real gateway — so this proves only
+        // that a dead endpoint does not make it panic.
+        let _ = running_gateway_status(&endpoint);
     }
 
+    /// The legacy port comes from `KIWANO_ADMIN_PORT` when the operator set one
+    /// — that is the whole of what the variable still means — and defaults to the
+    /// port the pre-0.1.8 gateway chose for itself when they did not. A value
+    /// that is not a port means "do not go looking at all".
     #[test]
-    fn reload_on_dead_port_is_silent() {
-        // must not panic
-        notify_reload(1);
+    fn the_legacy_port_is_read_from_the_environment() {
+        assert_eq!(legacy_admin_port_from(None), Some(8310));
+        assert_eq!(legacy_admin_port_from(Some("  ")), Some(8310));
+        assert_eq!(legacy_admin_port_from(Some("9000")), Some(9000));
+        assert_eq!(legacy_admin_port_from(Some(" 9000 ")), Some(9000));
+        assert_eq!(legacy_admin_port_from(Some("not-a-port")), None);
+        // Port 0 is "any port the OS likes", never something an operator
+        // pointed a gateway at.
+        assert_eq!(legacy_admin_port_from(Some("0")), None);
+    }
+
+    /// `restart` must not start a second gateway next to one it failed to stop —
+    /// the two would fight over the data port. With nothing to stop it has to
+    /// return an error and spawn nothing.
+    ///
+    /// Skipped when the legacy port really is answering: that would be a real
+    /// gateway of somebody's, and this test would be shutting it down.
+    #[test]
+    fn restart_refuses_when_nothing_can_be_stopped() {
+        if legacy_admin_port().is_some_and(tcp_ping) {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let err = restart(&dead_endpoint(dir.path()))
+            .expect_err("nothing was stopped, so nothing may be started");
+        assert!(err.to_string().contains("would not stop"), "{err}");
     }
 
     /// The mismatch branch is the one that cannot be reached by hand without an
@@ -728,12 +1002,6 @@ mod tests {
             startup_action(Some(&stranger), "0.1.8"),
             StartupAction::Spawn
         );
-    }
-
-    #[test]
-    fn shutdown_on_dead_port_reports_failure() {
-        // No gateway to stop is not the same as having stopped one.
-        assert!(!request_shutdown(1));
     }
 
     #[test]
@@ -798,117 +1066,206 @@ mod tests {
         assert_eq!(token, None);
     }
 
-    /// Re-exec'd by the test below as a stand-in for a gateway built before
-    /// `POST /shutdown` existed: it answers `GET /status` and 404s everything
-    /// else, so `request_shutdown` cannot stop it and `force_stop` has to.
+    /// An in-process stand-in for a real admin plane, serving the three routes
+    /// by hand over `endpoint`.
     ///
-    /// Its own process on purpose — `force_stop` finds its target through
-    /// `lsof`, and a listener inside the test runner would name the runner.
-    /// Returns immediately in an ordinary run, where the env var is unset.
-    #[test]
-    fn stub_pre_shutdown_gateway() {
-        use std::net::TcpListener;
+    /// Hand-rolled rather than an axum router, because this crate has no
+    /// HTTP-server dependency and does not need one: what is under test here is
+    /// the *client* — the exact bytes it writes and how it reads the answer — so
+    /// a stub that answers raw bytes is the more honest fixture. The server end
+    /// of this transport is exercised by `kiwano-gateway`'s own
+    /// `admin_routes_answer_over_the_ipc_endpoint`, which runs on both CI
+    /// platforms including Windows; this stub is unix-only because a Windows
+    /// named pipe cannot be created from `std`.
+    #[cfg(unix)]
+    struct LiveGateway {
+        endpoint: AdminEndpoint,
+        reloads: Arc<AtomicUsize>,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
 
-        let Ok(port) = std::env::var("KIWANO_TEST_STUB_PORT") else {
-            return;
-        };
-        let listener = TcpListener::bind(("127.0.0.1", port.parse::<u16>().unwrap())).unwrap();
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let (code, reason, body) = if String::from_utf8_lossy(&buf).starts_with("GET /status") {
-                (
-                    200,
-                    "OK",
-                    r#"{"ok":true,"name":"kiwano-gateway","version":"0.0.1"}"#,
-                )
-            } else {
-                (404, "Not Found", r#"{"ok":false}"#)
+    #[cfg(unix)]
+    impl LiveGateway {
+        fn start(dir: &Path, version: &str) -> LiveGateway {
+            use std::os::unix::net::UnixListener;
+
+            let endpoint = AdminEndpoint::parse(&dir.join("admin.sock").to_string_lossy());
+            let listener = UnixListener::bind(endpoint.path()).expect("bind the stub endpoint");
+            let reloads = Arc::new(AtomicUsize::new(0));
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let (reload_count, seen) = (reloads.clone(), requests.clone());
+            let version = version.to_string();
+
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { continue };
+                    let mut buf = [0u8; 4096];
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    seen.lock().unwrap().push(request.clone());
+
+                    // `/shutdown` is the interesting one: the reply goes out and
+                    // the listener is then dropped, which is exactly what the
+                    // real gateway does to the endpoint — and what
+                    // `request_shutdown` waits to observe.
+                    let shutdown = request.starts_with("POST /shutdown");
+                    let body = if shutdown {
+                        r#"{"ok":true}"#.to_string()
+                    } else if request.starts_with("POST /reload") {
+                        reload_count.fetch_add(1, Ordering::SeqCst);
+                        r#"{"ok":true,"agents_routed":1}"#.to_string()
+                    } else {
+                        format!(
+                            r#"{{"ok":true,"name":"kiwano-gateway","version":"{version}","uptime_secs":1}}"#
+                        )
+                    };
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    if shutdown {
+                        return;
+                    }
+                }
+            });
+
+            let gateway = LiveGateway {
+                endpoint,
+                reloads,
+                requests,
             };
-            let _ = write!(
-                stream,
-                "HTTP/1.1 {code} {reason}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
+            for _ in 0..100 {
+                if ping_admin(&gateway.endpoint) {
+                    return gateway;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the stub admin plane never came up");
+        }
+
+        /// The first request the stub saw that starts with `prefix`.
+        fn request_starting_with(&self, prefix: &str) -> Option<String> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|r| r.starts_with(prefix))
+                .cloned()
         }
     }
 
-    /// Kills the stub even when an assertion panics.
-    ///
-    /// Gated with the test that uses it, not merely placed next to it: a
-    /// struct whose only constructor sits behind `#[cfg(unix)]` is dead code
-    /// everywhere else, and `-D warnings` makes dead code a build failure.
-    #[cfg(unix)]
-    struct StubGuard(std::process::Child);
-    #[cfg(unix)]
-    impl Drop for StubGuard {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-
-    /// The fallback that lets a 0.1.8 app replace a gateway that predates
-    /// `POST /shutdown`. Reachable in practice only against a binary someone
-    /// built by hand, which is exactly the kind of path that otherwise ships
-    /// unexecuted.
+    /// The whole admin client against a live endpoint: the liveness probe, the
+    /// status report, the reload, and the shutdown that takes the endpoint down.
+    /// This is the coverage the re-exec'd TCP stub used to give the three calls,
+    /// now over the transport the plane actually uses.
     #[cfg(unix)]
     #[test]
-    fn force_stop_stops_a_gateway_that_cannot_be_asked() {
-        use std::net::TcpListener;
+    fn the_admin_client_talks_to_a_live_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let gw = LiveGateway::start(dir.path(), "0.1.8");
 
-        // Have the OS hand us a port nothing else holds, then let it go for the
-        // stub. `force_stop` signals whatever `lsof` names on this port, so it
-        // has to be one we know is ours. If the stub fails to take it, the
-        // "is it up" check below fails and nothing is signalled.
-        let port = TcpListener::bind("127.0.0.1:0")
-            .expect("probe bind")
-            .local_addr()
-            .expect("probe addr")
-            .port();
+        assert!(ping_admin(&gw.endpoint), "the liveness probe answers");
 
-        let guard = StubGuard(
-            Command::new(std::env::current_exe().expect("test binary"))
-                .args(["--exact", "sidecar::tests::stub_pre_shutdown_gateway"])
-                .env("KIWANO_TEST_STUB_PORT", port.to_string())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .expect("spawn stub"),
+        let status = gateway_status(&gw.endpoint).expect("the status report");
+        assert_eq!(status["name"], "kiwano-gateway");
+        assert_eq!(status["version"], "0.1.8");
+
+        // `running_gateway_status` asks the endpoint first, so a live one is
+        // found there and the legacy port is never consulted.
+        let running = running_gateway_status(&gw.endpoint).expect("the startup probe");
+        assert_eq!(running["version"], "0.1.8");
+
+        notify_reload(&gw.endpoint);
+        assert_eq!(
+            gw.reloads.load(Ordering::SeqCst),
+            1,
+            "the reload request reached the gateway"
         );
 
-        // Check the version, not just liveness: a stranger that happened to
-        // take the port must not be mistaken for our stub — and then killed.
-        let mut up = false;
-        for _ in 0..100 {
-            let ours = gateway_status(port)
-                .and_then(|s| {
-                    let v = s.get("version")?.as_str()?.to_string();
-                    Some(v)
-                })
-                .is_some_and(|v| v == "0.0.1");
-            if ours {
-                up = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
+        // The request on the wire is a complete, well-formed reload. What it
+        // carries *besides* the path is not asserted here: the token comes out
+        // of the database this machine happens to have, and
+        // `admin_requests_carry_the_token_when_we_have_one` is where that is
+        // pinned. This test is about the transport.
+        let reload = gw
+            .request_starting_with("POST /reload")
+            .expect("the reload request was sent");
+        assert!(reload.contains("Host: localhost\r\n"), "{reload}");
+        assert!(reload.ends_with("\r\n\r\n"), "{reload}");
+
+        assert!(
+            request_shutdown(&gw.endpoint),
+            "the gateway accepted /shutdown"
+        );
+        assert!(
+            !ping_admin(&gw.endpoint),
+            "and stopped serving the endpoint"
+        );
+    }
+
+    /// A stand-in for a *pre-0.1.8* gateway: the same routes, but on loopback
+    /// TCP. The legacy half of the transition, without depending on what happens
+    /// to hold `:8310` on this machine — the OS hands us the port.
+    struct LegacyGateway {
+        port: u16,
+    }
+
+    impl LegacyGateway {
+        fn start(version: &str) -> LegacyGateway {
+            use std::net::TcpListener;
+
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind the legacy stub");
+            let port = listener.local_addr().expect("stub addr").port();
+            let version = version.to_string();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { continue };
+                    let mut buf = [0u8; 4096];
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    let shutdown = request.starts_with("POST /shutdown");
+                    let body = if shutdown {
+                        r#"{"ok":true}"#.to_string()
+                    } else {
+                        format!(r#"{{"ok":true,"name":"kiwano-gateway","version":"{version}"}}"#)
+                    };
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    if shutdown {
+                        return;
+                    }
+                }
+            });
+            LegacyGateway { port }
         }
-        assert!(up, "stub never came up on {port}");
+    }
 
-        // The pre-0.1.8 shape: reachable, but no way to ask it to stop.
+    /// The upgrade half of the transport change: a gateway from before the IPC
+    /// move is found on its loopback port, is still asked to stop the same way,
+    /// and lets go of the port when it does.
+    #[test]
+    fn a_legacy_gateway_is_found_and_stopped_over_tcp() {
+        let gw = LegacyGateway::start("0.1.7");
+
+        assert!(tcp_ping(gw.port), "the legacy port answers");
+        let status = tcp_gateway_status(gw.port).expect("the legacy status report");
+        assert_eq!(status["name"], "kiwano-gateway");
+        assert_eq!(status["version"], "0.1.7");
+
         assert!(
-            !request_shutdown(port),
-            "a gateway without /shutdown cannot be asked"
+            legacy_request_shutdown(Some(gw.port)),
+            "a legacy gateway is stopped over TCP"
         );
-        assert!(
-            ping_admin(port),
-            "and it is still running after being asked"
-        );
+        assert!(!tcp_ping(gw.port), "and lets go of its port");
+    }
 
-        assert!(force_stop(port), "force_stop should stop it");
-        assert!(!ping_admin(port), "and release the port");
-
-        drop(guard);
+    /// No legacy port to look at is not a gateway that stopped.
+    #[test]
+    fn a_legacy_shutdown_without_a_port_reports_failure() {
+        assert!(!legacy_request_shutdown(None));
     }
 }

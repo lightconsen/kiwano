@@ -1,12 +1,19 @@
-//! Gateway servers: data plane (:8317) + admin plane (:8310), tech.md §4.1.
+//! Gateway servers: data plane (loopback :8317) + admin plane (a unix socket or
+//! a named pipe, see [`admin_ipc`]), tech.md §4.1.
 //!
 //! Both servers share one [`GatewayState`]: the SQLite store (SSOT) and the
 //! in-memory route table that `/reload` swaps atomically.
+//!
+//! Only the data plane is a TCP port, and deliberately so: agents are
+//! configured with a URL. The admin plane is a local IPC endpoint, which is
+//! what its two clients (the app and the CLI) can use and no one else can.
 
 pub mod admin;
+pub mod admin_ipc;
 pub mod data;
 
 pub use admin::{admin_plane_router, ensure_admin_token, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
+pub use admin_ipc::{AdminEndpoint, AdminListener, AdminStream, ADMIN_SOCKET_ENV};
 pub use data::data_plane_router;
 
 use std::sync::{Arc, RwLock};

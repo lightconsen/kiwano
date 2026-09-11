@@ -8,9 +8,9 @@ mod admin;
 
 use std::collections::BTreeMap;
 
+use kiwano_gateway::server::admin_ipc::AdminEndpoint;
 use kiwano_gateway::store::{now_rfc3339, Billing, Binding, Protocol, Store, StrategyType};
 
-const DEFAULT_ADMIN_PORT: u16 = 8310;
 const USAGE_DAYS_DEFAULT: i64 = 7;
 
 // ── parsing ---------------------------------------------------------------
@@ -18,14 +18,17 @@ const USAGE_DAYS_DEFAULT: i64 = 7;
 #[derive(Debug)]
 struct Globals {
     db: Option<String>,
-    admin_port: u16,
+    /// Where the gateway's admin plane is: a socket file on unix, a pipe name on
+    /// Windows. Resolved here because it may follow from `--db`, which is parsed
+    /// in the same pass.
+    admin: AdminEndpoint,
     json: bool,
     rest: Vec<String>,
 }
 
 fn parse_globals(argv: Vec<String>) -> Result<Globals, String> {
     let mut db: Option<String> = None;
-    let mut admin_port: Option<u16> = None;
+    let mut admin_socket: Option<String> = None;
     let mut json = false;
     let mut rest = Vec::new();
 
@@ -33,29 +36,27 @@ fn parse_globals(argv: Vec<String>) -> Result<Globals, String> {
     while let Some(word) = it.next() {
         match word.as_str() {
             "--db" => db = Some(it.next().ok_or("--db requires a path")?),
-            "--admin-port" => {
-                let v = it.next().ok_or("--admin-port requires a number")?;
-                admin_port = Some(
-                    v.parse()
-                        .map_err(|_| format!("invalid --admin-port: {v}"))?,
-                );
+            "--admin-socket" => {
+                admin_socket = Some(it.next().ok_or("--admin-socket requires a path")?);
             }
             "--json" => json = true,
             _ => rest.push(word),
         }
     }
-    let admin_port = match admin_port {
-        Some(p) => p,
-        None => match std::env::var("KIWANO_ADMIN_PORT") {
-            Ok(v) if !v.is_empty() => v
-                .parse()
-                .map_err(|_| format!("invalid KIWANO_ADMIN_PORT: {v}"))?,
-            _ => DEFAULT_ADMIN_PORT,
-        },
+    // `--admin-socket` wins, then `KIWANO_ADMIN_SOCKET` (applied by `from_env`),
+    // then the default: a socket beside the database, or the per-user pipe. An
+    // empty value counts as "not given" rather than as an endpoint named "".
+    let admin = match admin_socket
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(value) => AdminEndpoint::parse(value),
+        None => AdminEndpoint::from_env(&db_path(&db)),
     };
     Ok(Globals {
         db,
-        admin_port,
+        admin,
         json,
         rest,
     })
@@ -211,7 +212,7 @@ fn run(argv: Vec<String>) -> i32 {
 fn dispatch(globals: Globals) -> Result<i32, String> {
     let Globals {
         db,
-        admin_port,
+        admin,
         json,
         rest,
     } = globals;
@@ -224,23 +225,23 @@ fn dispatch(globals: Globals) -> Result<i32, String> {
         }
         "status" => {
             ensure_empty(&words)?;
-            cmd_status(admin_port, &db, json)
+            cmd_status(&admin, &db, json)
         }
         "reload" => {
             ensure_empty(&words)?;
-            cmd_reload(admin_port, &db)
+            cmd_reload(&admin, &db)
         }
         "providers" => {
             let sub = positional(
                 &mut words,
                 "providers requires a subcommand (list|add|use|remove)",
             )?;
-            cmd_providers(sub, words, &db, admin_port, json)?;
+            cmd_providers(sub, words, &db, &admin, json)?;
             Ok(0)
         }
         "keys" => {
             let sub = positional(&mut words, "keys requires a subcommand (list|add|remove)")?;
-            cmd_keys(sub, words, &db, admin_port, json)?;
+            cmd_keys(sub, words, &db, &admin, json)?;
             Ok(0)
         }
         "usage" => {
@@ -313,9 +314,9 @@ fn admin_token(db: &Option<String>) -> Option<String> {
 /// (wrong or missing token) is reported rather than counted as a reload: the
 /// gateway is still routing the previous table, and saying "0 agents" would
 /// read as "reloaded, but nothing is configured".
-fn after_mutation(admin_port: u16, db: &Option<String>) {
+fn after_mutation(admin: &AdminEndpoint, db: &Option<String>) {
     let token = admin_token(db);
-    match admin::post_reload(admin_port, token.as_deref()) {
+    match admin::post_reload(admin, token.as_deref()) {
         Some(v) if v["ok"].as_bool() == Some(true) => println!(
             "gateway route table reloaded ({} agents)",
             v["agents_routed"].as_u64().unwrap_or(0)
@@ -325,23 +326,24 @@ fn after_mutation(admin_port: u16, db: &Option<String>) {
              until it is restarted",
             v["error"].as_str().unwrap_or("no reason given")
         ),
-        None => {
-            println!("note: gateway not reachable on :{admin_port}; changes apply on next start")
-        }
+        None => println!(
+            "note: gateway not reachable on {}; changes apply on next start",
+            admin.describe()
+        ),
     }
 }
 
 // ── commands ----------------------------------------------------------------
 
-fn cmd_status(admin_port: u16, db: &Option<String>, json: bool) -> Result<i32, String> {
+fn cmd_status(admin: &AdminEndpoint, db: &Option<String>, json: bool) -> Result<i32, String> {
     // With the token this is the full report; without it the gateway answers
     // the liveness subset (version and uptime, no route table).
-    match admin::get_status(admin_port, admin_token(db).as_deref()) {
+    match admin::get_status(admin, admin_token(db).as_deref()) {
         Some(v) => {
             if json {
                 println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
             } else {
-                println!("{}", render_status(&v, admin_port));
+                println!("{}", render_status(&v, admin));
             }
             Ok(0)
         }
@@ -349,7 +351,7 @@ fn cmd_status(admin_port: u16, db: &Option<String>, json: bool) -> Result<i32, S
             // Gateway down: still show local store counts (useful headless).
             let store = open_store(db)?;
             let m = store.metrics().map_err(|e| e.to_string())?;
-            println!("gateway: not running (admin :{admin_port})");
+            println!("gateway: not running (admin {})", admin.describe());
             println!(
                 "store: providers {} · bindings {} · placeholder_keys {} · usage_rows {}",
                 m.providers, m.bindings, m.placeholder_keys, m.usage_rows
@@ -359,8 +361,8 @@ fn cmd_status(admin_port: u16, db: &Option<String>, json: bool) -> Result<i32, S
     }
 }
 
-fn cmd_reload(admin_port: u16, db: &Option<String>) -> Result<i32, String> {
-    match admin::post_reload(admin_port, admin_token(db).as_deref()) {
+fn cmd_reload(admin: &AdminEndpoint, db: &Option<String>) -> Result<i32, String> {
+    match admin::post_reload(admin, admin_token(db).as_deref()) {
         Some(v) if v["ok"].as_bool() == Some(true) => {
             println!(
                 "reloaded: {} agents routed",
@@ -372,7 +374,7 @@ fn cmd_reload(admin_port: u16, db: &Option<String>) -> Result<i32, String> {
             "gateway refused the reload: {}",
             v["error"].as_str().unwrap_or("no reason given")
         )),
-        None => Err(format!("gateway not reachable on :{admin_port}")),
+        None => Err(format!("gateway not reachable on {}", admin.describe())),
     }
 }
 
@@ -380,7 +382,7 @@ fn cmd_providers(
     sub: String,
     mut words: Vec<String>,
     db: &Option<String>,
-    admin_port: u16,
+    admin: &AdminEndpoint,
     json: bool,
 ) -> Result<(), String> {
     match sub.as_str() {
@@ -394,7 +396,7 @@ fn cmd_providers(
             let args = parse_providers_add(words)?;
             let store = open_store(db)?;
             cmd_providers_add(&store, &args)?;
-            after_mutation(admin_port, db);
+            after_mutation(admin, db);
             Ok(())
         }
         "use" => {
@@ -403,7 +405,7 @@ fn cmd_providers(
             ensure_empty(&words)?;
             let store = open_store(db)?;
             cmd_providers_use(&store, &id, &agent)?;
-            after_mutation(admin_port, db);
+            after_mutation(admin, db);
             Ok(())
         }
         "remove" => {
@@ -411,7 +413,7 @@ fn cmd_providers(
             ensure_empty(&words)?;
             let store = open_store(db)?;
             cmd_providers_remove(&store, &id)?;
-            after_mutation(admin_port, db);
+            after_mutation(admin, db);
             Ok(())
         }
         other => Err(format!("unknown providers subcommand: {other}")),
@@ -673,7 +675,7 @@ fn cmd_keys(
     sub: String,
     mut words: Vec<String>,
     db: &Option<String>,
-    admin_port: u16,
+    admin: &AdminEndpoint,
     json: bool,
 ) -> Result<(), String> {
     let store = open_store(db)?;
@@ -702,7 +704,7 @@ fn cmd_keys(
                 .insert_api_key(&provider, key.trim(), label.as_deref().map(str::trim))
                 .map_err(|e| e.to_string())?;
             println!("added key #{id} for {provider}");
-            after_mutation(admin_port, db);
+            after_mutation(admin, db);
             Ok(())
         }
         "remove" => {
@@ -712,7 +714,7 @@ fn cmd_keys(
                 return Err(format!("key not found: #{id}"));
             }
             println!("removed key #{id}");
-            after_mutation(admin_port, db);
+            after_mutation(admin, db);
             Ok(())
         }
         other => Err(format!("unknown keys subcommand: {other}")),
@@ -852,12 +854,13 @@ fn cmd_usage(
     Ok(())
 }
 
-fn render_status(v: &serde_json::Value, admin_port: u16) -> String {
+fn render_status(v: &serde_json::Value, admin: &AdminEndpoint) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "gateway: running (v{}, uptime {}s, admin 127.0.0.1:{admin_port})\n",
+        "gateway: running (v{}, uptime {}s, admin {})\n",
         v["version"].as_str().unwrap_or("?"),
-        v["uptime_secs"].as_u64().unwrap_or(0)
+        v["uptime_secs"].as_u64().unwrap_or(0),
+        admin.describe()
     ));
     // The token is what turns a liveness answer into the full report; without
     // it these fields are absent rather than zero, and printing "null" would
@@ -934,12 +937,19 @@ fn print_help() {
         "kiwano-cli — manage Kiwano providers without the desktop app
 
 USAGE:
-    kiwano-cli [--db PATH] [--admin-port N] [--json] <COMMAND>
+    kiwano-cli [--db PATH] [--admin-socket TARGET] [--json] <COMMAND>
 
 GLOBAL FLAGS:
-    --db PATH         SQLite file (default ~/.kiwano/kiwano.db, env KIWANO_DB_PATH)
-    --admin-port N    gateway admin port (default {DEFAULT_ADMIN_PORT}, env KIWANO_ADMIN_PORT)
-    --json            machine-readable output
+    --db PATH            SQLite file (default ~/.kiwano/kiwano.db, env KIWANO_DB_PATH)
+    --admin-socket TARGET
+                         where the gateway admin plane is: a socket file on
+                         macOS/Linux, a pipe name on Windows (default: admin.sock
+                         beside the database, env KIWANO_ADMIN_SOCKET)
+    --json               machine-readable output
+
+The admin plane is not a TCP port, so `curl http://127.0.0.1:8310/status` no
+longer reaches it and KIWANO_ADMIN_PORT is no longer read. On macOS/Linux:
+    curl --unix-socket ~/.kiwano/admin.sock http://localhost/status
 
 COMMANDS:
     status                        gateway + store summary (exit 1 when gateway is down)
@@ -982,17 +992,34 @@ mod tests {
         assert_eq!(g.db.as_deref(), Some("/tmp/x.db"));
         assert!(g.json);
         assert_eq!(g.rest, vec!["providers".to_string(), "list".to_string()]);
+        // Given no override, the endpoint follows from the database: the plane
+        // sits beside the store, not on a port of its own.
+        #[cfg(unix)]
+        assert_eq!(g.admin.describe(), "/tmp/admin.sock");
 
         let g = globals_of(&["status"]);
-        assert_eq!(g.admin_port, DEFAULT_ADMIN_PORT);
         assert!(!g.json);
     }
 
+    /// `--admin-port` is gone with the port it named; `--admin-socket` is what
+    /// points the CLI at a plane that is not the default one.
     #[test]
-    fn globals_reject_bad_port() {
-        let err =
-            parse_globals(vec!["--admin-port".into(), "abc".into(), "status".into()]).unwrap_err();
-        assert!(err.contains("invalid --admin-port"));
+    fn globals_read_the_admin_socket() {
+        let g = globals_of(&["--admin-socket", "/tmp/elsewhere.sock", "status"]);
+        assert_eq!(g.admin.describe(), "/tmp/elsewhere.sock");
+
+        // A value that is only whitespace means "not given", not an endpoint
+        // whose name is blank.
+        let g = globals_of(&["--admin-socket", "  ", "--db", "/tmp/x.db", "status"]);
+        #[cfg(unix)]
+        assert_eq!(g.admin.describe(), "/tmp/admin.sock");
+        #[cfg(windows)]
+        assert!(
+            g.admin.describe().starts_with(r"\\.\pipe\kiwano-admin-"),
+            "a blank override falls back to the per-user pipe"
+        );
+
+        assert!(parse_globals(vec!["--admin-socket".into()]).is_err());
     }
 
     #[test]
@@ -1219,7 +1246,7 @@ mod tests {
                   "candidates": [{ "id": "ds" }, { "id": "kimi" }] }
             ]
         });
-        let text = render_status(&v, 8310);
+        let text = render_status(&v, &AdminEndpoint::parse("/tmp/admin.sock"));
         assert!(text.contains("running (v0.1.0, uptime 42s"));
         assert!(text.contains("providers 2"));
         assert!(text.contains("failover"));

@@ -1,15 +1,15 @@
-//! kiwano-gateway binary entry (tech.md §4.1): data plane :8317 + admin plane
-//! :8310, both loopback-bound. Runs as a Tauri sidecar; configuration comes
-//! from environment variables so the GUI can pass explicit ports/paths.
+//! kiwano-gateway binary entry (tech.md §4.1): data plane on loopback :8317,
+//! admin plane on a unix socket / named pipe (`server::admin_ipc`). Runs as a
+//! Tauri sidecar; configuration comes from environment variables so the GUI can
+//! pass explicit ports and paths.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use kiwano_gateway::server::{admin_plane_router, data_plane_router, GatewayState};
+use kiwano_gateway::server::{admin_plane_router, data_plane_router, AdminEndpoint, GatewayState};
 use kiwano_gateway::store::Store;
 
 const DEFAULT_DATA_PORT: u16 = 8317;
-const DEFAULT_ADMIN_PORT: u16 = 8310;
 const DEFAULT_DB_SUBDIR: &str = ".kiwano";
 const DEFAULT_DB_FILE: &str = "kiwano.db";
 
@@ -43,8 +43,14 @@ fn db_path_from_env() -> PathBuf {
 #[tokio::main]
 async fn main() {
     let data_port = env_port("KIWANO_DATA_PORT", DEFAULT_DATA_PORT);
-    let admin_port = env_port("KIWANO_ADMIN_PORT", DEFAULT_ADMIN_PORT);
     let db_path = db_path_from_env();
+    // The admin plane is not a port: a socket beside the database, or a
+    // per-user named pipe on Windows. `KIWANO_ADMIN_SOCKET` overrides it, and
+    // the GUI inherits nothing, so both sides resolve the same default from the
+    // same database path. `KIWANO_ADMIN_PORT` is no longer read here at all —
+    // it survives only in the app, as the port a *pre-0.1.8* gateway is still
+    // reachable on.
+    let admin_endpoint = AdminEndpoint::from_env(&db_path);
 
     // Logging first, and beside the database: everything below can fail, and a
     // packaged app has no stdout to fail onto.
@@ -77,7 +83,6 @@ async fn main() {
     };
 
     let data_addr = std::net::SocketAddr::from(([127, 0, 0, 1], data_port));
-    let admin_addr = std::net::SocketAddr::from(([127, 0, 0, 1], admin_port));
     let data_listener = match tokio::net::TcpListener::bind(data_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -85,10 +90,16 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let admin_listener = match tokio::net::TcpListener::bind(admin_addr).await {
+    // Binds, or reclaims a socket file a previous gateway left behind, or
+    // refuses because a live one holds it — see `AdminEndpoint::bind`.
+    let admin_listener = match admin_endpoint.bind().await {
         Ok(l) => l,
         Err(e) => {
-            tracing::error!(addr = %admin_addr, error = %e, "cannot bind admin plane (port conflict?)");
+            tracing::error!(
+                admin = %admin_endpoint.describe(),
+                error = %e,
+                "cannot bind admin plane (another gateway holds it?)"
+            );
             std::process::exit(1);
         }
     };
@@ -96,7 +107,7 @@ async fn main() {
     let agents = state.route_table().routes.len();
     tracing::info!(
         data = %data_addr,
-        admin = %admin_addr,
+        admin = %admin_endpoint.describe(),
         db = %db_path.display(),
         agents_routed = agents,
         version = state.version,
@@ -104,7 +115,10 @@ async fn main() {
     );
 
     // Sidecar stdout handshake (tech.md §4.6): one parseable ready line.
-    println!("ready data=127.0.0.1:{data_port} admin=127.0.0.1:{admin_port}");
+    println!(
+        "ready data=127.0.0.1:{data_port} admin={}",
+        admin_endpoint.describe()
+    );
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
@@ -170,6 +184,10 @@ async fn main() {
         axum::serve(admin_listener, admin_app)
             .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
     );
+    // Remove the socket file an orderly stop would otherwise leave for the next
+    // bind to reclaim. Best-effort: a crash leaves the file, and `bind`
+    // handles that, so this is tidiness rather than correctness.
+    admin_endpoint.cleanup();
     if let Err(e) = served {
         tracing::error!(error = %e, "gateway terminated");
         std::process::exit(1);

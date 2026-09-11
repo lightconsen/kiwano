@@ -1,17 +1,50 @@
-//! Admin plane (:8310, loopback only): status chip + route hot reload
-//! (tech.md §4.6 control channel; §4.3 flow 2).
+//! Admin plane: status chip + route hot reload + shutdown (tech.md §4.6
+//! control channel; §4.3 flow 2).
 //!
 //! The Tauri app calls `POST /reload` after writing new bindings to SQLite;
 //! the next request routed by the gateway hits the new provider. `GET
 //! /status` powers the first-screen gateway state chip and sidecar re-connect.
 //!
+//! # Transport
+//!
+//! These are the same three HTTP routes as ever, served over the local IPC
+//! endpoint described in [`super::admin_ipc`] — a unix domain socket, or a
+//! per-user named pipe on Windows — instead of a loopback TCP port. No handler
+//! below knows or cares which: the router is transport-independent, which is
+//! why the tests in this module drive it with `oneshot` while
+//! [`super::admin_ipc`]'s drive it through a real socket, and why the app's
+//! hand-written requests did not have to change shape when the plane moved.
+//!
 //! # Auth
 //!
-//! `/reload` and `/shutdown` take the caller's choice of provider and stop the
-//! process, so loopback binding alone is not enough: any local process could
-//! reach them, and "loopback" is not a boundary between processes — everything
-//! on the machine is on it. They therefore require [`ADMIN_TOKEN_HEADER`],
-//! carrying the token the gateway minted for itself on first run.
+//! `/reload` and `/shutdown` route the operator's traffic and stop the process,
+//! so both require [`ADMIN_TOKEN_HEADER`], carrying the token the gateway minted
+//! for itself on first run.
+//!
+//! **What the token is worth now that the plane is not a port.** Decided
+//! deliberately when the transport changed, because the answer is not the same
+//! as it was:
+//!
+//! - The boundary is the endpoint's own access control. On unix the socket sits
+//!   in `~/.kiwano` (0700) and is itself 0600; on Windows the pipe's DACL
+//!   grants the creating user alone. A process running as another user cannot
+//!   reach the plane at all, and does not need a token to be kept out.
+//! - Any process running as *this* user can reach it — the socket path is
+//!   predictable, not secret — and can equally read the token out of the
+//!   database, which is 0600 to that same user. So against a same-user
+//!   attacker the token stops nothing that the file permissions do not already
+//!   stop. That is the honest reading, and it is why this doc no longer claims
+//!   the token is what keeps local processes out.
+//! - It is kept anyway, as a layer over a *different* mechanism. The socket's
+//!   mode and the database's mode are enforced independently, so the case where
+//!   the token still decides something is the case where they come apart: a
+//!   socket path overridden into a shared directory, a mode lost to a move or a
+//!   restore, a caller that can open the socket but not the data directory.
+//!   There, whoever reaches `/reload` must still hold the token, and the token
+//!   is readable only from a database they cannot open.
+//! - So: redundant when permissions hold, load-bearing when they do not, and
+//!   32 bytes of header on a handful of local requests a minute. Keeping it is
+//!   the cheap side of that trade.
 //!
 //! The token lives in the `app_settings` KV ([`ADMIN_TOKEN_KEY`]), which both
 //! processes already share — the GUI writes and reads it, the gateway reads
@@ -22,15 +55,11 @@
 //! GUI being locked out of its own gateway. Admin traffic is a handful of
 //! requests a minute, so the SELECT costs nothing.
 //!
-//! Loopback binding stays, as the second layer: the token stops local
-//! processes from driving the gateway, and the bind stops anything off-box
-//! from reaching it at all.
-//!
 //! `/status` is deliberately *not* locked. It is the liveness probe (`ping_admin`),
 //! and it is the version check that decides whether a running gateway is this
 //! build and should be replaced — both have to work when the caller knows
-//! nothing about the token, including the upgrade case where the gateway on
-//! the port is an older build that has no token support at all. An
+//! nothing about the token, including the upgrade case where the gateway
+//! answering is an older build that has no token support at all. An
 //! unauthenticated caller gets identity and uptime and nothing else; the
 //! route table, provider ids, strategies, candidate lists and blocked reasons
 //! need the token. See [`status`].
@@ -65,8 +94,9 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
 /// Read the admin token, minting one on first run.
 ///
 /// 128 bits of v4 UUID, hex. Called from `GatewayState::new`, i.e. before
-/// either listener binds, so the row is on disk the moment the port answers —
-/// a GUI that reads it after a successful ping can never lose that race.
+/// either listener binds, so the row is on disk the moment the admin endpoint
+/// answers — a GUI that reads it after a successful ping can never lose that
+/// race.
 ///
 /// An existing row is adopted as-is rather than overwritten: a gateway
 /// restart must not rotate the secret out from under a GUI that is holding
@@ -81,8 +111,8 @@ pub fn ensure_admin_token(store: &Store) -> crate::error::Result<String> {
     let token = uuid::Uuid::new_v4().simple().to_string();
     store.set_app_setting(ADMIN_TOKEN_KEY, &token)?;
     // Re-read and prefer the stored value: if another gateway was starting at
-    // the same moment, exactly one of us ends up bound to :8310, and this is
-    // the value both sides will actually compare against from here on.
+    // the same moment, exactly one of us ends up bound to the endpoint, and
+    // this is the value both sides will actually compare against from here on.
     Ok(store.app_setting(ADMIN_TOKEN_KEY).unwrap_or(token))
 }
 
@@ -121,7 +151,7 @@ fn token_matches(presented: &str, expected: &str) -> bool {
 }
 
 /// 401 for an admin endpoint the caller may not use. Named `ok: false` so the
-/// raw-TCP clients in `sidecar.rs` / `crates/cli` can tell a refusal from a
+/// raw-HTTP clients in `sidecar.rs` / `crates/cli` can tell a refusal from a
 /// success without parsing the status line.
 fn unauthorized() -> Response {
     (
@@ -138,8 +168,8 @@ fn unauthorized() -> Response {
 
 /// Stop this process.
 ///
-/// The app calls this when the gateway answering :8310 is not the version it
-/// ships. The daemon outlives the GUI on purpose, so the one it finds is
+/// The app calls this when the gateway answering the admin endpoint is not the
+/// version it ships. The daemon outlives the GUI on purpose, so the one it finds is
 /// usually not its child and there is no handle to kill — and killing it
 /// outright would skip the store's write-ahead-log checkpoint, which is the
 /// whole reason this plane exists rather than a signal. Token-guarded like
@@ -166,13 +196,14 @@ async fn shutdown(State(state): State<Arc<GatewayState>>, headers: HeaderMap) ->
 ///
 /// - `ping_admin` greps the status line for `200`, and the GUI's watchdog uses
 ///   it every few seconds to tell "a gateway is here" from "nothing is here".
-///   A 401 there would read as a dead port, and `force_stop` would then refuse
-///   to stop a gateway it believes is already gone.
+///   A 401 there would read as a gateway that is not running, and the watchdog
+///   would respawn one on top of the gateway that answered.
 /// - `sidecar::startup_action` parses `name` + `version` out of this body to
-///   decide whether the running daemon is the build we ship. That decision has
-///   to survive an upgrade in both directions: against a 0.1.7-era gateway
-///   there is no token row to send, and the old build would ignore the header
-///   anyway.
+///   decide whether the running daemon is the build we ship — and it is the
+///   same body `sidecar::legacy_admin_port` reads off a *pre-0.1.8* gateway
+///   still on TCP. That decision has to survive an upgrade in both directions:
+///   against an older build there is no token row to send, and the old build
+///   would ignore the header anyway.
 ///
 /// Everything past the first branch — routes, provider ids, candidate
 /// protocols, strategies, blocked reasons — names the operator's providers and
@@ -652,6 +683,77 @@ mod tests {
         .await;
         assert_eq!(v["ok"], true);
         assert_eq!(v["agents_routed"], 1);
+    }
+
+    // ── the admin plane over its real transport ──────────────────────────
+
+    /// Every route the app and the CLI use, over a real socket/pipe rather
+    /// than `oneshot`: this is the wiring the transport change could break
+    /// while every test above still passed. `/status` (with and without the
+    /// token), `/reload` and `/shutdown` all have to answer.
+    ///
+    /// Runs on both platforms — the endpoint is whatever the OS gives us, and
+    /// on Windows CI this is the test that exercises the named-pipe server.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn admin_routes_answer_over_the_ipc_endpoint() {
+        use crate::server::admin_ipc::test_support::{request, serve_in_background, test_endpoint};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+        let endpoint = test_endpoint(dir.path());
+        serve_in_background(&endpoint, admin_plane_router(state.clone()));
+
+        let get = |path: &str, token: Option<&str>| {
+            let header = token
+                .map(|t| format!("{ADMIN_TOKEN_HEADER}: {t}\r\n"))
+                .unwrap_or_default();
+            request(
+                &endpoint,
+                &format!(
+                    "GET {path} HTTP/1.1\r\nHost: localhost\r\n{header}Connection: close\r\n\r\n"
+                ),
+            )
+        };
+        let post = |path: &str, token: Option<&str>| {
+            let header = token
+                .map(|t| format!("{ADMIN_TOKEN_HEADER}: {t}\r\n"))
+                .unwrap_or_default();
+            request(
+                &endpoint,
+                &format!(
+                    "POST {path} HTTP/1.1\r\nHost: localhost\r\n{header}Content-Length: 0\r\nConnection: close\r\n\r\n"
+                ),
+            )
+        };
+
+        // /status, authenticated: the full report, not just liveness.
+        let status = get("/status", Some(&token));
+        assert!(status.starts_with("HTTP/1.1 200 OK"), "{status}");
+        assert!(status.contains("\"agents_routed\":1"), "{status}");
+
+        // /status, unauthenticated: still a 200, and liveness only.
+        let liveness = get("/status", None);
+        assert!(liveness.starts_with("HTTP/1.1 200 OK"), "{liveness}");
+        assert!(liveness.contains("kiwano-gateway"), "{liveness}");
+        assert!(!liveness.contains("agents_routed"), "{liveness}");
+
+        // /reload, refused and then accepted.
+        let refused = post("/reload", None);
+        assert!(refused.starts_with("HTTP/1.1 401"), "{refused}");
+        let reloaded = post("/reload", Some(&token));
+        assert!(reloaded.starts_with("HTTP/1.1 200 OK"), "{reloaded}");
+        assert!(reloaded.contains("\"ok\":true"), "{reloaded}");
+
+        // /shutdown last: it flips the stop signal, and everything above had to
+        // happen while the gateway was still running.
+        let mut rx = state.shutdown_rx();
+        let stopped = post("/shutdown", Some(&token));
+        assert!(stopped.starts_with("HTTP/1.1 200 OK"), "{stopped}");
+        rx.changed().await.expect("stop signal delivered");
+        assert!(*rx.borrow_and_update(), "stop requested");
     }
 
     // ── data plane auth ─────────────────────────────────────────────────

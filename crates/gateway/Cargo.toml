@@ -27,14 +27,16 @@ chrono = "0.4"
 sha2 = "0.10"
 thiserror = "2"
 
-# Windows DACL hardening in src/store/mod.rs (`harden_permissions`). Same crate
-# version as kiwano-adapters so the two resolve to one windows-sys.
+# Windows DACL hardening in src/store/mod.rs (`harden_permissions`) and the
+# named-pipe admin plane in src/server/admin_ipc.rs. Same crate version as
+# kiwano-adapters so the two resolve to one windows-sys.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",             # WIN32_ERROR, HANDLE, LocalFree
     "Win32_Security",               # token SID, DACL/ACE types, security-info flags
     "Win32_Security_Authorization", # SetEntriesInAclW / SetNamedSecurityInfoW
     "Win32_Storage_FileSystem",     # FILE_ALL_ACCESS (the mask the ACE grants)
+    "Win32_System_Pipes",           # WaitNamedPipeW (bounding the client connect)
     "Win32_System_Threading",       # OpenProcessToken / GetCurrentProcess
 ] }
 

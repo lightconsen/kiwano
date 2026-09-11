@@ -1,8 +1,9 @@
 //! Kiwano GUI backend: Tauri commands backed by the gateway store + sidecar.
 //!
 //! Data flow (tech.md §4.1): UI → `invoke` → commands here → gateway Store
-//! (same SQLite file the sidecar reads) → `POST :8310/reload` hot-swaps the
-//! gateway route table. The gateway process itself is spawned in `setup`.
+//! (same SQLite file the sidecar reads) → `POST /reload` on the admin plane
+//! (a unix socket / named pipe, see `sidecar`) hot-swaps the gateway route
+//! table. The gateway process itself is spawned in `setup`.
 
 mod creds;
 mod csv;
@@ -23,13 +24,17 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 use detect::{detect_agents, probe_agent_versions};
+use sidecar::AdminEndpoint;
 use vm::Aux;
 
 struct AppState {
     store: Store,
     aux: Aux,
     child: Mutex<Option<std::process::Child>>,
-    admin_port: u16,
+    /// Where the admin plane is, not a port: a socket beside the database, or a
+    /// per-user pipe on Windows. Resolved once at startup and shared by every
+    /// caller, so nothing re-reads the environment mid-session.
+    admin: AdminEndpoint,
     data_port: u16,
     /// Update found by the silent startup check, so the UI can show it without
     /// the user running a check by hand (see `get_pending_update`).
@@ -58,7 +63,7 @@ fn db_path() -> std::path::PathBuf {
 }
 
 fn after_mutation(state: &State<AppState>) {
-    sidecar::notify_reload(state.admin_port);
+    sidecar::notify_reload(&state.admin);
 }
 
 // ── Daemon lifecycle (tech.md §2.4 B / §4.6) ──
@@ -69,11 +74,11 @@ fn after_mutation(state: &State<AppState>) {
 // reconnect mechanism.
 //
 // Startup treats a version mismatch as a replace (see `sidecar::startup_action`).
-// The watchdog below does not: its adopt paths only ask whether the admin port
+// The watchdog below does not: its adopt paths only ask whether the admin plane
 // answers. That is deliberate — it ticks every few seconds, and killing a
 // process because one `/status` call came back odd is worse than running a
-// gateway a version behind. Skew cannot appear mid-session anyway: the port is
-// held by whatever this app spawned or adopted at startup.
+// gateway a version behind. Skew cannot appear mid-session anyway: the endpoint
+// is held by whatever this app spawned or adopted at startup.
 
 /// Watchdog decision for one tick, factored out for testing.
 #[derive(Debug, PartialEq, Eq)]
@@ -128,7 +133,7 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
                 .as_mut()
                 .map(|c| c.try_wait().map(|st| st.is_some()).unwrap_or(true))
         };
-        let admin_alive = sidecar::ping_admin(state.admin_port);
+        let admin_alive = sidecar::ping_admin(&state.admin);
         match watchdog_decision(child_exited, admin_alive) {
             // Serving: whatever streak there was is over.
             WatchdogAction::None => respawns = 0,
@@ -144,7 +149,7 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
                 let Ok(mut child) = state.child.lock() else {
                     return;
                 };
-                if sidecar::ping_admin(state.admin_port) {
+                if sidecar::ping_admin(&state.admin) {
                     *child = None;
                     respawns = 0;
                     continue;
@@ -215,7 +220,7 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
                     rows = r.seeded,
                     "hub model pricing seeded"
                 );
-                sidecar::notify_reload(state.admin_port);
+                sidecar::notify_reload(&state.admin);
             }
             Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
             _ => {}
@@ -329,7 +334,7 @@ fn setup_tray(app: &tauri::App, data_port: u16) -> tauri::Result<()> {
 
 #[tauri::command]
 fn get_gateway_status(state: State<AppState>) -> vm::GatewayStatusVm {
-    let report = sidecar::gateway_status(state.admin_port);
+    let report = sidecar::gateway_status(&state.admin);
     let blocked = report
         .as_ref()
         .and_then(|r| r.get("blocked"))
@@ -513,6 +518,10 @@ fn list_request_logs(
 /// Writes the filtered log slice to `path` as CSV. The frontend picks the path
 /// from the dialog plugin first — the same split as `export_config` — and this
 /// is `async` because a full export is a lot of formatting to block a thread on.
+/// `include_bodies` is the export dialog's choice; bodies are always captured,
+/// so this is where the file decides whether to carry them. Defaults to off for
+/// a caller that does not send it — the safe direction for a file that may be
+/// shared.
 #[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 fn export_request_logs(
@@ -523,15 +532,19 @@ fn export_request_logs(
     status: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    include_bodies: Option<bool>,
 ) -> Result<vm::RequestLogExportVm, String> {
     vm::export_request_logs_csv(
         &state.store,
         &path,
-        agent.as_deref(),
-        provider_id.as_deref(),
-        status.as_deref(),
-        from.as_deref(),
-        to.as_deref(),
+        RequestLogFilter {
+            agent: agent.as_deref(),
+            provider_id: provider_id.as_deref(),
+            status: status.as_deref(),
+            from: from.as_deref(),
+            to: to.as_deref(),
+        },
+        include_bodies.unwrap_or(false),
     )
 }
 
@@ -827,20 +840,25 @@ pub fn run() {
             let store = Store::open(&path).map_err(|e| e.to_string())?;
             let aux = Aux::open(&path).map_err(|e| e.to_string())?;
             let data_port = env_port("KIWANO_DATA_PORT", 8317);
-            let admin_port = env_port("KIWANO_ADMIN_PORT", 8310);
+            // Not a port any more: the admin plane is a socket beside the
+            // database, or a per-user named pipe. `KIWANO_ADMIN_PORT` survives
+            // only inside `sidecar` as where a pre-0.1.8 gateway is looked for.
+            let admin = sidecar::admin_endpoint();
 
             // Sidecar lifecycle (tech.md §4.6): adopt an already-running daemon
             // — but only one of our own version. The daemon deliberately
             // outlives the GUI, so an upgrade meets its predecessor still
-            // holding the port, and the two share a SQLite file whose schema
-            // only one of them may understand. `gateway_status` doubles as the
-            // liveness probe here: None means nothing is answering.
+            // holding the data port, and the two share a SQLite file whose
+            // schema only one of them may understand. `running_gateway_status`
+            // doubles as the liveness probe here — None means nothing is
+            // answering on the endpoint or, during the 0.1.8 upgrade window, on
+            // the legacy TCP port (`sidecar` documents when that goes away).
             let ours = env!("CARGO_PKG_VERSION");
-            let status = sidecar::gateway_status(admin_port);
+            let status = sidecar::running_gateway_status(&admin);
             let child = match sidecar::startup_action(status.as_ref(), ours) {
                 sidecar::StartupAction::Adopt => {
                     tracing::info!(
-                        port = admin_port,
+                        admin = %admin.describe(),
                         version = ours,
                         "adopting running gateway"
                     );
@@ -855,10 +873,10 @@ pub fn run() {
                     tracing::warn!(
                         running,
                         ours,
-                        port = admin_port,
+                        admin = %admin.describe(),
                         "the running gateway is a different version; replacing it"
                     );
-                    match sidecar::restart(admin_port) {
+                    match sidecar::restart(&admin) {
                         Ok(c) => Some(c),
                         Err(e) => {
                             tracing::error!(error = %e, "could not replace the running gateway");
@@ -892,7 +910,7 @@ pub fn run() {
                 store,
                 aux,
                 child: Mutex::new(child),
-                admin_port,
+                admin,
                 data_port,
                 pending_update: Mutex::new(None),
             });

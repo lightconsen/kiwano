@@ -23,3 +23,6 @@ models/
 # Python
 __pycache__/
 *.pyc
+
+# Screenshots dropped in the repo root for review, never project content
+ScreenShot_*.png

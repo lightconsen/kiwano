@@ -87,6 +87,23 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+      # The gateway is an `externalBin`, so the config entry and the staging
+      # script have to agree on a path and a name. Both are cheap to check here
+      # and expensive to discover four builds later — a missing externalBin is
+      # a hard `tauri build` error on every platform.
+      - name: Sidecar staging
+        run: |
+          set -euo pipefail
+          grep -q '"externalBin"' src-tauri/tauri.conf.json \
+            || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
+          # Debug profile on purpose: this proves the path and the triple-suffix
+          # naming agree, and does not need the LTO release build to say so.
+          node scripts/build-sidecar.mjs
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          test -x "src-tauri/binaries/kiwano-gateway-$triple" \
+            || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
+          echo "staged src-tauri/binaries/kiwano-gateway-$triple"
+
       # A tag is now expected to yield a signed, notarized build. Shipping
       # unsigned was the old normal; it is a regression now, and nothing
       # downstream would notice — publishing has no human in it. Fail cheaply
@@ -240,9 +257,25 @@ jobs:
           chmod 600 "$key"
           echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
 
+      # The app alone is not a runnable Kiwano: the gateway daemon is an
+      # `externalBin`, and Tauri bundles whatever
+      # src-tauri/binaries/kiwano-gateway-<triple> happens to exist — which,
+      # before this step existed, was nothing on every platform, so every
+      # shipped build could not start a gateway on a machine that had never
+      # compiled one. Build it for the target being bundled, explicitly: the
+      # beforeBuildCommand hook cannot see --target.
+      - name: Build the gateway sidecar
+        run: node scripts/build-sidecar.mjs --target ${{ matrix.target }} --profile release
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The action runs the build through the package manager — with
+          # `tauriScript` unset it resolves to `pnpm tauri build`, which is this
+          # repo's `tauri` script and rebuilds the sidecar. Without this the
+          # wrapper would stage the *host* triple, and on the x86_64 leg of an
+          # arm64 runner Tauri would then look for a file that does not exist.
+          KIWANO_SIDECAR_TARGET: ${{ matrix.target }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Apple signing + notarization. Tauri imports the .p12 into a
@@ -356,6 +389,62 @@ jobs:
             spctl --assess --type open --context context:primary-signature -v "$dmg"
           fi
           echo "signed, notarized and stapled: $app"
+
+      # The gateway daemon is what makes the app work at all, and it lives
+      # beside the app binary rather than inside it. Tauri bundles whatever
+      # src-tauri/binaries/kiwano-gateway-<triple> exists and says nothing when
+      # the triple is wrong — the 0.1.7 bundles went out with no gateway on any
+      # platform and nothing noticed, because the dev machine always had one
+      # running to adopt. Assert it is inside the artifact a user installs.
+      - name: Verify the gateway sidecar is in the bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="target/${{ matrix.target }}/release/bundle"
+          fail() { echo "::error::$*"; exit 1; }
+
+          case "${{ matrix.target }}" in
+            *-apple-darwin)
+              app=$(find "$bundle" -maxdepth 3 -name '*.app' -type d | head -n 1)
+              [ -n "$app" ] || fail "no .app under $bundle"
+              sidecar="$app/Contents/MacOS/kiwano-gateway"
+              [ -x "$sidecar" ] || fail "gateway sidecar missing from $app"
+              # A nested Mach-O must carry the same Developer ID. Notarization
+              # would have rejected an unsigned one, so this proves the
+              # signature covered the sidecar rather than being drawn around it.
+              codesign --verify --verbose=2 "$sidecar"
+              codesign -dv --verbose=4 "$sidecar" 2>&1 \
+                | grep -q '^Authority=Developer ID Application' \
+                || fail "$sidecar is not Developer ID signed"
+              ;;
+
+            *-unknown-linux-gnu)
+              # What gets installed, not just what Tauri staged.
+              deb=$(find "$bundle/deb" -maxdepth 2 -name '*.deb' | head -n 1)
+              [ -n "$deb" ] || fail "no .deb under $bundle/deb"
+              dpkg-deb -c "$deb" | grep -q 'usr/bin/kiwano-gateway' \
+                || fail "gateway sidecar missing from $deb"
+              appimage=$(find "$bundle/appimage" -maxdepth 2 -name '*.AppImage' | head -n 1)
+              if [ -n "$appimage" ]; then
+                chmod +x "$appimage"
+                tmp=$(mktemp -d)
+                ( cd "$tmp" && "$(realpath "$appimage")" --appimage-extract >/dev/null )
+                [ -x "$tmp/squashfs-root/usr/bin/kiwano-gateway" ] \
+                  || fail "gateway sidecar missing from $appimage"
+              fi
+              ;;
+
+            *-pc-windows-msvc)
+              # Tauri copies externalBin next to the built GUI binary; the
+              # installers package from there, so this is the load-bearing
+              # check. (Installing silently and looking in %LOCALAPPDATA% would
+              # depend on the NSIS installMode default, which nothing here
+              # pins.)
+              [ -f "target/${{ matrix.target }}/release/kiwano-gateway.exe" ] \
+                || fail "Tauri did not stage kiwano-gateway.exe beside the app"
+              ;;
+          esac
+          echo "gateway sidecar present in the ${{ matrix.target }} bundle"
 
       # Mirror the built installers to Cloudflare R2 under releases/ (served at
       # hub.kiwano.cc/releases). Only the newest build lives there: names are

@@ -13,6 +13,10 @@ pnpm-debug.log*
 target/
 src-tauri/gen/schemas
 
+# Tauri sidecar staging — written by scripts/build-sidecar.mjs, one binary per
+# target triple, never project content.
+src-tauri/binaries/
+
 # Editor / OS
 .DS_Store
 .idea

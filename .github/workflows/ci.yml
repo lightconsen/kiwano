@@ -62,6 +62,21 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+      # The gateway daemon is an `externalBin`: without it a packaged app has
+      # no way to start one, and that failure is invisible in dev, where a
+      # gateway is always already running to adopt. Check the config entry and
+      # the staging script agree here, on every PR, rather than at release.
+      # Debug profile on purpose — this is about the path and the naming.
+      - name: Sidecar staging
+        run: |
+          set -euo pipefail
+          grep -q '"externalBin"' src-tauri/tauri.conf.json \
+            || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
+          node scripts/build-sidecar.mjs
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          test -x "src-tauri/binaries/kiwano-gateway-$triple" \
+            || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
+
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15

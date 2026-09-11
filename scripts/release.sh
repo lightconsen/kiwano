@@ -16,7 +16,8 @@
 #
 #   --dry-run   print the planned changes and modify nothing
 #   --commit    commit the bump (message: "chore: bump version to <version>")
-#   --tag       create the annotated tag v<version>; requires --commit
+#   --tag       create the annotated tag v<version>; requires --commit and a
+#               CHANGELOG.md section for this version
 #
 # Nothing is ever pushed. Without --commit/--tag this is a local, reversible edit.
 
@@ -26,6 +27,7 @@ PKG_JSON="package.json"
 TAURI_CONF="src-tauri/tauri.conf.json"
 CARGO_TOML="Cargo.toml"
 CARGO_LOCK="Cargo.lock"
+CHANGELOG="CHANGELOG.md"
 # Every file this script owns and may rewrite.
 MANAGED_FILES="$PKG_JSON $TAURI_CONF $CARGO_TOML $CARGO_LOCK"
 # Workspace members whose Cargo.lock entries must match the new version.
@@ -225,6 +227,24 @@ cd "$(cd "$(dirname "$0")/.." && pwd)"
 for f in $MANAGED_FILES; do
     [ -f "$f" ] || die "missing file: $f"
 done
+
+# --- the changelog gate ------------------------------------------------------
+# A tag is a release, and a release nobody can read is not one: the entry is
+# written first, then tagged. Checked before anything is rewritten, so a missing
+# entry costs nothing to fix.
+if [ "$DO_TAG" -eq 1 ]; then
+    [ -f "$CHANGELOG" ] || die "missing file: $CHANGELOG"
+    if ! grep -qF "## [$NEW_VERSION]" "$CHANGELOG"; then
+        die "$CHANGELOG has no $NEW_VERSION section — move the [Unreleased] items under '## [$NEW_VERSION] - <date>', describe the release, commit it, then tag"
+    fi
+    # The section must also be *committed*. The bump commit below stages only
+    # $MANAGED_FILES, so a changelog entry still sitting in the working tree
+    # would be left out of the very commit the tag points at — a release whose
+    # notes exist everywhere except in the release.
+    if [ -n "$(git status --porcelain -- "$CHANGELOG")" ]; then
+        die "$CHANGELOG has uncommitted changes — commit the $NEW_VERSION entry first; the tag is cut from the commit, so an uncommitted entry would not be in it"
+    fi
+fi
 
 # --- validate the current state ---------------------------------------------
 

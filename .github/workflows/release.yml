@@ -8,6 +8,11 @@
 # Builds are unsigned: macOS Gatekeeper needs right-click → Open, and Windows
 # SmartScreen shows a warning.
 #
+# The GitHub release body is the tag's own CHANGELOG.md section (`changelog`
+# job), so the notes a reader sees are the ones written before the tag. Only the
+# unsigned-build warning is appended, because that is about the artifacts rather
+# than the release.
+#
 # Two outputs: the GitHub release (the updater's authoritative manifest source)
 # and a Cloudflare R2 mirror under releases/, whose paths carry no version so
 # they stay valid across releases. See the `mirror-*` and `publish` jobs.
@@ -75,8 +80,48 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+  # The release body, read from the changelog section for this tag. Its own job
+  # so it runs once rather than per platform, and so a missing section fails in
+  # seconds instead of after four builds — `build` needs it, so nothing ships
+  # without it. `scripts/release.sh --tag` refuses to create the tag in the
+  # first place; this catches a tag made by hand or pushed from elsewhere.
+  changelog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      body: ${{ steps.read.outputs.body }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The heading is matched against the tag, not package.json: a tag on a
+      # commit whose version was never bumped should fail here rather than
+      # publish notes for a version that was not released.
+      - name: Read this tag's changelog section
+        id: read
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # From "## [<version>]" up to the next "## [" heading. The heading
+          # itself is dropped: the release is already titled "Kiwano v<version>".
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          # Whitespace-only counts as empty: a heading with nothing under it
+          # would otherwise publish a release with no notes at all.
+          grep -q '[^[:space:]]' notes.md || {
+            echo "::error::CHANGELOG.md has no '$version' section with content — write it, commit it, then re-tag"
+            exit 1
+          }
+          {
+            echo 'body<<KIWANO_CHANGELOG_EOF'
+            cat notes.md
+            echo 'KIWANO_CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
   build:
-    needs: verify
+    needs: [verify, changelog]
     strategy:
       fail-fast: false
       matrix:
@@ -135,7 +180,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Kiwano ${{ github.ref_name }}"
-          releaseBody: >-
+          # Literal block, not folded: the changelog is Markdown and its line
+          # breaks are the formatting.
+          releaseBody: |
+            ${{ needs.changelog.outputs.body }}
+
+            ---
+
             安装包未做代码签名：macOS 首次打开需右键 → 打开，
             Windows SmartScreen 出现提示时选择“仍要运行”。
 

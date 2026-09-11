@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -266,6 +267,7 @@ export default function RequestLogs({
   const [toDate, setToDate] = useState(todayLocalDate);
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportBodies, setExportBodies] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -345,7 +347,7 @@ export default function RequestLogs({
         setExporting(false);
         return;
       }
-      const r = await api.exportRequestLogs(path, exportFilter());
+      const r = await api.exportRequestLogs(path, exportFilter(), exportBodies);
       if (r.truncated) {
         setErr(
           `Capped at ${r.rows_written.toLocaleString()} rows — narrow the range for the rest.`,
@@ -547,6 +549,17 @@ export default function RequestLogs({
                   />
                 </div>
               )}
+
+              {/* Bodies are recorded either way; this decides whether the file
+                  carries them. Off by default: the file is the thing that
+                  leaves the machine, and a body is prompt text. */}
+              <div className="flex items-center justify-between">
+                <span>
+                  <span className="text-[11.5px]">Include request and response bodies</span>
+                  <span className="text-[10.5px] text-mut"> Two extra columns</span>
+                </span>
+                <Switch checked={exportBodies} onCheckedChange={setExportBodies} />
+              </div>
 
               {/* The file is not the page: say so, or the range reads as a
                   filter on the table behind the dialog. */}

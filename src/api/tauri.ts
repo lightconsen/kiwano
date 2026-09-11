@@ -155,7 +155,7 @@ export const tauriApi: KiwanoApi = {
 
   // `path` was chosen by the caller from the save dialog; the file itself is
   // written in Rust, which is why no fs-plugin permission is involved.
-  exportRequestLogs: (path: string, filter?: RequestLogFilter) =>
+  exportRequestLogs: (path: string, filter?: RequestLogFilter, includeBodies?: boolean) =>
     invoke<RequestLogExport>("export_request_logs", {
       path,
       agent: filter?.agent ?? null,
@@ -163,6 +163,7 @@ export const tauriApi: KiwanoApi = {
       status: filter?.status ?? null,
       from: filter?.from ?? null,
       to: filter?.to ?? null,
+      includeBodies: includeBodies ?? false,
     }),
 
   clearRequestLogs: () => invoke<void>("clear_request_logs"),

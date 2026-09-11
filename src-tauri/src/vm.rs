@@ -11,8 +11,9 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwano_gateway::store::{
-    Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry, RequestLogFilter,
-    Store, Strategy, StrategyType, UsageTotals, EXPORT_ROW_CAP,
+    Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry,
+    RequestLogExportRow, RequestLogFilter, Store, Strategy, StrategyType, UsageTotals,
+    EXPORT_ROW_CAP,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -2343,32 +2344,39 @@ pub struct RequestLogExportVm {
 /// Every log row the filter matches, as CSV — what the Logs card's export
 /// writes. Unpaged, unlike `list_request_logs`: the page size is a display
 /// concern and must not cap what lands in the file.
+///
+/// `include_bodies` is the export's own choice, not a capture setting: bodies
+/// are always recorded, and the file either carries them or does not. It also
+/// picks the read — the bodyless one never touches `request_bodies` at all,
+/// so a metadata-only export of a large log does not load every body.
 pub fn export_request_logs_csv(
     store: &Store,
     path: &str,
-    agent: Option<&str>,
-    provider_id: Option<&str>,
-    status: Option<&str>,
-    from: Option<&str>,
-    to: Option<&str>,
+    filter: RequestLogFilter<'_>,
+    include_bodies: bool,
 ) -> Result<RequestLogExportVm, String> {
     // Ask for one row more than the cap will allow, so "exactly at the cap"
     // and "more than the cap" are distinguishable.
-    let mut rows = store
-        .export_request_logs(
-            RequestLogFilter {
-                agent,
-                provider_id,
-                status,
-                from,
-                to,
-            },
-            EXPORT_ROW_CAP + 1,
+    let (mut rows, truncated) = if include_bodies {
+        let rows = store
+            .export_request_logs_with_bodies(filter, EXPORT_ROW_CAP + 1)
+            .map_err(e2s)?;
+        let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
+        (rows, truncated)
+    } else {
+        let rows = store
+            .export_request_logs(filter, EXPORT_ROW_CAP + 1)
+            .map_err(e2s)?;
+        let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
+        (
+            rows.into_iter()
+                .map(RequestLogExportRow::from_entry)
+                .collect(),
+            truncated,
         )
-        .map_err(e2s)?;
-    let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
+    };
     rows.truncate(EXPORT_ROW_CAP as usize);
-    crate::csv::write_csv(path, &rows).map_err(e2s)?;
+    crate::csv::write_csv(path, &rows, include_bodies).map_err(e2s)?;
     Ok(RequestLogExportVm {
         rows_written: rows.len(),
         truncated,
@@ -4269,7 +4277,7 @@ mod tests {
         let path = dir.path().join("logs.csv");
         let path = path.to_str().unwrap();
 
-        let out = export_request_logs_csv(&s, path, None, None, None, None, None).unwrap();
+        let out = export_request_logs_csv(&s, path, RequestLogFilter::default(), false).unwrap();
         assert_eq!(out.rows_written, 3);
         assert!(!out.truncated);
 
@@ -4284,10 +4292,79 @@ mod tests {
 
         // The same filter the table gets: a slice with no rows writes a
         // header-only file rather than the whole table.
-        let empty =
-            export_request_logs_csv(&s, path, Some("codex"), None, None, None, None).unwrap();
+        let empty = export_request_logs_csv(
+            &s,
+            path,
+            RequestLogFilter {
+                agent: Some("codex"),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
         assert_eq!(empty.rows_written, 0);
         assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 1);
+    }
+
+    /// The export's body flag is the only place a body can be withheld, so it
+    /// has to actually withhold one — and actually produce one.
+    #[test]
+    fn export_includes_bodies_only_when_asked() {
+        let s = store();
+        // One row, with markers that need no CSV quoting, so "is it in the
+        // file" is a plain substring test.
+        s.insert_request_log(&kiwano_gateway::store::RequestLogNew {
+            ts: rfc3339(unix_now() - 90),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: Some("claude".into()),
+            attribution: Some("key".into()),
+            provider_id: Some("demo-alpha".into()),
+            model: Some("demo-model".into()),
+            status_code: 200,
+            error_kind: None,
+            error_message: None,
+            session_id: None,
+            is_streaming: false,
+            input_tokens: 10,
+            output_tokens: 2,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: Some(100),
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: Some("request-body-marker".into()),
+            response_body: Some("response-body-marker".into()),
+            request_size: 19,
+            response_size: 20,
+            truncated: false,
+            cost: None,
+            cost_currency: None,
+        })
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("logs.csv");
+        let path = path.to_str().unwrap();
+
+        let out = export_request_logs_csv(&s, path, RequestLogFilter::default(), false).unwrap();
+        assert_eq!(out.rows_written, 1);
+        let without = std::fs::read_to_string(path).unwrap();
+        assert!(!without.contains("request-body-marker"), "{without}");
+        assert!(!without.contains("response-body-marker"), "{without}");
+        assert!(!without.contains("request_body"), "no body column either");
+
+        let out = export_request_logs_csv(&s, path, RequestLogFilter::default(), true).unwrap();
+        assert_eq!(out.rows_written, 1);
+        let with = std::fs::read_to_string(path).unwrap();
+        assert!(with.contains("request-body-marker"), "{with}");
+        assert!(with.contains("response-body-marker"), "{with}");
+        assert!(
+            with.contains("request_body,response_body"),
+            "header matches"
+        );
     }
 
     #[test]

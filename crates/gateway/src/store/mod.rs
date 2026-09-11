@@ -675,6 +675,29 @@ pub struct RequestLogEntry {
     pub cost_currency: Option<String>,
 }
 
+/// One row of an export: the metadata every export carries, plus the captured
+/// bodies when the caller asked for them (the export is the only reader that
+/// can ask — the list view never does).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestLogExportRow {
+    pub entry: RequestLogEntry,
+    /// `None` when the export was run without bodies, or when this row has
+    /// none stored (a pre-forward failure, or a pruned body table row).
+    pub request_body: Option<String>,
+    pub response_body: Option<String>,
+}
+
+impl RequestLogExportRow {
+    /// The metadata-only shape: bodies deliberately absent.
+    pub fn from_entry(entry: RequestLogEntry) -> Self {
+        RequestLogExportRow {
+            entry,
+            request_body: None,
+            response_body: None,
+        }
+    }
+}
+
 /// Detail view: metadata + the captured bodies.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RequestLogDetail {
@@ -724,12 +747,11 @@ pub const EXPORT_ROW_CAP: i64 = 100_000;
 /// The GUI writes it; the gateway reads it at startup and on /reload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogConfig {
-    /// Master switch: capture data-plane requests at all.
+    /// Master switch: capture data-plane requests at all. There is no second
+    /// switch for bodies — capture means the whole request, bodies included,
+    /// and the CSV export is where a body can be left out of a file.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Store request/response bodies (when disabled, metadata only).
-    #[serde(default = "default_true")]
-    pub capture_bodies: bool,
     /// Rows older than this many days are pruned.
     #[serde(default = "default_retain_days")]
     pub retain_days: u32,
@@ -752,7 +774,6 @@ impl Default for LogConfig {
     fn default() -> Self {
         LogConfig {
             enabled: true,
-            capture_bodies: true,
             retain_days: default_retain_days(),
             max_body_bytes: default_max_body_bytes(),
         }
@@ -1889,6 +1910,49 @@ impl Store {
                     limit
                 ],
                 request_log_from_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// The same export read, with the captured bodies attached.
+    ///
+    /// `request_bodies` is keyed by `log_id`, not a column of `request_logs`,
+    /// so the bodies come from a LEFT JOIN rather than from the shared
+    /// [`REQUEST_LOG_COLUMNS`] slice — a row whose body was never stored (a
+    /// pre-forward failure, a pruned body table row) still exports, with NULL
+    /// bodies, instead of disappearing from the file. Row order and the filter
+    /// are identical to [`Self::export_request_logs`]; only the two extra
+    /// columns differ.
+    pub fn export_request_logs_with_bodies(
+        &self,
+        filter: RequestLogFilter<'_>,
+        limit: i64,
+    ) -> Result<Vec<RequestLogExportRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {REQUEST_LOG_COLUMNS}, b.request_body, b.response_body
+             FROM request_logs LEFT JOIN request_bodies b ON b.log_id = request_logs.id
+             {REQUEST_LOG_WHERE}
+             ORDER BY request_logs.id DESC LIMIT ?6",
+        ))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    filter.agent,
+                    filter.provider_id,
+                    filter.status,
+                    filter.from,
+                    filter.to,
+                    limit
+                ],
+                |row| {
+                    Ok(RequestLogExportRow {
+                        entry: request_log_from_row(row)?,
+                        request_body: row.get(27)?,
+                        response_body: row.get(28)?,
+                    })
+                },
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
@@ -3439,6 +3503,72 @@ mod tests {
     }
 
     #[test]
+    fn export_with_bodies_joins_the_separate_body_table() {
+        let (_dir, store) = temp_store();
+        store
+            .insert_request_log(&sample_log(
+                "2026-09-07T10:00:00+00:00",
+                Some("claude"),
+                200,
+            ))
+            .unwrap();
+        // A second row with no body stored: the LEFT JOIN must keep it.
+        let mut bodyless = sample_log("2026-09-07T11:00:00+00:00", Some("claude"), 502);
+        bodyless.request_body = None;
+        bodyless.response_body = None;
+        store.insert_request_log(&bodyless).unwrap();
+
+        let rows = store
+            .export_request_logs_with_bodies(RequestLogFilter::default(), 100)
+            .unwrap();
+        assert_eq!(rows.len(), 2, "a row without a body still exports");
+        assert_eq!(
+            rows[0].entry.status_code, 502,
+            "newest first, as in the list"
+        );
+        assert_eq!(rows[0].request_body, None);
+        assert_eq!(rows[0].response_body, None);
+        assert_eq!(
+            rows[1].request_body.as_deref(),
+            Some(r#"{"model":"claude-sonnet-4-5"}"#)
+        );
+        assert_eq!(rows[1].response_body.as_deref(), Some(r#"{"ok":true}"#));
+        // Metadata rides along unchanged — same columns as the bodyless read.
+        assert_eq!(
+            rows[1].entry,
+            store
+                .export_request_logs(RequestLogFilter::default(), 100)
+                .unwrap()[1]
+        );
+    }
+
+    #[test]
+    fn log_config_tolerates_a_stored_blob_from_before_the_switch_was_removed() {
+        // A `capture_bodies` key left in `gateway_settings` by an older build
+        // is an unknown field now: ignored, not a parse failure that would
+        // reset the whole config to defaults.
+        let (_dir, store) = temp_store();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)",
+            params![
+                LOG_CONFIG_KEY,
+                r#"{"enabled":false,"capture_bodies":true,"retain_days":7,"max_body_bytes":1024}"#
+            ],
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(
+            store.load_log_config().unwrap(),
+            LogConfig {
+                enabled: false,
+                retain_days: 7,
+                max_body_bytes: 1024,
+            }
+        );
+    }
+
+    #[test]
     fn request_log_insert_list_detail_roundtrip() {
         let (_dir, store) = temp_store();
         store
@@ -3513,7 +3643,8 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 1);
 
-        // Bodyless insert (capture_bodies=false) still lists; detail has no bodies.
+        // A row with no body stored (a pre-forward failure) still lists; its
+        // detail has no bodies.
         let mut bodyless = sample_log("2026-09-07T13:00:00+00:00", Some("pi"), 200);
         bodyless.request_body = None;
         bodyless.response_body = None;
@@ -3615,7 +3746,6 @@ mod tests {
         store
             .save_log_config(&LogConfig {
                 enabled: false,
-                capture_bodies: false,
                 retain_days: 7,
                 max_body_bytes: 1024,
             })
@@ -3624,7 +3754,6 @@ mod tests {
             store.load_log_config().unwrap(),
             LogConfig {
                 enabled: false,
-                capture_bodies: false,
                 retain_days: 7,
                 max_body_bytes: 1024
             }

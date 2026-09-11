@@ -985,7 +985,6 @@ async fn request_log_disabled_records_nothing() {
     store
         .save_log_config(&LogConfig {
             enabled: false,
-            capture_bodies: true,
             retain_days: 30,
             max_body_bytes: 4 * 1024 * 1024,
         })
@@ -1081,4 +1080,63 @@ async fn request_log_captures_client_visible_sse_stream() {
     // The stored body is exactly what the client observed.
     let detail = state.store.get_request_log(row.id).unwrap().unwrap();
     assert_eq!(detail.response_body.as_deref(), Some(expected.as_str()));
+}
+
+/// A credential in the query string is a shape real providers use (`?key=` for
+/// Gemini), and the failure path is the one that quotes the URL back: the
+/// metadata column stores the redacted query, and `error_message` must not put
+/// the raw one back. The upstream here is a closed port, so the row is written
+/// by `persist_failure` through `SendFailure::message`.
+#[tokio::test]
+async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
+    const SECRET: &str = "AIzaSyLiveKeyDoNotStore";
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    // Port 1 on loopback: nothing listens, so the send fails immediately.
+    store
+        .insert_provider(&provider(
+            "p-ant",
+            Protocol::Anthropic,
+            "http://127.0.0.1:1".into(),
+        ))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        &format!("/v1/messages?key={SECRET}&model=x"),
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let client_saw = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(
+        !client_saw.contains(SECRET),
+        "leaked to the client: {client_saw}"
+    );
+
+    let (rows, _) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    let row = rows.first().expect("the failure is audited");
+    assert_eq!(
+        row.query.as_deref(),
+        Some("key=[REDACTED]&model=x"),
+        "the stored query keeps its names and loses its value"
+    );
+    let message = row.error_message.as_deref().expect("a failure message");
+    assert!(
+        !message.contains(SECRET),
+        "leaked into error_message: {message}"
+    );
+    assert!(message.contains("key=[REDACTED]"), "{message}");
 }

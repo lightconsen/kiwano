@@ -243,7 +243,35 @@ enum SendFailure {
 }
 
 impl SendFailure {
+    /// A transport failure carrying no URL of its own.
+    ///
+    /// `reqwest::Error`'s `Display` ends in `for url (<the full url>)`, query
+    /// string and all, so the error would hand back exactly the credential
+    /// [`Self::message`] is about to redact — and this message is persisted as
+    /// `error_message`. The message names the URL already; the error does not
+    /// need to repeat it. Stripping it here, at the one place the failure is
+    /// built, keeps the trace, the client-facing error and the stored column
+    /// from disagreeing.
+    fn transport(e: reqwest::Error) -> Self {
+        SendFailure::Transport(e.without_url())
+    }
+
+    /// The failure text, with the URL's query credentials redacted.
+    ///
+    /// This message reaches three readers — the tracing line, the client's
+    /// error response, and the `error_message` column — and it is built once
+    /// here so none of them can be the one that forgot. The *request* is still
+    /// sent to the raw URL; only the sentence about it is scrubbed. The client
+    /// sees its own query replaced by `[REDACTED]` in the failure text, which
+    /// costs it nothing (it sent the query) and stops the gateway from echoing
+    /// a key back at whoever is reading over its shoulder.
+    ///
+    /// Note the provider's *response body* never arrives here:
+    /// [`SendFailure::Transport`] wraps a reqwest transport error, not
+    /// provider content, so an upstream that names the key it rejected in its
+    /// error JSON cannot reach this column. The URL was the only way in.
     fn message(&self, url: &str) -> String {
+        let url = crate::log_capture::redact_url(url);
         match self {
             SendFailure::Timeout(secs) => format!("request to `{url}` timed out after {secs}s"),
             SendFailure::Transport(e) => format!("request to `{url}` failed: {e}"),
@@ -293,10 +321,10 @@ async fn send_upstream(
             .send();
         let outcome: Result<reqwest::Response, SendFailure> = match provider.timeout_secs {
             Some(secs) => match tokio::time::timeout(Duration::from_secs(secs), send).await {
-                Ok(r) => r.map_err(SendFailure::Transport),
+                Ok(r) => r.map_err(SendFailure::transport),
                 Err(_) => Err(SendFailure::Timeout(secs)),
             },
-            None => send.await.map_err(SendFailure::Transport),
+            None => send.await.map_err(SendFailure::transport),
         };
 
         match outcome {
@@ -687,18 +715,15 @@ pub async fn forward(
     }
 }
 
-/// Serialize a response header map for the request log (same redaction as
-/// the request side; `copy_response_headers` output has no credentials).
+/// Serialize a response header map for the request log.
+///
+/// The request side's redaction, not a copy of it: an upstream response is not
+/// the safer half of the exchange. `set-cookie` is a live session credential
+/// and it reaches this map — `copy_response_headers` only drops framing and
+/// hop-by-hop names — so the same rule has to run here. Sharing the one
+/// function is what keeps the two sides from drifting apart.
 fn response_headers_text(headers: &HeaderMap) -> String {
-    let mut map = serde_json::Map::new();
-    for (name, value) in headers.iter() {
-        let v = value
-            .to_str()
-            .map(str::to_string)
-            .unwrap_or_else(|_| "<binary>".to_string());
-        map.insert(name.as_str().to_string(), serde_json::Value::String(v));
-    }
-    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+    crate::log_capture::redact_headers(headers)
 }
 
 /// Forward an Anthropic `/v1/messages` request to an OpenAI-compatible
@@ -1565,6 +1590,28 @@ mod tests {
         assert!(out.get(axum::http::header::TRANSFER_ENCODING).is_none());
     }
 
+    /// An upstream response carries credentials of its own — a session cookie
+    /// is the common one — and this map is what lands in `response_headers`.
+    #[test]
+    fn response_headers_are_redacted_like_the_request_side() {
+        let mut src = HeaderMap::new();
+        src.insert(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        src.insert(
+            axum::http::header::SET_COOKIE,
+            HeaderValue::from_static("session=upstream-secret; HttpOnly"),
+        );
+        src.insert("x-request-id", HeaderValue::from_static("req-7"));
+
+        let json = response_headers_text(&src);
+        assert!(!json.contains("upstream-secret"), "{json}");
+        assert!(json.contains(r#""set-cookie":"[REDACTED]""#), "{json}");
+        assert!(json.contains("application/json"), "{json}");
+        assert!(json.contains("req-7"), "{json}");
+    }
+
     /// Synthetic chunk source with awkward boundaries (a usage event split in
     /// half, no trailing newline).
     struct ChunksStream {
@@ -1634,5 +1681,50 @@ mod tests {
         assert_eq!(sample.usage.input_tokens, 7);
         assert_eq!(sample.usage.output_tokens, 9);
         assert_eq!(sample.model.as_deref(), Some("m"));
+    }
+
+    /// The failure text is what lands in `error_message`, so the credential a
+    /// client put in the query string must not survive into it.
+    #[test]
+    fn send_failure_message_redacts_query_credentials() {
+        let url = "https://generativelanguage.googleapis.com/v1beta/models/g:generateContent?key=AIzaSyLiveKey&alt=json";
+
+        let timeout = SendFailure::Timeout(30).message(url);
+        assert!(!timeout.contains("AIzaSyLiveKey"), "{timeout}");
+        assert!(timeout.contains("key=[REDACTED]"), "{timeout}");
+        assert!(timeout.contains("&alt=json"), "{timeout}");
+        assert!(timeout.contains("timed out after 30s"), "{timeout}");
+
+        // An ordinary URL is quoted back unchanged, minus nothing.
+        let plain = SendFailure::Timeout(30)
+            .message("https://api.anthropic.com/v1/messages?model=x&stream=true");
+        assert_eq!(
+            plain,
+            "request to `https://api.anthropic.com/v1/messages?model=x&stream=true` timed out after 30s"
+        );
+    }
+
+    /// `reqwest::Error`'s `Display` ends in `for url (<full url>)`, so the
+    /// transport error would put the key back after the redaction above. The
+    /// assertion on the raw error proves the premise; the one on the message
+    /// proves `SendFailure::transport` closes it.
+    #[tokio::test]
+    async fn transport_failure_carries_no_url_of_its_own() {
+        // Port 1 on loopback refuses immediately — no listener, no network.
+        let url = "http://127.0.0.1:1/v1/messages?key=AIzaSyLiveKey";
+        let raw = reqwest::Client::new()
+            .post(url)
+            .send()
+            .await
+            .expect_err("connect to a closed port must fail");
+        assert!(
+            raw.to_string().contains("AIzaSyLiveKey"),
+            "premise: reqwest's Display leaks the url, got `{raw}`"
+        );
+
+        let message = SendFailure::transport(raw).message(url);
+        assert!(!message.contains("AIzaSyLiveKey"), "{message}");
+        assert!(message.contains("key=[REDACTED]"), "{message}");
+        assert!(message.contains("failed: "), "{message}");
     }
 }

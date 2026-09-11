@@ -1305,8 +1305,13 @@ export const devApi: KiwanoApi = {
 
   // No filesystem in the browser, so this reports what it would have written
   // rather than pretending to write it — the toolbar's feedback then matches
-  // the desktop app's without a second code path here.
-  async exportRequestLogs(_path: string, filter?: RequestLogFilter): Promise<RequestLogExport> {
+  // the desktop app's without a second code path here. `_includeBodies` has
+  // nothing to do without a file to shape, so it only has to be accepted.
+  async exportRequestLogs(
+    _path: string,
+    filter?: RequestLogFilter,
+    _includeBodies?: boolean,
+  ): Promise<RequestLogExport> {
     await delay();
     return { rows_written: matchingLogs(filter).length, truncated: false };
   },

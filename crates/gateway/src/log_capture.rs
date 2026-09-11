@@ -3,9 +3,22 @@
 //! This is a local tool: every data-plane request is captured to
 //! `request_logs` + `request_bodies` unless the user turns capture off
 //! (`LogConfig`, reloaded from `gateway_settings` alongside the route
-//! table). Credential headers are redacted by name and bodies are redacted
-//! by shape before storage; bodies are then capped per body and stored
-//! lossy-UTF8 (they are JSON/SSE text in practice).
+//! table). Logging on means bodies are recorded — there is no second switch
+//! to turn them off, and the CSV export is the one place a body can be left
+//! out of a file.
+//!
+//! Credentials are redacted by name before storage: header values under an
+//! auth-shaped name ([`is_secret_header`]), [`SECRET_KEYS`]-named query
+//! parameters ([`redact_query`]), and — in the bodies — [`SECRET_KEYS`]-named
+//! JSON scalars plus recognizable token shapes ([`redact_body`]). Bodies are
+//! then capped per body and stored lossy-UTF8 (they are JSON/SSE text in
+//! practice).
+//!
+//! None of this is a detector, and none of it is a guarantee. The names are a
+//! fixed allowlist and the shapes are literal prefixes, so a credential filed
+//! under an unlisted name in an unrecognized shape is stored as it arrived.
+//! Each function states its own limits — including [`is_secret_header`],
+//! whose shape rule is deliberately broader than the rest.
 
 use axum::http::{HeaderMap, StatusCode};
 
@@ -14,25 +27,22 @@ use crate::store::{now_rfc3339, RequestLogNew, Store};
 /// Written in place of a redacted credential.
 const REDACTED: &str = "[REDACTED]";
 
-/// Header names never written to the log (credentials / cookies).
-const REDACTED_HEADERS: &[&str] = &[
-    "authorization",
-    "x-api-key",
-    "x-goog-api-key",
-    "cookie",
-    "proxy-authorization",
-];
-
-/// JSON key names whose *scalar* value is a credential, in normalized form
-/// (see `normalize_key`): lowercased with `_`/`-` removed, so `api_key`,
-/// `apiKey` and `API-KEY` are one entry.
+/// Names whose *scalar* value is a credential, in normalized form (see
+/// `normalize_key`): lowercased with `_`/`-` removed, so `api_key`, `apiKey`
+/// and `API-KEY` are one entry.
 ///
 /// This is an allowlist of names, not a substring match: `max_tokens` and
 /// `token_count` do not normalize to `token` and are left alone. The cost is
 /// the mirror image — a credential filed under a name not listed here
 /// (`session_token`, `bearer_key`, …) is only caught if its *value* matches a
 /// known shape below.
+///
+/// The same list drives both halves of the metadata capture (a JSON key name
+/// in a body, a parameter name in a query string), so it has to cover the
+/// query-string spellings too — `key` is here for Gemini's `?key=AIza…`,
+/// which the body scrubber would otherwise never see.
 const SECRET_KEYS: &[&str] = &[
+    "key",
     "apikey",
     "xapikey",
     "xgoogapikey",
@@ -88,6 +98,75 @@ fn normalize_key(key: &str) -> String {
 /// True when a key name means "the value is a credential".
 fn is_secret_key(key: &str) -> bool {
     SECRET_KEYS.contains(&normalize_key(key).as_str())
+}
+
+/// True when a header name means "the value is a credential".
+///
+/// A *rule*, not a list, over the same `normalize_key` normalization the body
+/// scrubber uses: redacted when the normalized name is exactly
+/// `authorization`/`proxyauthorization`, is `cookie`/`setcookie`, or merely
+/// *contains* `apikey`, `auth`, `token` or `secret`. A rule is what a fixed
+/// five-name list could not be: `x-goog-api-key`, `x-auth-token`,
+/// `x-amz-security-token` and whatever the next provider invents all land on
+/// one of those shapes without an edit here.
+///
+/// Deliberately over-broad, and the false positives are worth naming:
+/// `authentication-info` and `www-authenticate` (challenge headers, not
+/// credentials), `authority` (HTTP/2's host pseudo-header) and any header
+/// that merely mentions a token are redacted too. The cost is a missing value
+/// in a local audit trail; the alternative is a live key in one. Ordinary
+/// traffic is untouched — `content-type`, `user-agent`, `x-request-id`,
+/// `x-api-version` and `accept-encoding` normalize to none of these shapes.
+fn is_secret_header(name: &str) -> bool {
+    let n = normalize_key(name);
+    n == "authorization"
+        || n == "proxyauthorization"
+        || n == "cookie"
+        || n == "setcookie"
+        || n.contains("apikey")
+        || n.contains("auth")
+        || n.contains("token")
+        || n.contains("secret")
+}
+
+/// Redact the credential values of a raw query string, keeping the parameter
+/// names so the log still reads: `?key=AIza…&model=x` becomes
+/// `?key=[REDACTED]&model=x`.
+///
+/// Matching is by name, through the same [`normalize_key`] / [`SECRET_KEYS`]
+/// pair the body scrubber uses, so `key`, `api_key` and `API-KEY` all hit.
+/// Repeated parameters are each redacted (the loop never stops at the first),
+/// and a bare parameter with no `=` has no value to leak and is copied
+/// through. The whole string is preserved otherwise — this rewrites values,
+/// never drops a parameter.
+fn redact_query(query: &str) -> String {
+    let mut out = String::with_capacity(query.len());
+    for (i, pair) in query.split('&').enumerate() {
+        if i > 0 {
+            out.push('&');
+        }
+        match pair.split_once('=') {
+            Some((name, _)) if is_secret_key(name) => {
+                out.push_str(name);
+                out.push('=');
+                out.push_str(REDACTED);
+            }
+            _ => out.push_str(pair),
+        }
+    }
+    out
+}
+
+/// Redact the credential parameters of a URL, leaving everything before the
+/// `?` — scheme, host, path — untouched.
+///
+/// Used on the URL as it appears in a *message* being logged. The URL the
+/// request is actually sent to is never passed through here.
+pub(crate) fn redact_url(url: &str) -> String {
+    match url.split_once('?') {
+        Some((head, query)) => format!("{head}?{}", redact_query(query)),
+        None => url.to_string(),
+    }
 }
 
 /// Redact credentials from a parsed JSON value in place.
@@ -269,17 +348,27 @@ fn redact_body(text: &str) -> String {
     out
 }
 
-/// Serialize headers as JSON with credential headers dropped.
-fn redact_headers(headers: &HeaderMap) -> String {
+/// Serialize headers as JSON with credential values replaced by [`REDACTED`].
+///
+/// The name is kept and only the value is lost: that a client sent an
+/// `x-api-key` is not a secret, and dropping the pair entirely would hide the
+/// fact that one was sent. Repeated names collapse to their last value, the
+/// way `serde_json::Map` always has.
+///
+/// Both directions go through this one function — the response side has its
+/// own share of credentials (`set-cookie` above all), and a second serializer
+/// is exactly where a redaction rule goes to be forgotten.
+pub(crate) fn redact_headers(headers: &HeaderMap) -> String {
     let mut map = serde_json::Map::new();
     for (name, value) in headers.iter() {
-        if REDACTED_HEADERS.contains(&name.as_str()) {
-            continue;
-        }
-        let v = value
-            .to_str()
-            .map(str::to_string)
-            .unwrap_or_else(|_| "<binary>".to_string());
+        let v = if is_secret_header(name.as_str()) {
+            REDACTED.to_string()
+        } else {
+            value
+                .to_str()
+                .map(str::to_string)
+                .unwrap_or_else(|_| "<binary>".to_string())
+        };
         map.insert(name.as_str().to_string(), serde_json::Value::String(v));
     }
     serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
@@ -292,11 +381,12 @@ pub struct RequestCapture {
     pub ts: String,
     pub method: String,
     pub path: String,
+    /// Query string as sent, with credential values redacted by
+    /// [`redact_query`] — the raw query never reaches this struct.
     pub query: Option<String>,
     pub session_id: Option<String>,
     pub request_headers: Option<String>,
-    /// Credential-redacted lossy-UTF8 body, truncated to `max_body_bytes`
-    /// when capture_bodies is on.
+    /// Credential-redacted lossy-UTF8 body, truncated to `max_body_bytes`.
     pub request_body: Option<String>,
     pub request_size: i64,
     pub truncated: bool,
@@ -318,7 +408,7 @@ impl RequestCapture {
             ts: now_rfc3339(),
             method: method.to_string(),
             path: path.to_string(),
-            query: query.map(str::to_string),
+            query: query.map(redact_query),
             session_id: None,
             request_headers: Some(redact_headers(headers)),
             request_body: None,
@@ -327,14 +417,12 @@ impl RequestCapture {
         })
     }
 
-    /// Attach the (possibly truncated) request body when body capture is on.
-    /// The original byte size is always recorded. Credentials are redacted by
-    /// [`redact_body`] before the text is stored.
-    pub fn set_body(&mut self, body: &[u8], capture_bodies: bool, max_body_bytes: usize) {
+    /// Attach the (possibly truncated) request body. The original byte size is
+    /// recorded whether or not the text is stored, and `truncated` reports the
+    /// cap. Credentials are redacted by [`redact_body`] before the text is
+    /// stored.
+    pub fn set_body(&mut self, body: &[u8], max_body_bytes: usize) {
         self.request_size = body.len() as i64;
-        if !capture_bodies {
-            return;
-        }
         self.truncated = body.len() > max_body_bytes;
         let capped = &body[..body.len().min(max_body_bytes)];
         self.request_body = Some(redact_body(&String::from_utf8_lossy(capped)));
@@ -418,38 +506,150 @@ mod tests {
     use super::*;
 
     #[test]
-    fn redact_headers_drops_credentials() {
+    fn redact_headers_redacts_credential_values() {
         let mut headers = HeaderMap::new();
         headers.insert("x-api-key", "kw-ag-claude-secret".parse().unwrap());
         headers.insert(
             axum::http::header::AUTHORIZATION,
             "Bearer sk-upstream".parse().unwrap(),
         );
+        headers.insert("x-goog-api-key", "AIzaSyUpstream".parse().unwrap());
+        headers.insert("cookie", "session=abc".parse().unwrap());
+        headers.insert("proxy-authorization", "Basic dXNlcg==".parse().unwrap());
+        headers.insert("x-auth-token", "tok-live-1".parse().unwrap());
         headers.insert("content-type", "application/json".parse().unwrap());
         headers.insert("user-agent", "claude-cli/1.0".parse().unwrap());
+        headers.insert("x-request-id", "req-42".parse().unwrap());
 
         let json = redact_headers(&headers);
-        assert!(json.contains("content-type"));
-        assert!(json.contains("user-agent"));
-        assert!(!json.contains("kw-ag-claude-secret"));
-        assert!(!json.contains("sk-upstream"));
-        assert!(!json.to_lowercase().contains("authorization"));
+        // Every credential shape is caught, by rule rather than by list.
+        for secret in [
+            "kw-ag-claude-secret",
+            "sk-upstream",
+            "AIzaSyUpstream",
+            "session=abc",
+            "dXNlcg==",
+            "tok-live-1",
+        ] {
+            assert!(!json.contains(secret), "{secret} leaked into {json}");
+        }
+        // The name survives with the value gone, so the log still says a
+        // credential was sent.
+        assert!(json.contains(r#""x-api-key":"[REDACTED]""#), "{json}");
+        assert!(json.contains(r#""authorization":"[REDACTED]""#), "{json}");
+        // Ordinary traffic is untouched.
+        assert!(json.contains("content-type"), "{json}");
+        assert!(json.contains("user-agent"), "{json}");
+        assert!(json.contains("claude-cli/1.0"), "{json}");
+        assert!(json.contains("req-42"), "{json}");
+    }
+
+    #[test]
+    fn is_secret_header_catches_shapes_and_spares_traffic() {
+        for name in [
+            "authorization",
+            "Authorization",
+            "PROXY-AUTHORIZATION",
+            "x-api-key",
+            "apiKey",
+            "x-goog-api-key",
+            "cookie",
+            "Set-Cookie",
+            "x-auth-token",
+            "x-amz-security-token",
+            "x-client-secret",
+            // Over-broad on purpose: a challenge, and HTTP/2's host header.
+            "authentication-info",
+            ":authority",
+        ] {
+            assert!(is_secret_header(name), "{name} should be redacted");
+        }
+        for name in [
+            "content-type",
+            "content-length",
+            "user-agent",
+            "x-request-id",
+            "x-api-version",
+            "accept-encoding",
+            "anthropic-version",
+            "x-kw-session",
+        ] {
+            assert!(!is_secret_header(name), "{name} should survive");
+        }
+    }
+
+    #[test]
+    fn redact_query_redacts_credential_parameters() {
+        // The three credential spellings, plus case/underscore variants.
+        assert_eq!(
+            redact_query("key=AIzaSyLivekey&model=gemini-2.5-pro"),
+            "key=[REDACTED]&model=gemini-2.5-pro"
+        );
+        assert_eq!(redact_query("api_key=sk-live-1"), "api_key=[REDACTED]");
+        assert_eq!(
+            redact_query("access_token=ya29.abc"),
+            "access_token=[REDACTED]"
+        );
+        assert_eq!(redact_query("API-KEY=abc"), "API-KEY=[REDACTED]");
+        // A repeated parameter is redacted at every occurrence.
+        assert_eq!(
+            redact_query("key=one&model=x&key=two"),
+            "key=[REDACTED]&model=x&key=[REDACTED]"
+        );
+        // A bare parameter has no value to leak and is copied through.
+        assert_eq!(redact_query("token&model=x"), "token&model=x");
+        // Ordinary traffic survives untouched, byte for byte.
+        for query in [
+            "model=x&stream=true",
+            "max_tokens=1024",
+            "keynote=hello&author=me",
+            "",
+        ] {
+            assert_eq!(redact_query(query), query, "{query} was rewritten");
+        }
+    }
+
+    #[test]
+    fn redact_url_keeps_the_origin_and_path() {
+        assert_eq!(
+            redact_url("https://generativelanguage.googleapis.com/v1beta/models/g:generateContent?key=AIzaSyLive"),
+            "https://generativelanguage.googleapis.com/v1beta/models/g:generateContent?key=[REDACTED]"
+        );
+        // No query: returned as-is, and a credential in the path is not this
+        // function's business (it is not a parameter).
+        assert_eq!(
+            redact_url("https://api.anthropic.com/v1/messages"),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn capture_start_redacts_the_query_it_stores() {
+        let c = RequestCapture::start(
+            true,
+            "GET",
+            "/v1beta/models",
+            Some("key=AIzaSyLive&model=x"),
+            &HeaderMap::new(),
+        )
+        .expect("capture");
+        assert_eq!(c.query.as_deref(), Some("key=[REDACTED]&model=x"));
     }
 
     #[test]
     fn set_body_respects_cap_and_records_size() {
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(b"hello", true, 3);
+        c.set_body(b"hello", 3);
         assert_eq!(c.request_body.as_deref(), Some("hel"));
         assert!(c.truncated);
         assert_eq!(c.request_size, 5);
 
-        // Body capture off: size recorded, text omitted.
+        // A body under the cap is stored whole and not marked truncated.
         let mut c =
             RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new()).unwrap();
-        c.set_body(b"hello", false, 1024);
-        assert_eq!(c.request_body, None);
+        c.set_body(b"hello", 1024);
+        assert_eq!(c.request_body.as_deref(), Some("hello"));
         assert!(!c.truncated);
         assert_eq!(c.request_size, 5);
 
@@ -462,7 +662,7 @@ mod tests {
     fn capture_with_body(body: &str) -> RequestCapture {
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(body.as_bytes(), true, 1024 * 1024);
+        c.set_body(body.as_bytes(), 1024 * 1024);
         c
     }
 
@@ -557,7 +757,7 @@ mod tests {
             r#"{"api_key":"sk-live-abcdefghijklmnopqrstuvwxyz","content":"tail is dropped"}"#;
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(body.as_bytes(), true, 60);
+        c.set_body(body.as_bytes(), 60);
         assert_eq!(c.request_size, body.len() as i64);
         assert!(c.truncated);
         let stored = c.request_body.unwrap();

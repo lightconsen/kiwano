@@ -341,11 +341,24 @@ impl RequestCapture {
     }
 }
 
-/// Truncate response bytes to the capture cap and lossy-decode them.
+/// Truncate response bytes to the capture cap, lossy-decode them, and scrub
+/// them the way [`redact_body`] scrubs a request.
+///
+/// A response is not the safer half of the exchange. A gateway echoing a
+/// credential back — an auth failure that names the key it rejected, a
+/// provider that reflects the request — puts it in the log by the same route
+/// the request would have, and the columns are read back into the same detail
+/// panel. So the same filter runs here, with the same documented limits: it
+/// rewrites what it recognises and leaves everything else alone.
+///
+/// The order is the one `set_body` uses, and for the same reason: the cap is
+/// applied first, so a credential straddling the cut is not scanned — the text
+/// is already lossy there — and the cap is what bounds this work, which runs
+/// once per response on the data plane.
 pub fn cap_body(bytes: &[u8], max_body_bytes: usize) -> (String, bool) {
     let truncated = bytes.len() > max_body_bytes;
     let capped = &bytes[..bytes.len().min(max_body_bytes)];
-    (String::from_utf8_lossy(capped).into_owned(), truncated)
+    (redact_body(&String::from_utf8_lossy(capped)), truncated)
 }
 
 /// Persist a request that failed before/inside the forward leg (no usage).
@@ -558,5 +571,35 @@ mod tests {
         assert!(stored.len() <= 60);
         // The size recorded is the *original* body, never the redacted text.
         assert!(c.request_size > stored.len() as i64);
+    }
+
+    /// The response half gets the same treatment: an upstream that names the
+    /// key it rejected would otherwise put it in the log just as surely as a
+    /// prompt carrying one.
+    #[test]
+    fn cap_body_scrubs_credentials_out_of_a_response() {
+        let response = r#"{"error":{"message":"Incorrect API key provided: sk-live-abcdefghijklmnopqrstuvwxyz"}}"#;
+        let (capped, truncated) = cap_body(response.as_bytes(), 4096);
+        assert!(!truncated);
+        assert!(
+            !capped.contains("sk-live-abcdefghijklmnopqrstuvwxyz"),
+            "{capped}"
+        );
+        assert!(capped.contains("Incorrect API key provided"), "{capped}");
+
+        // Under a secret-shaped key name, with no recognisable shape at all.
+        let (capped, _) = cap_body(br#"{"api_key":"hunter2","model":"gpt-5"}"#, 4096);
+        assert!(capped.contains("\"api_key\":\"[REDACTED]\""), "{capped}");
+        assert!(capped.contains("gpt-5"), "{capped}");
+
+        // An ordinary response is returned untouched, byte for byte — the
+        // filter only rewrites what it recognises.
+        let plain = r#"{"content":[{"type":"text","text":"hello, world"}]}"#;
+        assert_eq!(cap_body(plain.as_bytes(), 4096).0, plain);
+
+        // And the cap still applies, and is still reported.
+        let (capped, truncated) = cap_body(plain.as_bytes(), 10);
+        assert!(truncated);
+        assert_eq!(capped.len(), 10);
     }
 }

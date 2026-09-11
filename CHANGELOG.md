@@ -43,9 +43,11 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   a prompt was written to the database in the clear and shown in the Logs detail
   panel. Bodies are now scrubbed: values under a secret-shaped key name, and
   anything matching a known credential shape (`sk-…`, the GitHub and Slack token
-  prefixes, JWTs, and Kiwano's own `kw-ag-…` placeholders). It is a filter over
-  what it recognises, not a detector — a credential in a shape it does not know
-  is still stored as it was.
+  prefixes, JWTs, and Kiwano's own `kw-ag-…` placeholders). Responses are
+  scrubbed the same way — a provider that names the key it rejected puts it in
+  the log by the same route a prompt would. It is a filter over what it
+  recognises, not a detector — a credential in a shape it does not know is
+  still stored as it was.
 - **The database is owner-only on Windows too.** The Unix hardening (0700
   directory, 0600 file) has always been Unix-only, leaving the database that
   holds every provider key with inherited permissions on Windows. It now gets a

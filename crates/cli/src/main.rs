@@ -1006,7 +1006,14 @@ mod tests {
     #[test]
     fn globals_read_the_admin_socket() {
         let g = globals_of(&["--admin-socket", "/tmp/elsewhere.sock", "status"]);
+        // A value the caller gave verbatim round-trips on unix. On Windows the
+        // pipe namespace is added when the value does not already carry it, so
+        // the same argument comes back prefixed — the assertion has to be
+        // per-platform, like the other two in this test.
+        #[cfg(unix)]
         assert_eq!(g.admin.describe(), "/tmp/elsewhere.sock");
+        #[cfg(windows)]
+        assert_eq!(g.admin.describe(), r"\\.\pipe\/tmp/elsewhere.sock");
 
         // A value that is only whitespace means "not given", not an endpoint
         // whose name is blank.

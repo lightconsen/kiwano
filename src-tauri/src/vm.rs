@@ -866,7 +866,6 @@ pub struct SettingsVm {
     /// Request-log retention in days (mirrored into gateway_settings for the sidecar).
     #[serde(default = "default_retain_days")]
     pub log_retention_days: u32,
-    pub telemetry: bool,
     /// Cost-alert toggle (spec §4.1 P1): system notification when usage hits the per-period limit
     #[serde(default = "default_true")]
     pub cost_alert: bool,
@@ -919,7 +918,6 @@ impl Default for SettingsVm {
             auto_failover: true,
             request_logs: true,
             log_retention_days: default_retain_days(),
-            telemetry: false,
             cost_alert: true,
             hub_logged_in: false,
             hub_url: default_hub_url(),
@@ -3851,9 +3849,15 @@ mod tests {
 
         let patch =
             serde_json::json!({ "language": "en", "telemetry": true, "takeovers": "ignored" });
+        // The patch still carries `telemetry`, a key older blobs hold and
+        // nothing reads any more: it must be ignored, not choke the merge.
         let v1 = update_settings(&s, &aux, &patch).unwrap();
         assert_eq!(v1.language, "en");
-        assert!(v1.telemetry);
+        // The stored blob now holds a key the struct no longer declares. It has
+        // to parse anyway: a failed parse falls back to every default at once,
+        // which would silently reset the reader's whole settings page.
+        let reread = build_settings(&s, &aux).unwrap();
+        assert_eq!(reread.language, "en", "an old key is ignored, not fatal");
         // takeovers untouched by patch
         assert!(v1.takeovers.iter().all(|t| !t.enabled));
 

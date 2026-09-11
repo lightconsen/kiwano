@@ -343,7 +343,6 @@ export interface AppSettings {
   request_logs: boolean;
   /** Request-log retention in days (gateway prunes older rows every 6h) */
   log_retention_days: number;
-  telemetry: boolean;
   /** Cost alert (spec §4.1 P1): system notification when usage reaches the per-period limit */
   cost_alert: boolean;
   /** Preferred display currency for costs (ISO code; converted via the bundled rates) */

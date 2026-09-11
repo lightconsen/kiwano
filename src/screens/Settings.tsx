@@ -311,18 +311,22 @@ export default function Settings() {
           <ShieldCheck className="h-3.5 w-3.5" />
           Privacy (Kiwano pledge)
         </h3>
-        <div className="space-y-2.5 text-[12.5px]">
-          <Row label="Anonymous usage reporting" note="Off by default · sanitized stats only">
-            <Switch checked={s.telemetry} onCheckedChange={(v) => patch({ telemetry: v })} />
-          </Row>
+        <div className="space-y-2 text-[12.5px]">
+          {/* No switch here. A toggle implies a pipeline behind it, and there
+              is none: nothing is collected, so "off by default" was promising
+              a choice that did not exist. */}
+          <div className="text-mut">
+            Kiwano sends nothing about your usage. The only outbound requests are the Hub catalog
+            and pricing fetch, and the update check.
+          </div>
           <div className="space-y-1 text-[10.5px]" style={{ color: "var(--mut)" }}>
             <div className="flex items-center gap-1.5">
               <Check className="h-3 w-3" style={{ color: "var(--kiwi)" }} />
-              API request content never passes through the Kiwano cloud
+              Neither carries your API keys or any request content
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="h-3 w-3" style={{ color: "var(--kiwi)" }} />
-              API keys never leave your device
+              Keys go only to the providers you configure, never to Kiwano
             </div>
           </div>
         </div>

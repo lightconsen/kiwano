@@ -526,7 +526,6 @@ const settings: AppSettings = {
   auto_failover: true,
   request_logs: true,
   log_retention_days: 30,
-  telemetry: false,
   cost_alert: true,
   preferred_currency: "CNY",
   auto_check_update: true,

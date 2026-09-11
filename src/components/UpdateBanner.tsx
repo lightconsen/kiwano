@@ -6,13 +6,16 @@
 // re-announce itself on every launch — a newer one will.
 import { useEffect, useState } from "react";
 import { ArrowUpCircle, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import { onUpdateAvailable } from "../lib/updateEvents";
+import { startUpdateInstall, useUpdateInstall } from "../lib/updateInstall";
 import type { UpdateInfo } from "../api/types";
 
 export function UpdateBanner() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const install = useUpdateInstall();
 
   useEffect(() => {
     let alive = true;
@@ -53,15 +56,24 @@ export function UpdateBanner() {
     >
       <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--kiwi)" }} />
       <span>Kiwano {info.version} is available</span>
-      <button
-        className="font-medium underline decoration-dotted underline-offset-2"
-        style={{ color: "var(--kiwi)" }}
+      {/* Starts the transfer and lands on Settings in the same click: the
+          download lives in lib/updateInstall, so the route change does not
+          interrupt it and Settings picks the progress up mid-flight. */}
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={install.installing}
         onClick={() => {
+          startUpdateInstall();
           window.location.hash = "#settings";
         }}
       >
-        Install from Settings
-      </button>
+        {install.installing
+          ? "Downloading…"
+          : install.err
+            ? "Retry download"
+            : "Download & install"}
+      </Button>
       <button
         aria-label="Dismiss update notice"
         title={`Hide until a version newer than ${info.version}`}

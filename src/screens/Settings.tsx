@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
 import { applyTheme } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
+import { startUpdateInstall, useUpdateInstall } from "../lib/updateInstall";
 import type { AgentId, AppSettings, UpdateInfo } from "../api/types";
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
@@ -33,9 +34,12 @@ export default function Settings() {
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
-  const [installing, setInstalling] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  // Both the download state and its error belong to lib/updateInstall: the
+  // banner can start the transfer before this screen mounts, and this screen
+  // unmounts mid-download. `checkErr` stays local — it is the version check's,
+  // a different failure the user retries with a different button.
+  const install = useUpdateInstall();
+  const [checkErr, setCheckErr] = useState<string | null>(null);
   const [upToDate, setUpToDate] = useState(false);
   const [takeoverBusy, setTakeoverBusy] = useState<string | null>(null);
   const [takeoverErr, setTakeoverErr] = useState<string | null>(null);
@@ -62,13 +66,10 @@ export default function Settings() {
     pullPendingUpdate();
     const offUpdate = onUpdateAvailable(pullPendingUpdate);
 
-    const offProgress = api.onUpdateProgress((p) => {
-      setProgress(p.total ? Math.round((p.downloaded / p.total) * 100) : null);
-    });
-    return () => {
-      offUpdate();
-      offProgress.then((off) => off()).catch(() => {});
-    };
+    // No progress subscription here: lib/updateInstall owns the one long-lived
+    // listener, so a download started from the banner is already being tracked
+    // by the time this screen mounts.
+    return () => offUpdate();
   }, []);
 
   // Turning a takeover off is one call — the backend restores the agent's own
@@ -99,7 +100,7 @@ export default function Settings() {
 
   const checkUpdate = () => {
     setChecking(true);
-    setErr(null);
+    setCheckErr(null);
     setUpdate(null);
     setUpToDate(false);
     api
@@ -109,7 +110,7 @@ export default function Settings() {
         // Silence used to be the answer to "no update"; say so instead.
         if (!u) setUpToDate(true);
       })
-      .catch((e) => setErr(String(e)))
+      .catch((e) => setCheckErr(String(e)))
       .finally(() => setChecking(false));
   };
 
@@ -132,16 +133,6 @@ export default function Settings() {
       })
       .catch((e) => setSyncErr(String(e)))
       .finally(() => setSyncing(false));
-  };
-
-  const installUpdate = () => {
-    setInstalling(true);
-    setProgress(0);
-    setErr(null);
-    api.downloadAndInstallAppUpdate().catch((e) => {
-      setErr(String(e));
-      setInstalling(false);
-    });
   };
 
   return (
@@ -372,36 +363,38 @@ export default function Settings() {
           </Row>
           <Row label="Updates">
             <span className="flex items-center gap-2">
-              {update ? (
-                installing ? (
-                  <>
+              {/* Progress first, ahead of the version check: the banner can
+                  start a download before this screen has read the pending
+                  update back, and the in-flight transfer is the more specific
+                  answer either way. */}
+              {install.installing ? (
+                <>
+                  <span
+                    className="h-1 w-24 overflow-hidden rounded-full"
+                    style={{ background: "var(--surface2)" }}
+                  >
                     <span
-                      className="h-1 w-24 overflow-hidden rounded-full"
-                      style={{ background: "var(--surface2)" }}
-                    >
-                      <span
-                        className="block h-full rounded-full transition-[width] duration-200"
-                        style={{ width: `${progress ?? 0}%`, background: "var(--kiwi)" }}
-                      />
-                    </span>
-                    <span className="text-[11px] text-mut">
-                      {progress == null ? "Downloading…" : `${progress}%`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-[11px]">v{update.version} available</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2.5 text-[11px]"
-                      onClick={installUpdate}
-                    >
-                      {/* Same button, honest label: a failure lands back here. */}
-                      {err ? "Retry download" : "Download & install"}
-                    </Button>
-                  </>
-                )
+                      className="block h-full rounded-full transition-[width] duration-200"
+                      style={{ width: `${install.progress ?? 0}%`, background: "var(--kiwi)" }}
+                    />
+                  </span>
+                  <span className="text-[11px] text-mut">
+                    {install.progress == null ? "Downloading…" : `${install.progress}%`}
+                  </span>
+                </>
+              ) : update ? (
+                <>
+                  <span className="text-[11px]">v{update.version} available</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-[11px]"
+                    onClick={startUpdateInstall}
+                  >
+                    {/* Same button, honest label: a failure lands back here. */}
+                    {install.err ? "Retry download" : "Download & install"}
+                  </Button>
+                </>
               ) : (
                 <>
                   {upToDate ? <span className="text-[11px] text-mut">Up to date</span> : null}
@@ -421,7 +414,9 @@ export default function Settings() {
           {update?.notes ? (
             <div className="whitespace-pre-wrap text-[11px] text-mut">{update.notes}</div>
           ) : null}
-          {err ? <div className="text-[11px] text-red-400">{err}</div> : null}
+          {install.err ?? checkErr ? (
+            <div className="text-[11px] text-red-400">{install.err ?? checkErr}</div>
+          ) : null}
         </div>
       </div>
     </section>

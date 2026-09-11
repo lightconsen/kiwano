@@ -149,11 +149,58 @@ async fn main() {
     let data_app = data_plane_router(state.clone());
     let admin_app = admin_plane_router(state.clone());
 
-    if let Err(e) = tokio::try_join!(
-        axum::serve(data_listener, data_app),
-        axum::serve(admin_listener, admin_app),
-    ) {
+    // Stop on a signal by returning, not by being killed. The store's
+    // connection is what checkpoints the write-ahead log back into the
+    // database, and a process the OS terminates outright never runs that — the
+    // database is then left with a WAL beside it. Being signalled is the normal
+    // way this daemon stops (the app sends one on quit, `kill` sends one by
+    // hand), so `cp`ing the `.db` alone routinely yielded a stale snapshot.
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        tracing::info!("shutdown signal received");
+        let _ = stop_tx.send(true);
+    });
+
+    let served = tokio::try_join!(
+        axum::serve(data_listener, data_app).with_graceful_shutdown(wait_for_stop(stop_rx.clone())),
+        axum::serve(admin_listener, admin_app).with_graceful_shutdown(wait_for_stop(stop_rx)),
+    );
+    if let Err(e) = served {
         tracing::error!(error = %e, "gateway terminated");
         std::process::exit(1);
+    }
+    tracing::info!("gateway stopped");
+}
+
+/// Resolves when the process is asked to stop: SIGTERM, or Ctrl-C.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = term.recv() => {}
+                    _ = tokio::signal::ctrl_c() => {}
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot watch SIGTERM; waiting for Ctrl-C only");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+async fn wait_for_stop(mut rx: tokio::sync::watch::Receiver<bool>) {
+    while !*rx.borrow_and_update() {
+        if rx.changed().await.is_err() {
+            return; // sender gone (it only drops when the process is ending)
+        }
     }
 }

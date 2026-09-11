@@ -23,7 +23,15 @@ const STRATEGIES: { id: StrategyKind; label: string; hint: string }[] = [
   { id: "failover", label: "Failover", hint: "Fall through standbys in order on failure, switch back on recovery" },
   { id: "roundrobin", label: "Weighted round-robin", hint: "New sessions rotate by weight; sticky per session to keep the upstream prompt cache" },
   { id: "timewindow", label: "Time window", hint: "Pick by each candidate's local time window; fall back to the primary when no window matches" },
-  { id: "quota", label: "Quota fallback", hint: "Switch to standbys once the primary exceeds its daily threshold" },
+  // "the primary" drifts: whoever holds the first slot right now, which a
+  // billing limit or a reorder can change. The number is the agent's, not the
+  // provider's — the old wording ("once the primary exceeds its daily
+  // threshold") read as an allowance set on one provider.
+  {
+    id: "quota",
+    label: "Quota fallback",
+    hint: "Once today's primary reaches the number below, send to standbys",
+  },
 ];
 
 function parseQuota(config: string | null): { limit: number; unit: "requests" | "tokens" } {

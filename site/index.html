@@ -4,7 +4,9 @@
      下载按钮直链 Cloudflare R2 的永久路径(hub.kiwano.cc/releases/):文件名不带版本号,
      每次发布原地覆盖,所以这些链接跨版本长期有效。GitHub Releases 是可用的镜像源。
 
-     注意:hero.note 里的版本号仍需随发布手动更新。 -->
+     版本号与许可证名不在这里维护:两者都是 package.json 已有的值,由
+     scripts/sync-site.mjs 写入,CI 在上传前会再执行一次,所以线上不会过期。
+     改这两处请改 package.json,不要手改本文件。 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -497,7 +499,7 @@ footer { padding: 56px 0 44px; }
       <a class="btn btn-lg" href="#download-win"><svg class="icon"><use href="#i-windows"/></svg>Windows</a>
       <a class="btn btn-lg" href="#download-linux"><svg class="icon"><use href="#i-linux"/></svg>Linux</a>
     </div>
-    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note">v0.1.3 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源</p>
+    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note">v0.1.7 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源</p>
     <figure class="shot rv" style="--d:300ms">
       <img src="assets/app-providers.png" width="2000" height="1300" alt="Kiwano 主界面:本机 Provider 列表,展示绑定的 Agent、近 7 日用量与额度、健康状态" fetchpriority="high">
     </figure>
@@ -710,7 +712,7 @@ footer { padding: 56px 0 44px; }
         <div class="foot-links">
           <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
           <a href="https://github.com/lightconsen/kiwano/releases" target="_blank" rel="noopener">Releases</a>
-          <a href="https://github.com/lightconsen/kiwano/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+          <a href="https://github.com/lightconsen/kiwano/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0-or-later</a>
         </div>
       </div>
       <div class="foot-bottom">
@@ -733,7 +735,7 @@ const I18N = {
       <strong>Claude Code, Codex and Gemini CLI</strong> to a local gateway in one click —
       every request stays on your machine, and so do your API keys.`,
     "hero.dlmac": "Download for macOS",
-    "hero.note": `v0.1.3 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source`,
+    "hero.note": `v0.1.7 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source`,
     "feats.h2": "A local gateway × a provider catalog",
     "feats.p": "Neither a plain switcher nor a cloud gateway: routing and metering run locally, while the Hub catalog helps you choose.",
     "f1.t": "Provider management",

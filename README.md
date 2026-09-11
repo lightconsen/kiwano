@@ -6,7 +6,7 @@
   <p>
     <a href="https://github.com/lightconsen/kiwano/releases/latest"><img src="https://img.shields.io/github/v/release/lightconsen/kiwano?label=download&sort=semver" alt="Latest release"></a>
     <a href="https://github.com/lightconsen/kiwano/actions/workflows/ci.yml"><img src="https://github.com/lightconsen/kiwano/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0 license">
+    <img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GPLv3 license">
   </p>
 </div>
 
@@ -97,6 +97,6 @@ Layout:
 
 ## License
 
-Apache License 2.0, see [LICENSE](LICENSE).
+GNU General Public License v3.0 or later, see [LICENSE](LICENSE).
 
 Selected modules are ported from [cc-switch](https://github.com/farion1231/cc-switch) (MIT); ported files carry upstream declarations, see [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

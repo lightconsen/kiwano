@@ -89,6 +89,11 @@ compiles it before the frontend starts. For a cross build, name the target:
 `KIWANO_SIDECAR_TARGET=x86_64-apple-darwin pnpm tauri build`. At runtime
 `KIWANO_GATEWAY_BIN` overrides which binary the app looks for.
 
+**Run `pnpm build:sidecar` first on a fresh clone.** The gateway is declared as
+an `externalBin`, and Tauri resolves that in `src-tauri/build.rs` — so a missing
+sidecar fails `cargo clippy` and `cargo test` themselves, not just the bundle
+step. `pnpm tauri dev` does it for you; the bare cargo commands do not.
+
 CI runs exactly those four Rust checks on Linux and macOS, plus a frontend typecheck and build. The toolchain version is pinned in `rust-toolchain.toml` and in every workflow, so a new clippy release can't turn the build red on code nobody touched.
 
 Layout:

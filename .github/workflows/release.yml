@@ -78,6 +78,24 @@ jobs:
       - name: Typecheck and build frontend
         run: pnpm build
 
+      # Before the first cargo command, not after: `tauri_build::build()` in
+      # src-tauri/build.rs resolves `externalBin` at build-script time, so a
+      # missing sidecar fails clippy and the tests with "resource path
+      # `binaries/kiwano-gateway-<triple>` doesn't exist" — it is a
+      # prerequisite for the Rust build, not just for bundling. Debug profile
+      # on purpose: this proves the path and the triple-suffix naming agree,
+      # and does not need the LTO release build to say so.
+      - name: Sidecar staging
+        run: |
+          set -euo pipefail
+          grep -q '"externalBin"' src-tauri/tauri.conf.json \
+            || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
+          node scripts/build-sidecar.mjs
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          test -x "src-tauri/binaries/kiwano-gateway-$triple" \
+            || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
+          echo "staged src-tauri/binaries/kiwano-gateway-$triple"
+
       - name: Format check
         run: cargo fmt --all -- --check
 
@@ -86,23 +104,6 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --locked
-
-      # The gateway is an `externalBin`, so the config entry and the staging
-      # script have to agree on a path and a name. Both are cheap to check here
-      # and expensive to discover four builds later — a missing externalBin is
-      # a hard `tauri build` error on every platform.
-      - name: Sidecar staging
-        run: |
-          set -euo pipefail
-          grep -q '"externalBin"' src-tauri/tauri.conf.json \
-            || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
-          # Debug profile on purpose: this proves the path and the triple-suffix
-          # naming agree, and does not need the LTO release build to say so.
-          node scripts/build-sidecar.mjs
-          triple=$(rustc -vV | sed -n 's/^host: //p')
-          test -x "src-tauri/binaries/kiwano-gateway-$triple" \
-            || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
-          echo "staged src-tauri/binaries/kiwano-gateway-$triple"
 
       # A tag is now expected to yield a signed, notarized build. Shipping
       # unsigned was the old normal; it is a regression now, and nothing

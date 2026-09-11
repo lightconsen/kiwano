@@ -56,17 +56,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Tests
-        run: cargo test --workspace --locked
-
-      # The gateway daemon is an `externalBin`: without it a packaged app has
-      # no way to start one, and that failure is invisible in dev, where a
-      # gateway is always already running to adopt. Check the config entry and
-      # the staging script agree here, on every PR, rather than at release.
-      # Debug profile on purpose — this is about the path and the naming.
+      # Before the first cargo command, not after: `tauri_build::build()` in
+      # src-tauri/build.rs resolves `externalBin` at build-script time, so a
+      # missing sidecar fails clippy and the tests themselves with
+      # "resource path `binaries/kiwano-gateway-<triple>` doesn't exist" —
+      # not just the bundle step. Debug profile on purpose: this is about the
+      # path and the naming, and does not need the LTO release build.
       - name: Sidecar staging
         run: |
           set -euo pipefail
@@ -76,6 +71,12 @@ jobs:
           triple=$(rustc -vV | sed -n 's/^host: //p')
           test -x "src-tauri/binaries/kiwano-gateway-$triple" \
             || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
 
   web:
     runs-on: ubuntu-latest

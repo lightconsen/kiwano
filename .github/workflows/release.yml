@@ -5,13 +5,14 @@
 # uploads them to a draft release, and publishes it automatically once every
 # platform has landed — the tag push is the only manual step. Because publishing
 # needs no human, `verify` is what stops a tag on a red commit from shipping.
-# Builds are unsigned: macOS Gatekeeper needs right-click → Open, and Windows
-# SmartScreen shows a warning.
+# macOS builds are signed with a Developer ID and notarized (app and disk
+# image alike); Windows builds are not signed yet, so SmartScreen still warns
+# there.
 #
 # The GitHub release body is the tag's own CHANGELOG.md section (`changelog`
-# job), so the notes a reader sees are the ones written before the tag. Only the
-# unsigned-build warning is appended, because that is about the artifacts rather
-# than the release.
+# job), so the notes a reader sees are the ones written before the tag. The
+# per-platform install notes are appended, because those describe the artifacts
+# rather than the release.
 #
 # A tag with a prerelease suffix (`v0.2.0-rc.1`) is a rehearsal: it runs every
 # check and build, then stops. It publishes nothing, mirrors nothing, and
@@ -265,13 +266,13 @@ jobs:
 
             ---
 
-            **Builds are not code-signed or notarized.** On first launch:
+            **macOS builds are signed with a Developer ID and notarized** — open
+            the app the usual way. Pick the build for your chip:
+            `Kiwano_aarch64.dmg` is Apple Silicon (M series), `Kiwano_x64.dmg` is
+            Intel.
 
-            - **macOS** — right-click the app and choose **Open**, then confirm.
-            - **Windows** — SmartScreen will warn; choose **More info → Run anyway**.
-
-            On macOS pick the build for your chip: `Kiwano_aarch64.dmg` is Apple
-            Silicon (M series), `Kiwano_x64.dmg` is Intel.
+            **Windows builds are not code-signed yet.** SmartScreen will warn on
+            first launch; choose **More info → Run anyway**.
           # Each platform uploads into a draft; the `publish` job below flips it
           # public once every platform has landed. Publishing from here would
           # expose a half-filled release — and a latest.json missing platforms,

@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-11
+
 ### Added
 
 - **A refresh button on Models**, beside the search box: it re-syncs the catalog
@@ -26,6 +28,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   restart. The icon spins while it checks and a failure reports itself in red;
   the sync is conditional on the Hub's side, so an unchanged catalog is still a
   completed check.
+
+### Changed
+
+- **The macOS build is signed with a Developer ID and notarized.** The app opens
+  on a double-click: no more right-click → Open, and no more "unidentified
+  developer" — from macOS 15 a notarized app is the only kind that opens without
+  a detour through System Settings. This covers the disk image as well as the
+  app inside it, which are assessed separately. Windows builds are still
+  unsigned, so SmartScreen keeps warning there until a certificate is in place.
 
 ## [0.1.6] - 2026-09-11
 

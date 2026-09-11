@@ -45,11 +45,11 @@ Latest release: **https://github.com/lightconsen/kiwano/releases/latest**
 
 Those links are served from Cloudflare R2 and always point at the newest build — no version in the URL, so they stay valid across releases. The same files are attached to every [GitHub release](https://github.com/lightconsen/kiwano/releases) as a mirror.
 
-**Builds are not code-signed or notarized.** On first launch:
+**macOS builds are signed with a Developer ID and notarized**, so the app opens the usual way. Pick the build for your chip: `aarch64` is Apple Silicon, `x64` is Intel (it runs under Rosetta, but the updater expects the build matching your chip).
 
-- **macOS** — right-click the app and choose **Open**, then confirm. On Apple Silicon pick the `aarch64` build; `x64` is for Intel Macs (it runs under Rosetta, but the updater expects the build matching your chip).
-- **Windows** — SmartScreen will warn; choose **More info → Run anyway**.
-- **Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager.
+**Windows builds are not code-signed yet.** SmartScreen will warn on first launch; choose **More info → Run anyway**.
+
+**Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager.
 
 Updates are delivered as `*.app.tar.gz` / `*-setup.exe` / `AppImage` artifacts from the release manifest (`latest.json`), signature-checked against the public key compiled into the app.
 

@@ -177,13 +177,27 @@ impl StrategyEngine {
         if route.candidates.is_empty() {
             return Err(GatewayError::NoBinding(route.agent.clone()));
         }
-        // Providers over a billing limit are not candidates at all. Pruning the
-        // list here, rather than checking inside `candidate_available`, is what
-        // makes it hold for every strategy: `candidate_available` is consulted
-        // by failover/roundrobin/quota only, while `single` and `timewindow`
-        // index `candidates` directly — and so do the no-backup fallbacks
-        // (`Self::primary`, `weighted_next`), which would otherwise serve a
-        // provider the user has already spent out.
+        // `single` is "this one provider, no failover" — the backup is bound
+        // but deliberately not a fallback. A limit does not promote it: the one
+        // provider is unusable, which is a failure rather than a reason to
+        // switch. So `single` opts out of the pruning below and answers for its
+        // own provider alone.
+        if matches!(route.strategy, StrategyType::Single) {
+            if let Some(reason) = limits.blocked(&route.candidates[0].id) {
+                return Err(GatewayError::AllOverLimit {
+                    agent: route.agent.clone(),
+                    reasons: format!("{} ({})", route.candidates[0].name, reason.describe()),
+                });
+            }
+            return Self::primary(route);
+        }
+        // Every other strategy: providers over a billing limit are not
+        // candidates at all. Pruning the list here, rather than checking inside
+        // `candidate_available`, is what makes it hold for all of them —
+        // `candidate_available` is consulted by failover/roundrobin/quota only,
+        // while `timewindow` indexes `candidates` directly — and so do the
+        // no-backup fallbacks (`Self::primary`, `weighted_next`), which would
+        // otherwise serve a provider the user has already spent out.
         let pruned = crate::limits::without_blocked(route, limits);
         let usable = pruned.as_ref().unwrap_or(route);
         if usable.candidates.is_empty() {
@@ -642,12 +656,11 @@ mod tests {
         let s = store();
         let engine = StrategyEngine::new();
         let limits = blocked("a");
-        // `candidate_available` only guards failover/roundrobin/quota; single
-        // and timewindow index the candidate list directly, and every strategy
-        // has a "fall back to the primary" branch. Pruning the list is what
-        // covers all of them, so all five are asserted rather than the one.
+        // `candidate_available` only guards failover/roundrobin/quota, and
+        // every strategy has a "fall back to the primary" branch; pruning the
+        // list is what covers them. `single` is absent on purpose — it is the
+        // one strategy that does not fail over, and answers for itself.
         for strategy in [
-            StrategyType::Single,
             StrategyType::Failover,
             StrategyType::Roundrobin,
             StrategyType::Timewindow,
@@ -681,6 +694,44 @@ mod tests {
 
         let picked = engine.select(&s, &r, None, &blocked("a")).await.unwrap();
         assert_eq!(picked.id, "b", "the fallback must not reach for 'a'");
+    }
+
+    #[tokio::test]
+    async fn a_single_strategy_fails_rather_than_promoting_the_backup() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        // P1 is the primary and P2 is bound, but `single` means P1 only — the
+        // backup is not a fallback, and a limit does not make it one.
+        let r = route(
+            StrategyType::Single,
+            vec![candidate("p1", 1, None), candidate("p2", 1, None)],
+        );
+        let err = engine
+            .select(&s, &r, None, &blocked("p1"))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, GatewayError::AllOverLimit { .. }),
+            "expected the hard wall, got {err}"
+        );
+        assert!(
+            err.to_string().contains("p1"),
+            "and it names the one it refuses"
+        );
+
+        // Same route, same limit state, but failover: this one does move over.
+        let r2 = route(
+            StrategyType::Failover,
+            vec![candidate("p1", 1, None), candidate("p2", 1, None)],
+        );
+        assert_eq!(
+            engine
+                .select(&s, &r2, None, &blocked("p1"))
+                .await
+                .unwrap()
+                .id,
+            "p2"
+        );
     }
 
     #[tokio::test]

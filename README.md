@@ -12,7 +12,7 @@
 
 Kiwano is a desktop app that sits between your coding agents and your AI providers. You register providers once, it runs a local gateway on `127.0.0.1:8317`, and every agent — Claude Code, Codex, Gemini CLI and others — talks to that one port. The gateway normalizes protocols, routes each request through the strategy you picked, meters what it cost, and records what happened.
 
-Your keys stay in the OS keychain. Requests never touch a Kiwano server.
+Your keys stay on your machine, in an owner-only local database. Requests never touch a Kiwano server.
 
 ![Kiwano's Apps screen: providers with their bound agents, usage and quota for the day](docs/screenshots/apps.png)
 
@@ -82,7 +82,7 @@ Updates are delivered as `*.app.tar.gz` / `*-setup.exe` / `AppImage` artifacts f
 
 Kiwano is local-first by design, and the code is the specification:
 
-- API keys are stored in the **OS keychain**, and provider credentials are only ever sent to the provider you configured.
+- API keys are stored **locally, in an owner-only SQLite database** — directory `0700`, file `0600` — so only your user can read them. Provider credentials are only ever sent to the provider you configured.
 - Requests, prompts and responses **never pass through a Kiwano server** — the gateway runs on your machine.
 - Usage history lives in a **local SQLite database** (`~/.kiwano/kiwano.db`). Nothing is uploaded.
 - The Hub only ever serves **catalog metadata** (provider names, endpoints, prices). It sees no keys and no request data.

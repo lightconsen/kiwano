@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-12
+
 ### Security
 
 - **The data plane no longer forwards a request it cannot attribute.** A

@@ -51,6 +51,31 @@ Those links are served from Cloudflare R2 and always point at the newest build �
 
 **Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager.
 
+### Verify your download
+
+Every release attaches `SHA256SUMS`, and every artifact carries a signed build-provenance attestation.
+
+**Provenance** — proves the file was built by this repository's release workflow at the tagged commit, not merely that it is intact. It is checked against GitHub's transparency log, so it does not depend on trusting the host you downloaded from:
+
+```sh
+gh attestation verify Kiwano_x64.dmg --repo lightconsen/kiwano
+```
+
+**Checksum** — compare the digest in `SHA256SUMS` (attached to the [GitHub release](https://github.com/lightconsen/kiwano/releases)) with the file you have:
+
+```sh
+# the published digest
+grep ' Kiwano_x64.dmg$' SHA256SUMS
+# the digest of the file you have
+sha256sum Kiwano_x64.dmg                    # Linux
+shasum -a 256 Kiwano_x64.dmg                # macOS
+
+# Windows, for Kiwano_x64-setup.exe
+certutil -hashfile Kiwano_x64-setup.exe SHA256
+```
+
+The two lines must match. Note that `SHA256SUMS` records the GitHub release names, which carry the version; the R2 links above deliberately have none, so pair it with the matching GitHub release if you downloaded from R2. Provenance is the check that needs no name to line up.
+
 Updates are delivered as `*.app.tar.gz` / `*-setup.exe` / `AppImage` artifacts from the release manifest (`latest.json`), signature-checked against the public key compiled into the app.
 
 ## Privacy

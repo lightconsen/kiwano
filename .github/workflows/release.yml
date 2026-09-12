@@ -61,6 +61,56 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Before anything that costs minutes, and before the build legs: this is
+      # the one check whose failure means "do not ship this tag at all".
+      #
+      # The updater's trust root is the public key compiled into the app
+      # (src-tauri/tauri.conf.json → plugins.updater.pubkey). An update is
+      # accepted when its minisign signature verifies against that key and
+      # nothing else — the app has no second opinion about who may update it. So
+      # whoever can change the key at a tagged commit can push code to every
+      # installed copy, and the change is one base64 string in a file nobody
+      # reads.
+      #
+      # Comparing the key against itself proves nothing: it lives in the tag's
+      # own tree. It is compared against the `EXPECTED_UPDATER_PUBKEY` repository
+      # variable instead, which lives outside the repository — a commit, a pull
+      # request or a compromised contributor account cannot reach it, only a
+      # repository admin can. Set it once (Settings → Secrets and variables →
+      # Actions → Variables) to the key on `main`; the failure message prints
+      # the value found, so filling it in is a copy-paste.
+      #
+      # Failing when the variable is unset is deliberate. A check that skips
+      # itself when unconfigured is the exact state an attacker would arrange,
+      # and it would look like a passing build. To ship without this on purpose,
+      # delete the step — do not make it conditional. Same trade as the signing
+      # credential check below.
+      - name: The updater public key is the one we pinned
+        env:
+          EXPECTED: ${{ vars.EXPECTED_UPDATER_PUBKEY }}
+        run: |
+          set -euo pipefail
+          found=$(node -e '
+            const fs = require("fs");
+            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
+            const updater = conf.plugins && conf.plugins.updater;
+            process.stdout.write((updater && updater.pubkey) || "");
+          ')
+          [ -n "$found" ] \
+            || { echo "::error::src-tauri/tauri.conf.json has no plugins.updater.pubkey — the app cannot verify updates at all"; exit 1; }
+
+          if [ -z "${EXPECTED:-}" ]; then
+            echo "::error::the EXPECTED_UPDATER_PUBKEY repository variable is unset, so nothing checks the updater's trust root. Set it to: $found"
+            exit 1
+          fi
+          if [ "$EXPECTED" != "$found" ]; then
+            echo "::error::the updater public key differs from the pinned value. Every installed copy would accept updates signed by this tag's key — or start refusing ours."
+            echo "::error::pinned: $EXPECTED"
+            echo "::error::found:  $found"
+            exit 1
+          fi
+          echo "updater public key matches the pinned value"
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
@@ -246,6 +296,7 @@ jobs:
         env:
           CERT_RAW: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
 
@@ -259,6 +310,19 @@ jobs:
           printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
           chmod 600 "$key"
           echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+
+          # The certificate's Team ID, parsed out of the identity string
+          # ("Developer ID Application: Name (TEAMID)") instead of kept as a
+          # second secret that could drift from it. The verification steps below
+          # pin every signed artifact to this team, and a Team ID that silently
+          # disagreed with the signing identity would turn those checks into
+          # rubber stamps.
+          team=$(printf '%s' "$APPLE_SIGNING_IDENTITY" | sed -n 's/.*(\([A-Za-z0-9]*\))$/\1/p')
+          [ -n "$team" ] \
+            || { echo "::error::APPLE_SIGNING_IDENTITY must look like 'Developer ID Application: Name (TEAMID)', got a value this step cannot parse"; exit 1; }
+          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=$team" >> "$GITHUB_ENV"
+          echo "signing identity resolved for team $team"
 
       # The updater key gets the same treatment as the Apple blobs above, for
       # the same reason — but the shape here is easy to get wrong, so it is
@@ -471,32 +535,80 @@ jobs:
           dmg=$(find "$bundle" -maxdepth 3 -name '*.dmg' | head -n 1)
           [ -n "$dmg" ] || { echo "::error::no .dmg under $bundle"; exit 1; }
 
-          # Apple's notary service has transient bad days: a submit that fails
-          # to reach it at all, or a `--wait` that comes back `Invalid` while
-          # the log says nothing is wrong with the submission. One attempt turns
-          # a few minutes of their downtime into a failed release, so try three
-          # times with 60s/120s of backoff, and fail the step only when the last
-          # attempt does. Staple only after a submit has actually succeeded —
-          # stapling an un-notarized image would just move the failure to the
-          # spctl check further down.
+          # Apple's notary service has transient bad days: a submit that never
+          # reaches it, or a wait that is cut short while the submission itself
+          # was fine. One attempt turns a few minutes of their downtime into a
+          # failed release, so this retries — but it retries against *one*
+          # submission rather than by calling `submit` again.
+          #
+          # `submit --wait` is not retryable as a unit, because a second call is
+          # a second submission on Apple's side. A wait that died for a network
+          # reason would then leave two submissions queued behind the same image
+          # and the retry would be racing its own predecessor. The submission id
+          # is what this loops over: submit once without waiting, record the id,
+          # then retry `wait` on that id. Only a submit that yielded no id at all
+          # — a transport failure before Apple accepted the upload — is safe to
+          # repeat, which is why the two are separated below.
+          #
+          # `Invalid` is not transient. The submission was received and rejected,
+          # and waiting again cannot change the verdict, so it reports the notary
+          # log instead — that log is the only place the reason appears.
+          auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+
           max_attempts=3
+          submission=""
+          notarized=0
           for attempt in $(seq 1 "$max_attempts"); do
-            echo "notarytool submit: attempt $attempt/$max_attempts"
-            if xcrun notarytool submit "$dmg" \
-              --key "$APPLE_API_KEY_PATH" \
-              --key-id "$APPLE_API_KEY" \
-              --issuer "$APPLE_API_ISSUER" \
-              --wait; then
+            if [ -z "$submission" ]; then
+              echo "notarytool submit: attempt $attempt/$max_attempts"
+              out=""
+              if out=$(xcrun notarytool submit "$dmg" "${auth[@]}" --no-wait --output-format json 2>&1); then
+                submission=$(printf '%s' "$out" \
+                  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null || true)
+              else
+                printf '%s\n' "$out"
+              fi
+              if [ -z "$submission" ]; then
+                if [ "$attempt" -eq "$max_attempts" ]; then
+                  echo "::error::notarytool submit never returned a submission id after $max_attempts attempts"
+                  exit 1
+                fi
+                backoff=$(( attempt * 60 ))
+                echo "submit did not reach the service; retrying in ${backoff}s"
+                sleep "$backoff"
+                continue
+              fi
+              echo "submission id: $submission"
+            fi
+
+            if out=$(xcrun notarytool wait "$submission" "${auth[@]}" --output-format json 2>&1); then
+              notarized=1
               break
             fi
+
+            status=$(printf '%s' "$out" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)
+            if [ "$status" = "Invalid" ]; then
+              echo "::error::notarization rejected the image"
+              printf '%s\n' "$out"
+              xcrun notarytool log "$submission" "${auth[@]}" || true
+              exit 1
+            fi
+
             if [ "$attempt" -eq "$max_attempts" ]; then
-              echo "::error::notarization failed after $max_attempts attempts"
+              echo "::error::notarization did not complete after $max_attempts attempts"
+              printf '%s\n' "$out"
               exit 1
             fi
             backoff=$(( attempt * 60 ))
-            echo "notarization failed; retrying in ${backoff}s"
+            echo "wait failed; retrying submission $submission in ${backoff}s"
             sleep "$backoff"
           done
+          # Staple only after a submit actually succeeded — stapling an
+          # un-notarized image would just move the failure to the spctl check
+          # further down, where it reads as a signing problem.
+          [ "$notarized" -eq 1 ] || { echo "::error::notarization did not report success"; exit 1; }
+
           xcrun stapler staple "$dmg"
           xcrun stapler validate "$dmg"
 
@@ -517,16 +629,31 @@ jobs:
           app=$(find "$bundle" -maxdepth 3 -name '*.app' -type d | head -n 1)
           [ -n "$app" ] || { echo "::error::no .app under $bundle"; exit 1; }
 
+          # A requirement, not just "a signature that verifies". `codesign
+          # --verify` answers "is this intact and coherently signed", which an
+          # app signed by *any* Developer ID certificate satisfies; this pins the
+          # leaf certificate to our team, so somebody else's signature fails.
+          # APPLE_SIGNING_IDENTITY and APPLE_TEAM_ID are resolved once, in the
+          # signing-material step, so this cannot silently disagree with what
+          # actually did the signing.
+          requirement="anchor apple generic and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\""
+
           # Deliberately *not* `--strict`: that treats a stray FinderInfo xattr
           # as fatal, and a healthy notarized app in /Applications fails it. A
           # gate that cries wolf on a good build gets deleted, not fixed.
           codesign --verify --deep --verbose=2 "$app"
+          codesign --verify --verbose=2 -R="$requirement" "$app"
 
           # The seals prove integrity; the authority line proves it was *us*
-          # and not an ad-hoc signature that happens to verify.
+          # and not an ad-hoc signature that happens to verify. Matched in full:
+          # a prefix match against "Authority=Developer ID Application" accepts
+          # every Developer ID certificate in existence, so it can only catch an
+          # unsigned artifact, never a wrong signer.
           info=$(codesign -dv --verbose=4 "$app" 2>&1)
-          printf '%s\n' "$info" | grep -q '^Authority=Developer ID Application' \
-            || { echo "::error::$app is not signed with a Developer ID"; printf '%s\n' "$info"; exit 1; }
+          printf '%s\n' "$info" | grep -Fxq "Authority=$APPLE_SIGNING_IDENTITY" \
+            || { echo "::error::$app is not signed by $APPLE_SIGNING_IDENTITY"; printf '%s\n' "$info"; exit 1; }
+          printf '%s\n' "$info" | grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" \
+            || { echo "::error::$app carries an unexpected TeamIdentifier"; printf '%s\n' "$info"; exit 1; }
 
           # stapler is the deterministic proof that notarization happened: if
           # the credentials were missing, Tauri signs and skips notarizing, and
@@ -540,11 +667,18 @@ jobs:
           # The image is assessed on its own signature and notarizing the app
           # inside does not cover it, so this is the check that catches a DMG
           # shipping unnoticed — and it fails an unstabled image on purpose.
+          # Required, not optional: the notarization step above already refuses
+          # to continue without a DMG, so a missing one here means something is
+          # wrong rather than that this platform has no image.
           dmg=$(find "$bundle" -maxdepth 3 -name '*.dmg' | head -n 1)
-          if [ -n "$dmg" ]; then
-            xcrun stapler validate "$dmg"
-            spctl --assess --type open --context context:primary-signature -v "$dmg"
-          fi
+          [ -n "$dmg" ] || { echo "::error::no .dmg under $bundle"; exit 1; }
+          codesign --verify --verbose=2 "$dmg"
+          codesign --verify --verbose=2 -R="$requirement" "$dmg"
+          dmg_info=$(codesign -dv --verbose=4 "$dmg" 2>&1)
+          printf '%s\n' "$dmg_info" | grep -Fxq "Authority=$APPLE_SIGNING_IDENTITY" \
+            || { echo "::error::$dmg is not signed by $APPLE_SIGNING_IDENTITY"; printf '%s\n' "$dmg_info"; exit 1; }
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature -v "$dmg"
           echo "signed, notarized and stapled: $app"
 
       # The gateway daemon is what makes the app work at all, and it lives
@@ -566,13 +700,20 @@ jobs:
               [ -n "$app" ] || fail "no .app under $bundle"
               sidecar="$app/Contents/MacOS/kiwano-gateway"
               [ -x "$sidecar" ] || fail "gateway sidecar missing from $app"
-              # A nested Mach-O must carry the same Developer ID. Notarization
-              # would have rejected an unsigned one, so this proves the
-              # signature covered the sidecar rather than being drawn around it.
+              # A nested Mach-O must carry the *same* Developer ID as the app.
+              # Notarization would have rejected an unsigned one, so this proves
+              # the signature covered the sidecar rather than being drawn around
+              # it. Matched in full, because the same certificate has to have
+              # signed both — a prefix match would accept any Developer ID, and
+              # the sidecar is the binary that actually holds the credentials.
+              # The identity variables only exist on macOS, which is why this
+              # lives in the macOS arm of the case.
               codesign --verify --verbose=2 "$sidecar"
-              codesign -dv --verbose=4 "$sidecar" 2>&1 \
-                | grep -q '^Authority=Developer ID Application' \
-                || fail "$sidecar is not Developer ID signed"
+              sidecar_info=$(codesign -dv --verbose=4 "$sidecar" 2>&1)
+              printf '%s\n' "$sidecar_info" | grep -Fxq "Authority=$APPLE_SIGNING_IDENTITY" \
+                || fail "$sidecar is not signed by $APPLE_SIGNING_IDENTITY"
+              printf '%s\n' "$sidecar_info" | grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" \
+                || fail "$sidecar carries an unexpected TeamIdentifier"
               ;;
 
             *-unknown-linux-gnu)
@@ -583,9 +724,15 @@ jobs:
                 || fail "gateway sidecar missing from $deb"
               appimage=$(find "$bundle/appimage" -maxdepth 2 -name '*.AppImage' | head -n 1)
               if [ -n "$appimage" ]; then
+                # Resolve before the subshell, not inside it: `find` returns a
+                # path relative to the workspace, and the `cd` below would make
+                # `realpath` resolve it against the temp directory instead —
+                # which is what this step did until the AppImage check ran for
+                # the first time and failed on a file that was right there.
+                appimage=$(realpath "$appimage")
                 chmod +x "$appimage"
                 tmp=$(mktemp -d)
-                ( cd "$tmp" && "$(realpath "$appimage")" --appimage-extract >/dev/null )
+                ( cd "$tmp" && "$appimage" --appimage-extract >/dev/null )
                 [ -x "$tmp/squashfs-root/usr/bin/kiwano-gateway" ] \
                   || fail "gateway sidecar missing from $appimage"
               fi
@@ -657,6 +804,72 @@ jobs:
           done
 
           aws s3 sync mirror s3://kiwano-hub/releases --no-progress
+
+  # Checksums and provenance for the release as a whole, after every platform
+  # has landed. Neither belongs to a build leg: the macOS DMG is replaced once
+  # it is stapled (see the notarization step above), so a digest or an
+  # attestation taken at build time would describe bytes nobody downloads.
+  # Taken here, over the assets the release is actually carrying, they mean
+  # something.
+  #
+  # Deliberately not gated on a rehearsal tag. Rehearsals exist to exercise this
+  # pipeline end to end, and both outputs land on the draft release only — which
+  # a rehearsal never publishes. The artifacts themselves are what a rehearsal
+  # must not touch; nothing here does.
+  release-manifest:
+    name: Checksums and provenance
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # `gh release download` and `upload` against the draft release.
+      contents: write
+      # Keyless: the attestation is signed by this run's GitHub OIDC identity,
+      # so there is no key to hold, rotate or leak.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the release's assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "${{ github.ref_name }}" \
+            -R "${{ github.repository }}" \
+            --dir release-assets
+          ls -la release-assets
+
+      # sha256sum's own format, so `sha256sum -c SHA256SUMS` checks a download
+      # with nothing beyond coreutils. Written outside the asset directory so it
+      # cannot end up hashing itself. The `--` keeps a file name beginning with a
+      # dash from being read as an option, and bare names rather than `./`-prefixed
+      # ones are what `sha256sum -c` expects to find beside it.
+      - name: Write SHA256SUMS
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          sha256sum -- * > ../SHA256SUMS
+          cat ../SHA256SUMS
+
+      # Binds every asset to this workflow run and this commit — "built by
+      # release.yml from this repository at <commit>" — signed by GitHub and
+      # verifiable later against a file the user already has. Note what it does
+      # *not* say: nothing about whether the code is any good. Provenance
+      # answers "where did this come from", which a checksum file, a mirror and
+      # a release page all fail to answer, because all three can be replaced.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release-assets/*
+
+      - name: Upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ github.ref_name }}" SHA256SUMS \
+            -R "${{ github.repository }}" --clobber
 
   # latest.json is assembled by tauri-action as each platform uploads its entry,
   # so mirroring it from the build jobs would race: whichever finished first
@@ -730,13 +943,19 @@ jobs:
         run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress
 
   # No human in the loop: publishing is a tag push and nothing else.
-  # `needs: build` only, never the mirror jobs — this job is what the mirror
-  # orders itself behind (`mirror-manifest` needs: this one), so waiting on the
-  # mirror here would be circular, and a mirror hiccup must not leave the
-  # release stranded as a draft. The release is the deliverable; the mirror is
-  # downstream of it.
+  #
+  # `needs: [build, release-manifest]` — everything that is *part of the release*
+  # has to be on it before it goes public, and SHA256SUMS is part of it: a
+  # checksum file added to a release that is already live would be a race for
+  # whoever downloads in that window, and would name a set of assets that was
+  # briefly incomplete.
+  #
+  # Never the mirror jobs: this job is what the mirror orders itself behind
+  # (`mirror-manifest` needs: this one), so waiting on the mirror here would be
+  # circular, and a mirror hiccup must not leave the release stranded as a
+  # draft. The release is the deliverable; the mirror is downstream of it.
   publish:
-    needs: build
+    needs: [build, release-manifest]
     # A prerelease suffix makes this a rehearsal: the release stays a draft for
     # the author to inspect and delete, and never becomes what `latest` points
     # at — which would hand every installed copy an RC via the updater.

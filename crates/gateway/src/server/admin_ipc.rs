@@ -54,13 +54,10 @@ use std::path::PathBuf;
 
 /// Environment variable overriding where the admin plane listens.
 ///
-/// This is what replaces `KIWANO_ADMIN_PORT` for anything built from here on:
-/// the plane is not a port any more. On unix the value is a filesystem path, on
-/// Windows a pipe name (with or without the `\\.\pipe\` prefix).
-///
-/// `KIWANO_ADMIN_PORT` itself is still read, but only as the port of the
-/// *pre-0.1.8* gateway the app may still find on TCP — see
-/// `sidecar::legacy_request_shutdown`.
+/// The plane is not a port: on unix the value is a filesystem path, on Windows a
+/// pipe name (with or without the `\\.\pipe\` prefix). It is what
+/// `KIWANO_ADMIN_PORT` named in pre-0.1.8 builds, and nothing reads that
+/// variable now.
 pub const ADMIN_SOCKET_ENV: &str = "KIWANO_ADMIN_SOCKET";
 
 /// Default socket file name, in the database's directory.

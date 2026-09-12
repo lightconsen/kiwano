@@ -840,21 +840,19 @@ pub fn run() {
             let store = Store::open(&path).map_err(|e| e.to_string())?;
             let aux = Aux::open(&path).map_err(|e| e.to_string())?;
             let data_port = env_port("KIWANO_DATA_PORT", 8317);
-            // Not a port any more: the admin plane is a socket beside the
-            // database, or a per-user named pipe. `KIWANO_ADMIN_PORT` survives
-            // only inside `sidecar` as where a pre-0.1.8 gateway is looked for.
+            // Not a port: the admin plane is a socket beside the database, or a
+            // per-user named pipe.
             let admin = sidecar::admin_endpoint();
 
             // Sidecar lifecycle (tech.md §4.6): adopt an already-running daemon
             // — but only one of our own version. The daemon deliberately
             // outlives the GUI, so an upgrade meets its predecessor still
             // holding the data port, and the two share a SQLite file whose
-            // schema only one of them may understand. `running_gateway_status`
-            // doubles as the liveness probe here — None means nothing is
-            // answering on the endpoint or, during the 0.1.8 upgrade window, on
-            // the legacy TCP port (`sidecar` documents when that goes away).
+            // schema only one of them may understand. `gateway_status` doubles
+            // as the liveness probe here — None means nothing is answering on
+            // the endpoint.
             let ours = env!("CARGO_PKG_VERSION");
-            let status = sidecar::running_gateway_status(&admin);
+            let status = sidecar::gateway_status(&admin);
             let child = match sidecar::startup_action(status.as_ref(), ours) {
                 sidecar::StartupAction::Adopt => {
                     tracing::info!(

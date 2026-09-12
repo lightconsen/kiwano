@@ -47,9 +47,8 @@ async fn main() {
     // The admin plane is not a port: a socket beside the database, or a
     // per-user named pipe on Windows. `KIWANO_ADMIN_SOCKET` overrides it, and
     // the GUI inherits nothing, so both sides resolve the same default from the
-    // same database path. `KIWANO_ADMIN_PORT` is no longer read here at all —
-    // it survives only in the app, as the port a *pre-0.1.8* gateway is still
-    // reachable on.
+    // same database path. The `KIWANO_ADMIN_PORT` of pre-0.1.8 builds is not
+    // read here at all, and nothing looks for one any more.
     let admin_endpoint = AdminEndpoint::from_env(&db_path);
 
     // Logging first, and beside the database: everything below can fail, and a

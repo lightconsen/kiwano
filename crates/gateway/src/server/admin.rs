@@ -199,11 +199,10 @@ async fn shutdown(State(state): State<Arc<GatewayState>>, headers: HeaderMap) ->
 ///   A 401 there would read as a gateway that is not running, and the watchdog
 ///   would respawn one on top of the gateway that answered.
 /// - `sidecar::startup_action` parses `name` + `version` out of this body to
-///   decide whether the running daemon is the build we ship — and it is the
-///   same body `sidecar::legacy_admin_port` reads off a *pre-0.1.8* gateway
-///   still on TCP. That decision has to survive an upgrade in both directions:
-///   against an older build there is no token row to send, and the old build
-///   would ignore the header anyway.
+///   decide whether the running daemon is the build we ship. That decision has
+///   to survive a caller with no readable token row — such as the app on a fresh
+///   install, before the gateway has written one — which is why the liveness
+///   subset does not require the header.
 ///
 /// Everything past the first branch — routes, provider ids, candidate
 /// protocols, strategies, blocked reasons — names the operator's providers and

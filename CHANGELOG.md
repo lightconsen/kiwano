@@ -19,6 +19,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Removed
+
+- **The app no longer looks for a gateway on the pre-0.1.8 admin port.** 0.1.8
+  moved the admin plane off loopback TCP onto a socket / named pipe, and kept a
+  fallback that found and stopped a gateway from the older build on `:8310` (or
+  whatever `KIWANO_ADMIN_PORT` named). No released version ever shipped a
+  gateway on that transport — the population it reached was hand-built workspace
+  binaries and stale `target/debug` copies — so the fallback is gone and the app
+  speaks IPC alone. `KIWANO_ADMIN_PORT` is read nowhere now; `KIWANO_ADMIN_SOCKET`
+  is the variable that moves the plane.
+
 ## [0.1.8] - 2026-09-12
 
 ### Security

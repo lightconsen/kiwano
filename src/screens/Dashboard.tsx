@@ -17,12 +17,14 @@ import {
 import { api } from "../api/client";
 import type { DashboardData, DashboardWindow, GatewayStatus } from "../api/types";
 import { fmtMoney, fmtTokens } from "../lib/format";
+import { useT, type KeyPath, type Messages } from "../i18n";
 import RequestLogs from "./RequestLogs";
 
-const WINDOWS: { id: DashboardWindow; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "7d", label: "Last 7 days" },
-  { id: "30d", label: "Last 30 days" },
+// Labels only: `id` is what the backend filters on and stays untranslated.
+const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
+  { id: "today", labelKey: "dashboard.windowToday" },
+  { id: "7d", labelKey: "dashboard.window7d" },
+  { id: "30d", labelKey: "dashboard.window30d" },
 ];
 
 type TrendMetric = "requests" | "tokens";
@@ -41,6 +43,10 @@ type TrendMetric = "requests" | "tokens";
  * readout the pointer gets.
  */
 function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric }) {
+  const t = useT();
+  const metricLabel = t(
+    metric === "requests" ? "dashboard.trendMetricRequests" : "dashboard.trendMetricTokens",
+  );
   const W = 900;
   const H = 140;
   const top = 22;
@@ -109,7 +115,7 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
         style={{ height: 128 }}
         tabIndex={0}
         role="img"
-        aria-label={`Usage trend · ${metric} · ${n} buckets`}
+        aria-label={t("dashboard.trendAria", { metric: metricLabel, n })}
         onKeyDown={onKeyDown}
         onFocus={() => pointAt(hover ?? 0)}
         onBlur={() => setHover(null)}
@@ -188,7 +194,7 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
           <span className="font-semibold">{tick(value(shown))}</span>
           <span style={{ color: "var(--mut)" }}>
             {" "}
-            {metric} · {shown.date}
+            {metricLabel} · {shown.date}
           </span>
         </div>
       )}
@@ -219,6 +225,7 @@ function Donut({
   size?: number;
   thickness?: number;
 }) {
+  const t = useT();
   const r = (size - thickness) / 2;
   const circumference = 2 * Math.PI * r;
   // The hole is 78px across at the default size; a provider name longer than
@@ -239,7 +246,7 @@ function Donut({
       viewBox={`0 0 ${size} ${size}`}
       className="shrink-0"
       role="img"
-      aria-label={`By provider · ${total} requests`}
+      aria-label={t("dashboard.donutAria", { n: total })}
       onPointerLeave={() => onHover(null)}
     >
       <circle
@@ -297,7 +304,7 @@ function Donut({
         {shown ? shown.value : total}
       </text>
       <text x="50%" y="62%" textAnchor="middle" fill="var(--mut)" fontSize="9">
-        {shown ? label : "requests"}
+        {shown ? label : t("dashboard.donutCenterLabel")}
       </text>
     </svg>
   );
@@ -319,6 +326,7 @@ function ProviderBreakdown({
   /** provider id -> why the gateway is refusing to route there */
   blocked: Record<string, string>;
 }) {
+  const t = useT();
   const [active, setActive] = useState<number | null>(null);
   return (
     <div className="mt-2.5 flex items-center gap-4">
@@ -349,7 +357,11 @@ function ProviderBreakdown({
           >
             <span
               className={`flex min-w-0 items-center gap-1.5${blocked[p.id] ? " opacity-55" : ""}`}
-              title={blocked[p.id] ? `Not routing here: ${blocked[p.id]}` : undefined}
+              title={
+                blocked[p.id]
+                  ? t("dashboard.notRoutingHere", { reason: blocked[p.id] })
+                  : undefined
+              }
             >
               <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: p.color }} />
               <span className="truncate">{p.name}</span>
@@ -361,7 +373,7 @@ function ProviderBreakdown({
                     color: "var(--red)",
                   }}
                 >
-                  Blocked
+                  {t("dashboard.blocked")}
                 </span>
               )}
             </span>
@@ -387,6 +399,7 @@ function Delta({ pct, invert }: { pct: number; invert?: boolean }) {
 }
 
 export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null } = {}) {
+  const t = useT();
   const [win, setWin] = useState<DashboardWindow>("7d");
   // The gateway decides which providers it will not route to, and reports it;
   // this card reads that rather than working out its own answer.
@@ -427,7 +440,8 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
       });
   }, [win, providerFilter, agentFilter]);
 
-  if (!data) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
+  if (!data)
+    return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
   const totalTokens = data.input_tokens + data.output_tokens;
 
@@ -441,7 +455,7 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
               className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${win === w.id ? " active" : ""}`}
               onClick={() => setWin(w.id)}
             >
-              {w.label}
+              {t(w.labelKey)}
             </button>
           ))}
         </div>
@@ -451,11 +465,14 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
           <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
             {/* The value is an id; a bare <SelectValue /> would print it. */}
             <SelectValue>
-              {(v) => data.filter_providers.find((p) => p.id === v)?.label ?? "All providers"}
+              {(v) =>
+                data.filter_providers.find((p) => p.id === v)?.label ??
+                t("dashboard.allProviders")
+              }
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All providers</SelectItem>
+            <SelectItem value="all">{t("dashboard.allProviders")}</SelectItem>
             {data.filter_providers.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.label}
@@ -466,11 +483,13 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
         <Select value={agentFilter} onValueChange={(v) => setAgentFilter(v ?? "all")}>
           <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
             <SelectValue>
-              {(v) => data.filter_agents.find((a) => a.id === v)?.label ?? "All agents"}
+              {(v) =>
+                data.filter_agents.find((a) => a.id === v)?.label ?? t("dashboard.allAgents")
+              }
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All agents</SelectItem>
+            <SelectItem value="all">{t("dashboard.allAgents")}</SelectItem>
             {data.filter_agents.map((a) => (
               <SelectItem key={a.id} value={a.id}>
                 {a.label}
@@ -478,7 +497,7 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
             ))}
           </SelectContent>
         </Select>
-        <span className="ml-auto text-[11px] text-mut">Data stays in local SQLite</span>
+        <span className="ml-auto text-[11px] text-mut">{t("dashboard.localSqlite")}</span>
       </div>
 
       <div className="p-4">
@@ -487,7 +506,7 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <Send className="h-3 w-3" />
-              Requests
+              {t("dashboard.statRequests")}
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
               {data.requests.toLocaleString()} <Delta pct={data.requests_delta_pct} />
@@ -496,31 +515,39 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <Coins className="h-3 w-3" />
-              Tokens
+              {t("dashboard.statTokens")}
             </div>
             <div
               className="mt-1 font-mono text-[19px] font-semibold"
-              title={`in ${fmtTokens(data.input_tokens)} (cache hits ${fmtTokens(data.cache_read_tokens)}, billed at 1/10) · out ${fmtTokens(data.output_tokens)}`}
+              title={t("dashboard.tokensTitle", {
+                input: fmtTokens(data.input_tokens),
+                cache: fmtTokens(data.cache_read_tokens),
+                output: fmtTokens(data.output_tokens),
+              })}
             >
               {fmtTokens(totalTokens)}{" "}
               <span className="text-[10.5px] font-normal text-mut">
-                in {fmtTokens(data.input_tokens)} / out {fmtTokens(data.output_tokens)}
+                {t("dashboard.tokensInOut", {
+                  input: fmtTokens(data.input_tokens),
+                  output: fmtTokens(data.output_tokens),
+                })}
               </span>
             </div>
           </div>
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <CircleDollarSign className="h-3 w-3" />
-              Est. cost
+              {t("dashboard.statEstCost")}
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
-              {fmtMoney(data.cost, pref)} <span className="text-[10.5px] font-normal text-mut">at Hub price</span>
+              {fmtMoney(data.cost, pref)}{" "}
+              <span className="text-[10.5px] font-normal text-mut">{t("dashboard.atHubPrice")}</span>
             </div>
           </div>
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">
               <Timer className="h-3 w-3" />
-              Avg latency
+              {t("dashboard.statAvgLatency")}
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
               {(Math.round(data.latency_ms / 100) / 10).toFixed(1)}s <Delta pct={-data.latency_delta_pct} invert />
@@ -531,7 +558,7 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
         {/* Request trend */}
         <div className="mt-3 rounded-lg border border-line bg-surface p-3.5">
           <div className="flex items-center justify-between">
-            <h3 className="text-[12.5px] font-semibold">Usage trend</h3>
+            <h3 className="text-[12.5px] font-semibold">{t("dashboard.usageTrend")}</h3>
             <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
               {(["requests", "tokens"] as TrendMetric[]).map((m, i) => (
                 <button
@@ -539,7 +566,7 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
                   className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${metric === m ? " active" : ""}`}
                   onClick={() => setMetric(m)}
                 >
-                  {m === "requests" ? "Requests" : "Tokens"}
+                  {t(m === "requests" ? "dashboard.metricRequests" : "dashboard.metricTokens")}
                 </button>
               ))}
             </div>
@@ -550,23 +577,23 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
         <div className="mt-3 grid grid-cols-2 gap-3">
           {/* Provider breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
-            <h3 className="text-[12.5px] font-semibold">By provider</h3>
+            <h3 className="text-[12.5px] font-semibold">{t("dashboard.byProvider")}</h3>
             {data.by_provider.length === 0 ? (
-              <div className="mt-3 text-[11.5px] text-mut">No traffic in this window.</div>
+              <div className="mt-3 text-[11.5px] text-mut">{t("dashboard.noTraffic")}</div>
             ) : (
               <ProviderBreakdown rows={data.by_provider} pref={pref} blocked={blocked} />
             )}
           </div>
           {/* Agent breakdown */}
           <div className="rounded-lg border border-line bg-surface p-3.5">
-            <h3 className="text-[12.5px] font-semibold">By agent</h3>
+            <h3 className="text-[12.5px] font-semibold">{t("dashboard.byAgent")}</h3>
             <table className="mt-2 w-full text-[11.5px]">
               <thead>
                 <tr className="text-left text-mut text-[10px]">
-                  <th className="pb-1.5 font-medium">Agent</th>
-                  <th className="pb-1.5 text-right font-medium">Requests</th>
-                  <th className="pb-1.5 text-right font-medium">Tokens</th>
-                  <th className="pb-1.5 text-right font-medium">Cost</th>
+                  <th className="pb-1.5 font-medium">{t("dashboard.colAgent")}</th>
+                  <th className="pb-1.5 text-right font-medium">{t("dashboard.colRequests")}</th>
+                  <th className="pb-1.5 text-right font-medium">{t("dashboard.colTokens")}</th>
+                  <th className="pb-1.5 text-right font-medium">{t("dashboard.colCost")}</th>
                 </tr>
               </thead>
               <tbody className="font-mono">

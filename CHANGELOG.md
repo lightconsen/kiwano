@@ -102,6 +102,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **The interface speaks Simplified Chinese.** Settings → Language has offered
+  only "English" since the beginning, disabled — it is a real choice now:
+  *System*, *English* or *简体中文*. System follows the operating system, and is
+  what a fresh install gets, so nothing changes for anyone whose machine is not
+  in Chinese. The switch applies immediately and is remembered.
+  What is translated is the app window: every screen, dialog, tooltip and
+  screen-reader label. What is *not*, yet: text the app's background pieces
+  produce — the tray menu, system notifications, error messages, the provider
+  connection test, and the gateway's own status sentences. Those stay English
+  for now. Product names (Claude Code, Codex, DeepSeek…) are names and do not
+  change language with the interface.
 - **The CSV export can include request and response bodies.** Bodies are always
   recorded — that is the point of the log — but a file you might share should not
   carry them unless you say so. The export asks; off, the file is the same 27

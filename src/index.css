@@ -131,9 +131,15 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* fonts & radius */
-  --font-sans: "Inter Variable", "Noto Sans SC", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  /* fonts & radius
+     Latin comes from Inter; CJK falls through to the platform's own face. The
+     list used to name "Noto Sans SC", which nothing ships or installs — the
+     browser skipped it and mixed Inter's Latin glyphs with whatever system-ui
+     produced, at different weights. Naming the platform faces explicitly keeps
+     the two scripts in a stack that was chosen rather than inherited. */
+  --font-sans: "Inter Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "PingFang SC", "Microsoft YaHei", monospace;
   --font-heading: var(--font-sans);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);

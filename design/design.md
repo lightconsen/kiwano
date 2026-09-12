@@ -52,7 +52,7 @@
   --blue:    oklch(0.72 0.13 245);    /* token 曲线/辅助 */
   --red:     oklch(0.65 0.2 25);
   --radius:  8px;
-  --font-sans: Inter, "Noto Sans SC", system-ui;
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui;
   --font-mono: "JetBrains Mono", monospace;  /* 端点/数值/延迟 */
 }
 ```

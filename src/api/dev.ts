@@ -507,7 +507,7 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
 };
 
 const settings: AppSettings = {
-  language: "zh-CN",
+  language: "system",
   theme: "dark",
   autostart: true,
   close_to_tray: true,

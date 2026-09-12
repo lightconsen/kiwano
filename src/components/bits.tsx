@@ -1,5 +1,6 @@
 // Shared atomic components from the design prototype (React versions of design/index.html's .logo-c/.dot/.billtag etc.; base controls have moved to shadcn/ui)
 import type { AgentMeta, Billing } from "../api/types";
+import { useT, type KeyPath, type Messages } from "../i18n";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 
 /** AgentId → brand icon key in the cc-switch registry (components/icons). */
@@ -55,10 +56,12 @@ export function Dot({
   return <span className={`dot ${size}`} style={style} />;
 }
 
-const BILL_TAG: Record<Billing, { label: string; cls: string }> = {
-  payg: { label: "PAYG", cls: "bill-payg" },
-  plan: { label: "Plan", cls: "bill-plan" },
-  unl: { label: "Unl", cls: "bill-unl" },
+/** Keys, not labels: this map is module-level and `t()` is a hook, so the
+    label is resolved at render. */
+const BILL_TAG: Record<Billing, { labelKey: KeyPath<Messages>; cls: string }> = {
+  payg: { labelKey: "app.billing.payg", cls: "bill-payg" },
+  plan: { labelKey: "app.billing.plan", cls: "bill-plan" },
+  unl: { labelKey: "app.billing.unl", cls: "bill-unl" },
 };
 
 /** Fallback class for a billing tag this build does not know (a Hub catalog
@@ -67,10 +70,11 @@ const BILL_TAG: Record<Billing, { label: string; cls: string }> = {
 const BILL_TAG_UNKNOWN_CLS = "bill-other";
 
 export function BillTag({ billing }: { billing: Billing }) {
-  const t = BILL_TAG[billing] as { label: string; cls: string } | undefined;
+  const t = useT();
+  const tag = BILL_TAG[billing] as { labelKey: KeyPath<Messages>; cls: string } | undefined;
   return (
-    <span className={`billtag ${t?.cls ?? BILL_TAG_UNKNOWN_CLS}`}>
-      {t?.label ?? billing}
+    <span className={`billtag ${tag?.cls ?? BILL_TAG_UNKNOWN_CLS}`}>
+      {tag ? t(tag.labelKey) : billing}
     </span>
   );
 }

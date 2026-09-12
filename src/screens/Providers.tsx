@@ -12,9 +12,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { useT, type Translate } from "../i18n";
 import {
   AGENTS,
-  PLAN_TIER_LABELS,
+  PLAN_TIER_LABEL_KEYS,
   type AgentDetect,
   type AgentId,
   type AgentRoute,
@@ -43,8 +44,10 @@ const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
   { id: "pi", icon: "pi" },
 ];
 
-function segmentLabel(id: AgentId | "all"): string {
-  if (id === "all") return "All";
+// Agent labels are brand names and stay as they are; only the "all" segment
+// has a translatable label.
+function segmentLabel(t: Translate, id: AgentId | "all"): string {
+  if (id === "all") return t("providers.all");
   return AGENTS.find((a) => a.id === id)?.label ?? id;
 }
 
@@ -77,33 +80,33 @@ function AgentOnboarding({
   /** Copy another agent's whole route — available right after Enable, before any binding exists */
   copySlot?: ReactNode;
 }) {
+  const t = useT();
   const meta = AGENTS.find((m) => m.id === agent)!;
   return (
     <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
       <ProviderLogo icon={SEGMENT_ICON[agent]} char={meta.chip_char} name={meta.label} size={36} />
       {takenOver ? (
         <>
-          <div className="text-[13px] font-semibold">{meta.label} is taken over</div>
-          <div className="max-w-[430px] text-[12px] text-mut">
-            The local gateway routes this agent's requests, but no provider is bound yet — add one so
-            requests have somewhere to go.
+          <div className="text-[13px] font-semibold">
+            {t("providers.takenOverTitle", { agent: meta.label })}
           </div>
+          <div className="max-w-[430px] text-[12px] text-mut">{t("providers.takenOverBody")}</div>
           <div className="flex items-center gap-2">
             {bindSlot}
             <Button size="sm" className="h-7 gap-1 px-3 text-[12px] font-semibold" onClick={onAdd}>
               <Plus className="h-3.5 w-3.5" />
-              Add provider
+              {t("providers.addProvider")}
             </Button>
           </div>
           {copySlot}
         </>
       ) : (
         <>
-          <div className="text-[13px] font-semibold">Start managing {meta.label} with Kiwano</div>
+          <div className="text-[13px] font-semibold">
+            {t("providers.startManaging", { agent: meta.label })}
+          </div>
           <div className="max-w-[460px] text-[12px] text-mut">
-            Kiwano backs up the current config (one-click restore later), imports the provider{" "}
-            {meta.label} already uses (shared with other agents), and routes it through the local
-            gateway — same upstream, instant switching afterwards.
+            {t("providers.startManagingBody", { agent: meta.label })}
           </div>
           <div className="flex gap-2">
             <Button
@@ -112,17 +115,14 @@ function AgentOnboarding({
               disabled={busy}
               onClick={onTakeover}
             >
-              {busy ? "Enabling…" : "Enable Kiwano"}
+              {busy ? t("providers.enabling") : t("providers.enableKiwano")}
             </Button>
             <Button variant="ghost" size="sm" className="h-7 px-3 text-[12px]" onClick={onAdd}>
-              Add provider first
+              {t("providers.addProviderFirst")}
             </Button>
           </div>
           {installed && (
-            <div className="max-w-[470px] text-[11px] text-mut">
-              Signed in with an official subscription (Claude / Gemini login, Codex ChatGPT)? Official
-              OAuth can't be proxied yet — add a provider manually first.
-            </div>
+            <div className="max-w-[470px] text-[11px] text-mut">{t("providers.oauthNote")}</div>
           )}
         </>
       )}
@@ -137,33 +137,65 @@ function ringColor(billing: Provider["billing"], pct: number): string {
   return "var(--kiwi)";
 }
 
-function usageTitle(p: Provider): string {
+/** One quota tier, e.g. `5h window 42%`. Falls back to the backend's own tier
+    name, so a tier added there before this list knows about it still reads as
+    something rather than disappearing. */
+function tierLabel(name: string, t: Translate): string {
+  const key = PLAN_TIER_LABEL_KEYS[name];
+  return key ? t(key) : name;
+}
+
+/** The usage cell's tooltip. It is one sentence per billing shape, so each
+    branch is a single key with named placeholders rather than a join: the
+    optional 5h/weekly bounds arrive already joined as `windows`, and the
+    optional in/out suffix as `tokens`. */
+function usageTitle(t: Translate, p: Provider): string {
   if (p.billing === "plan" && p.plan_limits) {
     const l = p.plan_limits;
-    const parts = [
-      l.five_hour != null ? `5h window ≤ ${l.five_hour}%` : null,
-      l.weekly != null ? `weekly window ≤ ${l.weekly}%` : null,
+    const windows = [
+      l.five_hour != null ? t("providers.usageWindowFive", { percent: l.five_hour }) : null,
+      l.weekly != null ? t("providers.usageWindowWeekly", { percent: l.weekly }) : null,
     ]
       .filter(Boolean)
       .join(" · ");
-    const tok = p.usage
-      ? ` · in ${fmtTokens(p.usage.input_tokens)} · out ${fmtTokens(p.usage.output_tokens)}`
+    const tokens = p.usage
+      ? t("providers.usageInOut", {
+          input: fmtTokens(p.usage.input_tokens),
+          output: fmtTokens(p.usage.output_tokens),
+        })
       : "";
-    return `Plan · limit ${parts} · enforced against the provider's plan-quota utilization${tok}`;
+    return t("providers.usagePlanLimits", { windows, tokens });
   }
   const u = p.usage;
   if (!u) return "";
   if (p.billing === "plan" && u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
-    const unitLabel = u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? u.quota.unit : u.quota.unit;
-    return `Plan · ${u.quota.used}/${u.quota.limit} ${unitLabel} this period (${pct}%) · resets ${u.quota.resets_at ?? ""} · in ${fmtTokens(u.input_tokens)} · out ${fmtTokens(u.output_tokens)}`;
+    // Counted units ("requests", "wan_tokens") print as-is; anything else is
+    // a currency code, which is also a data value rather than a label.
+    return t("providers.usagePlanQuota", {
+      used: u.quota.used,
+      limit: u.quota.limit,
+      unit: u.quota.unit,
+      percent: pct,
+      resets: u.quota.resets_at ?? "",
+      input: fmtTokens(u.input_tokens),
+      output: fmtTokens(u.output_tokens),
+    });
   }
-  if (p.billing === "unl") return "Local inference · no cost metering · works offline";
+  if (p.billing === "unl") return t("providers.usageLocalInference");
   if (u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
-    return `Pay as you go · ${fmtMoney(u.quota.used, u.quota.unit)} / ${fmtMoney(u.quota.limit, u.quota.unit)} this period (${pct}%) · in ${fmtTokens(u.input_tokens)} (cache ${fmtTokens(u.cache_read_tokens)}, billed at 1/10) · out ${fmtTokens(u.output_tokens)} · latency ${fmtLatency(u.latency_ms)}`;
+    return t("providers.usagePaygQuota", {
+      used: fmtMoney(u.quota.used, u.quota.unit),
+      limit: fmtMoney(u.quota.limit, u.quota.unit),
+      percent: pct,
+      input: fmtTokens(u.input_tokens),
+      cache: fmtTokens(u.cache_read_tokens),
+      output: fmtTokens(u.output_tokens),
+      latency: fmtLatency(u.latency_ms),
+    });
   }
-  return "Pay as you go · no limit set · 7-day usage trend";
+  return t("providers.usagePaygTrend");
 }
 
 /** The provider's own billing currency, when its limit unit names one.
@@ -180,11 +212,23 @@ function quotaAmountText(used: number, limit: number, unit: string): string {
   return `${fmtMoney(used, unit)} / ${fmtMoney(limit, unit)}`;
 }
 
+/** Tooltip of the live plan-quota line: the failure reason when the query
+    failed, otherwise the template id plus a cached marker. `template` is a
+    backend identifier and stays untranslated. */
+function planLineTitle(t: Translate, plan: PlanQuotaReport | undefined): string {
+  if (!plan) return "";
+  if (!plan.success) return plan.error ?? "";
+  return plan.cached
+    ? t("providers.planTemplateCached", { template: plan.template })
+    : plan.template;
+}
+
 /** Percent-limit plan cell: the ring shows how close the live plan-quota
     utilization is to its configured ceiling (tightest window wins); the
     limit line reads from plan_limits. Independent of usage history, so it
     renders for brand-new providers too. */
 function planPercentCell(
+  t: Translate,
   p: Provider,
   plan: PlanQuotaReport | undefined,
   title: string,
@@ -200,15 +244,17 @@ function planPercentCell(
   ];
   const pct = Math.min(100, Math.round(Math.max(...ratios, 0)));
   const color = pct >= 95 ? "var(--red)" : pct >= 80 ? "var(--amber)" : "var(--kiwi)";
+  // Two optional whole phrases with a fixed order, joined by a neutral
+  // separator — each is translated on its own so the join needs no key.
   const limitLine = [
-    l.five_hour != null ? `5h ≤ ${l.five_hour}%` : null,
-    l.weekly != null ? `wk ≤ ${l.weekly}%` : null,
+    l.five_hour != null ? t("providers.planLimitFive", { percent: l.five_hour }) : null,
+    l.weekly != null ? t("providers.planLimitWeekly", { percent: l.weekly }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
   const planLine = plan?.success
     ? plan.tiers
-        .map((t) => `${PLAN_TIER_LABELS[t.name] ?? t.name} ${Math.round(t.utilization)}%`)
+        .map((tier) => `${tierLabel(tier.name, t)} ${Math.round(tier.utilization)}%`)
         .join(" · ")
     : plan && !plan.success
       ? plan.error
@@ -228,7 +274,7 @@ function planPercentCell(
           <div
             className="mt-0.5 truncate text-[10.5px]"
             style={{ color: maxUtil >= 95 ? "var(--red)" : maxUtil >= 80 ? "var(--amber)" : "var(--mut)" }}
-            title={plan && !plan.success ? (plan.error ?? "") : `${plan?.template}${plan?.cached ? " · cached" : ""}`}
+            title={planLineTitle(t, plan)}
           >
             {planLine}
           </div>
@@ -254,10 +300,11 @@ function UsageCell({
   /** Why the gateway is refusing to route here, when it is. */
   blocked?: string;
 }) {
+  const t = useT();
   return (
     <div
       className={`w-[28%]${blocked ? " opacity-55" : ""}`}
-      title={blocked ? `Not routing here: ${blocked}` : undefined}
+      title={blocked ? t("providers.notRoutingTitle", { reason: blocked }) : undefined}
     >
       <UsageCellBody p={p} plan={plan} />
     </div>
@@ -268,22 +315,23 @@ function UsageCellBody({ p, plan }: { p: Provider;
   /** Plan-quota report for providers with a plan query (undefined = not fetched yet) */
   plan?: PlanQuotaReport;
 }) {
+  const t = useT();
   const u = p.usage;
 
   // Percent-limit rows render even before the provider has any usage
   // history (usage summary still null): the ring/limit line need no totals.
   if (p.billing === "plan" && p.plan_limits) {
-    return planPercentCell(p, plan, usageTitle(p));
+    return planPercentCell(t, p, plan, usageTitle(t, p));
   }
 
   if (!u) return <div className="w-full" />;
-  const title = usageTitle(p);
+  const title = usageTitle(t, p);
 
   if (p.billing === "plan" && u.quota) {
     const pct = Math.round((u.quota.used / u.quota.limit) * 100);
     const planLine = plan?.success
       ? plan.tiers
-          .map((t) => `${PLAN_TIER_LABELS[t.name] ?? t.name} ${Math.round(t.utilization)}%`)
+          .map((tier) => `${tierLabel(tier.name, t)} ${Math.round(tier.utilization)}%`)
           .join(" · ")
       : plan && !plan.success
         ? plan.error
@@ -298,14 +346,21 @@ function UsageCellBody({ p, plan }: { p: Provider;
             {u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? (
               <>
                 {u.quota.used}/{u.quota.limit}{" "}
-                <span className="font-normal text-mut">{u.quota.unit === "requests" ? "req" : "10k tok"}</span>
+                <span className="font-normal text-mut">
+                  {u.quota.unit === "requests" ? t("providers.unitReq") : t("providers.unitTenKTok")}
+                </span>
               </>
             ) : (
               <span>{quotaAmountText(u.quota.used, u.quota.limit, u.quota.unit)}</span>
             )}
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
-            {[p.plan_price, u.quota.resets_at ? `resets ${u.quota.resets_at.slice(5)}` : null]
+            {[
+              p.plan_price,
+              u.quota.resets_at
+                ? t("providers.resetsAt", { date: u.quota.resets_at.slice(5) })
+                : null,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </div>
@@ -314,7 +369,7 @@ function UsageCellBody({ p, plan }: { p: Provider;
             <div
               className="mt-0.5 truncate text-[10.5px]"
               style={{ color: maxUtil >= 95 ? "var(--red)" : maxUtil >= 80 ? "var(--amber)" : "var(--mut)" }}
-              title={plan && !plan.success ? (plan.error ?? "") : `${plan?.template}${plan?.cached ? " · cached" : ""}`}
+              title={planLineTitle(t, plan)}
             >
               {planLine}
             </div>
@@ -332,10 +387,16 @@ function UsageCellBody({ p, plan }: { p: Provider;
       <div className="w-full" title={title}>
         <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
           <BillTag billing="unl" />
-          {u.requests} <span className="font-normal text-mut">req · {fmtTokens(u.input_tokens + u.output_tokens)} tok</span>
+          {u.requests}{" "}
+          <span className="font-normal text-mut">
+            {t("providers.reqTokSuffix", { tokens: fmtTokens(u.input_tokens + u.output_tokens) })}
+          </span>
         </div>
         <div className="mt-0.5 text-[10.5px] text-mut">
-          in {fmtTokens(u.input_tokens)} · out {fmtTokens(u.output_tokens)}
+          {t("providers.inOutTokens", {
+            input: fmtTokens(u.input_tokens),
+            output: fmtTokens(u.output_tokens),
+          })}
         </div>
       </div>
     );
@@ -351,11 +412,19 @@ function UsageCellBody({ p, plan }: { p: Provider;
             <BillTag billing="payg" />
             {quotaAmountText(u.quota.used, u.quota.limit, u.quota.unit).split(" / ")[0]}{" "}
             <span className="font-normal text-mut">
-              / {u.quota.unit === "requests" || u.quota.unit === "wan_tokens" ? u.quota.limit : fmtMoney(u.quota.limit, u.quota.unit)} limit
+              {t("providers.limitSuffix", {
+                limit:
+                  u.quota.unit === "requests" || u.quota.unit === "wan_tokens"
+                    ? u.quota.limit
+                    : fmtMoney(u.quota.limit, u.quota.unit),
+              })}
             </span>
           </div>
           <div className="mt-0.5 text-[10.5px] text-mut">
-            {fmtTokens(u.input_tokens + u.output_tokens)} tokens · latency {fmtLatency(u.latency_ms)}
+            {t("providers.tokensLatency", {
+              tokens: fmtTokens(u.input_tokens + u.output_tokens),
+              latency: fmtLatency(u.latency_ms),
+            })}
           </div>
         </div>
       </div>
@@ -367,7 +436,9 @@ function UsageCellBody({ p, plan }: { p: Provider;
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
         <BillTag billing="payg" />
         {fmtMoney(u.cost ?? 0, u.cost_currency ?? providerCurrency(p) ?? "USD")}{" "}
-        <span className="font-normal text-mut">· {u.requests} req</span>
+        <span className="font-normal text-mut">
+          {t("providers.reqSuffix", { requests: u.requests })}
+        </span>
       </div>
       {u.spark && (
         <span className="mt-1 block w-20">
@@ -383,6 +454,7 @@ function UsageCellBody({ p, plan }: { p: Provider;
     collapsed is_current; agent tabs pass inUse to badge membership in that
     agent's serving set only. */
 function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
+  const t = useT();
   // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
   const brandIcon = iconForEndpoint(p.endpoint);
   const showInUse = inUse ?? p.is_current;
@@ -398,7 +470,7 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
           <span className="text-[13px] font-semibold">{p.name}</span>
           {showInUse && (
             <span className="rounded px-1.5 py-px text-[10px] font-medium" style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}>
-              In use
+              {t("providers.inUse")}
             </span>
           )}
           {p.status_badge && (
@@ -418,14 +490,15 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
 
 /** Health cell: green dot + latency when healthy, muted note otherwise. */
 function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
+  const t = useT();
   // The provider is up and reachable — that is not what changed. What changed
   // is whether Kiwano will use it, which is this column's question.
   if (blocked) {
     return (
-      <div className="w-[14%]" title={`Not routing here: ${blocked}`}>
+      <div className="w-[14%]" title={t("providers.notRoutingTitle", { reason: blocked })}>
         <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--red)" }}>
           <Dot state="error" />
-          Blocked
+          {t("providers.blocked")}
         </span>
         <div className="mt-0.5 truncate text-[10.5px] text-mut">{blocked}</div>
       </div>
@@ -435,7 +508,8 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
     <div className="w-[14%]">
       {p.health.state === "ok" ? (
         <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--kiwi)" }}>
-          <Dot state="ok" />Healthy {p.health.latency_ms}ms
+          <Dot state="ok" />
+          {t("providers.healthy", { latency: p.health.latency_ms ?? "" })}
         </span>
       ) : (
         <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
@@ -460,6 +534,7 @@ function ProviderRow({
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
+  const t = useT();
   // Delete is a two-step confirm: the first click enters the confirm state; a second click within 3 seconds actually deletes
   const [confirmDel, setConfirmDel] = useState(false);
   useEffect(() => {
@@ -473,7 +548,7 @@ function ProviderRow({
 
       <div className="flex w-[18%] items-center">
         {p.agents.length === 0 ? (
-          <span className="text-[11px] text-mut">Unbound</span>
+          <span className="text-[11px] text-mut">{t("providers.unbound")}</span>
         ) : (
           <>
             {/* Mini-logos, slightly overlapping (earlier agents on top); the
@@ -508,8 +583,8 @@ function ProviderRow({
           variant="ghost"
           size="sm"
           className="h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px] text-mut"
-          aria-label="Edit"
-          title="Edit provider"
+          aria-label={t("common.edit")}
+          title={t("providers.editProvider")}
           onClick={() => onEdit(p)}
         >
           <Pencil className="h-3.5 w-3.5" />
@@ -519,11 +594,11 @@ function ProviderRow({
           size="sm"
           className={`h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px]${confirmDel ? "" : " text-mut"}`}
           style={confirmDel ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
-          aria-label="Delete"
-          title={confirmDel ? "Click again to confirm" : "Delete provider"}
+          aria-label={t("common.delete")}
+          title={confirmDel ? t("providers.clickAgain") : t("providers.deleteProvider")}
           onClick={() => (confirmDel ? onDelete(p) : setConfirmDel(true))}
         >
-          {confirmDel ? "Confirm" : <Trash2 className="h-3.5 w-3.5" />}
+          {confirmDel ? t("providers.confirm") : <Trash2 className="h-3.5 w-3.5" />}
         </Button>
       </div>
     </div>
@@ -547,6 +622,7 @@ function WeightEditor({
   b: StrategyBinding;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [val, setVal] = useState(String(b.weight));
   useEffect(() => setVal(String(b.weight)), [b.weight]);
   const commit = () => {
@@ -558,8 +634,8 @@ function WeightEditor({
     api.updateAgentBinding(agent, b.provider_id, { weight: n }).then(onChanged);
   };
   return (
-    <span className="flex flex-none items-center gap-1" title="Sessions rotate across candidates proportionally to their weights">
-      <span className="text-[10.5px] text-mut">weight</span>
+    <span className="flex flex-none items-center gap-1" title={t("providers.weightTitle")}>
+      <span className="text-[10.5px] text-mut">{t("providers.weight")}</span>
       <Input
         type="number"
         min={1}
@@ -590,6 +666,7 @@ function TimeRangeEditor({
   b: StrategyBinding;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [s, setS] = useState(b.win_start ?? "");
   const [e, setE] = useState(b.win_end ?? "");
   const [left, setLeft] = useState(false); // focus has left the pair once
@@ -645,13 +722,13 @@ function TimeRangeEditor({
   return (
     <span
       className="flex flex-none items-center gap-1.5 rounded-md border border-line px-1.5 py-0.5"
-      title="Local time window this candidate serves; type digits like 0930 — the end must be later than the start. Clear both to remove the window"
+      title={t("providers.windowTitle")}
       onBlur={onBlur}
     >
       <Input
         inputMode="numeric"
         placeholder="--:--"
-        aria-label="Window start"
+        aria-label={t("providers.windowStart")}
         className={field}
         aria-invalid={badS}
         value={s}
@@ -662,7 +739,7 @@ function TimeRangeEditor({
       <Input
         inputMode="numeric"
         placeholder="--:--"
-        aria-label="Window end"
+        aria-label={t("providers.windowEnd")}
         className={field}
         aria-invalid={badE}
         value={e}
@@ -688,6 +765,7 @@ function RoleCell({
   idx: number;
   onChanged: () => void;
 }) {
+  const t = useT();
   const badge = (label: string, title: string) => (
     <span className="rounded px-1 text-[9.5px] font-medium" style={{ background: "var(--kiwi-soft)", color: "var(--kiwi)" }} title={title}>
       {label}
@@ -699,10 +777,12 @@ function RoleCell({
         <WeightEditor agent={agent} b={b} onChanged={onChanged} />
       ) : route.strategy === "timewindow" ? (
         <>
-          {idx === 0 && !b.win_start && badge("Fallback", "Serves whenever no candidate's window matches")}
+          {idx === 0 &&
+            !b.win_start &&
+            badge(t("providers.fallback"), t("providers.fallbackTitle"))}
           {idx > 0 && !b.win_start && (
-            <span className="text-[10.5px] text-mut" title="No window set — this candidate is never picked">
-              No window
+            <span className="text-[10.5px] text-mut" title={t("providers.noWindowTitle")}>
+              {t("providers.noWindow")}
             </span>
           )}
           {/* The Fallback slot has no window by definition — no range editor
@@ -710,9 +790,9 @@ function RoleCell({
           {(idx > 0 || !!b.win_start) && <TimeRangeEditor agent={agent} b={b} onChanged={onChanged} />}
         </>
       ) : idx === 0 ? (
-        badge("Primary", "Current route of this agent")
+        badge(t("providers.primary"), t("providers.primaryTitle"))
       ) : (
-        <span className="text-[11px] text-mut">Standby #{idx}</span>
+        <span className="text-[11px] text-mut">{t("providers.standby", { index: idx })}</span>
       )}
     </div>
   );
@@ -738,6 +818,7 @@ function BindingRow({
   onMove: (idx: number, dir: -1 | 1) => void;
   onChanged: () => void;
 }) {
+  const t = useT();
   // Pin: promote this candidate to the queue head (the primary slot) — the
   // same reorder the arrows do, just straight to the top. Meaningless under
   // roundrobin (every candidate serves by weight), so it is hidden there.
@@ -773,7 +854,7 @@ function BindingRow({
           <span className="flex flex-col">
             <button
               className="text-mut hover:text-ink disabled:opacity-30"
-              aria-label="Move up"
+              aria-label={t("providers.moveUp")}
               disabled={idx === 0}
               onClick={() => onMove(idx, -1)}
             >
@@ -781,7 +862,7 @@ function BindingRow({
             </button>
             <button
               className="text-mut hover:text-ink disabled:opacity-30"
-              aria-label="Move down"
+              aria-label={t("providers.moveDown")}
               disabled={idx === route.bindings.length - 1}
               onClick={() => onMove(idx, 1)}
             >
@@ -794,8 +875,8 @@ function BindingRow({
             variant="ghost"
             size="sm"
             className={`h-7 border border-line px-1.5 text-mut${idx === 0 ? " invisible" : ""}`}
-            aria-label="Make primary"
-            title="Make primary — move this candidate to the head of the queue"
+            aria-label={t("providers.makePrimary")}
+            title={t("providers.makePrimaryTitle")}
             onClick={makePrimary}
           >
             <Pin className="h-3.5 w-3.5" />
@@ -805,8 +886,8 @@ function BindingRow({
           variant="ghost"
           size="sm"
           className="h-7 border border-line px-1.5 text-mut hover:text-ink"
-          aria-label="Remove from route"
-          title="Remove from this route (other agents keep their binding)"
+          aria-label={t("providers.removeFromRouteAria")}
+          title={t("providers.removeFromRoute")}
           onClick={unbind}
         >
           <X className="h-3.5 w-3.5" />
@@ -829,6 +910,7 @@ function BindProviderSelect({
   boundIds: Set<string>;
   onPick: (providerId: string) => void;
 }) {
+  const t = useT();
   const available = providers.filter((p) => !boundIds.has(p.id));
   const [sel, setSel] = useState("");
   const full = available.length === 0;
@@ -843,10 +925,12 @@ function BindProviderSelect({
     >
       <SelectTrigger
         size="sm"
-        aria-label="Bind provider to route"
+        aria-label={t("providers.bindAria")}
         className="h-7 w-[210px] bg-transparent text-[12px] dark:bg-transparent disabled:opacity-50"
       >
-        <SelectValue placeholder={full ? "All providers are already bound" : "Bind existing provider…"} />
+        <SelectValue
+          placeholder={full ? t("providers.allBound") : t("providers.bindExisting")}
+        />
       </SelectTrigger>
       <SelectContent className="min-w-[220px]">
         {available.map((p) => {
@@ -876,6 +960,7 @@ function AddBindingRow({
   boundIds: Set<string>;
   onChanged: () => void;
 }) {
+  const t = useT();
   const available = providers.filter((p) => !boundIds.has(p.id));
   return (
     <div className="flex h-11 items-center gap-3 border-b border-line px-4">
@@ -886,8 +971,8 @@ function AddBindingRow({
       />
       <span className="flex-1 truncate text-[11px] text-mut">
         {available.length === 0
-          ? "All providers are already in this route — add a new one from the header"
-          : "Bind another provider to this route — it joins the queue tail as a standby"}
+          ? t("providers.allInRoute")
+          : t("providers.bindAnother")}
       </span>
     </div>
   );
@@ -909,6 +994,7 @@ export default function Providers({
   /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
   initialAgent?: AgentId | null;
 }) {
+  const t = useT();
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [routes, setRoutes] = useState<AgentRoute[] | null>(null);
   const [seg, setSeg] = useState<AgentId | "all">(initialAgent ?? "all");
@@ -1034,7 +1120,7 @@ export default function Providers({
     }
   };
 
-  if (!providers) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
+  if (!providers) return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
   const filtered = providers.filter((p) => seg === "all" || p.agents.includes(seg));
   const agentsBound = new Set(providers.flatMap((p) => p.agents)).size;
@@ -1052,7 +1138,7 @@ export default function Providers({
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
         <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
           {visibleSegments.map((s, i) => {
-            const label = segmentLabel(s.id);
+            const label = segmentLabel(t, s.id);
             const ver = s.id === "all" ? undefined : agentVersions[s.id];
             return (
               <button
@@ -1072,14 +1158,14 @@ export default function Providers({
           })}
         </div>
         <span className="ml-1.5 text-[11.5px] text-mut">
-          {providers.length} providers · {agentsBound} agents bound
+          {t("providers.counts", { providers: providers.length, agents: agentsBound })}
         </span>
         <Button
           variant="ghost"
           size="sm"
           className="ml-auto h-7 w-7 px-0 text-mut"
-          aria-label="Refresh"
-          title="Refresh providers and plan quotas (bypasses the 5-min quota cache)"
+          aria-label={t("common.refresh")}
+          title={t("providers.refreshTitle")}
           disabled={quotaBusy}
           onClick={() => {
             refetch();
@@ -1094,7 +1180,7 @@ export default function Providers({
           onClick={onAdd}
         >
           <Plus className="h-3.5 w-3.5" />
-          Add provider
+          {t("providers.addProvider")}
         </Button>
       </div>
 
@@ -1112,11 +1198,15 @@ export default function Providers({
       ) : (
         <>
           <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-            <span className="w-[32%]">Provider</span>
-            <span className="w-[18%]">{route ? "Role in strategy" : "Bound agents"}</span>
-            <span className="w-[28%]">Usage / quota</span>
-            <span className="w-[14%]">Status</span>
-            <span className="flex-1 text-right">{route ? "Priority" : "Actions"}</span>
+            <span className="w-[32%]">{t("providers.colProvider")}</span>
+            <span className="w-[18%]">
+              {route ? t("providers.colRole") : t("providers.colBoundAgents")}
+            </span>
+            <span className="w-[28%]">{t("providers.colUsage")}</span>
+            <span className="w-[14%]">{t("providers.colStatus")}</span>
+            <span className="flex-1 text-right">
+              {route ? t("providers.colPriority") : t("providers.colActions")}
+            </span>
           </div>
 
           {route
@@ -1183,9 +1273,9 @@ export default function Providers({
 
           {filtered.length === 0 && seg === "all" && (
             <div className="px-4 py-8 text-center text-[12px] text-mut">
-              No providers yet —{" "}
+              {t("providers.none")}{" "}
               <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
-                Add provider
+                {t("providers.addProvider")}
               </button>
             </div>
           )}
@@ -1204,12 +1294,12 @@ export default function Providers({
           header of its own). */}
       <div className="mt-auto truncate px-4 py-3 text-[10.5px] text-mut">
         {notTakenOver
-          ? "Kiwano does not route this agent yet — enable the takeover above; the stored route is kept and applies again as-is · API keys stay in the system keychain · requests never touch the Kiwano cloud"
+          ? t("providers.footerNotTakenOver")
           : seg !== "all" &&
               (takenOver?.has(seg) ?? false) &&
               (routes?.some((r) => r.agent === seg) ?? false)
-            ? "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys stay in the system keychain · requests never touch the Kiwano cloud"
-            : "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud"}
+            ? t("providers.footerStrategy")
+            : t("providers.footerDefault")}
       </div>
     </section>
   );

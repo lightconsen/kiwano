@@ -14,6 +14,14 @@ import { api } from "../api/client";
 import { applyTheme } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
 import { startUpdateInstall, useUpdateInstall } from "../lib/updateInstall";
+import {
+  LANGUAGE_PREFS,
+  languageLabel,
+  resolveLocale,
+  setLocale,
+  useT,
+  type LanguagePref,
+} from "../i18n";
 import type { AgentId, AppSettings, UpdateInfo } from "../api/types";
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
@@ -29,6 +37,7 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
 }
 
 export default function Settings() {
+  const t = useT();
   const [s, setS] = useState<AppSettings | null>(null);
   const [currencies, setCurrencies] = useState<string[]>([]);
   const [version, setVersion] = useState("");
@@ -88,11 +97,11 @@ export default function Settings() {
   // "Up to date" is a confirmation, not a mode: it clears itself.
   useEffect(() => {
     if (!upToDate) return;
-    const t = setTimeout(() => setUpToDate(false), 5000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setUpToDate(false), 5000);
+    return () => clearTimeout(timer);
   }, [upToDate]);
 
-  if (!s) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
+  if (!s) return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
   const patch = (p: Partial<AppSettings>) => {
     api.updateSettings(p).then(setS);
@@ -124,10 +133,12 @@ export default function Settings() {
       .syncHub()
       .then((r) => {
         const bits = [
-          r.unchanged ? `Catalog up to date · ${r.fetched} providers` : `Synced ${r.fetched} providers`,
+          r.unchanged
+            ? t("settings.syncUnchanged", { count: r.fetched })
+            : t("settings.syncSynced", { count: r.fetched }),
         ];
         if (r.pricing_version != null && !r.pricing_unchanged) {
-          bits.push(`pricing v${r.pricing_version}`);
+          bits.push(t("settings.syncPricing", { version: r.pricing_version }));
         }
         setSyncNote(bits.join(" · "));
       })
@@ -139,27 +150,40 @@ export default function Settings() {
     <section className="space-y-3 p-4">
       {/* General */}
       <div className="rounded-lg border border-line bg-surface p-4">
-        <h3 className="mb-3 text-[12.5px] font-semibold">General</h3>
+        <h3 className="mb-3 text-[12.5px] font-semibold">{t("settings.general")}</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          {/* Language / theme ship with a single supported value — the selects
-              stay (visual consistency, desktop-tool convention) but disabled
-              until i18n and theming actually land. */}
-          <Row label="Language" note="English only">
-            <Select value="en" disabled>
+          <Row label={t("common.language")}>
+            <Select
+              value={s.language || "system"}
+              onValueChange={(v) => {
+                if (!v) return;
+                // Apply now, persist after — the same order the theme switch
+                // below uses, so the screen does not wait on a round trip to
+                // change its own language.
+                setLocale(resolveLocale(v));
+                patch({ language: v });
+              }}
+            >
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
-                {/* A bare <SelectValue /> renders the raw value ("en"), not the
-                    item's label. */}
-                <SelectValue>{(v) => (v === "en" ? "EN" : String(v ?? ""))}</SelectValue>
+                {/* A bare <SelectValue /> renders the raw value ("system"), not
+                    the item's label. */}
+                <SelectValue>
+                  {(v) => languageLabel(t, (v as LanguagePref) ?? "system")}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="en">English</SelectItem>
+                {LANGUAGE_PREFS.map((pref) => (
+                  <SelectItem key={pref} value={pref}>
+                    {languageLabel(t, pref)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Row>
           {/* Costs are printed in this currency across the app, so it reads as
               a display preference — it sits with language, not with the
               usage-threshold settings it used to live among. */}
-          <Row label="Display currency" note="For cost cards and usage limits">
+          <Row label={t("settings.displayCurrency")} note={t("settings.displayCurrencyNote")}>
             <Select
               value={s.preferred_currency}
               onValueChange={(v) => patch({ preferred_currency: v ?? "CNY" })}
@@ -176,7 +200,7 @@ export default function Settings() {
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Theme">
+          <Row label={t("settings.theme")}>
             <Select
               value={s.theme}
               onValueChange={(v) => {
@@ -188,30 +212,32 @@ export default function Settings() {
             >
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
                 {/* Same reason as Language: the value is lowercase ("dark"). */}
-                <SelectValue>{(v) => (v === "light" ? "Light" : "Dark")}</SelectValue>
+                <SelectValue>
+                  {(v) => (v === "light" ? t("settings.themeLight") : t("settings.themeDark"))}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="dark">Dark</SelectItem>
-                <SelectItem value="light">Light</SelectItem>
+                <SelectItem value="dark">{t("settings.themeDark")}</SelectItem>
+                <SelectItem value="light">{t("settings.themeLight")}</SelectItem>
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Launch at login">
+          <Row label={t("settings.launchAtLogin")}>
             <Switch checked={s.autostart} onCheckedChange={(v) => patch({ autostart: v })} />
           </Row>
-          <Row label="Minimize to tray on close">
+          <Row label={t("settings.minimizeToTray")}>
             <Switch checked={s.close_to_tray} onCheckedChange={(v) => patch({ close_to_tray: v })} />
           </Row>
           {/* The app's own trail — sidecar starts, sync failures, panics — which
               a packaged app has nowhere to print. */}
-          <Row label="Logs" note="Errors and warnings, one file, seven days">
+          <Row label={t("settings.logs")} note={t("settings.logsNote")}>
             <Button
               variant="outline"
               size="sm"
               className="h-7 px-2.5 text-[11px]"
               onClick={() => api.openLogFolder().catch(() => {})}
             >
-              Open folder
+              {t("settings.openFolder")}
             </Button>
           </Row>
         </div>
@@ -219,38 +245,43 @@ export default function Settings() {
 
       {/* Local gateway */}
       <div className="rounded-lg border border-line bg-surface p-4">
-        <h3 className="mb-3 text-[12.5px] font-semibold">Local gateway</h3>
+        <h3 className="mb-3 text-[12.5px] font-semibold">{t("settings.localGateway")}</h3>
         <div className="space-y-2.5 text-[12.5px]">
           <div className="pb-0.5 pt-1 text-[11px] font-medium text-mut">
-            Agent takeover <span className="font-normal">· hot-switching once pointed at the local gateway</span>
+            {t("settings.agentTakeover")}{" "}
+            <span className="font-normal">{t("settings.agentTakeoverNote")}</span>
           </div>
-          {s.takeovers.map((t) => (
-            <div key={t.agent} className="flex items-center justify-between">
+          {/* `tk`, not `t`: the translator is in scope here. */}
+          {s.takeovers.map((tk) => (
+            <div key={tk.agent} className="flex items-center justify-between">
               <span className="flex items-center gap-2">
-                {t.label}{" "}
-                {t.additive && (
-                  <span className="text-[10px] text-mut">Coexist · multi-provider</span>
+                {tk.label}{" "}
+                {tk.additive && (
+                  <span className="text-[10px] text-mut">{t("settings.coexist")}</span>
                 )}
-                {t.placeholder_key ? (
-                  <span className="text-[10px] font-mono text-mut" title="Placeholder key assigned by the gateway, used for request attribution">
-                    {t.placeholder_key}
+                {tk.placeholder_key ? (
+                  <span
+                    className="text-[10px] font-mono text-mut"
+                    title={t("settings.placeholderKeyTitle")}
+                  >
+                    {tk.placeholder_key}
                   </span>
                 ) : (
-                  <span className="text-[10px] font-mono text-mut">—</span>
+                  <span className="text-[10px] font-mono text-mut">{t("common.none")}</span>
                 )}
               </span>
               <span className="flex items-center gap-2">
-                <span className="text-[10.5px]" style={t.enabled ? { color: "var(--kiwi)" } : { color: "var(--mut)" }}>
-                  {t.enabled ? "Taken over" : "Not taken over"}
+                <span className="text-[10.5px]" style={tk.enabled ? { color: "var(--kiwi)" } : { color: "var(--mut)" }}>
+                  {tk.enabled ? t("settings.takenOver") : t("settings.notTakenOver")}
                 </span>
-                {t.enabled ? (
+                {tk.enabled ? (
                   // Off is one call, so it lives here as a switch. Turning one
                   // back on is not (enable → route → rewrite in Apps), which is
                   // why that direction keeps its own button below.
                   <Switch
                     checked
-                    disabled={takeoverBusy === t.agent}
-                    onCheckedChange={() => disableTakeover(t.agent)}
+                    disabled={takeoverBusy === tk.agent}
+                    onCheckedChange={() => disableTakeover(tk.agent)}
                   />
                 ) : (
                   <Button
@@ -258,39 +289,39 @@ export default function Settings() {
                     size="sm"
                     className="h-7 px-2.5 text-[11px]"
                     onClick={() => {
-                      window.location.hash = `providers/${t.agent}`;
+                      window.location.hash = `providers/${tk.agent}`;
                     }}
                   >
-                    Enable in Apps
+                    {t("settings.enableInApps")}
                   </Button>
                 )}
               </span>
             </div>
           ))}
           {takeoverErr ? <div className="text-[11px] text-red-400">{takeoverErr}</div> : null}
-          <Row label="Auto failover" note="Switch to a standby when the primary fails">
+          <Row label={t("settings.autoFailover")} note={t("settings.autoFailoverNote")}>
             <Switch checked={s.auto_failover} onCheckedChange={(v) => patch({ auto_failover: v })} />
           </Row>
-          <Row label="Request logs" note="Record every request with bodies, local only">
+          <Row label={t("settings.requestLogs")} note={t("settings.requestLogsNote")}>
             <Switch checked={s.request_logs} onCheckedChange={(v) => patch({ request_logs: v })} />
           </Row>
-          <Row label="Log retention" note="Rows older than this are pruned every 6h">
+          <Row label={t("settings.logRetention")} note={t("settings.logRetentionNote")}>
             <Select
               value={String(s.log_retention_days ?? 30)}
               onValueChange={(v) => patch({ log_retention_days: Number(v) })}
             >
               <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
                 {/* Would otherwise read "30" rather than "30 days". */}
-                <SelectValue>{(v) => `${v ?? ""} days`}</SelectValue>
+                <SelectValue>{(v) => t("settings.days", { count: v ?? "" })}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="7">7 days</SelectItem>
-                <SelectItem value="30">30 days</SelectItem>
-                <SelectItem value="90">90 days</SelectItem>
+                <SelectItem value="7">{t("settings.days", { count: 7 })}</SelectItem>
+                <SelectItem value="30">{t("settings.days", { count: 30 })}</SelectItem>
+                <SelectItem value="90">{t("settings.days", { count: 90 })}</SelectItem>
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Cost alert" note="System notification when a period limit is reached">
+          <Row label={t("settings.costAlert")} note={t("settings.costAlertNote")}>
             <Switch checked={s.cost_alert} onCheckedChange={(v) => patch({ cost_alert: v })} />
           </Row>
         </div>
@@ -300,33 +331,30 @@ export default function Settings() {
       <div className="rounded-lg border p-4" style={{ background: "var(--kiwi-soft)", borderColor: "var(--kiwi-dim)" }}>
         <h3 className="mb-3 flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: "var(--kiwi)" }}>
           <ShieldCheck className="h-3.5 w-3.5" />
-          Privacy (Kiwano pledge)
+          {t("settings.privacyTitle")}
         </h3>
         <div className="space-y-2 text-[12.5px]">
           {/* No switch here. A toggle implies a pipeline behind it, and there
               is none: nothing is collected, so "off by default" was promising
               a choice that did not exist. */}
-          <div className="text-mut">
-            Kiwano sends nothing about your usage. The only outbound requests are the Hub catalog
-            and pricing fetch, and the update check.
-          </div>
+          <div className="text-mut">{t("settings.privacyUsage")}</div>
           <div className="space-y-1 text-[10.5px]" style={{ color: "var(--mut)" }}>
             <div className="flex items-center gap-1.5">
               <Check className="h-3 w-3" style={{ color: "var(--kiwi)" }} />
-              Neither carries your API keys or any request content
+              {t("settings.privacyNoKeys")}
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="h-3 w-3" style={{ color: "var(--kiwi)" }} />
-              Keys go only to the providers you configure, never to Kiwano
+              {t("settings.privacyKeysLocal")}
             </div>
           </div>
         </div>
       </div>
       {/* Hub catalog — model/provider list source */}
       <div className="rounded-lg border border-line bg-surface p-4">
-        <h3 className="mb-3 text-[12.5px] font-semibold">Kiwano Hub</h3>
+        <h3 className="mb-3 text-[12.5px] font-semibold">{t("settings.hub")}</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          <Row label="Catalog" note="skips the download when unchanged">
+          <Row label={t("settings.catalog")} note={t("settings.catalogNote")}>
             <span className="flex items-center gap-2">
               {syncNote && <span className="text-[11px] text-mut">{syncNote}</span>}
               <Button
@@ -336,7 +364,7 @@ export default function Settings() {
                 onClick={syncNow}
                 disabled={syncing}
               >
-                {syncing ? "Syncing…" : "Sync now"}
+                {syncing ? t("settings.syncing") : t("settings.syncNow")}
               </Button>
             </span>
           </Row>
@@ -345,15 +373,15 @@ export default function Settings() {
       </div>
       {/* About / update */}
       <div className="rounded-lg border border-line bg-surface p-4">
-        <h3 className="mb-3 text-[12.5px] font-semibold">About</h3>
+        <h3 className="mb-3 text-[12.5px] font-semibold">{t("settings.about")}</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          <Row label="Version">
-            <span className="text-mut">{version || "—"}</span>
+          <Row label={t("settings.version")}>
+            <span className="text-mut">{version || t("common.none")}</span>
           </Row>
-          <Row label="Auto-check for updates" note="Silent check at startup">
+          <Row label={t("settings.autoCheckUpdates")} note={t("settings.autoCheckUpdatesNote")}>
             <Switch checked={s.auto_check_update} onCheckedChange={(v) => patch({ auto_check_update: v })} />
           </Row>
-          <Row label="Updates">
+          <Row label={t("settings.updates")}>
             <span className="flex items-center gap-2">
               {/* Progress first, ahead of the version check: the banner can
                   start a download before this screen has read the pending
@@ -371,12 +399,14 @@ export default function Settings() {
                     />
                   </span>
                   <span className="text-[11px] text-mut">
-                    {install.progress == null ? "Downloading…" : `${install.progress}%`}
+                    {install.progress == null ? t("settings.downloading") : `${install.progress}%`}
                   </span>
                 </>
               ) : update ? (
                 <>
-                  <span className="text-[11px]">v{update.version} available</span>
+                  <span className="text-[11px]">
+                    {t("settings.versionAvailable", { version: update.version })}
+                  </span>
                   <Button
                     size="sm"
                     variant="outline"
@@ -384,12 +414,12 @@ export default function Settings() {
                     onClick={startUpdateInstall}
                   >
                     {/* Same button, honest label: a failure lands back here. */}
-                    {install.err ? "Retry download" : "Download & install"}
+                    {install.err ? t("settings.retryDownload") : t("settings.downloadInstall")}
                   </Button>
                 </>
               ) : (
                 <>
-                  {upToDate ? <span className="text-[11px] text-mut">Up to date</span> : null}
+                  {upToDate ? <span className="text-[11px] text-mut">{t("settings.upToDate")}</span> : null}
                   <Button
                     size="sm"
                     variant="outline"
@@ -397,7 +427,7 @@ export default function Settings() {
                     onClick={checkUpdate}
                     disabled={checking}
                   >
-                    {checking ? "Checking…" : "Check for updates"}
+                    {checking ? t("settings.checking") : t("settings.checkForUpdates")}
                   </Button>
                 </>
               )}

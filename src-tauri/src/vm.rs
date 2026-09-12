@@ -910,7 +910,10 @@ pub(crate) fn default_hub_url() -> String {
 impl Default for SettingsVm {
     fn default() -> Self {
         Self {
-            language: "zh-CN".into(),
+            // Not a locale: the UI resolves this one from the OS. Defaulting to
+            // a concrete language would decide the reader's language for them
+            // on first run, and an existing install carries whatever it stored.
+            language: "system".into(),
             theme: "dark".into(),
             autostart: true,
             close_to_tray: true,
@@ -4013,7 +4016,7 @@ mod tests {
         // decide what these assertions see.
         let tmp = tempfile::tempdir().unwrap();
         let v0 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
-        assert_eq!(v0.language, "zh-CN");
+        assert_eq!(v0.language, "system");
         assert!(v0.takeovers.iter().all(|t| !t.enabled));
 
         let patch =

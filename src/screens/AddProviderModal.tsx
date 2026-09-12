@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { useT } from "../i18n";
 import {
   AGENTS,
   PLAN_QUERY_TEMPLATES,
@@ -35,28 +36,9 @@ import { AgentChip } from "@/components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
 
-const BILL_OPTIONS: { id: Billing; label: string }[] = [
-  { id: "plan", label: "Plan" },
-  { id: "payg", label: "Pay as you go" },
-  { id: "unl", label: "Unlimited" },
-];
-
-const PROTOCOL_OPTIONS: { id: Protocol; label: string }[] = [
-  { id: "openai", label: "OpenAI-compatible" },
-  { id: "anthropic", label: "Anthropic" },
-  { id: "gemini", label: "Gemini API" },
-];
-
-// Inline probe readout: ok shows the measured latency, every other verdict
-// shows a short word (full detail lives in the span's title). Green/kiwi =
-// usable (ok, or route exists but key invalid), red = broken/unreachable.
-const PROBE_TEXT: Record<ProbeReport["verdict"], string> = {
-  ok: "OK",
-  auth: "Auth",
-  unsupported: "404",
-  error: "Error",
-  unreachable: "Down",
-};
+// These three tables carry user-visible labels, so they are built inside the
+// component where the translator is available rather than at module scope
+// (a module-level `t` is impossible — it is a hook).
 
 function probeColor(verdict: ProbeReport["verdict"]): string {
   return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
@@ -76,6 +58,29 @@ export default function AddProviderModal({
   onSaved: () => void;
 }) {
   const hubUrl = useHubUrl();
+  const t = useT();
+  // Billing, protocol and probe labels: resolved here so a language change
+  // re-renders them along with the rest of the form.
+  const billOptions: { id: Billing; label: string }[] = [
+    { id: "plan", label: t("addProvider.billingPlan") },
+    { id: "payg", label: t("addProvider.billingPayg") },
+    { id: "unl", label: t("addProvider.billingUnlimited") },
+  ];
+  const protocolOptions: { id: Protocol; label: string }[] = [
+    { id: "openai", label: t("addProvider.protoOpenai") },
+    { id: "anthropic", label: t("addProvider.protoAnthropic") },
+    { id: "gemini", label: t("addProvider.protoGemini") },
+  ];
+  // Inline probe readout: ok shows the measured latency, every other verdict
+  // shows a short word (full detail lives in the span's title). Green/kiwi =
+  // usable (ok, or route exists but key invalid), red = broken/unreachable.
+  const probeText: Record<ProbeReport["verdict"], string> = {
+    ok: t("addProvider.probeOk"),
+    auth: t("addProvider.probeAuth"),
+    unsupported: t("addProvider.probeUnsupported"),
+    error: t("addProvider.probeError"),
+    unreachable: t("addProvider.probeUnreachable"),
+  };
   const [mode, setMode] = useState<"shelf" | "custom">("shelf");
   // Catalog entry chosen in the "From Models" mode (preset pre-seeds it when
   // the modal opens from the Models page; otherwise picked in-modal)
@@ -138,6 +143,14 @@ export default function AddProviderModal({
   const [pqOpen, setPqOpen] = useState(false);
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
+  /** A plan-query template's label, or its raw id when the list does not know
+      the value — the backend and the Hub catalog can both send one this build
+      has not heard of. The lookup is by id, so the map param cannot be named
+      `t`: that would shadow the translator, and `tsc` would reject the call. */
+  const templateLabel = (id: string | null | undefined): string => {
+    const tpl = PLAN_QUERY_TEMPLATES.find((x) => x.id === id);
+    return tpl ? t(tpl.labelKey) : String(id ?? "");
+  };
   // Plan-mode percent limits: per-window utilization ceilings over the
   // vendor's rolling 5-hour / weekly windows (blank = no limit on it).
   const [planFiveHour, setPlanFiveHour] = useState("");
@@ -197,7 +210,7 @@ export default function AddProviderModal({
   const fetchModels = async () => {
     if (fetching || !endpoint.trim()) return;
     if (!apiKey.trim()) {
-      setFetchError("Enter the API key first — providers reject anonymous model lists");
+      setFetchError(t("addProvider.errorNoKey"));
       return;
     }
     setFetching(true);
@@ -205,7 +218,7 @@ export default function AddProviderModal({
     try {
       const list = await api.listModels(protocol, endpoint.trim(), apiKey.trim());
       if (list.length === 0) {
-        setFetchError("The endpoint returned no models");
+        setFetchError(t("addProvider.errorNoModels"));
       } else {
         setFetchedModels(list);
       }
@@ -328,7 +341,7 @@ export default function AddProviderModal({
   // visible instead of silently rewriting it to payg, and leave the picker
   // open — the backend rejects an unknown tag on save, so locking the form
   // would dead-end the entry.
-  const billingKnown = BILL_OPTIONS.some((b) => b.id === billing);
+  const billingKnown = billOptions.some((b) => b.id === billing);
   const billingLocked = (!!edit || (mode === "shelf" && !!shelf)) && billingKnown;
 
   // Non-empty credential fields of the selected template (empty rows dropped)
@@ -438,7 +451,7 @@ export default function AddProviderModal({
       <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-x-hidden overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
         <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line px-4">
           <DialogTitle className="text-[13px] font-semibold">
-            {edit ? "Edit provider" : "Add provider"}
+            {edit ? t("addProvider.titleEdit") : t("addProvider.titleAdd")}
           </DialogTitle>
         </DialogHeader>
 
@@ -452,14 +465,16 @@ export default function AddProviderModal({
                 onClick={() => setMode("shelf")}
               >
                 <Store className="h-3 w-3" />
-                From Models{shelf ? `: ${shelf.name}` : ""}
+                {shelf
+                  ? t("addProvider.fromModelsNamed", { name: shelf.name })
+                  : t("addProvider.fromModels")}
               </div>
               <div
                 className="btn flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center"
                 style={mode === "custom" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
                 onClick={() => setMode("custom")}
               >
-                Custom
+                {t("addProvider.custom")}
               </div>
             </div>
           )}
@@ -469,7 +484,7 @@ export default function AddProviderModal({
             <div className="mt-3">
               <Input
                 className="h-8 bg-bg text-[12px] dark:bg-bg"
-                placeholder="Search the catalog…"
+                placeholder={t("addProvider.searchCatalog")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -503,10 +518,14 @@ export default function AddProviderModal({
                     </button>
                   ))}
                 {catalog && catalog.filter((e) => !e.added && e.name.toLowerCase().includes(query.trim().toLowerCase())).length === 0 && (
-                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">No matching providers</div>
+                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">
+                    {t("addProvider.noMatching")}
+                  </div>
                 )}
                 {!catalog && (
-                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">Loading…</div>
+                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">
+                    {t("common.loading")}
+                  </div>
                 )}
               </div>
             </div>
@@ -528,14 +547,14 @@ export default function AddProviderModal({
                 style={{ color: "var(--kiwi)" }}
                 onClick={() => setShelf(null)}
               >
-                Change
+                {t("addProvider.change")}
               </button>
             </div>
           )}
 
           <div className="mt-3 space-y-3">
             <div>
-              <Label className="text-[11px] font-medium text-mut">Name</Label>
+              <Label className="text-[11px] font-medium text-mut">{t("addProvider.name")}</Label>
               <Input
                 className="mt-1 h-8 bg-bg text-[12px] dark:bg-bg"
                 value={name}
@@ -544,12 +563,14 @@ export default function AddProviderModal({
             </div>
 
             <div>
-              <Label className="text-[11px] font-medium text-mut">Protocol</Label>
+              <Label className="text-[11px] font-medium text-mut">
+                {t("addProvider.protocol")}
+              </Label>
               {/* Read-only coverage: every supported protocol renders as a lit
                   badge (primary + each additional endpoint), the rest dimmed.
                   The authoritative selection is the per-endpoint rows below. */}
               <div className="mt-1 flex gap-1.5">
-                {PROTOCOL_OPTIONS.map((p) => (
+                {protocolOptions.map((p) => (
                   <span
                     key={p.id}
                     className="flex h-7 cursor-default items-center rounded-md border px-2 text-[11.5px]"
@@ -565,9 +586,9 @@ export default function AddProviderModal({
 
             <div>
               <Label className="text-[11px] font-medium text-mut">
-                API Key{" "}
+                {t("addProvider.apiKey")}{" "}
                 <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                  {edit ? "Leave blank to keep the current key" : "Stored in the local keychain only"}
+                  {edit ? t("addProvider.keyKeep") : t("addProvider.keyLocal")}
                 </span>
               </Label>
               <div className="relative mt-1">
@@ -583,7 +604,7 @@ export default function AddProviderModal({
                   size="icon-xs"
                   className="absolute top-1/2 right-1 -translate-y-1/2 text-mut"
                   onClick={() => setShowKey(!showKey)}
-                  aria-label="Show / hide key"
+                  aria-label={t("addProvider.showHideKey")}
                 >
                   <Eye className="h-3.5 w-3.5" />
                 </Button>
@@ -597,11 +618,11 @@ export default function AddProviderModal({
                 (edit) — read-only, no add/remove. */}
             <div>
               <Label className="text-[11px] font-medium text-mut">
-                Endpoint URL{" "}
+                {t("addProvider.endpointUrl")}{" "}
                 <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
                   {!edit && mode === "shelf" && shelf
-                    ? "from the catalog · one per protocol · shares the API key"
-                    : "one per protocol · shares the API key"}
+                    ? t("addProvider.endpointHintShelf")
+                    : t("addProvider.endpointHint")}
                 </span>
               </Label>
               <div className="mt-1 space-y-1.5">
@@ -609,7 +630,7 @@ export default function AddProviderModal({
                 <div className="flex items-center gap-1.5">
                   <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
                     <span className="truncate">
-                      {PROTOCOL_OPTIONS.find((p) => p.id === protocol)?.label ?? protocol}
+                      {protocolOptions.find((p) => p.id === protocol)?.label ?? protocol}
                     </span>
                   </span>
                   <Input
@@ -643,10 +664,10 @@ export default function AddProviderModal({
                     }}
                   >
                     <Gauge className="h-3 w-3" />
-                    Test{" "}
+                    {t("addProvider.test")}{" "}
                     {probe && (
                       <span className="font-mono" style={{ color: probeColor(probe.verdict) }} title={probe.detail}>
-                        {probe.verdict === "ok" ? `${probe.latency_ms}ms` : PROBE_TEXT[probe.verdict]}
+                        {probe.verdict === "ok" ? `${probe.latency_ms}ms` : probeText[probe.verdict]}
                       </span>
                     )}
                   </Button>
@@ -655,7 +676,7 @@ export default function AddProviderModal({
                   <div key={i} className="flex items-center gap-1.5">
                     <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
                       <span className="truncate">
-                        {PROTOCOL_OPTIONS.find((p) => p.id === r.protocol)?.label ?? r.protocol}
+                        {protocolOptions.find((p) => p.id === r.protocol)?.label ?? r.protocol}
                       </span>
                     </span>
                     <span className="min-w-0 flex-1">
@@ -673,7 +694,7 @@ export default function AddProviderModal({
                       onClick={() => testAlt(i)}
                     >
                       <Gauge className="h-3 w-3" />
-                      Test{" "}
+                      {t("addProvider.test")}{" "}
                       {altProbes[i] && (
                         <span
                           className="font-mono"
@@ -682,7 +703,7 @@ export default function AddProviderModal({
                         >
                           {altProbes[i]!.verdict === "ok"
                             ? `${altProbes[i]!.latency_ms}ms`
-                            : PROBE_TEXT[altProbes[i]!.verdict]}
+                            : probeText[altProbes[i]!.verdict]}
                         </span>
                       )}
                     </Button>
@@ -693,7 +714,7 @@ export default function AddProviderModal({
 
             <div>
               <div className="flex items-center justify-between">
-                <Label className="text-[11px] font-medium text-mut">Default model</Label>
+                <Label className="text-[11px] font-medium text-mut">{t("addProvider.defaultModel")}</Label>
                 {/* Pulls the live model list from the primary endpoint; needs
                     the API key, so a click without one shows an inline error */}
                 <Button
@@ -704,7 +725,7 @@ export default function AddProviderModal({
                   onClick={fetchModels}
                 >
                   <RefreshCw className={`h-3 w-3${fetching ? " animate-spin" : ""}`} />
-                  {fetching ? "Fetching…" : "Fetch"}
+                  {fetching ? t("addProvider.fetching") : t("addProvider.fetch")}
                 </Button>
               </div>
               {showModelSelect ? (
@@ -725,7 +746,7 @@ export default function AddProviderModal({
                   className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="model-id"
+                  placeholder={t("addProvider.modelIdPlaceholder")}
                 />
               )}
               {fetchError && (
@@ -737,20 +758,20 @@ export default function AddProviderModal({
 
             <div>
               <Label className="text-[11px] font-medium text-mut">
-                Billing
+                {t("addProvider.billing")}
                 {billingLocked && (
                   <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    {edit ? "fixed for this provider" : "from the catalog"}
+                    {edit ? t("addProvider.billingFixed") : t("addProvider.billingFromCatalog")}
                   </span>
                 )}
               </Label>
               {billingLocked ? (
                 <div className="mt-1 flex h-8 items-center rounded-md border border-line bg-surface2 px-2.5 text-[11.5px] text-ink">
-                  {BILL_OPTIONS.find((b) => b.id === billing)?.label ?? billing}
+                  {billOptions.find((b) => b.id === billing)?.label ?? billing}
                 </div>
               ) : (
                 <div className="mt-1 grid grid-cols-3 gap-1.5">
-                  {BILL_OPTIONS.map((b) => {
+                  {billOptions.map((b) => {
                     const active = billing === b.id;
                     return (
                       <button
@@ -769,7 +790,7 @@ export default function AddProviderModal({
               )}
               {!billingKnown && (
                 <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
-                  Unrecognized billing tag “{billing}” · pick a mode
+                  {t("addProvider.billingUnknown", { billing })}
                 </p>
               )}
             </div>
@@ -777,9 +798,9 @@ export default function AddProviderModal({
             {billing === "plan" && (
               <div>
                 <Label className="text-[11px] font-medium text-mut">
-                  Usage limits
+                  {t("addProvider.usageLimits")}
                   <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    optional · % of each plan window
+                    {t("addProvider.usageLimitsHint")}
                   </span>
                 </Label>
                 <div className="mt-1 grid grid-cols-2 gap-2">
@@ -788,34 +809,33 @@ export default function AddProviderModal({
                       className="h-8 bg-bg font-mono text-[12px] dark:bg-bg"
                       value={planFiveHour}
                       onChange={(e) => setPlanFiveHour(e.target.value)}
-                      placeholder="e.g. 20 · blank = no limit"
+                      placeholder={t("addProvider.planFiveHourPlaceholder")}
                       inputMode="decimal"
                     />
-                    <p className="mt-1 text-[10px] text-mut">5-hour window</p>
+                    <p className="mt-1 text-[10px] text-mut">{t("addProvider.fiveHourWindow")}</p>
                   </div>
                   <div>
                     <Input
                       className="h-8 bg-bg font-mono text-[12px] dark:bg-bg"
                       value={planWeekly}
                       onChange={(e) => setPlanWeekly(e.target.value)}
-                      placeholder="e.g. 60 · blank = no limit"
+                      placeholder={t("addProvider.planWeeklyPlaceholder")}
                       inputMode="decimal"
                     />
-                    <p className="mt-1 text-[10px] text-mut">Weekly window</p>
+                    <p className="mt-1 text-[10px] text-mut">{t("addProvider.weeklyWindow")}</p>
                   </div>
                 </div>
-                <p className="mt-1.5 text-[10.5px] text-mut">
-                  Kiwano stops routing to this provider once its live plan-quota
-                  utilization for a window reaches the percent, and resumes when
-                  usage drops back under. Takes effect when a plan query is configured.
-                </p>
+                <p className="mt-1.5 text-[10.5px] text-mut">{t("addProvider.planLimitsBody")}</p>
               </div>
             )}
 
             {billing === "payg" && (
               <div>
                 <Label className="text-[11px] font-medium text-mut">
-                  Spending limit <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>optional · leave blank to show the usage trend</span>
+                  {t("addProvider.spendingLimit")}{" "}
+                  <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>
+                    {t("addProvider.spendingLimitHint")}
+                  </span>
                 </Label>
                 <div className="mt-1 flex gap-1.5">
                   <Input
@@ -829,7 +849,7 @@ export default function AddProviderModal({
                   <Select value={limitCurrency} disabled>
                     <SelectTrigger
                       className="w-[84px] bg-bg text-[12px] dark:bg-bg"
-                      title={`${limitCurrency} — the currency this provider bills in`}
+                      title={t("addProvider.currencyTitle", { currency: limitCurrency })}
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -844,7 +864,7 @@ export default function AddProviderModal({
             {billing === "unl" && (
               <div className="flex h-8 items-center gap-1.5 text-[11.5px] text-mut">
                 <InfinityIcon className="h-3.5 w-3.5" />
-                No quota config · usage info hidden in lists
+                {t("addProvider.noQuotaConfig")}
               </div>
             )}
 
@@ -853,7 +873,7 @@ export default function AddProviderModal({
                 className="cursor-pointer select-none text-[11px] font-medium text-mut"
                 onClick={() => setAgentsOpen((o) => !o)}
               >
-                Bind to agents after saving
+                {t("addProvider.bindAgents")}
               </Label>
               <button
                 type="button"
@@ -861,7 +881,7 @@ export default function AddProviderModal({
                 onClick={() => setAgentsOpen((o) => !o)}
               >
                 {agents.length === 0 ? (
-                  <span className="text-mut">Select agents…</span>
+                  <span className="text-mut">{t("addProvider.selectAgents")}</span>
                 ) : (
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
                     {AGENTS.filter((a) => agents.includes(a.id)).map((a) => (
@@ -911,9 +931,9 @@ export default function AddProviderModal({
             {edit && (
               <div>
                 <Label className="text-[11px] font-medium text-mut">
-                  Rotating keys{" "}
+                  {t("addProvider.rotatingKeys")}{" "}
                   <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    rotate with the primary key · avoids rate limits
+                    {t("addProvider.rotatingKeysHint")}
                   </span>
                 </Label>
                 <div className="mt-1 space-y-1">
@@ -930,7 +950,7 @@ export default function AddProviderModal({
                         variant="ghost"
                         size="icon-xs"
                         className="text-mut"
-                        aria-label="Delete key"
+                        aria-label={t("addProvider.deleteKey")}
                         onClick={() => removePollKey(k.id)}
                       >
                         <XIcon />
@@ -942,13 +962,13 @@ export default function AddProviderModal({
                       className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                       value={newKey}
                       onChange={(e) => setNewKey(e.target.value)}
-                      placeholder="sk-… add key"
+                      placeholder={t("addProvider.addKeyPlaceholder")}
                     />
                     <Input
                       className="h-8 w-[84px] bg-bg text-[11.5px] dark:bg-bg"
                       value={newKeyLabel}
                       onChange={(e) => setNewKeyLabel(e.target.value)}
-                      placeholder="Label"
+                      placeholder={t("addProvider.labelPlaceholder")}
                     />
                     <Button
                       variant="outline"
@@ -958,7 +978,7 @@ export default function AddProviderModal({
                       onClick={addPollKey}
                     >
                       <Plus className="h-3 w-3" />
-                      Add
+                      {t("common.add")}
                     </Button>
                   </div>
                 </div>
@@ -978,10 +998,10 @@ export default function AddProviderModal({
                 >
                   <span className="flex items-center gap-1.5">
                     <Gauge className="h-3 w-3" />
-                    Plan quota query
+                    {t("addProvider.planQuotaQuery")}
                     {pqTemplate && (
                       <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>
-                        {PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate)?.label ?? pqTemplate}
+                        {templateLabel(pqTemplate)}
                       </span>
                     )}
                   </span>
@@ -990,7 +1010,7 @@ export default function AddProviderModal({
                 {pqOpen && (
                   <div className="mt-2 space-y-2.5">
                     <div>
-                      <Label className="text-[10.5px] font-medium text-mut">Template</Label>
+                      <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.template")}</Label>
                       {/* "none" sentinel: Radix SelectItem rejects empty values */}
                       <Select
                         value={pqTemplate === "" ? "none" : pqTemplate}
@@ -1002,24 +1022,24 @@ export default function AddProviderModal({
                           <SelectValue>
                             {(v) =>
                               v == null || v === "none"
-                                ? "None"
-                                : (PLAN_QUERY_TEMPLATES.find((t) => t.id === v)?.label ?? String(v))
+                                ? t("addProvider.none")
+                                : templateLabel(v)
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          {PLAN_QUERY_TEMPLATES.map((t) => (
-                            <SelectItem key={t.id} value={t.id}>
-                              {t.label}
+                          <SelectItem value="none">{t("addProvider.none")}</SelectItem>
+                          {PLAN_QUERY_TEMPLATES.map((tpl) => (
+                            <SelectItem key={tpl.id} value={tpl.id}>
+                              {t(tpl.labelKey)}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    {(PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate)?.fields ?? []).map((f) => (
+                    {(PLAN_QUERY_TEMPLATES.find((x) => x.id === pqTemplate)?.fields ?? []).map((f) => (
                       <div key={f.key}>
-                        <Label className="text-[10.5px] font-medium text-mut">{f.label}</Label>
+                        <Label className="text-[10.5px] font-medium text-mut">{t(f.labelKey)}</Label>
                         <Input
                           className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
                           value={pqFields[f.key] ?? ""}
@@ -1027,10 +1047,7 @@ export default function AddProviderModal({
                         />
                       </div>
                     ))}
-                    <p className="text-[10.5px] text-mut">
-                      Queries the plan usage with the provider's API key (5-min cache);
-                      quota chips refresh on the Providers page.
-                    </p>
+                    <p className="text-[10.5px] text-mut">{t("addProvider.planQueryBody")}</p>
                   </div>
                 )}
               </div>
@@ -1049,7 +1066,7 @@ export default function AddProviderModal({
               >
                 <span className="flex items-center gap-1.5">
                   <Gauge className="h-3 w-3" />
-                  Advanced (timeout / retries / headers)
+                  {t("addProvider.advanced")}
                 </span>
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform ${advOpen ? "rotate-180" : ""}`}
@@ -1059,7 +1076,7 @@ export default function AddProviderModal({
                 <div className="mt-2 space-y-2.5">
                   <div className="grid grid-cols-2 gap-1.5">
                     <div>
-                      <Label className="text-[10.5px] font-medium text-mut">Timeout (s)</Label>
+                      <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.timeoutLabel")}</Label>
                       <Input
                         type="number"
                         min={1}
@@ -1071,7 +1088,7 @@ export default function AddProviderModal({
                       />
                     </div>
                     <div>
-                      <Label className="text-[10.5px] font-medium text-mut">Retries</Label>
+                      <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.retriesLabel")}</Label>
                       <Input
                         type="number"
                         min={0}
@@ -1083,15 +1100,12 @@ export default function AddProviderModal({
                       />
                     </div>
                   </div>
-                  <p className="text-[10.5px] text-mut">
-                    Blank = gateway default · timeout caps time to response headers, never an
-                    in-flight stream · retries apply to this provider before failover
-                  </p>
+                  <p className="text-[10.5px] text-mut">{t("addProvider.advancedBody")}</p>
                   <div>
                     <Label className="text-[10.5px] font-medium text-mut">
-                      Custom headers{" "}
+                      {t("addProvider.customHeaders")}{" "}
                       <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                        merged last · can override the API key header
+                        {t("addProvider.customHeadersHint")}
                       </span>
                     </Label>
                     <div className="mt-1 space-y-1.5">
@@ -1101,19 +1115,19 @@ export default function AddProviderModal({
                             className="h-8 w-[38%] min-w-0 flex-none bg-bg font-mono text-[12px] dark:bg-bg"
                             value={r.name}
                             onChange={(e) => setHeader(i, { name: e.target.value })}
-                            placeholder="Header-Name"
+                            placeholder={t("addProvider.headerNamePlaceholder")}
                           />
                           <Input
                             className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                             value={r.value}
                             onChange={(e) => setHeader(i, { value: e.target.value })}
-                            placeholder="value"
+                            placeholder={t("addProvider.headerValuePlaceholder")}
                           />
                           <Button
                             variant="ghost"
                             size="icon-xs"
                             className="flex-none text-mut"
-                            aria-label="Remove header"
+                            aria-label={t("addProvider.removeHeader")}
                             onClick={() => removeHeader(i)}
                           >
                             <XIcon />
@@ -1127,7 +1141,7 @@ export default function AddProviderModal({
                         onClick={addHeader}
                       >
                         <Plus className="h-3 w-3" />
-                        Add header
+                        {t("addProvider.addHeader")}
                       </Button>
                     </div>
                   </div>
@@ -1139,10 +1153,10 @@ export default function AddProviderModal({
 
         <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">
           <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" className="font-semibold" disabled={!canSave} onClick={save}>
-            {saving ? "Saving…" : edit ? "Save" : "Save & enable"}
+            {saving ? t("addProvider.saving") : edit ? t("common.save") : t("addProvider.saveEnable")}
           </Button>
         </DialogFooter>
       </DialogContent>

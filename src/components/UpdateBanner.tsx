@@ -8,11 +8,13 @@ import { useEffect, useState } from "react";
 import { ArrowUpCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
+import { useT } from "../i18n";
 import { onUpdateAvailable } from "../lib/updateEvents";
 import { startUpdateInstall, useUpdateInstall } from "../lib/updateInstall";
 import type { UpdateInfo } from "../api/types";
 
 export function UpdateBanner() {
+  const t = useT();
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const install = useUpdateInstall();
@@ -55,7 +57,7 @@ export function UpdateBanner() {
       style={{ background: "var(--kiwi-soft)" }}
     >
       <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--kiwi)" }} />
-      <span>Kiwano {info.version} is available</span>
+      <span>{t("settings.updateAvailable", { version: info.version })}</span>
       {/* Starts the transfer and lands on Settings in the same click: the
           download lives in lib/updateInstall, so the route change does not
           interrupt it and Settings picks the progress up mid-flight. */}
@@ -69,14 +71,14 @@ export function UpdateBanner() {
         }}
       >
         {install.installing
-          ? "Downloading…"
+          ? t("settings.downloading")
           : install.err
-            ? "Retry download"
-            : "Download & install"}
+            ? t("settings.retryDownload")
+            : t("settings.downloadInstall")}
       </Button>
       <button
-        aria-label="Dismiss update notice"
-        title={`Hide until a version newer than ${info.version}`}
+        aria-label={t("settings.dismissUpdate")}
+        title={t("settings.hideUntil", { version: info.version })}
         className="ml-auto text-mut hover:text-ink"
         onClick={dismiss}
       >

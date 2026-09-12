@@ -15,24 +15,32 @@ import {
 
 import { api } from "../api/client";
 import { AGENTS, type AgentId, type AgentRoute, type StrategyKind } from "../api/types";
+import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import StrategyIcon from "./StrategyIcon";
 import { Button } from "@/components/ui/button";
 
-const STRATEGIES: { id: StrategyKind; label: string; hint: string }[] = [
-  { id: "single", label: "Single primary", hint: "Always use the primary provider" },
-  { id: "failover", label: "Failover", hint: "Fall through standbys in order on failure, switch back on recovery" },
-  { id: "roundrobin", label: "Weighted round-robin", hint: "New sessions rotate by weight; sticky per session to keep the upstream prompt cache" },
-  { id: "timewindow", label: "Time window", hint: "Pick by each candidate's local time window; fall back to the primary when no window matches" },
+// Labels and hints are translation *keys*, resolved at render: `t` is a hook,
+// so a module-level table cannot hold the strings themselves. The ids are the
+// values sent to the backend and are never translated.
+const STRATEGIES: { id: StrategyKind; label: KeyPath<Messages>; hint: KeyPath<Messages> }[] = [
+  { id: "single", label: "strategy.single", hint: "strategy.singleHint" },
+  { id: "failover", label: "strategy.failover", hint: "strategy.failoverHint" },
+  { id: "roundrobin", label: "strategy.roundrobin", hint: "strategy.roundrobinHint" },
+  { id: "timewindow", label: "strategy.timewindow", hint: "strategy.timewindowHint" },
   // "the primary" drifts: whoever holds the first slot right now, which a
   // billing limit or a reorder can change. The number is the agent's, not the
   // provider's — the old wording ("once the primary exceeds its daily
   // threshold") read as an allowance set on one provider.
-  {
-    id: "quota",
-    label: "Quota fallback",
-    hint: "Once today's primary reaches the number below, send to standbys",
-  },
+  { id: "quota", label: "strategy.quota", hint: "strategy.quotaHint" },
 ];
+
+/** The strategy's display label, lowercased so it reads as part of the
+    mid-sentence confirmation ("failover, 2 candidates"). Lowercasing is a
+    no-op on Chinese, so the same call serves both locales. */
+function strategyLabel(t: Translate, id: StrategyKind): string {
+  const s = STRATEGIES.find((x) => x.id === id);
+  return (s ? t(s.label) : id).toLowerCase();
+}
 
 function parseQuota(config: string | null): { limit: number; unit: "requests" | "tokens" } {
   try {
@@ -52,8 +60,10 @@ function parseQuota(config: string | null): { limit: number; unit: "requests" | 
 const DEFAULT_LIMIT: Record<"requests" | "tokens", number> = { requests: 100, tokens: 1_000_000 };
 
 function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => void }) {
+  const t = useT();
   const meta = AGENTS.find((m) => m.id === route.agent)!;
-  const hint = STRATEGIES.find((s) => s.id === route.strategy)?.hint ?? "";
+  const strategy = STRATEGIES.find((s) => s.id === route.strategy);
+  const hint = strategy ? t(strategy.hint) : "";
   const quota = parseQuota(route.config);
 
   const setStrategy = async (next: StrategyKind) => {
@@ -85,13 +95,13 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
         >
           <SelectTrigger
             size="sm"
-            aria-label={`${meta.label} strategy`}
+            aria-label={t("strategy.ariaFor", { agent: meta.label })}
             className="h-7 min-w-[92px] bg-transparent px-1.5 text-[11.5px] dark:bg-transparent"
           >
             {/* Static children replace the selected-item label: icon + name */}
             <SelectValue>
               <StrategyIcon id={route.strategy} className="size-3.5" />
-              <span>{STRATEGIES.find((s) => s.id === route.strategy)?.label}</span>
+              <span>{strategy && t(strategy.label)}</span>
             </SelectValue>
           </SelectTrigger>
           {/* wider than the trigger: the longest label ("Weighted round-robin") must fit */}
@@ -99,7 +109,7 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
             {STRATEGIES.map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 <StrategyIcon id={s.id} className="size-3.5" />
-                {s.label}
+                {t(s.label)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -128,11 +138,15 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
               >
                 {/* The value is the bare unit ("tokens"); the menu adds the
                     "/day" the reader needs. */}
-                <SelectValue>{(v) => (v === "tokens" ? "tokens/day" : "requests/day")}</SelectValue>
+                <SelectValue>
+                  {(v) =>
+                    v === "tokens" ? t("strategy.unitTokensDay") : t("strategy.unitRequestsDay")
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="requests">requests/day</SelectItem>
-                <SelectItem value="tokens">tokens/day</SelectItem>
+                <SelectItem value="requests">{t("strategy.unitRequestsDay")}</SelectItem>
+                <SelectItem value="tokens">{t("strategy.unitTokensDay")}</SelectItem>
               </SelectContent>
             </Select>
           </span>
@@ -158,6 +172,7 @@ export function CopyRouteRow({
   routes: AgentRoute[];
   onChanged: () => void;
 }) {
+  const t = useT();
   const [src, setSrc] = useState<AgentId | null>(null);
   const [bump, setBump] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -185,12 +200,20 @@ export function CopyRouteRow({
       {srcRoute && srcMeta ? (
         <>
           <span className="truncate">
-            Replace {mineMeta.label}'s route with {srcMeta.label}'s (
-            {STRATEGIES.find((s) => s.id === srcRoute.strategy)?.label.toLowerCase()},{" "}
-            {srcRoute.bindings.length} candidate{srcRoute.bindings.length === 1 ? "" : "s"})?
+            {t(
+              srcRoute.bindings.length === 1
+                ? "strategy.replaceConfirmOne"
+                : "strategy.replaceConfirmOther",
+              {
+                mine: mineMeta.label,
+                source: srcMeta.label,
+                strategy: strategyLabel(t, srcRoute.strategy),
+                count: srcRoute.bindings.length,
+              },
+            )}
           </span>
           <Button size="sm" className="h-6 flex-none px-2 text-[11px]" onClick={apply} disabled={busy}>
-            Replace
+            {t("strategy.replace")}
           </Button>
           <Button
             size="sm"
@@ -198,21 +221,21 @@ export function CopyRouteRow({
             className="h-6 flex-none px-2 text-[11px]"
             onClick={() => setSrc(null)}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
         </>
       ) : (
         <>
-          <span className="flex-none">Copy route from…</span>
+          <span className="flex-none">{t("strategy.copyRouteFrom")}</span>
           {/* key remounts the uncontrolled select after a cancelled pick so
               the trigger label resets */}
           <Select key={bump} onValueChange={(v) => setSrc(v as AgentId)}>
             <SelectTrigger
               size="sm"
-              aria-label={`Copy route from another agent onto ${mineMeta.label}`}
+              aria-label={t("strategy.copyRouteAria", { agent: mineMeta.label })}
               className="h-6 w-auto gap-1 bg-transparent px-1.5 text-[11px] dark:bg-transparent"
             >
-              <SelectValue placeholder="Pick an agent" />
+              <SelectValue placeholder={t("strategy.pickAgent")} />
             </SelectTrigger>
             {/* wider than the trigger: "Claude Code · 2 candidates" must fit */}
             <SelectContent className="min-w-[230px]">
@@ -220,7 +243,12 @@ export function CopyRouteRow({
                 const label = AGENTS.find((m) => m.id === r.agent)?.label ?? r.agent;
                 return (
                   <SelectItem key={r.agent} value={r.agent}>
-                    {label} · {r.bindings.length} candidate{r.bindings.length === 1 ? "" : "s"}
+                    {t(
+                      r.bindings.length === 1
+                        ? "strategy.candidateOne"
+                        : "strategy.candidateOther",
+                      { agent: label, count: r.bindings.length },
+                    )}
                   </SelectItem>
                 );
               })}

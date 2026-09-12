@@ -1,6 +1,12 @@
 // Kiwano frontend data contract — fields aligned with the SQLite tables (tech.md §2.3/§4.7).
 // The UI accesses data only via KiwanoApi in src/api/client.ts; components must not contain
 // dev literals or Tauri invoke calls.
+//
+// The two display constants at the foot of this file carry *dictionary keys*
+// rather than labels. They are module-level tables that get rendered, so the
+// translator cannot be called where they are declared — the key is resolved at
+// the call site, which is the same shape the screens use for their own tables.
+import type { KeyPath, Messages } from "../i18n";
 
 export type AgentId =
   | "claude"
@@ -85,41 +91,46 @@ export interface PlanQuery {
     and intentionally absent). Fields render per-template credential inputs. */
 export const PLAN_QUERY_TEMPLATES: {
   id: string;
-  label: string;
-  fields: { key: string; label: string }[];
+  /** Dictionary key, not the label: the names are product names that stay as
+      they are in every language, and only the qualifier around them moves. */
+  labelKey: KeyPath<Messages>;
+  fields: { key: string; labelKey: KeyPath<Messages> }[];
 }[] = [
-  { id: "kimi", label: "Kimi (monthly plan)", fields: [] },
-  { id: "zhipu", label: "Zhipu GLM (personal)", fields: [] },
+  { id: "kimi", labelKey: "addProvider.tplKimi", fields: [] },
+  { id: "zhipu", labelKey: "addProvider.tplZhipuPersonal", fields: [] },
   {
     id: "zhipu_team",
-    label: "Zhipu GLM (team)",
+    labelKey: "addProvider.tplZhipuTeam",
     fields: [
-      { key: "organization_id", label: "Org ID" },
-      { key: "project_id", label: "Project ID" },
+      { key: "organization_id", labelKey: "addProvider.fieldOrgId" },
+      { key: "project_id", labelKey: "addProvider.fieldProjectId" },
     ],
   },
-  { id: "minimax", label: "MiniMax", fields: [] },
+  { id: "minimax", labelKey: "addProvider.tplMinimax", fields: [] },
   {
     id: "zenmux",
-    label: "ZenMux",
-    fields: [{ key: "quota_url", label: "Usage endpoint URL" }],
+    labelKey: "addProvider.tplZenmux",
+    fields: [{ key: "quota_url", labelKey: "addProvider.fieldQuotaUrl" }],
   },
-  { id: "opencode_go", label: "OpenCode Go", fields: [] },
+  { id: "opencode_go", labelKey: "addProvider.tplOpencodeGo", fields: [] },
   {
     id: "volcengine",
-    label: "Volcengine Ark",
+    labelKey: "addProvider.tplVolcengine",
     fields: [
-      { key: "access_key_id", label: "AccessKey ID" },
-      { key: "secret_access_key", label: "Secret AccessKey" },
+      { key: "access_key_id", labelKey: "addProvider.fieldAccessKeyId" },
+      { key: "secret_access_key", labelKey: "addProvider.fieldSecretAccessKey" },
     ],
   },
 ];
 
-/** Canonical tier-name -> display label (backend emits machine keys) */
-export const PLAN_TIER_LABELS: Record<string, string> = {
-  five_hour: "5h window",
-  weekly_limit: "Weekly",
-  monthly: "Monthly",
+/** Canonical tier-name -> the dictionary key for its label (the backend emits
+    machine keys, so the mapping is by name and the label is resolved at render).
+    The `?? t.name` fallback at the call sites is deliberate: a tier the backend
+    adds before this list knows about it should read as its own id, not vanish. */
+export const PLAN_TIER_LABEL_KEYS: Record<string, KeyPath<Messages>> = {
+  five_hour: "providers.tierFiveHour",
+  weekly_limit: "providers.tierWeekly",
+  monthly: "providers.tierMonthly",
 };
 
 /** One usage window of a token plan (5h / weekly / monthly …) */

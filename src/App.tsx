@@ -10,6 +10,7 @@ import {
 import { api } from "./api/client";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { applyTheme } from "./lib/theme";
+import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
 import { onOpenSettings } from "./lib/updateEvents";
 import { AGENTS } from "./api/types";
 import type {
@@ -31,11 +32,13 @@ import AddProviderModal from "./screens/AddProviderModal";
 
 type Route = "providers" | "shelf" | "dashboard" | "settings";
 
-const NAV: { id: Route; label: string }[] = [
-  { id: "providers", label: "Apps" },
-  { id: "shelf", label: "Models" },
-  { id: "dashboard", label: "Dashboard" },
-  { id: "settings", label: "Settings" },
+/** Keys, not labels: this array is module-level and `t()` is a hook, so the
+    label is resolved at render. */
+const NAV: { id: Route; labelKey: KeyPath<Messages> }[] = [
+  { id: "providers", labelKey: "app.nav.apps" },
+  { id: "shelf", labelKey: "app.nav.models" },
+  { id: "dashboard", labelKey: "app.nav.dashboard" },
+  { id: "settings", labelKey: "app.nav.settings" },
 ];
 
 /** Hash router: #settings etc., plus an optional deep-linked agent segment
@@ -48,6 +51,8 @@ function routeFromHash(): { route: Route; agent: AgentId | null } {
 }
 
 export default function App() {
+  const t = useT();
+  const locale = useLocale();
   const [route, setRoute] = useState<{ route: Route; agent: AgentId | null }>(routeFromHash);
   const [tick, setTick] = useState(0);
   const [gw, setGw] = useState<GatewayStatus | null>(null);
@@ -66,6 +71,13 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // `<html lang>` follows the locale rather than the `index.html` default: it
+  // drives per-script font fallback (the CJK chain in index.css), hyphenation
+  // and screen-reader pronunciation.
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   // Settings own the theme. The pre-paint script in index.html only had the
   // cached copy, so this is what decides it for real. Same round trip keeps the
   // backend's day boundaries on the user's clock: `getTimezoneOffset()` counts
@@ -75,6 +87,10 @@ export default function App() {
       .getSettings()
       .then((s) => {
         applyTheme(s.theme);
+        // The stored preference is `"system"` until the user picks one, and it
+        // resolves from the OS locale — so this has to run before the first
+        // paint that shows text.
+        setLocale(resolveLocale(s.language));
         const tz = -new Date().getTimezoneOffset();
         if (s.tz_offset_minutes !== tz) {
           api.updateSettings({ tz_offset_minutes: tz }).catch(() => {});
@@ -94,7 +110,7 @@ export default function App() {
   );
 
   const refresh = useCallback(() => {
-    setTick((t) => t + 1);
+    setTick((n) => n + 1);
     api.getGatewayStatus().then(setGw);
     api.getFooterStats().then(setFooter);
   }, []);
@@ -133,18 +149,26 @@ export default function App() {
           }
           const used =
             a.unit === "plan_pct"
-              ? `${a.used}% of its plan window`
+              ? t("app.usedPlanWindow", { pct: a.used })
               : a.unit === "wan_tokens"
-                ? `${(a.used * 10).toLocaleString()}k tokens`
+                ? t("app.usedTokens", { count: (a.used * 10).toLocaleString() })
                 : a.unit === "requests"
-                  ? `${a.used.toLocaleString()} requests`
+                  ? t("app.usedRequests", { count: a.used.toLocaleString() })
                   : fmtMoney(a.used, a.unit);
           sendNotification({
-            title: a.unit === "plan_pct" ? "Kiwano plan limit" : "Kiwano cost alert",
+            title: a.unit === "plan_pct" ? t("app.notifyPlanTitle") : t("app.notifyCostTitle"),
             body:
               a.unit === "plan_pct"
-                ? `${a.provider_name} is at ${used} and has reached its ${a.limit}% limit — it is disabled until usage drops back under`
-                : `${a.provider_name} used ${used} this period and has hit its limit of ${a.limit} — watch your spending`,
+                ? t("app.notifyPlanBody", {
+                    provider: a.provider_name,
+                    used,
+                    limit: a.limit,
+                  })
+                : t("app.notifyCostBody", {
+                    provider: a.provider_name,
+                    used,
+                    limit: a.limit,
+                  }),
           });
         }
       } catch {
@@ -152,8 +176,9 @@ export default function App() {
       }
     };
     check();
-    const t = setInterval(check, 60_000);
-    return () => clearInterval(t);
+    // Not `t`: the translator is in scope here.
+    const timer = setInterval(check, 60_000);
+    return () => clearInterval(timer);
   }, []);
 
   const nav = (id: Route) => {
@@ -180,16 +205,22 @@ export default function App() {
               className={`navtab h-full px-3 text-[12.5px] font-medium text-mut${route.route === n.id ? " active" : ""}`}
               onClick={() => nav(n.id)}
             >
-              {n.label}
+              {t(n.labelKey)}
             </button>
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2.5">
           <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
             <Dot state={gw?.running ? "ok" : "off"} size="h-[6px] w-[6px]" />
-            Gateway <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
+            {t("app.gateway")} <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
           </span>
-          <Button variant="ghost" size="icon-sm" className="text-mut" onClick={refresh} aria-label="Refresh">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-mut"
+            onClick={refresh}
+            aria-label={t("common.refresh")}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -219,14 +250,17 @@ export default function App() {
       >
         {footer && (
           <span>
-            Today <span className="font-mono text-ink">{footer.today_requests.toLocaleString()}</span> requests ·{" "}
-            <span className="font-mono text-ink">{fmtTokens(footer.today_tokens)} tokens</span>
+            {t("app.today")}{" "}
+            <span className="font-mono text-ink">{footer.today_requests.toLocaleString()}</span>{" "}
+            {t("app.requests")} ·{" "}
+            <span className="font-mono text-ink">{fmtTokens(footer.today_tokens)}</span>{" "}
+            {t("app.tokens")}
           </span>
         )}
         {footer?.hub_synced && (
           <span className="ml-auto flex items-center gap-1">
             <Dot state="ok" size="h-[5px] w-[5px]" />
-            Hub just synced
+            {t("app.hubSynced")}
           </span>
         )}
       </footer>

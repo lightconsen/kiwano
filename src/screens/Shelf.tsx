@@ -13,20 +13,22 @@ import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
+import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 
 // Chip icons speak the category's meaning; colors match the per-tag badge
-// palette used in the table (tagChipStyle below)
+// palette used in the table (tagChipStyle below). The labels are keys, not
+// text: every map below is module-level, where no hook can run.
 const CHIPS: {
   id: "all" | CatalogEntry["tag"];
-  label: string;
+  labelKey: KeyPath<Messages>;
   icon?: LucideIcon;
   icon_color?: string;
 }[] = [
-  { id: "all", label: "All" },
-  { id: "official", label: "Official", icon: ShieldCheck, icon_color: "var(--kiwi)" },
-  { id: "aggregate", label: "Aggregator", icon: Layers, icon_color: "var(--violet)" },
-  { id: "third", label: "Third-party", icon: Boxes, icon_color: "var(--blue)" },
-  { id: "free", label: "Free tier", icon: Gift, icon_color: "var(--amber)" },
+  { id: "all", labelKey: "shelf.chipAll" },
+  { id: "official", labelKey: "shelf.chipOfficial", icon: ShieldCheck, icon_color: "var(--kiwi)" },
+  { id: "aggregate", labelKey: "shelf.chipAggregate", icon: Layers, icon_color: "var(--violet)" },
+  { id: "third", labelKey: "shelf.chipThird", icon: Boxes, icon_color: "var(--blue)" },
+  { id: "free", labelKey: "shelf.chipFree", icon: Gift, icon_color: "var(--amber)" },
 ];
 
 function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
@@ -58,26 +60,28 @@ const TAG_RANK: Record<CatalogEntry["tag"], number> = {
   local: 4,
 };
 
-const BILLING_LABEL: Record<Billing, string> = {
-  plan: "Plan",
-  payg: "Pay as you go",
-  unl: "Unlimited",
+const BILLING_LABEL: Record<Billing, KeyPath<Messages>> = {
+  plan: "shelf.billingPlan",
+  payg: "shelf.billingPayg",
+  unl: "shelf.billingUnl",
 };
 
 /** Hub catalogs may carry a billing tag this build predates: show the raw
     tag rather than a blank cell. */
-function billingLabel(billing: Billing): string {
-  return BILLING_LABEL[billing] ?? billing;
+function billingLabel(billing: Billing, t: Translate): string {
+  // The lookup can miss at runtime despite the `Record` type: a newer Hub
+  // catalog may name a billing tag this build has never heard of.
+  return BILLING_LABEL[billing] ? t(BILLING_LABEL[billing]) : billing;
 }
 
 // Probe verdict chip: green=usable, amber=route exists but needs a key,
 // gray=route missing, red=broken/unreachable
-const PROBE_LABEL: Record<ProbeReport["verdict"], string> = {
-  ok: "OK",
-  auth: "Auth required",
-  unsupported: "Unsupported",
-  error: "Error",
-  unreachable: "Unreachable",
+const PROBE_LABEL: Record<ProbeReport["verdict"], KeyPath<Messages>> = {
+  ok: "shelf.probeOk",
+  auth: "shelf.probeAuth",
+  unsupported: "shelf.probeUnsupported",
+  error: "shelf.probeError",
+  unreachable: "shelf.probeUnreachable",
 };
 
 function probeChipStyle(verdict: ProbeReport["verdict"]): React.CSSProperties {
@@ -98,6 +102,7 @@ function probeChipStyle(verdict: ProbeReport["verdict"]): React.CSSProperties {
     A 401/403 still counts as "auth" — the route exists, so the protocol is
     supported even without a key. */
 function EndpointCard({ protocol, endpoint, models }: { protocol: Protocol; endpoint: string; models: string[] }) {
+  const t = useT();
   const [probe, setProbe] = useState<ProbeReport | "loading" | null>(null);
   return (
     <div className="rounded-md border border-line px-2.5 py-2">
@@ -118,17 +123,24 @@ function EndpointCard({ protocol, endpoint, models }: { protocol: Protocol; endp
             api
               .testEndpoint(protocol, endpoint)
               .then(setProbe)
-              .catch(() => setProbe({ verdict: "error", status: null, latency_ms: 0, detail: "probe failed" }));
+              .catch(() =>
+                setProbe({
+                  verdict: "error",
+                  status: null,
+                  latency_ms: 0,
+                  detail: t("shelf.probeFailed"),
+                }),
+              );
           }}
         >
           <Gauge className="h-3 w-3" />
-          Test
+          {t("shelf.test")}
         </Button>
       </div>
       {probe && probe !== "loading" && (
         <div className="mt-1.5 flex items-center gap-2">
           <span className="rounded px-1.5 text-[10px]" style={probeChipStyle(probe.verdict)}>
-            {PROBE_LABEL[probe.verdict]}
+            {t(PROBE_LABEL[probe.verdict])}
           </span>
           <span className="min-w-0 truncate text-[10.5px] text-mut" title={probe.detail}>
             {probe.detail}
@@ -151,12 +163,12 @@ function EndpointCard({ protocol, endpoint, models }: { protocol: Protocol; endp
 
 type SortKey = "name" | "protocol" | "tag";
 
-const COLUMNS: { key: SortKey | null; label: string; className: string }[] = [
-  { key: "name", label: "Name", className: "w-[150px]" },
-  { key: "protocol", label: "Protocol", className: "w-[190px]" },
-  { key: "tag", label: "Category", className: "w-[84px]" },
-  { key: null, label: "Price", className: "" },
-  { key: null, label: "Actions", className: "w-[70px] text-right" },
+const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: string }[] = [
+  { key: "name", labelKey: "shelf.colName", className: "w-[150px]" },
+  { key: "protocol", labelKey: "shelf.colProtocol", className: "w-[190px]" },
+  { key: "tag", labelKey: "shelf.colCategory", className: "w-[84px]" },
+  { key: null, labelKey: "shelf.colPrice", className: "" },
+  { key: null, labelKey: "shelf.colActions", className: "w-[70px] text-right" },
 ];
 
 function compare(key: SortKey, a: CatalogEntry, b: CatalogEntry): number {
@@ -181,6 +193,7 @@ function Row({
   onAdd: (e: CatalogEntry) => void;
   onOpen: (e: CatalogEntry) => void;
 }) {
+  const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
@@ -214,10 +227,10 @@ function Row({
       <td className="px-2 py-2 text-[11.5px] text-mut">{entry.price_line}</td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
         {entry.added ? (
-          <span className="text-[10.5px] text-mut">Added</span>
+          <span className="text-[10.5px] text-mut">{t("shelf.added")}</span>
         ) : (
           <Button size="xs" className="rounded px-2 text-[10.5px] font-semibold" onClick={() => onAdd(entry)}>
-            {entry.tag === "local" ? "+ Connect" : "+ Add"}
+            {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
           </Button>
         )}
       </td>
@@ -238,6 +251,7 @@ function DetailDialog({
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
+  const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
@@ -278,14 +292,15 @@ function DetailDialog({
 
           <div className="mt-2.5 flex gap-4 text-[11.5px] text-mut">
             <span>
-              Billing <span className="text-ink">{billingLabel(entry.billing)}</span>
+              {t("shelf.billing")}{" "}
+              <span className="text-ink">{billingLabel(entry.billing, t)}</span>
             </span>
             <span>{entry.users}</span>
           </div>
 
           {/* one card per protocol: endpoint URL + keyless Test + models */}
           <div className="mt-3">
-            <div className="mb-1 text-[10px] font-medium text-mut">ENDPOINTS</div>
+            <div className="mb-1 text-[10px] font-medium text-mut">{t("shelf.endpoints")}</div>
             <div className="space-y-1.5">
               {endpoints.map((e) => (
                 <EndpointCard key={e.protocol} protocol={e.protocol} endpoint={e.endpoint} models={e.models} />
@@ -295,13 +310,17 @@ function DetailDialog({
         </div>
 
         <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">
-          {entry.added && <span className="mr-auto self-center text-[11px] text-mut">Already added</span>}
+          {entry.added && (
+            <span className="mr-auto self-center text-[11px] text-mut">
+              {t("shelf.alreadyAdded")}
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={onClose}>
-            Close
+            {t("common.close")}
           </Button>
           {!entry.added && (
             <Button size="sm" className="font-semibold" onClick={() => onAdd(entry)}>
-              {entry.tag === "local" ? "+ Connect" : "+ Add"}
+              {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
             </Button>
           )}
         </DialogFooter>
@@ -311,6 +330,7 @@ function DetailDialog({
 }
 
 export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void }) {
+  const t = useT();
   const hubUrl = useHubUrl();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
@@ -351,8 +371,9 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   // refresh glyph. An error has no such timer — it holds until the next try.
   useEffect(() => {
     if (hub !== "done") return;
-    const t = setTimeout(() => setHub("idle"), 1600);
-    return () => clearTimeout(t);
+    // Named `timer`, not `t`: `t` is the translator here.
+    const timer = setTimeout(() => setHub("idle"), 1600);
+    return () => clearTimeout(timer);
   }, [hub]);
 
   const filtered = useMemo(() => {
@@ -370,7 +391,8 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     return [...ordered].sort((a, b) => Number(b.added) - Number(a.added));
   }, [catalog, chip, query, sort]);
 
-  if (!catalog) return <div className="p-8 text-center text-[12px] text-mut">Loading…</div>;
+  if (!catalog)
+    return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
@@ -379,7 +401,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     <section>
       <div className="sticky top-0 z-20 flex h-11 items-center gap-2 border-b border-line bg-bg px-4">
         <span className="text-[12px] text-mut">
-          From Kiwano Hub · <span className="font-mono">{catalog.total}</span> providers
+          {t("shelf.fromHub", { n: catalog.total })}
         </span>
         <div className="ml-3 flex gap-1.5">
           {CHIPS.map((c) => (
@@ -389,7 +411,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
               onClick={() => setChip(c.id)}
             >
               {c.icon && <c.icon className="size-3" style={{ color: c.icon_color }} />}
-              {c.label}
+              {t(c.labelKey)}
             </button>
           ))}
         </div>
@@ -409,7 +431,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mut" />
             <input
               className="h-7 w-[190px] rounded-md border border-line bg-surface pl-7 pr-2 text-[12px]"
-              placeholder="Search providers…"
+              placeholder={t("shelf.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -418,8 +440,8 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
             variant="ghost"
             size="sm"
             className="h-7 w-7 flex-none px-0 text-mut"
-            aria-label="Refresh from Hub"
-            title="Fetch the latest catalog from Kiwano Hub"
+            aria-label={t("shelf.refreshAria")}
+            title={t("shelf.refreshTitle")}
             disabled={hub === "busy"}
             onClick={refreshFromHub}
           >
@@ -436,11 +458,11 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           <tr className="border-b border-line">
             {COLUMNS.map((c) => (
               <th
-                key={c.label}
-                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.label === "Actions" ? "pr-4" : ""}`}
+                key={c.labelKey}
+                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.labelKey === "shelf.colActions" ? "pr-4" : ""}`}
                 onClick={c.key ? () => toggleSort(c.key!) : undefined}
               >
-                {c.label}
+                {t(c.labelKey)}
                 {sort?.key === c.key && (
                   <span className="ml-0.5 text-[9px]">{sort.dir === 1 ? "▲" : "▼"}</span>
                 )}
@@ -455,7 +477,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           {filtered.length === 0 && (
             <tr>
               <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
-                No matching providers
+                {t("shelf.noMatches")}
               </td>
             </tr>
           )}

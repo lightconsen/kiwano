@@ -299,6 +299,113 @@ fn status_without_a_gateway_exits_1_and_reports_the_store() {
     assert!(out.contains("providers 1"), "{out}");
 }
 
+// ── agents ──────────────────────────────────────────────────────────────────
+
+fn claude_settings(home: &Path) -> PathBuf {
+    home.join(".claude").join("settings.json")
+}
+
+fn write_claude_config(home: &Path, body: &str) {
+    let dir = home.join(".claude");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("settings.json"), body).unwrap();
+}
+
+/// The capability that made a headless server unusable: without a placeholder
+/// key the data plane refuses the agent outright, and only the desktop app could
+/// mint one.
+#[test]
+fn takeover_routes_an_agent_and_restore_puts_it_back() {
+    let (dir, db) = temp_db();
+    let home = dir.path().join("home");
+    let home_arg = home.display().to_string();
+    let original = r#"{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_AUTH_TOKEN":"sk-real-abcdef123456"},"other":true}"#;
+    write_claude_config(&home, original);
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "--home",
+            &home_arg,
+            "providers",
+            "add",
+            "--name",
+            "ds",
+            "--endpoint",
+            "https://api.deepseek.com/anthropic",
+            "--protocol",
+            "anthropic",
+            "--bind",
+            "claude",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+
+    let (code, out, err) = run(&db, &["--home", &home_arg, "agents", "takeover", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("127.0.0.1:8317"), "{out}");
+
+    let rewritten = std::fs::read_to_string(claude_settings(&home)).unwrap();
+    assert!(rewritten.contains("http://127.0.0.1:8317"), "{rewritten}");
+    assert!(
+        !rewritten.contains("sk-real-abcdef123456"),
+        "the operator's real key must not survive the takeover: {rewritten}"
+    );
+    assert!(
+        rewritten.contains("other") && rewritten.contains("true"),
+        "unrelated settings are preserved: {rewritten}"
+    );
+
+    // The key the config carries must be the one the gateway registered —
+    // anything else is a 401 waiting to happen.
+    let store = Store::open(&db).unwrap();
+    let minted = store
+        .list_placeholder_keys()
+        .unwrap()
+        .into_iter()
+        .find(|k| k.agent == "claude")
+        .expect("a placeholder key was registered");
+    assert!(
+        rewritten.contains(&minted.key),
+        "the config should carry {}: {rewritten}",
+        minted.key
+    );
+
+    let (code, _, err) = run(&db, &["--home", &home_arg, "agents", "restore", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(claude_settings(&home)).unwrap(),
+        original,
+        "restore is byte-exact"
+    );
+}
+
+#[test]
+fn takeover_rejects_an_unknown_agent() {
+    let (dir, db) = temp_db();
+    let home = dir.path().display().to_string();
+    let (code, _, err) = run(
+        &db,
+        &["--home", &home, "agents", "takeover", "not-an-agent"],
+    );
+    assert_eq!(code, 3);
+    assert!(err.contains("unknown agent"), "{err}");
+}
+
+#[test]
+fn detect_reports_the_known_agents() {
+    let (dir, db) = temp_db();
+    let home = dir.path().display().to_string();
+    let (code, out, err) = run(&db, &["--home", &home, "--json", "agents", "detect"]);
+    assert_eq!(code, 0, "{err}");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let names: Vec<&str> = rows.iter().filter_map(|r| r["agent"].as_str()).collect();
+    assert!(names.contains(&"claude"), "{names:?}");
+    assert!(names.contains(&"claude-desktop"), "{names:?}");
+    // Every row answers the question, whatever the machine has installed.
+    assert!(rows.iter().all(|r| r["installed"].is_boolean()), "{rows:?}");
+}
+
 // ── output discipline ───────────────────────────────────────────────────────
 
 /// The defect this rewrite fixes: a mutation under `--json` used to print its

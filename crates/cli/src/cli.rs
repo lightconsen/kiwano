@@ -43,6 +43,20 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub quiet: bool,
 
+    /// Port an agent's config is pointed at when it is taken over
+    #[arg(
+        long,
+        global = true,
+        value_name = "PORT",
+        env = "KIWANO_DATA_PORT",
+        default_value_t = 8317
+    )]
+    pub data_port: u16,
+
+    /// Root the agent config files live under (default $HOME)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub home: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -65,6 +79,32 @@ pub enum Command {
 
     /// Usage totals
     Usage(UsageArgs),
+
+    /// Coding agents: detect them, and route them through the gateway
+    #[command(subcommand)]
+    Agents(AgentsCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AgentsCmd {
+    /// Which agents are installed on this machine
+    Detect,
+
+    /// Version strings for the installed CLI agents
+    ///
+    /// Slow by construction: one `--version` subprocess per agent, each through
+    /// the login shell.
+    Versions,
+
+    /// Route an agent through the local gateway, backing up its config first
+    ///
+    /// Mints the agent's placeholder key if it has none — without it the
+    /// gateway refuses the agent's requests, because it only routes keys it
+    /// issued itself.
+    Takeover { agent: String },
+
+    /// Restore an agent's configuration from its takeover backup
+    Restore { agent: String },
 }
 
 #[derive(Debug, Subcommand)]

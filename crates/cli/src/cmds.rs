@@ -6,11 +6,12 @@
 
 use std::collections::BTreeMap;
 
+use kiwano_core::detect;
 use kiwano_core::sidecar;
 use kiwano_core::vm;
 use kiwano_gateway::store::{StrategyType, UsageTotals};
 
-use crate::cli::{AddArgs, KeysCmd, ProvidersCmd, UsageArgs};
+use crate::cli::{AddArgs, AgentsCmd, KeysCmd, ProvidersCmd, UsageArgs};
 use crate::output::{ellipsize, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
 
@@ -224,6 +225,65 @@ struct UsageReport {
     by_provider: Vec<(String, String, UsageTotals)>,
 }
 
+// ── agents ──────────────────────────────────────────────────────────────────
+
+pub fn agents(cmd: &AgentsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        AgentsCmd::Detect => {
+            let found = detect::detect_agents();
+            let text = render_agents(&found);
+            ctx.out.emit(&found, || text);
+            Ok(())
+        }
+        AgentsCmd::Versions => {
+            let versions = detect::probe_agent_versions();
+            let text = render_versions(&versions);
+            ctx.out.emit(&versions, || text);
+            Ok(())
+        }
+        AgentsCmd::Takeover { agent } => set_takeover(ctx, agent, true),
+        AgentsCmd::Restore { agent } => set_takeover(ctx, agent, false),
+    }
+}
+
+/// Take over, or restore, one agent — the operation that makes a server
+/// usable, and the one the CLI could not do at all.
+fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliError> {
+    let (home, port) = (ctx.home.clone(), ctx.data_port);
+    {
+        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        vm::set_agent_takeover(store, aux, agent, enabled, port, &home)?;
+    }
+
+    if enabled {
+        // The placeholder key is the part that is invisible from outside, and
+        // getting it wrong is the difference between a routed agent and a 401 —
+        // the data plane only routes keys it minted itself. Printed as stored.
+        let key = {
+            let store = ctx.store()?;
+            store
+                .list_placeholder_keys()
+                .map_err(runtime)?
+                .into_iter()
+                .find(|k| k.agent == agent)
+                .map(|k| k.key)
+        };
+        ctx.out.line(format!(
+            "{agent}: routed through the gateway on 127.0.0.1:{port}"
+        ));
+        match key {
+            Some(key) => ctx.out.line(format!("placeholder key: {key}")),
+            None => ctx.out.note(format!(
+                "note: {agent} has no placeholder key; the gateway will refuse its requests"
+            )),
+        }
+    } else {
+        ctx.out.line(format!("{agent}: configuration restored"));
+    }
+    ctx.after_mutation();
+    Ok(())
+}
+
 // ── input mapping ───────────────────────────────────────────────────────────
 
 /// Turn the flags into the app's `NewProviderInput`.
@@ -373,6 +433,38 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
                     })
                     .collect::<Vec<_>>()
                     .join(","),
+            ]
+        })
+        .collect();
+    render_table(&head, &rows)
+}
+
+fn render_agents(found: &[detect::AgentDetectVm]) -> String {
+    if found.is_empty() {
+        return "(no agents known)".to_string();
+    }
+    let head = ["AGENT", "INSTALLED", "PATH"];
+    let rows: Vec<Vec<String>> = found
+        .iter()
+        .map(|a| {
+            vec![
+                a.agent.clone(),
+                if a.installed { "yes" } else { "no" }.to_string(),
+                a.path.clone().unwrap_or_else(|| "-".to_string()),
+            ]
+        })
+        .collect();
+    render_table(&head, &rows)
+}
+
+fn render_versions(versions: &[detect::AgentVersionVm]) -> String {
+    let head = ["AGENT", "VERSION"];
+    let rows: Vec<Vec<String>> = versions
+        .iter()
+        .map(|v| {
+            vec![
+                v.agent.clone(),
+                v.version.clone().unwrap_or_else(|| "-".to_string()),
             ]
         })
         .collect();

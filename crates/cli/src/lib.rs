@@ -76,6 +76,10 @@ pub struct Ctx<'a> {
     pub db: PathBuf,
     pub admin: AdminEndpoint,
     pub token: Option<String>,
+    /// Port an agent's config is pointed at when it is taken over.
+    pub data_port: u16,
+    /// Root the agent config files live under.
+    pub home: PathBuf,
     pub out: Out<'a>,
     reload: bool,
     store: OnceCell<Store>,
@@ -141,8 +145,10 @@ impl Ctx<'_> {
 
 /// Parse `argv` (without the program name) and run it, returning the exit code.
 pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    // argv[0] is what clap prints in usage lines, so this has to be the real
+    // binary name rather than the crate's.
     let parsed =
-        Cli::try_parse_from(std::iter::once("kiwano-cli".to_string()).chain(argv.iter().cloned()));
+        Cli::try_parse_from(std::iter::once("kiwano".to_string()).chain(argv.iter().cloned()));
     let cli = match parsed {
         Ok(cli) => cli,
         Err(e) => {
@@ -171,11 +177,16 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         None => AdminEndpoint::from_env(&db),
     };
     let token = sidecar::admin_token_for(&db);
+    // Same resolution the rest of the codebase uses, so a container with no
+    // HOME set behaves the way the gateway does rather than failing.
+    let home = cli.home.clone().unwrap_or_else(default_home);
 
     let mut ctx = Ctx {
         db,
         admin,
         token,
+        data_port: cli.data_port,
+        home,
         out: Out::new(stdout, stderr, cli.json, cli.quiet),
         reload: !cli.no_reload,
         store: OnceCell::new(),
@@ -207,5 +218,17 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::usage(args, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Agents(cmd) => {
+            cmds::agents(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
     }
+}
+
+/// `$HOME`, or `.` when there is none — matching the gateway's own fallback so
+/// a container without HOME set does not fail differently in each process.
+fn default_home() -> PathBuf {
+    std::env::var("HOME")
+        .unwrap_or_else(|_| ".".to_string())
+        .into()
 }

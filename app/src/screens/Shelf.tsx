@@ -642,8 +642,13 @@ function Row({
             {price}
           </span>
           {/* The figures beside it are the peak ones, which is not obvious from
-              a number that has two. */}
-          {!modelId && entry.price_ref && <TierChip rate={entry.price_ref} t={t} />}
+              a number that has two. In the grouped view that holds only for the
+              row this price actually belongs to: `price_ref` names one model,
+              and the flagship's schedule says nothing about a group for another
+              model of the same provider (which shows a dash anyway). */}
+          {entry.price_ref && (!modelId || modelId === entry.price_ref.model_id) && (
+            <TierChip rate={entry.price_ref} t={t} />
+          )}
         </span>
       </td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>

@@ -517,6 +517,12 @@ pub struct ProviderDistVm {
     pub requests: i64,
     pub pct: i64,
     pub cost: f64,
+    /// The peak premium: what these requests would have cost had they all run
+    /// at their rows' off-peak rates. Zero for a model with no schedule — and,
+    /// deliberately, for traffic that was already off-peak, where the discount
+    /// was simply taken. Not a "saving" the user could bank: it prices the same
+    /// tokens at the same rows' other rate.
+    pub cost_off_peak: f64,
 }
 
 #[derive(Serialize)]
@@ -526,6 +532,12 @@ pub struct AgentDistVm {
     pub requests: i64,
     pub tokens: String,
     pub cost: f64,
+    /// The peak premium: what these requests would have cost had they all run
+    /// at their rows' off-peak rates. Zero for a model with no schedule — and,
+    /// deliberately, for traffic that was already off-peak, where the discount
+    /// was simply taken. Not a "saving" the user could bank: it prices the same
+    /// tokens at the same rows' other rate.
+    pub cost_off_peak: f64,
 }
 
 /// One select option of the dashboard's provider/agent filters.
@@ -544,6 +556,12 @@ pub struct DashboardVm {
     pub cache_read_tokens: i64,
     pub output_tokens: i64,
     pub cost: f64,
+    /// The peak premium: what these requests would have cost had they all run
+    /// at their rows' off-peak rates. Zero for a model with no schedule — and,
+    /// deliberately, for traffic that was already off-peak, where the discount
+    /// was simply taken. Not a "saving" the user could bank: it prices the same
+    /// tokens at the same rows' other rate.
+    pub cost_off_peak: f64,
     pub latency_ms: i64,
     pub latency_delta_pct: i64,
     pub trend: Vec<TrendVm>,
@@ -2548,24 +2566,32 @@ pub fn build_dashboard(
         crate::pricing::convert_cost_buckets(buckets, &pref, &rates)
     };
 
-    // Headline cost for the window.
-    let cost = cost_of(
-        &store
-            .usage_cost_by_currency(agent, provider_id, Some(&since))
-            .map_err(e2s)?,
-    );
+    // Headline cost for the window, with the off-peak equivalent of the same
+    // rows beside it. Both sums come from one query over one row set, which is
+    // what makes their difference "what running at peak cost you" rather than a
+    // comparison of two different populations.
+    let headline = store
+        .usage_cost_with_off_peak_by_currency(agent, provider_id, Some(&since))
+        .map_err(e2s)?;
+    let pairs = |pick: fn(&kiwanod::store::CostBucket) -> f64| -> Vec<(Option<String>, f64)> {
+        headline.iter().map(|b| (b.currency.clone(), pick(b))).collect()
+    };
+    let cost = cost_of(&pairs(|b| b.cost));
+    let cost_off_peak = (cost_of(&pairs(|b| b.cost_off_peak)) * 1e6).round() / 1e6;
 
     // Per-provider cost for the distribution card.
     let mut cost_by_pid: HashMap<String, f64> = HashMap::new();
-    for (pid, currency, c) in store
+    let mut off_peak_by_pid: HashMap<String, f64> = HashMap::new();
+    for b in store
         .usage_cost_by_provider(agent, Some(&since))
         .map_err(e2s)?
     {
-        let c = match currency.as_deref() {
+        let convert = |c: f64| match b.currency.as_deref() {
             Some(cur) => crate::pricing::convert_amount(c, cur, &pref, &rates),
             None => 0.0,
         };
-        *cost_by_pid.entry(pid).or_default() += c;
+        *cost_by_pid.entry(b.provider_id.clone()).or_default() += convert(b.cost);
+        *off_peak_by_pid.entry(b.provider_id).or_default() += convert(b.cost_off_peak);
     }
 
     let mut trend = Vec::new();
@@ -2639,6 +2665,13 @@ pub fn build_dashboard(
                 pct: pu.totals.requests * 100 / total_req,
                 cost: (cost_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
                     / 1e6,
+                cost_off_peak: (off_peak_by_pid
+                    .get(&pu.provider_id)
+                    .copied()
+                    .unwrap_or(0.0)
+                    * 1e6)
+                    .round()
+                    / 1e6,
             }
         })
         .collect();
@@ -2664,14 +2697,28 @@ pub fn build_dashboard(
             .map_err(e2s)?;
         if t.requests > 0 {
             let buckets = store
-                .usage_cost_by_currency(Some(name), provider_id, Some(&since))
+                .usage_cost_with_off_peak_by_currency(Some(name), provider_id, Some(&since))
                 .unwrap_or_default();
+            let off_peak = cost_of(
+                &buckets
+                    .iter()
+                    .map(|b| (b.currency.clone(), b.cost_off_peak))
+                    .collect::<Vec<_>>(),
+            );
             by_agent.push(AgentDistVm {
                 agent: name.to_string(),
                 label: label.to_string(),
                 requests: t.requests,
                 tokens: fmt_tokens(t.input_tokens + t.output_tokens),
-                cost: (cost_of(&buckets) * 1e6).round() / 1e6,
+                cost: (cost_of(
+                    &buckets
+                        .iter()
+                        .map(|b| (b.currency.clone(), b.cost))
+                        .collect::<Vec<_>>(),
+                ) * 1e6)
+                    .round()
+                    / 1e6,
+                cost_off_peak: (off_peak * 1e6).round() / 1e6,
             });
         }
     }
@@ -2717,6 +2764,7 @@ pub fn build_dashboard(
         cache_read_tokens: cur.cache_read_tokens,
         output_tokens: cur.output_tokens,
         cost: (cost * 1e6).round() / 1e6,
+        cost_off_peak,
         latency_ms: latency,
         latency_delta_pct,
         trend,

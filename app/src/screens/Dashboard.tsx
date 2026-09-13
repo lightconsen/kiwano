@@ -444,6 +444,9 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
   const totalTokens = data.input_tokens + data.output_tokens;
+  // What the window's cost would have been off-peak, in the display currency:
+  // the two sums are already converted, so the difference is the premium.
+  const premium = data.cost - data.cost_off_peak;
 
   return (
     <section>
@@ -543,6 +546,16 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
               {fmtMoney(data.cost, pref)}{" "}
               <span className="text-[10.5px] font-normal text-mut">{t("dashboard.atHubPrice")}</span>
             </div>
+            {/* Only when there is a premium: most models publish a single price,
+                and a permanent "premium ¥0" would read as a bug. */}
+            {premium > 0 && (
+              <div
+                className="mt-0.5 font-mono text-[10.5px] text-mut"
+                title={t("dashboard.offPeakPremiumTitle")}
+              >
+                {fmtMoney(premium, pref)} {t("dashboard.offPeakPremium")}
+              </div>
+            )}
           </div>
           <div className="flex-1 p-3">
             <div className="flex items-center gap-1 text-[10.5px] text-mut">

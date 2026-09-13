@@ -1646,6 +1646,15 @@ fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
         vm::fmt_tokens(data.output_tokens),
         vm::fmt_tokens(data.cache_read_tokens)
     ));
+    // The peak premium, only when there is one: most models publish a single
+    // price, and a permanent "off-peak 0.0000" would read as a bug.
+    let premium = data.cost - data.cost_off_peak;
+    if premium > 0.0 {
+        out.push_str(&format!(
+            "\nof which {:.4} was the peak premium (off-peak: {:.4})",
+            premium, data.cost_off_peak
+        ));
+    }
     out.push_str(&format!(
         "\navg latency {} ms ({}%)",
         data.latency_ms, data.latency_delta_pct

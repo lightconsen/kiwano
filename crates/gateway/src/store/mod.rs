@@ -633,6 +633,25 @@ pub struct UsageRecord {
     pub cost_off_peak: Option<f64>,
 }
 
+/// A cost summed over a window, with what the same rows would have cost at
+/// their off-peak rates (migration v13). The two are equal for a model with no
+/// published schedule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CostBucket {
+    pub currency: Option<String>,
+    pub cost: f64,
+    pub cost_off_peak: f64,
+}
+
+/// The same pair, split per provider.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderCostBucket {
+    pub provider_id: String,
+    pub currency: Option<String>,
+    pub cost: f64,
+    pub cost_off_peak: f64,
+}
+
 /// Aggregated token/request totals.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageTotals {
@@ -1648,26 +1667,73 @@ impl Store {
     }
 
     /// Per-provider cost sums with their currency (dashboard by-provider
-    /// breakdown needs the split before converting to the preferred currency).
+    /// breakdown needs the split before converting to the preferred currency),
+    /// each beside what the same rows would have cost off-peak.
+    ///
+    /// `cost_off_peak` is written equal to `cost` for a model with no schedule,
+    /// so the difference is the premium paid for running at peak times and
+    /// nothing else — which is what makes it a sum over every priced row rather
+    /// than a second query with its own row set.
     pub fn usage_cost_by_provider(
         &self,
         agent: Option<&str>,
         since: Option<&str>,
-    ) -> Result<Vec<(String, Option<String>, f64)>> {
+    ) -> Result<Vec<ProviderCostBucket>> {
         let (cond, params) = Self::usage_filters(agent, None, since);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
-            "SELECT provider_id, cost_currency, SUM(cost) FROM usage
+            "SELECT provider_id, cost_currency, SUM(cost), SUM(cost_off_peak) FROM usage
              WHERE 1=1{cond} AND cost IS NOT NULL
              GROUP BY provider_id, cost_currency",
         ))?;
         let mut out = Vec::new();
         let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, f64>(2)?,
-            ))
+            let cost: f64 = row.get(2)?;
+            // A NULL sum means no row here carries an off-peak figure — rows an
+            // older gateway wrote into a v13 database. Reading that as "what you
+            // paid" states no premium, which is the honest answer; reading it as
+            // 0 would report the whole cost as one.
+            Ok(ProviderCostBucket {
+                provider_id: row.get(0)?,
+                currency: row.get(1)?,
+                cost,
+                cost_off_peak: row.get::<_, Option<f64>>(3)?.unwrap_or(cost),
+            })
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// [`Self::usage_cost_by_currency`] with the off-peak sum beside it.
+    ///
+    /// A sibling rather than two more columns on that method: it has seven
+    /// callers — a spending-limit evaluation and three tests among them — and
+    /// none of them asked for this.
+    pub fn usage_cost_with_off_peak_by_currency(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<CostBucket>> {
+        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT cost_currency, SUM(cost), SUM(cost_off_peak) FROM usage
+             WHERE 1=1{cond} AND cost IS NOT NULL
+             GROUP BY cost_currency",
+        ))?;
+        let mut out = Vec::new();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            let cost: f64 = row.get(1)?;
+            Ok(CostBucket {
+                currency: row.get(0)?,
+                cost,
+                // See `usage_cost_by_provider`: an absent sum is "no premium",
+                // not "the whole cost was one".
+                cost_off_peak: row.get::<_, Option<f64>>(2)?.unwrap_or(cost),
+            })
         })?;
         for row in rows {
             out.push(row?);

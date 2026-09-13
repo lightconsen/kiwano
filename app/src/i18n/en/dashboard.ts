@@ -17,6 +17,12 @@ export const dashboard = {
   statEstCost: "Est. cost",
   statAvgLatency: "Avg latency",
   atHubPrice: "at Hub price",
+  /** The peak premium under the cost stat, shown only when there is one. Not a
+      "saving": it prices the window's own tokens at the same rows' off-peak
+      rate, which is the discount a caller who ran at peak did not get. */
+  offPeakPremium: "peak premium",
+  offPeakPremiumTitle:
+    "What this window's tokens would have cost at their rows' off-peak rates. Zero when nothing you used publishes a time-of-day price, and zero when you were already off-peak.",
   tokensInOut: "in {input} / out {output}",
   /** Hover text on the tokens total; the cache-hit tier bills at 1/10. */
   tokensTitle: "in {input} (cache hits {cache}, billed at 1/10) · out {output}",

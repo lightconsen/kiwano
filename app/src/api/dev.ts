@@ -401,6 +401,9 @@ const dashboard7d: DashboardData = {
   cache_read_tokens: 4_300_000,
   output_tokens: 1_300_000,
   cost: 46.2,
+  // DeepSeek's rows carry a peak/off-peak schedule, so ¥3.1 of that was the
+  // premium for running at peak times — the Dashboard's one non-zero case.
+  cost_off_peak: 43.1,
   latency_ms: 1200,
   latency_delta_pct: 9,
   trend: [
@@ -413,15 +416,15 @@ const dashboard7d: DashboardData = {
     { date: "09-07", requests: 254, tokens: 1_600_000 },
   ],
   by_provider: [
-    { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", requests: 731, pct: 62, cost: 28.6 },
-    { id: "kimi", name: "Kimi", color: "#555555", requests: 271, pct: 23, cost: 10.9 },
-    { id: "glm", name: "GLM", color: "#3859FF", requests: 177, pct: 15, cost: 6.7 },
+    { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", requests: 731, pct: 62, cost: 28.6, cost_off_peak: 25.5 },
+    { id: "kimi", name: "Kimi", color: "#555555", requests: 271, pct: 23, cost: 10.9, cost_off_peak: 10.9 },
+    { id: "glm", name: "GLM", color: "#3859FF", requests: 177, pct: 15, cost: 6.7, cost_off_peak: 6.7 },
   ],
   by_agent: [
-    { agent: "claude", label: "Claude Code", requests: 943, tokens: "6.2M", cost: 33.4 },
-    { agent: "codex", label: "Codex", requests: 264, tokens: "1.9M", cost: 9.8 },
-    { agent: "gemini", label: "Gemini CLI", requests: 77, tokens: "0.5M", cost: 3.0 },
-    { agent: "opencode", label: "OpenCode", requests: 12, tokens: "0.1M", cost: 0.4 },
+    { agent: "claude", label: "Claude Code", requests: 943, tokens: "6.2M", cost: 33.4, cost_off_peak: 31.2 },
+    { agent: "codex", label: "Codex", requests: 264, tokens: "1.9M", cost: 9.8, cost_off_peak: 9.3 },
+    { agent: "gemini", label: "Gemini CLI", requests: 77, tokens: "0.5M", cost: 3.0, cost_off_peak: 2.6 },
+    { agent: "opencode", label: "OpenCode", requests: 12, tokens: "0.1M", cost: 0.4, cost_off_peak: 0.4 },
   ],
   // getDashboard always derives the real option lists from by_provider/by_agent
   filter_providers: [],
@@ -438,6 +441,7 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
     cache_read_tokens: 900_000,
     output_tokens: 300_000,
     cost: 10.8,
+    cost_off_peak: 9.6,
     latency_ms: 1100,
     latency_delta_pct: 3,
     trend: [
@@ -450,14 +454,14 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
       { date: "20:00", requests: 32, tokens: 200_000 },
     ],
     by_provider: [
-      { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", requests: 224, pct: 78, cost: 8.4 },
-      { id: "kimi", name: "Kimi", color: "#555555", requests: 64, pct: 22, cost: 2.4 },
+      { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", requests: 224, pct: 78, cost: 8.4, cost_off_peak: 7.6 },
+      { id: "kimi", name: "Kimi", color: "#555555", requests: 64, pct: 22, cost: 2.4, cost_off_peak: 2.4 },
     ],
     by_agent: [
-      { agent: "claude", label: "Claude Code", requests: 201, tokens: "1.5M", cost: 8.1 },
-      { agent: "codex", label: "Codex", requests: 66, tokens: "0.4M", cost: 2.3 },
-      { agent: "gemini", label: "Gemini CLI", requests: 17, tokens: "0.1M", cost: 0.4 },
-      { agent: "opencode", label: "OpenCode", requests: 4, tokens: "0.02M", cost: 0.1 },
+      { agent: "claude", label: "Claude Code", requests: 201, tokens: "1.5M", cost: 8.1, cost_off_peak: 8.1 },
+      { agent: "codex", label: "Codex", requests: 66, tokens: "0.4M", cost: 2.3, cost_off_peak: 2.3 },
+      { agent: "gemini", label: "Gemini CLI", requests: 17, tokens: "0.1M", cost: 0.4, cost_off_peak: 0.4 },
+      { agent: "opencode", label: "OpenCode", requests: 4, tokens: "0.02M", cost: 0.1, cost_off_peak: 0.1 },
     ],
   },
   "7d": dashboard7d,
@@ -470,6 +474,7 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
     cache_read_tokens: 19_400_000,
     output_tokens: 5_900_000,
     cost: 203.5,
+    cost_off_peak: 191.4,
     latency_ms: 1300,
     latency_delta_pct: 5,
     trend: [

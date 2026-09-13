@@ -332,6 +332,10 @@ export interface DashboardData {
   cache_read_tokens: number;
   output_tokens: number;
   cost: number;
+  /** The peak premium: what these requests would have cost had they all run at
+      their rows' off-peak rates. 0 when nothing in the window is tiered, and 0
+      (correctly) for traffic that was already off-peak. */
+  cost_off_peak: number;
   latency_ms: number;
   latency_delta_pct: number;
   trend: TrendPoint[];
@@ -342,8 +346,19 @@ export interface DashboardData {
     requests: number;
     pct: number;
     cost: number;
+    /** The peak premium: what these requests would have cost had they all run at
+            their rows' off-peak rates. 0 when nothing in the window is tiered, and 0
+            (correctly) for traffic that was already off-peak. */
+    cost_off_peak: number;
   }[];
-  by_agent: { agent: AgentId; label: string; requests: number; tokens: string; cost: number }[];
+  by_agent: {
+    agent: AgentId;
+    label: string;
+    requests: number;
+    tokens: string;
+    cost: number;
+    cost_off_peak: number;
+  }[];
   /** Filter select options: providers/agents with traffic in the window,
       computed independent of the active filter */
   filter_providers: { id: string; label: string }[];

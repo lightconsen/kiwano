@@ -12,6 +12,9 @@ export const dashboard = {
   statEstCost: "预估费用",
   statAvgLatency: "平均延迟",
   atHubPrice: "按 Hub 价格",
+  offPeakPremium: "峰时溢价",
+  offPeakPremiumTitle:
+    "这个窗口的 token 若按各行的谷时价计费会是多少。用的模型没有峰谷价时为 0;本来就在谷时也为 0。",
   tokensInOut: "输入 {input} / 输出 {output}",
   tokensTitle: "输入 {input}（缓存命中 {cache}，按 1/10 计费）· 输出 {output}",
 

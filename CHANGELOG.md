@@ -21,6 +21,14 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **The Models shelf prices in the provider's currency.** It converted every
+  rate into the display currency from Settings, which turned a published figure
+  into a derived one that moved with a preference and hid what the provider
+  actually charges. Prices now show as published — `$0.27 / $1.10`, not
+  `¥1.92 / ¥7.81` — and a group's price range is shown only when the rates it
+  covers are in one currency. The display currency is the Dashboard's, where
+  rolling mixed figures into a single number is the point.
+
 - **The Models shelf's Category column is an icon.** A shield for official,
   layers for aggregate, boxes for third-party, a gift for the free tier — the
   glyphs the filter chips already carry, which is what makes an icon enough:

@@ -20,7 +20,7 @@ import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
-import { convertAmount, fmtMoney } from "../lib/format";
+import { fmtMoney } from "../lib/format";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 
 /** The glyph each category wears, in the table and in the chip that filters for
@@ -175,11 +175,6 @@ function ProtoChip({ protocol, t }: { protocol: Protocol; t: Translate }) {
   );
 }
 
-/** The currency to price in, and the rates to get there. An empty rate table
-    converts nothing, which is also `convertAmount`'s behaviour for a code it
-    has no rate for. */
-type Money = { rates: Record<string, number>; to: string };
-
 const SORT_KEYS = ["name", "protocol", "tag", "billing", "price"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 type Sort = { key: SortKey; dir: 1 | -1 };
@@ -197,34 +192,39 @@ function parseSort(v: string | null | undefined): Sort | null {
 
 const formatSort = (s: Sort | null): string | null => (s ? `${s.key}:${s.dir}` : null);
 
-/** The comparable price of an entry: the representative model's input rate, in
-    the display currency. null means no price is published at all. */
-function priceValue(e: CatalogEntry, money: Money): number | null {
+/** The comparable price of an entry: the representative model's input rate, as
+    published. null means no price is published at all. */
+function priceValue(e: CatalogEntry): number | null {
   const p = e.price_ref;
   if (!p) return null;
   const n = Number(p.input);
-  return Number.isFinite(n) ? convertAmount(n, p.currency || "USD", money.to, money.rates) : null;
+  return Number.isFinite(n) ? n : null;
 }
 
 /** The price cell: the representative model's name and its in/out rates, or the
-    provider's one-line description when it prices no model at all. */
-function priceText(e: CatalogEntry, money: Money): string {
+    provider's one-line description when it prices no model at all.
+
+    The rates stay in the currency the entry publishes them in. Converting them
+    would show a derived number that moves with a Settings choice and hides what
+    the provider charges — the display currency is the Dashboard's, and the
+    price a reader compares across providers has to be the price they pay. */
+function priceText(e: CatalogEntry): string {
   const p = e.price_ref;
   if (!p) return e.desc ?? "";
   const inRate = Number(p.input);
   const outRate = Number(p.output);
   if (!Number.isFinite(inRate) || !Number.isFinite(outRate)) return e.desc ?? "";
   const cur = p.currency || "USD";
-  const conv = (n: number) => fmtMoney(convertAmount(n, cur, money.to, money.rates), money.to);
-  return `${p.display_name} · ${conv(inRate)} / ${conv(outRate)}`;
+  const fmt = (n: number) => fmtMoney(n, cur);
+  return `${p.display_name} · ${fmt(inRate)} / ${fmt(outRate)}`;
 }
 
 /** The price cell's text. A plan provider is bought rather than metered, so its
     `desc` leads — "from ¥49 /mo" is what the reader would actually pay — and
     the rates after it say what the same models cost per token. For every other
     billing mode the two are the same sentence, and this is `priceText`. */
-function rowPriceText(e: CatalogEntry, money: Money): string {
-  const rate = priceText(e, money);
+function rowPriceText(e: CatalogEntry): string {
+  const rate = priceText(e);
   if (e.billing !== "plan") return rate;
   const offer = e.desc ?? "";
   // Equal when the entry prices no model and `desc` is all there is.
@@ -358,13 +358,13 @@ function compare(key: Exclude<SortKey, "price">, a: CatalogEntry, b: CatalogEntr
     chosen). Sorting by price needs the currency conversion, and a row with no
     published price has no place in a price ordering — it stays last whichever
     way the arrow points, rather than the arrow flipping it to the top. */
-function orderRows(rows: CatalogEntry[], sort: Sort | null, money: Money): CatalogEntry[] {
+function orderRows(rows: CatalogEntry[], sort: Sort | null): CatalogEntry[] {
   if (!sort) return [...rows].sort(byTagRank);
   // Destructured so the narrowing survives into the comparator closure.
   const { key, dir } = sort;
   if (key !== "price") return [...rows].sort((a, b) => compare(key, a, b) * dir);
   return rows
-    .map((e) => ({ e, p: priceValue(e, money) }))
+    .map((e) => ({ e, p: priceValue(e) }))
     .sort((a, b) => {
       if (a.p === null || b.p === null) {
         if (a.p === null && b.p === null) return byTagRank(a.e, b.e);
@@ -424,9 +424,12 @@ type ModelGroup = {
   model: string;
   name: string;
   rows: ModelGroupRow[];
-  /** The priced rows' input rates, formatted and cheapest first: the header's
-      count and its range. */
+  /** The priced rows' input rates, formatted and cheapest first — the header's
+      count. */
   prices: string[];
+  /** `min – max`, only when the priced rows share a currency and disagree; null
+      otherwise (a range across currencies compares units). */
+  range: string | null;
 };
 
 /** The name a group is shown under: the display name its priced rows agree on,
@@ -456,7 +459,7 @@ function groupName(entries: CatalogEntry[], model: string): string {
     a comparison — unless something is being searched, in which case a single
     row is the answer that was asked for. Rows are built after the chip filter,
     so a group whose providers are all filtered out is simply absent. */
-function buildModelGroups(entries: CatalogEntry[], money: Money, query: string): ModelGroup[] {
+function buildModelGroups(entries: CatalogEntry[], query: string): ModelGroup[] {
   const q = query.trim().toLowerCase();
   const byModel = new Map<string, CatalogEntry[]>();
   for (const e of entries) {
@@ -482,10 +485,8 @@ function buildModelGroups(entries: CatalogEntry[], money: Money, query: string):
       )
       .map((e) => {
         const rate = modelRate(e, model);
-        const converted = rate
-          ? convertAmount(Number(rate.input), rate.currency || "USD", money.to, money.rates)
-          : null;
-        return { entry: e, rate, value: converted !== null && Number.isFinite(converted) ? converted : null };
+        const published = rate ? Number(rate.input) : null;
+        return { entry: e, rate, value: published !== null && Number.isFinite(published) ? published : null };
       })
       .sort((a, b) => {
         if (a.value === null || b.value === null) {
@@ -495,17 +496,16 @@ function buildModelGroups(entries: CatalogEntry[], money: Money, query: string):
         return a.value - b.value || byTagRank(a.entry, b.entry);
       });
     if (rows.length < (q === "" ? 2 : 1)) continue;
-    const prices = rows.flatMap((r) =>
-      r.rate
-        ? [
-            fmtMoney(
-              convertAmount(Number(r.rate.input), r.rate.currency || "USD", money.to, money.rates),
-              money.to,
-            ),
-          ]
-        : [],
-    );
-    groups.push({ model, name, rows, prices });
+    // Each rate in the currency it is published in, and a range only when they
+    // are all in the same one: `$1 – ¥8` would be a comparison of units.
+    const priced = rows.flatMap((r) => (r.rate ? [r.rate] : []));
+    const prices = priced.map((rate) => fmtMoney(Number(rate.input), rate.currency || "USD"));
+    const currencies = new Set(priced.map((rate) => rate.currency || "USD"));
+    const range =
+      prices.length > 1 && currencies.size === 1 && new Set(prices).size > 1
+        ? `${prices[0]} – ${prices[prices.length - 1]}`
+        : null;
+    groups.push({ model, name, rows, prices, range });
   }
 
   // Priced groups first, then the widest, then by name: with today's data two
@@ -523,27 +523,18 @@ function buildModelGroups(entries: CatalogEntry[], money: Money, query: string):
     (the group header has it) and without a plan provider's offer — "from ¥49
     /mo" is a price for the provider, and ranking it beside per-token rates
     would compare two different things. */
-function groupPriceText(rate: ModelGroupRow["rate"], money: Money, t: Translate): string {
+function groupPriceText(rate: ModelGroupRow["rate"], t: Translate): string {
   if (!rate) return t("common.none");
   const inRate = Number(rate.input);
   const outRate = Number(rate.output);
   if (!Number.isFinite(inRate) || !Number.isFinite(outRate)) return t("common.none");
-  const conv = (n: number) => fmtMoney(convertAmount(n, rate.currency || "USD", money.to, money.rates), money.to);
-  return `${conv(inRate)} / ${conv(outRate)}`;
-}
-
-/** The header's price range, shown only when the rows disagree: equal prices
-    are already stated by every row below, and `¥36 – ¥36` is noise. Compared as
-    formatted strings, so two currencies that print alike count as equal. */
-function groupPriceRange(g: ModelGroup): string | null {
-  if (new Set(g.prices).size < 2) return null;
-  return `${g.prices[0]} – ${g.prices[g.prices.length - 1]}`;
+  const cur = rate.currency || "USD";
+  return `${fmtMoney(inRate, cur)} / ${fmtMoney(outRate, cur)}`;
 }
 
 function Row({
   entry,
   hubUrl,
-  money,
   onAdd,
   onOpen,
   modelId,
@@ -551,7 +542,6 @@ function Row({
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
-  money: Money;
   onAdd: (e: CatalogEntry) => void;
   onOpen: (e: CatalogEntry) => void;
   /** Set by the grouped view: the model whose group this row sits in. It is the
@@ -565,8 +555,8 @@ function Row({
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
   const price = modelId
-    ? groupPriceText(modelRate(entry, modelId), money, t)
-    : rowPriceText(entry, money);
+    ? groupPriceText(modelRate(entry, modelId), t)
+    : rowPriceText(entry);
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className={`py-2 ${indent ? "pl-10" : "pl-4"} pr-2`}>
@@ -626,19 +616,17 @@ function Row({
 function DetailDialog({
   entry,
   hubUrl,
-  money,
   onClose,
   onAdd,
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
-  money: Money;
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
-  const price = priceText(entry, money);
+  const price = priceText(entry);
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),
@@ -713,7 +701,6 @@ function DetailDialog({
 function useShelfPrefs() {
   const [sort, setSort] = useState<Sort | null>(null);
   const [view, setView] = useState<ShelfView>("provider");
-  const [money, setMoney] = useState<Money>({ rates: {}, to: "USD" });
   useEffect(() => {
     let alive = true;
     api
@@ -723,10 +710,6 @@ function useShelfPrefs() {
         setSort(parseSort(s.shelf_sort));
         setView(parseView(s.shelf_view));
       })
-      .catch(() => {});
-    api
-      .getCurrencyMeta()
-      .then((m) => alive && setMoney({ rates: m.exchange_rates, to: m.preferred }))
       .catch(() => {});
     return () => {
       alive = false;
@@ -743,13 +726,13 @@ function useShelfPrefs() {
     setView(v);
     api.updateSettings({ shelf_view: v }).catch(() => {});
   };
-  return { sort, money, view, remember, rememberView };
+  return { sort, view, remember, rememberView };
 }
 
 export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void }) {
   const t = useT();
   const hubUrl = useHubUrl();
-  const { sort, money, view, remember, rememberView } = useShelfPrefs();
+  const { sort, view, remember, rememberView } = useShelfPrefs();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
   const [query, setQuery] = useState("");
@@ -806,10 +789,10 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     // Added (or connected) providers pin to the top of any ordering — they are
     // the ones already wired into the local setup. The sort is stable, so a
     // picked column keeps its order inside each group.
-    return orderRows(rows, sort, money).sort((a, b) => Number(b.added) - Number(a.added));
-  }, [chipRows, query, sort, money]);
+    return orderRows(rows, sort).sort((a, b) => Number(b.added) - Number(a.added));
+  }, [chipRows, query, sort]);
 
-  const groups = useMemo(() => buildModelGroups(chipRows, money, query), [chipRows, money, query]);
+  const groups = useMemo(() => buildModelGroups(chipRows, query), [chipRows, query]);
 
   // Collapsed models, by id. Held here rather than in the group rows because a
   // group is a <tbody>, not a component — and deliberately not persisted: it is
@@ -959,7 +942,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         {view === "provider" ? (
           <tbody>
             {filtered.map((e) => (
-              <Row key={e.id} entry={e} hubUrl={hubUrl} money={money} onAdd={onAdd} onOpen={setDetail} />
+              <Row key={e.id} entry={e} hubUrl={hubUrl} onAdd={onAdd} onOpen={setDetail} />
             ))}
             {filtered.length === 0 && (
               <tr>
@@ -972,7 +955,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         ) : (
           <>
             {orderedGroups.map((g) => {
-              const range = groupPriceRange(g);
+              const range = g.range;
               const open = !collapsed.has(g.model);
               return (
                 <tbody key={g.model}>
@@ -1024,7 +1007,6 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
                         key={r.entry.id}
                         entry={r.entry}
                         hubUrl={hubUrl}
-                        money={money}
                         onAdd={onAdd}
                         onOpen={setDetail}
                         modelId={g.model}
@@ -1050,7 +1032,6 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         <DetailDialog
           entry={detail}
           hubUrl={hubUrl}
-          money={money}
           onClose={() => setDetail(null)}
           onAdd={(e) => {
             setDetail(null);

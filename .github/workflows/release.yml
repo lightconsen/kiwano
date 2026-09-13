@@ -789,6 +789,13 @@ jobs:
           tar tzf "dist-cli/kiwano-$triple.tar.gz" | grep -q '^\./kiwano-gateway' \
             || { echo "::error::the server bundle has no kiwano-gateway"; exit 1; }
 
+          # The digest install.sh checks against when GitHub is unreachable.
+          # Per-platform on purpose: all four legs write to the same mirror
+          # prefix, and one shared SHA256SUMS would be four uploads racing to
+          # overwrite each other with a file describing one platform.
+          ( cd dist-cli && sha256sum "kiwano-$triple.tar.gz" > "kiwano-$triple.sha256" )
+          cat "dist-cli/kiwano-$triple.sha256"
+
       - name: Upload the server bundle
         shell: bash
         env:
@@ -835,7 +842,8 @@ jobs:
           find "$bundle" dist-cli -type f \
             \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
-               -o -name '*.exe' -o -name '*.msi' \) -exec cp {} mirror/ \;
+               -o -name '*.exe' -o -name '*.msi' -o -name '*.sha256' \) \
+            -exec cp {} mirror/ \;
 
           # Drop the version from every name (Kiwano_0.1.2_x64.dmg →
           # Kiwano_x64.dmg; rpms spell it Kiwano-0.1.2-1.<arch>.rpm), then tag
@@ -998,6 +1006,32 @@ jobs:
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
         run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress
+
+      # `https://hub.kiwano.cc/install.sh` — the one-command server install.
+      #
+      # At the bucket root rather than under releases/, which is where the
+      # artifacts live: this is not an artifact, it is the way to get them, and
+      # it is the URL people type.
+      #
+      # Published here, from the job that runs once and only on a real release,
+      # for two reasons. Four legs run the artifact mirror in parallel and would
+      # each upload this file; and a rehearsal tag must not replace the script
+      # every existing user's next install will fetch.
+      #
+      # Content type is set explicitly: S3 defaults to binary, and a shell
+      # script served as application/octet-stream still pipes into `sh` fine but
+      # reads as a download in a browser.
+      - name: Publish the installer
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
+        run: >-
+          aws s3 cp packaging/install.sh s3://kiwano-hub/install.sh
+          --content-type 'text/x-shellscript; charset=utf-8'
+          --cache-control 'public, max-age=300'
+          --no-progress
 
   # No human in the loop: publishing is a tag push and nothing else.
   #

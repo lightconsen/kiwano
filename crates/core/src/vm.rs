@@ -2475,16 +2475,20 @@ pub struct UsageAlertVm {
     pub unit: String,
 }
 
-/// Check whether enabled providers' usage this period has reached the
-/// user-set per-period limit (period_limit). Hits not yet notified this
-/// period are recorded under a dedup key and returned (the frontend turns
-/// them into system notifications).
+/// Alerts for providers that have spent their allowance, which the frontend
+/// turns into system notifications.
 ///
-/// Notification only — `enforce_amount_limits` is what acts on it, and runs
+/// Two ways to be over, and both are raised here: an **amount** limit
+/// (`period_limit` — requests, tokens, or the provider's own currency) and a
+/// **plan window** ceiling (`plan_limits`, measured against what the provider's
+/// endpoint reports). Both are read through `kiwanod::limits`, the same code the
+/// gateway enforces with, so a notice can never describe a different number from
+/// the block.
+///
+/// Notification only — the acting half is `kiwanod::limits::evaluate`, which runs
 /// whether or not the user wants to be told.
-/// Alerts for providers that have spent their period allowance.
 ///
-/// `mark` controls the once-per-period dedup write. The app passes `true` — it
+/// `mark` controls the once-per-identity dedup write. The app passes `true` — it
 /// raises one notification per provider per reset period, and recording that is
 /// the point of the key. A read-only caller passes `false`, because consuming
 /// the dedup would suppress the notification the app is about to raise: a

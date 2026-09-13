@@ -822,15 +822,61 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
       return next;
     });
 
+  /** The grouped body under the current sort.
+      The columns describe *rows* — a protocol, a category, a billing mode are
+      the provider's — so a click orders the providers inside every group. Two
+      of them also say something about a group, and those order the groups
+      themselves: a name sort makes the model list itself alphabetical, and a
+      price sort puts the models with the cheapest entry point first. The other
+      columns leave the groups in `buildModelGroups`' order, because a group of
+      providers has no single protocol or category to sort by.
+      Without a sort, groups keep that order and rows stay cheapest first — the
+      reading this view exists for. */
+  const orderedGroups = useMemo(() => {
+    if (!sort) return groups;
+    // Destructured so the narrowing survives into the comparator closures.
+    const { key, dir } = sort;
+    const rowCmp = (a: ModelGroupRow, b: ModelGroupRow): number => {
+      if (key === "price") {
+        // A row with no price has no place in a price ordering: last, whichever
+        // way the arrow points — "no price" is a category, not the cheapest one.
+        if (a.value === null || b.value === null) {
+          if (a.value === null && b.value === null) return byTagRank(a.entry, b.entry);
+          return a.value === null ? 1 : -1;
+        }
+        return (a.value - b.value) * dir;
+      }
+      return compare(key, a.entry, b.entry) * dir;
+    };
+    const cheapest = (g: ModelGroup) =>
+      g.rows.reduce((min, r) => (r.value !== null && r.value < min ? r.value : min), Number.POSITIVE_INFINITY);
+    const groupCmp = (a: ModelGroup, b: ModelGroup): number => {
+      if (key === "name") return a.name.localeCompare(b.name) * dir;
+      if (key === "price") {
+        const av = cheapest(a);
+        const bv = cheapest(b);
+        // Same rule as a row: a group nobody prices goes last both ways rather
+        // than reading as free. `Infinity - Infinity` is NaN, hence the guards.
+        if (!Number.isFinite(av) || !Number.isFinite(bv)) {
+          return Number.isFinite(av) ? -1 : Number.isFinite(bv) ? 1 : 0;
+        }
+        return (av - bv) * dir;
+      }
+      return 0; // the group order is the grouping's own
+    };
+    // `sort` is stable, so the groups this comparator cannot order stay in the
+    // order the grouping built.
+    return [...groups]
+      .sort(groupCmp)
+      .map((g) => ({ ...g, rows: [...g.rows].sort(rowCmp) }));
+  }, [groups, sort]);
+
   if (!catalog)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
   // Three-state: ascending → descending → back to the default order.
   const toggleSort = (key: SortKey) =>
     remember(sort?.key === key ? (sort.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 });
-
-  // The grouped view fixes its own order (cheapest first within a model).
-  const sortable = view === "provider";
 
   /** An empty catalog is not a failed search: there is no bundled fallback any
       more, so a machine that has never synced sees that message instead — and
@@ -919,13 +965,11 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
             {COLUMNS.map((c) => (
               <th
                 key={c.labelKey}
-                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${sortable && c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.labelKey === "shelf.colActions" ? "pr-4" : ""}`}
-                onClick={sortable && c.key ? () => toggleSort(c.key!) : undefined}
+                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.labelKey === "shelf.colActions" ? "pr-4" : ""}`}
+                onClick={c.key ? () => toggleSort(c.key!) : undefined}
               >
                 {t(c.labelKey)}
-                {/* The grouped view fixes its own order, so an arrow here would
-                    point at something the click cannot do. */}
-                {sortable && sort?.key === c.key && (
+                {sort?.key === c.key && (
                   <span className="ml-0.5 text-[9px]">{sort.dir === 1 ? "▲" : "▼"}</span>
                 )}
               </th>
@@ -947,7 +991,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           </tbody>
         ) : (
           <>
-            {groups.map((g) => {
+            {orderedGroups.map((g) => {
               const range = groupPriceRange(g);
               const open = !collapsed.has(g.model);
               return (

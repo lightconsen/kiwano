@@ -805,9 +805,17 @@ jobs:
           # A bundle whose client cannot print its own version is not one worth
           # shipping, and a version that disagrees with the tag means something
           # in the version plumbing is wrong.
+          #
+          # Compared against the tag's *release* version, not the tag. A
+          # rehearsal tag names the release it rehearses and carries a suffix
+          # (`v0.1.9-rc.1` against a tree whose version is `0.1.9`), so comparing
+          # the raw tag fails every rehearsal — and fails it *here*, before the
+          # bundle checks below, which are exactly what a rehearsal exists to run.
           ./dist-cli/pkg/kiwano$exe --version
           built=$(./dist-cli/pkg/kiwano$exe --version | awk '{print $NF}')
-          [ "$built" = "${GITHUB_REF_NAME#v}" ] \
+          expected="${GITHUB_REF_NAME#v}"
+          expected="${expected%%-*}"
+          [ "$built" = "$expected" ] \
             || { echo "::error::kiwano --version says $built, the tag is $GITHUB_REF_NAME"; exit 1; }
 
           # And the daemon has to be in there: the bundle is useless without it,

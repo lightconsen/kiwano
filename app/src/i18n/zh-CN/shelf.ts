@@ -39,7 +39,6 @@ export const shelf = {
   connect: "+ 连接",
   add: "+ 添加",
 
-  fromHub: "来自 Kiwano Hub · {n} 个 Provider",
   searchPlaceholder: "搜索 Provider…",
   refreshAria: "从 Hub 刷新",
   refreshTitle: "从 Kiwano Hub 获取最新目录",

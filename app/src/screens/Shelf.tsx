@@ -819,10 +819,10 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   return (
     <section>
       <div className="sticky top-0 z-20 flex h-11 items-center gap-2 border-b border-line bg-bg px-4">
-        <span className="text-[12px] text-mut">
-          {t("shelf.fromHub", { n: catalog.total })}
-        </span>
-        <div className="ml-3 flex gap-1.5">
+        {/* No "From Kiwano Hub · N providers" line: the refresh button beside
+            the search already says where the list comes from, and the count was
+            a width the chips and the view toggle can use. */}
+        <div className="flex gap-1.5">
           {CHIPS.map((c) => {
             // The chip's glyph is the tag's own, so the filter and the badge in
             // the column below can never drift apart.

@@ -52,7 +52,6 @@ export const shelf = {
   connect: "+ Connect",
   add: "+ Add",
 
-  fromHub: "From Kiwano Hub · {n} providers",
   searchPlaceholder: "Search providers…",
   refreshAria: "Refresh from Hub",
   refreshTitle: "Fetch the latest catalog from Kiwano Hub",

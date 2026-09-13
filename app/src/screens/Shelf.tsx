@@ -110,9 +110,6 @@ const BILLING_LABEL: Record<Billing, KeyPath<Messages>> = {
   unl: "shelf.billingUnl",
 };
 
-/** Sort order for the billing column — see `compare`. */
-const BILLING_RANK: Record<Billing, number> = { plan: 0, payg: 1, unl: 2 };
-
 /** Hub catalogs may carry a billing tag this build predates: show the raw
     tag rather than a blank cell. */
 function billingLabel(billing: Billing, t: Translate): string {
@@ -175,7 +172,7 @@ function ProtoChip({ protocol, t }: { protocol: Protocol; t: Translate }) {
   );
 }
 
-const SORT_KEYS = ["name", "protocol", "tag", "billing", "price"] as const;
+const SORT_KEYS = ["name", "price"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 type Sort = { key: SortKey; dir: 1 | -1 };
 
@@ -320,9 +317,9 @@ function EndpointCard({ protocol, endpoint, models }: { protocol: Protocol; endp
 
 const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: string }[] = [
   { key: "name", labelKey: "shelf.colName", className: "w-[150px]" },
-  { key: "protocol", labelKey: "shelf.colProtocol", className: "w-[72px]" },
-  { key: "tag", labelKey: "shelf.colCategory", className: "w-[48px]" },
-  { key: "billing", labelKey: "shelf.colBilling", className: "w-[104px]" },
+  { key: null, labelKey: "shelf.colProtocol", className: "w-[72px]" },
+  { key: null, labelKey: "shelf.colCategory", className: "w-[48px]" },
+  { key: null, labelKey: "shelf.colBilling", className: "w-[104px]" },
   { key: "price", labelKey: "shelf.colPrice", className: "" },
   { key: null, labelKey: "shelf.colActions", className: "w-[70px] text-right" },
 ];
@@ -335,25 +332,6 @@ const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: st
 const byTagRank = (a: CatalogEntry, b: CatalogEntry): number =>
   TAG_RANK[a.tag] - TAG_RANK[b.tag] || a.name.localeCompare(b.name);
 
-function compare(key: Exclude<SortKey, "price">, a: CatalogEntry, b: CatalogEntry): number {
-  switch (key) {
-    case "name":
-      return a.name.localeCompare(b.name);
-    case "protocol":
-      return a.protocol.localeCompare(b.protocol) || a.name.localeCompare(b.name);
-    case "tag":
-      return TAG_RANK[a.tag] - TAG_RANK[b.tag] || a.name.localeCompare(b.name);
-    case "billing":
-      // Ranked, not alphabetical: a subscription is the thing you decide to
-      // buy, so sorting this column gathers the plans at the top. A tag this
-      // build has never seen sorts last rather than into the middle.
-      return (
-        (BILLING_RANK[a.billing] ?? 9) - (BILLING_RANK[b.billing] ?? 9) ||
-        a.name.localeCompare(b.name)
-      );
-  }
-}
-
 /** Rows in the user's chosen order (or the default one when they have not
     chosen). Sorting by price needs the currency conversion, and a row with no
     published price has no place in a price ordering — it stays last whichever
@@ -362,7 +340,7 @@ function orderRows(rows: CatalogEntry[], sort: Sort | null): CatalogEntry[] {
   if (!sort) return [...rows].sort(byTagRank);
   // Destructured so the narrowing survives into the comparator closure.
   const { key, dir } = sort;
-  if (key !== "price") return [...rows].sort((a, b) => compare(key, a, b) * dir);
+  if (key !== "price") return [...rows].sort((a, b) => a.name.localeCompare(b.name) * dir);
   return rows
     .map((e) => ({ e, p: priceValue(e) }))
     .sort((a, b) => {
@@ -829,7 +807,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         }
         return (a.value - b.value) * dir;
       }
-      return compare(key, a.entry, b.entry) * dir;
+      return a.entry.name.localeCompare(b.entry.name) * dir;
     };
     return groups.map((g) => ({ ...g, rows: [...g.rows].sort(rowCmp) }));
   }, [groups, sort]);

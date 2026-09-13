@@ -1601,38 +1601,11 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     let vm_advanced = advanced_vm(&provider);
 
     for agent in &input.agents {
+        // "Save & Enable" → becomes the primary for the chosen agents.
         store
             .upsert_strategy(agent, StrategyType::Single, None)
             .map_err(e2s)?;
-        // "Save & Enable" → becomes the primary for the chosen agents; the
-        // previous primary is demoted to backup #1.
-        let prev = store.primary_provider_id(agent).map_err(e2s)?;
-        store
-            .upsert_binding(&Binding {
-                agent: agent.clone(),
-                provider_id: id.clone(),
-                priority: 0,
-                weight: 1,
-                win_start: None,
-                win_end: None,
-                enabled: true,
-            })
-            .map_err(e2s)?;
-        if let Some(prev) = prev {
-            if prev != id {
-                store
-                    .upsert_binding(&Binding {
-                        agent: agent.clone(),
-                        provider_id: prev,
-                        priority: 1,
-                        weight: 1,
-                        win_start: None,
-                        win_end: None,
-                        enabled: true,
-                    })
-                    .map_err(e2s)?;
-            }
-        }
+        bind_as_primary(store, agent, &id)?;
     }
     Ok(ProviderVm {
         id,
@@ -1677,37 +1650,53 @@ pub fn enable_provider(store: &Store, id: &str) -> Result<(), String> {
         })
         .collect();
     for agent in agents {
-        let mut others: Vec<String> = store
-            .bindings_for_agent(&agent)
-            .map_err(e2s)?
-            .into_iter()
-            .map(|b| b.provider_id)
-            .filter(|p| p != id)
-            .collect();
+        bind_as_primary(store, &agent, id)?;
+    }
+    Ok(())
+}
+
+/// Make `provider_id` the primary for `agent`: priority 0, every other binding
+/// reindexed after it in the order it already had.
+///
+/// The full reindex is the point. Demoting only the previous primary can leave
+/// two bindings claiming priority 1, and `bindings_for_agent` is
+/// priority-ordered — so the ambiguity would reach the strategy engine rather
+/// than stop here.
+///
+/// The one place that writes "this provider is now the primary". `add_provider`'s
+/// Save & Enable, `enable_provider`, `update_provider` and the CLI's
+/// `providers use` / `providers add --bind` all land here.
+pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
+    let mut others: Vec<String> = store
+        .bindings_for_agent(agent)
+        .map_err(e2s)?
+        .into_iter()
+        .map(|b| b.provider_id)
+        .filter(|p| p != provider_id)
+        .collect();
+    store
+        .upsert_binding(&Binding {
+            agent: agent.to_string(),
+            provider_id: provider_id.to_string(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .map_err(e2s)?;
+    for (i, p) in others.drain(..).enumerate() {
         store
             .upsert_binding(&Binding {
-                agent: agent.clone(),
-                provider_id: id.to_string(),
-                priority: 0,
+                agent: agent.to_string(),
+                provider_id: p,
+                priority: i as i64 + 1,
                 weight: 1,
                 win_start: None,
                 win_end: None,
                 enabled: true,
             })
             .map_err(e2s)?;
-        for (i, p) in others.drain(..).enumerate() {
-            store
-                .upsert_binding(&Binding {
-                    agent: agent.clone(),
-                    provider_id: p,
-                    priority: i as i64 + 1,
-                    weight: 1,
-                    win_start: None,
-                    win_end: None,
-                    enabled: true,
-                })
-                .map_err(e2s)?;
-        }
     }
     Ok(())
 }
@@ -1806,33 +1795,7 @@ pub fn update_provider(
         store
             .upsert_strategy(agent, StrategyType::Single, None)
             .map_err(e2s)?;
-        let prev = store.primary_provider_id(agent).map_err(e2s)?;
-        store
-            .upsert_binding(&Binding {
-                agent: agent.clone(),
-                provider_id: id.to_string(),
-                priority: 0,
-                weight: 1,
-                win_start: None,
-                win_end: None,
-                enabled: true,
-            })
-            .map_err(e2s)?;
-        if let Some(prev) = prev {
-            if prev != id {
-                store
-                    .upsert_binding(&Binding {
-                        agent: agent.clone(),
-                        provider_id: prev,
-                        priority: 1,
-                        weight: 1,
-                        win_start: None,
-                        win_end: None,
-                        enabled: true,
-                    })
-                    .map_err(e2s)?;
-            }
-        }
+        bind_as_primary(store, agent, id)?;
     }
 
     let vms = build_provider_vms(store, aux)?;

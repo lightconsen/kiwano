@@ -102,7 +102,7 @@ pub fn spawn() -> std::io::Result<Child> {
 /// else `~/.kiwano/kiwano.db`. The app sets no environment for the child, so
 /// the spawned gateway inherits `KIWANO_DB_PATH` and the two agree by
 /// construction.
-fn shared_db_path() -> PathBuf {
+pub fn default_db_path() -> PathBuf {
     if let Ok(p) = std::env::var("KIWANO_DB_PATH") {
         if !p.is_empty() {
             return PathBuf::from(p);
@@ -110,6 +110,17 @@ fn shared_db_path() -> PathBuf {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".kiwano").join("kiwano.db")
+}
+
+/// [`default_db_path`], unless the caller named one.
+///
+/// The CLI takes `--db`, the app does not; both then agree on the fallback
+/// because it is resolved here rather than in either front end.
+pub fn db_path(explicit: Option<&Path>) -> PathBuf {
+    match explicit {
+        Some(p) => p.to_path_buf(),
+        None => default_db_path(),
+    }
 }
 
 /// The admin plane endpoint this app and its gateway share.
@@ -120,12 +131,12 @@ fn shared_db_path() -> PathBuf {
 /// process's environment and derives the same default from the same file
 /// location.
 pub fn admin_endpoint() -> AdminEndpoint {
-    admin_endpoint_for(&shared_db_path())
+    admin_endpoint_for(&default_db_path())
 }
 
 /// [`admin_endpoint`] for an explicit database path.
 ///
-/// The CLI takes `--db`, so it cannot resolve through [`shared_db_path`]'s
+/// The CLI takes `--db`, so it cannot resolve through [`default_db_path`]'s
 /// environment lookup. The resolution is otherwise identical — the same
 /// [`AdminEndpoint::from_env`] on the same kind of path — which is what keeps
 /// two clients from disagreeing about where the plane is.
@@ -162,7 +173,7 @@ fn admin_token() -> Option<String> {
     if let Some(token) = CACHED.get() {
         return Some(token.clone());
     }
-    let token = admin_token_for(&shared_db_path())?;
+    let token = admin_token_for(&default_db_path())?;
     let _ = CACHED.set(token.clone());
     Some(token)
 }

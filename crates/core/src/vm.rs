@@ -762,7 +762,7 @@ fn billing_to_db(ui: &str) -> Result<Billing, String> {
     }
 }
 
-fn billing_to_ui(db: Billing) -> &'static str {
+pub fn billing_to_ui(db: Billing) -> &'static str {
     match db {
         Billing::Subscription => "plan",
         Billing::Unlimited => "unl",

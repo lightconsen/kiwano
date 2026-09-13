@@ -31,3 +31,21 @@ pub mod sidecar;
 pub mod sync;
 pub mod takeover;
 pub mod vm;
+
+/// Run a future to completion, for callers that are not async themselves.
+///
+/// [`sidecar`]'s endpoint probe and model listing are `async` because the
+/// gateway is, but the CLI is a straight-line program: it wants the answer, not
+/// a reactor. One current-thread runtime for the process, built on first use —
+/// these calls are a handful per invocation, and thread-per-call would be waste.
+pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build a current-thread runtime")
+        })
+        .block_on(future)
+}

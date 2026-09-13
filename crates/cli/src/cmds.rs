@@ -9,9 +9,12 @@ use std::collections::BTreeMap;
 use kiwano_core::detect;
 use kiwano_core::sidecar;
 use kiwano_core::vm;
-use kiwano_gateway::store::{StrategyType, UsageTotals};
+use kiwano_gateway::store::{Provider, StrategyType, UsageTotals};
+use kiwano_gateway::strategy::QuotaConfig;
 
-use crate::cli::{AddArgs, AgentsCmd, KeysCmd, ProvidersCmd, UsageArgs};
+use crate::cli::{
+    AddArgs, AgentsCmd, BindingCmd, EditArgs, KeysCmd, ProbeCmd, ProvidersCmd, RoutesCmd, UsageArgs,
+};
 use crate::output::{ellipsize, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
 
@@ -69,6 +72,9 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         ProvidersCmd::Add(args) => providers_add(args, ctx),
         ProvidersCmd::Use { provider_id, agent } => providers_use(ctx, provider_id, agent),
         ProvidersCmd::Remove { provider_id } => providers_remove(ctx, provider_id),
+        ProvidersCmd::Edit(args) => providers_edit(args, ctx),
+        ProvidersCmd::Enable { provider_id } => providers_enable(ctx, provider_id),
+        ProvidersCmd::Probe(cmd) => providers_probe(cmd, ctx),
     }
 }
 
@@ -127,6 +133,306 @@ fn providers_remove(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
     ctx.out.line(format!("removed {provider_id}"));
     ctx.after_mutation();
     Ok(())
+}
+
+/// Change a provider in place.
+///
+/// The id is stable across the edit, which is the reason this exists at all:
+/// bindings, rotating keys and usage rows all reference it, so remove-and-add
+/// is not the same operation.
+fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
+    let input = {
+        let store = ctx.store()?;
+        let current = store
+            .get_provider(&args.provider_id)
+            .map_err(runtime)?
+            .ok_or_else(|| runtime(format!("provider not found: {}", args.provider_id)))?;
+        edit_input(args, &current, store)?
+    };
+    let updated = {
+        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        vm::update_provider(store, aux, &args.provider_id, &input)?
+    };
+    let text = format!("updated {} ({})", updated.id, updated.name);
+    ctx.out.emit(&updated, || text);
+    ctx.after_mutation();
+    Ok(())
+}
+
+/// Rebuild a full `NewProviderInput` from the stored row plus whatever flags
+/// were given.
+///
+/// `update_provider` treats name, endpoint, protocol, billing and the endpoint
+/// list as authoritative rather than patch-shaped, so an edit that only sent the
+/// changed fields would blank the rest — including a plan provider's percent
+/// limits. Everything is therefore carried over explicitly, and only the flags
+/// present in `args` override.
+fn edit_input(
+    args: &EditArgs,
+    current: &Provider,
+    store: &kiwano_gateway::store::Store,
+) -> Result<vm::NewProviderInput, CliError> {
+    let billing = match &args.billing {
+        Some(raw) => parse_billing(raw)?.to_string(),
+        None => vm::billing_to_ui(current.billing).to_string(),
+    };
+    let protocol = match &args.protocol {
+        Some(raw) => parse_protocol(raw)?.to_string(),
+        None => current.protocol.as_str().to_string(),
+    };
+    let agents = if args.no_bind {
+        Vec::new()
+    } else if args.bind.is_empty() {
+        agents_bound_to(store, &args.provider_id)?
+    } else {
+        args.bind.clone()
+    };
+
+    let limit_value = args.limit.or(current.period_limit);
+    Ok(vm::NewProviderInput {
+        name: args.name.clone().unwrap_or_else(|| current.name.clone()),
+        // An empty key means "keep the stored one" in update_provider, so this
+        // is safe to leave blank when the flag is absent.
+        api_key: args.key.clone().unwrap_or_default(),
+        endpoint: args
+            .endpoint
+            .clone()
+            .unwrap_or_else(|| current.base_url.clone()),
+        protocol,
+        model_default: String::new(),
+        billing,
+        billing_config: vm::BillingConfigInput {
+            limit_value,
+            limit_unit: args.unit.clone().or_else(|| current.limit_unit.clone()),
+            reset_period: args.reset.clone().or_else(|| current.reset_period.clone()),
+            plan_limits: plan_limits_input(current.plan_limits.as_deref()),
+        },
+        agents,
+        endpoints: current
+            .endpoints
+            .iter()
+            .map(|e| vm::NewEndpointInput {
+                protocol: e.protocol.as_str().to_string(),
+                endpoint: e.base_url.clone(),
+            })
+            .collect(),
+        // Absent = keep, which is exactly what an edit that says nothing about
+        // advanced settings wants.
+        advanced: None,
+        plan_query: None,
+    })
+}
+
+/// `{"five_hour":20,"weekly":60}` (the stored shape) back into the input type.
+fn plan_limits_input(raw: Option<&str>) -> Option<vm::PlanLimitsInput> {
+    let v: serde_json::Value = serde_json::from_str(raw?).ok()?;
+    let number = |key: &str| v.get(key).and_then(|x| x.as_f64());
+    Some(vm::PlanLimitsInput {
+        five_hour: number("five_hour"),
+        weekly: number("weekly"),
+    })
+}
+
+fn providers_enable(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
+    let agents = {
+        let store = ctx.store()?;
+        let bound = agents_bound_to(store, provider_id)?;
+        if bound.is_empty() {
+            return Err(runtime(format!(
+                "provider {provider_id} is not bound to any agent; use `routes binding add` first"
+            )));
+        }
+        vm::enable_provider(store, provider_id)?;
+        bound
+    };
+    ctx.out.line(format!(
+        "{provider_id}: now the primary for {}",
+        agents.join(", ")
+    ));
+    ctx.after_mutation();
+    Ok(())
+}
+
+fn providers_probe(cmd: &ProbeCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        ProbeCmd::Latency { endpoint } => {
+            let latency_ms = sidecar::measure_latency(endpoint)?;
+            let payload = serde_json::json!({ "endpoint": endpoint, "latency_ms": latency_ms });
+            let text = format!("{latency_ms} ms");
+            ctx.out.emit(&payload, || text);
+            Ok(())
+        }
+        ProbeCmd::Endpoint {
+            protocol,
+            endpoint,
+            key,
+        } => {
+            // The probe speaks HTTP; the CLI does not, so drive the future on
+            // the shared runtime rather than making every command async.
+            let report =
+                kiwano_core::block_on(sidecar::probe_endpoint(protocol, endpoint, key.as_deref()))?;
+            let text = render_probe(&report);
+            ctx.out.emit(&report, || text);
+            Ok(())
+        }
+        ProbeCmd::Models {
+            protocol,
+            endpoint,
+            key,
+        } => {
+            let names = kiwano_core::block_on(sidecar::fetch_model_names(protocol, endpoint, key))?;
+            let text = names.join("\n");
+            ctx.out.emit(&names, || text);
+            Ok(())
+        }
+    }
+}
+
+// ── routes ──────────────────────────────────────────────────────────────────
+
+pub fn routes(cmd: &RoutesCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        RoutesCmd::List => {
+            let routes = {
+                let store = ctx.store()?;
+                vm::build_agent_routes(store)?
+            };
+            let text = render_routes(&routes);
+            ctx.out.emit(&routes, || text);
+            Ok(())
+        }
+        RoutesCmd::Strategy {
+            agent,
+            kind,
+            limit,
+            unit,
+        } => {
+            let config = strategy_config(kind, *limit, unit)?;
+            {
+                let store = ctx.store()?;
+                vm::set_agent_strategy(store, agent, kind, config.as_deref())?;
+            }
+            let detail = config.map(|c| format!(" ({c})")).unwrap_or_default();
+            ctx.out.line(format!("{agent}: strategy {kind}{detail}"));
+            ctx.after_mutation();
+            Ok(())
+        }
+        RoutesCmd::Reorder {
+            agent,
+            provider_ids,
+        } => {
+            {
+                let store = ctx.store()?;
+                vm::reorder_agent_bindings(store, agent, provider_ids)?;
+            }
+            ctx.out.line(format!(
+                "{agent}: {} candidates in the given order",
+                provider_ids.len()
+            ));
+            ctx.after_mutation();
+            Ok(())
+        }
+        RoutesCmd::Apply { from, to } => {
+            {
+                let store = ctx.store()?;
+                vm::apply_agent_route(store, to, from)?;
+            }
+            ctx.out.line(format!("{to}: route copied from {from}"));
+            ctx.after_mutation();
+            Ok(())
+        }
+        RoutesCmd::Binding(cmd) => binding(cmd, ctx),
+    }
+}
+
+/// The strategy payload, or `None` for strategies that carry none.
+///
+/// Quota is validated by the engine's own parser rather than by constructing the
+/// struct here, so a config this writes cannot be one the engine would silently
+/// reinterpret.
+fn strategy_config(kind: &str, limit: Option<f64>, unit: &str) -> Result<Option<String>, CliError> {
+    if kind != "quota" {
+        if limit.is_some() {
+            return Err(CliError::usage(format!(
+                "--limit only applies to the quota strategy, not {kind}"
+            )));
+        }
+        return Ok(None);
+    }
+    let limit = limit.ok_or_else(|| CliError::usage("the quota strategy requires --limit"))?;
+    let json = QuotaConfig {
+        limit,
+        unit: unit.to_string(),
+        period: "day".to_string(),
+    }
+    .to_json();
+    QuotaConfig::from_json(&json).map_err(CliError::usage)?;
+    Ok(Some(json))
+}
+
+fn binding(cmd: &BindingCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        BindingCmd::Add { agent, provider_id } => {
+            {
+                let store = ctx.store()?;
+                vm::add_agent_binding(store, agent, provider_id)?;
+            }
+            ctx.out.line(format!("{agent}: bound {provider_id}"));
+            ctx.after_mutation();
+        }
+        BindingCmd::Remove { agent, provider_id } => {
+            {
+                let store = ctx.store()?;
+                vm::remove_agent_binding(store, agent, provider_id)?;
+            }
+            ctx.out.line(format!("{agent}: unbound {provider_id}"));
+            ctx.after_mutation();
+        }
+        BindingCmd::Set {
+            agent,
+            provider_id,
+            weight,
+            window,
+            no_window,
+        } => {
+            let (win_start, win_end) = match (window, no_window) {
+                (Some(w), _) => {
+                    let (start, end) = w
+                        .split_once('-')
+                        .ok_or_else(|| CliError::usage("--window must look like HH:MM-HH:MM"))?;
+                    check_hhmm(start)?;
+                    check_hhmm(end)?;
+                    (Some(start.to_string()), Some(end.to_string()))
+                }
+                // The two bounds clear together: a half window never matches,
+                // which is also why `update_agent_binding` refuses to set one
+                // without the other.
+                (None, true) => (Some(String::new()), Some(String::new())),
+                (None, false) => (None, None),
+            };
+            {
+                let store = ctx.store()?;
+                vm::update_agent_binding(store, agent, provider_id, *weight, win_start, win_end)?;
+            }
+            ctx.out.line(format!("{agent}: {provider_id} updated"));
+            ctx.after_mutation();
+        }
+    }
+    Ok(())
+}
+
+fn check_hhmm(value: &str) -> Result<(), CliError> {
+    let (h, m) = value
+        .split_once(':')
+        .ok_or_else(|| CliError::usage(format!("invalid time {value:?} (expected HH:MM)")))?;
+    let ok = h.parse::<u32>().is_ok_and(|h| h < 24) && m.parse::<u32>().is_ok_and(|m| m < 60);
+    if ok {
+        Ok(())
+    } else {
+        Err(CliError::usage(format!(
+            "invalid time {value:?} (expected HH:MM)"
+        )))
+    }
 }
 
 // ── keys ────────────────────────────────────────────────────────────────────
@@ -365,6 +671,29 @@ fn runtime(e: impl std::fmt::Display) -> CliError {
     CliError::runtime(e.to_string())
 }
 
+/// Which agents a provider is currently bound to.
+///
+/// The store indexes bindings by agent, not by provider, so this walks the
+/// bound agents. Cheap at this scale, and there is no reverse index to keep in
+/// sync.
+fn agents_bound_to(
+    store: &kiwano_gateway::store::Store,
+    provider_id: &str,
+) -> Result<Vec<String>, CliError> {
+    let mut bound = Vec::new();
+    for agent in store.bound_agents().map_err(runtime)? {
+        if store
+            .bindings_for_agent(&agent)
+            .map_err(runtime)?
+            .iter()
+            .any(|b| b.provider_id == provider_id)
+        {
+            bound.push(agent);
+        }
+    }
+    Ok(bound)
+}
+
 // ── rendering ───────────────────────────────────────────────────────────────
 
 fn render_status(v: &serde_json::Value, admin: &str) -> String {
@@ -437,6 +766,50 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
         })
         .collect();
     render_table(&head, &rows)
+}
+
+fn render_probe(report: &sidecar::ProbeReport) -> String {
+    let mut out = format!("{} ({} ms)", report.verdict, report.latency_ms);
+    if let Some(status) = report.status {
+        out.push_str(&format!(" · HTTP {status}"));
+    }
+    if !report.detail.is_empty() {
+        out.push_str(&format!("\n{}", report.detail));
+    }
+    out
+}
+
+fn render_routes(routes: &[vm::AgentRouteVm]) -> String {
+    if routes.is_empty() {
+        return "(no agent has a route; take one over first)".to_string();
+    }
+    let mut out = String::new();
+    for (i, route) in routes.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!("{} · {}", route.agent, route.strategy));
+        if let Some(config) = &route.config {
+            out.push_str(&format!(" {config}"));
+        }
+        for (n, b) in route.bindings.iter().enumerate() {
+            let marker = if n == 0 { "→" } else { " " };
+            out.push_str(&format!(
+                "\n  {marker} {:<28} {}",
+                ellipsize(&b.provider_id, 28),
+                b.provider_name
+            ));
+            // Only surfaced when they mean something: a weight on a strategy
+            // that ignores it, or a window that is not set, is noise.
+            if route.strategy == "roundrobin" {
+                out.push_str(&format!("  weight={}", b.weight));
+            }
+            if let (Some(start), Some(end)) = (&b.win_start, &b.win_end) {
+                out.push_str(&format!("  {start}-{end}"));
+            }
+        }
+    }
+    out
 }
 
 fn render_agents(found: &[detect::AgentDetectVm]) -> String {

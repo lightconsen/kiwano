@@ -299,6 +299,249 @@ fn status_without_a_gateway_exits_1_and_reports_the_store() {
     assert!(out.contains("providers 1"), "{out}");
 }
 
+/// The id is the whole point of `edit`: bindings, rotating keys and usage rows
+/// all reference it, so remove-and-add is not the same operation.
+#[test]
+fn providers_edit_keeps_the_id_and_the_fields_it_was_not_given() {
+    let (_dir, db) = temp_db();
+    let id = add_provider(&db, "original", &["claude"]);
+
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--json",
+            "providers",
+            "edit",
+            &id,
+            "--name",
+            "renamed",
+            "--endpoint",
+            "https://moved.example.com",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let updated: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(updated["id"], id, "the id must survive the edit");
+
+    // Fields the flags did not mention are carried over, not blanked — that is
+    // the failure mode `update_provider`'s authoritative semantics invite.
+    let store = Store::open(&db).unwrap();
+    let row = store.get_provider(&id).unwrap().unwrap();
+    assert_eq!(row.name, "renamed");
+    assert_eq!(row.base_url, "https://moved.example.com");
+    assert_eq!(row.api_key.as_deref(), Some("sk-test"), "the key is kept");
+    assert_eq!(row.protocol.as_str(), "openai", "the protocol is kept");
+    assert_eq!(
+        store.primary_provider_id("claude").unwrap().as_deref(),
+        Some(id.as_str()),
+        "the binding is kept"
+    );
+}
+
+#[test]
+fn providers_edit_can_unbind_from_every_agent() {
+    let (_dir, db) = temp_db();
+    let id = add_provider(&db, "bound", &["claude"]);
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--no-bind"]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    assert!(store.bindings_for_agent("claude").unwrap().is_empty());
+}
+
+#[test]
+fn providers_enable_refuses_an_unbound_provider() {
+    let (_dir, db) = temp_db();
+    let id = add_provider(&db, "loose", &[]);
+    let (code, _, err) = run(&db, &["providers", "enable", &id]);
+    assert_eq!(code, 3);
+    assert!(err.contains("not bound"), "{err}");
+}
+
+// ── routes ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn strategy_roundrobin_seeds_balanced_weights() {
+    let (_dir, db) = temp_db();
+    add_provider(&db, "one", &["claude"]);
+    add_provider(&db, "two", &["claude"]);
+
+    let (code, _, err) = run(&db, &["routes", "strategy", "claude", "roundrobin"]);
+    assert_eq!(code, 0, "{err}");
+
+    let store = Store::open(&db).unwrap();
+    let weights: Vec<i64> = store
+        .bindings_for_agent("claude")
+        .unwrap()
+        .iter()
+        .map(|b| b.weight)
+        .collect();
+    assert_eq!(weights, vec![50, 50], "an even split, not every row at 1");
+}
+
+/// The quota payload is validated by the engine's own parser, so a config this
+/// writes cannot be one the engine would silently reinterpret.
+#[test]
+fn quota_strategy_requires_a_limit_and_a_known_unit() {
+    let (_dir, db) = temp_db();
+    add_provider(&db, "one", &["claude"]);
+
+    let (code, _, err) = run(&db, &["routes", "strategy", "claude", "quota"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--limit"), "{err}");
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "routes", "strategy", "claude", "quota", "--limit", "10", "--unit", "cost",
+        ],
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("cost"), "{err}");
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "routes", "strategy", "claude", "quota", "--limit", "5000", "--unit", "tokens",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let config = store
+        .get_strategy("claude")
+        .unwrap()
+        .unwrap()
+        .config
+        .unwrap();
+    assert!(config.contains("tokens"), "{config}");
+
+    // A limit on a strategy that ignores one is a mistake, not a no-op.
+    let (code, _, err) = run(
+        &db,
+        &["routes", "strategy", "claude", "failover", "--limit", "10"],
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("quota"), "{err}");
+}
+
+#[test]
+fn routes_binding_add_set_and_remove() {
+    let (_dir, db) = temp_db();
+    let first = add_provider(&db, "first", &["claude"]);
+    let second = add_provider(&db, "second", &[]);
+
+    let (code, _, err) = run(&db, &["routes", "binding", "add", "claude", &second]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 2);
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "routes",
+            "binding",
+            "set",
+            "claude",
+            &second,
+            "--window",
+            "09:00-17:00",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let b = store
+        .bindings_for_agent("claude")
+        .unwrap()
+        .into_iter()
+        .find(|b| b.provider_id == second)
+        .unwrap();
+    assert_eq!(b.win_start.as_deref(), Some("09:00"));
+    assert_eq!(b.win_end.as_deref(), Some("17:00"));
+
+    let (code, _, err) = run(
+        &db,
+        &["routes", "binding", "set", "claude", &second, "--no-window"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let b = store
+        .bindings_for_agent("claude")
+        .unwrap()
+        .into_iter()
+        .find(|b| b.provider_id == second)
+        .unwrap();
+    assert_eq!(b.win_start, None, "both bounds clear together");
+
+    // A malformed window is a usage error, not a silently ignored flag.
+    let (code, _, err) = run(
+        &db,
+        &[
+            "routes", "binding", "set", "claude", &second, "--window", "9am-5pm",
+        ],
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("HH:MM"), "{err}");
+
+    let (code, _, err) = run(&db, &["routes", "binding", "remove", "claude", &second]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let remaining = store.bindings_for_agent("claude").unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].provider_id, first);
+}
+
+#[test]
+fn routes_reorder_rewrites_priorities() {
+    let (_dir, db) = temp_db();
+    let first = add_provider(&db, "first", &["claude"]);
+    let second = add_provider(&db, "second", &["claude"]);
+    assert_eq!(
+        Store::open(&db)
+            .unwrap()
+            .primary_provider_id("claude")
+            .unwrap()
+            .as_deref(),
+        Some(second.as_str())
+    );
+
+    let (code, _, err) = run(&db, &["routes", "reorder", "claude", &first, &second]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    assert_eq!(
+        store.primary_provider_id("claude").unwrap().as_deref(),
+        Some(first.as_str())
+    );
+    let by_priority: Vec<String> = store
+        .bindings_for_agent("claude")
+        .unwrap()
+        .into_iter()
+        .map(|b| b.provider_id)
+        .collect();
+    assert_eq!(by_priority, vec![first, second]);
+}
+
+#[test]
+fn routes_apply_copies_another_agents_route() {
+    let (_dir, db) = temp_db();
+    let provider = add_provider(&db, "shared", &["claude"]);
+    run(&db, &["routes", "strategy", "claude", "failover"]);
+
+    let (code, _, err) = run(
+        &db,
+        &["routes", "apply", "--from", "claude", "--to", "codex"],
+    );
+    assert_eq!(code, 0, "{err}");
+
+    let store = Store::open(&db).unwrap();
+    assert_eq!(
+        store.get_strategy("codex").unwrap().unwrap().kind,
+        kiwano_gateway::store::StrategyType::Failover
+    );
+    assert_eq!(
+        store.primary_provider_id("codex").unwrap().as_deref(),
+        Some(provider.as_str())
+    );
+}
+
 // ── agents ──────────────────────────────────────────────────────────────────
 
 fn claude_settings(home: &Path) -> PathBuf {

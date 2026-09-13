@@ -222,6 +222,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::agents(cmd, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Routes(cmd) => {
+            cmds::routes(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
     }
 }
 

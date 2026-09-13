@@ -83,6 +83,111 @@ pub enum Command {
     /// Coding agents: detect them, and route them through the gateway
     #[command(subcommand)]
     Agents(AgentsCmd),
+
+    /// Agent routes: strategy and candidate order
+    #[command(subcommand)]
+    Routes(RoutesCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RoutesCmd {
+    /// Every agent's strategy and candidate order
+    List,
+
+    /// Set an agent's selection strategy
+    Strategy {
+        agent: String,
+
+        /// single | failover | roundrobin | timewindow | quota
+        kind: String,
+
+        /// quota: the threshold value
+        #[arg(long, value_name = "N")]
+        limit: Option<f64>,
+
+        /// quota: what the threshold counts
+        #[arg(long, value_name = "UNIT", default_value = "requests")]
+        unit: String,
+    },
+
+    /// Set the candidate order; the argument order becomes priority 0..n
+    Reorder {
+        agent: String,
+
+        #[arg(required = true, value_name = "PROVIDER_ID")]
+        provider_ids: Vec<String>,
+    },
+
+    /// Copy another agent's strategy and candidate order onto this one
+    Apply {
+        #[arg(long, value_name = "SOURCE")]
+        from: String,
+
+        #[arg(long, value_name = "TARGET")]
+        to: String,
+    },
+
+    /// One candidate binding
+    #[command(subcommand)]
+    Binding(BindingCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BindingCmd {
+    /// Add a candidate at the tail of the queue
+    Add { agent: String, provider_id: String },
+
+    /// Remove a candidate
+    Remove { agent: String, provider_id: String },
+
+    /// Change a candidate's roundrobin weight or timewindow window
+    Set {
+        agent: String,
+        provider_id: String,
+
+        /// roundrobin: relative weight (>= 1)
+        #[arg(long, value_name = "N")]
+        weight: Option<i64>,
+
+        /// timewindow: local window, HH:MM-HH:MM
+        #[arg(long, value_name = "HH:MM-HH:MM")]
+        window: Option<String>,
+
+        /// timewindow: drop the window (matches any hour)
+        #[arg(long, conflicts_with = "window")]
+        no_window: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProbeCmd {
+    /// TCP connect time to an endpoint
+    Latency { endpoint: String },
+
+    /// Ask an endpoint whether it answers, and how
+    Endpoint {
+        #[arg(long, value_name = "PROTOCOL")]
+        protocol: String,
+
+        #[arg(long, value_name = "URL")]
+        endpoint: String,
+
+        /// Optional: without one, 401/403 still proves the route exists
+        #[arg(long, value_name = "KEY")]
+        key: Option<String>,
+    },
+
+    /// The model ids an endpoint advertises (needs a key)
+    Models {
+        #[arg(long, value_name = "PROTOCOL")]
+        protocol: String,
+
+        #[arg(long, value_name = "URL")]
+        endpoint: String,
+
+        #[arg(long, value_name = "KEY")]
+        key: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -128,6 +233,61 @@ pub enum ProvidersCmd {
 
     /// Delete a provider; a bound agent promotes its next candidate
     Remove { provider_id: String },
+
+    /// Change a provider in place, keeping its id — and so every binding to it
+    Edit(Box<EditArgs>),
+
+    /// Make a provider the current route of every agent bound to it
+    ///
+    /// Unlike `use`, this does not touch the strategy: it reorders candidates
+    /// under whatever the agent already has configured.
+    Enable { provider_id: String },
+
+    /// Ask an endpoint whether it answers, before committing to it
+    #[command(subcommand)]
+    Probe(ProbeCmd),
+}
+
+/// Every field optional: only what is given is changed. Absent means "keep",
+/// which is why this is a read-modify-write against the stored row rather than
+/// a fresh `NewProviderInput`.
+#[derive(Debug, Args)]
+pub struct EditArgs {
+    pub provider_id: String,
+
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+
+    #[arg(long, value_name = "URL")]
+    pub endpoint: Option<String>,
+
+    /// New upstream key. Omit to keep the stored one.
+    #[arg(long, value_name = "KEY")]
+    pub key: Option<String>,
+
+    #[arg(long, value_name = "PROTOCOL")]
+    pub protocol: Option<String>,
+
+    #[arg(long, value_name = "BILLING")]
+    pub billing: Option<String>,
+
+    #[arg(long, value_name = "N")]
+    pub limit: Option<f64>,
+
+    #[arg(long, value_name = "UNIT")]
+    pub unit: Option<String>,
+
+    #[arg(long, value_name = "PERIOD")]
+    pub reset: Option<String>,
+
+    /// Replace the bound agents with exactly these (repeatable).
+    /// Omit to leave the current set alone.
+    #[arg(long = "bind", value_name = "AGENT")]
+    pub bind: Vec<String>,
+
+    /// Unbind from every agent
+    #[arg(long, conflicts_with = "bind")]
+    pub no_bind: bool,
 }
 
 /// The flags `providers add` accepts. They map onto the app's

@@ -29,6 +29,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.13", features = ["blocking"] }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+kiwano-core = { path = "../crates/core" }
 kiwano-gateway = { path = "../crates/gateway" }
 tracing = "0.1"
 kiwano-adapters = { path = "../crates/adapters" }

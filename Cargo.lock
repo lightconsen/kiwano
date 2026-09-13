@@ -2359,6 +2359,7 @@ version = "0.1.8"
 dependencies = [
  "chrono",
  "kiwano-adapters",
+ "kiwano-core",
  "kiwano-gateway",
  "reqwest",
  "rusqlite",
@@ -2412,6 +2413,23 @@ dependencies = [
  "chrono",
  "kiwano-gateway",
  "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
+name = "kiwano-core"
+version = "0.1.8"
+dependencies = [
+ "chrono",
+ "kiwano-adapters",
+ "kiwano-gateway",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
  "tempfile",
  "uuid",
 ]

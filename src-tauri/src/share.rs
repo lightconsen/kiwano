@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use kiwano_gateway::store::{Binding, Provider, Store, StrategyType};
 
-use crate::vm;
+use kiwano_core::vm;
 
 pub const FORMAT_VERSION: u32 = 1;
 

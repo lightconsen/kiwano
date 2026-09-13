@@ -1,0 +1,26 @@
+[package]
+name = "kiwano-core"
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Kiwano's application layer: provider/routing logic and view models, shared by the desktop app and the CLI"
+
+[lib]
+name = "kiwano_core"
+path = "src/lib.rs"
+
+[dependencies]
+kiwano-gateway = { path = "../gateway" }
+kiwano-adapters = { path = "../adapters" }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+reqwest = { version = "0.13", features = ["blocking"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+serde_yaml = "0.9"

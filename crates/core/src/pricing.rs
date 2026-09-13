@@ -56,7 +56,7 @@ pub struct SeededReport {
 }
 
 /// Read the bundled price table.
-pub(crate) fn bundled_doc() -> ModelsDoc {
+pub fn bundled_doc() -> ModelsDoc {
     serde_json::from_str(kiwano_adapters::model_pricing::MODELS_JSON)
         .expect("bundled models.json is valid")
 }
@@ -65,7 +65,7 @@ pub(crate) fn bundled_doc() -> ModelsDoc {
 /// from the Hub. Prefers the Hub cache (a remote refresh wins over the compiled
 /// snapshot) and falls back to bundled on absence *or* on a corrupt cache —
 /// the same posture as `vm::load_catalog`. Never fails.
-pub(crate) fn effective_doc(aux: &Aux) -> (ModelsDoc, Option<String>) {
+pub fn effective_doc(aux: &Aux) -> (ModelsDoc, Option<String>) {
     if let Some((_, payload, sha, _)) = aux.load_hub_models_cache() {
         if let Ok(doc) = serde_json::from_str::<ModelsDoc>(&payload) {
             return (doc, Some(sha));

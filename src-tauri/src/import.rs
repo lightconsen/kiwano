@@ -27,7 +27,7 @@ use kiwano_gateway::store::{Binding, Protocol, Provider, Store, StrategyType};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::vm::slug;
+use kiwano_core::vm::slug;
 
 #[derive(Serialize)]
 pub struct ImportReportVm {
@@ -105,7 +105,7 @@ pub fn run_import(
             continue;
         }
         let id = format!("ccs-{}-{}", raw.app, slug(&raw.cc_id));
-        let now = crate::vm::rfc3339(crate::vm::unix_now());
+        let now = kiwano_core::vm::rfc3339(kiwano_core::vm::unix_now());
         let provider = Provider {
             id: id.clone(),
             name,

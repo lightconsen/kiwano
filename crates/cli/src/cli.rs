@@ -445,6 +445,15 @@ pub enum ProvidersCmd {
     /// Ask an endpoint whether it answers, before committing to it
     #[command(subcommand)]
     Probe(ProbeCmd),
+
+    /// Query a plan provider's quota windows (needs a `plan_query` configured)
+    Quota {
+        provider_id: String,
+
+        /// Bypass the short-lived cache and ask the endpoint again
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Every field optional: only what is given is changed. Absent means "keep",

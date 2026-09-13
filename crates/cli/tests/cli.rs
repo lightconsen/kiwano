@@ -297,6 +297,46 @@ fn status_without_a_gateway_exits_1_and_reports_the_store() {
     assert_eq!(code, 1);
     assert!(out.contains("gateway: not running"), "{out}");
     assert!(out.contains("providers 1"), "{out}");
+    // Today's totals, which the app's status bar shows. They come from the
+    // *usage* table — what was billable — not from the request log, so seeding
+    // a log row would not move them.
+    {
+        let store = Store::open(&db).unwrap();
+        store
+            .record_usage(&kiwano_gateway::store::UsageRecord {
+                ts: kiwano_gateway::store::now_rfc3339(),
+                agent: "claude".into(),
+                provider_id: "alpha".into(),
+                model: None,
+                input_tokens: 100,
+                output_tokens: 20,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+            })
+            .unwrap();
+    }
+    let (_, out, _) = run(&db, &["status"]);
+    assert!(out.contains("today: 1 requests"), "{out}");
+    assert!(out.contains("120 tokens"), "{out}");
+}
+
+/// `status` is the first thing anyone runs on a machine with no database, so it
+/// must not create one — opening the store does that as a side effect.
+#[test]
+fn status_does_not_create_a_database() {
+    let (dir, db) = temp_db();
+    assert!(!db.exists());
+    let (code, _, _) = run(&db, &["status"]);
+    assert_eq!(code, 1);
+    assert!(
+        !db.exists(),
+        "asking whether a gateway is running should not conjure the store"
+    );
+    let _ = dir;
 }
 
 /// The id is the whole point of `edit`: bindings, rotating keys and usage rows
@@ -346,6 +386,18 @@ fn providers_edit_can_unbind_from_every_agent() {
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     assert!(store.bindings_for_agent("claude").unwrap().is_empty());
+}
+
+/// A provider with no plan query has no quota to report, and saying so beats a
+/// fabricated 0%.
+#[test]
+fn providers_quota_reports_a_missing_plan_query() {
+    let (_dir, db) = temp_db();
+    let id = add_provider(&db, "plain", &[]);
+    let (code, out, err) = run(&db, &["providers", "quota", &id]);
+    assert_eq!(code, 3);
+    assert!(err.to_lowercase().contains("plan query"), "{err}");
+    assert!(out.is_empty(), "no payload on stdout for a failure: {out}");
 }
 
 #[test]

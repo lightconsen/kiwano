@@ -25,9 +25,18 @@ use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
 
 pub fn status(ctx: &mut Ctx) -> Result<i32, CliError> {
     let admin = ctx.admin.describe();
+    let footer = footer_stats(ctx);
     match sidecar::status_for(&ctx.admin, ctx.token.as_deref()) {
-        Some(v) => {
-            let text = render_status(&v, &admin);
+        Some(mut v) => {
+            // Additive rather than reshaped: the rest of this object is the
+            // admin plane's report passed through, and a consumer parsing it
+            // should keep working.
+            if let (Some(object), Some(footer)) = (v.as_object_mut(), footer.as_ref()) {
+                if let Ok(value) = serde_json::to_value(footer) {
+                    object.insert("footer".to_string(), value);
+                }
+            }
+            let text = render_status(&v, &admin, footer.as_ref());
             ctx.out.emit(&v, || text);
             Ok(EXIT_OK)
         }
@@ -35,16 +44,56 @@ pub fn status(ctx: &mut Ctx) -> Result<i32, CliError> {
         // and on a server that is exactly what you want to see. Exit 1 is how a
         // script tells the two apart.
         None => {
-            let metrics = ctx.store()?.metrics().map_err(runtime)?;
             ctx.out
                 .line(format!("gateway: not running (admin {admin})"));
-            ctx.out.line(format!(
-                "store: providers {} · bindings {} · placeholder_keys {} · usage_rows {}",
-                metrics.providers, metrics.bindings, metrics.placeholder_keys, metrics.usage_rows
-            ));
+            // Only report on a store that is already there. Opening one creates
+            // it as a side effect, and `status` is the first thing anyone runs
+            // on a machine that has neither — it should not be the command that
+            // leaves a database behind.
+            if ctx.db.is_file() {
+                let metrics = ctx.store()?.metrics().map_err(runtime)?;
+                ctx.out.line(format!(
+                    "store: providers {} · bindings {} · placeholder_keys {} · usage_rows {}",
+                    metrics.providers,
+                    metrics.bindings,
+                    metrics.placeholder_keys,
+                    metrics.usage_rows
+                ));
+            }
+            if let Some(footer) = &footer {
+                ctx.out.line(render_footer(footer));
+            }
             Ok(EXIT_NEGATIVE)
         }
     }
+}
+
+/// Today's totals — what the app's status bar shows.
+///
+/// Returns `None` rather than forcing an answer when there is no database yet:
+/// opening the store creates the file as a side effect, and `status` is the
+/// first thing anyone runs on a machine that has neither, so it must stay a
+/// read-only question.
+fn footer_stats(ctx: &Ctx) -> Option<vm::FooterStatsVm> {
+    if !ctx.db.is_file() {
+        return None;
+    }
+    let (store, aux) = (ctx.store().ok()?, ctx.aux().ok()?);
+    vm::build_footer_stats(store, aux, env!("CARGO_PKG_VERSION")).ok()
+}
+
+fn render_footer(footer: &vm::FooterStatsVm) -> String {
+    format!(
+        "today: {} requests · {} tokens · hub {} · v{}",
+        footer.today_requests,
+        vm::fmt_tokens(footer.today_tokens),
+        if footer.hub_synced {
+            "synced"
+        } else {
+            "not synced"
+        },
+        footer.version
+    )
 }
 
 pub fn reload(ctx: &mut Ctx) -> Result<i32, CliError> {
@@ -78,7 +127,30 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         ProvidersCmd::Edit(args) => providers_edit(args, ctx),
         ProvidersCmd::Enable { provider_id } => providers_enable(ctx, provider_id),
         ProvidersCmd::Probe(cmd) => providers_probe(cmd, ctx),
+        ProvidersCmd::Quota { provider_id, force } => providers_quota(ctx, provider_id, *force),
     }
+}
+
+/// The quota rings the app draws, from the same reader — which matters because
+/// the same code backs the gateway's own limit enforcement, so the display and
+/// the block cannot disagree.
+fn providers_quota(ctx: &mut Ctx, provider_id: &str, force: bool) -> Result<(), CliError> {
+    let report = {
+        let store = ctx.store()?;
+        kiwano_gateway::plan_quota::get_plan_quota_report(store, provider_id, force)?
+    };
+    // A deterministic failure (bad credentials, unknown template) comes back as
+    // `success: false` rather than as an Err, and reporting it as success would
+    // be a lie about what the endpoint said.
+    if !report.success {
+        return Err(runtime(format!(
+            "quota query failed for {provider_id}: {}",
+            report.error.as_deref().unwrap_or("no reason given")
+        )));
+    }
+    let text = render_quota(&report);
+    ctx.out.emit(&report, || text);
+    Ok(())
 }
 
 fn providers_list(ctx: &mut Ctx, agent: Option<&str>) -> Result<(), CliError> {
@@ -1104,7 +1176,7 @@ fn agents_bound_to(
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-fn render_status(v: &serde_json::Value, admin: &str) -> String {
+fn render_status(v: &serde_json::Value, admin: &str, footer: Option<&vm::FooterStatsVm>) -> String {
     let mut out = format!(
         "gateway: running (v{}, uptime {}s, admin {admin})",
         v["version"].as_str().unwrap_or("?"),
@@ -1140,6 +1212,10 @@ fn render_status(v: &serde_json::Value, admin: &str) -> String {
             }
         }
     }
+    if let Some(footer) = footer {
+        out.push('\n');
+        out.push_str(&render_footer(footer));
+    }
     out
 }
 
@@ -1174,6 +1250,41 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
         })
         .collect();
     render_table(&head, &rows)
+}
+
+fn render_quota(report: &kiwano_gateway::plan_quota::PlanQuotaReport) -> String {
+    let mut out = format!("{} · template {}", report.provider_id, report.template);
+    if let Some(note) = &report.note {
+        out.push_str(&format!("\n{note}"));
+    }
+    if report.tiers.is_empty() {
+        out.push_str("\n(no quota windows reported)");
+        return out;
+    }
+    for tier in &report.tiers {
+        out.push_str(&format!(
+            "\n  {:<14} {:>6.1}% used",
+            tier.name, tier.utilization
+        ));
+        // Only some endpoints report absolute amounts; the rest are
+        // percentage-only and would print a misleading 0/0.
+        if let (Some(used), Some(limit)) = (tier.used, tier.limit) {
+            out.push_str(&format!(
+                "  ({used}/{limit}{})",
+                tier.unit
+                    .as_deref()
+                    .map(|u| format!(" {u}"))
+                    .unwrap_or_default()
+            ));
+        }
+        if let Some(resets) = &tier.resets_at {
+            out.push_str(&format!("  resets {resets}"));
+        }
+    }
+    if report.cached {
+        out.push_str("\n(from the 5-minute cache; --force asks again)");
+    }
+    out
 }
 
 fn render_settings(settings: &vm::SettingsVm) -> String {

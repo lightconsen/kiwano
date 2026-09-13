@@ -45,6 +45,19 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **The privacy wording now describes what the code does.** The README, the app's
+  own UI strings and the marketing site all said API keys are kept in the **OS
+  keychain**. There is no keychain integration anywhere in this project — keys
+  are stored in the clear in `~/.kiwano/kiwano.db`, protected by file
+  permissions (directory `0700`, database `0600`, and the same on its `-wal` and
+  `-shm`). A promise like that is read *before* someone downloads, so it should
+  describe the shipped behaviour rather than the intended one; the wording now
+  says keys are stored locally and readable only by your user.
+
+  **Nothing about how keys are handled has changed — only the claim.** If you
+  relied on the keychain statement, this is the correction to read. Keychain
+  storage remains a sensible thing to build; it is not built.
+
 - **The command-line client is now `kiwano`, and the desktop app's executable is
   `kiwano-app`.** The name was previously split the other way round — `kiwano`
   was the GUI and `kiwano-cli` the command-line client — which is backwards for

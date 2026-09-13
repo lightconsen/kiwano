@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/kiwano-logo.svg" width="112" alt="Kiwano logo" />
+  <img src="app/public/kiwano-logo.svg" width="112" alt="Kiwano logo" />
   <h1>Kiwano</h1>
   <p><strong>Local-first AI provider manager.</strong><br/>
   Keep every provider key on your own machine, point all your coding agents at one local gateway, and see what they actually cost.</p>
@@ -130,12 +130,19 @@ pointed at the port by hand is refused), read the logs, export the config. See
 
 ## Development
 
+The frontend and the Tauri shell live under `app/`, so the pnpm commands run
+from there while the cargo ones run from the repo root — the Rust workspace
+root is still here, because `crates/` is part of it.
+
 ```bash
+cd app
 pnpm install
 pnpm dev         # frontend dev server on :1420 (browser, mocked data)
 pnpm tauri dev   # desktop app in dev mode (real SQLite + gateway sidecar)
-
 pnpm build       # frontend typecheck + production build
+```
+
+```bash
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all -- --check
@@ -149,9 +156,9 @@ compiles it before the frontend starts. For a cross build, name the target:
 `KIWANO_GATEWAY_BIN` overrides which binary the app looks for.
 
 **Run `pnpm build:sidecar` first on a fresh clone.** The gateway is declared as
-an `externalBin`, and Tauri resolves that in `src-tauri/build.rs` — so a missing
-sidecar fails `cargo clippy` and `cargo test` themselves, not just the bundle
-step. `pnpm tauri dev` does it for you; the bare cargo commands do not.
+an `externalBin`, and Tauri resolves that in `app/src-tauri/build.rs` — so a
+missing sidecar fails `cargo clippy` and `cargo test` themselves, not just the
+bundle step. `pnpm tauri dev` does it for you; the bare cargo commands do not.
 
 CI runs exactly those four Rust checks on Linux and macOS, plus a frontend typecheck and build. The toolchain version is pinned in `rust-toolchain.toml` and in every workflow, so a new clippy release can't turn the build red on code nobody touched.
 
@@ -159,8 +166,8 @@ Layout:
 
 | Path | What lives there |
 | --- | --- |
-| `src/` | React UI (screens, components, the `api/` layer) |
-| `src-tauri/` | The Tauri shell: commands, tray, watchdog, updater — the desktop app's binary is `kiwano-app` |
+| `app/src/` | React UI (screens, components, the `api/` layer) |
+| `app/src-tauri/` | The Tauri shell: commands, tray, watchdog, updater — the desktop app's binary is `kiwano-app` |
 | `crates/core/` | The application layer the app and the CLI share: view models, takeover, sync, share; the bundled provider catalog is `crates/core/src/catalog.json` |
 | `crates/gateway/` | The gateway daemon: routing, strategies, metering, store |
 | `crates/adapters/` | Protocol conversion, agent config take-over, pricing table (`resources/models.json`) |

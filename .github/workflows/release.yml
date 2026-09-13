@@ -60,12 +60,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          # The lockfile lives with the frontend, not at the repo root.
+          cache-dependency-path: app/pnpm-lock.yaml
 
       # Before anything that costs minutes, and before the build legs: this is
       # the one check whose failure means "do not ship this tag at all".
       #
       # The updater's trust root is the public key compiled into the app
-      # (src-tauri/tauri.conf.json → plugins.updater.pubkey). An update is
+      # (app/src-tauri/tauri.conf.json → plugins.updater.pubkey). An update is
       # accepted when its minisign signature verifies against that key and
       # nothing else — the app has no second opinion about who may update it. So
       # whoever can change the key at a tagged commit can push code to every
@@ -92,12 +94,12 @@ jobs:
           set -euo pipefail
           found=$(node -e '
             const fs = require("fs");
-            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
+            const conf = JSON.parse(fs.readFileSync("app/src-tauri/tauri.conf.json", "utf8"));
             const updater = conf.plugins && conf.plugins.updater;
             process.stdout.write((updater && updater.pubkey) || "");
           ')
           [ -n "$found" ] \
-            || { echo "::error::src-tauri/tauri.conf.json has no plugins.updater.pubkey — the app cannot verify updates at all"; exit 1; }
+            || { echo "::error::app/src-tauri/tauri.conf.json has no plugins.updater.pubkey — the app cannot verify updates at all"; exit 1; }
 
           if [ -z "${EXPECTED:-}" ]; then
             echo "::error::the EXPECTED_UPDATER_PUBKEY repository variable is unset, so nothing checks the updater's trust root. Set it to: $found"
@@ -112,6 +114,7 @@ jobs:
           echo "updater public key matches the pinned value"
 
       - name: Install frontend dependencies
+        working-directory: app
         run: pnpm install --frozen-lockfile
 
       - name: Install Tauri system dependencies (Linux)
@@ -128,10 +131,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Typecheck and build frontend
+        working-directory: app
         run: pnpm build
 
       # Before the first cargo command, not after: `tauri_build::build()` in
-      # src-tauri/build.rs resolves `externalBin` at build-script time, so a
+      # app/src-tauri/build.rs resolves `externalBin` at build-script time, so a
       # missing sidecar fails clippy and the tests with "resource path
       # `binaries/kiwano-gateway-<triple>` doesn't exist" — it is a
       # prerequisite for the Rust build, not just for bundling. Debug profile
@@ -140,13 +144,13 @@ jobs:
       - name: Sidecar staging
         run: |
           set -euo pipefail
-          grep -q '"externalBin"' src-tauri/tauri.conf.json \
+          grep -q '"externalBin"' app/src-tauri/tauri.conf.json \
             || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
           node scripts/build-sidecar.mjs
           triple=$(rustc -vV | sed -n 's/^host: //p')
-          test -x "src-tauri/binaries/kiwano-gateway-$triple" \
+          test -x "app/src-tauri/binaries/kiwano-gateway-$triple" \
             || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
-          echo "staged src-tauri/binaries/kiwano-gateway-$triple"
+          echo "staged app/src-tauri/binaries/kiwano-gateway-$triple"
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -265,8 +269,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          # The lockfile lives with the frontend, not at the repo root.
+          cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Install frontend dependencies
+        working-directory: app
         run: pnpm install --frozen-lockfile
 
       # Same Tauri v2 system packages as ci.yml (webkit2gtk 4.1 + ayatana appindicator)
@@ -455,7 +462,7 @@ jobs:
 
       # The app alone is not a runnable Kiwano: the gateway daemon is an
       # `externalBin`, and Tauri bundles whatever
-      # src-tauri/binaries/kiwano-gateway-<triple> happens to exist — which,
+      # app/src-tauri/binaries/kiwano-gateway-<triple> happens to exist — which,
       # before this step existed, was nothing on every platform, so every
       # shipped build could not start a gateway on a machine that had never
       # compiled one. Build it for the target being bundled, explicitly: the
@@ -490,6 +497,14 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
+          # The frontend and the Tauri shell live under app/. Without this the
+          # action looks for src-tauri at the repo root, and — because it also
+          # falls back to a globally installed CLI when it cannot find a project
+          # — fails in a way that reads like a Tauri bug rather than a path.
+          # The Cargo target directory is unaffected: the action walks up from
+          # the Tauri directory to the workspace root, which is still the repo
+          # root, so `target/` stays where every later step expects it.
+          projectPath: app
           tagName: ${{ github.ref_name }}
           releaseName: "Kiwano ${{ github.ref_name }}"
           # Literal block, not folded: the changelog is Markdown and its line
@@ -683,7 +698,7 @@ jobs:
 
       # The gateway daemon is what makes the app work at all, and it lives
       # beside the app binary rather than inside it. Tauri bundles whatever
-      # src-tauri/binaries/kiwano-gateway-<triple> exists and says nothing when
+      # app/src-tauri/binaries/kiwano-gateway-<triple> exists and says nothing when
       # the triple is wrong — the 0.1.7 bundles went out with no gateway on any
       # platform and nothing noticed, because the dev machine always had one
       # running to adopt. Assert it is inside the artifact a user installs.
@@ -756,7 +771,7 @@ jobs:
       # triple by the sidecar step above.
       #
       # `cargo build -p kiwano` deliberately does not go through
-      # `src-tauri/build.rs`, so it cannot fail on a missing sidecar and needs
+      # `app/src-tauri/build.rs`, so it cannot fail on a missing sidecar and needs
       # none of the Tauri system libraries the app build requires.
       - name: Package the CLI server bundle
         shell: bash
@@ -824,7 +839,7 @@ jobs:
           set -euo pipefail
           # The build passes --target, so bundles land under target/<triple>/.
           bundle="target/${{ matrix.target }}/release/bundle"
-          version=$(node -p "require('./package.json').version")
+          version=$(node -p "require('./app/package.json').version")
 
           case "${{ matrix.target }}" in
             aarch64-apple-darwin)     arch=aarch64 ;;

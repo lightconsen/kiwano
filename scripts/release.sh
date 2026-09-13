@@ -3,12 +3,12 @@
 # Bump the Kiwano version everywhere it is recorded, then refresh Cargo.lock.
 #
 # The version lives in three files that must always agree:
-#   package.json                -> "version"
-#   src-tauri/tauri.conf.json   -> "version"   (drives bundle names + updater manifest)
-#   Cargo.toml                  -> [workspace.package] version, inherited by every crate
+#   app/package.json                -> "version"
+#   app/src-tauri/tauri.conf.json   -> "version"   (drives bundle names + updater manifest)
+#   Cargo.toml                      -> [workspace.package] version, inherited by every crate
 #
-# Cargo.lock is never edited by hand: the four local packages (kiwano, kiwano-adapters,
-# kiwano-app, kiwano-gateway) inherit the workspace version, so we let
+# Cargo.lock is never edited by hand: the five local packages (kiwano, kiwano-core,
+# kiwano-adapters, kiwano-app, kiwano-gateway) inherit the workspace version, so we let
 # `cargo metadata --offline` rewrite the lock -- not `cargo update`, which would also
 # move third-party dependencies.
 #
@@ -23,8 +23,8 @@
 
 set -euo pipefail
 
-PKG_JSON="package.json"
-TAURI_CONF="src-tauri/tauri.conf.json"
+PKG_JSON="app/package.json"
+TAURI_CONF="app/src-tauri/tauri.conf.json"
 CARGO_TOML="Cargo.toml"
 CARGO_LOCK="Cargo.lock"
 CHANGELOG="CHANGELOG.md"

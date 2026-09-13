@@ -27,8 +27,8 @@ serde_json = "1"
 # The application layer (providers, routes, takeover, sync, sidecar control)
 # lives in kiwano-core, shared with the CLI. What is left here is the Tauri
 # shell: commands, tray, updater, and the managed state that ties them together.
-kiwano-core = { path = "../crates/core" }
-kiwano-gateway = { path = "../crates/gateway" }
+kiwano-core = { path = "../../crates/core" }
+kiwano-gateway = { path = "../../crates/gateway" }
 tracing = "0.1"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"

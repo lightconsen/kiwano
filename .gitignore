@@ -11,11 +11,11 @@ pnpm-debug.log*
 
 # Rust
 target/
-src-tauri/gen/schemas
+app/src-tauri/gen/schemas
 
 # Tauri sidecar staging — written by scripts/build-sidecar.mjs, one binary per
 # target triple, never project content.
-src-tauri/binaries/
+app/src-tauri/binaries/
 
 # The server bundle staged by release.yml before it is uploaded to the release.
 dist-cli/

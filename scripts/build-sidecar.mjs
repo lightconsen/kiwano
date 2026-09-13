@@ -2,7 +2,7 @@
 // Build kiwano-gateway and stage it for Tauri's `externalBin`.
 //
 // Tauri resolves the config entry `binaries/kiwano-gateway` to
-// src-tauri/binaries/kiwano-gateway-<target-triple>[.exe] — the triple the
+// app/src-tauri/binaries/kiwano-gateway-<target-triple>[.exe] — the triple the
 // bundle is being built *for*, which is not always the host's (release.yml
 // builds x86_64-apple-darwin on an arm64 runner). The hook environment carries
 // no target triple — TAURI_ENV_TARGET_TRIPLE does not exist — so it has to be
@@ -27,7 +27,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const STAGE = join(ROOT, "src-tauri", "binaries");
+const STAGE = join(ROOT, "app", "src-tauri", "binaries");
 
 const argv = process.argv.slice(2);
 const flag = (name, fallback) => {

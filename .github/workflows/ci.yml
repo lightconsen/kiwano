@@ -64,7 +64,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Before the first cargo command, not after: `tauri_build::build()` in
-      # src-tauri/build.rs resolves `externalBin` at build-script time, so a
+      # app/src-tauri/build.rs resolves `externalBin` at build-script time, so a
       # missing sidecar fails clippy and the tests themselves with
       # "resource path `binaries/kiwano-gateway-<triple>` doesn't exist" —
       # not just the bundle step. Debug profile on purpose: this is about the
@@ -76,13 +76,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q '"externalBin"' src-tauri/tauri.conf.json \
+          grep -q '"externalBin"' app/src-tauri/tauri.conf.json \
             || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
           node scripts/build-sidecar.mjs
           triple=$(rustc -vV | sed -n 's/^host: //p')
           exe=""
           case "$triple" in *windows*) exe=".exe" ;; esac
-          test -x "src-tauri/binaries/kiwano-gateway-$triple$exe" \
+          test -x "app/src-tauri/binaries/kiwano-gateway-$triple$exe" \
             || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple$exe"; exit 1; }
 
       - name: Clippy
@@ -105,10 +105,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          # The lockfile lives with the frontend, not at the repo root.
+          cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Install dependencies
+        working-directory: app
         run: pnpm install --frozen-lockfile
 
       # `tsc && vite build` — typecheck plus a real bundle
       - name: Typecheck and build
+        working-directory: app
         run: pnpm build

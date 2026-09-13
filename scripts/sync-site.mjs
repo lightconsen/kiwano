@@ -26,7 +26,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SITE = join(ROOT, "site", "index.html");
 const check = process.argv.includes("--check");
 
-const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+const pkg = JSON.parse(readFileSync(join(ROOT, "app", "package.json"), "utf8"));
 const { version, license } = pkg;
 if (!version || !license) {
   console.error("sync-site: package.json has no `version` or no `license`");

@@ -73,7 +73,7 @@ gh attestation verify Kiwano_x64.dmg --repo lightconsen/kiwano
 
 ### 1.5 更新信任根钉到 tag 上
 
-`verify` job 在花掉几分钟构建之前，就把 `src-tauri/tauri.conf.json` 里的
+`verify` job 在花掉几分钟构建之前，就把 `app/src-tauri/tauri.conf.json` 里的
 `plugins.updater.pubkey` 与仓库变量 `EXPECTED_UPDATER_PUBKEY` 比对。
 
 updater 的信任根就是这个编译进 App 的公钥：能改它的人可以给所有已安装用户推任意更新，
@@ -163,10 +163,10 @@ Tauri v2 侧对应 `bundle.windows.signCommand`（云签名服务不提供私钥
    |---|---|---|
    | `README.md:15` | `Your keys stay in the OS keychain.` | `…on your machine, in an owner-only local database.` |
    | `README.md:85` | `stored in the **OS keychain**` | `stored **locally, in an owner-only SQLite database** — directory 0700, file 0600` |
-   | `src/i18n/en/providers.ts:116,118,120` | `API keys stay in the system keychain` | `API keys are stored locally, readable only by you` |
-   | `src/i18n/en/addProvider.ts:32` | `Stored in the local keychain only` | `Stored locally, readable only by you` |
-   | `src/i18n/zh-CN/providers.ts:99,101,103` | `API 密钥仅保存在系统钥匙串` | `API 密钥仅存本机，只有你能读取` |
-   | `src/i18n/zh-CN/addProvider.ts:27` | `仅保存在本机钥匙串` | `仅存本机，只有你能读取` |
+   | `app/src/i18n/en/providers.ts:116,118,120` | `API keys stay in the system keychain` | `API keys are stored locally, readable only by you` |
+   | `app/src/i18n/en/addProvider.ts:32` | `Stored in the local keychain only` | `Stored locally, readable only by you` |
+   | `app/src/i18n/zh-CN/providers.ts:99,101,103` | `API 密钥仅保存在系统钥匙串` | `API 密钥仅存本机，只有你能读取` |
+   | `app/src/i18n/zh-CN/addProvider.ts:27` | `仅保存在本机钥匙串` | `仅存本机，只有你能读取` |
    | `site/index.html:583,699,759,779` | 中英两版「钥匙串 / keychain」 | 同为「仅存本机 / a local database」 |
 
    > ⚠️ **本文原先的表述有一处错误，值得记下来**：原文说「`zh-CN` 资源里没有任何这类

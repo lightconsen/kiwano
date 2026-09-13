@@ -8,8 +8,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "build:sidecar": "node scripts/build-sidecar.mjs",
-    "tauri": "node scripts/tauri.mjs"
+    "build:sidecar": "node ../scripts/build-sidecar.mjs",
+    "tauri": "node ../scripts/tauri.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

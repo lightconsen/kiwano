@@ -1,12 +1,12 @@
 # Deploy the static marketing site (site/) to GitHub Pages.
 # Still no build step for the page itself — one file, served as written. The
 # one thing that runs is `scripts/sync-site.mjs`, which copies the version and
-# the licence name out of `package.json` before the upload so the deployed page
-# cannot advertise a release or a licence the project has moved past.
+# the licence name out of `app/package.json` before the upload so the deployed
+# page cannot advertise a release or a licence the project has moved past.
 #
-# `package.json` is in the trigger list for that reason: a release bumps it, and
-# without this the site would keep its old version until something else under
-# `site/` happened to change. PRs never deploy. Site URL:
+# `app/package.json` is in the trigger list for that reason: a release bumps it,
+# and without this the site would keep its old version until something else
+# under `site/` happened to change. PRs never deploy. Site URL:
 # https://lightconsen.github.io/kiwano/
 #
 # One-time repo setting (required before the first run succeeds):
@@ -20,7 +20,7 @@ on:
     paths:
       - "site/**"
       - "scripts/sync-site.mjs"
-      - "package.json"
+      - "app/package.json"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -52,7 +52,7 @@ jobs:
       # from `package.json` — and both had gone stale, the licence by two
       # releases. Stamp them from the source of truth before the upload, so the
       # deployed site is current whatever the committed file happens to say.
-      - name: Stamp version and licence from package.json
+      - name: Stamp version and licence from app/package.json
         run: node scripts/sync-site.mjs
 
       - uses: actions/configure-pages@v6

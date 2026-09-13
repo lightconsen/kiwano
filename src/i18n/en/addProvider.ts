@@ -29,7 +29,7 @@ export const addProvider = {
 
   apiKey: "API Key",
   keyKeep: "Leave blank to keep the current key",
-  keyLocal: "Stored in the local keychain only",
+  keyLocal: "Stored locally, readable only by you",
   showHideKey: "Show / hide key",
 
   endpointUrl: "Endpoint URL",

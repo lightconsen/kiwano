@@ -147,16 +147,9 @@ Tauri v2 侧对应 `bundle.windows.signCommand`（云签名服务不提供私钥
 
 ## 5. 开放问题
 
-1. **README 与英文 UI 的 keychain 表述与实现不符。** 声称密钥存于系统 keychain 的位置：
+1. ~~**README 与 UI 的 keychain 表述与实现不符。**~~ **已修复（2026-09-13）。**
 
-   | 位置 | 原文 |
-   |---|---|
-   | `README.md:15` | `Your keys stay in the OS keychain.` |
-   | `README.md:85` | `API keys are stored in the **OS keychain**` |
-   | `src/i18n/en/providers.ts:116,118,120` | `API keys stay in the system keychain` |
-   | `src/i18n/en/addProvider.ts:32` | `Stored in the local keychain only` |
-
-   但代码中**没有任何 keychain 集成**：`Cargo.toml` / `Cargo.lock` / 各 crate 均无
+   代码中**没有任何 keychain 集成**：`Cargo.toml` / `Cargo.lock` / 各 crate 均无
    `keyring` 依赖（`security-framework` 只是 rustls 的传递依赖，用于 TLS 证书校验）。
    密钥实际**明文**存于 `~/.kiwano/kiwano.db`（`providers.api_key`、`api_keys.api_key`、
    以及 `takeover_backups` 里的原始配置），仅靠 Unix 文件权限保护：
@@ -164,9 +157,23 @@ Tauri v2 侧对应 `bundle.windows.signCommand`（云签名服务不提供私钥
    （`open_restricts_the_database_to_the_owner`，见 `crates/gateway/src/store/mod.rs`）。
    代码注释自己写着 "a keychain is planned, not done"。
 
-   这是对用户的安全承诺 —— README 是别人下载前读的东西 —— 优先级应高于本文任何签名事项。
-   要么实现 keychain，要么把表述改成「明文存于本地数据库，文件权限 0600」。
-   好消息是范围很小：`zh-CN` 资源里没有任何这类表述（0 处），只需改英文的 4 处加 README 的 2 处。
+   这是对用户的安全承诺，所以按事实改写，而不是留着等 keychain 落地。改动位置：
+
+   | 位置 | 原表述 | 现表述 |
+   |---|---|---|
+   | `README.md:15` | `Your keys stay in the OS keychain.` | `…on your machine, in an owner-only local database.` |
+   | `README.md:85` | `stored in the **OS keychain**` | `stored **locally, in an owner-only SQLite database** — directory 0700, file 0600` |
+   | `src/i18n/en/providers.ts:116,118,120` | `API keys stay in the system keychain` | `API keys are stored locally, readable only by you` |
+   | `src/i18n/en/addProvider.ts:32` | `Stored in the local keychain only` | `Stored locally, readable only by you` |
+   | `src/i18n/zh-CN/providers.ts:99,101,103` | `API 密钥仅保存在系统钥匙串` | `API 密钥仅存本机，只有你能读取` |
+   | `src/i18n/zh-CN/addProvider.ts:27` | `仅保存在本机钥匙串` | `仅存本机，只有你能读取` |
+   | `site/index.html:583,699,759,779` | 中英两版「钥匙串 / keychain」 | 同为「仅存本机 / a local database」 |
+
+   > ⚠️ **本文原先的表述有一处错误，值得记下来**：原文说「`zh-CN` 资源里没有任何这类
+   > 表述（0 处），只需改英文的 4 处加 README 的 2 处」。实际上 `zh-CN` 有 4 处
+   > （`providers.ts` 3 处、`addProvider.ts` 1 处），站点另有 4 处。范围比本文说的大一倍，
+   > 而且 **UI 里那句话比 README 更直接** —— 用户是在「添加供应商」弹窗里读到它的。
+   > 教训：凭「应该没有」下结论前先 grep。
 2. **`TAURI_SIGNING_PRIVATE_KEY` 的归一化已经很严，但 Apple 密钥没有同等强度。**
    updater 密钥会校验 base64 分组对齐、`RW` 前缀、行数（见 `release.yml`）；
    `APPLE_CERTIFICATE` 只做了空白剥离。以现状看风险低（Apple blob 的解码错误会直接失败），

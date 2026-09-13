@@ -580,7 +580,7 @@ footer { padding: 56px 0 44px; }
         <div class="step rv">
           <span class="no">01</span>
           <h3 data-i18n="s1.t">添加供应商</h3>
-          <p data-i18n="s1.d">从货架一键添加,或自定义端点;API Key 存入本机钥匙串,永不上传。</p>
+          <p data-i18n="s1.d">从货架一键添加,或自定义端点;API Key 存于本机数据库,永不上传。</p>
         </div>
         <div class="step rv" style="--d:80ms">
           <span class="no">02</span>
@@ -696,7 +696,7 @@ footer { padding: 56px 0 44px; }
   <div class="privacy">
     <div class="wrap privacy-inner">
       <div class="priv rv"><svg class="icon"><use href="#i-shield"/></svg><span data-i18n="pv.1">API 请求本地直连,不经过任何云端中转</span></div>
-      <div class="priv rv" style="--d:80ms"><svg class="icon"><use href="#i-key"/></svg><span data-i18n="pv.2">API Key 仅存本机系统钥匙串</span></div>
+      <div class="priv rv" style="--d:80ms"><svg class="icon"><use href="#i-key"/></svg><span data-i18n="pv.2">API Key 仅存本机，只有你能读取</span></div>
       <div class="priv rv" style="--d:160ms"><svg class="icon"><use href="#i-wifioff"/></svg><span data-i18n="pv.3">无账号体系,离线完整可用</span></div>
     </div>
   </div>
@@ -756,7 +756,7 @@ const I18N = {
     "how.h2": "Three steps, never hand-edit config files again",
     "how.p": "Each agent's base_url is pointed at the gateway once; every switch after that is just a routing change — instant, no restarts.",
     "s1.t": "Add a provider",
-    "s1.d": "Add from the shelf in one click, or use a custom endpoint; API keys go into the local keychain, never uploaded.",
+    "s1.d": "Add from the shelf in one click, or use a custom endpoint; API keys go into a local database, never uploaded.",
     "s2.t": "Take over your agents",
     "s2.d": `Point Claude Code / Codex / Gemini CLI at <code>127.0.0.1:8317</code> in one click; the original config is backed up automatically.`,
     "s3.t": "Switch freely",
@@ -776,7 +776,7 @@ const I18N = {
     "dl.intel": "Intel", "dl.winbtn": "64-bit installer", "dl.appimg": "Portable",
     "dl.f1": "Open source", "dl.f2": "No account", "dl.f3": "Data stays on your machine",
     "pv.1": "API requests go direct from your machine — no cloud relay",
-    "pv.2": "API keys stay in your local system keychain",
+    "pv.2": "API keys stay on this machine, readable only by you",
     "pv.3": "No accounts; fully usable offline",
     "foot.note": "Portions ported from cc-switch (MIT); see THIRD-PARTY-NOTICES",
   },

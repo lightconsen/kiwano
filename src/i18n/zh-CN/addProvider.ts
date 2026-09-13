@@ -24,7 +24,7 @@ export const addProvider = {
 
   apiKey: "API Key",
   keyKeep: "留空则保留当前密钥",
-  keyLocal: "仅保存在本机钥匙串",
+  keyLocal: "仅存本机，只有你能读取",
   showHideKey: "显示 / 隐藏密钥",
 
   endpointUrl: "端点 URL",

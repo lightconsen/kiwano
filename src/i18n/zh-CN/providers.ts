@@ -96,11 +96,11 @@ export const providers = {
 
   // ── Closing note (one variant per tab state) ──
   footerNotTakenOver:
-    "Kiwano 尚未路由该 Agent —— 请在上方启用接管；已保存的路由会保留并原样再次生效 · API 密钥仅保存在系统钥匙串 · 请求不经过 Kiwano 云端",
+    "Kiwano 尚未路由该 Agent —— 请在上方启用接管；已保存的路由会保留并原样再次生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
   footerStrategy:
-    "Agent 路由策略 · 上方各行即按优先级排序的候选（主用在前）· 切换即时生效 · API 密钥仅保存在系统钥匙串 · 请求不经过 Kiwano 云端",
+    "Agent 路由策略 · 上方各行即按优先级排序的候选（主用在前）· 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
   footerDefault:
-    "切换即时生效（该 Agent 已由本地网关接管；切换仅改变路由）· API 密钥仅保存在系统钥匙串 · 请求不经过 Kiwano 云端",
+    "切换即时生效（该 Agent 已由本地网关接管；切换仅改变路由）· API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
 
   // ── Plan quota tiers ──
   tierFiveHour: "5 小时窗口",

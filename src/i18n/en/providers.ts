@@ -113,11 +113,11 @@ export const providers = {
 
   // ── Closing note (one variant per tab state) ──
   footerNotTakenOver:
-    "Kiwano does not route this agent yet — enable the takeover above; the stored route is kept and applies again as-is · API keys stay in the system keychain · requests never touch the Kiwano cloud",
+    "Kiwano does not route this agent yet — enable the takeover above; the stored route is kept and applies again as-is · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
   footerStrategy:
-    "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys stay in the system keychain · requests never touch the Kiwano cloud",
+    "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
   footerDefault:
-    "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys stay in the system keychain · requests never touch the Kiwano cloud",
+    "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
 
   // ── Plan quota tiers ──
   // The backend reports these as machine keys (`five_hour`, `weekly_limit`,

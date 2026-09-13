@@ -475,8 +475,9 @@ pub struct CatalogPriceRefVm {
     /// says so — a reader who is only shown the peak would compare the wrong
     /// number.
     ///
-    /// Absent until the Hub publishes the tiers here: they live in the price
-    /// document today, which this page does not read.
+    /// The Hub copies these from the entry's flagship model and publishes the
+    /// two together or not at all, so they are present exactly when the entry's
+    /// flagship is priced by time of day.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub off_peak: Option<kiwano_adapters::model_pricing::OffPeakRates>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2501,35 +2502,79 @@ pub fn check_usage_alerts(
         if !p.enabled {
             continue;
         }
-        let Some(kiwanod::limits::PeriodLimit {
-            used,
-            limit,
-            unit,
-            period_key,
-        }) = kiwanod::limits::period_limit_usage(store, &p).map_err(e2s)?
-        else {
-            continue;
-        };
-        if used < limit {
-            continue;
+        if let Some(pl) = kiwanod::limits::period_limit_usage(store, &p).map_err(e2s)? {
+            // Notify at most once per reset period (app_settings KV dedup).
+            let key = format!("alert_sent:{}", p.id);
+            if pl.used >= pl.limit && first_notice(aux, &key, &pl.period_key, mark)? {
+                alerts.push(UsageAlertVm {
+                    provider_id: p.id.clone(),
+                    provider_name: p.name.clone(),
+                    used: (pl.used * 100.0).round() / 100.0,
+                    limit: pl.limit,
+                    unit: pl.unit,
+                });
+            }
         }
-        // Notify at most once per reset period (app_settings KV dedup)
-        let dedup_key = format!("alert_sent:{}", p.id);
-        if aux.get_setting(&dedup_key).as_deref() == Some(period_key.as_str()) {
-            continue;
+        // The percent half — a plan window whose live utilization has reached the
+        // ceiling the user set for it. These are the same numbers the gateway
+        // blocks on (`limits::evaluate`), read through the same cached report and
+        // the same `window_over`, so the notice and the block agree. Until now
+        // nothing raised it: the UI had the branch and the strings, and no
+        // producer, so a plan ceiling took the provider out of service silently.
+        if p.billing == Billing::Subscription {
+            // Bound to locals rather than chained: the hit borrows the report,
+            // so the report has to outlive it in this scope.
+            let limits = kiwanod::limits::PlanLimits::parse(p.plan_limits.as_deref());
+            let report = kiwanod::plan_quota::cached_report(store, &p.id);
+            let hit = match (limits.as_ref(), report.as_ref()) {
+                (Some(limits), Some(report)) => kiwanod::limits::window_over(report, limits),
+                _ => None,
+            };
+            if let Some(hit) = hit {
+                // One notice per window, and a fresh one once it rolls over.
+                let identity = match hit.resets_at {
+                    Some(at) => format!("{}@{at}", hit.window),
+                    // The endpoint does not say when the window resets, so
+                    // re-arm daily: a window that stays over should not notify
+                    // again on every poll, but it must not go quiet forever.
+                    None => format!(
+                        "{}@{}",
+                        hit.window,
+                        kiwanod::limits::period_start(
+                            unix_now(),
+                            Some("day"),
+                            store.ui_tz_offset_minutes()
+                        )
+                        .1
+                    ),
+                };
+                let key = format!("alert_sent:plan:{}", p.id);
+                if first_notice(aux, &key, &identity, mark)? {
+                    alerts.push(UsageAlertVm {
+                        provider_id: p.id.clone(),
+                        provider_name: p.name.clone(),
+                        used: (hit.util * 100.0).round() / 100.0,
+                        limit: hit.pct,
+                        unit: "plan_pct".into(),
+                    });
+                }
+            }
         }
-        if mark {
-            aux.set_setting(&dedup_key, &period_key).map_err(e2s)?;
-        }
-        alerts.push(UsageAlertVm {
-            provider_id: p.id,
-            provider_name: p.name,
-            used: (used * 100.0).round() / 100.0,
-            limit,
-            unit,
-        });
     }
     Ok(alerts)
+}
+
+/// Record `identity` under `key`, answering whether this is the first time it
+/// has been seen. With `mark` false the answer is given without consuming the
+/// dedup, so a read-only caller cannot eat the alert the app is about to raise.
+fn first_notice(aux: &Aux, key: &str, identity: &str, mark: bool) -> Result<bool, String> {
+    if aux.get_setting(key).as_deref() == Some(identity) {
+        return Ok(false);
+    }
+    if mark {
+        aux.set_setting(key, identity).map_err(e2s)?;
+    }
+    Ok(true)
 }
 
 // ── Dashboard ──
@@ -5028,6 +5073,72 @@ mod tests {
         assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
     }
 
+    /// A plan ceiling is the other way a provider goes out of service, and it
+    /// used to do so silently: the gateway took it out of the routes, the UI had
+    /// the branch and the strings for the notice, and nothing ever produced one.
+    #[test]
+    fn a_plan_window_ceiling_notifies_once_per_window() {
+        use kiwanod::plan_quota::{cache_write, PlanQuotaReport, PlanTierVm};
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("glm-1", "GLM", Billing::Subscription);
+        p.plan_limits = Some(serde_json::json!({ "five_hour": 90.0 }).to_string());
+        s.insert_provider(&p).unwrap();
+
+        let report = |util: f64, resets: &str| PlanQuotaReport {
+            provider_id: "glm-1".into(),
+            template: "zhipu".into(),
+            success: true,
+            error: None,
+            note: None,
+            tiers: vec![
+                PlanTierVm {
+                    name: "five_hour".into(),
+                    utilization: util,
+                    resets_at: Some(resets.into()),
+                    used: None,
+                    limit: None,
+                    unit: None,
+                },
+                // Present and quiet: only the window that is over should speak.
+                PlanTierVm {
+                    name: "weekly_limit".into(),
+                    utilization: 10.0,
+                    resets_at: None,
+                    used: None,
+                    limit: None,
+                    unit: None,
+                },
+            ],
+            queried_at: 0,
+            cached: false,
+        };
+
+        // Under the ceiling: nothing to say.
+        cache_write(&s, "glm-1", &report(80.0, "2026-09-14T10:00:00Z"));
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
+
+        // Over it: one notice, carrying the window's own percentage against the
+        // ceiling the user set.
+        cache_write(&s, "glm-1", &report(95.0, "2026-09-14T10:00:00Z"));
+        let alerts = check_usage_alerts(&s, &aux, true).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].unit, "plan_pct");
+        assert_eq!(alerts[0].used, 95.0);
+        assert_eq!(alerts[0].limit, 90.0);
+
+        // Same window, same news: silent, the way the money cap is.
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
+
+        // The window rolls over and is over its ceiling again. The reset time is
+        // the identity, so this is what re-arms the dedup rather than letting one
+        // hit go quiet for good.
+        cache_write(&s, "glm-1", &report(97.0, "2026-09-14T15:00:00Z"));
+        let alerts = check_usage_alerts(&s, &aux, true).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].used, 97.0);
+    }
+
     /// The dedup key is shared with the desktop notification, so a read-only
     /// caller must be able to ask without consuming the alert the app is about
     /// to raise. A cron poll that silenced the user's notification would be a
@@ -5095,15 +5206,25 @@ mod tests {
         assert!((alerts[1].used - 60.0).abs() < 1e-6);
     }
 
+    /// A store and an aux on **one file**, which is what production has: the
+    /// GUI opens both on `kiwano.db`, so a rate cached by a sync is the rate the
+    /// gateway reads back when it measures a limit.
+    fn store_and_aux_on_one_file() -> (tempfile::TempDir, Store, Aux) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let store = Store::open(&path).unwrap();
+        let aux = Aux::open(&path).unwrap();
+        (dir, store, aux)
+    }
+
     #[test]
     fn currency_limits_convert_with_the_hub_rate_table() {
-        let s = store();
-        let aux = Aux::open_in_memory().unwrap();
-        // A Hub price table whose CNY rate is nothing like the real one (the
-        // Hub quotes several CNY per USD).
+        let (_dir, s, aux) = store_and_aux_on_one_file();
+        // A Hub price table whose CNY rate is nothing like the real one (the Hub
+        // quotes several CNY per USD).
         let hub = serde_json::json!({
             "version": 99,
-            "exchange_rates": { "USD": 1.0, "CNY": 2.0 },
+            "exchange_rates": { "USD": 1.0, "CNY": 6.0 },
             "models": []
         })
         .to_string();
@@ -5115,18 +5236,22 @@ mod tests {
         cny.limit_unit = Some("CNY".into());
         s.insert_provider(&cny).unwrap();
 
+        // Dollars, against a limit denominated in yuan — which happens whenever
+        // a provider serves a model it does not price itself and the general row
+        // is in someone else's currency.
         let mut row = usage_row("glm-1");
         row.cost = Some(10.0);
         row.cost_currency = Some("USD".into());
         s.record_usage(&row).unwrap();
 
-        // 10 USD is 20 CNY at the cached rate — under the 50 CNY limit, so no
-        // alert. Converting at the real ~7.1 CNY/USD instead would put it at 71
-        // and fire one, which is what makes "no alert" a real assertion.
+        // 10 USD is 60 CNY at the cached rate, over the 50 CNY limit, so the
+        // alert fires. Adding the buckets raw — the old behaviour — read 10 and
+        // stayed silent, and so did converting at any rate at or below 5, which
+        // is why the rate is quoted high enough to decide the outcome.
         let alerts = check_usage_alerts(&s, &aux, true).unwrap();
         assert!(
-            alerts.iter().all(|a| a.provider_id != "glm-1"),
-            "10 USD at 2.0 CNY/USD is 20 CNY, under the 50 CNY limit"
+            alerts.iter().any(|a| a.provider_id == "glm-1"),
+            "10 USD at 6.0 CNY/USD is 60 CNY, over the 50 CNY limit"
         );
     }
 }

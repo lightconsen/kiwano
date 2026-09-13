@@ -102,10 +102,13 @@ pub fn period_limit_usage(
     // reads, so v1 rows keep meaning what they always did.
     let unit = match p.limit_unit.as_deref() {
         Some("wan_tokens") => "wan_tokens",
-        // A currency limit compares the period's cost directly: the limit is
-        // denominated in the provider's own currency, the one its models are
-        // priced in, so no rate is involved. Converting would make the ceiling
-        // move with the exchange rate.
+        // A currency limit compares the period's cost, denominated in the
+        // currency the provider bills in. Most of the time that is the only
+        // currency in the sum — a provider's own models are priced in it — but
+        // the cost of a model it does not price comes from the general row,
+        // which may be in another one. So the buckets are converted rather than
+        // added (see `used` below); what stays true is that the *limit* is
+        // never converted, so the ceiling the user typed does not move.
         Some(u) if u.len() == 3 => u,
         _ => "requests",
     };
@@ -121,11 +124,21 @@ pub fn period_limit_usage(
                 as f64
                 / 10_000.0
         }
-        u if u.len() == 3 => store
-            .usage_cost_by_currency(None, Some(&p.id), since.as_deref())?
-            .iter()
-            .filter_map(|(currency, cost)| currency.as_deref().map(|_| *cost))
-            .sum(),
+        u if u.len() == 3 => {
+            // Converted before it is added, because a provider's usage can span
+            // more than one currency: its own models are priced in its own
+            // currency, but a model it does not price is billed from the general
+            // row, which may be denominated in another. Summing the buckets raw
+            // added USD to CNY at 1:1 — a `¥50` limit quietly became a ceiling
+            // of nothing in particular, and it did so while both the app and the
+            // gateway agreed on the wrong number.
+            let buckets = store.usage_cost_by_currency(None, Some(&p.id), since.as_deref())?;
+            kiwano_adapters::model_pricing::convert_cost_buckets(
+                &buckets,
+                u,
+                &store.hub_exchange_rates(),
+            )
+        }
         _ => {
             store
                 .usage_totals_for_provider(&p.id, since.as_deref())?
@@ -156,31 +169,45 @@ impl PlanLimits {
     }
 }
 
-/// The first configured window whose live utilization has reached its ceiling,
-/// as (window, utilization, ceiling). A window the report does not mention
-/// counts as not over: no evidence is not evidence of a hit.
-pub fn window_over(
-    report: &crate::plan_quota::PlanQuotaReport,
+/// A plan window whose live utilization has reached the ceiling set for it.
+pub struct WindowHit<'a> {
+    /// `five_hour` | `weekly`.
+    pub window: &'static str,
+    /// Percent of the window used, as the provider's own endpoint reports it.
+    pub util: f64,
+    /// The ceiling the user configured, in percent.
+    pub pct: f64,
+    /// When the window resets, as the endpoint reports it. This is what a
+    /// notification dedups on: one notice per window, and a fresh one after the
+    /// window rolls over. `None` when the endpoint does not say.
+    pub resets_at: Option<&'a str>,
+}
+
+/// The first configured window whose live utilization has reached its ceiling.
+/// A window the report does not mention counts as not over: no evidence is not
+/// evidence of a hit.
+pub fn window_over<'a>(
+    report: &'a crate::plan_quota::PlanQuotaReport,
     limits: &PlanLimits,
-) -> Option<(&'static str, f64, f64)> {
-    let tier_util = |name: &str| {
-        report
-            .tiers
-            .iter()
-            .find(|t| t.name == name)
-            .map(|t| t.utilization)
+) -> Option<WindowHit<'a>> {
+    let tier = |name: &str| report.tiers.iter().find(|t| t.name == name);
+    let hit = |window, tier: &'a crate::plan_quota::PlanTierVm, pct| WindowHit {
+        window,
+        util: tier.utilization,
+        pct,
+        resets_at: tier.resets_at.as_deref(),
     };
     if let Some(pct) = limits.five_hour {
-        if let Some(util) = tier_util("five_hour") {
-            if util >= pct {
-                return Some(("five_hour", util, pct));
+        if let Some(t) = tier("five_hour") {
+            if t.utilization >= pct {
+                return Some(hit("five_hour", t, pct));
             }
         }
     }
     if let Some(pct) = limits.weekly {
-        if let Some(util) = tier_util("weekly_limit") {
-            if util >= pct {
-                return Some(("weekly", util, pct));
+        if let Some(t) = tier("weekly_limit") {
+            if t.utilization >= pct {
+                return Some(hit("weekly", t, pct));
             }
         }
     }
@@ -308,17 +335,21 @@ pub fn evaluate(store: &Store) -> LimitState {
         // here would make `GatewayState::new` block on N provider endpoints,
         // and would put a network round trip in a path that runs every tick.
         if p.billing == crate::store::Billing::Subscription {
-            let over = PlanLimits::parse(p.plan_limits.as_deref()).and_then(|limits| {
-                crate::plan_quota::cached_report(store, &p.id)
-                    .and_then(|report| window_over(&report, &limits))
-            });
-            if let Some((window, util, pct)) = over {
+            // Bound to locals rather than chained: the hit borrows the report,
+            // so the report has to outlive it in this scope.
+            let limits = PlanLimits::parse(p.plan_limits.as_deref());
+            let report = crate::plan_quota::cached_report(store, &p.id);
+            let over = match (limits.as_ref(), report.as_ref()) {
+                (Some(limits), Some(report)) => window_over(report, limits),
+                _ => None,
+            };
+            if let Some(hit) = over {
                 blocked.insert(
                     p.id.clone(),
                     BlockReason::PlanWindow {
-                        window: window.to_string(),
-                        util,
-                        pct,
+                        window: hit.window.to_string(),
+                        util: hit.util,
+                        pct: hit.pct,
                     },
                 );
             }
@@ -440,6 +471,44 @@ pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
 mod tests {
     use super::*;
 
+    /// A provider's spend can span currencies: its own models are priced in its
+    /// own currency, but a model it does not price is billed from the general
+    /// row, which may be denominated in another. The limit is the user's, in the
+    /// provider's currency, so each bucket is converted on the way in.
+    ///
+    /// The same 10 USD + 5 CNY of usage is run under two Hub rates, giving 25
+    /// and then 65 — a raw sum would read 15 in both cases, which is what makes
+    /// the second assertion the one that proves a rate was applied at all.
+    #[test]
+    fn a_money_limit_converts_each_currency_before_it_sums_them() {
+        let (_low_dir, low) = store_with_hub_rates(r#"{"USD":1.0,"CNY":2.0}"#);
+        let (_high_dir, high) = store_with_hub_rates(r#"{"USD":1.0,"CNY":6.0}"#);
+        for (store, expected) in [(&low, 25.0), (&high, 65.0)] {
+            // The limit itself is never converted: ¥50 stays ¥50.
+            let p = limited_provider(store, "ds-1", 50.0);
+            record_cost(store, "ds-1", 10.0, "USD");
+            record_cost(store, "ds-1", 5.0, "CNY");
+            let used = period_limit_usage(store, &p).unwrap().unwrap().used;
+            assert!(
+                (used - expected).abs() < 1e-6,
+                "10 USD + 5 CNY should measure {expected}, got {used}"
+            );
+        }
+    }
+
+    /// The ordinary case needs no rate: a provider whose usage is all in its own
+    /// currency converts to itself, which is also all a never-synced install
+    /// with no rates cached can measure.
+    #[test]
+    fn a_money_limit_in_one_currency_needs_no_rates() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("kiwano.db")).unwrap();
+        let p = limited_provider(&store, "ds-1", 50.0);
+        record_cost(&store, "ds-1", 5.0, "CNY");
+        let used = period_limit_usage(&store, &p).unwrap().unwrap().used;
+        assert!((used - 5.0).abs() < 1e-6, "got {used}");
+    }
+
     #[test]
     fn period_start_keys() {
         // 2026-09-07T12:34:56Z (Monday)
@@ -459,10 +528,10 @@ mod tests {
         assert_eq!(key, "all");
     }
 
-    fn store_with_spend(provider_id: &str, limit: f64, spent: f64) -> Store {
-        use crate::store::{Billing, Protocol, Provider, UsageRecord};
-        let s = Store::open_in_memory().unwrap();
-        s.insert_provider(&Provider {
+    /// A provider on a CNY limit, with no usage recorded yet.
+    fn limited_provider(store: &Store, provider_id: &str, limit: f64) -> crate::store::Provider {
+        use crate::store::{Billing, Protocol, Provider};
+        let p = Provider {
             id: provider_id.into(),
             name: provider_id.into(),
             catalog_id: None,
@@ -483,25 +552,70 @@ mod tests {
             enabled: true,
             created_at: crate::store::now_rfc3339(),
             updated_at: crate::store::now_rfc3339(),
-        })
-        .unwrap();
-        s.record_usage(&UsageRecord {
-            ts: crate::store::now_rfc3339(),
-            agent: "claude".into(),
-            provider_id: provider_id.into(),
-            model: None,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_creation_tokens: 0,
-            latency_ms: None,
-            status: "ok".into(),
-            cost: Some(spent),
-            cost_currency: Some("CNY".into()),
-            cost_off_peak: None,
-        })
-        .unwrap();
+        };
+        store.insert_provider(&p).unwrap();
+        p
+    }
+
+    /// One metered row, in the currency given.
+    fn record_cost(store: &Store, provider_id: &str, cost: f64, currency: &str) {
+        use crate::store::UsageRecord;
+        store
+            .record_usage(&UsageRecord {
+                ts: crate::store::now_rfc3339(),
+                agent: "claude".into(),
+                provider_id: provider_id.into(),
+                model: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: Some(cost),
+                cost_currency: Some(currency.into()),
+                cost_off_peak: None,
+            })
+            .unwrap();
+    }
+
+    fn store_with_spend(provider_id: &str, limit: f64, spent: f64) -> Store {
+        let s = Store::open_in_memory().unwrap();
+        limited_provider(&s, provider_id, limit);
+        record_cost(&s, provider_id, spent, "CNY");
         s
+    }
+
+    /// A store on a real file with a Hub price document cached beside it — the
+    /// shape production has, where the GUI opens `Aux` on the same database the
+    /// gateway opens, so the rates the seeder read and the rates a limit reads
+    /// back are one row.
+    fn store_with_hub_rates(rates: &str) -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let store = Store::open(&path).unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        // The GUI's own schema (`kiwano_core::Aux`), which the gateway reads but
+        // does not create.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS hub_models_cache (
+                 id        INTEGER PRIMARY KEY CHECK (id = 1),
+                 version   INTEGER NOT NULL,
+                 sha256    TEXT NOT NULL,
+                 payload   TEXT NOT NULL,
+                 synced_at TEXT NOT NULL
+             )",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO hub_models_cache (id, version, sha256, payload, synced_at)
+             VALUES (1, 1, 'sha', ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![format!(
+                r#"{{"version":1,"exchange_rates":{rates},"models":[]}}"#
+            )],
+        )
+        .unwrap();
+        (dir, store)
     }
 
     #[test]

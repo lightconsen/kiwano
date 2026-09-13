@@ -1154,7 +1154,10 @@ fn cache_read(store: &Store, provider_id: &str) -> Option<PlanQuotaReport> {
     Some(report)
 }
 
-fn cache_write(store: &Store, provider_id: &str, report: &PlanQuotaReport) {
+/// Store a report for a provider — the write half of [`cached_report`], which
+/// the refresh step calls. Public so the app's alert path can be exercised
+/// against a cached report without a provider endpoint to talk to.
+pub fn cache_write(store: &Store, provider_id: &str, report: &PlanQuotaReport) {
     let v = serde_json::json!({ "ts": now_millis(), "report": report });
     let _ = store.set_app_setting(&cache_key(provider_id), &v.to_string());
 }

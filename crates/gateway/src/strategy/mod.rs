@@ -19,7 +19,7 @@ pub mod prober;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{GatewayError, Result};
 use crate::router::AgentRoute;
@@ -72,14 +72,17 @@ fn in_window(now_min: u32, start: &str, end: &str) -> bool {
 ///
 /// `period` currently supports only `day` (the user's local day); other values are
 /// treated as day and warned about in engine logs. The cost unit opens up once the §8 billing model lands.
-#[derive(Debug, Deserialize)]
-struct QuotaConfig {
-    limit: f64,
+///
+/// Public, because this payload is authored outside the engine too — the CLI
+/// writes it — and two definitions of its spelling is how a config that looks
+/// accepted ends up silently ignored.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuotaConfig {
+    pub limit: f64,
     #[serde(default = "default_quota_unit")]
-    unit: String,
+    pub unit: String,
     #[serde(default)]
-    #[allow(dead_code)] // declared for explicit semantics; currently only day
-    period: String,
+    pub period: String,
 }
 
 fn default_quota_unit() -> String {
@@ -87,6 +90,47 @@ fn default_quota_unit() -> String {
 }
 
 impl QuotaConfig {
+    /// The units [`QuotaConfig::consumed`] acts on.
+    pub const UNITS: [&'static str; 2] = ["requests", "tokens"];
+
+    /// Parse and *validate* a config authored outside the engine.
+    ///
+    /// Stricter than the private [`QuotaConfig::parse`], which stays lenient for
+    /// the read path: a config already in the database must not start failing
+    /// requests just because it names a unit this build does not know. A writer,
+    /// on the other hand, can act on being told — and an unknown unit silently
+    /// falling back to `requests` changes what the threshold counts.
+    pub fn from_json(config: &str) -> std::result::Result<QuotaConfig, String> {
+        let cfg: QuotaConfig =
+            serde_json::from_str(config).map_err(|e| format!("invalid quota config JSON: {e}"))?;
+        // `is_finite` first: a NaN limit would compare false against everything
+        // and quietly never trip the threshold.
+        if !cfg.limit.is_finite() || cfg.limit <= 0.0 {
+            return Err(format!(
+                "quota limit must be a positive number, got {}",
+                cfg.limit
+            ));
+        }
+        if !Self::UNITS.contains(&cfg.unit.as_str()) {
+            return Err(format!(
+                "unknown quota unit \"{}\" (expected {})",
+                cfg.unit,
+                Self::UNITS.join("|")
+            ));
+        }
+        if !cfg.period.is_empty() && cfg.period != "day" {
+            return Err(format!(
+                "unknown quota period \"{}\" (only day is supported)",
+                cfg.period
+            ));
+        }
+        Ok(cfg)
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
     fn parse(config: Option<&str>) -> Option<QuotaConfig> {
         let cfg: QuotaConfig = serde_json::from_str(config?).ok()?;
         if cfg.unit != "requests" && cfg.unit != "tokens" {
@@ -942,5 +986,39 @@ mod tests {
         assert_eq!(cfg.unit, "requests");
         assert!(QuotaConfig::parse(Some("not json")).is_none());
         assert!(QuotaConfig::parse(None).is_none());
+    }
+
+    /// The read path stays lenient — a row already in the database must not
+    /// start failing requests — while the write path rejects what the engine
+    /// would silently reinterpret.
+    #[test]
+    fn quota_config_validation_is_stricter_than_parsing() {
+        // Defaults fill in, and the round trip survives.
+        let cfg = QuotaConfig::from_json(r#"{"limit": 100}"#).unwrap();
+        assert_eq!(cfg.unit, "requests");
+        assert_eq!(QuotaConfig::from_json(&cfg.to_json()).unwrap().limit, 100.0);
+
+        // Lenient: parse accepts a unit it will fall back from.
+        assert!(QuotaConfig::parse(Some(r#"{"limit":1,"unit":"cost"}"#)).is_some());
+        // Strict: a writer is told instead of silently counting something else.
+        let err = QuotaConfig::from_json(r#"{"limit":1,"unit":"cost"}"#).unwrap_err();
+        assert!(err.contains("cost"), "{err}");
+        assert!(err.contains("requests|tokens"), "{err}");
+
+        for bad in [
+            r#"{"limit":0}"#,
+            r#"{"limit":-5}"#,
+            r#"{"unit":"tokens"}"#,
+            "not json",
+            r#"{"limit":10,"period":"week"}"#,
+        ] {
+            assert!(
+                QuotaConfig::from_json(bad).is_err(),
+                "should have been rejected: {bad}"
+            );
+        }
+
+        // The period the engine does support stays accepted.
+        assert!(QuotaConfig::from_json(r#"{"limit":10,"period":"day"}"#).is_ok());
     }
 }

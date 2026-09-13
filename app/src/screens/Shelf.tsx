@@ -822,19 +822,19 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
       return next;
     });
 
-  /** The grouped body under the current sort.
-      The columns describe *rows* — a protocol, a category, a billing mode are
-      the provider's — so a click orders the providers inside every group. Two
-      of them also say something about a group, and those order the groups
-      themselves: a name sort makes the model list itself alphabetical, and a
-      price sort puts the models with the cheapest entry point first. The other
-      columns leave the groups in `buildModelGroups`' order, because a group of
-      providers has no single protocol or category to sort by.
-      Without a sort, groups keep that order and rows stay cheapest first — the
-      reading this view exists for. */
+  /** The grouped body under the current sort: a sort orders the providers
+      *inside* each group and never the groups themselves.
+
+      A view where a column reorders the models would need the columns to
+      describe models, and they do not — protocol, category, billing and name
+      are the provider's, which is why they mean the same thing in both views.
+      The model order stays the grouping's own: models somebody prices first,
+      then the widest, then by name. Without a sort the rows keep the order
+      `buildModelGroups` gave them, cheapest first — the reading this view
+      exists for. */
   const orderedGroups = useMemo(() => {
     if (!sort) return groups;
-    // Destructured so the narrowing survives into the comparator closures.
+    // Destructured so the narrowing survives into the comparator closure.
     const { key, dir } = sort;
     const rowCmp = (a: ModelGroupRow, b: ModelGroupRow): number => {
       if (key === "price") {
@@ -848,27 +848,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
       }
       return compare(key, a.entry, b.entry) * dir;
     };
-    const cheapest = (g: ModelGroup) =>
-      g.rows.reduce((min, r) => (r.value !== null && r.value < min ? r.value : min), Number.POSITIVE_INFINITY);
-    const groupCmp = (a: ModelGroup, b: ModelGroup): number => {
-      if (key === "name") return a.name.localeCompare(b.name) * dir;
-      if (key === "price") {
-        const av = cheapest(a);
-        const bv = cheapest(b);
-        // Same rule as a row: a group nobody prices goes last both ways rather
-        // than reading as free. `Infinity - Infinity` is NaN, hence the guards.
-        if (!Number.isFinite(av) || !Number.isFinite(bv)) {
-          return Number.isFinite(av) ? -1 : Number.isFinite(bv) ? 1 : 0;
-        }
-        return (av - bv) * dir;
-      }
-      return 0; // the group order is the grouping's own
-    };
-    // `sort` is stable, so the groups this comparator cannot order stay in the
-    // order the grouping built.
-    return [...groups]
-      .sort(groupCmp)
-      .map((g) => ({ ...g, rows: [...g.rows].sort(rowCmp) }));
+    return groups.map((g) => ({ ...g, rows: [...g.rows].sort(rowCmp) }));
   }, [groups, sort]);
 
   if (!catalog)

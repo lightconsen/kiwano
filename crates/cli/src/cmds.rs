@@ -9,11 +9,12 @@ use std::collections::BTreeMap;
 use kiwano_core::detect;
 use kiwano_core::sidecar;
 use kiwano_core::vm;
-use kiwano_gateway::store::{Provider, StrategyType, UsageTotals};
+use kiwano_gateway::store::{Provider, RequestLogFilter, StrategyType, UsageTotals};
 use kiwano_gateway::strategy::QuotaConfig;
 
 use crate::cli::{
-    AddArgs, AgentsCmd, BindingCmd, EditArgs, KeysCmd, ProbeCmd, ProvidersCmd, RoutesCmd, UsageArgs,
+    AddArgs, AgentsCmd, BindingCmd, DashboardArgs, EditArgs, GatewayCmd, KeysCmd, LogFilterArgs,
+    LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd, UsageArgs,
 };
 use crate::output::{ellipsize, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
@@ -590,6 +591,198 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
     Ok(())
 }
 
+// ── logs ────────────────────────────────────────────────────────────────────
+
+pub fn logs(cmd: &LogsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        LogsCmd::List(args) => {
+            if args.page < 1 {
+                return Err(CliError::usage("--page is 1-based"));
+            }
+            if args.page_size < 1 {
+                return Err(CliError::usage("--page-size must be positive"));
+            }
+            let filter = log_filter(&args.filter)?;
+            let list = {
+                let store = ctx.store()?;
+                vm::list_request_logs(store, args.page, args.page_size, filter)?
+            };
+            let text = render_logs(&list);
+            ctx.out.emit(&list, || text);
+            Ok(())
+        }
+        LogsCmd::Show { id } => {
+            let detail = {
+                let store = ctx.store()?;
+                vm::get_request_log(store, *id)?
+            };
+            match detail {
+                Some(detail) => {
+                    let text = render_log_detail(&detail);
+                    ctx.out.emit(&detail, || text);
+                    Ok(())
+                }
+                // Pruned rather than missing: the retention window drops old
+                // rows, so the id genuinely existed once.
+                None => Err(runtime(format!(
+                    "no request {id} (it may have been pruned by the retention window)"
+                ))),
+            }
+        }
+        LogsCmd::Export(args) => {
+            let filter = log_filter(&args.filter)?;
+            let path = args.out.to_string_lossy();
+            let report = {
+                let store = ctx.store()?;
+                vm::export_request_logs_csv(store, &path, filter, args.include_bodies)?
+            };
+            if report.truncated {
+                ctx.out.note(format!(
+                    "note: the result exceeded the export cap; {} rows written and the \
+                     file is short of the full set",
+                    report.rows_written
+                ));
+            }
+            let text = format!(
+                "wrote {} rows to {}",
+                report.rows_written,
+                args.out.display()
+            );
+            ctx.out.emit(&report, || text);
+            Ok(())
+        }
+        LogsCmd::Clear { yes } => {
+            if !*yes {
+                return Err(CliError::usage(
+                    "this deletes every logged request; re-run with --yes to confirm",
+                ));
+            }
+            {
+                let store = ctx.store()?;
+                vm::clear_request_logs(store)?;
+            }
+            ctx.out.line("cleared the request log");
+            Ok(())
+        }
+        LogsCmd::Dir => {
+            let dir = kiwano_gateway::logging::log_dir(&ctx.db);
+            ctx.out.line(dir.display().to_string());
+            Ok(())
+        }
+    }
+}
+
+fn log_filter(args: &LogFilterArgs) -> Result<RequestLogFilter<'_>, CliError> {
+    // The column carries a CHECK constraint, so an unknown value would fail
+    // deep in SQLite with a message about a constraint rather than about the
+    // flag the user typed.
+    let status = match args.status.as_deref() {
+        None => None,
+        Some(s @ ("ok" | "error")) => Some(s),
+        Some(other) => {
+            return Err(CliError::usage(format!(
+                "invalid --status: {other} (ok|error)"
+            )))
+        }
+    };
+    Ok(RequestLogFilter {
+        agent: args.agent.as_deref(),
+        provider_id: args.provider.as_deref(),
+        status,
+        from: args.from.as_deref(),
+        to: args.to.as_deref(),
+    })
+}
+
+// ── dashboard / alerts ──────────────────────────────────────────────────────
+
+pub fn dashboard(args: &DashboardArgs, ctx: &mut Ctx) -> Result<(), CliError> {
+    let window = match args.window.as_str() {
+        w @ ("today" | "7d" | "30d") => w,
+        other => {
+            return Err(CliError::usage(format!(
+                "invalid --window: {other} (today|7d|30d)"
+            )))
+        }
+    };
+    let data = {
+        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        vm::build_dashboard(
+            store,
+            aux,
+            window,
+            args.provider.as_deref(),
+            args.agent.as_deref(),
+        )?
+    };
+    let text = render_dashboard(&data, window);
+    ctx.out.emit(&data, || text);
+    Ok(())
+}
+
+/// Alerts are read-only unless `--mark-notified`, because the dedup key they
+/// consult is the same one the app uses to decide whether to raise a desktop
+/// notification. A cron poll consuming it would silence the alert the user was
+/// waiting for.
+pub fn alerts(mark_notified: bool, ctx: &mut Ctx) -> Result<(), CliError> {
+    let alerts = {
+        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        vm::check_usage_alerts(store, aux, mark_notified)?
+    };
+    if alerts.is_empty() {
+        // Not an error: "nothing is over budget" is the answer to the question.
+        ctx.out.note("no provider is over its allowance");
+    }
+    let text = render_alerts(&alerts);
+    ctx.out.emit(&alerts, || text);
+    Ok(())
+}
+
+// ── gateway daemon ──────────────────────────────────────────────────────────
+
+pub fn gateway(cmd: &GatewayCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        GatewayCmd::Start => {
+            let status = sidecar::status_for(&ctx.admin, ctx.token.as_deref());
+            match sidecar::startup_action(status.as_ref(), env!("CARGO_PKG_VERSION")) {
+                sidecar::StartupAction::Adopt => {
+                    ctx.out.line(format!(
+                        "gateway already running (admin {})",
+                        ctx.admin.describe()
+                    ));
+                }
+                sidecar::StartupAction::Restart => {
+                    let child = sidecar::restart(&ctx.admin).map_err(runtime)?;
+                    ctx.out
+                        .line(format!("replaced the running gateway (pid {})", child.id()));
+                }
+                sidecar::StartupAction::Spawn => {
+                    let child = sidecar::spawn().map_err(runtime)?;
+                    ctx.out
+                        .line(format!("started gateway (pid {})", child.id()));
+                }
+            }
+            Ok(())
+        }
+        GatewayCmd::Stop => {
+            if !sidecar::request_shutdown(&ctx.admin) {
+                return Err(runtime(format!(
+                    "the gateway would not stop (admin {}); stop it by hand if it is still running",
+                    ctx.admin.describe()
+                )));
+            }
+            ctx.out.line("gateway stopped");
+            Ok(())
+        }
+        GatewayCmd::Restart => {
+            let child = sidecar::restart(&ctx.admin).map_err(runtime)?;
+            ctx.out
+                .line(format!("gateway restarted (pid {})", child.id()));
+            Ok(())
+        }
+    }
+}
+
 // ── input mapping ───────────────────────────────────────────────────────────
 
 /// Turn the flags into the app's `NewProviderInput`.
@@ -762,6 +955,151 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
                     })
                     .collect::<Vec<_>>()
                     .join(","),
+            ]
+        })
+        .collect();
+    render_table(&head, &rows)
+}
+
+fn render_logs(list: &vm::RequestLogListVm) -> String {
+    if list.rows.is_empty() {
+        return "(no matching requests)".to_string();
+    }
+    let head = [
+        "ID", "TIME", "AGENT", "PROVIDER", "MODEL", "ST", "MS", "IN", "OUT",
+    ];
+    let rows: Vec<Vec<String>> = list
+        .rows
+        .iter()
+        .map(|r| {
+            vec![
+                r.id.to_string(),
+                r.ts.clone(),
+                r.agent.clone().unwrap_or_else(|| "-".to_string()),
+                r.provider_id.clone().unwrap_or_else(|| "-".to_string()),
+                ellipsize(r.model.as_deref().unwrap_or("-"), 24),
+                r.status_code.to_string(),
+                r.latency_ms
+                    .map(|ms| ms.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                r.input_tokens.to_string(),
+                r.output_tokens.to_string(),
+            ]
+        })
+        .collect();
+    let mut out = render_table(&head, &rows);
+    // The total, not the page length, is what tells a caller whether to keep
+    // paging.
+    out.push_str(&format!("\n{} of {} matching", list.rows.len(), list.total));
+    out
+}
+
+fn render_log_detail(detail: &kiwano_gateway::store::RequestLogDetail) -> String {
+    let e = &detail.entry;
+    let mut out = format!(
+        "#{} {} {} {}{}",
+        e.id,
+        e.ts,
+        e.method,
+        e.path,
+        e.query
+            .as_deref()
+            .map(|q| format!("?{q}"))
+            .unwrap_or_default()
+    );
+    out.push_str(&format!(
+        "\nstatus {} · {} ms{}",
+        e.status_code,
+        e.latency_ms.unwrap_or(0),
+        if e.is_streaming { " · streaming" } else { "" }
+    ));
+    out.push_str(&format!(
+        "\nagent {} · provider {} · model {}",
+        e.agent.as_deref().unwrap_or("-"),
+        e.provider_id.as_deref().unwrap_or("-"),
+        e.model.as_deref().unwrap_or("-")
+    ));
+    out.push_str(&format!(
+        "\ntokens in {} · out {} · cache_read {} · size {}→{}",
+        e.input_tokens, e.output_tokens, e.cache_read_tokens, e.request_size, e.response_size
+    ));
+    if let Some(kind) = &e.error_kind {
+        out.push_str(&format!(
+            "\nerror {kind}: {}",
+            e.error_message.as_deref().unwrap_or("(no message)")
+        ));
+    }
+    // Bodies are the reason to open one of these; they are already redacted by
+    // the capture layer.
+    for (label, body) in [
+        ("request", &detail.request_body),
+        ("response", &detail.response_body),
+    ] {
+        if let Some(body) = body {
+            out.push_str(&format!("\n{label} body:\n{body}"));
+        }
+    }
+    if e.truncated {
+        out.push_str("\n(one or more captured bodies were truncated)");
+    }
+    out
+}
+
+fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
+    let mut out = format!(
+        "{} · {} requests ({}%) · cost {:.4}",
+        window, data.requests, data.requests_delta_pct, data.cost
+    );
+    out.push_str(&format!(
+        "\ntokens in {} · out {} · cache_read {}",
+        vm::fmt_tokens(data.input_tokens),
+        vm::fmt_tokens(data.output_tokens),
+        vm::fmt_tokens(data.cache_read_tokens)
+    ));
+    out.push_str(&format!(
+        "\navg latency {} ms ({}%)",
+        data.latency_ms, data.latency_delta_pct
+    ));
+    if !data.by_provider.is_empty() {
+        out.push_str("\nby provider:");
+        for p in &data.by_provider {
+            out.push_str(&format!(
+                "\n  {:<24} {:>6} req  {:>3}%  {:.4}",
+                ellipsize(&p.name, 23),
+                p.requests,
+                p.pct,
+                p.cost
+            ));
+        }
+    }
+    if !data.by_agent.is_empty() {
+        out.push_str("\nby agent:");
+        for a in &data.by_agent {
+            out.push_str(&format!(
+                "\n  {:<24} {:>6} req  {:>8} tokens  {:.4}",
+                ellipsize(&a.label, 23),
+                a.requests,
+                a.tokens,
+                a.cost
+            ));
+        }
+    }
+    out
+}
+
+fn render_alerts(alerts: &[vm::UsageAlertVm]) -> String {
+    if alerts.is_empty() {
+        return "(nothing over its allowance)".to_string();
+    }
+    let head = ["PROVIDER", "USED", "LIMIT", "UNIT"];
+    let rows: Vec<Vec<String>> = alerts
+        .iter()
+        .map(|a| {
+            vec![
+                ellipsize(&a.provider_name, 24),
+                format!("{:.2}", a.used),
+                format!("{:.2}", a.limit),
+                a.unit.clone(),
             ]
         })
         .collect();

@@ -226,6 +226,22 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::routes(cmd, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Logs(cmd) => {
+            cmds::logs(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Dashboard(args) => {
+            cmds::dashboard(args, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Alerts { mark_notified } => {
+            cmds::alerts(*mark_notified, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Gateway(cmd) => {
+            cmds::gateway(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
     }
 }
 

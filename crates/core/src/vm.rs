@@ -2351,7 +2351,18 @@ pub struct UsageAlertVm {
 ///
 /// Notification only — `enforce_amount_limits` is what acts on it, and runs
 /// whether or not the user wants to be told.
-pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>, String> {
+/// Alerts for providers that have spent their period allowance.
+///
+/// `mark` controls the once-per-period dedup write. The app passes `true` — it
+/// raises one notification per provider per reset period, and recording that is
+/// the point of the key. A read-only caller passes `false`, because consuming
+/// the dedup would suppress the notification the app is about to raise: a
+/// `--json` poll from a script must not silently eat the user's alert.
+pub fn check_usage_alerts(
+    store: &Store,
+    aux: &Aux,
+    mark: bool,
+) -> Result<Vec<UsageAlertVm>, String> {
     if !ui_settings(aux).cost_alert {
         return Ok(Vec::new());
     }
@@ -2377,7 +2388,9 @@ pub fn check_usage_alerts(store: &Store, aux: &Aux) -> Result<Vec<UsageAlertVm>,
         if aux.get_setting(&dedup_key).as_deref() == Some(period_key.as_str()) {
             continue;
         }
-        aux.set_setting(&dedup_key, &period_key).map_err(e2s)?;
+        if mark {
+            aux.set_setting(&dedup_key, &period_key).map_err(e2s)?;
+        }
         alerts.push(UsageAlertVm {
             provider_id: p.id,
             provider_name: p.name,
@@ -4351,24 +4364,60 @@ mod tests {
         for _ in 0..40 {
             s.record_usage(&usage_row("kimi-1")).unwrap();
         }
-        assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
 
         // 100/100 → threshold hit
         for _ in 0..60 {
             s.record_usage(&usage_row("kimi-1")).unwrap();
         }
-        let alerts = check_usage_alerts(&s, &aux).unwrap();
+        let alerts = check_usage_alerts(&s, &aux, true).unwrap();
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].provider_id, "kimi-1");
         assert_eq!(alerts[0].unit, "requests");
 
         // same-period dedup: the second check returns nothing
-        assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
 
         // toggle off → silent
         let patch = serde_json::json!({ "cost_alert": false });
         update_settings(&s, &aux, &patch).unwrap();
-        assert!(check_usage_alerts(&s, &aux).unwrap().is_empty());
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
+    }
+
+    /// The dedup key is shared with the desktop notification, so a read-only
+    /// caller must be able to ask without consuming the alert the app is about
+    /// to raise. A cron poll that silenced the user's notification would be a
+    /// bug nobody would connect to the poll.
+    #[test]
+    fn cost_alert_can_be_read_without_consuming_the_dedup() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("kimi-1", "Kimi", Billing::Subscription);
+        p.period_limit = Some(10.0);
+        p.limit_unit = Some("requests".into());
+        p.reset_period = Some("monthly".into());
+        s.insert_provider(&p).unwrap();
+        for _ in 0..10 {
+            s.record_usage(&usage_row("kimi-1")).unwrap();
+        }
+
+        // Read-only: the alert is reported every time, and the dedup is
+        // untouched — which is what `--mark-notified` is for.
+        let first = check_usage_alerts(&s, &aux, false).unwrap();
+        let second = check_usage_alerts(&s, &aux, false).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1, "a read must not consume the alert");
+
+        // The app's marking call still works and still dedups.
+        assert_eq!(check_usage_alerts(&s, &aux, true).unwrap().len(), 1);
+        assert!(
+            check_usage_alerts(&s, &aux, true).unwrap().is_empty(),
+            "marking is what suppresses the repeat"
+        );
+        assert!(
+            check_usage_alerts(&s, &aux, false).unwrap().is_empty(),
+            "…for read-only callers too, once it has been marked"
+        );
     }
 
     #[test]
@@ -4394,7 +4443,7 @@ mod tests {
             row.cost_currency = Some("CNY".into());
             s.record_usage(&row).unwrap();
         }
-        let alerts = check_usage_alerts(&s, &aux).unwrap();
+        let alerts = check_usage_alerts(&s, &aux, true).unwrap();
         assert_eq!(alerts.len(), 2);
         assert_eq!(alerts[0].provider_id, "ds-1");
         assert_eq!(alerts[1].provider_id, "glm-1");
@@ -4430,7 +4479,7 @@ mod tests {
         // 10 USD is 20 CNY at the Hub's rate — under the 50 CNY limit, so no
         // alert. Converting with the bundled table instead would put it at 71
         // and fire one, which is what makes "no alert" a real assertion.
-        let alerts = check_usage_alerts(&s, &aux).unwrap();
+        let alerts = check_usage_alerts(&s, &aux, true).unwrap();
         assert!(
             alerts.iter().all(|a| a.provider_id != "glm-1"),
             "10 USD at 2.0 CNY/USD is 20 CNY, under the 50 CNY limit"

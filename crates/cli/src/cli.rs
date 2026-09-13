@@ -87,6 +87,124 @@ pub enum Command {
     /// Agent routes: strategy and candidate order
     #[command(subcommand)]
     Routes(RoutesCmd),
+
+    /// Request logs: what the gateway routed, and what it cost
+    #[command(subcommand)]
+    Logs(LogsCmd),
+
+    /// Requests, tokens, cost and latency over a window
+    Dashboard(DashboardArgs),
+
+    /// Providers that have spent their allowance for the current period
+    Alerts {
+        /// Record the alert as delivered, which suppresses the desktop
+        /// notification. Off by default so a poll cannot eat the user's alert.
+        #[arg(long)]
+        mark_notified: bool,
+    },
+
+    /// The gateway daemon
+    #[command(subcommand)]
+    Gateway(GatewayCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LogsCmd {
+    /// List requests, newest first
+    List(LogsListArgs),
+
+    /// One request in full, including bodies
+    Show {
+        /// The row id shown by `logs list`
+        id: i64,
+    },
+
+    /// Write the matching requests to a CSV file
+    Export(LogsExportArgs),
+
+    /// Delete every logged request
+    Clear {
+        /// Required: this deletes the whole log, not a filtered slice
+        #[arg(long)]
+        yes: bool,
+    },
+
+    /// Print where the gateway keeps its own log files
+    Dir,
+}
+
+#[derive(Debug, Args)]
+pub struct LogsListArgs {
+    #[command(flatten)]
+    pub filter: LogFilterArgs,
+
+    #[arg(long, default_value_t = 1, value_name = "N")]
+    pub page: i64,
+
+    #[arg(long, default_value_t = 20, value_name = "N")]
+    pub page_size: i64,
+}
+
+#[derive(Debug, Args)]
+pub struct LogsExportArgs {
+    /// Where to write the CSV. The file is the payload, so this is required.
+    #[arg(long, value_name = "PATH")]
+    pub out: PathBuf,
+
+    /// Include the request and response bodies (appends two columns)
+    #[arg(long)]
+    pub include_bodies: bool,
+
+    #[command(flatten)]
+    pub filter: LogFilterArgs,
+}
+
+/// The shared log filter. `--from` is inclusive and `--to` exclusive, matching
+/// the store's half-open range.
+#[derive(Debug, Args)]
+pub struct LogFilterArgs {
+    #[arg(long, value_name = "AGENT")]
+    pub agent: Option<String>,
+
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// ok | error
+    #[arg(long, value_name = "STATUS")]
+    pub status: Option<String>,
+
+    /// RFC3339, inclusive
+    #[arg(long, value_name = "RFC3339")]
+    pub from: Option<String>,
+
+    /// RFC3339, exclusive
+    #[arg(long, value_name = "RFC3339")]
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DashboardArgs {
+    /// today | 7d | 30d
+    #[arg(long, default_value = "7d", value_name = "WINDOW")]
+    pub window: String,
+
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    #[arg(long, value_name = "AGENT")]
+    pub agent: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GatewayCmd {
+    /// Start a gateway, adopting one that is already running
+    Start,
+
+    /// Ask the running gateway to stop
+    Stop,
+
+    /// Stop the running gateway and start a fresh one
+    Restart,
 }
 
 #[derive(Debug, Subcommand)]

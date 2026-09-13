@@ -649,6 +649,174 @@ fn detect_reports_the_known_agents() {
     assert!(rows.iter().all(|r| r["installed"].is_boolean()), "{rows:?}");
 }
 
+// ── logs / dashboard / alerts / gateway ─────────────────────────────────────
+
+fn seed_log(db: &Path, agent: &str, status_code: i64) {
+    let store = Store::open(db).unwrap();
+    store
+        .insert_request_log(&kiwano_gateway::store::RequestLogNew {
+            ts: kiwano_gateway::store::now_rfc3339(),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: Some(agent.into()),
+            attribution: Some("key".into()),
+            provider_id: Some("p1".into()),
+            model: Some("claude-opus-4-8".into()),
+            status_code,
+            error_kind: (status_code >= 400).then(|| "upstream_error".to_string()),
+            error_message: None,
+            session_id: None,
+            is_streaming: false,
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: Some(42),
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: None,
+            response_body: None,
+            request_size: 10,
+            response_size: 20,
+            truncated: false,
+            cost: None,
+            cost_currency: None,
+        })
+        .unwrap();
+}
+
+#[test]
+fn logs_list_filters_by_status_and_reports_the_total() {
+    let (_dir, db) = temp_db();
+    seed_log(&db, "claude", 200);
+    seed_log(&db, "claude", 500);
+
+    let (code, out, err) = run(&db, &["--json", "logs", "list"]);
+    assert_eq!(code, 0, "{err}");
+    let list: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(list["total"], 2);
+
+    let (_, out, _) = run(&db, &["--json", "logs", "list", "--status", "error"]);
+    let list: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["rows"][0]["status_code"], 500);
+
+    // The column carries a CHECK constraint, so an unknown status should be
+    // refused by name rather than by a SQLite constraint message.
+    let (code, _, err) = run(&db, &["logs", "list", "--status", "broken"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("broken"), "{err}");
+
+    let (code, _, err) = run(&db, &["logs", "list", "--page", "0"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("1-based"), "{err}");
+}
+
+#[test]
+fn logs_show_reports_a_pruned_row_clearly() {
+    let (_dir, db) = temp_db();
+    seed_log(&db, "claude", 200);
+    let (code, _, err) = run(&db, &["logs", "show", "9999"]);
+    assert_eq!(code, 3);
+    assert!(err.contains("pruned"), "{err}");
+}
+
+#[test]
+fn logs_export_writes_the_file_and_requires_no_confirmation() {
+    let (dir, db) = temp_db();
+    seed_log(&db, "claude", 200);
+    let out_path = dir.path().join("logs.csv");
+    let (code, _, err) = run(
+        &db,
+        &["logs", "export", "--out", &out_path.display().to_string()],
+    );
+    assert_eq!(code, 0, "{err}");
+    let csv = std::fs::read_to_string(&out_path).unwrap();
+    assert!(csv.contains("claude"), "{csv}");
+    assert!(!csv.contains("request_body"), "bodies are opt-in: {csv}");
+
+    let with_bodies = dir.path().join("with-bodies.csv");
+    let (code, _, err) = run(
+        &db,
+        &[
+            "logs",
+            "export",
+            "--out",
+            &with_bodies.display().to_string(),
+            "--include-bodies",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let csv = std::fs::read_to_string(&with_bodies).unwrap();
+    assert!(csv.contains("request_body"), "{csv}");
+}
+
+#[test]
+fn logs_clear_demands_confirmation() {
+    let (_dir, db) = temp_db();
+    seed_log(&db, "claude", 200);
+    let (code, _, err) = run(&db, &["logs", "clear"]);
+    assert_eq!(code, 2, "destructive commands ask first");
+    assert!(err.contains("--yes"), "{err}");
+    // …and the log is untouched by the refusal.
+    let (_, out, _) = run(&db, &["--json", "logs", "list"]);
+    let list: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(list["total"], 1);
+
+    let (code, _, err) = run(&db, &["logs", "clear", "--yes"]);
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run(&db, &["--json", "logs", "list"]);
+    let list: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(list["total"], 0);
+}
+
+#[test]
+fn logs_dir_prints_a_path() {
+    let (_dir, db) = temp_db();
+    let (code, out, err) = run(&db, &["logs", "dir"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.trim().contains("log"), "{out}");
+}
+
+#[test]
+fn dashboard_rejects_an_unknown_window() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(&db, &["dashboard", "--window", "90d"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("90d"), "{err}");
+
+    let (code, _, err) = run(&db, &["dashboard", "--window", "today"]);
+    assert_eq!(code, 0, "{err}");
+}
+
+/// Nothing over budget is the answer to the question, not a failure.
+#[test]
+fn alerts_on_a_quiet_database_succeeds_with_nothing() {
+    let (_dir, db) = temp_db();
+    let (code, out, err) = run(&db, &["--json", "alerts"]);
+    assert_eq!(code, 0, "{err}");
+    let alerts: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert!(alerts.is_empty());
+    // The note is on stderr, so the JSON on stdout stays a bare `[]`.
+    assert!(err.contains("no provider is over its allowance"), "{err}");
+}
+
+/// `gateway stop` with nothing listening is a failure with a clear message, not
+/// a hang or a silent success.
+#[test]
+fn gateway_stop_reports_when_there_is_nothing_to_stop() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(&db, &["gateway", "stop"]);
+    assert_eq!(code, 3);
+    assert!(err.contains("would not stop"), "{err}");
+    assert!(
+        err.contains("admin"),
+        "the message should say where it looked: {err}"
+    );
+}
+
 // ── output discipline ───────────────────────────────────────────────────────
 
 /// The defect this rewrite fixes: a mutation under `--json` used to print its

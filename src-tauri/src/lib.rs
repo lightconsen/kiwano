@@ -772,7 +772,7 @@ fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
 /// provider any more.
 #[tauri::command]
 fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, String> {
-    vm::check_usage_alerts(&state.store, &state.aux)
+    vm::check_usage_alerts(&state.store, &state.aux, true)
 }
 
 // ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──

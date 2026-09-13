@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-13
+
 ### Added
 
 - **The command-line client can do everything the app can.** `kiwano-cli` had

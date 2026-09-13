@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "../api/client";
 import type { Billing, CatalogEntry, ModelPrice, ProbeReport, Protocol } from "../api/types";
-import { isPeakAt, tzLabel, type PeakHours } from "../lib/peak";
+import { tzLabel, type PeakHours } from "../lib/peak";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
 import { fmtMoney } from "../lib/format";
@@ -1118,23 +1118,6 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
 
   const groups = useMemo(() => buildModelGroups(chipRows, query), [chipRows, query]);
 
-  // The schedule the shelf's tiered rows share: one, or none. Entries that
-  // disagreed would have no single "is it peak now" answer, and picking one
-  // would be a guess — so the chip does not render at all.
-  const schedule = useMemo(() => {
-    const seen = new Map<string, PeakHours>();
-    for (const e of chipRows) {
-      const tiers = tiersOf(e.price_ref);
-      if (tiers) seen.set(JSON.stringify(tiers.hours), tiers.hours);
-    }
-    return seen.size === 1 ? [...seen.values()][0] : null;
-  }, [chipRows]);
-
-  // The reader's clock, read once per render — the only place it enters. The
-  // gateway decides what is billed; this chip is a convenience, and a machine
-  // with a skewed clock is wrong about nothing that matters.
-  const now = new Date();
-
   // Collapsed models, by id. Held here rather than in the group rows because a
   // group is a <tbody>, not a component — and deliberately not persisted: it is
   // a reading position, not a preference.
@@ -1214,17 +1197,6 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         <div className="ml-auto flex items-center gap-2">
           {/* Two readings of one catalog: rows are providers, or rows are the
               models those providers serve. */}
-          {schedule && (
-            <span
-              className="flex-none rounded px-1.5 py-0.5 font-mono text-[10px]"
-              style={{ background: "var(--surface2)", color: "var(--mut)" }}
-              title={`${t("shelf.peakHours")}: ${windowText(schedule, t)} (${t("shelf.vendorTime", {
-                offset: tzLabel(schedule.tz_offset),
-              })})`}
-            >
-              {isPeakAt(schedule, now) ? t("shelf.peakNow") : t("shelf.offPeakNow")}
-            </span>
-          )}
           <Select value={view} onValueChange={(v) => rememberView(parseView(v))}>
             <SelectTrigger className="h-7 w-[132px] flex-none bg-surface text-[11.5px]">
               <SelectValue>{(v) => t(VIEWS.find((x) => x.id === v)?.labelKey ?? VIEWS[0].labelKey)}</SelectValue>

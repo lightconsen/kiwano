@@ -76,9 +76,6 @@ export const shelf = {
       business hours, so they are never converted into the reader's zone. */
   vendorTime: "Vendor's clock (UTC{offset})",
   windowSep: ", ",
-  /** The header chip: is the vendor charging its peak rate right now? */
-  peakNow: "Peak now",
-  offPeakNow: "Off-peak now",
   dayMon: "Mon",
   dayTue: "Tue",
   dayWed: "Wed",

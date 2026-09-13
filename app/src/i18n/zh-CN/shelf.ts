@@ -52,8 +52,6 @@ export const shelf = {
   peakHours: "峰时时段",
   vendorTime: "厂商时钟 (UTC{offset})",
   windowSep: "、",
-  peakNow: "当前峰时",
-  offPeakNow: "当前谷时",
   dayMon: "周一",
   dayTue: "周二",
   dayWed: "周三",

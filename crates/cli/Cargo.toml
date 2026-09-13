@@ -1,5 +1,5 @@
 [package]
-name = "kiwano-cli"
+name = "kiwano"
 license.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ authors.workspace = true
 description = "Kiwano's command-line client: manage providers and agents without the desktop app"
 
 [[bin]]
-name = "kiwano-cli"
+name = "kiwano"
 path = "src/main.rs"
 
 # A library too, so the integration tests can drive the whole command tree

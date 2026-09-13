@@ -8,7 +8,7 @@
 #   Cargo.toml                  -> [workspace.package] version, inherited by every crate
 #
 # Cargo.lock is never edited by hand: the four local packages (kiwano, kiwano-adapters,
-# kiwano-cli, kiwano-gateway) inherit the workspace version, so we let
+# kiwano-app, kiwano-gateway) inherit the workspace version, so we let
 # `cargo metadata --offline` rewrite the lock -- not `cargo update`, which would also
 # move third-party dependencies.
 #
@@ -31,7 +31,7 @@ CHANGELOG="CHANGELOG.md"
 # Every file this script owns and may rewrite.
 MANAGED_FILES="$PKG_JSON $TAURI_CONF $CARGO_TOML $CARGO_LOCK"
 # Workspace members whose Cargo.lock entries must match the new version.
-LOCAL_CRATES="kiwano kiwano-adapters kiwano-cli kiwano-gateway"
+LOCAL_CRATES="kiwano kiwano-app kiwano-adapters kiwano-core kiwano-gateway"
 
 NEW_VERSION=""
 DRY_RUN=0

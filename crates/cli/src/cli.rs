@@ -12,7 +12,7 @@ use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "kiwano-cli",
+    name = "kiwano",
     version,
     about = "Manage Kiwano providers without the desktop app",
     long_about = "Manage Kiwano providers without the desktop app.\n\n\

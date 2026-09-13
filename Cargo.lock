@@ -2459,18 +2459,12 @@ dependencies = [
 name = "kiwano"
 version = "0.1.8"
 dependencies = [
+ "clap",
  "kiwano-core",
  "kiwano-gateway",
  "serde",
  "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tracing",
+ "tempfile",
 ]
 
 [[package]]
@@ -2501,15 +2495,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "kiwano-cli"
+name = "kiwano-app"
 version = "0.1.8"
 dependencies = [
- "clap",
  "kiwano-core",
  "kiwano-gateway",
  "serde",
  "serde_json",
- "tempfile",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tracing",
 ]
 
 [[package]]

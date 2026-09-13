@@ -19,6 +19,44 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **The command-line client is now `kiwano`, and the desktop app's executable is
+  `kiwano-app`.** The name was previously split the other way round — `kiwano`
+  was the GUI and `kiwano-cli` the command-line client — which is backwards for
+  a tool you run on a server. What you install from the desktop bundles is
+  unchanged: the app is still called Kiwano, still ships as `Kiwano.app`,
+  `Kiwano_x64.dmg` and friends, and updates in place. Only the executable inside
+  changes name, and on Linux and Windows that means the installed command
+  (`/usr/bin/kiwano-app`, `kiwano-app.exe`).
+
+  > **Windows, one-time:** if you had *Launch at login* enabled, the login item
+  > still points at the old `kiwano.exe` filename, which the installer does not
+  > remove. Reinstall once — or re-toggle the setting — to clear it. macOS has no
+  > equivalent: its login item points at the app bundle.
+
+- **`kiwano-cli` is gone**, with no compatibility alias. Everything it did is
+  available under `kiwano`; the subcommands now nest (`keys …` under
+  `providers keys …`), and its flags are otherwise unchanged.
+
+- **`providers add --billing` uses the app's vocabulary.** `plan`, `payg` and
+  `unl` are the canonical words; the old `subscription`, `metered` and
+  `unlimited` are still accepted as aliases, so existing scripts keep working.
+  What changes is the *plan* case: `--limit`, `--unit` and `--reset` are now
+  **rejected** for a plan provider instead of being written to columns the app
+  deliberately leaves empty. A plan's quota is tracked through the plan query,
+  not a locally entered number. Passing those flags used to configure a limit
+  that the app would never read.
+
+- **`--json` output is now a single JSON document on stdout.** Diagnostics — the
+  note about a route reload, warnings, errors — go to stderr. Previously a
+  mutating command printed its reload note to stdout *after* the JSON, so
+  `kiwano-cli --json providers add … | jq` failed to parse. Errors are still
+  reported only on stderr, never as a JSON object on stdout, so a pipeline can
+  tell "it failed" from "it printed something unexpected" by the exit code:
+  0 success, 1 the answer is "no" (`status` with the gateway down), 2 usage
+  error, 3 runtime error.
+
 ### Removed
 
 - **The app no longer looks for a gateway on the pre-0.1.8 admin port.** 0.1.8

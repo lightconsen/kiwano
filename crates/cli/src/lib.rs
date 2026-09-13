@@ -1,4 +1,4 @@
-//! kiwano-cli — manage Kiwano providers without the desktop app.
+//! kiwano — manage Kiwano providers without the desktop app.
 //!
 //! Talks straight to the shared SQLite store (the same file the gateway and the
 //! desktop app use) and to the gateway's admin plane for status and hot reload,

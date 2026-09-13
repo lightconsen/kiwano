@@ -29,7 +29,7 @@
 //! ```
 //!
 //! Windows has no `curl` equivalent for a named pipe; use the app's status chip
-//! or `kiwano-cli status`, both of which go through this module.
+//! or `kiwano status`, both of which go through this module.
 //!
 //! # Where the endpoint is
 //!

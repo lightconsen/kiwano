@@ -1,5 +1,5 @@
 [package]
-name = "kiwano"
+name = "kiwano-app"
 license.workspace = true
 version.workspace = true
 description = "Kiwano — local-first AI model Provider manager"

@@ -726,6 +726,13 @@ pub struct NewProviderInput {
     pub api_key: String,
     pub endpoint: String,
     pub protocol: String,
+    /// Collected by the app's add/edit form and **never read** — `add_provider`
+    /// and `update_provider` ignore it, and nothing else names it. Kept because
+    /// dropping it is an API change across the frontend contract, and read by
+    /// nothing is a smaller problem than that. The CLI deliberately has no
+    /// `--model-default` flag for the same reason: a flag that does nothing is
+    /// worse than no flag. Decide whether to wire it up or remove it before
+    /// adding an eighth way to set it.
     #[allow(dead_code)]
     pub model_default: String,
     pub billing: String,

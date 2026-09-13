@@ -223,6 +223,21 @@ merges by name and endpoint rather than overwriting.
 `catalog list` reads the Hub cache when it has been synced and the bundled copy
 otherwise, so it works on a machine that has never reached the network.
 
+**There is no `catalog add`.** The shelf's one-click "Add" opens the provider
+form prefilled from the entry — it does not call an API of its own, so the
+capability is `providers add`, and the values come from `catalog list --json`:
+
+```sh
+kiwano catalog list --json --search deepseek
+kiwano providers add --name DeepSeek --endpoint https://api.deepseek.com/anthropic \
+    --protocol anthropic --billing payg --limit 50 --unit CNY --bind claude
+```
+
+The prefilling rules (a `payg` limit of 50, and the agent prebind some catalog
+entries carry) live in the app's form, not in a shared layer. If that mapping
+moves into `kiwano-core` later, this becomes a one-command shortcut — until
+then it is a convenience the CLI does without, not a capability it lacks.
+
 ## How this maps onto the app
 
 Every user-facing capability of the desktop app is reachable here except the

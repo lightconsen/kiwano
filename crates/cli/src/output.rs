@@ -214,7 +214,10 @@ fn char_width(c: char) -> usize {
 /// remainder can land a hair below zero. `-0.0000` in a column of costs reads
 /// as a bug because it looks like one, so a zero is printed as one.
 /// A genuinely negative amount keeps its sign: that is a fact about the data,
-/// and rounding it away would be the quiet lie.
+/// and rounding it away would be the quiet lie. The source of the `-0.0` this
+/// was written for — an empty bucket list summing negatively in
+/// `pricing::convert_cost_buckets` — is fixed there too; this is the edge that
+/// keeps a future one from reaching a screen.
 pub fn fmt_amount(v: f64, places: usize) -> String {
     let scale = 10f64.powi(places as i32);
     let v = if (v * scale).round() == 0.0 { 0.0 } else { v };

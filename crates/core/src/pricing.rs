@@ -328,13 +328,16 @@ pub fn convert_cost_buckets(
     to: &str,
     rates: &HashMap<String, f64>,
 ) -> f64 {
+    // Folded from `0.0` rather than `.sum()`ed: Rust's `Sum` for floats starts
+    // at `-0.0`, so an empty bucket list — a window whose rows are all unpriced
+    // — yields a *negative* zero, and `{:.4}` prints its sign. `-0.0000` in a
+    // column of costs reads as a bug because it looks like one.
     buckets
         .iter()
-        .map(|(currency, cost)| match currency {
-            Some(c) => convert_amount(*cost, c, to, rates),
-            None => 0.0,
+        .fold(0.0, |total, (currency, cost)| match currency {
+            Some(c) => total + convert_amount(*cost, c, to, rates),
+            None => total,
         })
-        .sum()
 }
 
 #[cfg(test)]
@@ -524,6 +527,19 @@ mod tests {
             .unwrap();
         seed_model_pricing(&aux).unwrap();
         assert!(priced_keys(&aux).is_empty());
+    }
+
+    /// Nothing to convert sums to a positive zero: the number reaches screens
+    /// and JSON, and `-0.0` reads as a bug in both.
+    #[test]
+    fn empty_cost_buckets_sum_to_positive_zero() {
+        let total = convert_cost_buckets(&[], "CNY", &rates());
+        assert_eq!(total, 0.0);
+        assert!(total.is_sign_positive(), "not -0.0: {total:?}");
+        // …and a bucket whose amount is zero keeps the sign too, whichever
+        // currency it is in.
+        let zero = convert_cost_buckets(&[(Some("USD".into()), 0.0)], "CNY", &rates());
+        assert!(zero.is_sign_positive(), "{zero:?}");
     }
 
     #[test]

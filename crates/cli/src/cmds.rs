@@ -18,7 +18,7 @@ use crate::cli::{
     GatewayCmd, ImportCmd, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd,
     SettingsCmd, UsageArgs,
 };
-use crate::output::{ellipsize, render_table};
+use crate::output::{ellipsize, fmt_amount, pad_to, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
 
 // ── status / reload ─────────────────────────────────────────────────────────
@@ -1637,8 +1637,11 @@ fn render_log_detail(detail: &kiwanod::store::RequestLogDetail) -> String {
 
 fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
     let mut out = format!(
-        "{} · {} requests ({}%) · cost {:.4}",
-        window, data.requests, data.requests_delta_pct, data.cost
+        "{} · {} requests ({}%) · cost {}",
+        window,
+        data.requests,
+        data.requests_delta_pct,
+        fmt_amount(data.cost, 4)
     );
     out.push_str(&format!(
         "\ntokens in {} · out {} · cache_read {}",
@@ -1651,8 +1654,9 @@ fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
     let premium = data.cost - data.cost_off_peak;
     if premium > 0.0 {
         out.push_str(&format!(
-            "\nof which {:.4} was the peak premium (off-peak: {:.4})",
-            premium, data.cost_off_peak
+            "\nof which {} was the peak premium (off-peak: {})",
+            fmt_amount(premium, 4),
+            fmt_amount(data.cost_off_peak, 4)
         ));
     }
     out.push_str(&format!(
@@ -1663,11 +1667,13 @@ fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
         out.push_str("\nby provider:");
         for p in &data.by_provider {
             out.push_str(&format!(
-                "\n  {:<24} {:>6} req  {:>3}%  {:.4}",
-                ellipsize(&p.name, 23),
+                "\n  {} {:>6} req  {:>3}%  {}",
+                // Padded by display width, not by `{:<24}`: a CJK provider name
+                // would otherwise push the request counts out of line.
+                pad_to(&ellipsize(&p.name, 23), 24),
                 p.requests,
                 p.pct,
-                p.cost
+                fmt_amount(p.cost, 4)
             ));
         }
     }
@@ -1675,11 +1681,11 @@ fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
         out.push_str("\nby agent:");
         for a in &data.by_agent {
             out.push_str(&format!(
-                "\n  {:<24} {:>6} req  {:>8} tokens  {:.4}",
-                ellipsize(&a.label, 23),
+                "\n  {} {:>6} req  {:>8} tokens  {}",
+                pad_to(&ellipsize(&a.label, 23), 24),
                 a.requests,
                 a.tokens,
-                a.cost
+                fmt_amount(a.cost, 4)
             ));
         }
     }
@@ -1696,8 +1702,8 @@ fn render_alerts(alerts: &[vm::UsageAlertVm]) -> String {
         .map(|a| {
             vec![
                 ellipsize(&a.provider_name, 24),
-                format!("{:.2}", a.used),
-                format!("{:.2}", a.limit),
+                fmt_amount(a.used, 2),
+                fmt_amount(a.limit, 2),
                 a.unit.clone(),
             ]
         })
@@ -1825,8 +1831,8 @@ fn render_usage(report: &UsageReport) -> String {
     for (provider_id, name, totals) in &report.by_provider {
         let label = if name.is_empty() { provider_id } else { name };
         out.push_str(&format!(
-            "\n  {:<24} {:>6} req  in {:>7}  out {:>7}",
-            ellipsize(label, 23),
+            "\n  {} {:>6} req  in {:>7}  out {:>7}",
+            pad_to(&ellipsize(label, 23), 24),
             totals.requests,
             vm::fmt_tokens(totals.input_tokens),
             vm::fmt_tokens(totals.output_tokens)

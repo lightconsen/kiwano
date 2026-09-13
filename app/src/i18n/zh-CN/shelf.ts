@@ -31,10 +31,12 @@ export const shelf = {
   groupMetaOne: "1 个 Provider · {m} 个有价格",
   groupPriceTitle: "每百万 token 的输入价格，从低到高",
 
+  tierPricePeak: "峰价",
+  tierPriceOffPeak: "谷价",
+  tierPriceSwitch: "点击在峰价与谷价之间切换",
   priceIn: "入",
   priceOut: "出",
   priceUnit: "{rates}（每百万 token）",
-  peakTier: "峰/谷",
   peakRates: "峰时",
   offPeakRates: "谷时",
   peakHours: "峰时时段",

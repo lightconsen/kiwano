@@ -184,6 +184,25 @@ function windowText(hours: PeakHours, t: Translate): string {
     .join(t("shelf.windowSep"));
 }
 
+/// Which of a row's two prices its cell is showing. The row's own figures are
+/// the **peak** ones (the published table's rule), so that is where every cell
+/// starts.
+type PriceTier = "peak" | "offPeak";
+
+/** The rates to show for `tier`: the row's own (peak) figures, or the
+    discounted pair. A row that publishes no schedule has only the one, which is
+    why the off-peak answer is the peak one there. */
+function tierRates(
+  rate: NonNullable<CatalogEntry["price_ref"]>,
+  tier: PriceTier,
+): { input: string; output: string; currency: string } {
+  const off = rate.off_peak;
+  if (tier === "offPeak" && off && rate.peak_hours) {
+    return { input: off.in, output: off.out, currency: rate.currency };
+  }
+  return { input: rate.input, output: rate.output, currency: rate.currency };
+}
+
 /** A pair of rates, labelled and in the currency they are published in:
     `in ¥9 / out ¥27`. The two numbers are meaningless unlabelled — any two
     figures could sit either side of a slash, and which one a request spends
@@ -215,18 +234,44 @@ function tierDetail(
   ].join(" · ");
 }
 
-/** The chip a tiered price wears: the number in the cell is the peak one. */
-function TierChip({ rate, t }: { rate: NonNullable<CatalogEntry["price_ref"]>; t: Translate }) {
+/** The switch a tiered price carries: it reads as the tier the cell is showing
+    and shows the other one when clicked, so "what does this model cost at
+    night?" is answered in place — the numbers beside it change.
+
+    Clicking must not open the row's detail dialog, hence the stopPropagation:
+    the whole row is a button. */
+function TierChip({
+  rate,
+  tier,
+  onToggle,
+  t,
+}: {
+  rate: NonNullable<CatalogEntry["price_ref"]>;
+  tier: PriceTier;
+  onToggle: () => void;
+  t: Translate;
+}) {
   const tiers = tiersOf(rate);
   if (!tiers) return null;
+  const offPeak = tier === "offPeak";
   return (
-    <span
-      className="ml-1.5 flex-none rounded px-1 font-mono text-[10px]"
-      style={{ background: "var(--surface2)", color: "var(--mut)" }}
-      title={tierDetail(rate, tiers, t)}
+    <button
+      type="button"
+      className="ml-1.5 flex-none cursor-pointer rounded px-1 font-mono text-[10px]"
+      style={
+        offPeak
+          ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" }
+          : { background: "var(--surface2)", color: "var(--mut)" }
+      }
+      title={`${tierDetail(rate, tiers, t)} · ${t("shelf.tierPriceSwitch")}`}
+      aria-pressed={offPeak}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
     >
-      {t("shelf.peakTier")}
-    </span>
+      {offPeak ? t("shelf.tierPriceOffPeak") : t("shelf.tierPricePeak")}
+    </button>
   );
 }
 
@@ -282,11 +327,14 @@ function priceValue(e: CatalogEntry): number | null {
     would show a derived number that moves with a Settings choice and hides what
     the provider charges — the display currency is the Dashboard's, and the
     price a reader compares across providers has to be the price they pay. */
-function priceText(e: CatalogEntry, t: Translate): string {
+function priceText(e: CatalogEntry, t: Translate, tier: PriceTier): string {
   const p = e.price_ref;
   if (!p) return e.desc ?? "";
-  if (!Number.isFinite(Number(p.input)) || !Number.isFinite(Number(p.output))) return e.desc ?? "";
-  return `${p.display_name} · ${rateText(p, t)}`;
+  const rates = tierRates(p, tier);
+  if (!Number.isFinite(Number(rates.input)) || !Number.isFinite(Number(rates.output))) {
+    return e.desc ?? "";
+  }
+  return `${p.display_name} · ${rateText(rates, t)}`;
 }
 
 
@@ -294,8 +342,8 @@ function priceText(e: CatalogEntry, t: Translate): string {
     `desc` leads — "from ¥49 /mo" is what the reader would actually pay — and
     the rates after it say what the same models cost per token. For every other
     billing mode the two are the same sentence, and this is `priceText`. */
-function rowPriceText(e: CatalogEntry, t: Translate): string {
-  const rate = priceText(e, t);
+function rowPriceText(e: CatalogEntry, t: Translate, tier: PriceTier): string {
+  const rate = priceText(e, t, tier);
   if (e.billing !== "plan") return rate;
   const offer = e.desc ?? "";
   // Equal when the entry prices no model and `desc` is all there is.
@@ -575,12 +623,13 @@ function buildModelGroups(entries: CatalogEntry[], query: string): ModelGroup[] 
     (the group header has it) and without a plan provider's offer — "from ¥49
     /mo" is a price for the provider, and ranking it beside per-token rates
     would compare two different things. */
-function groupPriceText(rate: ModelGroupRow["rate"], t: Translate): string {
+function groupPriceText(rate: ModelGroupRow["rate"], t: Translate, tier: PriceTier): string {
   if (!rate) return t("common.none");
-  if (!Number.isFinite(Number(rate.input)) || !Number.isFinite(Number(rate.output))) {
+  const rates = tierRates(rate, tier);
+  if (!Number.isFinite(Number(rates.input)) || !Number.isFinite(Number(rates.output))) {
     return t("common.none");
   }
-  return rateText(rate, t);
+  return rateText(rates, t);
 }
 
 function Row({
@@ -594,7 +643,9 @@ function Row({
   entry: CatalogEntry;
   hubUrl: string | null;
   onAdd: (e: CatalogEntry) => void;
-  onOpen: (e: CatalogEntry) => void;
+  /// Handed the tier the row was showing, so the dialog opens on the same
+  /// figures the click came from.
+  onOpen: (e: CatalogEntry, tier: PriceTier) => void;
   /** Set by the grouped view: the model whose group this row sits in. It is the
       only thing that differs between the two views' rows — the price cell then
       speaks for that model instead of for the provider. */
@@ -606,13 +657,22 @@ function Row({
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
   const rate = modelId ? modelRate(entry, modelId) : (entry.price_ref ?? null);
-  const price = modelId ? groupPriceText(rate, t) : rowPriceText(entry, t);
+  // Which of this row's two prices the cell shows. Held per row and not
+  // remembered: it is a peek at the other number ("now or tonight?"), not a
+  // preference — and the column's sort and a group's range stay on the
+  // published rate, which is what they have always ranked by.
+  const [tier, setTier] = useState<PriceTier>("peak");
+  const price = modelId ? groupPriceText(rate, t, tier) : rowPriceText(entry, t, tier);
   /** The tooltip: the same figures plus the unit they are quoted in, which the
       table has no room to repeat on every row. A cell with no rates behind it
       (a plan's offer, a provider that prices no model) says only what it says. */
   const priceHint = rate ? t("shelf.priceUnit", { rates: price }) : price;
+  const toggleTier = () => setTier((v) => (v === "peak" ? "offPeak" : "peak"));
   return (
-    <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
+    <tr
+      className="cursor-pointer border-t border-line hover:bg-surface2"
+      onClick={() => onOpen(entry, tier)}
+    >
       <td className={`py-2 ${indent ? "pl-10" : "pl-4"} pr-2`}>
         <div className="flex items-center gap-2">
           <ProviderLogo logo={logo} name={entry.name} color={entry.logo_color} />
@@ -652,14 +712,9 @@ function Row({
           <span className="min-w-0 truncate" title={priceHint}>
             {price}
           </span>
-          {/* The figures beside it are the peak ones, which is not obvious from
-              a number that has two. In the grouped view that holds only for the
-              row this price actually belongs to: `price_ref` names one model,
-              and the flagship's schedule says nothing about a group for another
-              model of the same provider (which shows a dash anyway). */}
-          {entry.price_ref && (!modelId || modelId === entry.price_ref.model_id) && (
-            <TierChip rate={entry.price_ref} t={t} />
-          )}
+          {/* `rate` is exactly the price this cell is showing, so it is also
+              exactly when there is a second one to switch to. */}
+          {rate && <TierChip rate={rate} tier={tier} onToggle={toggleTier} t={t} />}
         </span>
       </td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
@@ -680,17 +735,21 @@ function Row({
 function DetailDialog({
   entry,
   hubUrl,
+  tier,
   onClose,
   onAdd,
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
+  /// The tier the row was showing when it was opened; the dialog spells both
+  /// out below the hero either way.
+  tier: PriceTier;
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
-  const price = priceText(entry, t);
+  const price = priceText(entry, t, tier);
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),
@@ -815,7 +874,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
   const [query, setQuery] = useState("");
   // Catalog row clicked → model detail dialog
-  const [detail, setDetail] = useState<CatalogEntry | null>(null);
+  const [detail, setDetail] = useState<{ entry: CatalogEntry; tier: PriceTier } | null>(null);
   // Hub refresh: "busy" spins the glyph, "done" flashes a check. The header
   // bar has no room for a toast, so success is the icon and only a failure
   // takes up words.
@@ -1048,7 +1107,13 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         {view === "provider" ? (
           <tbody>
             {filtered.map((e) => (
-              <Row key={e.id} entry={e} hubUrl={hubUrl} onAdd={onAdd} onOpen={setDetail} />
+              <Row
+                key={e.id}
+                entry={e}
+                hubUrl={hubUrl}
+                onAdd={onAdd}
+                onOpen={(entry, tier) => setDetail({ entry, tier })}
+              />
             ))}
             {filtered.length === 0 && (
               <tr>
@@ -1114,7 +1179,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
                         entry={r.entry}
                         hubUrl={hubUrl}
                         onAdd={onAdd}
-                        onOpen={setDetail}
+                        onOpen={(entry, tier) => setDetail({ entry, tier })}
                         modelId={g.model}
                         indent
                       />
@@ -1136,8 +1201,9 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
       </table>
       {detail && (
         <DetailDialog
-          entry={detail}
+          entry={detail.entry}
           hubUrl={hubUrl}
+          tier={detail.tier}
           onClose={() => setDetail(null)}
           onAdd={(e) => {
             setDetail(null);

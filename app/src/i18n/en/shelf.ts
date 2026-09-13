@@ -48,11 +48,15 @@ export const shelf = {
       the request runs, and the two labels the detail dialog's price block uses. */
   /** The two figures in a price cell are per-million-token rates, and are
       meaningless unlabelled — `¥9 / ¥27` could be any pair of numbers. */
+  /** The switch in a tiered price cell: it reads as the tier being shown, and
+      clicking it shows the other one. */
+  tierPricePeak: "Peak price",
+  tierPriceOffPeak: "Off-peak price",
+  tierPriceSwitch: "Click to switch between the peak and off-peak prices",
   priceIn: "in",
   priceOut: "out",
   /** The cell's tooltip: the same rates, with the unit they are quoted in. */
   priceUnit: "{rates} per million tokens",
-  peakTier: "peak/off-peak",
   peakRates: "Peak",
   offPeakRates: "Off-peak",
   peakHours: "Peak hours",

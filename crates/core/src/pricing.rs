@@ -4,13 +4,17 @@
 //! source, as it is for the catalog. This module keeps the GUI-readable
 //! `model_pricing` SQLite table in sync with it (version-keyed upsert, changed
 //! rows only, rows the document dropped pruned away) and provides the currency
-//! metadata + conversion used across the usage/dashboard surfaces.
+//! metadata used across the usage/dashboard surfaces.
 
 use crate::vm::Aux;
 /// Re-exported: the app's `list_model_prices` command hands these rows to the
 /// frontend, and the app deliberately depends on `kiwano-core` alone rather than
 /// reaching into the adapters crate for a type.
 pub use kiwano_adapters::model_pricing::ModelPriceEntry;
+/// Re-exported for the same reason, and for a better one: the gateway's limit
+/// check converts with these too, and one implementation is the only way the
+/// figure it enforces and the figure the app shows can be the same number.
+pub use kiwano_adapters::model_pricing::{convert_amount, convert_cost_buckets};
 use kiwano_adapters::model_pricing::ModelsDoc;
 use std::collections::HashMap;
 
@@ -67,9 +71,25 @@ pub struct SeededReport {
 /// document" — the difference matters, because seeding an empty document
 /// clears the table.
 pub fn effective_doc(aux: &Aux) -> Option<(ModelsDoc, String)> {
-    let (_, payload, sha, _) = aux.load_hub_models_cache()?;
-    let doc = serde_json::from_str::<ModelsDoc>(&payload).ok()?;
-    Some((doc, sha))
+    let (version, payload, sha, _) = aux.load_hub_models_cache()?;
+    match serde_json::from_str::<ModelsDoc>(&payload) {
+        Ok(doc) => Some((doc, sha)),
+        Err(e) => {
+            // Not the same as "the Hub published nothing". A cached document
+            // that will not parse is a price table that has quietly stopped
+            // updating: the seed reports itself skipped, the old rows stay, and
+            // the gateway goes on billing them. The sync validates a document
+            // before caching it, so reaching this means the stored row changed
+            // underneath the app — a truncated write, or a schema this build no
+            // longer reads. Say so, because the symptom is otherwise invisible.
+            tracing::warn!(
+                version,
+                error = %e,
+                "cached pricing document does not parse; the previously seeded prices stand"
+            );
+            None
+        }
+    }
 }
 
 /// The exchange rates to convert with, or an empty table before the first sync
@@ -319,40 +339,6 @@ pub fn currency_meta(aux: &Aux) -> Result<CurrencyMetaVm, String> {
     })
 }
 
-/// Convert an amount between currencies using the models.json rates
-/// (`rates[currency]` = units per 1 USD; USD pivots). Unknown currencies
-/// return the amount unchanged (no rate — display the raw number).
-pub fn convert_amount(amount: f64, from: &str, to: &str, rates: &HashMap<String, f64>) -> f64 {
-    if from == to {
-        return amount;
-    }
-    let (Some(per_usd_from), Some(per_usd_to)) = (rates.get(from), rates.get(to)) else {
-        return amount;
-    };
-    if *per_usd_from == 0.0 {
-        return amount;
-    }
-    let usd = amount / per_usd_from;
-    usd * per_usd_to
-}
-
-/// Sum per-currency cost buckets into one amount denominated in `to`.
-pub fn convert_cost_buckets(
-    buckets: &[(Option<String>, f64)],
-    to: &str,
-    rates: &HashMap<String, f64>,
-) -> f64 {
-    // Folded from `0.0` rather than `.sum()`ed: Rust's `Sum` for floats starts
-    // at `-0.0`, so an empty bucket list — a window whose rows are all unpriced
-    // — yields a *negative* zero, and `{:.4}` prints its sign. `-0.0000` in a
-    // column of costs reads as a bug because it looks like one.
-    buckets
-        .iter()
-        .fold(0.0, |total, (currency, cost)| match currency {
-            Some(c) => total + convert_amount(*cost, c, to, rates),
-            None => total,
-        })
-}
 
 #[cfg(test)]
 mod tests {

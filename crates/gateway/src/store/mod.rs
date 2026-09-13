@@ -8,6 +8,7 @@
 //! The file is also the home of every upstream credential (see `Provider`), so
 //! it is owner-only by construction — see `harden_permissions`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -2263,6 +2264,44 @@ impl Store {
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
             .and_then(|v| v.get("tz_offset_minutes").and_then(|t| t.as_i64()))
             .unwrap_or(0)
+    }
+
+    /// The Hub's exchange rates, as `models.json` publishes them
+    /// (`rates[currency]` = units per 1 USD; USD pivots).
+    ///
+    /// Read from the cached document rather than from the price mirror, which
+    /// stores the rows but not the rates above them. This is the same row the
+    /// GUI seeds prices from, so the two never disagree about what a dollar is
+    /// worth.
+    ///
+    /// Empty when nothing has been synced, or when the cached payload cannot be
+    /// read. `convert_amount` then passes each amount through unchanged, which
+    /// is the same answer the GUI gives on an install that has never synced —
+    /// and one that has no priced usage to convert anyway.
+    pub fn hub_exchange_rates(&self) -> HashMap<String, f64> {
+        let payload: Option<String> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.query_row(
+                "SELECT payload FROM hub_models_cache WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+        };
+        payload
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(&p).ok())
+            .and_then(|doc| {
+                Some(
+                    doc.get("exchange_rates")?
+                        .as_object()?
+                        .iter()
+                        .filter_map(|(code, per_usd)| Some((code.clone(), per_usd.as_f64()?)))
+                        .collect(),
+                )
+            })
+            .unwrap_or_default()
     }
 
     /// Load the log capture config (defaults when the key is absent/corrupt).

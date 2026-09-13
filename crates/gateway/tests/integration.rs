@@ -12,10 +12,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use futures_core::Stream;
-use kiwano_gateway::server::{
+use kiwanod::server::{
     admin_plane_router, data_plane_router, GatewayState, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY,
 };
-use kiwano_gateway::store::{
+use kiwanod::store::{
     now_rfc3339, Billing, Binding, LogConfig, Protocol, Provider, RequestLogEntry,
     RequestLogFilter, Store,
 };
@@ -211,7 +211,7 @@ async fn wait_for_usage(
     state: &GatewayState,
     agent: &str,
     expected: i64,
-) -> kiwano_gateway::store::UsageTotals {
+) -> kiwanod::store::UsageTotals {
     for _ in 0..60 {
         let totals = state.store.usage_totals(Some(agent), None, None).unwrap();
         if totals.requests >= expected {

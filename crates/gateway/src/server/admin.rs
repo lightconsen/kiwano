@@ -211,7 +211,7 @@ async fn shutdown(State(state): State<Arc<GatewayState>>, headers: HeaderMap) ->
 async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> Response {
     let liveness = json!({
         "ok": true,
-        "name": "kiwano-gateway",
+        "name": "kiwanod",
         "version": state.version,
         "uptime_secs": state.started_at.elapsed().as_secs(),
     });
@@ -266,7 +266,7 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
 
     Json(json!({
         "ok": true,
-        "name": "kiwano-gateway",
+        "name": "kiwanod",
         "version": state.version,
         "uptime_secs": state.started_at.elapsed().as_secs(),
         "providers": metrics.providers,
@@ -535,7 +535,7 @@ mod tests {
         // would read as "no gateway is running".
         let v = body_json(response).await;
         assert_eq!(v["ok"], true);
-        assert_eq!(v["name"], "kiwano-gateway");
+        assert_eq!(v["name"], "kiwanod");
         assert!(v["version"].is_string());
         assert!(v["uptime_secs"].is_number());
         assert!(v["routes"].is_null(), "no route table without the token");
@@ -736,7 +736,7 @@ mod tests {
         // /status, unauthenticated: still a 200, and liveness only.
         let liveness = get("/status", None);
         assert!(liveness.starts_with("HTTP/1.1 200 OK"), "{liveness}");
-        assert!(liveness.contains("kiwano-gateway"), "{liveness}");
+        assert!(liveness.contains("kiwanod"), "{liveness}");
         assert!(!liveness.contains("agents_routed"), "{liveness}");
 
         // /reload, refused and then accepted.

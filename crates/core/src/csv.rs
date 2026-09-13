@@ -13,7 +13,7 @@
 //! were empty, and the 27 metadata columns keep their positions either way, so
 //! a reader that indexes by position is unaffected by the choice.
 
-use kiwano_gateway::store::RequestLogExportRow;
+use kiwanod::store::RequestLogExportRow;
 
 /// Excel reads a BOM-less UTF-8 file as the system codepage, which turns any
 /// non-ASCII (model ids, upstream error text) into mojibake. The BOM is the
@@ -156,7 +156,7 @@ pub fn write_csv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kiwano_gateway::store::RequestLogEntry;
+    use kiwanod::store::RequestLogEntry;
 
     fn entry() -> RequestLogEntry {
         RequestLogEntry {

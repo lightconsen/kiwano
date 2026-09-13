@@ -2461,7 +2461,7 @@ version = "0.1.8"
 dependencies = [
  "clap",
  "kiwano-core",
- "kiwano-gateway",
+ "kiwanod",
  "serde",
  "serde_json",
  "tempfile",
@@ -2499,7 +2499,7 @@ name = "kiwano-app"
 version = "0.1.8"
 dependencies = [
  "kiwano-core",
- "kiwano-gateway",
+ "kiwanod",
  "serde",
  "serde_json",
  "tauri",
@@ -2518,7 +2518,7 @@ version = "0.1.8"
 dependencies = [
  "chrono",
  "kiwano-adapters",
- "kiwano-gateway",
+ "kiwanod",
  "reqwest",
  "rusqlite",
  "serde",
@@ -2532,7 +2532,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kiwano-gateway"
+name = "kiwanod"
 version = "0.1.8"
 dependencies = [
  "axum",

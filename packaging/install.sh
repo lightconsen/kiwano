@@ -228,17 +228,54 @@ else
 fi
 say ""
 
+# ── retiring the old name ───────────────────────────────────────────────────
+#
+# The daemon was `kiwano-gateway` before this release. An install that predates
+# the rename still holds that binary and, under systemd, a unit pointing at it —
+# and two units both want port 8317, so the old one has to be stopped before the
+# new one starts, not left to lose a race at boot.
+#
+# Deliberately silent on a machine that never had the old name: this prints
+# nothing at all there. Where it does find something it says what it is doing,
+# because "your installer deleted a binary" should never be a surprise.
+#
+# The stop comes first so the port is free before the new unit is enabled.
+
+old_unit=""
+if [ "$SYSTEM" = 1 ]; then
+    old_unit=/etc/systemd/system/kiwano-gateway.service
+else
+    old_unit="$HOME/.config/systemd/user/kiwano-gateway.service"
+fi
+
+if [ -f "$old_unit" ]; then
+    note "retiring the old service: kiwano-gateway"
+    if [ "$os" = Linux ] && command -v systemctl >/dev/null 2>&1; then
+        if [ "$SYSTEM" = 1 ]; then
+            systemctl disable --now kiwano-gateway >/dev/null 2>&1 || true
+        else
+            systemctl --user disable --now kiwano-gateway >/dev/null 2>&1 || true
+        fi
+    fi
+    rm -f "$old_unit"
+fi
+
+if [ -f "$bin_dir/kiwano-gateway" ]; then
+    note "removing the old binary: $bin_dir/kiwano-gateway"
+    rm -f "$bin_dir/kiwano-gateway"
+fi
+
 # ── install ─────────────────────────────────────────────────────────────────
 
 tar xzf "$tmp/$asset" -C "$tmp" || die "could not unpack $asset"
-[ -f "$tmp/kiwano" ] && [ -f "$tmp/kiwano-gateway" ] ||
+[ -f "$tmp/kiwano" ] && [ -f "$tmp/kiwanod" ] ||
     die "the archive does not contain the expected binaries"
 
 mkdir -p "$bin_dir"
 install -m 0755 "$tmp/kiwano" "$bin_dir/kiwano"
-install -m 0755 "$tmp/kiwano-gateway" "$bin_dir/kiwano-gateway"
+install -m 0755 "$tmp/kiwanod" "$bin_dir/kiwanod"
 note "installed $bin_dir/kiwano"
-note "installed $bin_dir/kiwano-gateway"
+note "installed $bin_dir/kiwanod"
 
 case ":$PATH:" in
     *":$bin_dir:"*) ;;
@@ -258,10 +295,10 @@ if [ "$SERVICE" = 1 ]; then
             id -u kiwano >/dev/null 2>&1 ||
                 useradd --system --home-dir /var/lib/kiwano --create-home \
                     --shell /usr/sbin/nologin kiwano
-            install -m 0644 "$tmp/kiwano-gateway.service" /etc/systemd/system/
+            install -m 0644 "$tmp/kiwanod.service" /etc/systemd/system/
             systemctl daemon-reload
-            systemctl enable --now kiwano-gateway
-            note "service kiwano-gateway enabled (system, user kiwano)"
+            systemctl enable --now kiwanod
+            note "service kiwanod enabled (system, user kiwano)"
             note "database /var/lib/kiwano/kiwano.db"
         else
             unit_dir="$HOME/.config/systemd/user"
@@ -269,7 +306,7 @@ if [ "$SERVICE" = 1 ]; then
             # The shipped unit is the system one: a fixed user, a fixed database
             # under /var/lib. For a user service both of those follow from who
             # is running it, so the unit is generated with %h rather than copied.
-            cat >"$unit_dir/kiwano-gateway.service" <<EOF
+            cat >"$unit_dir/kiwanod.service" <<EOF
 [Unit]
 Description=Kiwano gateway (local AI model router)
 Documentation=https://github.com/lightconsen/kiwano
@@ -280,7 +317,7 @@ Wants=network-online.target
 Type=simple
 Environment=KIWANO_DB_PATH=%h/.kiwano/kiwano.db
 Environment=KIWANO_DATA_PORT=$DATA_PORT
-ExecStart=$bin_dir/kiwano-gateway
+ExecStart=$bin_dir/kiwanod
 KillSignal=SIGTERM
 TimeoutStopSec=15
 Restart=on-failure
@@ -290,8 +327,8 @@ RestartSec=5
 WantedBy=default.target
 EOF
             systemctl --user daemon-reload
-            systemctl --user enable --now kiwano-gateway
-            note "service kiwano-gateway enabled (user $USER, port $DATA_PORT)"
+            systemctl --user enable --now kiwanod
+            note "service kiwanod enabled (user $USER, port $DATA_PORT)"
 
             # Without lingering, the service stops the moment the last session
             # ends: it belongs to the user manager, not to the machine.
@@ -307,7 +344,7 @@ EOF
     else
         note "no systemd here, so nothing was registered as a service."
         note "Start the gateway yourself:"
-        note "  $bin_dir/kiwano-gateway &"
+        note "  $bin_dir/kiwanod &"
     fi
 fi
 

@@ -63,13 +63,13 @@ async fn not_found(State(state): State<Arc<GatewayState>>, req: Request) -> Resp
         None,
         StatusCode::NOT_FOUND,
         "unsupported_path",
-        "kiwano-gateway: unknown data-plane path".to_string(),
+        "kiwanod: unknown data-plane path".to_string(),
     );
     error_response(
         None,
         StatusCode::NOT_FOUND,
         "unsupported_path",
-        "kiwano-gateway: unknown data-plane path",
+        "kiwanod: unknown data-plane path",
     )
 }
 
@@ -104,13 +104,13 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
                 None,
                 StatusCode::NOT_FOUND,
                 "unsupported_path",
-                format!("kiwano-gateway: no protocol mapping for path `{path}`"),
+                format!("kiwanod: no protocol mapping for path `{path}`"),
             );
             return error_response(
                 None,
                 StatusCode::NOT_FOUND,
                 "unsupported_path",
-                &format!("kiwano-gateway: no protocol mapping for path `{path}`"),
+                &format!("kiwanod: no protocol mapping for path `{path}`"),
             );
         }
     };
@@ -127,13 +127,13 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
                 None,
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "body_too_large",
-                format!("kiwano-gateway: failed to read request body: {e}"),
+                format!("kiwanod: failed to read request body: {e}"),
             );
             return error_response(
                 inbound,
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "body_too_large",
-                &format!("kiwano-gateway: failed to read request body: {e}"),
+                &format!("kiwanod: failed to read request body: {e}"),
             );
         }
     };

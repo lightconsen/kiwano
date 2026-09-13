@@ -4,9 +4,9 @@ This bundle contains the two pieces a headless host needs, and nothing else:
 
 | File | What it is |
 | --- | --- |
-| `kiwano-gateway` | The daemon: the local router the agents actually talk to |
+| `kiwanod` | The daemon: the local router the agents actually talk to |
 | `kiwano` | The command-line client that configures and inspects it |
-| `kiwano-gateway.service` | A systemd unit, for a machine-wide install |
+| `kiwanod.service` | A systemd unit, for a machine-wide install |
 | `INSTALL.md` | This file |
 
 There is no GUI here. The desktop app is a separate download.
@@ -47,7 +47,7 @@ sha256sum -c --ignore-missing SHA256SUMS
 ```sh
 tar xzf kiwano-<target>.tar.gz -C /tmp/kiwano
 install -m 0755 /tmp/kiwano/kiwano         ~/.local/bin/
-install -m 0755 /tmp/kiwano/kiwano-gateway ~/.local/bin/
+install -m 0755 /tmp/kiwano/kiwanod ~/.local/bin/
 ```
 
 ## 3. Run the gateway as your own user
@@ -57,7 +57,7 @@ This is the default, and it is not merely the convenient choice — see
 
 ```sh
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/kiwano-gateway.service <<'EOF'
+cat > ~/.config/systemd/user/kiwanod.service <<'EOF'
 [Unit]
 Description=Kiwano gateway (local AI model router)
 After=network-online.target
@@ -67,7 +67,7 @@ Wants=network-online.target
 Type=simple
 Environment=KIWANO_DB_PATH=%h/.kiwano/kiwano.db
 Environment=KIWANO_DATA_PORT=8317
-ExecStart=%h/.local/bin/kiwano-gateway
+ExecStart=%h/.local/bin/kiwanod
 KillSignal=SIGTERM
 TimeoutStopSec=15
 Restart=on-failure
@@ -78,14 +78,14 @@ WantedBy=default.target
 EOF
 
 systemctl --user daemon-reload
-systemctl --user enable --now kiwano-gateway
+systemctl --user enable --now kiwanod
 sudo loginctl enable-linger "$USER"      # else it stops when you log out
 ```
 
 Check it came up:
 
 ```sh
-systemctl --user status kiwano-gateway
+systemctl --user status kiwanod
 kiwano status
 ```
 
@@ -142,10 +142,10 @@ or by hand:
 ```sh
 sudo useradd --system --home-dir /var/lib/kiwano --create-home \
     --shell /usr/sbin/nologin kiwano
-sudo install -m 0755 /tmp/kiwano/kiwano-gateway /usr/local/bin/
-sudo install -m 0644 /tmp/kiwano/kiwano-gateway.service /etc/systemd/system/
+sudo install -m 0755 /tmp/kiwano/kiwanod /usr/local/bin/
+sudo install -m 0644 /tmp/kiwano/kiwanod.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now kiwano-gateway
+sudo systemctl enable --now kiwanod
 ```
 
 The unit sets `KIWANO_DB_PATH=/var/lib/kiwano/kiwano.db` and
@@ -170,7 +170,7 @@ which is useful on a development machine and in a container with no init. Under
 systemd it is the wrong tool: stopping the daemon out from under the unit makes
 systemd restart it per `Restart=on-failure`, so the two fight.
 
-Use `systemctl --user restart kiwano-gateway` (or the system equivalent) on this
+Use `systemctl --user restart kiwanod` (or the system equivalent) on this
 host.
 
 ## Updating
@@ -182,6 +182,30 @@ the new tarball, verify it, and install over the binaries.
 curl -fsSL https://hub.kiwano.cc/install.sh | sh
 ```
 
-The database is migrated in place on first start. The gateway runs every
+The database is migrated in place on first start. The daemon runs every
 migration before it begins serving, so a failed migration fails the start rather
 than half-serving.
+
+### If you installed before the rename
+
+The daemon used to be called `kiwano-gateway`; it is `kiwanod` now, and the
+systemd unit is `kiwanod.service`. `install.sh` handles the transition: it finds
+the old unit and the old binary, stops the old service, and removes both before
+starting the new one — and says so when it does, because two units both want
+port 8317 and leaving the old one running would be a race at every boot.
+
+If you install **by hand** rather than through the script, do that part
+yourself:
+
+```sh
+systemctl --user disable --now kiwano-gateway   # or: sudo systemctl … for --system
+rm ~/.config/systemd/user/kiwano-gateway.service
+rm ~/.local/bin/kiwano-gateway
+```
+
+**What did not change:** the provider entry Kiwano writes into an agent's config
+is still named `kiwano-gateway`. That string lives in files on your disk under
+`$HOME` — for opencode, openclaw, hermes and pi — and both the restore path and
+the daemon match on it. Renaming it would have left those entries behind,
+unfindable, with the agent still pointed at the gateway. It is an identifier,
+not a filename, and it stays.

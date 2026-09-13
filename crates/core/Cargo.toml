@@ -11,7 +11,7 @@ name = "kiwano_core"
 path = "src/lib.rs"
 
 [dependencies]
-kiwano-gateway = { path = "../gateway" }
+kiwanod = { path = "../gateway" }
 kiwano-adapters = { path = "../adapters" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

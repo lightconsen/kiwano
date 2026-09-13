@@ -137,7 +137,7 @@ jobs:
       # Before the first cargo command, not after: `tauri_build::build()` in
       # app/src-tauri/build.rs resolves `externalBin` at build-script time, so a
       # missing sidecar fails clippy and the tests with "resource path
-      # `binaries/kiwano-gateway-<triple>` doesn't exist" — it is a
+      # `binaries/kiwanod-<triple>` doesn't exist" — it is a
       # prerequisite for the Rust build, not just for bundling. Debug profile
       # on purpose: this proves the path and the triple-suffix naming agree,
       # and does not need the LTO release build to say so.
@@ -148,9 +148,9 @@ jobs:
             || { echo "::error::bundle.externalBin is gone from tauri.conf.json"; exit 1; }
           node scripts/build-sidecar.mjs
           triple=$(rustc -vV | sed -n 's/^host: //p')
-          test -x "app/src-tauri/binaries/kiwano-gateway-$triple" \
-            || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple"; exit 1; }
-          echo "staged app/src-tauri/binaries/kiwano-gateway-$triple"
+          test -x "app/src-tauri/binaries/kiwanod-$triple" \
+            || { echo "::error::build-sidecar.mjs did not stage kiwanod-$triple"; exit 1; }
+          echo "staged app/src-tauri/binaries/kiwanod-$triple"
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -462,7 +462,7 @@ jobs:
 
       # The app alone is not a runnable Kiwano: the gateway daemon is an
       # `externalBin`, and Tauri bundles whatever
-      # app/src-tauri/binaries/kiwano-gateway-<triple> happens to exist — which,
+      # app/src-tauri/binaries/kiwanod-<triple> happens to exist — which,
       # before this step existed, was nothing on every platform, so every
       # shipped build could not start a gateway on a machine that had never
       # compiled one. Build it for the target being bundled, explicitly: the
@@ -698,7 +698,7 @@ jobs:
 
       # The gateway daemon is what makes the app work at all, and it lives
       # beside the app binary rather than inside it. Tauri bundles whatever
-      # app/src-tauri/binaries/kiwano-gateway-<triple> exists and says nothing when
+      # app/src-tauri/binaries/kiwanod-<triple> exists and says nothing when
       # the triple is wrong — the 0.1.7 bundles went out with no gateway on any
       # platform and nothing noticed, because the dev machine always had one
       # running to adopt. Assert it is inside the artifact a user installs.
@@ -713,7 +713,7 @@ jobs:
             *-apple-darwin)
               app=$(find "$bundle" -maxdepth 3 -name '*.app' -type d | head -n 1)
               [ -n "$app" ] || fail "no .app under $bundle"
-              sidecar="$app/Contents/MacOS/kiwano-gateway"
+              sidecar="$app/Contents/MacOS/kiwanod"
               [ -x "$sidecar" ] || fail "gateway sidecar missing from $app"
               # A nested Mach-O must carry the *same* Developer ID as the app.
               # Notarization would have rejected an unsigned one, so this proves
@@ -735,7 +735,7 @@ jobs:
               # What gets installed, not just what Tauri staged.
               deb=$(find "$bundle/deb" -maxdepth 2 -name '*.deb' | head -n 1)
               [ -n "$deb" ] || fail "no .deb under $bundle/deb"
-              dpkg-deb -c "$deb" | grep -q 'usr/bin/kiwano-gateway' \
+              dpkg-deb -c "$deb" | grep -q 'usr/bin/kiwanod' \
                 || fail "gateway sidecar missing from $deb"
               appimage=$(find "$bundle/appimage" -maxdepth 2 -name '*.AppImage' | head -n 1)
               if [ -n "$appimage" ]; then
@@ -748,7 +748,7 @@ jobs:
                 chmod +x "$appimage"
                 tmp=$(mktemp -d)
                 ( cd "$tmp" && "$appimage" --appimage-extract >/dev/null )
-                [ -x "$tmp/squashfs-root/usr/bin/kiwano-gateway" ] \
+                [ -x "$tmp/squashfs-root/usr/bin/kiwanod" ] \
                   || fail "gateway sidecar missing from $appimage"
               fi
               ;;
@@ -759,8 +759,8 @@ jobs:
               # check. (Installing silently and looking in %LOCALAPPDATA% would
               # depend on the NSIS installMode default, which nothing here
               # pins.)
-              [ -f "target/${{ matrix.target }}/release/kiwano-gateway.exe" ] \
-                || fail "Tauri did not stage kiwano-gateway.exe beside the app"
+              [ -f "target/${{ matrix.target }}/release/kiwanod.exe" ] \
+                || fail "Tauri did not stage kiwanod.exe beside the app"
               ;;
           esac
           echo "gateway sidecar present in the ${{ matrix.target }} bundle"
@@ -785,8 +785,8 @@ jobs:
 
           rm -rf dist-cli && mkdir -p dist-cli/pkg
           cp "target/$triple/release/kiwano$exe" dist-cli/pkg/
-          cp "target/$triple/release/kiwano-gateway$exe" dist-cli/pkg/
-          cp packaging/kiwano-gateway.service dist-cli/pkg/
+          cp "target/$triple/release/kiwanod$exe" dist-cli/pkg/
+          cp packaging/kiwanod.service dist-cli/pkg/
           cp packaging/INSTALL.md dist-cli/pkg/
 
           tar czf "dist-cli/kiwano-$triple.tar.gz" -C dist-cli/pkg .
@@ -801,8 +801,8 @@ jobs:
 
           # And the daemon has to be in there: the bundle is useless without it,
           # which is the same failure the sidecar check above exists for.
-          tar tzf "dist-cli/kiwano-$triple.tar.gz" | grep -q '^\./kiwano-gateway' \
-            || { echo "::error::the server bundle has no kiwano-gateway"; exit 1; }
+          tar tzf "dist-cli/kiwano-$triple.tar.gz" | grep -q '^\./kiwanod' \
+            || { echo "::error::the server bundle has no kiwanod"; exit 1; }
 
           # The digest install.sh checks against when GitHub is unreachable.
           # Per-platform on purpose: all four legs write to the same mirror

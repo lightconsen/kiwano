@@ -9,7 +9,7 @@ mod update;
 
 use std::sync::Mutex;
 
-use kiwano_gateway::store::{RequestLogFilter, Store};
+use kiwanod::store::{RequestLogFilter, Store};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
@@ -511,12 +511,8 @@ fn get_plan_quota(
     state: State<AppState>,
     provider_id: String,
     force: Option<bool>,
-) -> Result<kiwano_gateway::plan_quota::PlanQuotaReport, String> {
-    kiwano_gateway::plan_quota::get_plan_quota_report(
-        &state.store,
-        &provider_id,
-        force.unwrap_or(false),
-    )
+) -> Result<kiwanod::plan_quota::PlanQuotaReport, String> {
+    kiwanod::plan_quota::get_plan_quota_report(&state.store, &provider_id, force.unwrap_or(false))
 }
 
 // ── Request logs (full data-plane audit trail, migration V5) ──
@@ -837,7 +833,7 @@ fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
 #[tauri::command]
 fn open_log_folder(app: AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let dir = kiwano_gateway::logging::log_dir(&db_path());
+    let dir = kiwanod::logging::log_dir(&db_path());
     // It may not exist yet — nothing has been logged before the directory is
     // made, and an empty folder explains itself better than an error does.
     let _ = std::fs::create_dir_all(&dir);
@@ -850,7 +846,7 @@ pub fn run() {
     // Before anything that can fail, and before the webview: a packaged app is
     // started by launchd, where stdout goes to /dev/null, so without this the
     // only way to read what happened is to run it from a terminal.
-    kiwano_gateway::logging::init(&db_path());
+    kiwanod::logging::init(&db_path());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())

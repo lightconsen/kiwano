@@ -10,8 +10,8 @@ use kiwano_core::detect;
 use kiwano_core::sidecar;
 use kiwano_core::vm;
 use kiwano_core::{import, pricing, share, sync};
-use kiwano_gateway::store::{Provider, RequestLogFilter, StrategyType, UsageTotals};
-use kiwano_gateway::strategy::QuotaConfig;
+use kiwanod::store::{Provider, RequestLogFilter, StrategyType, UsageTotals};
+use kiwanod::strategy::QuotaConfig;
 
 use crate::cli::{
     AddArgs, AgentsCmd, BindingCmd, CatalogCmd, ConfigCmd, DashboardArgs, EditArgs, ForwardArgs,
@@ -137,7 +137,7 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 fn providers_quota(ctx: &mut Ctx, provider_id: &str, force: bool) -> Result<(), CliError> {
     let report = {
         let store = ctx.store()?;
-        kiwano_gateway::plan_quota::get_plan_quota_report(store, provider_id, force)?
+        kiwanod::plan_quota::get_plan_quota_report(store, provider_id, force)?
     };
     // A deterministic failure (bad credentials, unknown template) comes back as
     // `success: false` rather than as an Err, and reporting it as success would
@@ -245,7 +245,7 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
 fn edit_input(
     args: &EditArgs,
     current: &Provider,
-    store: &kiwano_gateway::store::Store,
+    store: &kiwanod::store::Store,
 ) -> Result<vm::NewProviderInput, CliError> {
     let billing = match &args.billing {
         Some(raw) => parse_billing(raw)?.to_string(),
@@ -739,7 +739,7 @@ pub fn logs(cmd: &LogsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             Ok(())
         }
         LogsCmd::Dir => {
-            let dir = kiwano_gateway::logging::log_dir(&ctx.db);
+            let dir = kiwanod::logging::log_dir(&ctx.db);
             ctx.out.line(dir.display().to_string());
             Ok(())
         }
@@ -1317,7 +1317,7 @@ fn runtime(e: impl std::fmt::Display) -> CliError {
 /// bound agents. Cheap at this scale, and there is no reverse index to keep in
 /// sync.
 fn agents_bound_to(
-    store: &kiwano_gateway::store::Store,
+    store: &kiwanod::store::Store,
     provider_id: &str,
 ) -> Result<Vec<String>, CliError> {
     let mut bound = Vec::new();
@@ -1428,7 +1428,7 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
     render_table(&head, &rows)
 }
 
-fn render_quota(report: &kiwano_gateway::plan_quota::PlanQuotaReport) -> String {
+fn render_quota(report: &kiwanod::plan_quota::PlanQuotaReport) -> String {
     let mut out = format!("{} · template {}", report.provider_id, report.template);
     if let Some(note) = &report.note {
         out.push_str(&format!("\n{note}"));
@@ -1565,7 +1565,7 @@ fn render_logs(list: &vm::RequestLogListVm) -> String {
     out
 }
 
-fn render_log_detail(detail: &kiwano_gateway::store::RequestLogDetail) -> String {
+fn render_log_detail(detail: &kiwanod::store::RequestLogDetail) -> String {
     let e = &detail.entry;
     let mut out = format!(
         "#{} {} {} {}{}",

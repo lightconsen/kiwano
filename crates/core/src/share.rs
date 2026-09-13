@@ -22,7 +22,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use kiwano_gateway::store::{Binding, Provider, Store, StrategyType};
+use kiwanod::store::{Binding, Provider, Store, StrategyType};
 
 use crate::vm;
 
@@ -226,7 +226,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kiwano_gateway::store::{Billing, Protocol};
+    use kiwanod::store::{Billing, Protocol};
 
     fn provider(id: &str, name: &str, base_url: &str, api_key: Option<&str>) -> Provider {
         Provider {

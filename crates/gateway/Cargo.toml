@@ -1,12 +1,12 @@
 [package]
-name = "kiwano-gateway"
+name = "kiwanod"
 license.workspace = true
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
 [lib]
-name = "kiwano_gateway"
+name = "kiwanod"
 path = "src/lib.rs"
 
 [dependencies]

@@ -28,7 +28,7 @@ serde_json = "1"
 # lives in kiwano-core, shared with the CLI. What is left here is the Tauri
 # shell: commands, tray, updater, and the managed state that ties them together.
 kiwano-core = { path = "../../crates/core" }
-kiwano-gateway = { path = "../../crates/gateway" }
+kiwanod = { path = "../../crates/gateway" }
 tracing = "0.1"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"

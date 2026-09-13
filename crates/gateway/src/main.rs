@@ -1,4 +1,4 @@
-//! kiwano-gateway binary entry (tech.md §4.1): data plane on loopback :8317,
+//! kiwanod binary entry (tech.md §4.1): data plane on loopback :8317,
 //! admin plane on a unix socket / named pipe (`server::admin_ipc`). Runs as a
 //! Tauri sidecar; configuration comes from environment variables so the GUI can
 //! pass explicit ports and paths.
@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use kiwano_gateway::server::{admin_plane_router, data_plane_router, AdminEndpoint, GatewayState};
-use kiwano_gateway::store::Store;
+use kiwanod::server::{admin_plane_router, data_plane_router, AdminEndpoint, GatewayState};
+use kiwanod::store::Store;
 
 const DEFAULT_DATA_PORT: u16 = 8317;
 const DEFAULT_DB_SUBDIR: &str = ".kiwano";
@@ -53,7 +53,7 @@ async fn main() {
 
     // Logging first, and beside the database: everything below can fail, and a
     // packaged app has no stdout to fail onto.
-    kiwano_gateway::logging::init(&db_path);
+    kiwanod::logging::init(&db_path);
 
     if let Some(dir) = db_path.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {
@@ -71,7 +71,7 @@ async fn main() {
     };
     // Before the first snapshot is taken: a provider the old app-side patrol
     // disabled carries a marker nothing would ever clear now.
-    kiwano_gateway::limits::clear_legacy_disables(&store);
+    kiwanod::limits::clear_legacy_disables(&store);
 
     let state = match GatewayState::new(store) {
         Ok(s) => Arc::new(s),
@@ -110,7 +110,7 @@ async fn main() {
         db = %db_path.display(),
         agents_routed = agents,
         version = state.version,
-        "kiwano-gateway ready"
+        "kiwanod ready"
     );
 
     // Sidecar stdout handshake (tech.md §4.6): one parseable ready line.
@@ -122,16 +122,16 @@ async fn main() {
     let _ = std::io::stdout().flush();
 
     // Background health probing (tech.md §4.7 failover groundwork): one round every 30s, writes provider_health.
-    tokio::spawn(kiwano_gateway::strategy::prober::run(
+    tokio::spawn(kiwanod::strategy::prober::run(
         state.store.clone(),
-        kiwano_gateway::strategy::prober::PROBE_INTERVAL,
+        kiwanod::strategy::prober::PROBE_INTERVAL,
     ));
 
     // Billing limits, evaluated here rather than in the desktop app so they
     // hold with the app closed — the gateway is the process that routes.
-    tokio::spawn(kiwano_gateway::limits::run(
+    tokio::spawn(kiwanod::limits::run(
         state.clone(),
-        kiwano_gateway::limits::LIMIT_INTERVAL,
+        kiwanod::limits::LIMIT_INTERVAL,
     ));
 
     // Request-log retention: prune at startup and every 6 hours (bodies make

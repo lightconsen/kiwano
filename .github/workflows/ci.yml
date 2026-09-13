@@ -66,7 +66,7 @@ jobs:
       # Before the first cargo command, not after: `tauri_build::build()` in
       # app/src-tauri/build.rs resolves `externalBin` at build-script time, so a
       # missing sidecar fails clippy and the tests themselves with
-      # "resource path `binaries/kiwano-gateway-<triple>` doesn't exist" —
+      # "resource path `binaries/kiwanod-<triple>` doesn't exist" —
       # not just the bundle step. Debug profile on purpose: this is about the
       # path and the naming, and does not need the LTO release build.
       # `shell: bash` explicitly: on windows-latest the default is PowerShell,
@@ -82,8 +82,8 @@ jobs:
           triple=$(rustc -vV | sed -n 's/^host: //p')
           exe=""
           case "$triple" in *windows*) exe=".exe" ;; esac
-          test -x "app/src-tauri/binaries/kiwano-gateway-$triple$exe" \
-            || { echo "::error::build-sidecar.mjs did not stage kiwano-gateway-$triple$exe"; exit 1; }
+          test -x "app/src-tauri/binaries/kiwanod-$triple$exe" \
+            || { echo "::error::build-sidecar.mjs did not stage kiwanod-$triple$exe"; exit 1; }
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

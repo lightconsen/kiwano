@@ -45,6 +45,29 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **The gateway daemon is now `kiwanod`.** It was `kiwano-gateway` — a name that
+  read as a description rather than as a program, and one that made the server
+  bundle look as though it shipped two things called Kiwano. The crate, its
+  library and the binary all take the new name; the systemd unit is
+  `kiwanod.service`.
+
+  **Nothing else changes.** The admin socket, the data port, the database, the
+  CLI's `kiwano gateway …` subcommands and the `KIWANO_GATEWAY_BIN` override are
+  all untouched — `kiwanod` is the program, "gateway" is still what it does.
+
+  **Installing over an existing server install is handled:** `install.sh` stops
+  and removes the old unit and binary before starting the new one, and reports
+  what it removed. Installing by hand needs that step done manually; see
+  `INSTALL.md`.
+
+  **One identifier deliberately keeps the old spelling.** The provider entry
+  Kiwano writes into an agent's own config (for opencode, openclaw, hermes and
+  pi) is still `kiwano-gateway`. That string is persisted in files under `$HOME`
+  on every machine already taken over, and both the restore path and the
+  takeover readers match on it exactly. Renaming it would have left those entries
+  in place and unfindable — the agent still pointed at the gateway, with no way
+  to restore it.
+
 - **The privacy wording now describes what the code does.** The README, the app's
   own UI strings and the marketing site all said API keys are kept in the **OS
   keychain**. There is no keychain integration anywhere in this project — keys

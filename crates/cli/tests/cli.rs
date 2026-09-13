@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use kiwano_gateway::store::Store;
+use kiwanod::store::Store;
 
 /// Run the CLI against `db`, returning (exit code, stdout, stderr).
 fn run(db: &Path, args: &[&str]) -> (i32, String, String) {
@@ -527,8 +527,8 @@ fn status_without_a_gateway_exits_1_and_reports_the_store() {
     {
         let store = Store::open(&db).unwrap();
         store
-            .record_usage(&kiwano_gateway::store::UsageRecord {
-                ts: kiwano_gateway::store::now_rfc3339(),
+            .record_usage(&kiwanod::store::UsageRecord {
+                ts: kiwanod::store::now_rfc3339(),
                 agent: "claude".into(),
                 provider_id: "alpha".into(),
                 model: None,
@@ -810,7 +810,7 @@ fn routes_apply_copies_another_agents_route() {
     let store = Store::open(&db).unwrap();
     assert_eq!(
         store.get_strategy("codex").unwrap().unwrap().kind,
-        kiwano_gateway::store::StrategyType::Failover
+        kiwanod::store::StrategyType::Failover
     );
     assert_eq!(
         store.primary_provider_id("codex").unwrap().as_deref(),
@@ -930,8 +930,8 @@ fn detect_reports_the_known_agents() {
 fn seed_log(db: &Path, agent: &str, status_code: i64) {
     let store = Store::open(db).unwrap();
     store
-        .insert_request_log(&kiwano_gateway::store::RequestLogNew {
-            ts: kiwano_gateway::store::now_rfc3339(),
+        .insert_request_log(&kiwanod::store::RequestLogNew {
+            ts: kiwanod::store::now_rfc3339(),
             method: "POST".into(),
             path: "/v1/messages".into(),
             query: None,

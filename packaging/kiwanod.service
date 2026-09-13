@@ -18,7 +18,7 @@ Environment=KIWANO_DB_PATH=/var/lib/kiwano/kiwano.db
 Environment=KIWANO_DATA_PORT=8317
 WorkingDirectory=/var/lib/kiwano
 
-ExecStart=/usr/bin/kiwano-gateway
+ExecStart=/usr/bin/kiwanod
 
 # SIGTERM is the *graceful* path, not just a courtesy: the gateway checkpoints
 # its SQLite write-ahead log and removes the socket on the way out, and a

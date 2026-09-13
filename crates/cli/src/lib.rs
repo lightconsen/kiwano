@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use kiwano_core::aux::Aux;
 use kiwano_core::sidecar::{self, AdminEndpoint};
-use kiwano_gateway::store::Store;
+use kiwanod::store::Store;
 
 use cli::{Cli, Command};
 use output::Out;

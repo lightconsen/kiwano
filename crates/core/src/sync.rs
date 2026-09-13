@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn cache_preferred_and_fallback_bundled() {
         let aux = Aux::open_in_memory().unwrap();
-        let store = kiwano_gateway::store::Store::open_in_memory().unwrap();
+        let store = kiwanod::store::Store::open_in_memory().unwrap();
         // never synced → bundled fallback
         let fallback = vm::load_catalog(&store, &aux);
         assert_eq!(fallback.total as usize, fallback.entries.len());
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn footer_hub_synced_tracks_today() {
         let aux = Aux::open_in_memory().unwrap();
-        let store = kiwano_gateway::store::Store::open_in_memory().unwrap();
+        let store = kiwanod::store::Store::open_in_memory().unwrap();
         // never synced → false
         assert!(
             !vm::build_footer_stats(&store, &aux, "v0.0.0")
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn skip_refreshes_synced_at_only() {
         let aux = Aux::open_in_memory().unwrap();
-        let store = kiwano_gateway::store::Store::open_in_memory().unwrap();
+        let store = kiwanod::store::Store::open_in_memory().unwrap();
         let payload = catalog_body(false);
         aux.save_hub_cache(&payload, "2020-01-01T00:00:00Z")
             .unwrap();

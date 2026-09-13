@@ -1,10 +1,10 @@
 //! Gateway sidecar lifecycle + admin plane client (tech.md §4.1/§4.6).
 //!
-//! The GUI spawns `kiwano-gateway` as a child process sharing the same
+//! The GUI spawns `kiwanod` as a child process sharing the same
 //! SQLite file. The admin plane is a local IPC endpoint — a unix domain socket,
 //! or a per-user named pipe on Windows — not a TCP port, so the control-channel
 //! calls are raw HTTP written to that endpoint. Both ends of that transport live
-//! in `kiwano_gateway::server::admin_ipc`, which this module re-exports
+//! in `kiwanod::server::admin_ipc`, which this module re-exports
 //! [`AdminEndpoint`] from: the plane is defined once, and the app inherits the
 //! endpoint from the database path rather than from a port number. No extra HTTP
 //! client dependency is needed, and no other process on the machine can reach
@@ -27,13 +27,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use kiwano_gateway::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
-use kiwano_gateway::store::Store;
+use kiwanod::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
+use kiwanod::store::Store;
 
 /// The endpoint type itself, so callers in this crate name
 /// `sidecar::AdminEndpoint` and do not need to know the gateway crate's module
 /// layout.
-pub use kiwano_gateway::server::AdminEndpoint;
+pub use kiwanod::server::AdminEndpoint;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -43,19 +43,19 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 const IPC_HOST: &str = "localhost";
 
 #[cfg(windows)]
-const GATEWAY_BIN_NAMES: &[&str] = &["kiwano-gateway.exe", "kiwano-gateway"];
+const GATEWAY_BIN_NAMES: &[&str] = &["kiwanod.exe", "kiwanod"];
 #[cfg(not(windows))]
-const GATEWAY_BIN_NAMES: &[&str] = &["kiwano-gateway"];
+const GATEWAY_BIN_NAMES: &[&str] = &["kiwanod"];
 
-/// Resolve the gateway binary: explicit env override, then the sibling of the
+/// Resolve the daemon binary: explicit env override, then the sibling of the
 /// running GUI binary.
 ///
 /// Sibling is where the bundler puts an `externalBin` on every platform —
 /// `Contents/MacOS/` in the .app, `usr/bin/` in the deb/rpm and inside the
-/// AppImage, beside `kiwano.exe` on Windows — and where cargo leaves it in dev
-/// (`target/<profile>/kiwano-gateway`, next to `target/<profile>/kiwano`).
+/// AppImage, beside `kiwano-app.exe` on Windows — and where cargo leaves it in
+/// dev (`target/<profile>/kiwanod`, next to `target/<profile>/kiwano-app`).
 ///
-/// Deliberately no `PATH` search: a `kiwano-gateway` from somewhere else is a
+/// Deliberately no `PATH` search: a `kiwanod` from somewhere else is a
 /// different version answering the same admin endpoint, and version skew is
 /// handled by replacing it (see `startup_action`), not by quietly running it.
 fn gateway_bin_path() -> Option<PathBuf> {
@@ -78,7 +78,7 @@ fn gateway_bin_path() -> Option<PathBuf> {
     tracing::error!(
         dir = %dir.display(),
         tried = ?GATEWAY_BIN_NAMES,
-        "no kiwano-gateway beside the app binary — this bundle is missing its sidecar"
+        "no kiwanod beside the app binary — this bundle is missing its sidecar"
     );
     None
 }
@@ -89,7 +89,7 @@ pub fn spawn() -> std::io::Result<Child> {
     let Some(bin) = gateway_bin_path() else {
         return Err(std::io::Error::other(
             "gateway sidecar not found beside the app binary — reinstall Kiwano, \
-             or set KIWANO_GATEWAY_BIN to a kiwano-gateway build",
+             or set KIWANO_GATEWAY_BIN to a kiwanod build",
         ));
     };
     Command::new(&bin).spawn().inspect_err(|e| {
@@ -320,7 +320,7 @@ pub enum StartupAction {
     Adopt,
     /// Ours, wrong version — stop it and start the bundled one.
     Restart,
-    /// Nothing there, or something that is not a kiwano-gateway.
+    /// Nothing there, or something that is not a kiwanod.
     Spawn,
 }
 
@@ -331,9 +331,9 @@ pub fn startup_action(status: Option<&serde_json::Value>, ours: &str) -> Startup
     // The endpoint may be held by something else entirely — a pipe or socket
     // another program happens to own. Not ours to stop; the spawn that follows
     // will fail to bind, and say so.
-    if status.get("name").and_then(|n| n.as_str()) != Some("kiwano-gateway") {
+    if status.get("name").and_then(|n| n.as_str()) != Some("kiwanod") {
         tracing::error!(
-            "the admin endpoint is held by something that is not kiwano-gateway; leaving it alone"
+            "the admin endpoint is held by something that is not kiwanod; leaving it alone"
         );
         return StartupAction::Spawn;
     }
@@ -380,7 +380,7 @@ pub fn restart(endpoint: &AdminEndpoint) -> std::io::Result<Child> {
     if !request_shutdown(endpoint) {
         tracing::error!(
             endpoint = %endpoint.describe(),
-            "the running gateway would not stop; stop it by hand (pkill -f kiwano-gateway)"
+            "the running gateway would not stop; stop it by hand (pkill -f kiwanod)"
         );
         return Err(std::io::Error::other(
             "the running gateway would not stop; not starting a second one on the same ports",
@@ -794,7 +794,7 @@ mod tests {
     /// old binary, so it is pinned here rather than left to the dev machine.
     #[test]
     fn startup_action_adopts_only_its_own_version() {
-        let gw = |version: serde_json::Value| serde_json::json!({ "ok": true, "name": "kiwano-gateway", "version": version });
+        let gw = |version: serde_json::Value| serde_json::json!({ "ok": true, "name": "kiwanod", "version": version });
 
         // Nothing answering: start one.
         assert_eq!(startup_action(None, "0.1.8"), StartupAction::Spawn);
@@ -895,7 +895,7 @@ mod tests {
     /// HTTP-server dependency and does not need one: what is under test here is
     /// the *client* — the exact bytes it writes and how it reads the answer — so
     /// a stub that answers raw bytes is the more honest fixture. The server end
-    /// of this transport is exercised by `kiwano-gateway`'s own
+    /// of this transport is exercised by `kiwanod`'s own
     /// `admin_routes_answer_over_the_ipc_endpoint`, which runs on both CI
     /// platforms including Windows; this stub is unix-only because a Windows
     /// named pipe cannot be created from `std`.
@@ -938,7 +938,7 @@ mod tests {
                         r#"{"ok":true,"agents_routed":1}"#.to_string()
                     } else {
                         format!(
-                            r#"{{"ok":true,"name":"kiwano-gateway","version":"{version}","uptime_secs":1}}"#
+                            r#"{{"ok":true,"name":"kiwanod","version":"{version}","uptime_secs":1}}"#
                         )
                     };
                     let _ = write!(
@@ -988,7 +988,7 @@ mod tests {
         assert!(ping_admin(&gw.endpoint), "the liveness probe answers");
 
         let status = gateway_status(&gw.endpoint).expect("the status report");
-        assert_eq!(status["name"], "kiwano-gateway");
+        assert_eq!(status["name"], "kiwanod");
         assert_eq!(status["version"], "0.1.8");
 
         notify_reload(&gw.endpoint);

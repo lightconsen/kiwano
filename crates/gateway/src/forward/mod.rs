@@ -755,7 +755,7 @@ async fn forward_anthropic_via_openai(
     let converted_body = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(v) => v,
         Err(e) => {
-            let message = format!("kiwano-gateway: inbound body is not valid JSON: {e}");
+            let message = format!("kiwanod: inbound body is not valid JSON: {e}");
             crate::log_capture::persist_failure(
                 &state.store,
                 log.as_ref().map(|l| &l.capture),
@@ -1082,7 +1082,7 @@ fn proxy_error_into_response(
         inbound,
         status,
         "conversion_failed",
-        &format!("kiwano-gateway: adapters conversion failed: {e}"),
+        &format!("kiwanod: adapters conversion failed: {e}"),
     )
 }
 

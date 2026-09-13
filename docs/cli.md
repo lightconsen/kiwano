@@ -77,7 +77,7 @@ derived state which exists only while the gateway runs, so this is the only
 place a shell can see it, and it is usually the answer to "why is nothing
 routing".
 
-On a systemd host, use `systemctl restart kiwano-gateway` instead of the
+On a systemd host, use `systemctl restart kiwanod` instead of the
 `gateway` subcommands — see INSTALL.md.
 
 ### Providers

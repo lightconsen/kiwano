@@ -29,9 +29,7 @@ pub enum GatewayError {
     /// The inbound request carried no placeholder key, or one this gateway did
     /// not mint, so its agent is unknown. Refused rather than guessed: the
     /// guess would have been forwarded on the operator's upstream credentials.
-    #[error(
-        "kiwano-gateway: {0}; only agents taken over by Kiwano are routed through this gateway"
-    )]
+    #[error("kiwanod: {0}; only agents taken over by Kiwano are routed through this gateway")]
     Unauthorized(String),
 
     #[error("upstream request failed: {0}")]

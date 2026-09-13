@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kiwano_gateway::store::{
+use kiwanod::store::{
     Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry,
     RequestLogExportRow, RequestLogFilter, Store, Strategy, StrategyType, UsageTotals,
     EXPORT_ROW_CAP,
@@ -962,7 +962,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 endpoint_note: endpoint_note(&p),
                 endpoints: vm_endpoints(&p),
                 billing: billing_to_ui(p.billing).to_string(),
-                plan_price: kiwano_gateway::plan_quota::plan_monthly_price(p.plan_query.as_deref()),
+                plan_price: kiwanod::plan_quota::plan_monthly_price(p.plan_query.as_deref()),
                 limit_unit: p.limit_unit.clone(),
                 plan_limits: p
                     .plan_limits
@@ -1249,11 +1249,11 @@ fn display_endpoint(p: &Provider) -> String {
     display_base(&p.base_url, &p.api_path)
 }
 
-fn protocol_label(p: kiwano_gateway::store::Protocol) -> &'static str {
+fn protocol_label(p: kiwanod::store::Protocol) -> &'static str {
     match p {
-        kiwano_gateway::store::Protocol::OpenAI => "OpenAI-compatible",
-        kiwano_gateway::store::Protocol::Anthropic => "Anthropic",
-        kiwano_gateway::store::Protocol::Gemini => "Gemini API",
+        kiwanod::store::Protocol::OpenAI => "OpenAI-compatible",
+        kiwanod::store::Protocol::Anthropic => "Anthropic",
+        kiwanod::store::Protocol::Gemini => "Gemini API",
     }
 }
 
@@ -1262,9 +1262,9 @@ fn endpoint_note(p: &Provider) -> String {
     // Additional endpoints surface in the same subtitle: "OpenAI-compatible · +Anthropic".
     for e in &p.endpoints {
         let tag = match e.protocol {
-            kiwano_gateway::store::Protocol::OpenAI => "OpenAI",
-            kiwano_gateway::store::Protocol::Anthropic => "Anthropic",
-            kiwano_gateway::store::Protocol::Gemini => "Gemini",
+            kiwanod::store::Protocol::OpenAI => "OpenAI",
+            kiwanod::store::Protocol::Anthropic => "Anthropic",
+            kiwanod::store::Protocol::Gemini => "Gemini",
         };
         note.push_str(" · +");
         note.push_str(tag);
@@ -1505,13 +1505,13 @@ fn advanced_vm(p: &Provider) -> Option<ProviderAdvancedVm> {
 /// Map the user-supplied additional endpoints to store rows; unknown protocol
 /// strings are skipped (defaulting one to openai could collide with the
 /// primary's protocol in provider_endpoints' PK).
-fn input_endpoints(input: &NewProviderInput) -> Vec<kiwano_gateway::store::ProviderEndpoint> {
+fn input_endpoints(input: &NewProviderInput) -> Vec<kiwanod::store::ProviderEndpoint> {
     input
         .endpoints
         .iter()
         .filter_map(|e| {
-            kiwano_gateway::store::Protocol::parse_str(&e.protocol).map(|p| {
-                kiwano_gateway::store::ProviderEndpoint {
+            kiwanod::store::Protocol::parse_str(&e.protocol).map(|p| {
+                kiwanod::store::ProviderEndpoint {
                     protocol: p,
                     base_url: e.endpoint.trim().to_string(),
                     api_path: None,
@@ -1557,12 +1557,12 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     // Plan rows carry percent limits in plan_limits; the legacy
     // number+unit+reset-cycle columns are left NULL (v10 form dropped them).
     let billing = billing_to_db(&input.billing)?;
-    let is_plan = billing == kiwano_gateway::store::Billing::Subscription;
+    let is_plan = billing == kiwanod::store::Billing::Subscription;
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
-        protocol: kiwano_gateway::store::Protocol::parse_str(&input.protocol)
-            .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
+        protocol: kiwanod::store::Protocol::parse_str(&input.protocol)
+            .unwrap_or(kiwanod::store::Protocol::OpenAI),
         base_url: input.endpoint.trim().to_string(),
         api_path: None,
         endpoints: input_endpoints(input),
@@ -1725,13 +1725,13 @@ pub fn update_provider(
 
     p.name = input.name.trim().to_string();
     p.base_url = input.endpoint.trim().to_string();
-    p.protocol = kiwano_gateway::store::Protocol::parse_str(&input.protocol)
-        .unwrap_or(kiwano_gateway::store::Protocol::OpenAI);
+    p.protocol = kiwanod::store::Protocol::parse_str(&input.protocol)
+        .unwrap_or(kiwanod::store::Protocol::OpenAI);
     p.endpoints = input_endpoints(input);
     p.billing = billing_to_db(&input.billing)?;
     // Plan rows carry percent limits in plan_limits and NULL the legacy
     // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
-    let is_plan = p.billing == kiwano_gateway::store::Billing::Subscription;
+    let is_plan = p.billing == kiwanod::store::Billing::Subscription;
     p.period_limit = if is_plan {
         None
     } else {
@@ -2047,7 +2047,7 @@ pub fn export_request_logs_csv(
 }
 
 /// Detail view (metadata + bodies); re-exported for the command signature.
-pub use kiwano_gateway::store::RequestLogDetail as RequestLogDetailVm;
+pub use kiwanod::store::RequestLogDetail as RequestLogDetailVm;
 
 pub fn get_request_log(store: &Store, id: i64) -> Result<Option<RequestLogDetail>, String> {
     store.get_request_log(id).map_err(e2s)
@@ -2224,13 +2224,13 @@ fn import_current_provider(
             &uuid::Uuid::new_v4().simple().to_string()[..6]
         ),
         name,
-        protocol: kiwano_gateway::store::Protocol::parse_str(creds.protocol)
-            .unwrap_or(kiwano_gateway::store::Protocol::OpenAI),
+        protocol: kiwanod::store::Protocol::parse_str(creds.protocol)
+            .unwrap_or(kiwanod::store::Protocol::OpenAI),
         base_url: base.to_string(),
         api_path: None,
         endpoints: Vec::new(),
         api_key: Some(creds.api_key.clone()),
-        billing: kiwano_gateway::store::Billing::Metered,
+        billing: kiwanod::store::Billing::Metered,
         period_limit: None,
         limit_unit: None,
         reset_period: None,
@@ -2378,12 +2378,12 @@ pub fn check_usage_alerts(
         if !p.enabled {
             continue;
         }
-        let Some(kiwano_gateway::limits::PeriodLimit {
+        let Some(kiwanod::limits::PeriodLimit {
             used,
             limit,
             unit,
             period_key,
-        }) = kiwano_gateway::limits::period_limit_usage(store, &p).map_err(e2s)?
+        }) = kiwanod::limits::period_limit_usage(store, &p).map_err(e2s)?
         else {
             continue;
         };
@@ -2723,7 +2723,7 @@ fn endpoint_key(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kiwano_gateway::store::UsageRecord;
+    use kiwanod::store::UsageRecord;
 
     fn store() -> Store {
         Store::open_in_memory().expect("in-memory store")
@@ -2733,7 +2733,7 @@ mod tests {
         Provider {
             id: id.into(),
             name: name.into(),
-            protocol: kiwano_gateway::store::Protocol::OpenAI,
+            protocol: kiwanod::store::Protocol::OpenAI,
             base_url: format!("https://{id}.example.com"),
             api_path: None,
             endpoints: Vec::new(),
@@ -3252,7 +3252,7 @@ mod tests {
         );
         assert_eq!(
             rows[0].endpoints[0].protocol,
-            kiwano_gateway::store::Protocol::Anthropic
+            kiwanod::store::Protocol::Anthropic
         );
     }
 
@@ -3427,7 +3427,7 @@ mod tests {
     fn seed_usage_rows(s: &Store, first_secs: i64, requests: i64, tokens: i64) {
         for i in 0..requests {
             let ts = rfc3339(first_secs + i);
-            s.record_usage(&kiwano_gateway::store::UsageRecord {
+            s.record_usage(&kiwanod::store::UsageRecord {
                 ts: ts.clone(),
                 agent: "claude".into(),
                 provider_id: "demo-alpha".into(),
@@ -3444,7 +3444,7 @@ mod tests {
             .unwrap();
             // The headline count reads request_logs, not usage: seed both, as
             // the gateway does for a forwarded request.
-            s.insert_request_log(&kiwano_gateway::store::RequestLogNew {
+            s.insert_request_log(&kiwanod::store::RequestLogNew {
                 ts,
                 method: "POST".into(),
                 path: "/v1/messages".into(),
@@ -3845,7 +3845,7 @@ mod tests {
         s.insert_provider(&provider("p1", "Prov", Billing::Metered))
             .unwrap();
         let now = rfc3339(unix_now());
-        s.record_usage(&kiwano_gateway::store::UsageRecord {
+        s.record_usage(&kiwanod::store::UsageRecord {
             ts: now.clone(),
             agent: "claude".into(),
             provider_id: "p1".into(),
@@ -3862,7 +3862,7 @@ mod tests {
         .unwrap();
         // Seed the request-log rows the headline counts: the forwarded request
         // above plus a pre-forward failure (usage tables never see the latter).
-        let log = |status: i64, tokens: (i64, i64)| kiwano_gateway::store::RequestLogNew {
+        let log = |status: i64, tokens: (i64, i64)| kiwanod::store::RequestLogNew {
             ts: now.clone(),
             method: "POST".into(),
             path: "/v1/messages".into(),
@@ -3989,7 +3989,7 @@ mod tests {
         let s = store();
         // One row, with markers that need no CSV quoting, so "is it in the
         // file" is a plain substring test.
-        s.insert_request_log(&kiwano_gateway::store::RequestLogNew {
+        s.insert_request_log(&kiwanod::store::RequestLogNew {
             ts: rfc3339(unix_now() - 90),
             method: "POST".into(),
             path: "/v1/messages".into(),
@@ -4055,7 +4055,7 @@ mod tests {
         metered.period_limit = Some(50.0);
         metered.limit_unit = Some("CNY".into());
         s.insert_provider(&metered).unwrap();
-        s.record_usage(&kiwano_gateway::store::UsageRecord {
+        s.record_usage(&kiwanod::store::UsageRecord {
             ts: rfc3339(now - 60),
             agent: "claude".into(),
             provider_id: "payg-1".into(),
@@ -4103,7 +4103,7 @@ mod tests {
         // counts — the filtered slice's total is all this needs.
         seed_usage_rows(&s, now - 90, 3, 1_000);
         for i in 0..2 {
-            s.record_usage(&kiwano_gateway::store::UsageRecord {
+            s.record_usage(&kiwanod::store::UsageRecord {
                 ts: rfc3339(now - 60 - i),
                 agent: "codex".into(),
                 provider_id: "demo-alpha".into(),
@@ -4321,7 +4321,7 @@ mod tests {
         .unwrap();
         assert_eq!(in_use(&s), (true, false));
         for _ in 0..5 {
-            s.record_usage(&kiwano_gateway::store::UsageRecord {
+            s.record_usage(&kiwanod::store::UsageRecord {
                 ts: rfc3339(unix_now()),
                 agent: "claude".into(),
                 provider_id: "a1".into(),

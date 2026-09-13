@@ -276,7 +276,7 @@ mod tests {
     fn test_env() -> (Aux, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("kiwano.db");
-        kiwano_gateway::store::Store::open(&path).unwrap();
+        kiwanod::store::Store::open(&path).unwrap();
         (Aux::open(&path).unwrap(), dir)
     }
 

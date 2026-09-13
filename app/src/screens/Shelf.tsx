@@ -184,6 +184,12 @@ function windowText(hours: PeakHours, t: Translate): string {
     .join(t("shelf.windowSep"));
 }
 
+/// How many models the detail dialog lists before it offers to expand. The
+/// catalog's own lists are short (a curated handful per endpoint); this is for
+/// the day the Hub publishes a long one, and it keeps the sections below the
+/// list reachable.
+const MODEL_ROWS_SHOWN = 8;
+
 /// Which of a row's two prices its cell is showing. The row's own figures are
 /// the **peak** ones (the published table's rule), so that is where every cell
 /// starts.
@@ -820,16 +826,7 @@ function DetailDialog({
     ...(entry.endpoints ?? []),
   ];
   const website = entry.website;
-
-  // The models this provider serves, its representative one first — that is the
-  // figure the shelf shows, so it is the one a reader arrives looking for.
-  const modelIds = [
-    ...new Set(
-      [entry.price_ref?.model_id, ...endpoints.flatMap((e) => e.models)].filter(
-        (id): id is string => !!id,
-      ),
-    ),
-  ];
+  const [showAllModels, setShowAllModels] = useState(false);
 
   /** The mirror row for one model: this provider's own first, then the general
       one (`""`), which is the order the gateway prices in. Matching is exact —
@@ -842,6 +839,20 @@ function DetailDialog({
       null
     );
   };
+
+  // The models this provider serves, ordered so that a capped list keeps what a
+  // reader came for. The representative model — the one the shelf row priced,
+  // and so the one that made them open this — leads; then the rest the mirror
+  // prices, since showing prices is what the list is for; then everything else,
+  // declared or not, by id.
+  const hero = entry.price_ref?.model_id;
+  const rank = (m: { id: string; price: ModelPrice | null }) =>
+    m.id === hero ? 0 : m.price ? 1 : 2;
+  const models = [
+    ...new Set([hero, ...endpoints.flatMap((e) => e.models)].filter((id): id is string => !!id)),
+  ]
+    .map((id) => ({ id, price: priceFor(id) }))
+    .sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       {/* overflow-x-hidden: same WKWebView hardening as the other modals */}
@@ -900,23 +911,6 @@ function DetailDialog({
             )}
           </div>
 
-          {/* Every model this provider serves, with the rates the gateway
-              charges by. The catalog names one representative price per
-              provider, so without this the rest of them — and any schedule of
-              their own — are invisible. */}
-          {modelIds.length > 0 && (
-            <div className="mt-3">
-              <div className="mb-1 text-[10px] font-medium text-mut">
-                {t("shelf.modelsPrices")}
-              </div>
-              <div className="space-y-1.5">
-                {modelIds.map((id) => (
-                  <ModelPriceRow key={id} modelId={id} price={priceFor(id)} t={t} />
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* one card per protocol: endpoint URL + keyless Test + models */}
           <div className="mt-3">
             <div className="mb-1 text-[10px] font-medium text-mut">{t("shelf.endpoints")}</div>
@@ -926,6 +920,34 @@ function DetailDialog({
               ))}
             </div>
           </div>
+          {/* Every model this provider serves, with the rates the gateway
+              charges by. The catalog names one representative price per
+              provider, so without this the rest of them — and any schedule of
+              their own — are invisible. */}
+          {models.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 text-[10px] font-medium text-mut">
+                {t("shelf.modelsPrices", { n: models.length })}
+              </div>
+              <div className="space-y-1.5">
+                {(showAllModels ? models : models.slice(0, MODEL_ROWS_SHOWN)).map((m) => (
+                  <ModelPriceRow key={m.id} modelId={m.id} price={m.price} t={t} />
+                ))}
+              </div>
+              {models.length > MODEL_ROWS_SHOWN && (
+                <button
+                  type="button"
+                  className="mt-1.5 cursor-pointer text-[10.5px] hover:underline"
+                  style={{ color: "var(--kiwi)" }}
+                  onClick={() => setShowAllModels((v) => !v)}
+                >
+                  {showAllModels
+                    ? t("shelf.showFewerModels")
+                    : t("shelf.showAllModels", { n: models.length - MODEL_ROWS_SHOWN })}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">

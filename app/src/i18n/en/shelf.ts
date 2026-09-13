@@ -56,7 +56,9 @@ export const shelf = {
   /** The four rates a price row can carry, and the section that lists them. */
   priceCacheRead: "cache hits",
   priceCacheWrite: "cache write",
-  modelsPrices: "Models & prices",
+  modelsPrices: "MODELS & PRICES · {n}",
+  showAllModels: "Show the other {n}",
+  showFewerModels: "Show fewer",
   noPublishedPrice: "No published price",
   website: "Website",
   priceIn: "in",

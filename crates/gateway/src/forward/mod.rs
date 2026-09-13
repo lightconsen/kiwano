@@ -16,6 +16,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
+
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
@@ -83,6 +85,11 @@ struct UsageSample {
     /// under; None is priced at the general rate, which is what a hand-added
     /// provider should get.
     catalog_id: Option<String>,
+    /// Unix seconds when the request began, which is what decides the price
+    /// tier: a row may charge its peak rates only inside its own windows, and a
+    /// request belongs to the window it *started* in. Not `ts`, which is the
+    /// write time — a long stream can end in a later window than it began.
+    started_unix: i64,
     model: Option<String>,
     usage: Usage,
     latency_ms: i64,
@@ -96,7 +103,17 @@ struct UsageSample {
 }
 
 impl UsageSample {
-    fn into_record(self, cost: Option<f64>, cost_currency: Option<String>) -> UsageRecord {
+    /// `cost_off_peak` is what these tokens would have cost at the row's
+    /// off-peak rates — equal to `cost` when it publishes no schedule. The pair
+    /// is frozen here and never re-derived later (from `ts`, or from whatever
+    /// the price table says next week): a request that started at 17:59 on a
+    /// Friday is billed peak and may carry an off-peak `ts`.
+    fn into_record(
+        self,
+        cost: Option<f64>,
+        cost_off_peak: Option<f64>,
+        cost_currency: Option<String>,
+    ) -> UsageRecord {
         UsageRecord {
             ts: now_rfc3339(),
             agent: self.agent,
@@ -110,13 +127,14 @@ impl UsageSample {
             status: self.status.to_string(),
             cost,
             cost_currency,
+            cost_off_peak,
         }
     }
 }
 
 /// Resolve the sample's price and compute its cost in the price entry's
-/// currency. Unpriced / unknown models yield `(None, None)` (row keeps
-/// NULL cost).
+/// currency, with the off-peak equivalent beside it. Unpriced / unknown models
+/// yield `(None, None, None)` (row keeps NULL cost).
 ///
 /// The lookup asks for the *catalog* provider, since that is who the Hub
 /// publishes prices for; a provider that never came from the shelf asks for no
@@ -124,23 +142,27 @@ impl UsageSample {
 fn compute_sample_cost(
     state: &GatewayState,
     sample: &UsageSample,
-) -> (Option<f64>, Option<String>) {
+) -> (Option<f64>, Option<f64>, Option<String>) {
     let Some(model) = sample.model.as_deref().filter(|m| !m.is_empty()) else {
-        return (None, None);
+        return (None, None, None);
     };
     let pricing = state.pricing.read().expect("pricing lock poisoned");
     let Some(entry) = pricing.find(sample.catalog_id.as_deref().unwrap_or_default(), model) else {
-        return (None, None);
+        return (None, None, None);
     };
-    let cost = kiwano_adapters::model_pricing::compute_cost(
+    let pair = kiwano_adapters::model_pricing::compute_cost_pair(
         entry,
+        sample.started_unix,
         sample.usage.input_tokens.max(0) as u64,
         sample.usage.output_tokens.max(0) as u64,
         sample.usage.cache_read_tokens.max(0) as u64,
         sample.usage.cache_creation_tokens.max(0) as u64,
         sample.cache_inclusive,
     );
-    (cost, Some(entry.currency.clone()))
+    match pair {
+        Some((cost, off_peak)) => (Some(cost), Some(off_peak), Some(entry.currency.clone())),
+        None => (None, None, None),
+    }
 }
 
 /// Pick the credential for one upstream request: the provider's key pool is
@@ -480,6 +502,9 @@ pub async fn forward(
     capture: Option<RequestCapture>,
 ) -> Response {
     let started = Instant::now();
+    // The wall clock the start corresponds to: `Instant` measures, it cannot say
+    // *when*, and the price tier is decided by when.
+    let started_unix = Utc::now().timestamp();
     let provider = &routed.provider;
     let mut log = capture.map(|c| CompletedLog {
         capture: c,
@@ -524,6 +549,7 @@ pub async fn forward(
                 routed,
                 inbound,
                 started,
+                started_unix,
                 log,
             )
             .await;
@@ -648,6 +674,7 @@ pub async fn forward(
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
                 catalog_id: provider.catalog_id.clone(),
+                started_unix,
                 model,
                 usage: Usage::default(),
                 latency_ms: 0,
@@ -710,6 +737,7 @@ pub async fn forward(
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
             catalog_id: provider.catalog_id.clone(),
+            started_unix,
             model: model.or(upstream_model),
             usage: usage.unwrap_or_default(),
             latency_ms,
@@ -755,6 +783,7 @@ async fn forward_anthropic_via_openai(
     routed: RoutedRequest,
     inbound: Option<Protocol>,
     started: Instant,
+    started_unix: i64,
     log: Option<CompletedLog>,
 ) -> Response {
     let provider = &routed.provider;
@@ -919,6 +948,7 @@ async fn forward_anthropic_via_openai(
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
                 catalog_id: provider.catalog_id.clone(),
+                started_unix,
                 model,
                 usage: Usage::default(),
                 latency_ms: 0,
@@ -987,6 +1017,7 @@ async fn forward_anthropic_via_openai(
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
                 catalog_id: provider.catalog_id.clone(),
+                started_unix,
                 model: model.or(upstream_model),
                 usage: usage.unwrap_or_default(),
                 latency_ms,
@@ -1060,6 +1091,7 @@ async fn forward_anthropic_via_openai(
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
             catalog_id: provider.catalog_id.clone(),
+            started_unix,
             model: model.or(upstream_model),
             usage: usage.unwrap_or_default(),
             latency_ms,
@@ -1109,8 +1141,8 @@ async fn record_pending_usage(state: Arc<GatewayState>, mut rx: mpsc::Receiver<U
 fn record_sample(state: &GatewayState, sample: UsageSample) {
     let mut sample = sample;
     let log = sample.log.take();
-    let (cost, cost_currency) = compute_sample_cost(state, &sample);
-    let record = sample.into_record(cost, cost_currency);
+    let (cost, cost_off_peak, cost_currency) = compute_sample_cost(state, &sample);
+    let record = sample.into_record(cost, cost_off_peak, cost_currency);
     tracing::info!(
         agent = %record.agent,
         provider_id = %record.provider_id,
@@ -1156,6 +1188,7 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
             truncated: log.capture.truncated || log.truncated,
             cost: record.cost,
             cost_currency: record.cost_currency,
+            cost_off_peak: record.cost_off_peak,
         };
         if let Err(e) = state.store.insert_request_log(&entry) {
             tracing::warn!(error = %e, "failed to persist request log");
@@ -1307,6 +1340,11 @@ impl Stream for SseUsageStream {
 mod tests {
     use super::*;
     use std::vec;
+
+    /// A fixed instant — Wed 2026-09-09 10:00 Beijing, inside the peak window
+    /// the published DeepSeek schedule names — so that a fixture which gains
+    /// tiers behaves predictably.
+    const TEST_AT: i64 = 1_788_919_200;
 
     fn provider(protocol: Protocol, api_path: Option<&str>) -> UpstreamProvider {
         UpstreamProvider {
@@ -1507,6 +1545,8 @@ mod tests {
             .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
                 provider_id: String::new(),
                 model_id: "claude-opus-4-8".into(),
+                off_peak: None,
+                peak_hours: None,
                 display_name: "Claude Opus 4.8".into(),
                 input: "5".into(),
                 output: "25".into(),
@@ -1547,6 +1587,7 @@ mod tests {
             agent: "claude".into(),
             provider_id: "p1".into(),
             catalog_id: None,
+            started_unix: TEST_AT,
             model: model.map(str::to_string),
             usage: Usage {
                 input_tokens: 1_000_000,
@@ -1592,6 +1633,8 @@ mod tests {
             |provider_id: &str, input: &str| kiwano_adapters::model_pricing::ModelPriceEntry {
                 provider_id: provider_id.into(),
                 model_id: "m1".into(),
+                off_peak: None,
+                peak_hours: None,
                 display_name: "M1".into(),
                 input: input.into(),
                 output: "0".into(),
@@ -1633,6 +1676,7 @@ mod tests {
             agent: "claude".into(),
             provider_id: provider_id.into(),
             catalog_id: catalog_id.map(str::to_string),
+            started_unix: TEST_AT,
             model: Some("m1".into()),
             usage: Usage {
                 input_tokens: 1_000_000,
@@ -1662,6 +1706,118 @@ mod tests {
         assert!(
             (cost_of("p-manual") - 1.0).abs() < 1e-9,
             "a hand-added provider pays the general rate"
+        );
+    }
+
+    /// A row with time-of-day tiers bills the tier the request **started** in.
+    ///
+    /// The same tokens, the same provider key, two instants: inside the
+    /// published window the listed rate, outside it the discounted one. This is
+    /// the whole money path — the sample's clock, the table's tiers, and the
+    /// recorded figure — and it is what the App got wrong by ignoring
+    /// `peak_hours` (it billed the peak always).
+    #[test]
+    fn record_sample_bills_the_tier_the_request_started_in() {
+        use crate::store::Protocol;
+
+        const PEAK_AT: i64 = 1_788_919_200; // Wed 2026-09-09 10:00 Beijing
+        const OFF_AT: i64 = 1_788_930_000; // the same day's 13:00 lunch gap
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        store
+            .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                provider_id: String::new(),
+                model_id: "m1".into(),
+                display_name: "M1".into(),
+                input: "9.0".into(),
+                output: "27.0".into(),
+                cache_read: "0.30".into(),
+                cache_creation: "0".into(),
+                currency: "CNY".into(),
+                off_peak: Some(kiwano_adapters::model_pricing::OffPeakRates {
+                    input: "4.5".into(),
+                    output: "13.5".into(),
+                    cache_read: "0.15".into(),
+                    cache_creation: "0".into(),
+                }),
+                peak_hours: Some(kiwano_adapters::model_pricing::PeakHours {
+                    tz_offset: 480,
+                    windows: vec![kiwano_adapters::model_pricing::PeakWindow {
+                        days: ["mon", "tue", "wed", "thu", "fri"]
+                            .iter()
+                            .map(|d| d.to_string())
+                            .collect(),
+                        start: "09:00".into(),
+                        end: "12:00".into(),
+                    }],
+                }),
+            })
+            .unwrap();
+        // Two providers, so the two samples are two figures rather than one sum.
+        for id in ["p-peak", "p-off"] {
+            store
+                .insert_provider(&crate::store::Provider {
+                    id: id.into(),
+                    name: id.into(),
+                    catalog_id: None,
+                    protocol: Protocol::Anthropic,
+                    base_url: "https://a.example.com".into(),
+                    api_path: None,
+                    endpoints: Vec::new(),
+                    api_key: Some("sk".into()),
+                    billing: crate::store::Billing::Metered,
+                    period_limit: None,
+                    limit_unit: None,
+                    plan_query: None,
+                    plan_limits: None,
+                    timeout_secs: None,
+                    retries: None,
+                    headers: None,
+                    reset_period: None,
+                    enabled: true,
+                    created_at: crate::store::now_rfc3339(),
+                    updated_at: crate::store::now_rfc3339(),
+                })
+                .unwrap();
+        }
+        let state = crate::server::GatewayState::new(store).expect("state");
+
+        let sample = |provider_id: &str, started_unix: i64| UsageSample {
+            agent: "claude".into(),
+            provider_id: provider_id.into(),
+            catalog_id: None,
+            started_unix,
+            model: Some("m1".into()),
+            usage: Usage {
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            log: None,
+        };
+        record_sample(&state, sample("p-peak", PEAK_AT));
+        record_sample(&state, sample("p-off", OFF_AT));
+
+        let cost_of = |provider_id: &str| {
+            state
+                .store
+                .usage_cost_by_currency(None, Some(provider_id), None)
+                .unwrap()[0]
+                .1
+        };
+        assert!(
+            (cost_of("p-peak") - 9.0).abs() < 1e-9,
+            "1M at the listed (peak) rate: {}",
+            cost_of("p-peak")
+        );
+        assert!(
+            (cost_of("p-off") - 4.5).abs() < 1e-9,
+            "1M at the off-peak rate: {}",
+            cost_of("p-off")
         );
     }
 
@@ -1772,6 +1928,7 @@ mod tests {
                 agent: "claude".into(),
                 provider_id: "p1".into(),
                 catalog_id: None,
+                started_unix: TEST_AT,
                 model: None,
                 usage: Usage::default(),
                 latency_ms: 0,

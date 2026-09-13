@@ -3994,6 +3994,7 @@ mod tests {
                 status: "ok".into(),
                 cost: Some(0.5),
                 cost_currency: Some("USD".into()),
+                cost_off_peak: None,
             })
             .unwrap();
             // The headline count reads request_logs, not usage: seed both, as
@@ -4027,6 +4028,7 @@ mod tests {
                 truncated: false,
                 cost: Some(0.5),
                 cost_currency: Some("USD".into()),
+                cost_off_peak: None,
             })
             .unwrap();
         }
@@ -4423,6 +4425,7 @@ mod tests {
             status: "ok".into(),
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         })
         .unwrap();
         // Seed the request-log rows the headline counts: the forwarded request
@@ -4456,6 +4459,7 @@ mod tests {
             truncated: false,
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         };
         s.insert_request_log(&log(200, (1000, 500))).unwrap();
         s.insert_request_log(&log(503, (0, 0))).unwrap();
@@ -4583,6 +4587,7 @@ mod tests {
             truncated: false,
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         })
         .unwrap();
 
@@ -4633,6 +4638,7 @@ mod tests {
             status: "ok".into(),
             cost: Some(30.0),
             cost_currency: Some("CNY".into()),
+            cost_off_peak: None,
         })
         .unwrap();
         let totals = s.usage_totals(None, Some("payg-1"), Some(&since7)).unwrap();
@@ -4681,6 +4687,7 @@ mod tests {
                 status: "ok".into(),
                 cost: None,
                 cost_currency: None,
+                cost_off_peak: None,
             })
             .unwrap();
         }
@@ -4899,6 +4906,7 @@ mod tests {
                 status: "ok".into(),
                 cost: None,
                 cost_currency: None,
+                cost_off_peak: None,
             })
             .unwrap();
         }
@@ -4919,6 +4927,7 @@ mod tests {
             status: "ok".into(),
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         }
     }
 

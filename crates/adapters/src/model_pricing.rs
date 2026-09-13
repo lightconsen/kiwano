@@ -2,22 +2,93 @@
 //! (src-tauri/src/services/usage_stats.rs matching layer and
 //! src-tauri/src/proxy/usage/calculator.rs, MIT License).
 //!
-//! Prices are USD per million tokens as TEXT decimals, plus top-level exchange
-//! rates used for UI-side currency conversion. There is no bundled snapshot:
-//! both the UI and the gateway read the Hub's `models.json` — through the
-//! served document, or through the `model_pricing` mirror the GUI seeds from
-//! it. An install that has never synced therefore has no prices at all and
-//! costs read as "—", the same posture the catalog takes (`vm::load_catalog`).
+//! Prices are per million tokens as TEXT decimals in the row's own currency,
+//! plus top-level exchange rates used for the Dashboard's display conversion.
+//! There is no bundled snapshot: both the UI and the gateway read the Hub's
+//! `models.json` — through the served document, or through the `model_pricing`
+//! mirror the GUI seeds from it. An install that has never synced therefore has
+//! no prices at all and costs read as "—", the same posture the catalog takes
+//! (`vm::load_catalog`).
+//!
+//! A row may also publish **time-of-day** pricing: its own rates are then the
+//! peak ones, applied inside `peak_hours` in the *vendor's* clock, with
+//! `off_peak` in force outside them (`is_peak`, `compute_cost_pair`).
 //!
 //! cc-switch uses rust_decimal; here prices are parsed to f64 and results are
 //! rounded to 6 decimal places, which is ample for per-request USD amounts.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The `[1m]` suffix Claude Desktop appends to 1M-context model names
 /// (same marker constant as `claude_desktop_config::ONE_M_CONTEXT_MARKER`).
 const ONE_M_CONTEXT_MARKER: &str = "[1m]";
+
+/// A row's rates outside its peak hours.
+///
+/// The document spells these `in` / `out` — short keys, and not ours to rename:
+/// the published shape is what the Hub and every other client share. The rates
+/// are read as they are written, so a vendor that discounts input but not output
+/// is expressible.
+///
+/// Both cache rates are defaulted rather than required: `models/README.md` says
+/// an absent cache field means 0, and a parse failure here is not a local
+/// problem — it fails the whole document, which the seeder answers by keeping
+/// the *previous* prices for every model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OffPeakRates {
+    #[serde(rename = "in")]
+    pub input: String,
+    #[serde(rename = "out")]
+    pub output: String,
+    #[serde(default = "zero_rate")]
+    pub cache_read: String,
+    #[serde(default = "zero_rate")]
+    pub cache_creation: String,
+}
+
+/// The cache rates the document leaves out default to 0, as the data repo's
+/// README states — not to the peak rate, which would invent a charge.
+fn zero_rate() -> String {
+    "0".to_string()
+}
+
+/// When a row's own (peak) rates apply, in the **vendor's** clock.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PeakHours {
+    /// Minutes east of UTC. Required when a schedule is published: these windows
+    /// are business hours somewhere, and judging "is it peak now" against the
+    /// reader's own timezone would silently pick the wrong rate.
+    #[serde(default)]
+    pub tz_offset: i32,
+    #[serde(default)]
+    pub windows: Vec<PeakWindow>,
+}
+
+/// One peak window. `start`/`end` are `HH:MM` in the vendor's clock and the
+/// window is half-open — `[start, end)` — which is what lets adjacent windows
+/// compose without a gap or an overlap. A window never wraps midnight; the
+/// document writes `22:00–02:00` as two windows.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PeakWindow {
+    #[serde(default)]
+    pub days: Vec<String>,
+    #[serde(default)]
+    pub start: String,
+    #[serde(default)]
+    pub end: String,
+}
+
+/// The two halves of a time-of-day price, as they are stored between the
+/// document and the mirror: one JSON blob, so the seeder and the mirror reader
+/// cannot disagree about the shape.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PriceTiers {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off_peak: Option<OffPeakRates>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_hours: Option<PeakHours>,
+}
 
 /// One row of models.json (prices = currency per million tokens, TEXT decimals).
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +109,42 @@ pub struct ModelPriceEntry {
     pub cache_read: String,
     pub cache_creation: String,
     pub currency: String,
+    /// The discounted rates in force outside `peak_hours`. The row's own rates
+    /// above are the **peak** ones — they apply inside the windows.
+    #[serde(default)]
+    pub off_peak: Option<OffPeakRates>,
+    #[serde(default)]
+    pub peak_hours: Option<PeakHours>,
+}
+
+impl ModelPriceEntry {
+    /// The tiers as they travel to the mirror, or `None` when the row has none.
+    /// "No tiers" is NULL rather than `"{}"`, so a forced re-seed of a tiered
+    /// document stays write-free for the rows that never had any.
+    pub fn tiers_json(&self) -> Option<String> {
+        let tiers = PriceTiers {
+            off_peak: self.off_peak.clone(),
+            peak_hours: self.peak_hours.clone(),
+        };
+        if tiers.off_peak.is_none() && tiers.peak_hours.is_none() {
+            return None;
+        }
+        serde_json::to_string(&tiers).ok()
+    }
+
+    /// Read the tiers back from the mirror, **tolerating** a blob this build
+    /// cannot parse: an unreadable row means peak-only for that row, never an
+    /// error. An error here would reach `resolve_pricing`, which answers a read
+    /// failure with an empty table — every cost NULL, which is far worse than
+    /// one row billed at its peak rate.
+    pub fn apply_tiers(&mut self, raw: Option<&str>) {
+        let Some(raw) = raw else { return };
+        let Ok(tiers) = serde_json::from_str::<PriceTiers>(raw) else {
+            return;
+        };
+        self.off_peak = tiers.off_peak;
+        self.peak_hours = tiers.peak_hours;
+    }
 }
 
 /// Top-level models.json document.
@@ -203,12 +310,118 @@ fn parse_price(s: &str) -> Option<f64> {
     s.trim().parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
+/// A fully parsed set of per-million rates.
+struct Rates {
+    input: f64,
+    output: f64,
+    cache_read: f64,
+    cache_creation: f64,
+}
+
+/// Is `at` (unix seconds) inside a peak window?
+///
+/// Read in the **vendor's** clock: `tz_offset` is minutes east of UTC and the
+/// windows are that vendor's business hours, so judging them against the
+/// reader's own timezone would pick the wrong rate silently — the one mistake
+/// this shape exists to prevent.
+///
+/// A window is half-open, `[start, end)`, which is what lets two adjacent
+/// windows meet without a gap. A window whose times are not clock times at all,
+/// or whose day list is empty, never matches: matching is what turns a typo into
+/// a wrong price, and the conservative direction is to charge the peak.
+///
+/// Note that a row carrying tiers is the row's *own* schedule: when one general
+/// row prices several providers (no published row names a provider yet), a
+/// reseller is billed on the publisher's clock too.
+pub fn is_peak(hours: &PeakHours, at: i64) -> bool {
+    use chrono::{Datelike, Timelike};
+
+    if hours.windows.is_empty() {
+        return false;
+    }
+    // The shifted DateTime is wrong as an instant and right as a wall clock,
+    // which is exactly what a vendor's business hours need. Same idiom as
+    // `gateway::limits::period_start`.
+    let shifted = chrono::DateTime::from_timestamp(at, 0).unwrap_or_default()
+        + chrono::Duration::minutes(hours.tz_offset as i64);
+    let today = shifted.weekday().num_days_from_monday() as usize;
+    let minutes = (shifted.time().hour() * 60 + shifted.time().minute()) as i64;
+
+    hours.windows.iter().any(|w| {
+        if !w.days.iter().any(|d| day_index(d) == Some(today)) {
+            return false;
+        }
+        let (Some(start), Some(end)) = (minutes_of_day(&w.start), minutes_of_day(&w.end)) else {
+            return false;
+        };
+        start <= minutes && minutes < end
+    })
+}
+
+/// `"HH:MM"` to minutes since midnight, or `None` when it is not that — a
+/// malformed time must leave the window unmatched rather than match broadly.
+fn minutes_of_day(hhmm: &str) -> Option<i64> {
+    let (h, m) = hhmm.trim().split_once(':')?;
+    let (h, m) = (h.trim().parse::<i64>().ok()?, m.trim().parse::<i64>().ok()?);
+    ((0..24).contains(&h) && (0..60).contains(&m)).then_some(h * 60 + m)
+}
+
+/// The weekday names the document uses, in `num_days_from_monday` order.
+/// Case-insensitive: a hand-edited `"Mon"` that silently stopped matching would
+/// misprice a whole week.
+const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+fn day_index(day: &str) -> Option<usize> {
+    let d = day.trim().to_ascii_lowercase();
+    DAYS.iter().position(|x| *x == d)
+}
+
+/// Parse a set of rates; `None` when the input or output rate is not a number.
+fn rates_of(input: &str, output: &str, cache_read: &str, cache_creation: &str) -> Option<Rates> {
+    Some(Rates {
+        input: parse_price(input)?,
+        output: parse_price(output)?,
+        cache_read: parse_price(cache_read)?,
+        cache_creation: parse_price(cache_creation)?,
+    })
+}
+
+/// The cost of `tokens` at `rates`, rounded to 6 decimal places.
+fn cost_of(
+    rates: &Rates,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_creation: u64,
+    cache_inclusive: bool,
+) -> f64 {
+    let billable_input = if cache_inclusive {
+        input
+            .saturating_sub(cache_read)
+            .saturating_sub(cache_creation)
+    } else {
+        input
+    };
+
+    let million = 1_000_000f64;
+    let total = (billable_input as f64 * rates.input
+        + output as f64 * rates.output
+        + cache_read as f64 * rates.cache_read
+        + cache_creation as f64 * rates.cache_creation)
+        / million;
+
+    (total * 1e6).round() / 1e6
+}
+
 /// Compute the request cost (in the entry's currency) from token counts.
 ///
 /// `cache_inclusive` mirrors cc-switch's `calculate_for_app` semantics:
 /// OpenAI/Gemini style `input_tokens` already contain the cache buckets and
 /// must be reduced before billing at the input rate; Anthropic's are fresh
 /// input only. Result rounded to 6 decimal places.
+///
+/// This is the **peak** price: the row's own rates. `compute_cost_pair` is what
+/// a caller with a clock wants.
 pub fn compute_cost(
     entry: &ModelPriceEntry,
     input_tokens: u64,
@@ -217,27 +430,75 @@ pub fn compute_cost(
     cache_creation_tokens: u64,
     cache_inclusive: bool,
 ) -> Option<f64> {
-    let input_price = parse_price(&entry.input)?;
-    let output_price = parse_price(&entry.output)?;
-    let cache_read_price = parse_price(&entry.cache_read)?;
-    let cache_creation_price = parse_price(&entry.cache_creation)?;
+    let rates = rates_of(
+        &entry.input,
+        &entry.output,
+        &entry.cache_read,
+        &entry.cache_creation,
+    )?;
+    Some(cost_of(
+        &rates,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
+        cache_inclusive,
+    ))
+}
 
-    let billable_input = if cache_inclusive {
-        input_tokens
-            .saturating_sub(cache_read_tokens)
-            .saturating_sub(cache_creation_tokens)
-    } else {
-        input_tokens
+/// The cost at the tier `at` (unix seconds) falls in, paired with what the same
+/// tokens would have cost at the row's **off-peak** rates.
+///
+/// The pair is one call because the second number is a property of the first:
+/// when the request was already off-peak, or the row publishes no tiers, the two
+/// are equal by construction — which is what makes a report of their difference
+/// a plain sum over every priced row, with no tier flag to keep in step.
+///
+/// An `off_peak` whose rates do not parse means the row has no off-peak tier
+/// (peak-only), never zero rates: a broken discount must not become a free one.
+pub fn compute_cost_pair(
+    entry: &ModelPriceEntry,
+    at: i64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_inclusive: bool,
+) -> Option<(f64, f64)> {
+    let peak = rates_of(
+        &entry.input,
+        &entry.output,
+        &entry.cache_read,
+        &entry.cache_creation,
+    )?;
+    let cost = |rates: &Rates| {
+        cost_of(
+            rates,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cache_inclusive,
+        )
     };
+    let off_peak = entry
+        .off_peak
+        .as_ref()
+        .and_then(|o| rates_of(&o.input, &o.output, &o.cache_read, &o.cache_creation));
 
-    let million = 1_000_000f64;
-    let total = (billable_input as f64 * input_price
-        + output_tokens as f64 * output_price
-        + cache_read_tokens as f64 * cache_read_price
-        + cache_creation_tokens as f64 * cache_creation_price)
-        / million;
+    let billed = match (&entry.peak_hours, &off_peak) {
+        // A schedule and something to discount: outside the windows the off-peak
+        // rates are the ones that apply.
+        (Some(hours), Some(off)) if !is_peak(hours, at) => cost(off),
+        // Everything else bills at the listed rates — including a row whose
+        // off-peak rates do not parse, where a broken discount must not become
+        // a free one, and a row whose schedule is unreadable, where charging the
+        // peak is the conservative direction the document itself prescribes.
+        _ => cost(&peak),
+    };
+    let off_peak_cost = off_peak.as_ref().map_or(billed, cost);
 
-    Some((total * 1e6).round() / 1e6)
+    Some((billed, off_peak_cost))
 }
 
 /// Placeholder ids (empty / unknown / null / none) never resolve to pricing.
@@ -631,7 +892,209 @@ mod tests {
             cache_read: "0.3".into(),
             cache_creation: "3.75".into(),
             currency: "USD".into(),
+            off_peak: None,
+            peak_hours: None,
         }
+    }
+
+    /// The published DeepSeek schedule: weekdays 09:00–12:00 and 14:00–18:00,
+    /// Beijing time. The instants below are what the vendor's clock makes of
+    /// them; 2026-09-09 is a Wednesday and 2026-09-12 a Saturday.
+    fn deepseek_hours() -> PeakHours {
+        let window = |start: &str, end: &str| PeakWindow {
+            days: ["mon", "tue", "wed", "thu", "fri"]
+                .iter()
+                .map(|d| d.to_string())
+                .collect(),
+            start: start.into(),
+            end: end.into(),
+        };
+        PeakHours {
+            tz_offset: 480,
+            windows: vec![window("09:00", "12:00"), window("14:00", "18:00")],
+        }
+    }
+
+    #[test]
+    fn is_peak_reads_the_vendor_clock() {
+        let hours = deepseek_hours();
+        // Wed 2026-09-09, Beijing: 08:59:59 off, 09:00:00 on (start inclusive),
+        // 11:59:59 on, 12:00:00 off (end exclusive), 13:00 the lunch gap off,
+        // 14:00 on again, 18:00 off.
+        for (epoch, peak) in [
+            (1_788_915_599_i64, false),
+            (1_788_915_600, true),
+            (1_788_919_200, true),
+            (1_788_926_399, true),
+            (1_788_926_400, false),
+            (1_788_930_000, false),
+            (1_788_933_600, true),
+            (1_788_948_000, false),
+            // Sat 2026-09-12 10:00 Beijing: the weekend is never peak.
+            (1_789_178_400, false),
+        ] {
+            assert_eq!(is_peak(&hours, epoch), peak, "at {epoch}");
+        }
+    }
+
+    /// The same instant, judged on the wrong clock: this is the mistake the
+    /// offset exists to prevent, so it gets its own test.
+    #[test]
+    fn is_peak_ignores_the_readers_timezone() {
+        let mut hours = deepseek_hours();
+        // Wed 10:00 Beijing is 02:00 UTC — outside the windows if read as UTC.
+        assert!(is_peak(&hours, 1_788_919_200));
+        hours.tz_offset = 0;
+        assert!(!is_peak(&hours, 1_788_919_200));
+    }
+
+    /// A schedule must never match broadly: a typo in a field disables the
+    /// window, and the peak rate applies.
+    #[test]
+    fn unparseable_windows_never_match() {
+        let at = 1_788_919_200; // Wed 10:00 Beijing
+        let with = |window: PeakWindow| PeakHours {
+            tz_offset: 480,
+            windows: vec![window],
+        };
+        let days = vec!["wed".to_string()];
+        // Case-insensitive, so a hand-edited "Wed" still matches.
+        assert!(is_peak(
+            &with(PeakWindow {
+                days: vec!["Wed".into()],
+                start: "09:00".into(),
+                end: "12:00".into()
+            }),
+            at
+        ));
+        // "9:00" is nine o'clock and matches — leniency here cannot charge the
+        // wrong rate. What must not match is a value that is not a clock time.
+        assert!(!is_peak(
+            &with(PeakWindow {
+                days: vec![],
+                start: "09:00".into(),
+                end: "12:00".into()
+            }),
+            at
+        ));
+        assert!(is_peak(
+            &with(PeakWindow {
+                days: days.clone(),
+                start: "9:00".into(),
+                end: "12:00".into()
+            }),
+            at
+        ));
+        for (start, end) in [("abc", "12:00"), ("09:00", "25:00"), ("09:00", "12:60")] {
+            assert!(
+                !is_peak(
+                    &with(PeakWindow {
+                        days: days.clone(),
+                        start: start.into(),
+                        end: end.into()
+                    }),
+                    at
+                ),
+                "{start}-{end} must not match"
+            );
+        }
+        // An empty schedule is the same answer.
+        assert!(!is_peak(
+            &PeakHours {
+                tz_offset: 480,
+                windows: vec![]
+            },
+            at
+        ));
+    }
+
+    /// A row with tiers: the listed rates inside the windows, the discounted
+    /// ones outside, and the pair's second element always the off-peak answer.
+    fn tiered_entry() -> ModelPriceEntry {
+        ModelPriceEntry {
+            input: "9.0".into(),
+            output: "27.0".into(),
+            cache_read: "0.30".into(),
+            cache_creation: "0".into(),
+            off_peak: Some(OffPeakRates {
+                input: "4.5".into(),
+                output: "13.5".into(),
+                cache_read: "0.15".into(),
+                cache_creation: "0".into(),
+            }),
+            peak_hours: Some(deepseek_hours()),
+            ..usage_entry()
+        }
+    }
+
+    #[test]
+    fn tiered_cost_picks_the_rate_in_force() {
+        let e = tiered_entry();
+        let peak_at = 1_788_919_200; // Wed 10:00 Beijing
+        let off_at = 1_788_930_000; // Wed 13:00, the lunch gap
+        let million = 1_000_000;
+
+        let (peak_cost, peak_off) =
+            compute_cost_pair(&e, peak_at, million, 0, 0, 0, false).unwrap();
+        let (off_cost, off_off) = compute_cost_pair(&e, off_at, million, 0, 0, 0, false).unwrap();
+        assert!((peak_cost - 9.0).abs() < 1e-9, "peak: {peak_cost}");
+        assert!((off_cost - 4.5).abs() < 1e-9, "off-peak: {off_cost}");
+        // The second element is the same answer either way — what matters for
+        // the report is that it does not depend on when the request ran.
+        assert!((peak_off - 4.5).abs() < 1e-9, "off-peak side: {peak_off}");
+        assert_eq!(off_off, off_cost);
+        // A row without tiers has no discount to state, so both are its own rate.
+        let plain = usage_entry();
+        let (cost, off) = compute_cost_pair(&plain, peak_at, million, 0, 0, 0, false).unwrap();
+        assert_eq!(cost, off);
+        assert_eq!(cost, compute_cost(&plain, million, 0, 0, 0, false).unwrap());
+    }
+
+    /// A discount nobody can read is not a discount: the row bills at its
+    /// listed rates rather than at zero.
+    #[test]
+    fn unreadable_off_peak_rates_are_ignored() {
+        let e = ModelPriceEntry {
+            off_peak: Some(OffPeakRates {
+                input: "abc".into(),
+                output: "13.5".into(),
+                cache_read: "0.15".into(),
+                cache_creation: "0".into(),
+            }),
+            ..tiered_entry()
+        };
+        let off_at = 1_788_930_000;
+        let (cost, off) = compute_cost_pair(&e, off_at, 1_000_000, 0, 0, 0, false).unwrap();
+        assert!(
+            (cost - 9.0).abs() < 1e-9,
+            "billed at the listed rate: {cost}"
+        );
+        assert_eq!(cost, off);
+    }
+
+    /// `off_peak` omits `cache_creation` in the published document; absent means
+    /// 0, not "the peak rate stands in".
+    #[test]
+    fn absent_off_peak_cache_creation_is_zero() {
+        let doc: ModelsDoc = serde_json::from_str(
+            r#"{"version": 1, "exchange_rates": {"USD": 1.0}, "models": [
+                {"model_id": "m", "display_name": "M", "input": "9", "output": "27",
+                 "cache_read": "0.3", "cache_creation": "1", "currency": "USD",
+                 "off_peak": {"in": "4.5", "out": "13.5", "cache_read": "0.15"}}]}"#,
+        )
+        .expect("the published shape parses");
+        let e = &doc.models[0];
+        assert_eq!(e.off_peak.as_ref().unwrap().cache_creation, "0");
+        // …and a document whose off_peak has no cache fields at all still parses,
+        // rather than failing every price this install has.
+        let sparse: ModelsDoc = serde_json::from_str(
+            r#"{"version": 1, "exchange_rates": {"USD": 1.0}, "models": [
+                {"model_id": "m", "display_name": "M", "input": "9", "output": "27",
+                 "cache_read": "0.3", "cache_creation": "1", "currency": "USD",
+                 "off_peak": {"in": "4.5", "out": "13.5"}}]}"#,
+        )
+        .expect("absent cache rates default to 0");
+        assert_eq!(sparse.models[0].off_peak.as_ref().unwrap().cache_read, "0");
     }
 
     #[test]

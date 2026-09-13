@@ -540,6 +540,7 @@ fn status_without_a_gateway_exits_1_and_reports_the_store() {
                 status: "ok".into(),
                 cost: None,
                 cost_currency: None,
+                cost_off_peak: None,
             })
             .unwrap();
     }
@@ -959,6 +960,7 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
             truncated: false,
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         })
         .unwrap();
 }

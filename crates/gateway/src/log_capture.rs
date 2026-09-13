@@ -495,6 +495,7 @@ pub fn persist_failure(
         // Pre-forward failures carry no token usage and hence no cost.
         cost: None,
         cost_currency: None,
+        cost_off_peak: None,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist request log");

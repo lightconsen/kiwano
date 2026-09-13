@@ -461,6 +461,7 @@ mod tests {
             status: "ok".into(),
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         }
     }
 

@@ -187,6 +187,7 @@ mod tests {
             truncated: false,
             cost: Some(0.02),
             cost_currency: Some("USD".into()),
+            cost_off_peak: None,
         }
     }
 

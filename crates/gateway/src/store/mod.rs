@@ -19,7 +19,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 12;
+pub const SCHEMA_VERSION: i32 = 13;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -368,6 +368,37 @@ const MIGRATION_V12: &str = r#"
 ALTER TABLE providers ADD COLUMN catalog_id TEXT;
 "#;
 
+/// v13: time-of-day prices, and what they would have cost off-peak.
+///
+/// - `model_pricing.tiers` holds a row's `off_peak` rates and `peak_hours`
+///   windows as one JSON blob, verbatim from the document — the shape belongs
+///   to the Hub, and two more columns per rate would make this table's schema
+///   the data side's problem. NULL means the row has no tiers; that spelling
+///   (rather than `"{}"`) is what keeps a forced re-seed write-free.
+/// - `usage.cost_off_peak` / `request_logs.cost_off_peak` are what the same
+///   tokens would have cost at the row's off-peak rates — **equal to `cost`**
+///   when the model publishes none. That equality is the whole point: it makes
+///   "the peak premium" a plain `SUM(cost - cost_off_peak)` over every priced
+///   row, with no tier flag to keep in step.
+///
+/// The backfill is load-bearing rather than cosmetic. Without it, every row
+/// written before this migration has a `cost` and a NULL, so the two sums cover
+/// different row sets and a user's headline and premium stop reconciling.
+/// Setting them equal is also the honest answer: those requests were priced from
+/// a table that had no tiers, so their off-peak equivalent never existed.
+///
+/// Both tables take plain `ADD COLUMN`s — no primary key or CHECK moves, which
+/// is the only reason v9 and v11 had to rebuild.
+const MIGRATION_V13: &str = r#"
+ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
+
+ALTER TABLE usage ADD COLUMN cost_off_peak REAL;
+ALTER TABLE request_logs ADD COLUMN cost_off_peak REAL;
+
+UPDATE usage SET cost_off_peak = cost WHERE cost IS NOT NULL;
+UPDATE request_logs SET cost_off_peak = cost WHERE cost IS NOT NULL;
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -595,6 +626,11 @@ pub struct UsageRecord {
     pub cost: Option<f64>,
     /// Currency of `cost` (ISO code, e.g. "USD"); NULL when cost is NULL.
     pub cost_currency: Option<String>,
+    /// What the same tokens would have cost at the price row's off-peak rates
+    /// (migration v13) — equal to `cost` when the model publishes no schedule,
+    /// so `cost - cost_off_peak` is a sum over every priced row. NULL exactly
+    /// when `cost` is NULL.
+    pub cost_off_peak: Option<f64>,
 }
 
 /// Aggregated token/request totals.
@@ -696,6 +732,8 @@ pub struct RequestLogNew {
     /// Computed request cost in the price entry's currency (migration v9).
     pub cost: Option<f64>,
     pub cost_currency: Option<String>,
+    /// The off-peak equivalent of `cost` (migration v13) — see `UsageRecord`.
+    pub cost_off_peak: Option<f64>,
 }
 
 /// Metadata row of `request_logs` (list view — never includes bodies).
@@ -730,6 +768,9 @@ pub struct RequestLogEntry {
     /// currency (never converted here) so an export can state it as recorded.
     pub cost: Option<f64>,
     pub cost_currency: Option<String>,
+    /// Its off-peak equivalent (migration v13) — see `UsageRecord`. Not in the
+    /// CSV export: that file states what happened, not what could have.
+    pub cost_off_peak: Option<f64>,
 }
 
 /// One row of an export: the metadata every export carries, plus the captured
@@ -793,7 +834,13 @@ const REQUEST_LOG_COLUMNS: &str = "id, ts, method, path, query, agent, attributi
                                    is_streaming, input_tokens, output_tokens, cache_read_tokens,
                                    cache_creation_tokens, latency_ms, first_token_ms,
                                    request_headers, response_headers, request_size, response_size,
-                                   truncated, cost, cost_currency";
+                                   truncated, cost, cost_currency, cost_off_peak";
+
+/// How many columns [`REQUEST_LOG_COLUMNS`] names. The body join appends two
+/// more, and the only way to read them by index without counting commas is to
+/// count them here — an off-by-one silently reads the wrong field into
+/// `request_body` (the CSV export test caught exactly that when v13 added one).
+const REQUEST_LOG_COLUMN_COUNT: usize = 28;
 
 /// Ceiling on one export. A local log can be large, and the CSV is built in
 /// memory before it is written, so the read is capped rather than unbounded;
@@ -1213,6 +1260,9 @@ impl Store {
         if version < 12 {
             conn.execute_batch(MIGRATION_V12)?;
         }
+        if version < 13 {
+            conn.execute_batch(MIGRATION_V13)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -1551,8 +1601,8 @@ impl Store {
         conn.execute(
             "INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
                                 cache_read_tokens, cache_creation_tokens, latency_ms, status,
-                                cost, cost_currency)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                cost, cost_currency, cost_off_peak)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 u.ts,
                 u.agent,
@@ -1566,6 +1616,7 @@ impl Store {
                 u.status,
                 u.cost,
                 u.cost_currency,
+                u.cost_off_peak,
             ],
         )?;
         Ok(())
@@ -1864,9 +1915,9 @@ impl Store {
                                        cache_creation_tokens, latency_ms, first_token_ms,
                                        request_headers, response_headers,
                                        request_size, response_size, truncated,
-                                       cost, cost_currency)
+                                       cost, cost_currency, cost_off_peak)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
             params![
                 r.ts,
                 r.method,
@@ -1894,6 +1945,7 @@ impl Store {
                 r.truncated as i64,
                 r.cost,
                 r.cost_currency,
+                r.cost_off_peak,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -2014,8 +2066,8 @@ impl Store {
                 |row| {
                     Ok(RequestLogExportRow {
                         entry: request_log_from_row(row)?,
-                        request_body: row.get(27)?,
-                        response_body: row.get(28)?,
+                        request_body: row.get(REQUEST_LOG_COLUMN_COUNT)?,
+                        response_body: row.get(REQUEST_LOG_COLUMN_COUNT + 1)?,
                     })
                 },
             )?
@@ -2187,11 +2239,12 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT provider_id, model_id, display_name, input, output,
-                    cache_read, cache_creation, currency
+                    cache_read, cache_creation, currency, tiers
              FROM model_pricing",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok(ModelPriceEntry {
+            let tiers: Option<String> = r.get(8)?;
+            let mut entry = ModelPriceEntry {
                 provider_id: r.get(0)?,
                 model_id: r.get(1)?,
                 display_name: r.get(2)?,
@@ -2200,7 +2253,14 @@ impl Store {
                 cache_read: r.get(5)?,
                 cache_creation: r.get(6)?,
                 currency: r.get(7)?,
-            })
+                off_peak: None,
+                peak_hours: None,
+            };
+            // A blob this build cannot read leaves the row at its listed rates
+            // rather than failing the read: `resolve_pricing` answers an error
+            // with an empty table, which would blank every cost.
+            entry.apply_tiers(tiers.as_deref());
+            Ok(entry)
         })?;
         let mut out = Vec::new();
         for row in rows {
@@ -2218,11 +2278,11 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
-                                        cache_read, cache_creation, currency, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'test')
+                                        cache_read, cache_creation, currency, source, tiers)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'test', ?9)
              ON CONFLICT(provider_id, model_id) DO UPDATE SET
                 display_name = ?3, input = ?4, output = ?5,
-                cache_read = ?6, cache_creation = ?7, currency = ?8",
+                cache_read = ?6, cache_creation = ?7, currency = ?8, tiers = ?9",
             params![
                 e.provider_id,
                 e.model_id,
@@ -2231,7 +2291,8 @@ impl Store {
                 e.output,
                 e.cache_read,
                 e.cache_creation,
-                e.currency
+                e.currency,
+                e.tiers_json(),
             ],
         )?;
         Ok(())
@@ -2407,6 +2468,7 @@ fn request_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogE
         truncated: row.get::<_, i64>(24)? != 0,
         cost: row.get(25)?,
         cost_currency: row.get(26)?,
+        cost_off_peak: row.get(27)?,
     })
 }
 
@@ -2984,6 +3046,86 @@ mod tests {
         );
     }
 
+    /// v12 → v13: the mirror gains a JSON blob, and the two cost tables gain the
+    /// off-peak figure with a backfill. `ALTER TABLE ADD COLUMN` is all it takes
+    /// — no key or CHECK moves — and the backfill is what keeps a window's
+    /// headline and its peak premium comparable for rows written before the
+    /// column existed: without it the two sums cover different row sets.
+    #[test]
+    fn migration_v13_backfills_the_off_peak_cost() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v12 database holding a priced usage row, an unpriced one,
+        // a log row, and a price row.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
+                                    cache_read_tokens, cache_creation_tokens, latency_ms, status,
+                                    cost, cost_currency)
+                 VALUES ('t0', 'claude', 'p1', 'm1', 10, 2, 0, 0, 100, 'ok', 1.5, 'USD'),
+                        ('t0', 'claude', 'p1', 'm2', 10, 2, 0, 0, 100, 'ok', NULL, NULL);
+                 INSERT INTO request_logs (ts, method, path, agent, status_code, input_tokens,
+                                           output_tokens, cache_read_tokens,
+                                           cache_creation_tokens, cost, cost_currency)
+                 VALUES ('t0', 'POST', '/v1/messages', 'claude', 200, 10, 2, 0, 0, 1.5, 'USD');
+                 INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
+                                            cache_read, cache_creation, currency, source)
+                 VALUES ('', 'm1', 'M1', '1', '2', '0', '0', 'USD', 'hub');
+                 PRAGMA user_version = 12;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let conn = store.conn.lock().unwrap();
+
+        // The priced row says "off-peak would have cost the same" — the only
+        // honest answer for a row priced before a schedule existed — and the
+        // unpriced one stays NULL in both.
+        let row = |id: i64| -> (Option<f64>, Option<f64>) {
+            conn.query_row(
+                "SELECT cost, cost_off_peak FROM usage WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(row(1), (Some(1.5), Some(1.5)));
+        assert_eq!(row(2), (None, None));
+        let logged: Option<f64> = conn
+            .query_row("SELECT cost_off_peak FROM request_logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(logged, Some(1.5));
+
+        // The mirror's new column starts NULL, and a row with no schedule reads
+        // back with none.
+        let tiers: Option<String> = conn
+            .query_row("SELECT tiers FROM model_pricing", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tiers, None);
+        drop(conn);
+        let rows = store.load_model_pricing().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].off_peak.is_none() && rows[0].peak_hours.is_none());
+    }
+
     /// v7: additional per-protocol endpoints round-trip with the provider row
     /// and cascade away on delete.
     #[test]
@@ -3323,6 +3465,7 @@ mod tests {
             status: "ok".to_string(),
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         };
 
         store
@@ -3348,6 +3491,7 @@ mod tests {
                 status: "error".into(),
                 cost: None,
                 cost_currency: None,
+                cost_off_peak: None,
             })
             .unwrap();
 
@@ -3470,6 +3614,7 @@ mod tests {
                 status: "ok".into(),
                 cost: None,
                 cost_currency: None,
+                cost_off_peak: None,
             })
             .unwrap();
 
@@ -3510,6 +3655,7 @@ mod tests {
             truncated: false,
             cost: None,
             cost_currency: None,
+            cost_off_peak: None,
         }
     }
 

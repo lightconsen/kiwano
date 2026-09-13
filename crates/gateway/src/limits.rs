@@ -498,6 +498,7 @@ mod tests {
             status: "ok".into(),
             cost: Some(spent),
             cost_currency: Some("CNY".into()),
+            cost_off_peak: None,
         })
         .unwrap();
         s

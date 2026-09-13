@@ -323,6 +323,8 @@ mod tests {
     fn entry(id: &str) -> kiwano_adapters::model_pricing::ModelPriceEntry {
         kiwano_adapters::model_pricing::ModelPriceEntry {
             provider_id: String::new(),
+            off_peak: None,
+            peak_hours: None,
             model_id: id.into(),
             display_name: id.into(),
             input: "1".into(),

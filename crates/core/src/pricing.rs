@@ -203,16 +203,20 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
             let n = tx
                 .execute(
                     "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
-                                                cache_read, cache_creation, currency, source)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                                                cache_read, cache_creation, currency, source, tiers)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                      ON CONFLICT(provider_id, model_id) DO UPDATE SET
                         display_name = ?3, input = ?4, output = ?5,
-                        cache_read = ?6, cache_creation = ?7, currency = ?8, source = ?9
-                     -- COALESCE: legacy rows may carry a NULL source, and
-                     -- `NULL <> ?` is NULL (falsy), which would silently skip them.
+                        cache_read = ?6, cache_creation = ?7, currency = ?8, source = ?9,
+                        tiers = ?10
+                     -- COALESCE on both nullable columns: a row may carry NULL
+                     -- in `source` (legacy) or in `tiers` (a model with no
+                     -- schedule), and `NULL <> ?` is NULL (falsy) — which would
+                     -- silently skip the very update that adds one.
                      WHERE display_name <> ?3 OR input <> ?4 OR output <> ?5
                         OR cache_read <> ?6 OR cache_creation <> ?7 OR currency <> ?8
-                        OR COALESCE(source, '') <> ?9",
+                        OR COALESCE(source, '') <> ?9
+                        OR COALESCE(tiers, '') <> COALESCE(?10, '')",
                     rusqlite::params![
                         provider_id,
                         model_id,
@@ -223,6 +227,7 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
                         m.cache_creation,
                         m.currency,
                         source,
+                        m.tiers_json(),
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -377,6 +382,20 @@ mod tests {
     }
 
     /// Every `(provider_id, model_id)` the local price table currently holds.
+    /// The tiers blob a row carries, as stored: `None` means the row has no
+    /// schedule (the column is NULL, never `"{}"`).
+    fn tiers_of(aux: &Aux, model_id: &str) -> Option<String> {
+        aux.conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT tiers FROM model_pricing WHERE model_id = ?1",
+                rusqlite::params![model_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+    }
+
     fn priced_keys(aux: &Aux) -> Vec<(String, String)> {
         let conn = aux.conn.lock().unwrap();
         let mut stmt = conn
@@ -613,6 +632,49 @@ mod tests {
         let after = seed_model_pricing(&aux).unwrap();
         assert!(after.skipped);
         assert_eq!(priced_keys(&aux).len(), 1, "the rows are left alone");
+    }
+
+    /// A row that gains a schedule, or whose only change is inside it, has to be
+    /// written: `tiers` is nullable, and the guard would compare `NULL <> '…'`
+    /// — NULL, hence falsy — if it were not COALESCEd on both sides. Without it
+    /// the very update that adds time-of-day pricing would be skipped, and the
+    /// install would keep billing peak forever.
+    #[test]
+    fn a_tiers_only_change_reseeds_the_row() {
+        let (aux, _dir) = test_env();
+        let doc = |off_peak_in: &str| {
+            format!(
+                r#"{{"version":1,"generated_at":"t","exchange_rates":{{"USD":1.0}},"models":[
+                   {{"model_id":"m1","display_name":"M1","input":"9","output":"27",
+                     "cache_read":"0.3","cache_creation":"0","currency":"USD",
+                     "off_peak":{{"in":"{off_peak_in}","out":"13.5","cache_read":"0.15"}},
+                     "peak_hours":{{"tz_offset":480,"windows":[
+                       {{"days":["mon"],"start":"09:00","end":"12:00"}}]}}}}]}}"#
+            )
+        };
+
+        // A row with no tiers stores NULL, not "{}"…
+        cache_hub(&aux, 1, "1", &sha_a());
+        assert_eq!(seed_model_pricing(&aux).unwrap().seeded, 1);
+        assert_eq!(tiers_of(&aux, "m1"), None);
+        // …so a forced re-seed of the same bytes stays write-free.
+        assert!(seed_model_pricing(&aux).unwrap().skipped);
+
+        // Only the discount moves.
+        aux.save_hub_models_cache(2, &doc("4.5"), &"c".repeat(64), "t")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&aux).unwrap().seeded, 1);
+
+        aux.save_hub_models_cache(3, &doc("3.5"), &"d".repeat(64), "t")
+            .unwrap();
+        assert_eq!(
+            seed_model_pricing(&aux).unwrap().seeded,
+            1,
+            "the tiers column changed"
+        );
+        let stored = tiers_of(&aux, "m1").expect("the schedule reached the mirror");
+        assert!(stored.contains(r#""in":"3.5""#), "{stored}");
+        assert!(stored.contains("peak_hours"), "{stored}");
     }
 
     /// The headline case: content changed, version did not. Nothing enforces a

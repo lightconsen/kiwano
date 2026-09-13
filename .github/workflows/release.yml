@@ -733,10 +733,21 @@ jobs:
 
             *-unknown-linux-gnu)
               # What gets installed, not just what Tauri staged.
+              #
+              # Not `dpkg-deb -c "$deb" | grep -q …`, which is what this was:
+              # under `set -o pipefail`, `grep -q` exits the moment it matches
+              # and closes the pipe, `dpkg-deb` dies of SIGPIPE ("tar: stdout:
+              # write error", exit 2), and pipefail makes the *pipeline* report
+              # that — so a package that plainly contains the file is reported
+              # as missing. It failed exactly that way on the first 0.1.9 build.
+              # Capturing first and matching without a pipe cannot do this.
               deb=$(find "$bundle/deb" -maxdepth 2 -name '*.deb' | head -n 1)
               [ -n "$deb" ] || fail "no .deb under $bundle/deb"
-              dpkg-deb -c "$deb" | grep -q 'usr/bin/kiwanod' \
-                || fail "gateway sidecar missing from $deb"
+              deb_contents=$(dpkg-deb -c "$deb") || fail "cannot read $deb"
+              case "$deb_contents" in
+                *usr/bin/kiwanod*) ;;
+                *) fail "gateway sidecar missing from $deb" ;;
+              esac
               appimage=$(find "$bundle/appimage" -maxdepth 2 -name '*.AppImage' | head -n 1)
               if [ -n "$appimage" ]; then
                 # Resolve before the subshell, not inside it: `find` returns a
@@ -801,8 +812,16 @@ jobs:
 
           # And the daemon has to be in there: the bundle is useless without it,
           # which is the same failure the sidecar check above exists for.
-          tar tzf "dist-cli/kiwano-$triple.tar.gz" | grep -q '^\./kiwanod' \
-            || { echo "::error::the server bundle has no kiwanod"; exit 1; }
+          #
+          # Captured rather than piped into `grep -q` for the reason spelled out
+          # at the deb check below — the short-circuit kills the writer and
+          # pipefail turns that into a false "missing".
+          bundle_contents=$(tar tzf "dist-cli/kiwano-$triple.tar.gz") \
+            || { echo "::error::cannot read the server bundle"; exit 1; }
+          case "$bundle_contents" in
+            *kiwanod*) ;;
+            *) echo "::error::the server bundle has no kiwanod"; exit 1 ;;
+          esac
 
           # The digest install.sh checks against when GitHub is unreachable.
           # Per-platform on purpose: all four legs write to the same mirror

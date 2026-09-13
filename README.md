@@ -88,6 +88,24 @@ Kiwano is local-first by design, and the code is the specification:
 - The Hub only ever serves **catalog metadata** (provider names, endpoints, prices). It sees no keys and no request data.
 - There is no analytics or telemetry in the app. Update checks are a plain HTTPS request for a static JSON manifest.
 
+## On a server
+
+Every release also carries a server bundle — `kiwano-<target>.tar.gz` — holding
+the command-line client, the gateway daemon, a systemd unit and install notes.
+No GUI, no display, nothing to configure by hand:
+
+```bash
+gh attestation verify kiwano-x86_64-unknown-linux-gnu.tar.gz --repo lightconsen/kiwano
+tar xzf kiwano-x86_64-unknown-linux-gnu.tar.gz -C /tmp/kiwano
+# then follow /tmp/kiwano/INSTALL.md
+```
+
+The CLI does everything the app does that is not inherently graphical: add
+providers, choose a routing strategy, take an agent over (which is what makes a
+server usable — the gateway only routes keys it minted itself, so an agent
+pointed at the port by hand is refused), read the logs, export the config. See
+[`docs/cli.md`](docs/cli.md) for the full command reference.
+
 ## Requirements
 
 - macOS (Apple Silicon or Intel), Windows 10 or later, or Linux x86_64
@@ -126,11 +144,17 @@ Layout:
 | Path | What lives there |
 | --- | --- |
 | `src/` | React UI (screens, components, the `api/` layer) |
-| `src-tauri/` | Tauri app: commands, view models, updater, agent discovery; the bundled provider catalog is `src-tauri/src/catalog.json` |
+| `src-tauri/` | The Tauri shell: commands, tray, watchdog, updater — the desktop app's binary is `kiwano-app` |
+| `crates/core/` | The application layer the app and the CLI share: view models, takeover, sync, share; the bundled provider catalog is `crates/core/src/catalog.json` |
 | `crates/gateway/` | The gateway daemon: routing, strategies, metering, store |
 | `crates/adapters/` | Protocol conversion, agent config take-over, pricing table (`resources/models.json`) |
-| `crates/cli/` | `kiwano` command-line client |
+| `crates/cli/` | The `kiwano` command-line client ([docs](docs/cli.md)) |
+| `packaging/` | The systemd unit and server install notes that ship inside the release bundle |
 | `site/`, `design/` | Marketing site, and the original UI design prototype |
+
+The desktop app is a thin Tauri shell over `kiwano-core`; the CLI is a second
+front end over the same crate. That is deliberate — a provider added from the
+command line is the same row, written the same way, as one added from the UI.
 
 ## License
 

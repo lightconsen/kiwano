@@ -19,6 +19,30 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **The command-line client can do everything the app can.** `kiwano-cli` had
+  seven subcommands — providers, keys, usage, status, reload. `kiwano` covers
+  the whole surface: agent takeover and restore, routing strategies (failover,
+  roundrobin, timewindow, quota), candidate weights and time windows, request
+  logs with filtering and CSV export, plan quota, the dashboard aggregates,
+  settings, config export/import, catalog sync and cc-switch migration. See
+  [docs/cli.md](docs/cli.md).
+
+  The one that matters most on a server is `kiwano agents takeover`, which was
+  not possible from a shell at all before: the gateway only routes keys it
+  minted itself, so pointing an agent at the local port by hand produced a 401
+  and nothing else.
+
+- **A server bundle in every release.** `kiwano-<target>.tar.gz` contains the
+  CLI, the gateway daemon, a systemd unit and install notes — no GUI, no
+  display. Attested and checksummed like every other artifact.
+
+- **`kiwano` gains a library.** The client is now `kiwano_cli` as well as a
+  binary, so the command tree can be driven in-process by tests — 41
+  integration tests exercise it against a temporary database, asserting on the
+  exit code and on stdout and stderr separately.
+
 ### Changed
 
 - **The command-line client is now `kiwano`, and the desktop app's executable is

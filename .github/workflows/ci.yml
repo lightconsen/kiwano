@@ -34,6 +34,28 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      # Windows reserves AUX, CON, PRN, NUL, COM1-9 and LPT1-9 as *device* names,
+      # and the reservation survives an extension: `aux.rs` cannot be created
+      # there at all. A tracked file with one of those base names therefore makes
+      # the repository un-clonable on Windows — `actions/checkout` fails with
+      # "invalid path" before a single line compiles.
+      #
+      # This check lives here, on the fast Linux job, because the leg that
+      # actually suffers is the 45-minute windows-latest one, and the failure it
+      # reports looks like an infrastructure problem rather than a filename.
+      # Learned the hard way: a `crates/core/src/aux.rs` sat on main for several
+      # commits with Windows red the whole time.
+      - name: No Windows-reserved filenames
+        run: |
+          set -euo pipefail
+          bad=$(git ls-files | sed 's|.*/||' \
+            | grep -iE '^(aux|con|prn|nul|com[1-9]|lpt[1-9])(\.|$)' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::these tracked paths cannot be checked out on Windows:"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+
   rust:
     strategy:
       fail-fast: false

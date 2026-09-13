@@ -19,7 +19,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
-use kiwano_core::aux::Aux;
+use kiwano_core::auxiliary::Aux;
 use kiwano_core::sidecar::{self, AdminEndpoint};
 use kiwanod::store::Store;
 

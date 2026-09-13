@@ -20,7 +20,7 @@
 //! Nothing here depends on Tauri, and nothing here may: the CLI links this crate
 //! without a display server anywhere in sight.
 
-pub mod aux;
+pub mod auxiliary;
 pub mod creds;
 pub mod csv;
 pub mod detect;

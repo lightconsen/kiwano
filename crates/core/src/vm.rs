@@ -251,9 +251,9 @@ fn quota_over_threshold(store: &Store, aux: &Aux, config: Option<&str>, provider
     consumed >= cfg.limit
 }
 
-// ── Auxiliary connection (moved to `crate::aux`, re-exported here) ──
+// ── Auxiliary connection (moved to `crate::auxiliary`, re-exported here) ──
 
-pub use crate::aux::Aux;
+pub use crate::auxiliary::Aux;
 
 // ── VM types (serde field names mirror src/api/types.ts verbatim) ──
 

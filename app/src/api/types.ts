@@ -265,51 +265,40 @@ export interface CatalogPriceRef {
   currency: string;
 }
 
+/** What the app hands the Models page. The Hub publishes less than this: the
+    primary endpoint (hoisted out of `endpoints`), the avatar colour, and
+    `added` are filled in by the Rust view model on the way in, and the row's
+    tag label is derived from `tag` through i18n. */
 export interface CatalogEntry {
   id: string;
   name: string;
-  logo_char: string;
+  /** Letter-avatar colour (the palette shared with locally-added providers) */
   logo_color: string;
-  logo_border?: boolean;
-  /** Brand-mark key in src/components/icons registry; missing = letter avatar */
-  icon?: string;
   /** Hub-relative logo path ("logos/<id>.<ext>"), resolved against hub_url;
-      missing/offline falls back to `icon` then the letter avatar */
+      absent offline, which falls back to the letter avatar */
   logo?: string;
-  /** Tag category shown on the card's top-right label (Models page chip filter) */
+  /** Tag category; drives the chip filter, the row sort and the badge text */
   tag: "official" | "aggregate" | "third" | "free" | "local";
-  tag_label: string;
   rating: number;
-  /** Endpoint pre-filled into the add modal */
+  /** Primary endpoint, pre-filled into the add modal */
   endpoint: string;
-  /** Protocol fingerprint of the endpoint (drives the add-modal protocol selector) */
+  /** Protocol of the primary endpoint (drives the add-modal selector) */
   protocol: Protocol;
   /** One line of prose: a price note, an audience line, a free-tier offer.
-      Supersedes price_line/price_note/users/blurb/free_offer; absent for the
-      entries with nothing to say. */
+      Absent for the entries with nothing to say. */
   desc?: string;
   /** The representative model's price; absent for providers that price no model */
   price_ref?: CatalogPriceRef;
   /** The currency this provider bills in; the spending limit is denominated
       in it. Older catalog entries omit it → the app falls back to USD. */
   currency?: string;
-  price_note?: string;
   billing: Billing;
   /** Derived at read time from the local provider list (same endpoint = added) */
   added: boolean;
-  /** One-liner shown when a free quota exists */
-  free_offer?: string;
-  /** Model options pre-populated in the add modal */
+  /** Models the primary endpoint serves; seeds the add modal's picker */
   models: string[];
-  /** Additional per-protocol endpoints merged from former sibling entries */
+  /** Every endpoint after the primary */
   endpoints?: { protocol: Protocol; endpoint: string; models: string[] }[];
-  /** @deprecated Superseded by `desc`; the Hub now publishes "" and the field
-      disappears once no client reads it. */
-  price_line?: string;
-  /** @deprecated Superseded by `desc`; the Hub now publishes "". */
-  users?: string;
-  /** @deprecated Superseded by `desc`; the Hub now publishes "". */
-  blurb?: string;
 }
 
 export interface CatalogList {

@@ -4,6 +4,8 @@ export const shelf = {
   chipAggregate: "聚合",
   chipThird: "第三方",
   chipFree: "免费档",
+  /** `local` 分类徽章:筛选 chip 里没有它,所以单独给一个键。 */
+  tagLocal: "本地",
 
   billingPlan: "套餐",
   billingPayg: "按量付费",

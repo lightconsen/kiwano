@@ -398,33 +398,38 @@ impl From<CatalogBilling> for String {
 pub struct CatalogEntryVm {
     pub id: String,
     pub name: String,
-    pub logo_char: String,
+    /// Letter-avatar colour, derived at load time from `name` with the same
+    /// palette the locally-added providers use. The Hub used to curate a brand
+    /// colour per provider; those are not derivable (they were hand-picked), so
+    /// dropping the field traded them for one consistent palette everywhere.
+    #[serde(default)]
     pub logo_color: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub logo_border: bool,
-    /// Brand-mark key in the frontend icon registry (cc-switch port);
-    /// absent entries fall back to the letter avatar.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
     /// Hub-relative logo path ("logos/<id>.<ext>"); the frontend resolves it
-    /// against hub_url. Absent = fall back to `icon` / letter avatar.
+    /// against hub_url. Absent while the setting loads, and in the bundled
+    /// snapshot, which falls back to the letter avatar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logo: Option<String>,
-    /// Protocol fingerprint (anthropic | openai | gemini); entries predate the
-    /// multi-protocol catalog, so older payloads default to openai.
-    #[serde(default = "default_catalog_protocol")]
+    /// Primary endpoint protocol — derived at load time from the first entry of
+    /// `endpoints`. The Hub publishes one list, primary first.
+    #[serde(default)]
     pub protocol: String,
-    /// Additional per-protocol endpoints of the same vendor service (migration
-    /// v7 merged the former per-protocol variant entries into one brand row).
+    /// Primary endpoint URL — derived at load time, see `protocol`.
+    #[serde(default)]
+    pub endpoint: String,
+    /// The models the primary endpoint serves — derived at load time, see
+    /// `protocol`. It seeds the add modal's model picker.
+    #[serde(default)]
+    pub models: Vec<String>,
+    /// Every endpoint *after* the primary. The Hub publishes them together with
+    /// the primary in one list; the split happens here because every screen
+    /// reads the primary from its own fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<CatalogEndpointVm>,
     pub tag: String,
-    pub tag_label: String,
     pub rating: f64,
-    pub endpoint: String,
     /// One line of prose about the provider — what the card shows under its
-    /// name. It supersedes `price_line`/`price_note`/`users`/`blurb`/
-    /// `free_offer`; absent for the entries that have nothing to say.
+    /// name. It supersedes the old price_line/price_note/users/blurb/free_offer
+    /// fields; absent for the entries that have nothing to say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desc: Option<String>,
     /// The price of the model that represents this provider, projected at build
@@ -432,31 +437,17 @@ pub struct CatalogEntryVm {
     /// prices no model at all (eleven of them), which falls back to `desc`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_ref: Option<CatalogPriceRefVm>,
-    /// Deprecated by `desc`, and published as an empty string by the data repo
-    /// since the two-file migration. `default` + `skip_serializing_if` so those
-    /// empty values neither fail to parse nor reach the frontend; the fields go
-    /// away entirely once no client needs them.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub price_line: String,
     /// The currency this provider bills in. Its price rows — and therefore its
     /// spending limit — are denominated in it. Catalogs published before the
     /// field existed fall back to USD, the price table's base currency.
     #[serde(default = "default_catalog_currency")]
     pub currency: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub price_note: Option<String>,
     /// Billing mode; unknown Hub tags survive as `CatalogBilling::Other`.
     pub billing: CatalogBilling,
-    /// Deprecated by `desc` — see `price_line`.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub users: String,
-    /// Deprecated by `desc` — see `price_line`.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub blurb: String,
+    /// Derived at load time from the local provider list (same endpoint =
+    /// added). The Hub does not publish it.
+    #[serde(default)]
     pub added: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub free_offer: Option<String>,
-    pub models: Vec<String>,
 }
 
 /// One model's price, as shown for a provider on the Models list: the terms a
@@ -488,10 +479,6 @@ pub struct CatalogEndpointVm {
 pub struct CatalogListVm {
     pub total: i64,
     pub entries: Vec<CatalogEntryVm>,
-}
-
-fn default_catalog_protocol() -> String {
-    "openai".to_string()
 }
 
 /// Result of a manual/startup Hub sync (for UI feedback).
@@ -2717,6 +2704,28 @@ pub fn build_footer_stats(
 /// counts as added when a provider exists at its primary OR any of its
 /// additional per-protocol endpoints. The static flags carried by
 /// catalog.json / the Hub cache are ignored.
+/// Fill what the Hub does not publish, and split the endpoint list.
+///
+/// The Hub sends source-of-truth data only: identity, classification, billing,
+/// and one endpoint list with the primary first. Two things this view model
+/// carries are the app's business, so they are derived on the way in — the
+/// letter-avatar colour (one palette shared with locally-added providers), and
+/// the primary endpoint hoisted into its own fields (`protocol` / `endpoint` /
+/// `models`), which is the shape every screen reads.
+///
+/// Idempotent: a payload that already carries `endpoint` was split by an older
+/// build (or is the bundled snapshot, from a catalog published before the Hub
+/// switched to one list), so its `endpoints` are extras and stay untouched.
+fn normalize_catalog_entry(e: &mut CatalogEntryVm) {
+    e.logo_color = palette_color(&e.name).to_string();
+    if e.endpoint.is_empty() && !e.endpoints.is_empty() {
+        let primary = e.endpoints.remove(0);
+        e.protocol = primary.protocol;
+        e.endpoint = primary.endpoint;
+        e.models = primary.models;
+    }
+}
+
 pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
     let mut list = if let Some((payload, _)) = aux.load_hub_cache() {
         serde_json::from_str::<CatalogListVm>(&payload).unwrap_or_else(|_| bundled_catalog())
@@ -2734,6 +2743,9 @@ pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
         })
         .collect();
     for e in &mut list.entries {
+        // Before `added`: it matches on the endpoints, and the primary only
+        // lands in `endpoint` once the list has been split.
+        normalize_catalog_entry(e);
         let mut endpoints = vec![&e.endpoint];
         endpoints.extend(e.endpoints.iter().map(|x| &x.endpoint));
         e.added = endpoints

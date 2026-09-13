@@ -75,6 +75,22 @@ function billingLabel(billing: Billing, t: Translate): string {
   return BILLING_LABEL[billing] ? t(BILLING_LABEL[billing]) : billing;
 }
 
+/** The row's category badge, derived from `tag` rather than carried in the
+    payload — the same keys the filter chips use, so a badge and the chip that
+    filters for it always read alike. There is no chip for `local` (the shelf
+    lists no local providers of its own), hence its own key. */
+const TAG_LABEL: Record<CatalogEntry["tag"], KeyPath<Messages>> = {
+  official: "shelf.chipOfficial",
+  aggregate: "shelf.chipAggregate",
+  third: "shelf.chipThird",
+  free: "shelf.chipFree",
+  local: "shelf.tagLocal",
+};
+
+function tagLabel(tag: CatalogEntry["tag"], t: Translate): string {
+  return TAG_LABEL[tag] ? t(TAG_LABEL[tag]) : tag;
+}
+
 /** The currency to price in, and the rates to get there. An empty rate table
     converts nothing, which is also `convertAmount`'s behaviour for a code it
     has no rate for. */
@@ -274,7 +290,7 @@ function Row({
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className="px-4 py-2">
         <div className="flex items-center gap-2">
-          <ProviderLogo logo={logo} icon={entry.icon} name={entry.name} color={entry.logo_color} />
+          <ProviderLogo logo={logo} name={entry.name} color={entry.logo_color} />
           <span className="truncate text-[12.5px] font-semibold" title={entry.name}>
             {entry.name}
           </span>
@@ -296,7 +312,7 @@ function Row({
       </td>
       <td className="px-2 py-2">
         <span className="rounded px-1.5 text-[10px]" style={tagChipStyle(entry.tag)}>
-          {entry.tag_label}
+          {tagLabel(entry.tag, t)}
         </span>
       </td>
       <td className="px-2 py-2 text-[11.5px] text-mut">
@@ -347,7 +363,7 @@ function DetailDialog({
       <DialogContent className="max-h-[min(600px,100dvh)] w-[calc(100%-2rem)] max-w-[480px] gap-0 overflow-x-hidden overflow-y-auto rounded-xl p-0 sm:max-w-[480px]">
         <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line pl-4 pr-12">
           <DialogTitle className="flex items-center gap-2 text-[13px] font-semibold">
-            <ProviderLogo logo={logo} icon={entry.icon} name={entry.name} color={entry.logo_color} size={18} />
+            <ProviderLogo logo={logo} name={entry.name} color={entry.logo_color} size={18} />
             {entry.name}
           </DialogTitle>
         </DialogHeader>
@@ -356,7 +372,7 @@ function DetailDialog({
           {/* hero: category · rating · the representative model's price */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded px-1.5 text-[10px]" style={tagChipStyle(entry.tag)}>
-              {entry.tag_label}
+              {tagLabel(entry.tag, t)}
             </span>
             <span className="text-[11.5px] text-mut">★ {entry.rating.toFixed(1)}</span>
             {entry.price_ref && <span className="ml-auto text-[12px] font-medium">{price}</span>}

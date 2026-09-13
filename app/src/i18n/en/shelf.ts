@@ -10,6 +10,9 @@ export const shelf = {
   chipAggregate: "Aggregator",
   chipThird: "Third-party",
   chipFree: "Free tier",
+  /** The `local` category badge: there is no chip for it, so it gets its own
+      key rather than reusing a filter label that does not exist. */
+  tagLocal: "Local",
 
   billingPlan: "Plan",
   billingPayg: "Pay as you go",

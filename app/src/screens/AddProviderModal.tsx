@@ -509,7 +509,6 @@ export default function AddProviderModal({
                     >
                       <ProviderLogo
                         logo={e.logo && hubUrl ? hubAssetUrl(hubUrl, e.logo) : undefined}
-                        icon={e.icon}
                         name={e.name}
                         color={e.logo_color}
                         size={16}
@@ -536,7 +535,6 @@ export default function AddProviderModal({
             <div className="mt-3 flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
               <ProviderLogo
                 logo={shelf.logo && hubUrl ? hubAssetUrl(hubUrl, shelf.logo) : undefined}
-                icon={shelf.icon}
                 name={shelf.name}
                 color={shelf.logo_color}
                 size={16}

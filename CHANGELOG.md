@@ -21,11 +21,11 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
-- **The Models shelf says how you pay.** Every row now marks its billing mode
-  (`plan` / `payg` / `unl`, with the spelled-out label on hover), and a filter
-  beside the search narrows the list to one mode. Category does not answer that
-  question on its own: the official entries split 14 pay-as-you-go to 16 plan,
-  and "which of these do I subscribe to?" is what that split is.
+- **The Models shelf says how you pay.** Every row has a Billing column —
+  `Plan`, `Pay as you go` or `Unlimited` — and the header sorts it, ranked so
+  that a click gathers the subscriptions at the top. Category does not answer
+  that question on its own: the official entries split 14 pay-as-you-go to 16
+  plan, and "which of these do I subscribe to?" is what that split is.
 
   For a plan provider the price cell now leads with the entry's one-liner —
   "from ¥49 /mo" — because that is what you would actually buy, while the

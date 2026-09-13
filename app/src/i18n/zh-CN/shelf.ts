@@ -7,7 +7,6 @@ export const shelf = {
   /** `local` 分类徽章:筛选 chip 里没有它,所以单独给一个键。 */
   tagLocal: "本地",
 
-  billingAny: "不限计费",
   billingPlan: "套餐",
   billingPayg: "按量付费",
   billingUnl: "无限量",
@@ -22,6 +21,7 @@ export const shelf = {
   colName: "名称",
   colProtocol: "协议",
   colCategory: "分类",
+  colBilling: "计费",
   colPrice: "价格",
   colActions: "操作",
 

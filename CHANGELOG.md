@@ -45,6 +45,24 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   integration tests exercise it against a temporary database, asserting on the
   exit code and on stdout and stderr separately.
 
+- **The Models shelf shows what a provider actually costs.** The catalog has
+  carried `desc` (one line of prose) and `price_ref` (the representative model's
+  rates) for a while; this release starts reading them. The price column shows
+  the model beside its input and output rates, converted into your display
+  currency, and falls back to the description for the eleven providers that
+  price no model at all. Sorting by price uses the input rate, and a provider
+  with no published price stays last whichever way the arrow points — "no price"
+  is a category of its own, not the cheapest one.
+
+  The default order is providers you already have, then tag rank, then name.
+  Alphabetical alone put whichever aggregators happened to be called `9527code`
+  and `a6api` on the first screen, so a new user's whole impression of the
+  catalog was decided by naming luck. Your sort choice is remembered.
+
+  The detail dialog reads the description and drops the rows that held users /
+  blurb / free offer — three of five prose fields the Hub was publishing empty
+  in all 82 entries.
+
 ### Changed
 
 - **The gateway daemon is now `kiwanod`.** It was `kiwano-gateway` — a name that

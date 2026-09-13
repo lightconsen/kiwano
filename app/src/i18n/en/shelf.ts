@@ -33,6 +33,17 @@ export const shelf = {
   colPrice: "Price",
   colActions: "Actions",
 
+  /** The two ways to read the same catalog: one row per provider, or one group
+      per model with its providers nested. */
+  viewByProvider: "By provider",
+  viewByModel: "By model",
+  /** A model group's header: how many providers serve it, and how many of them
+      publish a price for it (the rest show a dash). */
+  groupMeta: "{n} providers · {m} with a price",
+  groupMetaOne: "1 provider · {m} with a price",
+  /** Tooltip for the header's price range — a bare range carries no unit. */
+  groupPriceTitle: "Input price per million tokens, lowest to highest",
+
   test: "Test",
   endpoints: "ENDPOINTS",
   billing: "Billing",

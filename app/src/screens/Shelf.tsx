@@ -368,22 +368,194 @@ function orderRows(rows: CatalogEntry[], sort: Sort | null, money: Money): Catal
     .map((x) => x.e);
 }
 
+// ── the view grouped by model ────────────────────────────────────────────
+
+type ShelfView = "provider" | "model";
+
+const VIEWS: { id: ShelfView; labelKey: KeyPath<Messages> }[] = [
+  { id: "provider", labelKey: "shelf.viewByProvider" },
+  { id: "model", labelKey: "shelf.viewByModel" },
+];
+
+/** The remembered view, defaulting to the provider table — and to it for any
+    value this build does not know, the way `parseSort` treats an unknown sort
+    key. */
+function parseView(v: string | null | undefined): ShelfView {
+  return v === "model" ? "model" : "provider";
+}
+
+/** Every model id an entry speaks about: the ones its endpoints list, plus the
+    one it prices. The union is not belt-and-braces — 15 of the catalog's 71
+    priced entries price a model their own list spells differently
+    (`openrouter` prices `gpt-5.2` while listing `openai/gpt-5.2`), and matching
+    on the lists alone would leave those prices in no group at all. */
+function servedModelIds(e: CatalogEntry): string[] {
+  const ids = new Set<string>(e.models);
+  for (const x of e.endpoints ?? []) {
+    for (const m of x.models) ids.add(m);
+  }
+  if (e.price_ref) ids.add(e.price_ref.model_id);
+  return [...ids];
+}
+
+/** This provider's published rate for `model` — exact ids only. The app has no
+    model-id ladder on this side (the costing one lives in Rust), and inventing
+    one here would make two visibly different ids read as one model. */
+function modelRate(e: CatalogEntry, model: string) {
+  return e.price_ref && e.price_ref.model_id === model ? e.price_ref : null;
+}
+
+type ModelGroupRow = {
+  entry: CatalogEntry;
+  rate: NonNullable<CatalogEntry["price_ref"]> | null;
+  /** Input rate in the display currency, or null when this provider publishes
+      none for this model — the sort key, and the range's raw material. */
+  value: number | null;
+};
+
+type ModelGroup = {
+  model: string;
+  name: string;
+  rows: ModelGroupRow[];
+  /** The priced rows' input rates, formatted and cheapest first: the header's
+      count and its range. */
+  prices: string[];
+};
+
+/** The name a group is shown under: the display name its priced rows agree on,
+    else the raw id. Voted rather than taken from the first row, because the
+    rows are ordered by price in the user's currency — "first" would relabel a
+    group when the currency preference changes. The id is never prettified:
+    `openai/gpt-5.2` and `gpt-5.2` are different ids, and giving the first an
+    invented name would make two different models read alike. */
+function groupName(entries: CatalogEntry[], model: string): string {
+  const votes = new Map<string, number>();
+  for (const e of entries) {
+    const r = e.price_ref;
+    if (r && r.model_id === model) votes.set(r.display_name, (votes.get(r.display_name) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  for (const [name, n] of votes) {
+    const top = best === null ? -1 : (votes.get(best) ?? 0);
+    if (n > top || (n === top && best !== null && name.localeCompare(best) < 0)) best = name;
+  }
+  return best ?? model;
+}
+
+/** The grouped body: one group per model, each holding the providers that speak
+    about it, cheapest first.
+
+    A group is worth showing when it has more than one row — one provider is not
+    a comparison — unless something is being searched, in which case a single
+    row is the answer that was asked for. Rows are built after the chip filter,
+    so a group whose providers are all filtered out is simply absent. */
+function buildModelGroups(entries: CatalogEntry[], money: Money, query: string): ModelGroup[] {
+  const q = query.trim().toLowerCase();
+  const byModel = new Map<string, CatalogEntry[]>();
+  for (const e of entries) {
+    for (const id of servedModelIds(e)) {
+      const seen = byModel.get(id);
+      // One entry contributes one row however many protocols it lists the id
+      // under, which is the dedupe — a provider is a row, not a protocol.
+      if (seen) seen.push(e);
+      else byModel.set(id, [e]);
+    }
+  }
+
+  const groups: ModelGroup[] = [];
+  for (const [model, serving] of byModel) {
+    const name = groupName(serving, model);
+    const rows: ModelGroupRow[] = serving
+      .filter(
+        (e) =>
+          q === "" ||
+          e.name.toLowerCase().includes(q) ||
+          model.toLowerCase().includes(q) ||
+          name.toLowerCase().includes(q),
+      )
+      .map((e) => {
+        const rate = modelRate(e, model);
+        const converted = rate
+          ? convertAmount(Number(rate.input), rate.currency || "USD", money.to, money.rates)
+          : null;
+        return { entry: e, rate, value: converted !== null && Number.isFinite(converted) ? converted : null };
+      })
+      .sort((a, b) => {
+        if (a.value === null || b.value === null) {
+          if (a.value === null && b.value === null) return byTagRank(a.entry, b.entry);
+          return a.value === null ? 1 : -1;
+        }
+        return a.value - b.value || byTagRank(a.entry, b.entry);
+      });
+    if (rows.length < (q === "" ? 2 : 1)) continue;
+    const prices = rows.flatMap((r) =>
+      r.rate
+        ? [
+            fmtMoney(
+              convertAmount(Number(r.rate.input), r.rate.currency || "USD", money.to, money.rates),
+              money.to,
+            ),
+          ]
+        : [],
+    );
+    groups.push({ model, name, rows, prices });
+  }
+
+  // Priced groups first, then the widest, then by name: with today's data two
+  // thirds of the rows are dashes, and the groups worth reading should not be
+  // interleaved with the empty ones.
+  return groups.sort(
+    (a, b) =>
+      Number(b.prices.length > 0) - Number(a.prices.length > 0) ||
+      b.rows.length - a.rows.length ||
+      a.name.localeCompare(b.name),
+  );
+}
+
+/** A group row's price cell: the rates for *this* model, without the model name
+    (the group header has it) and without a plan provider's offer — "from ¥49
+    /mo" is a price for the provider, and ranking it beside per-token rates
+    would compare two different things. */
+function groupPriceText(rate: ModelGroupRow["rate"], money: Money, t: Translate): string {
+  if (!rate) return t("common.none");
+  const inRate = Number(rate.input);
+  const outRate = Number(rate.output);
+  if (!Number.isFinite(inRate) || !Number.isFinite(outRate)) return t("common.none");
+  const conv = (n: number) => fmtMoney(convertAmount(n, rate.currency || "USD", money.to, money.rates), money.to);
+  return `${conv(inRate)} / ${conv(outRate)}`;
+}
+
+/** The header's price range, shown only when the rows disagree: equal prices
+    are already stated by every row below, and `¥36 – ¥36` is noise. Compared as
+    formatted strings, so two currencies that print alike count as equal. */
+function groupPriceRange(g: ModelGroup): string | null {
+  if (new Set(g.prices).size < 2) return null;
+  return `${g.prices[0]} – ${g.prices[g.prices.length - 1]}`;
+}
+
 function Row({
   entry,
   hubUrl,
   money,
   onAdd,
   onOpen,
+  modelId,
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
   money: Money;
   onAdd: (e: CatalogEntry) => void;
   onOpen: (e: CatalogEntry) => void;
+  /** Set by the grouped view: the model whose group this row sits in. It is the
+      only thing that differs between the two views' rows — the price cell then
+      speaks for that model instead of for the provider. */
+  modelId?: string;
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
-  const price = rowPriceText(entry, money);
+  const price = modelId
+    ? groupPriceText(modelRate(entry, modelId), money, t)
+    : rowPriceText(entry, money);
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className="px-4 py-2">
@@ -529,12 +701,17 @@ function DetailDialog({
     fire-and-forget so a failed write never blocks the click that caused it. */
 function useShelfPrefs() {
   const [sort, setSort] = useState<Sort | null>(null);
+  const [view, setView] = useState<ShelfView>("provider");
   const [money, setMoney] = useState<Money>({ rates: {}, to: "USD" });
   useEffect(() => {
     let alive = true;
     api
       .getSettings()
-      .then((s) => alive && setSort(parseSort(s.shelf_sort)))
+      .then((s) => {
+        if (!alive) return;
+        setSort(parseSort(s.shelf_sort));
+        setView(parseView(s.shelf_view));
+      })
       .catch(() => {});
     api
       .getCurrencyMeta()
@@ -548,13 +725,20 @@ function useShelfPrefs() {
     setSort(s);
     api.updateSettings({ shelf_sort: formatSort(s) }).catch(() => {});
   };
-  return { sort, money, remember };
+  // Persisted, not just held: App remounts the shelf after every mutation, so a
+  // view in component state would snap back to the provider table the moment
+  // the user added a provider while browsing models.
+  const rememberView = (v: ShelfView) => {
+    setView(v);
+    api.updateSettings({ shelf_view: v }).catch(() => {});
+  };
+  return { sort, money, view, remember, rememberView };
 }
 
 export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void }) {
   const t = useT();
   const hubUrl = useHubUrl();
-  const { sort, money, remember } = useShelfPrefs();
+  const { sort, money, view, remember, rememberView } = useShelfPrefs();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
   const [query, setQuery] = useState("");
@@ -598,18 +782,23 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     return () => clearTimeout(timer);
   }, [hub]);
 
+  // The category filter, shared by both views so neither can drift from the
+  // chips: the provider view filters on names afterwards, the grouped view
+  // builds its groups from these rows.
+  const chipRows = useMemo(
+    () => catalog?.entries.filter((e) => chip === "all" || e.tag === chip) ?? [],
+    [catalog, chip],
+  );
+
   const filtered = useMemo(() => {
-    if (!catalog) return [];
-    const rows = catalog.entries.filter(
-      (e) =>
-        (chip === "all" || e.tag === chip) &&
-        e.name.toLowerCase().includes(query.trim().toLowerCase()),
-    );
+    const rows = chipRows.filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase()));
     // Added (or connected) providers pin to the top of any ordering — they are
     // the ones already wired into the local setup. The sort is stable, so a
     // picked column keeps its order inside each group.
     return orderRows(rows, sort, money).sort((a, b) => Number(b.added) - Number(a.added));
-  }, [catalog, chip, query, sort, money]);
+  }, [chipRows, query, sort, money]);
+
+  const groups = useMemo(() => buildModelGroups(chipRows, money, query), [chipRows, money, query]);
 
   if (!catalog)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
@@ -617,6 +806,15 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   // Three-state: ascending → descending → back to the default order.
   const toggleSort = (key: SortKey) =>
     remember(sort?.key === key ? (sort.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 });
+
+  // The grouped view fixes its own order (cheapest first within a model).
+  const sortable = view === "provider";
+
+  /** An empty catalog is not a failed search: there is no bundled fallback any
+      more, so a machine that has never synced sees that message instead — and
+      "no matching providers" would send the user off to rewrite a search term
+      that was never wrong. */
+  const emptyLabel = catalog.entries.length === 0 ? t("shelf.notSynced") : t("shelf.noMatches");
 
   return (
     <section>
@@ -642,6 +840,19 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           })}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* Two readings of one catalog: rows are providers, or rows are the
+              models those providers serve. */}
+          <div className="flex flex-none overflow-hidden rounded-lg border border-line text-[12px]">
+            {VIEWS.map((v, i) => (
+              <button
+                key={v.id}
+                className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${view === v.id ? " active" : ""}`}
+                onClick={() => rememberView(v.id)}
+              >
+                {t(v.labelKey)}
+              </button>
+            ))}
+          </div>
           {/* A failed sync is worth the room it takes; the search box shifts
               left to make it, which is the point. */}
           {hubErr && (
@@ -685,33 +896,93 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
             {COLUMNS.map((c) => (
               <th
                 key={c.labelKey}
-                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.labelKey === "shelf.colActions" ? "pr-4" : ""}`}
-                onClick={c.key ? () => toggleSort(c.key!) : undefined}
+                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${sortable && c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.labelKey === "shelf.colActions" ? "pr-4" : ""}`}
+                onClick={sortable && c.key ? () => toggleSort(c.key!) : undefined}
               >
                 {t(c.labelKey)}
-                {sort?.key === c.key && (
+                {/* The grouped view fixes its own order, so an arrow here would
+                    point at something the click cannot do. */}
+                {sortable && sort?.key === c.key && (
                   <span className="ml-0.5 text-[9px]">{sort.dir === 1 ? "▲" : "▼"}</span>
                 )}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
-          {filtered.map((e) => (
-            <Row key={e.id} entry={e} hubUrl={hubUrl} money={money} onAdd={onAdd} onOpen={setDetail} />
-          ))}
-          {filtered.length === 0 && (
-            <tr>
-              <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
-                {/* An empty catalog is not a failed search. There is no bundled
-                    fallback any more, so a machine that has never synced shows
-                    this instead — and "no matching providers" would send the
-                    user off to rewrite a search term that was never wrong. */}
-                {catalog.entries.length === 0 ? t("shelf.notSynced") : t("shelf.noMatches")}
-              </td>
-            </tr>
-          )}
-        </tbody>
+        {view === "provider" ? (
+          <tbody>
+            {filtered.map((e) => (
+              <Row key={e.id} entry={e} hubUrl={hubUrl} money={money} onAdd={onAdd} onOpen={setDetail} />
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
+                  {emptyLabel}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        ) : (
+          <>
+            {groups.map((g) => {
+              const range = groupPriceRange(g);
+              return (
+                <tbody key={g.model}>
+                  <tr className="border-t border-line" style={{ background: "var(--surface2)" }}>
+                    {/* colgroup, not a stray cell: this header is what the
+                        providers below it are grouped by. A bare `th` is bold
+                        and centred, hence the explicit left/normal. */}
+                    <th
+                      scope="colgroup"
+                      colSpan={COLUMNS.length}
+                      className="px-4 py-1.5 text-left text-[11.5px] font-semibold"
+                    >
+                      <span className="flex items-baseline gap-2">
+                        <span className="truncate">{g.name}</span>
+                        {g.name !== g.model && (
+                          <span className="truncate font-mono text-[10.5px] font-normal text-mut">
+                            {g.model}
+                          </span>
+                        )}
+                        <span className="font-normal text-mut">
+                          {t(g.rows.length === 1 ? "shelf.groupMetaOne" : "shelf.groupMeta", {
+                            n: g.rows.length,
+                            m: g.prices.length,
+                          })}
+                        </span>
+                        {range && (
+                          <span className="ml-auto flex-none font-mono" title={t("shelf.groupPriceTitle")}>
+                            {range}
+                          </span>
+                        )}
+                      </span>
+                    </th>
+                  </tr>
+                  {g.rows.map((r) => (
+                    <Row
+                      key={r.entry.id}
+                      entry={r.entry}
+                      hubUrl={hubUrl}
+                      money={money}
+                      onAdd={onAdd}
+                      onOpen={setDetail}
+                      modelId={g.model}
+                    />
+                  ))}
+                </tbody>
+              );
+            })}
+            {groups.length === 0 && (
+              <tbody>
+                <tr>
+                  <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
+                    {emptyLabel}
+                  </td>
+                </tr>
+              </tbody>
+            )}
+          </>
+        )}
       </table>
       {detail && (
         <DetailDialog

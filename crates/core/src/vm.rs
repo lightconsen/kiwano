@@ -612,6 +612,13 @@ pub struct SettingsVm {
     /// knows a sort key this one does not simply falls back to the default.
     #[serde(default)]
     pub shelf_sort: Option<String>,
+    /// Which Models view the user last chose: `"model"` for the one grouped by
+    /// model, anything else (None) for the provider table. Remembered for the
+    /// same reason as `shelf_sort`, only more so — the shelf is remounted after
+    /// every mutation, so a view held in component state would snap back the
+    /// moment the user added a provider while browsing models.
+    #[serde(default)]
+    pub shelf_view: Option<String>,
 }
 
 pub fn default_preferred_currency() -> String {
@@ -651,6 +658,7 @@ impl Default for SettingsVm {
             dismissed_update: None,
             tz_offset_minutes: 0,
             shelf_sort: None,
+            shelf_view: None,
         }
     }
 }

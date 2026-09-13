@@ -25,6 +25,12 @@ export const shelf = {
   colPrice: "价格",
   colActions: "操作",
 
+  viewByProvider: "按 Provider",
+  viewByModel: "按模型",
+  groupMeta: "{n} 个 Provider · {m} 个有价格",
+  groupMetaOne: "1 个 Provider · {m} 个有价格",
+  groupPriceTitle: "每百万 token 的输入价格，从低到高",
+
   test: "测试",
   endpoints: "端点",
   billing: "计费",

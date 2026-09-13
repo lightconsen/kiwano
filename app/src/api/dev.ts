@@ -279,7 +279,10 @@ const catalog: CatalogEntry[] = [
     currency: "USD",
     billing: "payg",
     added: false,
-    models: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.2"],
+    // Serves `deepseek-chat (V3)` without pricing it — the shape most real
+    // groups have (two providers, one of them with a published price), and what
+    // makes the grouped view's dash cells visible in `pnpm dev`.
+    models: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.2", "deepseek-chat (V3)"],
   },
   {
     id: "ollama",
@@ -371,6 +374,17 @@ const catalog: CatalogEntry[] = [
     tag: "third",
     rating: 4.2,
     endpoint: "https://www.packyapi.ai/v1",
+    // Priced but not listed — the shape 15 of the real catalog's priced entries
+    // have (they price a model their own list spells differently), and what
+    // makes the "by model" view's price range visible in `pnpm dev`: this rate
+    // is deliberately not Qwen's.
+    price_ref: {
+      model_id: "qwen-max",
+      display_name: "Qwen Max",
+      input: "1.40",
+      output: "5.60",
+      currency: "USD",
+    },
     currency: "USD",
     billing: "payg",
     added: false,
@@ -521,6 +535,7 @@ const settings: AppSettings = {
   hub_logged_in: false,
   hub_url: "https://hub.kiwano.cc/catalog.json",
   shelf_sort: null,
+  shelf_view: null,
 };
 
 let idSeq = 100;

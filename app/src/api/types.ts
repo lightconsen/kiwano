@@ -390,6 +390,10 @@ export interface AppSettings {
   /** Models list sort choice, remembered across sessions: "<key>:<dir>".
       null = the default order (added first, then tag rank, then name). */
   shelf_sort: string | null;
+  /** Which Models view was last chosen: "model" for the grouping by model, null
+      (or anything this build does not know) for the provider table. Kept loose
+      like `shelf_sort`; `parseView` in the shelf is what narrows it. */
+  shelf_view: string | null;
 }
 
 /** Hub catalog sync result (tech.md §3 Hub sync protocol) */

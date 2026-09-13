@@ -30,6 +30,26 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **The Models shelf can be read by model.** The page lists providers; a
+  toggle in its header now switches to the same catalog grouped by model, each
+  model holding the providers that serve it — cheapest first — so "what does
+  this cost elsewhere?" is a glance instead of 23 searches. A group appears when
+  more than one provider serves the model (or when a search asked for it), a
+  provider's price shows only when the entry prices *that* model, and the header
+  states how many providers serve it and how many publish a price. It carries a
+  price range only when the prices actually differ.
+
+  Membership is the union of a provider's model lists and the model it prices:
+  15 of the catalog's 71 priced entries price a model their own list spells
+  differently (`openrouter` prices `gpt-5.2` while listing `openai/gpt-5.2`), so
+  matching the lists alone would leave those prices in no group at all.
+
+  Worth knowing before reading it as a comparison: today every provider charges
+  the same for the same model, so most groups show one price repeated, and two
+  thirds of the rows are providers that publish no price for that model. The
+  view is what the per-provider pricing work was for — it starts showing real
+  differences when the Hub starts publishing them.
+
 - **The Models shelf says how you pay.** Every row has a Billing column —
   `Plan`, `Pay as you go` or `Unlimited` — and the header sorts it, ranked so
   that a click gathers the subscriptions at the top. Category does not answer

@@ -49,6 +49,12 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **The Models shelf says less per row.** The protocol column spelled every
+  protocol out — `openai anthropic gemini` — in a table whose price cell is the
+  one that truncates. Each protocol is now one letter (`O`, `A`, `G`) in its own
+  colour, with the full name on hover and as the accessible name, and the width
+  it gives back goes to the price.
+
 - **Model prices now come only from the Hub.** They used to come from a table
   compiled into the binary as well, and the two had drifted apart: a machine
   that had never synced showed no providers on the shelf — that snapshot is

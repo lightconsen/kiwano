@@ -53,6 +53,28 @@ const PROTO_STYLE: Record<Protocol, React.CSSProperties> = {
   gemini: { background: "var(--indigo-soft)", color: "var(--indigo)" },
 };
 
+/** One letter per protocol. The column is 17% of a 1000px window for what is
+    usually one or two words, while the price column beside it is the one that
+    truncates — and a protocol set of exactly three is a set a letter can name.
+
+    The letter is not the whole answer: the chip keeps its colour, carries the
+    full name as its hover title and its accessible name, and the detail dialog
+    spells the protocols out. Sorting still uses the full string. */
+const PROTO_ABBR: Record<Protocol, string> = {
+  anthropic: "A",
+  openai: "O",
+  gemini: "G",
+};
+
+/** The spelled-out name behind an abbreviation. Reused from the add form rather
+    than duplicated: `Protocol` is one vocabulary across the two screens, and a
+    second copy of it is a second thing to keep in step. */
+const PROTO_LABEL: Record<Protocol, KeyPath<Messages>> = {
+  anthropic: "addProvider.protoAnthropic",
+  openai: "addProvider.protoOpenai",
+  gemini: "addProvider.protoGemini",
+};
+
 const TAG_RANK: Record<CatalogEntry["tag"], number> = {
   official: 0,
   aggregate: 1,
@@ -89,6 +111,25 @@ const TAG_LABEL: Record<CatalogEntry["tag"], KeyPath<Messages>> = {
 
 function tagLabel(tag: CatalogEntry["tag"], t: Translate): string {
   return TAG_LABEL[tag] ? t(TAG_LABEL[tag]) : tag;
+}
+
+/** One protocol as a marked letter — see PROTO_ABBR for why, and for what
+    carries the full name. */
+function ProtoChip({ protocol, t }: { protocol: Protocol; t: Translate }) {
+  const name = t(PROTO_LABEL[protocol]);
+  return (
+    <span
+      className="rounded px-1.5 py-0.5 font-mono text-[10px]"
+      style={PROTO_STYLE[protocol]}
+      title={name}
+    >
+      {/* The letter is the visual stand-in, the name is what a screen reader
+          reads — an `aria-label` on a bare span is not reliably announced, and
+          a chip that announces "O" is worse than no chip at all. */}
+      <span aria-hidden>{PROTO_ABBR[protocol]}</span>
+      <span className="sr-only">{name}</span>
+    </span>
+  );
 }
 
 /** The currency to price in, and the rates to get there. An empty rate table
@@ -224,7 +265,7 @@ function EndpointCard({ protocol, endpoint, models }: { protocol: Protocol; endp
 
 const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: string }[] = [
   { key: "name", labelKey: "shelf.colName", className: "w-[150px]" },
-  { key: "protocol", labelKey: "shelf.colProtocol", className: "w-[170px]" },
+  { key: "protocol", labelKey: "shelf.colProtocol", className: "w-[72px]" },
   { key: "tag", labelKey: "shelf.colCategory", className: "w-[84px]" },
   { key: "price", labelKey: "shelf.colPrice", className: "" },
   { key: null, labelKey: "shelf.colActions", className: "w-[70px] text-right" },
@@ -300,13 +341,9 @@ function Row({
         {/* All supported protocols on one horizontal line (endpoint URLs
             live in the detail dialog, not the table) */}
         <div className="flex items-center gap-1">
-          <span className="rounded px-1.5 py-0.5 font-mono text-[10px]" style={PROTO_STYLE[entry.protocol]}>
-            {entry.protocol}
-          </span>
+          <ProtoChip protocol={entry.protocol} t={t} />
           {(entry.endpoints ?? []).map((e) => (
-            <span key={e.protocol} className="rounded px-1.5 py-0.5 font-mono text-[10px]" style={PROTO_STYLE[e.protocol]}>
-              {e.protocol}
-            </span>
+            <ProtoChip key={e.protocol} protocol={e.protocol} t={t} />
           ))}
         </div>
       </td>

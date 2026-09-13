@@ -1,6 +1,6 @@
 // Models: Kiwano Hub cloud catalog as a sortable table (desktop-tool density)
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, Check, Gauge, Gift, House, Layers, RefreshCw, Search, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Boxes, Check, ChevronDown, ChevronRight, Gauge, Gift, House, Layers, RefreshCw, Search, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -547,6 +547,7 @@ function Row({
   onAdd,
   onOpen,
   modelId,
+  indent,
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
@@ -557,6 +558,9 @@ function Row({
       only thing that differs between the two views' rows — the price cell then
       speaks for that model instead of for the provider. */
   modelId?: string;
+  /** …and this row is nested under that group's header, so the name cell starts
+      where the header's model name does (past its chevron). */
+  indent?: boolean;
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
@@ -565,7 +569,7 @@ function Row({
     : rowPriceText(entry, money);
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
-      <td className="px-4 py-2">
+      <td className={`py-2 ${indent ? "pl-10" : "pl-4"} pr-2`}>
         <div className="flex items-center gap-2">
           <ProviderLogo logo={logo} name={entry.name} color={entry.logo_color} />
           <span className="truncate text-[12.5px] font-semibold" title={entry.name}>
@@ -807,6 +811,17 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
 
   const groups = useMemo(() => buildModelGroups(chipRows, money, query), [chipRows, money, query]);
 
+  // Collapsed models, by id. Held here rather than in the group rows because a
+  // group is a <tbody>, not a component — and deliberately not persisted: it is
+  // a reading position, not a preference.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (model: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(model)) next.add(model);
+      return next;
+    });
+
   if (!catalog)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
@@ -934,18 +949,28 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           <>
             {groups.map((g) => {
               const range = groupPriceRange(g);
+              const open = !collapsed.has(g.model);
               return (
                 <tbody key={g.model}>
                   <tr className="border-t border-line" style={{ background: "var(--surface2)" }}>
                     {/* colgroup, not a stray cell: this header is what the
                         providers below it are grouped by. A bare `th` is bold
-                        and centred, hence the explicit left/normal. */}
-                    <th
-                      scope="colgroup"
-                      colSpan={COLUMNS.length}
-                      className="px-4 py-1.5 text-left text-[11.5px] font-semibold"
-                    >
-                      <span className="flex items-baseline gap-2">
+                        and centred, hence the explicit left/normal — and the
+                        whole row is the collapse control, so it is a button
+                        inside the header rather than a click on the header
+                        itself (which is not focusable). */}
+                    <th scope="colgroup" colSpan={COLUMNS.length} className="p-0 text-left">
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-[11.5px] font-semibold"
+                        aria-expanded={open}
+                        onClick={() => toggleGroup(g.model)}
+                      >
+                        {open ? (
+                          <ChevronDown className="size-3.5 flex-none text-mut" aria-hidden />
+                        ) : (
+                          <ChevronRight className="size-3.5 flex-none text-mut" aria-hidden />
+                        )}
                         <span className="truncate">{g.name}</span>
                         {g.name !== g.model && (
                           <span className="truncate font-mono text-[10.5px] font-normal text-mut">
@@ -959,24 +984,29 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
                           })}
                         </span>
                         {range && (
-                          <span className="ml-auto flex-none font-mono" title={t("shelf.groupPriceTitle")}>
+                          <span
+                            className="ml-auto flex-none font-mono font-normal"
+                            title={t("shelf.groupPriceTitle")}
+                          >
                             {range}
                           </span>
                         )}
-                      </span>
+                      </button>
                     </th>
                   </tr>
-                  {g.rows.map((r) => (
-                    <Row
-                      key={r.entry.id}
-                      entry={r.entry}
-                      hubUrl={hubUrl}
-                      money={money}
-                      onAdd={onAdd}
-                      onOpen={setDetail}
-                      modelId={g.model}
-                    />
-                  ))}
+                  {open &&
+                    g.rows.map((r) => (
+                      <Row
+                        key={r.entry.id}
+                        entry={r.entry}
+                        hubUrl={hubUrl}
+                        money={money}
+                        onAdd={onAdd}
+                        onOpen={setDetail}
+                        modelId={g.model}
+                        indent
+                      />
+                    ))}
                 </tbody>
               );
             })}

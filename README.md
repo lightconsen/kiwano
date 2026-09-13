@@ -90,9 +90,25 @@ Kiwano is local-first by design, and the code is the specification:
 
 ## On a server
 
-Every release also carries a server bundle — `kiwano-<target>.tar.gz` — holding
-the command-line client, the gateway daemon, a systemd unit and install notes.
-No GUI, no display, nothing to configure by hand:
+No display, no desktop app — one command:
+
+```bash
+curl -fsSL https://hub.kiwano.cc/install.sh | sh
+```
+
+It downloads the command-line client and the gateway daemon, checks the download
+against a digest published for the release, installs both to `~/.local/bin`, and
+registers the gateway as a **service for your own user** — no root. That last
+part is not just convenience: `kiwano agents takeover` rewrites an agent's config
+under its own `$HOME`, so the CLI and the agent have to be the same account, and
+a user-level service is the layout where they are.
+
+Prefer to read it first? It is a plain script —
+[`packaging/install.sh`](packaging/install.sh) in this repo, served unmodified.
+
+Every release also carries the same thing as a tarball — `kiwano-<target>.tar.gz`,
+with the binaries, a systemd unit and [`INSTALL.md`](packaging/INSTALL.md) — and
+it is attested like every other artifact:
 
 ```bash
 gh attestation verify kiwano-x86_64-unknown-linux-gnu.tar.gz --repo lightconsen/kiwano

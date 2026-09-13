@@ -9,9 +9,19 @@ command in this document is a call into `kiwano-core`, the crate the desktop app
 also links. A provider added here is the same row, written the same way, as one
 added there.
 
-If you are installing on a server, start with the [`INSTALL.md`](../packaging/INSTALL.md)
-that ships inside the release bundle — it covers the service unit and the user
-the daemon should run as.
+## Installing
+
+On a Linux or macOS server, one command does the whole thing — binaries,
+checksum verification, and the gateway registered as a service for your user:
+
+```sh
+curl -fsSL https://hub.kiwano.cc/install.sh | sh
+```
+
+It needs no root, and that is deliberate rather than convenient: `agents
+takeover` rewrites an agent's config under its own `$HOME`, so the CLI and the
+agent must be the same account. See [`packaging/INSTALL.md`](../packaging/INSTALL.md)
+for what it does step by step, and for the machine-wide alternative.
 
 ## Globals
 

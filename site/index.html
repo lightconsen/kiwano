@@ -470,6 +470,7 @@ footer { padding: 56px 0 44px; }
       <a href="#features" data-i18n="nav.features">特性</a>
       <a href="#screens" data-i18n="nav.screens">界面</a>
       <a href="#how" data-i18n="nav.how">工作原理</a>
+      <a href="#server" data-i18n="nav.server">服务器</a>
       <a href="#download" data-i18n="nav.download">下载</a>
     </div>
     <div class="nav-cta">
@@ -692,6 +693,40 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
+  <!-- ══ 服务器 / CLI ══ -->
+  <section class="block" id="server">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">Server</div>
+        <h2 data-i18n="srv.h2">没有桌面环境,一样能跑</h2>
+        <p data-i18n="srv.p">客户端与网关就装在发布包里。命令行能做桌面应用能做的每一件事 —— 添供应商、选策略、看用量日志,以及把 Agent 接管到本地网关。</p>
+      </div>
+      <div class="steps">
+        <div class="step rv">
+          <span class="no">01</span>
+          <h3 data-i18n="srv.1t">一条命令装好</h3>
+          <p data-i18n="srv.1d">下载并校验客户端与网关,把网关注册成你账户下的服务,数据库放在 <code>~/.kiwano</code>。不需要 root。</p>
+          <p><code>curl -fsSL https://hub.kiwano.cc/install.sh | sh</code></p>
+        </div>
+        <div class="step rv" style="--d:80ms">
+          <span class="no">02</span>
+          <h3 data-i18n="srv.2t">接管你的 Agent</h3>
+          <p data-i18n="srv.2d">改写 Agent 自己的配置指向本地网关,并签给它一把占位 Key —— 网关只路由自己签发的 Key,手动改端口只会得到 401。</p>
+          <p><code>kiwano agents takeover claude</code></p>
+        </div>
+        <div class="step rv" style="--d:160ms">
+          <span class="no">03</span>
+          <h3 data-i18n="srv.3t">路由、计量、日志</h3>
+          <p data-i18n="srv.3d">failover、roundrobin、时间窗、配额四种策略;7 天用量与成本;逐请求日志与 CSV 导出。</p>
+          <p><code>kiwano routes strategy claude failover</code></p>
+        </div>
+      </div>
+      <p class="dl-foot rv">
+        <span data-i18n="srv.f1">无需 root</span><span class="dot"></span><span data-i18n="srv.f2">systemd 服务</span><span class="dot"></span><span data-i18n="srv.f3">完整命令参考见文档</span>
+      </p>
+    </div>
+  </section>
+
   <!-- ══ 隐私承诺 ══ -->
   <div class="privacy">
     <div class="wrap privacy-inner">
@@ -728,7 +763,7 @@ footer { padding: 56px 0 44px; }
 const I18N = {
   en: {
     "title": "Kiwano — Local-first AI Provider Manager",
-    "nav.features": "Features", "nav.screens": "Screens", "nav.how": "How it works", "nav.download": "Download", "nav.dlbtn": "Download",
+    "nav.features": "Features", "nav.screens": "Screens", "nav.how": "How it works", "nav.server": "Server", "nav.download": "Download", "nav.dlbtn": "Download",
     "hero.badge": "Local-first · API requests never touch the cloud",
     "hero.h1": "One hub for all<br>your <em>AI providers</em>",
     "hero.sub": `Kiwano is a local-first AI provider manager: discover, compare and switch model providers, and connect
@@ -775,6 +810,15 @@ const I18N = {
     "dl.p": "Free, no account, works offline. Pick your platform:",
     "dl.intel": "Intel", "dl.winbtn": "64-bit installer", "dl.appimg": "Portable",
     "dl.f1": "Open source", "dl.f2": "No account", "dl.f3": "Data stays on your machine",
+    "srv.h2": "No desktop? It runs headless",
+    "srv.p": "The client and the gateway ship in one bundle. The command line does everything the app does — add providers, pick a routing strategy, read usage and logs, and take an agent over.",
+    "srv.1t": "Install in one command",
+    "srv.1d": "Downloads and checks the client and the gateway, registers the gateway as a service for your account, and keeps the database in <code>~/.kiwano</code>. No root.",
+    "srv.2t": "Take your agents over",
+    "srv.2d": "Rewrites the agent's own config to point at the gateway and mints the placeholder key it will accept — the gateway only routes keys it issued itself, so pointing it at the port by hand gets you a 401.",
+    "srv.3t": "Routing, metering, logs",
+    "srv.3d": "failover, roundrobin, time windows and quota; seven-day usage and cost; per-request logs with CSV export.",
+    "srv.f1": "No root needed", "srv.f2": "systemd service", "srv.f3": "Full command reference in the docs",
     "pv.1": "API requests go direct from your machine — no cloud relay",
     "pv.2": "API keys stay on this machine, readable only by you",
     "pv.3": "No accounts; fully usable offline",

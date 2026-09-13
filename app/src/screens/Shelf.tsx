@@ -9,6 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
@@ -89,6 +96,10 @@ const BILLING_LABEL: Record<Billing, KeyPath<Messages>> = {
   unl: "shelf.billingUnl",
 };
 
+/** The billing filter's options, in the order they are offered. */
+const BILLING_OPTIONS: Billing[] = ["plan", "payg", "unl"];
+type BillingFilter = "all" | Billing;
+
 /** Hub catalogs may carry a billing tag this build predates: show the raw
     tag rather than a blank cell. */
 function billingLabel(billing: Billing, t: Translate): string {
@@ -111,6 +122,23 @@ const TAG_LABEL: Record<CatalogEntry["tag"], KeyPath<Messages>> = {
 
 function tagLabel(tag: CatalogEntry["tag"], t: Translate): string {
   return TAG_LABEL[tag] ? t(TAG_LABEL[tag]) : tag;
+}
+
+/** The billing tag as the Hub spells it (`plan` / `payg` / `unl`), short by
+    design: it sits in the price cell, where "how do I pay for this?" belongs,
+    and the spelled-out label is its tooltip — the detail dialog shows that
+    label in full. An unknown Hub tag renders as itself, like the billing line
+    there. */
+function BillingTag({ billing, t }: { billing: Billing; t: Translate }) {
+  return (
+    <span
+      className="flex-none rounded px-1 font-mono text-[10px]"
+      style={{ background: "var(--surface2)", color: "var(--mut)" }}
+      title={billingLabel(billing, t)}
+    >
+      {billing}
+    </span>
+  );
 }
 
 /** One protocol as a marked letter — see PROTO_ABBR for why, and for what
@@ -174,6 +202,18 @@ function priceText(e: CatalogEntry, money: Money): string {
   const cur = p.currency || "USD";
   const conv = (n: number) => fmtMoney(convertAmount(n, cur, money.to, money.rates), money.to);
   return `${p.display_name} · ${conv(inRate)} / ${conv(outRate)}`;
+}
+
+/** The price cell's text. A plan provider is bought rather than metered, so its
+    `desc` leads — "from ¥49 /mo" is what the reader would actually pay — and
+    the rates after it say what the same models cost per token. For every other
+    billing mode the two are the same sentence, and this is `priceText`. */
+function rowPriceText(e: CatalogEntry, money: Money): string {
+  const rate = priceText(e, money);
+  if (e.billing !== "plan") return rate;
+  const offer = e.desc ?? "";
+  // Equal when the entry prices no model and `desc` is all there is.
+  return offer && offer !== rate ? `${offer} · ${rate}` : rate;
 }
 
 // Probe verdict chip: green=usable, amber=route exists but needs a key,
@@ -326,7 +366,7 @@ function Row({
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
-  const price = priceText(entry, money);
+  const price = rowPriceText(entry, money);
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className="px-4 py-2">
@@ -353,10 +393,15 @@ function Row({
         </span>
       </td>
       <td className="px-2 py-2 text-[11.5px] text-mut">
-        {/* The representative model's rates, or the provider's own one-liner
-            when it prices nothing. `title` because the cell can truncate. */}
-        <span className="block truncate" title={price}>
-          {price}
+        {/* How you pay, then what you pay: the billing tag, then the
+            representative model's rates (see `rowPriceText` for what a plan row
+            leads with), or the provider's own one-liner when it prices nothing.
+            `title` because the cell can truncate. */}
+        <span className="flex items-center gap-1.5">
+          <BillingTag billing={entry.billing} t={t} />
+          <span className="min-w-0 truncate" title={price}>
+            {price}
+          </span>
         </span>
       </td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
@@ -491,6 +536,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   const { sort, money, remember } = useShelfPrefs();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
+  const [billing, setBilling] = useState<BillingFilter>("all");
   const [query, setQuery] = useState("");
   // Catalog row clicked → model detail dialog
   const [detail, setDetail] = useState<CatalogEntry | null>(null);
@@ -537,13 +583,14 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
     const rows = catalog.entries.filter(
       (e) =>
         (chip === "all" || e.tag === chip) &&
+        (billing === "all" || e.billing === billing) &&
         e.name.toLowerCase().includes(query.trim().toLowerCase()),
     );
     // Added (or connected) providers pin to the top of any ordering — they are
     // the ones already wired into the local setup. The sort is stable, so a
     // picked column keeps its order inside each group.
     return orderRows(rows, sort, money).sort((a, b) => Number(b.added) - Number(a.added));
-  }, [catalog, chip, query, sort, money]);
+  }, [catalog, chip, billing, query, sort, money]);
 
   if (!catalog)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
@@ -571,6 +618,31 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* Billing is a second axis, not a category: an official provider can
+              be plan- or pay-as-you-go-billed, so it cannot ride in the chip
+              row above (which filters categories, one at a time). A select is
+              what fits beside the search box. */}
+          <Select
+            value={billing}
+            onValueChange={(v) => setBilling((v ?? "all") as BillingFilter)}
+          >
+            <SelectTrigger
+              className="h-7 w-[118px] bg-surface text-[11.5px]"
+              aria-label={t("shelf.billing")}
+            >
+              <SelectValue>
+                {(v) => (v == null || v === "all" ? t("shelf.billingAny") : billingLabel(v as Billing, t))}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("shelf.billingAny")}</SelectItem>
+              {BILLING_OPTIONS.map((b) => (
+                <SelectItem key={b} value={b}>
+                  {billingLabel(b, t)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {/* A failed sync is worth the room it takes; the search box shifts
               left to make it, which is the point. */}
           {hubErr && (

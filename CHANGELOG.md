@@ -21,6 +21,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **The Models shelf says how you pay.** Every row now marks its billing mode
+  (`plan` / `payg` / `unl`, with the spelled-out label on hover), and a filter
+  beside the search narrows the list to one mode. Category does not answer that
+  question on its own: the official entries split 14 pay-as-you-go to 16 plan,
+  and "which of these do I subscribe to?" is what that split is.
+
+  For a plan provider the price cell now leads with the entry's one-liner —
+  "from ¥49 /mo" — because that is what you would actually buy, while the
+  per-token rates after it are what the same models cost metered. Fourteen of
+  the nineteen plan entries were showing the rate and hiding the offer.
+
 - **A price can belong to a provider.** The price table was keyed by model
   alone, so a model could carry exactly one price whoever served it, and a
   document that priced one model differently at two providers could not be

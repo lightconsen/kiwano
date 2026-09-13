@@ -14,6 +14,10 @@ export const shelf = {
       key rather than reusing a filter label that does not exist. */
   tagLocal: "Local",
 
+  /** The billing filter's "no filter" option — billing is a second axis beside
+      the category chips, so it reads as a question ("any billing") rather than
+      as one of the answers. */
+  billingAny: "Any billing",
   billingPlan: "Plan",
   billingPayg: "Pay as you go",
   billingUnl: "Unlimited",

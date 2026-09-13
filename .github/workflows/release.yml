@@ -843,18 +843,21 @@ jobs:
           # and the Apple Silicon build `Kiwano.app.tar.gz`, so without this
           # they would overwrite each other on the mirror.
           #
-          # The server bundle (`kiwano-<triple>.tar.gz`) is skipped explicitly
-          # rather than left to luck. Its name carries no version to strip
-          # today, so the sed is a no-op and the case arms are case-sensitive
-          # against a lowercase name — but that is three coincidences, and a
-          # rename here would silently publish it under the wrong key.
+          # The server bundle (`kiwano-<triple>.tar.gz`) is skipped *before* the
+          # rewriting, not matched around afterwards. Its name is already
+          # version-free, so the sed is a no-op today — but it is a no-op only
+          # because the version does not happen to appear in it, and a name that
+          # carries it later would be silently mangled into a different key.
+          # Skipping the whole body is the guard; matching one case arm would
+          # only skip the second rewrite.
           for f in mirror/*; do
-            name=$(basename "$f" | sed -e "s/_${version}//" -e "s/-${version}-/-/")
+            base=$(basename "$f")
+            case "$base" in kiwano-*) continue ;; esac
+            name=$(printf '%s' "$base" | sed -e "s/_${version}//" -e "s/-${version}-/-/")
             case "$name" in
-              kiwano-*) ;;
               Kiwano.app.tar.gz*) name="Kiwano_${arch}.${name#Kiwano.}" ;;
             esac
-            [ "$name" = "$(basename "$f")" ] || mv "$f" "mirror/$name"
+            [ "$name" = "$base" ] || mv "$f" "mirror/$name"
           done
 
           aws s3 sync mirror s3://kiwano-hub/releases --no-progress

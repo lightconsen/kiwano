@@ -228,7 +228,12 @@ export default function App() {
 
       <UpdateBanner />
 
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      {/* overscroll-none: this is the app's only scroll region, and once it
+          hits its end WebKit hands the remaining scroll to the document, which
+          rubber-bands the whole 100vh view — status bar included, since a flex
+          sibling cannot outrun its container. Chaining off, so the scroll stops
+          where the content does. */}
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-none">
         {route.route === "providers" && (
           <Providers
             key={`p${tick}`}

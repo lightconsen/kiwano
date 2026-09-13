@@ -153,6 +153,11 @@
 html,
 body {
   height: 100%;
+  /* Nothing here is meant to scroll: every screen scrolls inside App's <main>,
+     which carries its own `overscroll-none`. The document is fixed furniture —
+     a header, that region, and the status bar — and letting the document take
+     a scroll (or bounce on one) drags the status bar off with it. */
+  overscroll-behavior: none;
 }
 
 body {

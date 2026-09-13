@@ -270,6 +270,15 @@ export interface CatalogPriceRef {
   output: string;
   /** ISO code the figures are denominated in (the provider's own currency) */
   currency: string;
+  /** The rates outside `peak_hours`. Present only when the provider publishes a
+      schedule — and then `input`/`output` above are the **peak** ones. */
+  off_peak?: { in: string; out: string; cache_read: string; cache_creation: string };
+  /** When the peak rates apply, on the vendor's clock (`tz_offset`, minutes east
+      of UTC). Read it with `lib/peak.ts`, never against the reader's zone. */
+  peak_hours?: {
+    tz_offset: number;
+    windows: { days: string[]; start: string; end: string }[];
+  };
 }
 
 /** What the app hands the Models page. The Hub publishes less than this: the

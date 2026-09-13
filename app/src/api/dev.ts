@@ -201,6 +201,18 @@ const catalog: CatalogEntry[] = [
       input: "0.27",
       output: "1.10",
       currency: "USD",
+      // DeepSeek's published shape: the rates above are the peak ones, halved
+      // outside Beijing business hours. Here so the shelf's tier chip, the
+      // vendor clock in its tooltip and the "now" chip are all exercisable
+      // offline.
+      off_peak: { in: "0.135", out: "0.55", cache_read: "0.02", cache_creation: "0" },
+      peak_hours: {
+        tz_offset: 480,
+        windows: [
+          { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "12:00" },
+          { days: ["mon", "tue", "wed", "thu", "fri"], start: "14:00", end: "18:00" },
+        ],
+      },
     },
     currency: "USD",
     billing: "payg",

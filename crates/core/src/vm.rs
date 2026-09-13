@@ -465,6 +465,17 @@ pub struct CatalogPriceRefVm {
     /// ISO-4217 code these figures are denominated in — the provider's own
     /// currency, so the frontend converts rather than assumes.
     pub currency: String,
+    /// The rates in force outside `peak_hours`, when the provider publishes a
+    /// schedule. The figures above are then the **peak** ones, and the panel
+    /// says so — a reader who is only shown the peak would compare the wrong
+    /// number.
+    ///
+    /// Absent until the Hub publishes the tiers here: they live in the price
+    /// document today, which this page does not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off_peak: Option<kiwano_adapters::model_pricing::OffPeakRates>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_hours: Option<kiwano_adapters::model_pricing::PeakHours>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2574,7 +2585,10 @@ pub fn build_dashboard(
         .usage_cost_with_off_peak_by_currency(agent, provider_id, Some(&since))
         .map_err(e2s)?;
     let pairs = |pick: fn(&kiwanod::store::CostBucket) -> f64| -> Vec<(Option<String>, f64)> {
-        headline.iter().map(|b| (b.currency.clone(), pick(b))).collect()
+        headline
+            .iter()
+            .map(|b| (b.currency.clone(), pick(b)))
+            .collect()
     };
     let cost = cost_of(&pairs(|b| b.cost));
     let cost_off_peak = (cost_of(&pairs(|b| b.cost_off_peak)) * 1e6).round() / 1e6;
@@ -2665,11 +2679,7 @@ pub fn build_dashboard(
                 pct: pu.totals.requests * 100 / total_req,
                 cost: (cost_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
                     / 1e6,
-                cost_off_peak: (off_peak_by_pid
-                    .get(&pu.provider_id)
-                    .copied()
-                    .unwrap_or(0.0)
-                    * 1e6)
+                cost_off_peak: (off_peak_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6)
                     .round()
                     / 1e6,
             }

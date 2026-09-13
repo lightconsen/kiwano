@@ -44,6 +44,27 @@ export const shelf = {
   /** Tooltip for the header's price range — a bare range carries no unit. */
   groupPriceTitle: "Input price per million tokens, lowest to highest",
 
+  /** Time-of-day pricing: the chip in a price cell whose number depends on when
+      the request runs, and the two labels the detail dialog's price block uses. */
+  peakTier: "peak/off-peak",
+  peakRates: "Peak",
+  offPeakRates: "Off-peak",
+  peakHours: "Peak hours",
+  /** Names the clock a schedule is written in. The windows are the vendor's
+      business hours, so they are never converted into the reader's zone. */
+  vendorTime: "Vendor's clock (UTC{offset})",
+  windowSep: ", ",
+  /** The header chip: is the vendor charging its peak rate right now? */
+  peakNow: "Peak now",
+  offPeakNow: "Off-peak now",
+  dayMon: "Mon",
+  dayTue: "Tue",
+  dayWed: "Wed",
+  dayThu: "Thu",
+  dayFri: "Fri",
+  daySat: "Sat",
+  daySun: "Sun",
+
   test: "Test",
   endpoints: "ENDPOINTS",
   billing: "Billing",

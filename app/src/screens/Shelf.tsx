@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
+import { isPeakAt, tzLabel, type PeakHours } from "../lib/peak";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
 import { fmtMoney } from "../lib/format";
@@ -149,6 +150,70 @@ function TagBadge({ tag, t }: { tag: CatalogEntry["tag"]; t: Translate }) {
     >
       <Icon className="size-3" aria-hidden />
       <span className="sr-only">{name}</span>
+    </span>
+  );
+}
+
+/** The document's weekday names on their dictionary keys. The schedule speaks
+    `mon`/`tue`/…, which is not a label in any language. */
+const DAY_LABEL: Record<string, KeyPath<Messages>> = {
+  mon: "shelf.dayMon",
+  tue: "shelf.dayTue",
+  wed: "shelf.dayWed",
+  thu: "shelf.dayThu",
+  fri: "shelf.dayFri",
+  sat: "shelf.daySat",
+  sun: "shelf.daySun",
+};
+
+/** A price's time-of-day tiers, or null when it publishes none. The two parts
+    are only meaningful together — a discount with no window is just a
+    different price — which is why they are read as one thing. */
+function tiersOf(rate: CatalogEntry["price_ref"]) {
+  if (!rate?.off_peak || !rate.peak_hours) return null;
+  return { off: rate.off_peak, hours: rate.peak_hours };
+}
+
+/** The peak hours as text: "Mon/Tue/Wed/Thu/Fri 09:00–12:00, …". */
+function windowText(hours: PeakHours, t: Translate): string {
+  return hours.windows
+    .map(
+      (w) =>
+        `${w.days.map((d) => t(DAY_LABEL[d.trim().toLowerCase()] ?? "shelf.dayMon")).join("/")} ${w.start}–${w.end}`,
+    )
+    .join(t("shelf.windowSep"));
+}
+
+/** The one line that says what a tiered price means: the peak rates, the
+    off-peak rates, and when each applies — **on the vendor's clock**, named, so
+    a reader is never left to assume their own. */
+function tierDetail(
+  rate: NonNullable<CatalogEntry["price_ref"]>,
+  tiers: NonNullable<ReturnType<typeof tiersOf>>,
+  t: Translate,
+): string {
+  const cur = rate.currency || "USD";
+  const fmt = (n: string) => fmtMoney(Number(n), cur);
+  return [
+    `${t("shelf.peakRates")} ${fmt(rate.input)} / ${fmt(rate.output)}`,
+    `${t("shelf.offPeakRates")} ${fmt(tiers.off.in)} / ${fmt(tiers.off.out)}`,
+    `${t("shelf.peakHours")}: ${windowText(tiers.hours, t)} (${t("shelf.vendorTime", {
+      offset: tzLabel(tiers.hours.tz_offset),
+    })})`,
+  ].join(" · ");
+}
+
+/** The chip a tiered price wears: the number in the cell is the peak one. */
+function TierChip({ rate, t }: { rate: NonNullable<CatalogEntry["price_ref"]>; t: Translate }) {
+  const tiers = tiersOf(rate);
+  if (!tiers) return null;
+  return (
+    <span
+      className="ml-1.5 flex-none rounded px-1 font-mono text-[10px]"
+      style={{ background: "var(--surface2)", color: "var(--mut)" }}
+      title={tierDetail(rate, tiers, t)}
+    >
+      {t("shelf.peakTier")}
     </span>
   );
 }
@@ -572,8 +637,13 @@ function Row({
             `rowPriceText`), then the representative model's rates, or the
             provider's own one-liner when it prices nothing. `title` because the
             cell can truncate. */}
-        <span className="block truncate" title={price}>
-          {price}
+        <span className="flex items-center">
+          <span className="min-w-0 truncate" title={price}>
+            {price}
+          </span>
+          {/* The figures beside it are the peak ones, which is not obvious from
+              a number that has two. */}
+          {!modelId && entry.price_ref && <TierChip rate={entry.price_ref} t={t} />}
         </span>
       </td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
@@ -634,6 +704,20 @@ function DetailDialog({
               price cell falls back to for the eleven entries that price no
               model. */}
           {entry.desc && <p className="mt-2 text-[11.5px] leading-relaxed text-mut">{entry.desc}</p>}
+
+          {/* A tiered price spelled out: the hero's figures are the peak ones,
+              and the alternative is not a footnote — it is what the same model
+              costs most of the week. */}
+          {entry.price_ref &&
+            (() => {
+              const tiers = tiersOf(entry.price_ref);
+              if (!tiers) return null;
+              return (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-mut">
+                  {tierDetail(entry.price_ref, tiers, t)}
+                </p>
+              );
+            })()}
 
           <div className="mt-2.5 flex gap-4 text-[11.5px] text-mut">
             <span>
@@ -772,6 +856,23 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
 
   const groups = useMemo(() => buildModelGroups(chipRows, query), [chipRows, query]);
 
+  // The schedule the shelf's tiered rows share: one, or none. Entries that
+  // disagreed would have no single "is it peak now" answer, and picking one
+  // would be a guess — so the chip does not render at all.
+  const schedule = useMemo(() => {
+    const seen = new Map<string, PeakHours>();
+    for (const e of chipRows) {
+      const tiers = tiersOf(e.price_ref);
+      if (tiers) seen.set(JSON.stringify(tiers.hours), tiers.hours);
+    }
+    return seen.size === 1 ? [...seen.values()][0] : null;
+  }, [chipRows]);
+
+  // The reader's clock, read once per render — the only place it enters. The
+  // gateway decides what is billed; this chip is a convenience, and a machine
+  // with a skewed clock is wrong about nothing that matters.
+  const now = new Date();
+
   // Collapsed models, by id. Held here rather than in the group rows because a
   // group is a <tbody>, not a component — and deliberately not persisted: it is
   // a reading position, not a preference.
@@ -851,6 +952,17 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         <div className="ml-auto flex items-center gap-2">
           {/* Two readings of one catalog: rows are providers, or rows are the
               models those providers serve. */}
+          {schedule && (
+            <span
+              className="flex-none rounded px-1.5 py-0.5 font-mono text-[10px]"
+              style={{ background: "var(--surface2)", color: "var(--mut)" }}
+              title={`${t("shelf.peakHours")}: ${windowText(schedule, t)} (${t("shelf.vendorTime", {
+                offset: tzLabel(schedule.tz_offset),
+              })})`}
+            >
+              {isPeakAt(schedule, now) ? t("shelf.peakNow") : t("shelf.offPeakNow")}
+            </span>
+          )}
           <Select value={view} onValueChange={(v) => rememberView(parseView(v))}>
             <SelectTrigger className="h-7 w-[132px] flex-none bg-surface text-[11.5px]">
               <SelectValue>{(v) => t(VIEWS.find((x) => x.id === v)?.labelKey ?? VIEWS[0].labelKey)}</SelectValue>

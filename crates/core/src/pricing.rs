@@ -1,9 +1,10 @@
 //! Model pricing sync + currency helpers.
 //!
-//! The bundled models.json (compiled into kiwano-adapters) is the price
-//! source. This module keeps the GUI-readable `model_pricing` SQLite table in
-//! sync with it (version-keyed upsert, changed rows only) and provides the
-//! currency metadata + conversion used across the usage/dashboard surfaces.
+//! The Hub's models.json — cached verbatim by [`crate::sync`] — is the price
+//! source, as it is for the catalog. This module keeps the GUI-readable
+//! `model_pricing` SQLite table in sync with it (version-keyed upsert, changed
+//! rows only, rows the document dropped pruned away) and provides the currency
+//! metadata + conversion used across the usage/dashboard surfaces.
 
 use crate::vm::Aux;
 use kiwano_adapters::model_pricing::{ModelPriceEntry, ModelsDoc};
@@ -12,10 +13,9 @@ use std::collections::HashMap;
 /// app_settings KV key holding the last-seeded models.json version.
 const SEEDED_VERSION_KEY: &str = "pricing_seeded_version";
 
-/// app_settings KV key holding the sha256 of the content last seeded, when that
-/// content came from the Hub. Absent for a bundled seed — the compiled snapshot
-/// has no published digest — which keeps the legacy version-only gate for
-/// installs that have never synced.
+/// app_settings KV key holding the sha256 of the content last seeded. Absent
+/// until the first Hub seed — an install that has never synced has nothing to
+/// record, and one that seeded before this key existed re-seeds once.
 const SEEDED_SHA_KEY: &str = "pricing_seeded_sha256";
 
 /// Currency metadata for the Settings selector + UI conversion.
@@ -32,9 +32,9 @@ pub struct CurrencyMetaVm {
 
 /// The currencies a user may display in. The rate table's keys are the ones
 /// conversion can actually target; `models[].currency` says what things are
-/// *priced* in, which is a different question — every bundled model is priced
-/// in USD, so deriving the list from it offered USD alone while the default
-/// preference was CNY, and picking USD left nothing to switch back to.
+/// *priced* in, which is a different question — the published table prices
+/// everything in USD, so deriving the list from it offered USD alone while the
+/// default preference was CNY, and picking USD left nothing to switch back to.
 ///
 /// The current preference is kept on the list even when no rate names it: a
 /// selector that cannot show its own value is a dead end.
@@ -55,35 +55,33 @@ pub struct SeededReport {
     pub skipped: bool,
 }
 
-/// Read the bundled price table.
-pub fn bundled_doc() -> ModelsDoc {
-    serde_json::from_str(kiwano_adapters::model_pricing::MODELS_JSON)
-        .expect("bundled models.json is valid")
+/// The price table to seed from, with the sha256 of the bytes it came from, or
+/// `None` when the Hub has never been synced or its cache is unusable.
+///
+/// There is no compiled fallback: like the catalog, prices come from the Hub
+/// alone. `None` is therefore "nothing to seed", never "an empty price
+/// document" — the difference matters, because seeding an empty document
+/// clears the table.
+pub fn effective_doc(aux: &Aux) -> Option<(ModelsDoc, String)> {
+    let (_, payload, sha, _) = aux.load_hub_models_cache()?;
+    let doc = serde_json::from_str::<ModelsDoc>(&payload).ok()?;
+    Some((doc, sha))
 }
 
-/// The price table to seed from, with the sha256 of its content when it came
-/// from the Hub. Prefers the Hub cache (a remote refresh wins over the compiled
-/// snapshot) and falls back to bundled on absence *or* on a corrupt cache —
-/// the same posture as `vm::load_catalog`. Never fails.
-pub fn effective_doc(aux: &Aux) -> (ModelsDoc, Option<String>) {
-    if let Some((_, payload, sha, _)) = aux.load_hub_models_cache() {
-        if let Ok(doc) = serde_json::from_str::<ModelsDoc>(&payload) {
-            return (doc, Some(sha));
-        }
-    }
-    (bundled_doc(), None)
+/// The exchange rates to convert with, or an empty table before the first sync
+/// (every conversion then passes amounts through unchanged).
+pub fn effective_rates(aux: &Aux) -> HashMap<String, f64> {
+    effective_doc(aux)
+        .map(|(doc, _)| doc.exchange_rates)
+        .unwrap_or_default()
 }
 
-/// The content half of the seed gate. Only compared when both sides exist, so
-/// an install that has never seen the Hub keeps the original version-only
-/// behaviour (and a switch back to the bundled snapshot re-seeds once).
-fn shas_match(fetched: Option<&str>, seeded: Option<&str>) -> bool {
-    match (fetched, seeded) {
-        (Some(a), Some(b)) => a == b,
-        (Some(_), None) => false, // Hub content we have never seeded
-        (None, Some(_)) => false, // source changed from the Hub back to bundled
-        (None, None) => true,     // pure version gate (legacy)
-    }
+/// The content half of the seed gate: only the bytes the Hub publishes may skip
+/// a seed. An install that seeded before digests were recorded has none, so it
+/// re-seeds once — which is also what a Hub that republishes under a new digest
+/// wants.
+fn shas_match(fetched: &str, seeded: Option<&str>) -> bool {
+    seeded == Some(fetched)
 }
 
 /// Delete the price rows whose `model_id` is not in `keep`; returns how many.
@@ -139,13 +137,20 @@ fn prune_absent(conn: &rusqlite::Connection, keep: &[ModelPriceEntry]) -> Result
 /// Rows are written only when a column actually changes (WHERE guard), so a
 /// forced re-seed is write-free in practice and `seeded` stays honest.
 pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
-    let (doc, sha) = effective_doc(aux);
+    // Nothing published, nothing to seed — and crucially, nothing to prune.
+    let Some((doc, sha)) = effective_doc(aux) else {
+        return Ok(SeededReport {
+            seeded: 0,
+            version: 0,
+            skipped: true,
+        });
+    };
     let seeded_version = aux
         .get_setting(SEEDED_VERSION_KEY)
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(0);
     let seeded_sha = aux.get_setting(SEEDED_SHA_KEY);
-    if doc.version <= seeded_version && shas_match(sha.as_deref(), seeded_sha.as_deref()) {
+    if doc.version <= seeded_version && shas_match(&sha, seeded_sha.as_deref()) {
         return Ok(SeededReport {
             seeded: 0,
             version: doc.version,
@@ -153,9 +158,11 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
         });
     }
 
-    // Provenance of these rows — the Hub refresh and the compiled snapshot are
-    // different sources, and the column exists to tell them apart.
-    let source = if sha.is_some() { "hub" } else { "bundled" };
+    // Provenance of these rows. Every row the seeder writes is Hub-sourced now
+    // that the compiled snapshot is gone; the column stays because legacy
+    // installs still carry `bundled` rows, and the guard below is what
+    // relabels them.
+    let source = "hub";
 
     let mut guard = aux.conn.lock().expect("aux mutex poisoned");
     let mut seeded = 0usize;
@@ -232,17 +239,9 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
 
     aux.set_setting(SEEDED_VERSION_KEY, &doc.version.to_string())
         .map_err(|e| e.to_string())?;
-    // Record the content half so an unchanged Hub document is not re-seeded;
-    // a bundled seed clears it, keeping the legacy version-only gate.
-    match sha.as_deref() {
-        Some(s) => aux
-            .set_setting(SEEDED_SHA_KEY, s)
-            .map_err(|e| e.to_string())?,
-        None => {
-            aux.delete_setting(SEEDED_SHA_KEY)
-                .map_err(|e| e.to_string())?;
-        }
-    }
+    // Record the content half so an unchanged Hub document is not re-seeded.
+    aux.set_setting(SEEDED_SHA_KEY, &sha)
+        .map_err(|e| e.to_string())?;
     Ok(SeededReport {
         seeded,
         version: doc.version,
@@ -261,16 +260,15 @@ pub fn preferred_currency(aux: &Aux) -> String {
 /// No Tauri involvement: the app's `get_currency_meta` command is a wrapper that
 /// hands over `state.aux`, and a command-line caller passes its own.
 ///
-/// The effective doc, not the bundled one: a Hub-supplied currency must be
-/// selectable, and a bundled-only currency must not be offered once the Hub
-/// table has replaced it — the list has to describe what was seeded.
+/// The rates are the Hub's, so the list describes what was actually seeded
+/// rather than what some snapshot once offered.
 pub fn currency_meta(aux: &Aux) -> Result<CurrencyMetaVm, String> {
-    let doc = effective_doc(aux).0;
+    let rates = effective_rates(aux);
     let preferred = preferred_currency(aux);
-    let currencies = displayable_currencies(&doc.exchange_rates, &preferred);
+    let currencies = displayable_currencies(&rates, &preferred);
     Ok(CurrencyMetaVm {
         currencies,
-        exchange_rates: doc.exchange_rates,
+        exchange_rates: rates,
         preferred,
     })
 }
@@ -337,20 +335,6 @@ mod tests {
         .to_string()
     }
 
-    /// An `Aux` on a database that also has `model_pricing`.
-    ///
-    /// That table belongs to the gateway store's migrations, not to `Aux`, and
-    /// an in-memory database cannot be shared between two connections — so the
-    /// store opens the file first and `Aux` joins it. In-memory would fail with
-    /// "no such table: model_pricing".
-    fn seeded_aux() -> (tempfile::TempDir, Aux) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("kiwano.db");
-        drop(kiwanod::store::Store::open(&path).unwrap());
-        let aux = Aux::open(&path).unwrap();
-        (dir, aux)
-    }
-
     /// Every `model_id` the local price table currently holds.
     fn priced_ids(aux: &Aux) -> Vec<String> {
         let conn = aux.conn.lock().unwrap();
@@ -374,7 +358,7 @@ mod tests {
     /// the kind.
     #[test]
     fn a_row_the_document_drops_stops_being_priced() {
-        let (_dir, aux) = seeded_aux();
+        let (aux, _dir) = test_env();
 
         aux.save_hub_models_cache(1, &doc_json_ids(1, &["a", "b", "c"]), &"a".repeat(64), "t")
             .unwrap();
@@ -397,7 +381,7 @@ mod tests {
     /// which is why `seed_model_pricing` logs the removal.
     #[test]
     fn an_empty_document_clears_the_table() {
-        let (_dir, aux) = seeded_aux();
+        let (aux, _dir) = test_env();
 
         aux.save_hub_models_cache(1, &doc_json_ids(1, &["a", "b"]), &"a".repeat(64), "t")
             .unwrap();
@@ -418,8 +402,8 @@ mod tests {
 
     #[test]
     fn a_preference_with_no_rate_still_stays_selectable() {
-        // The reported bug in miniature: every bundled model is priced in USD,
-        // so a list built from those offered USD alone while the default
+        // The reported bug in miniature: every published model is priced in
+        // USD, so a list built from those offered USD alone while the default
         // preference was CNY — pick USD and there was nothing to switch back
         // to. Whatever is selected has to stay on its own list.
         let usd_only = HashMap::from([("USD".to_string(), 1.0)]);
@@ -485,29 +469,37 @@ mod tests {
 
     #[test]
     fn shas_match_matrix() {
-        assert!(shas_match(Some("a"), Some("a")));
-        assert!(!shas_match(Some("a"), Some("b")));
-        assert!(!shas_match(Some("a"), None), "Hub content never seeded");
-        assert!(
-            !shas_match(None, Some("a")),
-            "source changed back to bundled"
-        );
-        assert!(shas_match(None, None), "legacy version-only gate");
+        assert!(shas_match("a", Some("a")));
+        assert!(!shas_match("a", Some("b")));
+        assert!(!shas_match("a", None), "published bytes never seeded");
     }
 
-    /// An install that never saw the Hub keeps the original behaviour: the
-    /// bundled snapshot has no published digest, so the version alone gates it.
+    /// Nothing published is not the same as "nothing is priced": the seed has
+    /// nothing to say and leaves the table exactly as it found it. The
+    /// distinction is load-bearing — the seed prunes rows the document does not
+    /// carry, so treating a missing document as an empty one would wipe the
+    /// local table on any install whose cache went missing.
     #[test]
-    fn seed_gate_version_only_legacy() {
+    fn seed_without_a_published_document_does_nothing() {
         let (aux, _dir) = test_env();
         let first = seed_model_pricing(&aux).unwrap();
-        assert!(!first.skipped);
-        assert!(first.seeded > 0);
+        assert!(first.skipped);
+        assert_eq!(first.seeded, 0);
         assert_eq!(aux.get_setting(SEEDED_SHA_KEY), None);
 
-        let second = seed_model_pricing(&aux).unwrap();
-        assert!(second.skipped);
-        assert_eq!(second.seeded, 0);
+        // …and once there are rows, they survive the document going away.
+        cache_hub(&aux, 1, "1", &sha_a());
+        seed_model_pricing(&aux).unwrap();
+        assert_eq!(priced_ids(&aux).len(), 1);
+
+        aux.conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM hub_models_cache", [])
+            .unwrap();
+        let after = seed_model_pricing(&aux).unwrap();
+        assert!(after.skipped);
+        assert_eq!(priced_ids(&aux).len(), 1, "the rows are left alone");
     }
 
     /// The headline case: content changed, version did not. Nothing enforces a
@@ -572,26 +564,26 @@ mod tests {
     }
 
     #[test]
-    fn effective_doc_prefers_hub_then_bundled() {
+    fn effective_doc_is_none_until_the_hub_is_synced() {
         let aux = Aux::open_in_memory().unwrap();
-        let (doc, sha) = effective_doc(&aux);
-        assert_eq!(doc.version, bundled_doc().version);
-        assert_eq!(sha, None);
+        assert!(effective_doc(&aux).is_none());
+        assert!(effective_rates(&aux).is_empty(), "no rates to convert with");
 
         cache_hub(&aux, 99, "1", &sha_a());
-        let (doc, sha) = effective_doc(&aux);
+        let (doc, sha) = effective_doc(&aux).unwrap();
         assert_eq!(doc.version, 99);
-        assert_eq!(sha.as_deref(), Some(sha_a().as_str()));
+        assert_eq!(sha, sha_a());
     }
 
     #[test]
-    fn effective_doc_corrupt_cache_falls_back() {
+    fn effective_doc_ignores_an_unusable_cache() {
         let aux = Aux::open_in_memory().unwrap();
         aux.save_hub_models_cache(9, "not json", &sha_a(), "2026-01-01T00:00:00Z")
             .unwrap();
-        let (doc, sha) = effective_doc(&aux);
-        assert_eq!(doc.version, bundled_doc().version);
-        assert_eq!(sha, None, "an unusable cache must not arm the gate");
+        assert!(
+            effective_doc(&aux).is_none(),
+            "an unparseable cache is no document at all"
+        );
     }
 
     /// Provenance: rows seeded from the Hub are labelled as such.

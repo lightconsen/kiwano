@@ -44,7 +44,7 @@ pub struct GatewayState {
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Request-log capture config, refreshed alongside the route table.
     log_cfg: RwLock<LogConfig>,
-    /// Bundled model price table (crates/adapters resources/models.json);
+    /// Model price table, built from the GUI-seeded `model_pricing` mirror and
     /// consulted at usage-record time to cost every metered request.
     pub(crate) pricing: RwLock<kiwano_adapters::model_pricing::PricingTable>,
     /// Providers currently over a billing limit. Derived state, recomputed by
@@ -60,16 +60,21 @@ pub struct GatewayState {
     shutdown: tokio::sync::watch::Sender<bool>,
 }
 
-/// The price table to serve from: the GUI-seeded `model_pricing` mirror when it
-/// has rows (so a Hub price refresh reaches cost recording), else the snapshot
-/// compiled into the binary. An empty mirror must never blank out pricing —
-/// it only means the seeder has not run yet.
+/// The price table to serve from: the GUI-seeded `model_pricing` mirror, which
+/// is how a Hub price refresh reaches cost recording.
+///
+/// There is no compiled snapshot behind it any more, so an empty mirror is
+/// simply an empty table: the seeder has not run yet and requests are recorded
+/// unpriced until it does. A read failure is logged rather than swallowed — it
+/// now serves the same empty table as "not seeded yet", and a silent dash on
+/// every cost is the hardest version of this to diagnose.
 fn resolve_pricing(store: &Store) -> kiwano_adapters::model_pricing::PricingTable {
     match store.load_model_pricing() {
-        Ok(rows) if !rows.is_empty() => {
-            kiwano_adapters::model_pricing::PricingTable::from_entries(rows)
+        Ok(rows) => kiwano_adapters::model_pricing::PricingTable::from_entries(rows),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read the price mirror; serving no prices");
+            Default::default()
         }
-        _ => kiwano_adapters::model_pricing::PricingTable::bundled(),
     }
 }
 
@@ -120,8 +125,8 @@ impl GatewayState {
         let _ = self.shutdown.send(true);
     }
 
-    /// Current price-table snapshot (cheap clone; bundled data is static but
-    /// a future backend-fed table swaps here on `/reload`).
+    /// Current price-table snapshot (cheap clone; rebuilt from the mirror on
+    /// `/reload`).
     pub fn pricing(&self) -> kiwano_adapters::model_pricing::PricingTable {
         self.pricing.read().expect("pricing lock poisoned").clone()
     }
@@ -327,22 +332,20 @@ mod tests {
         }
     }
 
-    /// A model the bundled table is known to price (see the adapters tests).
-    const BUNDLED_MODEL: &str = "claude-opus-4-8";
-
-    /// An unseeded mirror must not blank out pricing — it only means the GUI
-    /// seeder has not run.
+    /// An unseeded mirror serves no prices. There is no compiled snapshot
+    /// behind it any more, so this is also what a fresh install looks like:
+    /// every request is recorded unpriced until the first sync.
     #[test]
-    fn resolve_pricing_falls_back_to_bundled_when_empty() {
+    fn resolve_pricing_of_an_unseeded_mirror_is_empty() {
         let store = Store::open_in_memory().unwrap();
-        assert!(resolve_pricing(&store).find(BUNDLED_MODEL).is_some());
+        assert!(resolve_pricing(&store).find("claude-opus-4-8").is_none());
     }
 
     /// A seeded mirror is served, and it is the *whole* table: the seeder
     /// always writes a complete document, so nothing is merged in behind it.
     /// This is the guard against the mirror going unread again.
     #[test]
-    fn resolve_pricing_prefers_the_mirror() {
+    fn resolve_pricing_serves_the_mirror() {
         let store = Store::open_in_memory().unwrap();
         store.upsert_model_pricing(&entry("kw-test-model")).unwrap();
         let table = resolve_pricing(&store);
@@ -351,8 +354,8 @@ mod tests {
             "mirror row is served"
         );
         assert!(
-            table.find(BUNDLED_MODEL).is_none(),
-            "mirror replaces bundled"
+            table.find("claude-opus-4-8").is_none(),
+            "and nothing else is"
         );
     }
 }

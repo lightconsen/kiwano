@@ -19,6 +19,19 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Model prices now come only from the Hub.** They used to come from a table
+  compiled into the binary as well, and the two had drifted apart: a machine
+  that had never synced showed no providers on the shelf — that snapshot is
+  already gone — yet still costed 192 models, 153 of them vendor rates the
+  catalog had deliberately dropped. The compiled table is removed, so prices
+  are seeded from the Hub's `models.json` and nothing else; until the first
+  sync there are no rates and every cost reads "—". The seed also deletes rows
+  the published document no longer carries, so a client that synced the larger
+  table stops costing what was withdrawn — and if the Hub ever publishes an
+  empty one, the app says so in its log rather than silently clearing it.
+
 ## [0.1.9] - 2026-09-13
 
 ### Added

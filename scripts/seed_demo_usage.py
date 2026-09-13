@@ -35,7 +35,6 @@ Usage:
 """
 import argparse
 import json
-import pathlib
 import sqlite3
 import sys
 from datetime import datetime, time, timedelta, timezone
@@ -272,9 +271,22 @@ def preferred_currency(db):
         conn.close()
 
 
-def rate_for(currency, repo):
-    doc = json.loads((pathlib.Path(repo) / "crates/adapters/resources/models.json").read_text())
-    return doc["exchange_rates"].get(currency, 1.0)
+def rate_for(currency, db):
+    """Units of `currency` per USD, per the Hub price document the app cached.
+
+    Prices used to ship as a bundled models.json; they come from the Hub now,
+    and the app converts with the cached copy of that document — so this reads
+    the same row. A scratch database that has never synced has no rates, and the
+    figure is then printed unconverted.
+    """
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        row = conn.execute("SELECT payload FROM hub_models_cache WHERE id = 1").fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return 1.0
+    return json.loads(row[0]).get("exchange_rates", {}).get(currency, 1.0)
 
 
 def main():
@@ -284,10 +296,9 @@ def main():
     parser.add_argument("--clear", action="store_true", help="drop existing usage/logs first")
     args = parser.parse_args()
 
-    repo = pathlib.Path(__file__).resolve().parent.parent
     inserted, per_day = seed(args.db, args.days, args.clear)
     currency = preferred_currency(args.db)
-    rate = rate_for(currency, repo)
+    rate = rate_for(currency, args.db)
 
     def sums(window_days):
         # Today is the current local day; "7 days" is today plus the six before

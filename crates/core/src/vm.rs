@@ -492,7 +492,8 @@ pub struct SyncReportVm {
     /// app confirmed it is current, which is what the footer badge claims.
     pub unchanged: bool,
     /// Version of the price table now cached; None when the Hub offers no
-    /// pricing (unreachable, malformed, or absent — the bundled table stands).
+    /// pricing (unreachable, malformed, or absent — the previous cache, if any,
+    /// stands).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing_version: Option<i64>,
     /// The pricing half was already current, so models.json was not fetched.
@@ -587,7 +588,7 @@ pub struct SettingsVm {
     #[serde(default = "default_hub_url")]
     pub hub_url: String,
     /// Preferred display currency (ISO code); per-provider amounts convert
-    /// into it via the bundled exchange rates.
+    /// into it via the Hub's published exchange rates.
     #[serde(default = "default_preferred_currency")]
     pub preferred_currency: String,
     /// Auto-check for app updates at startup (opt-out; silent, notification only).
@@ -2481,10 +2482,10 @@ pub fn build_dashboard(
         .collect();
 
     // Cost rolls up per-currency buckets (each row's cost_currency) into the
-    // user's preferred display currency via the effective price table's rates:
-    // the Hub's when it has published any, so this agrees with the currency
-    // selector instead of a snapshot compiled into the binary.
-    let rates = crate::pricing::effective_doc(aux).0.exchange_rates;
+    // user's preferred display currency via the Hub's published rates, so this
+    // agrees with the currency selector. Before the first sync there are no
+    // rates and the buckets are summed as-is.
+    let rates = crate::pricing::effective_rates(aux);
     let pref = crate::pricing::preferred_currency(aux);
     let cost_of = |buckets: &[(Option<String>, f64)]| {
         crate::pricing::convert_cost_buckets(buckets, &pref, &rates)
@@ -3562,6 +3563,17 @@ mod tests {
     fn dashboard_windows_cover_the_right_days() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
+        // Display conversion uses the Hub's published rates and there is no
+        // compiled snapshot behind them, so the fixture publishes the rate the
+        // cost assertion below converts with.
+        let hub = serde_json::json!({
+            "version": 1,
+            "exchange_rates": { "USD": 1.0, "CNY": 7.1 },
+            "models": []
+        })
+        .to_string();
+        aux.save_hub_models_cache(1, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
+            .unwrap();
         // Distinct magnitudes per age so a window that is too wide or too
         // narrow cannot cancel out: today 2, 3 days back 4, 10 days back 6,
         // 40 days back 8, plus one row 7 calendar days back.
@@ -4542,8 +4554,8 @@ mod tests {
     fn currency_limits_convert_with_the_hub_rate_table() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
-        // A Hub price table whose CNY rate is nothing like the bundled one
-        // (the bundled table quotes several CNY per USD).
+        // A Hub price table whose CNY rate is nothing like the real one (the
+        // Hub quotes several CNY per USD).
         let hub = serde_json::json!({
             "version": 99,
             "exchange_rates": { "USD": 1.0, "CNY": 2.0 },
@@ -4563,8 +4575,8 @@ mod tests {
         row.cost_currency = Some("USD".into());
         s.record_usage(&row).unwrap();
 
-        // 10 USD is 20 CNY at the Hub's rate — under the 50 CNY limit, so no
-        // alert. Converting with the bundled table instead would put it at 71
+        // 10 USD is 20 CNY at the cached rate — under the 50 CNY limit, so no
+        // alert. Converting at the real ~7.1 CNY/USD instead would put it at 71
         // and fire one, which is what makes "no alert" a real assertion.
         let alerts = check_usage_alerts(&s, &aux, true).unwrap();
         assert!(

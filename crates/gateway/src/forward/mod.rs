@@ -1484,9 +1484,22 @@ mod tests {
     fn record_sample_costs_priced_models_and_skips_unknown() {
         use crate::store::Protocol;
 
-        let state =
-            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
-                .expect("state");
+        // The `model_pricing` mirror is the only price source (there is no
+        // compiled snapshot behind it), so the rows this test costs against
+        // have to be seeded into it — exactly as the GUI seeder would.
+        let store = crate::store::Store::open_in_memory().expect("store");
+        store
+            .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                model_id: "claude-opus-4-8".into(),
+                display_name: "Claude Opus 4.8".into(),
+                input: "5".into(),
+                output: "25".into(),
+                cache_read: "0.5".into(),
+                cache_creation: "6.25".into(),
+                currency: "USD".into(),
+            })
+            .unwrap();
+        let state = crate::server::GatewayState::new(store).expect("state");
         state
             .store
             .insert_provider(&crate::store::Provider {
@@ -1512,7 +1525,7 @@ mod tests {
             })
             .unwrap();
 
-        // claude-opus-4-8 is priced in the bundled table (input 5 USD/M).
+        // claude-opus-4-8 is priced in the mirror above (input 5 USD/M).
         let sample = |model: Option<&'static str>| UsageSample {
             agent: "claude".into(),
             provider_id: "p1".into(),

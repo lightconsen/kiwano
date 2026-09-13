@@ -170,7 +170,7 @@ Layout:
 | `app/src-tauri/` | The Tauri shell: commands, tray, watchdog, updater — the desktop app's binary is `kiwano-app` |
 | `crates/core/` | The application layer the app and the CLI share: view models, takeover, sync, share |
 | `crates/gateway/` | The gateway daemon: routing, strategies, metering, store |
-| `crates/adapters/` | Protocol conversion, agent config take-over, pricing table (`resources/models.json`) |
+| `crates/adapters/` | Protocol conversion, agent config take-over, price lookup and cost calculation |
 | `crates/cli/` | The `kiwano` command-line client ([docs](docs/cli.md)) |
 | `packaging/` | The systemd unit and server install notes that ship inside the release bundle |
 | `site/`, `design/` | Marketing site, and the original UI design prototype |

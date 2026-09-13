@@ -235,11 +235,11 @@ ALTER TABLE providers ADD COLUMN headers TEXT;
 
 /// v9: model pricing (port of cc-switch's price layer).
 /// - `model_pricing` is the price table itself (TEXT decimals, currency per
-///   row). The GUI seeds it from the bundled snapshot and refreshes it from the
-///   Hub; the gateway builds its in-memory table from these rows at startup and
-///   on `/reload` (`server::resolve_pricing`), falling back to the bundled
-///   snapshot when the table is still empty. A price update therefore affects
-///   costs recorded *after* the reload — history is not rewritten.
+///   row). The GUI seeds it from the Hub's models.json; the gateway builds its
+///   in-memory table from these rows at startup and on `/reload`
+///   (`server::resolve_pricing`) — an empty table is an empty table, there is
+///   nothing behind these rows. A price update therefore affects costs recorded
+///   *after* the reload — history is not rewritten.
 /// - `usage`/`request_logs` gain `cost` + `cost_currency` (cost is stored in
 ///   the price entry's currency; NULL for unpriced models).
 /// - `providers.plan_query` holds the token-plan quota query template +
@@ -2111,12 +2111,13 @@ impl Store {
         Ok(())
     }
 
-    /// The `model_pricing` mirror, written by the GUI's seeder from the bundled
-    /// snapshot and refreshed from the Hub. The gateway resolves prices in
-    /// memory, so this is what feeds a Hub price update into cost recording.
+    /// The `model_pricing` mirror, written by the GUI's seeder from the Hub's
+    /// models.json. The gateway resolves prices in memory, so this is what
+    /// feeds a Hub price update into cost recording.
     ///
-    /// An empty result means the seeder has never run — callers must fall back
-    /// to the bundled table rather than read it as "nothing is priced".
+    /// An empty result means nothing is priced: the seeder has not run, or the
+    /// Hub published a table that prices nothing. There is no snapshot behind
+    /// this table to fall back to, so callers read it as it is.
     pub fn load_model_pricing(&self) -> Result<Vec<ModelPriceEntry>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(

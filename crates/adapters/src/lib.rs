@@ -9,8 +9,8 @@
 //! - [`config`]: home-dir resolution + atomic file writes
 //! - [`provider`]: provider model, manager and metadata
 //! - [`model_capabilities`]: image-input capability resolution
-//! - [`model_pricing`]: bundled per-million-token price table + cost
-//!   calculation (matching semantics ported from cc-switch usage stats)
+//! - [`model_pricing`]: per-million-token price lookup + cost calculation
+//!   (matching semantics ported from cc-switch usage stats)
 //! - [`gemini_config`]: Gemini env/settings file management
 //! - [`claude_desktop_config`]: Claude Desktop gateway profile + deploymentMode
 //!   writes (macOS Claude-3p configLibrary subset)

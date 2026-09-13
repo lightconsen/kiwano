@@ -161,9 +161,9 @@ export interface PlanQuotaReport {
   cached: boolean;
 }
 
-/** Currency metadata from the bundled price table (Settings selector + client conversion) */
+/** Currency metadata from the Hub price table (Settings selector + client conversion) */
 export interface CurrencyMeta {
-  /** ISO codes present in the bundled price table */
+  /** ISO codes present in the Hub price table */
   currencies: string[];
   /** currency -> units of that currency per 1 USD (e.g. CNY: 7.1) */
   exchange_rates: Record<string, number>;
@@ -367,7 +367,7 @@ export interface AppSettings {
   log_retention_days: number;
   /** Cost alert (spec §4.1 P1): system notification when usage reaches the per-period limit */
   cost_alert: boolean;
-  /** Preferred display currency for costs (ISO code; converted via the bundled rates) */
+  /** Preferred display currency for costs (ISO code; converted via the Hub rates) */
   preferred_currency: string;
   /** Auto-check for app updates at startup (silent; notification only) */
   auto_check_update: boolean;

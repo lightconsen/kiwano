@@ -917,8 +917,8 @@ pub fn run() {
             };
 
             let ui = vm::ui_settings(&aux);
-            // Seed the bundled model price table into model_pricing
-            // (version-gated no-op after the first run).
+            // Seed the Hub price table into model_pricing (a no-op until the
+            // first sync, and until the document changes after that).
             match pricing::seed_model_pricing(&aux) {
                 Ok(r) if !r.skipped => {
                     tracing::info!(version = r.version, rows = r.seeded, "model pricing seeded")
@@ -937,7 +937,7 @@ pub fn run() {
             spawn_watchdog(app.handle().clone());
             // Hub catalog: one-shot conditional sync (skips the download when
             // the manifest sha matches the cache). Silent, opt-out-free, and
-            // failure-tolerant — the bundled catalog is the offline fallback.
+            // failure-tolerant — a failed sync just leaves the cache as it was.
             spawn_hub_sync(app.handle().clone());
 
             // Tray + login items (the autostart/close_to_tray settings become real from here on)

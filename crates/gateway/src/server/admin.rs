@@ -319,6 +319,7 @@ mod tests {
         Provider {
             id: id.into(),
             name: id.into(),
+            catalog_id: None,
             protocol,
             base_url: base_url.into(),
             api_path: None,

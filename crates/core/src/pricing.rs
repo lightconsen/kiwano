@@ -84,28 +84,51 @@ fn shas_match(fetched: &str, seeded: Option<&str>) -> bool {
     seeded == Some(fetched)
 }
 
-/// Delete the price rows whose `model_id` is not in `keep`; returns how many.
+/// The canonical `(provider_id, model_id)` key of a document row.
+///
+/// Both halves trimmed and lowercased, because that is what the in-memory index
+/// looks up: a row stored as the Hub spelled it would never be found. The seed's
+/// insert and its prune go through here together — normalizing in only one of
+/// them would delete the row the other just wrote, every sync.
+fn price_key(m: &ModelPriceEntry) -> (String, String) {
+    (
+        m.provider_id.trim().to_ascii_lowercase(),
+        m.model_id.trim().to_ascii_lowercase(),
+    )
+}
+
+/// Delete the price rows whose key is not in `keep`; returns how many.
 ///
 /// A temp table rather than `NOT IN (?, ?, …)`: the placeholder list is capped
-/// by SQLite's variable limit (999 by default) while this is however many models
+/// by SQLite's variable limit (999 by default) while this is however many rows
 /// the Hub publishes. The connection outlives the call, so the table is dropped
 /// rather than left behind.
+///
+/// The key is the full `(provider_id, model_id)` pair. A pre-v11 row is the
+/// general one (`provider_id = ''`), and it has to go when the document prices
+/// that model per provider instead: a stale general row is not inert, it is what
+/// every unmatched provider falls back to.
 ///
 /// An empty `keep` deletes every row, which is the intended reading of a
 /// document that prices nothing. The caller logs it.
 fn prune_absent(conn: &rusqlite::Connection, keep: &[ModelPriceEntry]) -> Result<usize, String> {
     conn.execute_batch(
-        "CREATE TEMP TABLE IF NOT EXISTS keep_price (model_id TEXT PRIMARY KEY);
+        "CREATE TEMP TABLE IF NOT EXISTS keep_price (
+             provider_id TEXT NOT NULL DEFAULT '',
+             model_id    TEXT NOT NULL,
+             PRIMARY KEY (provider_id, model_id)
+         );
          DELETE FROM keep_price;",
     )
     .map_err(|e| e.to_string())?;
 
     {
         let mut stmt = conn
-            .prepare("INSERT OR IGNORE INTO keep_price (model_id) VALUES (?1)")
+            .prepare("INSERT OR IGNORE INTO keep_price (provider_id, model_id) VALUES (?1, ?2)")
             .map_err(|e| e.to_string())?;
         for m in keep {
-            stmt.execute(rusqlite::params![m.model_id])
+            let (provider_id, model_id) = price_key(m);
+            stmt.execute(rusqlite::params![provider_id, model_id])
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -113,7 +136,9 @@ fn prune_absent(conn: &rusqlite::Connection, keep: &[ModelPriceEntry]) -> Result
     let removed = conn
         .execute(
             "DELETE FROM model_pricing
-              WHERE model_id NOT IN (SELECT model_id FROM keep_price)",
+              WHERE NOT EXISTS (SELECT 1 FROM keep_price k
+                                 WHERE k.provider_id = model_pricing.provider_id
+                                   AND k.model_id = model_pricing.model_id)",
             [],
         )
         .map_err(|e| e.to_string())?;
@@ -174,21 +199,23 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
     {
         let tx = guard.transaction().map_err(|e| e.to_string())?;
         for m in &doc.models {
+            let (provider_id, model_id) = price_key(m);
             let n = tx
                 .execute(
-                    "INSERT INTO model_pricing (model_id, display_name, input, output,
+                    "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
                                                 cache_read, cache_creation, currency, source)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                     ON CONFLICT(model_id) DO UPDATE SET
-                        display_name = ?2, input = ?3, output = ?4,
-                        cache_read = ?5, cache_creation = ?6, currency = ?7, source = ?8
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     ON CONFLICT(provider_id, model_id) DO UPDATE SET
+                        display_name = ?3, input = ?4, output = ?5,
+                        cache_read = ?6, cache_creation = ?7, currency = ?8, source = ?9
                      -- COALESCE: legacy rows may carry a NULL source, and
                      -- `NULL <> ?` is NULL (falsy), which would silently skip them.
-                     WHERE display_name <> ?2 OR input <> ?3 OR output <> ?4
-                        OR cache_read <> ?5 OR cache_creation <> ?6 OR currency <> ?7
-                        OR COALESCE(source, '') <> ?8",
+                     WHERE display_name <> ?3 OR input <> ?4 OR output <> ?5
+                        OR cache_read <> ?6 OR cache_creation <> ?7 OR currency <> ?8
+                        OR COALESCE(source, '') <> ?9",
                     rusqlite::params![
-                        m.model_id,
+                        provider_id,
+                        model_id,
                         m.display_name,
                         m.input,
                         m.output,
@@ -313,13 +340,14 @@ mod tests {
         HashMap::from([("USD".to_string(), 1.0), ("CNY".to_string(), 7.1)])
     }
 
-    /// A price document carrying `ids`, as the Hub would publish it.
-    fn doc_json_ids(version: i64, ids: &[&str]) -> String {
-        let models: Vec<serde_json::Value> = ids
+    /// A price document carrying `rows` as `(provider_id, model_id)`, as the
+    /// Hub would publish it.
+    fn doc_json_rows(version: i64, rows: &[(&str, &str)]) -> String {
+        let models: Vec<serde_json::Value> = rows
             .iter()
-            .map(|id| {
+            .map(|(provider_id, id)| {
                 serde_json::json!({
-                    "model_id": id, "display_name": id,
+                    "provider_id": provider_id, "model_id": id, "display_name": id,
                     "input": "1", "output": "2",
                     "cache_read": "0", "cache_creation": "0",
                     "currency": "USD",
@@ -335,18 +363,33 @@ mod tests {
         .to_string()
     }
 
-    /// Every `model_id` the local price table currently holds.
-    fn priced_ids(aux: &Aux) -> Vec<String> {
+    /// `doc_json_rows` for a document of provider-less ids — the pre-v11 shape.
+    fn doc_json_ids(version: i64, ids: &[&str]) -> String {
+        let rows: Vec<(&str, &str)> = ids.iter().map(|id| ("", *id)).collect();
+        doc_json_rows(version, &rows)
+    }
+
+    /// How `ids` would be stored: no provider, so the general price.
+    fn general_keys(ids: &[&str]) -> Vec<(String, String)> {
+        ids.iter()
+            .map(|id| (String::new(), id.to_string()))
+            .collect()
+    }
+
+    /// Every `(provider_id, model_id)` the local price table currently holds.
+    fn priced_keys(aux: &Aux) -> Vec<(String, String)> {
         let conn = aux.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT model_id FROM model_pricing ORDER BY model_id")
+            .prepare(
+                "SELECT provider_id, model_id FROM model_pricing ORDER BY provider_id, model_id",
+            )
             .unwrap();
-        let ids = stmt
-            .query_map([], |r| r.get::<_, String>(0))
+        let keys = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
             .unwrap()
             .filter_map(Result::ok)
             .collect();
-        ids
+        keys
     }
 
     /// A row the document drops has to stop being priced.
@@ -363,17 +406,87 @@ mod tests {
         aux.save_hub_models_cache(1, &doc_json_ids(1, &["a", "b", "c"]), &"a".repeat(64), "t")
             .unwrap();
         seed_model_pricing(&aux).unwrap();
-        assert_eq!(priced_ids(&aux), ["a", "b", "c"]);
+        assert_eq!(priced_keys(&aux), general_keys(&["a", "b", "c"]));
 
         aux.save_hub_models_cache(2, &doc_json_ids(2, &["a", "b"]), &"b".repeat(64), "t")
             .unwrap();
         let report = seed_model_pricing(&aux).unwrap();
         assert!(!report.skipped, "a newer version re-seeds");
         assert_eq!(
-            priced_ids(&aux),
-            ["a", "b"],
+            priced_keys(&aux),
+            general_keys(&["a", "b"]),
             "the dropped row is gone, not merely untouched"
         );
+    }
+
+    /// A model the document starts pricing per provider replaces the general
+    /// row rather than sitting beside it. The general row is not inert — it is
+    /// what every provider without a price of its own falls back to — so leaving
+    /// it would keep handing out a price the Hub had withdrawn.
+    #[test]
+    fn a_row_that_gains_a_provider_replaces_the_general_one() {
+        let (aux, _dir) = test_env();
+
+        aux.save_hub_models_cache(1, &doc_json_ids(1, &["m1"]), &"a".repeat(64), "t")
+            .unwrap();
+        seed_model_pricing(&aux).unwrap();
+        assert_eq!(priced_keys(&aux), general_keys(&["m1"]));
+
+        aux.save_hub_models_cache(
+            2,
+            &doc_json_rows(2, &[("kimi", "m1"), ("moonshot", "m1")]),
+            &"b".repeat(64),
+            "t",
+        )
+        .unwrap();
+        seed_model_pricing(&aux).unwrap();
+        assert_eq!(
+            priced_keys(&aux),
+            vec![
+                ("kimi".to_string(), "m1".to_string()),
+                ("moonshot".to_string(), "m1".to_string()),
+            ],
+            "both providers are priced, and the general row is gone"
+        );
+    }
+
+    /// The stored key is the normalized one, so a row spelled differently is the
+    /// same row — which is what stops the insert and the prune from disagreeing
+    /// about whether it belongs: an unnormalized prune would delete the row the
+    /// insert had just normalized, on every sync, leaving the table empty.
+    #[test]
+    fn the_stored_key_is_normalized() {
+        let (aux, _dir) = test_env();
+        let kimi_m1 = vec![("kimi".to_string(), "m1".to_string())];
+
+        aux.save_hub_models_cache(
+            1,
+            &doc_json_rows(1, &[("  Kimi  ", "m1")]),
+            &"a".repeat(64),
+            "t",
+        )
+        .unwrap();
+        seed_model_pricing(&aux).unwrap();
+        assert_eq!(priced_keys(&aux), kimi_m1);
+
+        // The same row, spelled differently, under a new digest so the gate
+        // re-seeds: nothing to write, and — the trap — nothing to prune. An
+        // insert that normalizes while the prune does not would delete the row
+        // it had just decided was unchanged.
+        aux.save_hub_models_cache(
+            2,
+            &doc_json_rows(2, &[("KIMI", "m1")]),
+            &"b".repeat(64),
+            "t",
+        )
+        .unwrap();
+        let report = seed_model_pricing(&aux).unwrap();
+        assert!(!report.skipped, "a new digest re-seeds");
+        assert_eq!(
+            report.seeded, 0,
+            "the row is already what the document says"
+        );
+        assert_eq!(priced_keys(&aux), kimi_m1, "and it survived the prune");
     }
 
     /// An empty document means "nothing is priced", and it clears the table.
@@ -386,12 +499,12 @@ mod tests {
         aux.save_hub_models_cache(1, &doc_json_ids(1, &["a", "b"]), &"a".repeat(64), "t")
             .unwrap();
         seed_model_pricing(&aux).unwrap();
-        assert_eq!(priced_ids(&aux).len(), 2);
+        assert_eq!(priced_keys(&aux).len(), 2);
 
         aux.save_hub_models_cache(2, &doc_json_ids(2, &[]), &"b".repeat(64), "t")
             .unwrap();
         seed_model_pricing(&aux).unwrap();
-        assert!(priced_ids(&aux).is_empty());
+        assert!(priced_keys(&aux).is_empty());
     }
 
     #[test]
@@ -490,7 +603,7 @@ mod tests {
         // …and once there are rows, they survive the document going away.
         cache_hub(&aux, 1, "1", &sha_a());
         seed_model_pricing(&aux).unwrap();
-        assert_eq!(priced_ids(&aux).len(), 1);
+        assert_eq!(priced_keys(&aux).len(), 1);
 
         aux.conn
             .lock()
@@ -499,7 +612,7 @@ mod tests {
             .unwrap();
         let after = seed_model_pricing(&aux).unwrap();
         assert!(after.skipped);
-        assert_eq!(priced_ids(&aux).len(), 1, "the rows are left alone");
+        assert_eq!(priced_keys(&aux).len(), 1, "the rows are left alone");
     }
 
     /// The headline case: content changed, version did not. Nothing enforces a

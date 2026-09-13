@@ -270,6 +270,10 @@ fn edit_input(
 
     let limit_value = args.limit.or(current.period_limit);
     Ok(vm::NewProviderInput {
+        // The CLI has no shelf to add from, and this column is only ever set
+        // from there — the stored link is kept when the field is absent, so an
+        // edit from the shell does not unlink a provider added in the app.
+        catalog_id: None,
         name: args.name.clone().unwrap_or_else(|| current.name.clone()),
         // An empty key means "keep the stored one" in update_provider, so this
         // is safe to leave blank when the flag is absent.
@@ -1104,6 +1108,9 @@ fn new_provider_input(args: &AddArgs) -> Result<vm::NewProviderInput, CliError> 
     check_plan_limits(billing, &args.forward)?;
 
     Ok(vm::NewProviderInput {
+        // No shelf on the command line; see the update path for why this is
+        // absent rather than empty.
+        catalog_id: None,
         name: args.name.trim().to_string(),
         api_key: args.key.clone().unwrap_or_default(),
         endpoint: args.endpoint.trim().to_string(),

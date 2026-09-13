@@ -19,6 +19,24 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A price can belong to a provider.** The price table was keyed by model
+  alone, so a model could carry exactly one price whoever served it, and a
+  document that priced one model differently at two providers could not be
+  loaded at all — which is why the Hub refused to publish one. Rows now name
+  the catalog entry they belong to, and a forwarded request is costed at the
+  provider it actually went through.
+
+  A provider added from the shelf records which catalog entry it came from.
+  That link has to be its own column: a local row is named `<slug>-<hex>`, so
+  `Kimi (Moonshot)` is `kimi-moonshot-4f2a1c` while the catalog calls it
+  `kimi`, and renaming a provider changes the name but not the id. A provider
+  that no catalog entry prices falls back in a fixed order — the general price
+  first, then the lowest-priced entry — instead of to whichever row was seeded
+  last, which is what the old table did: a cost could move without any price
+  moving.
+
 ### Changed
 
 - **Model prices now come only from the Hub.** They used to come from a table

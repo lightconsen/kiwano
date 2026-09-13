@@ -264,6 +264,7 @@ mod tests {
         crate::router::UpstreamProvider {
             id: "p".into(),
             name: "p".into(),
+            catalog_id: None,
             protocol: Protocol::Anthropic,
             base_url: base.into(),
             api_path: api_path.map(Into::into),

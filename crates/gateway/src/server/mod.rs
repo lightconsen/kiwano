@@ -322,6 +322,7 @@ mod tests {
 
     fn entry(id: &str) -> kiwano_adapters::model_pricing::ModelPriceEntry {
         kiwano_adapters::model_pricing::ModelPriceEntry {
+            provider_id: String::new(),
             model_id: id.into(),
             display_name: id.into(),
             input: "1".into(),
@@ -338,7 +339,9 @@ mod tests {
     #[test]
     fn resolve_pricing_of_an_unseeded_mirror_is_empty() {
         let store = Store::open_in_memory().unwrap();
-        assert!(resolve_pricing(&store).find("claude-opus-4-8").is_none());
+        assert!(resolve_pricing(&store)
+            .find("", "claude-opus-4-8")
+            .is_none());
     }
 
     /// A seeded mirror is served, and it is the *whole* table: the seeder
@@ -350,11 +353,11 @@ mod tests {
         store.upsert_model_pricing(&entry("kw-test-model")).unwrap();
         let table = resolve_pricing(&store);
         assert!(
-            table.find("kw-test-model").is_some(),
+            table.find("", "kw-test-model").is_some(),
             "mirror row is served"
         );
         assert!(
-            table.find("claude-opus-4-8").is_none(),
+            table.find("", "claude-opus-4-8").is_none(),
             "and nothing else is"
         );
     }

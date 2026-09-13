@@ -22,6 +22,15 @@ const ONE_M_CONTEXT_MARKER: &str = "[1m]";
 /// One row of models.json (prices = currency per million tokens, TEXT decimals).
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelPriceEntry {
+    /// The catalog provider entry this price belongs to. The Hub prices a model
+    /// per provider, so the same `model_id` may appear once per provider at
+    /// different rates (a subsidy, a margin, an off-peak tariff).
+    ///
+    /// Empty means "not specific to a provider": that is what documents and
+    /// rows written before this field existed carry, and the lookup treats them
+    /// as the general price.
+    #[serde(default)]
+    pub provider_id: String,
     pub model_id: String,
     pub display_name: String,
     pub input: String,
@@ -46,11 +55,17 @@ pub struct ModelsDoc {
 }
 
 /// In-memory price lookup built from models.json.
+///
+/// Keyed by `(provider_id, model_id)`; both are normalized/lowercase and a row
+/// whose `provider_id` is empty is the general price.
 #[derive(Debug, Clone, Default)]
 pub struct PricingTable {
-    /// model_id -> entry (model_ids are stored already normalized/lowercase)
-    rows: HashMap<String, ModelPriceEntry>,
-    /// Sorted keys for the gated prefix scan (shortest match wins).
+    /// provider_id -> model_id -> entry.
+    rows: HashMap<String, HashMap<String, ModelPriceEntry>>,
+    /// model_id -> the providers that price it, ascending, which is what makes
+    /// `fallback` deterministic and try the general row first ("" sorts first).
+    providers_by_model: HashMap<String, Vec<String>>,
+    /// Sorted model_id keys for the gated prefix scan (shortest match wins).
     keys: Vec<String>,
     /// Currency conversion rates for display (e.g. USD -> CNY).
     exchange_rates: HashMap<String, f64>,
@@ -64,22 +79,44 @@ impl std::str::FromStr for PricingTable {
 
     fn from_str(json: &str) -> Result<Self, Self::Err> {
         let doc: ModelsDoc = serde_json::from_str(json)?;
-        let mut rows = HashMap::with_capacity(doc.models.len());
-        for entry in doc.models {
-            rows.insert(entry.model_id.to_ascii_lowercase(), entry);
-        }
-        let mut keys: Vec<String> = rows.keys().cloned().collect();
-        keys.sort_by_key(|k| (k.len(), k.clone()));
-        Ok(Self {
-            rows,
-            keys,
-            exchange_rates: doc.exchange_rates,
-            version: doc.version,
-        })
+        Ok(Self::build(doc.models, doc.exchange_rates, doc.version))
     }
 }
 
 impl PricingTable {
+    /// Index the rows. Shared by the JSON document and the mirror-read path so
+    /// the two can never disagree about what a key means.
+    fn build(
+        entries: Vec<ModelPriceEntry>,
+        exchange_rates: HashMap<String, f64>,
+        version: i64,
+    ) -> Self {
+        let mut rows: HashMap<String, HashMap<String, ModelPriceEntry>> =
+            HashMap::with_capacity(entries.len());
+        let mut providers_by_model: HashMap<String, Vec<String>> = HashMap::new();
+        for entry in entries {
+            let provider = entry.provider_id.trim().to_ascii_lowercase();
+            let model = entry.model_id.trim().to_ascii_lowercase();
+            rows.entry(provider.clone())
+                .or_default()
+                .insert(model.clone(), entry);
+            providers_by_model.entry(model).or_default().push(provider);
+        }
+        for providers in providers_by_model.values_mut() {
+            providers.sort();
+            providers.dedup();
+        }
+        let mut keys: Vec<String> = providers_by_model.keys().cloned().collect();
+        keys.sort_by_key(|k| (k.len(), k.clone()));
+        Self {
+            rows,
+            providers_by_model,
+            keys,
+            exchange_rates,
+            version,
+        }
+    }
+
     /// Build a table from rows read back from the `model_pricing` mirror. The
     /// gateway resolves prices in memory, so this is how a Hub-refreshed price
     /// table reaches a forwarded request. Exchange rates stay empty: they are a
@@ -87,52 +124,72 @@ impl PricingTable {
     ///
     /// `version` is 0 — it keys the SQLite seeder, not in-memory lookups.
     pub fn from_entries(entries: Vec<ModelPriceEntry>) -> Self {
-        let mut rows = HashMap::with_capacity(entries.len());
-        for entry in entries {
-            rows.insert(entry.model_id.to_ascii_lowercase(), entry);
-        }
-        let mut keys: Vec<String> = rows.keys().cloned().collect();
-        keys.sort_by_key(|k| (k.len(), k.clone()));
-        Self {
-            rows,
-            keys,
-            exchange_rates: HashMap::new(),
-            version: 0,
-        }
+        Self::build(entries, HashMap::new(), 0)
     }
 
     pub fn exchange_rates(&self) -> &HashMap<String, f64> {
         &self.exchange_rates
     }
 
-    /// Exact-map hit for one candidate id (already normalized).
-    fn get_exact(&self, candidate: &str) -> Option<&ModelPriceEntry> {
-        self.rows.get(candidate)
+    /// Exact-key hit: `provider`'s own row for `model`.
+    fn get_exact(&self, provider: &str, model: &str) -> Option<&ModelPriceEntry> {
+        self.rows
+            .get(provider)
+            .and_then(|by_model| by_model.get(model))
     }
 
-    /// Gated prefix scan: shortest table key that starts with `candidate-`.
-    /// The caller applies `should_try_pricing_prefix_match` first.
-    fn get_prefix(&self, candidate: &str) -> Option<&ModelPriceEntry> {
+    /// The general price for `model`, or failing that the lowest-`provider_id`
+    /// row that prices it.
+    ///
+    /// This tail is tolerance, not policy. The Hub prices a model per provider
+    /// entry, and a local provider that has not been matched to its catalog
+    /// entry (`Provider.catalog_id`) can only be found by model. The ordering is
+    /// the point: `""` is the lowest key, so the general row wins when there is
+    /// one, and the rest is stable — a model-keyed table returned whichever row
+    /// happened to be seeded last, so a cost could move without any price moving.
+    fn fallback(&self, model: &str) -> Option<&ModelPriceEntry> {
+        self.providers_by_model
+            .get(model)?
+            .iter()
+            .find_map(|provider| self.get_exact(provider, model))
+    }
+
+    /// One id, two rungs — the provider's price, else the fallback.
+    fn lookup(&self, provider: &str, model: &str) -> Option<&ModelPriceEntry> {
+        self.get_exact(provider, model)
+            .or_else(|| self.fallback(model))
+    }
+
+    /// Gated prefix scan: shortest table key that starts with `candidate-`,
+    /// resolved for this provider. The caller applies
+    /// `should_try_pricing_prefix_match` first.
+    fn get_prefix(&self, provider: &str, candidate: &str) -> Option<&ModelPriceEntry> {
         let mut prefix = String::with_capacity(candidate.len() + 1);
         prefix.push_str(candidate);
         prefix.push('-');
-        self.keys
-            .iter()
-            .find(|k| k.starts_with(&prefix))
-            .and_then(|k| self.rows.get(k))
+        let key = self.keys.iter().find(|k| k.starts_with(&prefix))?;
+        self.lookup(provider, key)
     }
 
-    /// Resolve pricing for a raw (upstream) model id using cc-switch's
-    /// matching ladder: exact candidate hits first, then gated prefix scan.
-    pub fn find(&self, model_id: &str) -> Option<&ModelPriceEntry> {
-        for candidate in pricing_candidates(model_id) {
-            if let Some(entry) = self.get_exact(&candidate) {
+    /// Resolve pricing for a raw (upstream) model id using cc-switch's matching
+    /// ladder: exact candidate hits first, then a gated prefix scan, with the
+    /// provider breaking ties at every rung.
+    ///
+    /// `provider_id` is the *catalog* entry id, not the local provider's row id
+    /// (a provider added from the shelf is named whatever the user called it).
+    /// An empty string asks for the general price, which is also what a provider
+    /// with no catalog entry gets.
+    pub fn find(&self, provider_id: &str, model_id: &str) -> Option<&ModelPriceEntry> {
+        let provider = provider_id.trim().to_ascii_lowercase();
+        let candidates = pricing_candidates(model_id);
+        for candidate in &candidates {
+            if let Some(entry) = self.lookup(&provider, candidate) {
                 return Some(entry);
             }
         }
-        for candidate in pricing_candidates(model_id) {
-            if should_try_pricing_prefix_match(&candidate) {
-                if let Some(entry) = self.get_prefix(&candidate) {
+        for candidate in &candidates {
+            if should_try_pricing_prefix_match(candidate) {
+                if let Some(entry) = self.get_prefix(&provider, candidate) {
                     return Some(entry);
                 }
             }
@@ -422,8 +479,9 @@ fn should_try_pricing_prefix_match(model_id: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// A two-row stand-in for a Hub document. There is no bundled snapshot to
-    /// read any more, so the lookup tests carry the rows they look up.
+    /// A stand-in for a Hub document. There is no bundled snapshot to read any
+    /// more, so the lookup tests carry the rows they look up: one general price
+    /// with a provider's own beside it, and one model priced per provider only.
     fn table() -> PricingTable {
         r#"{
             "version": 1,
@@ -434,7 +492,17 @@ mod tests {
                  "cache_creation": "6.25", "currency": "USD"},
                 {"model_id": "claude-3-5-haiku", "display_name": "Claude 3.5 Haiku",
                  "input": "0.8", "output": "4", "cache_read": "0.08",
-                 "cache_creation": "1", "currency": "USD"}
+                 "cache_creation": "1", "currency": "USD"},
+                {"provider_id": "zenmux", "model_id": "claude-opus-4-8",
+                 "display_name": "Claude Opus 4.8 (ZenMux)", "input": "6",
+                 "output": "30", "cache_read": "0.6", "cache_creation": "7.5",
+                 "currency": "USD"},
+                {"provider_id": "kimi", "model_id": "kimi-k2",
+                 "display_name": "Kimi K2 (Kimi)", "input": "1", "output": "4",
+                 "cache_read": "0.1", "cache_creation": "1", "currency": "USD"},
+                {"provider_id": "moonshot", "model_id": "kimi-k2",
+                 "display_name": "Kimi K2 (Moonshot)", "input": "2", "output": "8",
+                 "cache_read": "0.2", "cache_creation": "2", "currency": "USD"}
             ]
         }"#
         .parse()
@@ -497,7 +565,7 @@ mod tests {
     #[test]
     fn find_resolves_exact_normalized_ids() {
         let t = table();
-        let entry = t.find("anthropic/claude-opus-4-8:beta").unwrap();
+        let entry = t.find("", "anthropic/claude-opus-4-8:beta").unwrap();
         assert_eq!(entry.model_id, "claude-opus-4-8");
         assert_eq!(entry.currency, "USD");
     }
@@ -507,22 +575,55 @@ mod tests {
         let t = table();
         // The full snapshot id has no row of its own; the candidate pass strips
         // the date and lands on the family row.
-        let entry = t.find("claude-3-5-haiku-20241022").unwrap();
+        let entry = t.find("", "claude-3-5-haiku-20241022").unwrap();
         assert_eq!(entry.model_id, "claude-3-5-haiku");
     }
 
     #[test]
     fn find_unknown_model_is_none() {
         let t = table();
-        assert!(t.find("totally-made-up-model").is_none());
-        assert!(t.find("unknown").is_none());
-        assert!(t.find("").is_none());
+        assert!(t.find("", "totally-made-up-model").is_none());
+        assert!(t.find("", "unknown").is_none());
+        assert!(t.find("", "").is_none());
+        // A known provider asking for a model nobody prices is still a miss.
+        assert!(t.find("kimi", "totally-made-up-model").is_none());
+    }
+
+    /// The reason the key carries a provider at all: two providers may price the
+    /// same model differently, and each request costs at its own provider's rate.
+    #[test]
+    fn find_uses_the_price_of_the_provider_that_was_asked_for() {
+        let t = table();
+        assert_eq!(t.find("kimi", "kimi-k2").unwrap().input, "1");
+        assert_eq!(t.find("moonshot", "kimi-k2").unwrap().input, "2");
+        // A provider's own row beats the general one for the same model.
+        assert_eq!(t.find("", "claude-opus-4-8").unwrap().input, "5");
+        assert_eq!(t.find("zenmux", "claude-opus-4-8").unwrap().input, "6");
+    }
+
+    /// Falling back is the point of the ladder: an unmatched provider (a manual
+    /// one, or one added before it carried a catalog id) must still be costed.
+    /// The order is fixed — general row first, then lowest provider_id — so a
+    /// cost never depends on which row was seeded last.
+    #[test]
+    fn find_falls_back_to_the_general_row_then_by_provider_id() {
+        let t = table();
+        // claude-opus-4-8 has a general row and a zenmux one; the general row
+        // is what an unlisted provider gets ("" sorts below "zenmux").
+        let entry = t.find("no-such-provider", "claude-opus-4-8").unwrap();
+        assert_eq!(entry.provider_id, "", "the general price, not zenmux's");
+        assert_eq!(entry.input, "5");
+        // claude-3-5-haiku has no provider row at all: general row either way.
+        assert_eq!(t.find("zenmux", "claude-3-5-haiku").unwrap().input, "0.8");
+        // kimi-k2 exists only per provider, so the fallback picks by name.
+        assert_eq!(t.find("no-such-provider", "kimi-k2").unwrap().input, "1");
     }
 
     // ---- cost calculation (ported from calculator.rs) --------------------
 
     fn usage_entry() -> ModelPriceEntry {
         ModelPriceEntry {
+            provider_id: String::new(),
             model_id: "test".into(),
             display_name: "Test".into(),
             input: "3.0".into(),

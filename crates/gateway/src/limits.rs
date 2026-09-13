@@ -465,6 +465,7 @@ mod tests {
         s.insert_provider(&Provider {
             id: provider_id.into(),
             name: provider_id.into(),
+            catalog_id: None,
             protocol: Protocol::Anthropic,
             base_url: "https://a.example.com".into(),
             api_path: None,

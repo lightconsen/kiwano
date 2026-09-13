@@ -78,6 +78,11 @@ struct CompletedLog {
 struct UsageSample {
     agent: String,
     provider_id: String,
+    /// The catalog entry the provider was added from, when it came from the
+    /// shelf. That — not the local row id — is the key its price is published
+    /// under; None is priced at the general rate, which is what a hand-added
+    /// provider should get.
+    catalog_id: Option<String>,
     model: Option<String>,
     usage: Usage,
     latency_ms: i64,
@@ -112,6 +117,10 @@ impl UsageSample {
 /// Resolve the sample's price and compute its cost in the price entry's
 /// currency. Unpriced / unknown models yield `(None, None)` (row keeps
 /// NULL cost).
+///
+/// The lookup asks for the *catalog* provider, since that is who the Hub
+/// publishes prices for; a provider that never came from the shelf asks for no
+/// provider and gets the general rate rather than nothing.
 fn compute_sample_cost(
     state: &GatewayState,
     sample: &UsageSample,
@@ -120,7 +129,7 @@ fn compute_sample_cost(
         return (None, None);
     };
     let pricing = state.pricing.read().expect("pricing lock poisoned");
-    let Some(entry) = pricing.find(model) else {
+    let Some(entry) = pricing.find(sample.catalog_id.as_deref().unwrap_or_default(), model) else {
         return (None, None);
     };
     let cost = kiwano_adapters::model_pricing::compute_cost(
@@ -638,6 +647,7 @@ pub async fn forward(
             UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
+                catalog_id: provider.catalog_id.clone(),
                 model,
                 usage: Usage::default(),
                 latency_ms: 0,
@@ -699,6 +709,7 @@ pub async fn forward(
         let sample = UsageSample {
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
+            catalog_id: provider.catalog_id.clone(),
             model: model.or(upstream_model),
             usage: usage.unwrap_or_default(),
             latency_ms,
@@ -907,6 +918,7 @@ async fn forward_anthropic_via_openai(
             UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
+                catalog_id: provider.catalog_id.clone(),
                 model,
                 usage: Usage::default(),
                 latency_ms: 0,
@@ -974,6 +986,7 @@ async fn forward_anthropic_via_openai(
             let sample = UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
+                catalog_id: provider.catalog_id.clone(),
                 model: model.or(upstream_model),
                 usage: usage.unwrap_or_default(),
                 latency_ms,
@@ -1046,6 +1059,7 @@ async fn forward_anthropic_via_openai(
         let sample = UsageSample {
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
+            catalog_id: provider.catalog_id.clone(),
             model: model.or(upstream_model),
             usage: usage.unwrap_or_default(),
             latency_ms,
@@ -1298,6 +1312,7 @@ mod tests {
         UpstreamProvider {
             id: "p1".into(),
             name: "p1".into(),
+            catalog_id: None,
             protocol,
             base_url: "https://up.example.com".into(),
             api_path: api_path.map(Into::into),
@@ -1490,6 +1505,7 @@ mod tests {
         let store = crate::store::Store::open_in_memory().expect("store");
         store
             .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                provider_id: String::new(),
                 model_id: "claude-opus-4-8".into(),
                 display_name: "Claude Opus 4.8".into(),
                 input: "5".into(),
@@ -1505,6 +1521,7 @@ mod tests {
             .insert_provider(&crate::store::Provider {
                 id: "p1".into(),
                 name: "p1".into(),
+                catalog_id: None,
                 protocol: Protocol::Anthropic,
                 base_url: "https://a.example.com".into(),
                 api_path: None,
@@ -1529,6 +1546,7 @@ mod tests {
         let sample = |model: Option<&'static str>| UsageSample {
             agent: "claude".into(),
             provider_id: "p1".into(),
+            catalog_id: None,
             model: model.map(str::to_string),
             usage: Usage {
                 input_tokens: 1_000_000,
@@ -1556,6 +1574,95 @@ mod tests {
         assert_eq!(costs.len(), 1);
         assert_eq!(costs[0].0.as_deref(), Some("USD"));
         assert!((costs[0].1 - 5.0).abs() < 1e-9, "got {}", costs[0].1);
+    }
+
+    /// The price a request is costed at follows the provider it went through.
+    ///
+    /// The Hub prices a model per catalog entry, so one model can cost
+    /// differently at two providers — and a provider with no catalog entry is
+    /// costed at the general price, not at a neighbour's subsidised one. This
+    /// pins the whole chain: the stored `catalog_id`, the lookup, and the
+    /// recorded cost.
+    #[test]
+    fn record_sample_uses_the_providers_own_price() {
+        use crate::store::Protocol;
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        let priced =
+            |provider_id: &str, input: &str| kiwano_adapters::model_pricing::ModelPriceEntry {
+                provider_id: provider_id.into(),
+                model_id: "m1".into(),
+                display_name: "M1".into(),
+                input: input.into(),
+                output: "0".into(),
+                cache_read: "0".into(),
+                cache_creation: "0".into(),
+                currency: "USD".into(),
+            };
+        store.upsert_model_pricing(&priced("", "1")).unwrap();
+        store.upsert_model_pricing(&priced("kimi", "3")).unwrap();
+        for (id, catalog_id) in [("p-kimi", Some("kimi")), ("p-manual", None)] {
+            store
+                .insert_provider(&crate::store::Provider {
+                    id: id.into(),
+                    name: id.into(),
+                    catalog_id: catalog_id.map(str::to_string),
+                    protocol: Protocol::Anthropic,
+                    base_url: "https://a.example.com".into(),
+                    api_path: None,
+                    endpoints: Vec::new(),
+                    api_key: Some("sk".into()),
+                    billing: crate::store::Billing::Metered,
+                    period_limit: None,
+                    limit_unit: None,
+                    plan_query: None,
+                    plan_limits: None,
+                    timeout_secs: None,
+                    retries: None,
+                    headers: None,
+                    reset_period: None,
+                    enabled: true,
+                    created_at: crate::store::now_rfc3339(),
+                    updated_at: crate::store::now_rfc3339(),
+                })
+                .unwrap();
+        }
+        let state = crate::server::GatewayState::new(store).expect("state");
+
+        let sample = |provider_id: &str, catalog_id: Option<&str>| UsageSample {
+            agent: "claude".into(),
+            provider_id: provider_id.into(),
+            catalog_id: catalog_id.map(str::to_string),
+            model: Some("m1".into()),
+            usage: Usage {
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            log: None,
+        };
+        record_sample(&state, sample("p-kimi", Some("kimi")));
+        record_sample(&state, sample("p-manual", None));
+
+        let cost_of = |provider_id: &str| {
+            let costs = state
+                .store
+                .usage_cost_by_currency(None, Some(provider_id), None)
+                .unwrap();
+            costs[0].1
+        };
+        assert!(
+            (cost_of("p-kimi") - 3.0).abs() < 1e-9,
+            "the shelf provider pays its own rate"
+        );
+        assert!(
+            (cost_of("p-manual") - 1.0).abs() < 1e-9,
+            "a hand-added provider pays the general rate"
+        );
     }
 
     #[test]
@@ -1664,6 +1771,7 @@ mod tests {
             UsageSample {
                 agent: "claude".into(),
                 provider_id: "p1".into(),
+                catalog_id: None,
                 model: None,
                 usage: Usage::default(),
                 latency_ms: 0,

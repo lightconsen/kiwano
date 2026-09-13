@@ -418,6 +418,7 @@ mod tests {
         UpstreamProvider {
             id: id.into(),
             name: format!("prov-{id}"),
+            catalog_id: None,
             protocol: Protocol::Anthropic,
             base_url: format!("https://{id}.example.com"),
             api_path: None,
@@ -841,6 +842,7 @@ mod tests {
         s.insert_provider(&crate::store::Provider {
             id: "a".into(),
             name: "a".into(),
+            catalog_id: None,
             protocol: Protocol::Anthropic,
             base_url: "https://a.example.com".into(),
             api_path: None,
@@ -917,6 +919,7 @@ mod tests {
         s.insert_provider(&crate::store::Provider {
             id: "a".into(),
             name: "a".into(),
+            catalog_id: None,
             protocol: Protocol::Anthropic,
             base_url: "https://a.example.com".into(),
             api_path: None,

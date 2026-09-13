@@ -70,6 +70,7 @@ mod tests {
         Provider {
             id: id.into(),
             name: id.into(),
+            catalog_id: None,
             protocol: Protocol::Anthropic,
             base_url: "http://127.0.0.1:1".into(), // port 1 always fails to connect
             api_path: None,

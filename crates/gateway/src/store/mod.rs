@@ -19,7 +19,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 10;
+pub const SCHEMA_VERSION: i32 = 12;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -320,6 +320,54 @@ const MIGRATION_V10: &str = r#"
 ALTER TABLE providers ADD COLUMN plan_limits TEXT;
 "#;
 
+/// v11: prices become per-provider.
+///
+/// The Hub prices a model per catalog provider entry, so the same `model_id`
+/// may appear once per provider at different rates (a subsidy, a margin) — and
+/// the v9 key of `model_id` alone could hold only one of them. The primary key
+/// becomes `(provider_id, model_id)`; a row whose `provider_id` is empty is the
+/// general price, which is what every pre-v11 row is (nothing had a provider to
+/// name) and what the app falls back to for a provider with no price of its own.
+///
+/// SQLite cannot alter a primary key in place, so the table is rebuilt (the v4
+/// pattern). No indexes or foreign keys point at it.
+const MIGRATION_V11: &str = r#"
+PRAGMA foreign_keys=OFF;
+CREATE TABLE model_pricing_new (
+    provider_id     TEXT NOT NULL DEFAULT '',
+    model_id        TEXT NOT NULL,
+    display_name    TEXT NOT NULL,
+    input           TEXT NOT NULL,
+    output          TEXT NOT NULL,
+    cache_read      TEXT NOT NULL DEFAULT '0',
+    cache_creation  TEXT NOT NULL DEFAULT '0',
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    source          TEXT,
+    PRIMARY KEY (provider_id, model_id)
+);
+INSERT INTO model_pricing_new (provider_id, model_id, display_name, input, output,
+                               cache_read, cache_creation, currency, source)
+    SELECT '', model_id, display_name, input, output,
+           cache_read, cache_creation, currency, source
+    FROM model_pricing;
+DROP TABLE model_pricing;
+ALTER TABLE model_pricing_new RENAME TO model_pricing;
+PRAGMA foreign_keys=ON;
+"#;
+
+/// v12: `providers.catalog_id`.
+///
+/// The price table is keyed by the Hub's catalog entry id, and a local
+/// provider's own id is not it: `vm::add_provider` names a row
+/// `<slug>-<hex>` and a rename changes the name, not the id. This column is
+/// the link that lets the gateway ask for the right provider's price.
+///
+/// NULL — every pre-v12 row, and every hand-added provider — means "no catalog
+/// entry", which prices at the general rate.
+const MIGRATION_V12: &str = r#"
+ALTER TABLE providers ADD COLUMN catalog_id TEXT;
+"#;
+
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -433,6 +481,15 @@ pub struct ProviderEndpoint {
 pub struct Provider {
     pub id: String,
     pub name: String,
+    /// The Hub catalog entry this provider was added from, when it came from
+    /// the shelf (migration v12). NULL for a hand-added provider, and for one
+    /// added before the column existed — both price at the general rate.
+    ///
+    /// Kept apart from `id` on purpose: `vm::add_provider` names a row
+    /// `<slug>-<hex>`, so `Kimi (Moonshot)` is `kimi-moonshot-4f2a1c` while the
+    /// catalog calls it `kimi`, and the price table is keyed by the latter.
+    #[serde(default)]
+    pub catalog_id: Option<String>,
     pub protocol: Protocol,
     pub base_url: String,
     /// Optional upstream path prefix, e.g. `/anthropic` for compatible endpoints.
@@ -1150,6 +1207,12 @@ impl Store {
         if version < 10 {
             conn.execute_batch(MIGRATION_V10)?;
         }
+        if version < 11 {
+            conn.execute_batch(MIGRATION_V11)?;
+        }
+        if version < 12 {
+            conn.execute_batch(MIGRATION_V12)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -1162,14 +1225,15 @@ impl Store {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
-            "INSERT INTO providers (id, name, protocol, base_url, api_path, api_key,
+            "INSERT INTO providers (id, name, catalog_id, protocol, base_url, api_path, api_key,
                                     billing, period_limit, limit_unit, plan_query,
                                     plan_limits, timeout_secs, retries, headers,
                                     reset_period, enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 p.id,
                 p.name,
+                p.catalog_id,
                 p.protocol.as_str(),
                 p.base_url,
                 p.api_path,
@@ -1199,7 +1263,7 @@ impl Store {
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
-                    reset_period, enabled, created_at, updated_at
+                    reset_period, enabled, created_at, updated_at, catalog_id
              FROM providers WHERE id = ?1",
         )?;
         let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -1215,7 +1279,7 @@ impl Store {
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
-                    reset_period, enabled, created_at, updated_at
+                    reset_period, enabled, created_at, updated_at, catalog_id
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -1239,15 +1303,16 @@ impl Store {
         };
         let tx = conn.transaction()?;
         tx.execute(
-            "UPDATE providers SET name = ?2, protocol = ?3, base_url = ?4, api_path = ?5,
-                    api_key = ?6, billing = ?7, period_limit = ?8, limit_unit = ?9,
-                    plan_query = ?10, plan_limits = ?11, timeout_secs = ?12,
-                    retries = ?13, headers = ?14,
-                    reset_period = ?15, enabled = ?16, updated_at = ?17
+            "UPDATE providers SET name = ?2, catalog_id = ?3, protocol = ?4, base_url = ?5,
+                    api_path = ?6, api_key = ?7, billing = ?8, period_limit = ?9,
+                    limit_unit = ?10, plan_query = ?11, plan_limits = ?12,
+                    timeout_secs = ?13, retries = ?14, headers = ?15,
+                    reset_period = ?16, enabled = ?17, updated_at = ?18
              WHERE id = ?1",
             params![
                 p.id,
                 p.name,
+                p.catalog_id,
                 p.protocol.as_str(),
                 p.base_url,
                 p.api_path,
@@ -2121,19 +2186,20 @@ impl Store {
     pub fn load_model_pricing(&self) -> Result<Vec<ModelPriceEntry>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT model_id, display_name, input, output,
+            "SELECT provider_id, model_id, display_name, input, output,
                     cache_read, cache_creation, currency
              FROM model_pricing",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(ModelPriceEntry {
-                model_id: r.get(0)?,
-                display_name: r.get(1)?,
-                input: r.get(2)?,
-                output: r.get(3)?,
-                cache_read: r.get(4)?,
-                cache_creation: r.get(5)?,
-                currency: r.get(6)?,
+                provider_id: r.get(0)?,
+                model_id: r.get(1)?,
+                display_name: r.get(2)?,
+                input: r.get(3)?,
+                output: r.get(4)?,
+                cache_read: r.get(5)?,
+                cache_creation: r.get(6)?,
+                currency: r.get(7)?,
             })
         })?;
         let mut out = Vec::new();
@@ -2151,13 +2217,14 @@ impl Store {
     pub fn upsert_model_pricing(&self, e: &ModelPriceEntry) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO model_pricing (model_id, display_name, input, output,
+            "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
                                         cache_read, cache_creation, currency, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'test')
-             ON CONFLICT(model_id) DO UPDATE SET
-                display_name = ?2, input = ?3, output = ?4,
-                cache_read = ?5, cache_creation = ?6, currency = ?7",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'test')
+             ON CONFLICT(provider_id, model_id) DO UPDATE SET
+                display_name = ?3, input = ?4, output = ?5,
+                cache_read = ?6, cache_creation = ?7, currency = ?8",
             params![
+                e.provider_id,
                 e.model_id,
                 e.display_name,
                 e.input,
@@ -2225,6 +2292,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
     Ok(Provider {
         id: row.get(0)?,
         name: row.get(1)?,
+        catalog_id: row.get(18)?,
         protocol: Protocol::parse_str(&protocol_str).unwrap_or(Protocol::Anthropic),
         base_url: row.get(3)?,
         api_path: row.get(4)?,
@@ -2350,6 +2418,7 @@ mod tests {
         Provider {
             id: id.to_string(),
             name: format!("prov-{id}"),
+            catalog_id: None,
             protocol,
             base_url: "https://api.example.com".to_string(),
             api_path: None,
@@ -2840,6 +2909,77 @@ mod tests {
         store.update_provider(&p).unwrap();
         assert_eq!(
             store.get_provider("p-plan").unwrap().unwrap().plan_limits,
+            None
+        );
+    }
+
+    /// v10 → v11: the price table is rebuilt keyed by `(provider_id, model_id)`.
+    /// A v10 row survives as the general price, and two providers can now price
+    /// the same model — which the old key could not express at all.
+    #[test]
+    fn migration_v11_keys_prices_by_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v10 database holding one price row and one provider.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(MIGRATION_V1).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute_batch(MIGRATION_V3).unwrap();
+            conn.execute_batch(MIGRATION_V4).unwrap();
+            conn.execute_batch(MIGRATION_V5).unwrap();
+            conn.execute_batch(MIGRATION_V7).unwrap();
+            conn.execute_batch(MIGRATION_V8).unwrap();
+            conn.execute_batch(MIGRATION_V9).unwrap();
+            conn.execute_batch(MIGRATION_V10).unwrap();
+            conn.execute_batch(
+                "INSERT INTO model_pricing (model_id, display_name, input, output,
+                                            cache_read, cache_creation, currency, source)
+                 VALUES ('m1', 'M1', '1', '2', '0', '0', 'USD', 'hub');
+                 INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
+                 VALUES ('p-old', 'Old', 'openai', 'https://api.example.com', 'metered', 't0', 't0');
+                 PRAGMA user_version = 10;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+
+        // The row is kept, as the general price: nothing before v11 had a
+        // provider to name.
+        let rows = store.load_model_pricing().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider_id, "");
+        assert_eq!(rows[0].model_id, "m1");
+        assert_eq!(rows[0].input, "1");
+
+        // Two providers, one model: the pair is the key now.
+        let mut kimi = rows[0].clone();
+        kimi.provider_id = "kimi".into();
+        kimi.input = "3".into();
+        store.upsert_model_pricing(&kimi).unwrap();
+        let mut rows = store.load_model_pricing().unwrap();
+        rows.sort_by(|a, b| a.provider_id.cmp(&b.provider_id));
+        assert_eq!(rows.len(), 2, "the general row and kimi's");
+        assert_eq!(rows[1].provider_id, "kimi");
+        assert_eq!(rows[1].input, "3", "and each keeps its own price");
+
+        // v12 comes with it: a pre-v12 provider has no catalog entry …
+        let old = store.get_provider("p-old").unwrap().expect("kept");
+        assert_eq!(old.catalog_id, None);
+        // … and one set now round-trips.
+        let mut p = sample_provider("p-shelf", Protocol::Anthropic);
+        p.catalog_id = Some("kimi".into());
+        store.insert_provider(&p).unwrap();
+        assert_eq!(
+            store.get_provider("p-shelf").unwrap().unwrap().catalog_id,
+            Some("kimi".to_string())
+        );
+        p.catalog_id = None;
+        store.update_provider(&p).unwrap();
+        assert_eq!(
+            store.get_provider("p-shelf").unwrap().unwrap().catalog_id,
             None
         );
     }

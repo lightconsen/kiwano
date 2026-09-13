@@ -783,6 +783,17 @@ pub struct NewProviderInput {
     /// an update = keep existing; null clears; a present object replaces.
     #[serde(default)]
     pub plan_query: Option<serde_json::Value>,
+    /// The Hub catalog entry this provider is being added from, when the add
+    /// came from the shelf. Prices are published per catalog entry, and a local
+    /// row's own id is `<slug>-<hex>`, so this is what lets a forwarded request
+    /// be costed at its provider's own rate rather than the general one.
+    ///
+    /// Absent (the hand-added form, and every edit) means "no catalog entry":
+    /// on add the provider prices at the general rate, and on update the stored
+    /// value is kept — an edit must not silently unlink the provider from its
+    /// price row.
+    #[serde(default)]
+    pub catalog_id: Option<String>,
 }
 
 // ── Billing mapping (UI plan/payg/unl ↔ DB subscription/metered/unlimited) ──
@@ -1593,6 +1604,15 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     let provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
+        // Which catalog entry this came from, if it was added from the shelf.
+        // An empty string is the frontend's "nothing selected"; storing it
+        // would be a provider id that names no row.
+        catalog_id: input
+            .catalog_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
         protocol: kiwanod::store::Protocol::parse_str(&input.protocol)
             .unwrap_or(kiwanod::store::Protocol::OpenAI),
         base_url: input.endpoint.trim().to_string(),
@@ -1794,6 +1814,15 @@ pub fn update_provider(
     };
     if !input.api_key.trim().is_empty() {
         p.api_key = Some(input.api_key.clone());
+    }
+    // The catalog entry this provider was added from: absent or empty keeps
+    // what is stored. The edit form has no catalog picker, and dropping the
+    // link on an unrelated edit would quietly change which price it is costed
+    // at — the one thing this column exists to pin down.
+    if let Some(catalog_id) = input.catalog_id.as_deref().map(str::trim) {
+        if !catalog_id.is_empty() {
+            p.catalog_id = Some(catalog_id.to_string());
+        }
     }
     // Advanced: absent = keep existing (same semantics as an empty api_key);
     // a present object is an authoritative snapshot — null fields clear values.
@@ -2250,6 +2279,8 @@ fn import_current_provider(
             })
     });
     let provider = Provider {
+        // Imported from another manager: no Hub catalog entry behind it.
+        catalog_id: None,
         id: format!(
             "{}-{}",
             slug(&name),
@@ -2797,6 +2828,7 @@ mod tests {
         Provider {
             id: id.into(),
             name: name.into(),
+            catalog_id: None,
             protocol: kiwanod::store::Protocol::OpenAI,
             base_url: format!("https://{id}.example.com"),
             api_path: None,
@@ -3260,6 +3292,7 @@ mod tests {
         .unwrap();
 
         let input = NewProviderInput {
+            catalog_id: None,
             name: "New Guy".into(),
             api_key: "sk-x".into(),
             endpoint: "https://api.new.example.com".into(),
@@ -3295,6 +3328,7 @@ mod tests {
     fn add_provider_persists_endpoints() {
         let s = store();
         let input = NewProviderInput {
+            catalog_id: None,
             name: "Qianfan".into(),
             api_key: "sk-x".into(),
             endpoint: "https://qianfan.baidubce.com/v2/tokenplan/personal".into(),
@@ -3341,6 +3375,7 @@ mod tests {
     fn provider_vm_carries_endpoints_and_note_suffix() {
         let s = store();
         let input = NewProviderInput {
+            catalog_id: None,
             name: "Qianfan".into(),
             api_key: "sk-x".into(),
             endpoint: "https://qianfan.baidubce.com/v2/tokenplan/personal".into(),
@@ -3410,6 +3445,7 @@ mod tests {
         .unwrap();
 
         let input = NewProviderInput {
+            catalog_id: None,
             name: "P One Renamed".into(),
             api_key: "".into(), // blank = keep existing key
             endpoint: "https://p1.example.com/v2".into(),

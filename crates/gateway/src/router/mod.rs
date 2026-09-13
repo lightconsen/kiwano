@@ -24,6 +24,10 @@ pub const PLACEHOLDER_KEY_PREFIX: &str = "kw-ag-";
 pub struct UpstreamProvider {
     pub id: String,
     pub name: String,
+    /// The Hub catalog entry this provider came from (migration v12), which is
+    /// the key its prices are published under. None for a hand-added provider:
+    /// it is then priced at the general rate.
+    pub catalog_id: Option<String>,
     pub protocol: Protocol,
     pub base_url: String,
     /// Optional upstream path prefix, e.g. `/anthropic` on compatible endpoints.
@@ -174,6 +178,7 @@ impl RouteTable {
                     Some(p) if p.enabled => candidates.push(UpstreamProvider {
                         id: p.id.clone(),
                         name: p.name.clone(),
+                        catalog_id: p.catalog_id.clone(),
                         protocol: p.protocol,
                         base_url: p.base_url.clone(),
                         api_path: p.api_path.clone(),
@@ -330,6 +335,7 @@ mod tests {
         Provider {
             id: id.to_string(),
             name: format!("prov-{id}"),
+            catalog_id: None,
             protocol,
             base_url: format!("https://{id}.example.com"),
             api_path: None,

@@ -165,6 +165,11 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
                 .insert_provider(&Provider {
                     id: new_id.clone(),
                     name: sp.name.clone(),
+                    // Carried over, unlike the plan-query credentials below: a
+                    // catalog id names a Hub entry, not something local to the
+                    // exporting install — so the imported provider is priced at
+                    // the same entry's rates as the one it came from.
+                    catalog_id: sp.catalog_id.clone(),
                     protocol: sp.protocol,
                     base_url: sp.base_url.clone(),
                     api_path: sp.api_path.clone(),
@@ -232,6 +237,7 @@ mod tests {
         Provider {
             id: id.into(),
             name: name.into(),
+            catalog_id: None,
             protocol: Protocol::OpenAI,
             base_url: base_url.into(),
             api_path: None,

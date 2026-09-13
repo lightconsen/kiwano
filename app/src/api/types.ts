@@ -242,6 +242,13 @@ export interface NewProviderInput {
   /** Plan-quota query config; null clears an existing config */
   plan_query?: PlanQuery | null;
   /**
+   * The catalog entry this provider is being added from (shelf adds only).
+   * Prices are published per catalog entry, so this is what the gateway looks
+   * a request's price up by. Absent = no catalog entry; on update, absent or
+   * empty keeps the stored value.
+   */
+  catalog_id?: string;
+  /**
    * Advanced forwarding settings. Absent in an update = keep existing
    * values; a present object is an authoritative snapshot (null clears).
    */

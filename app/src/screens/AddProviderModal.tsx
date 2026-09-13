@@ -430,6 +430,13 @@ export default function AddProviderModal({
         },
         // Edit only: "" = clear the config, a template = authoritative snapshot.
         plan_query: edit ? (pqTemplate ? { template: pqTemplate, fields: pqFieldInputs() } : null) : undefined,
+        // Add from the shelf only: which catalog entry this is. The gateway
+        // prices a request by catalog entry, so without it a shelf-added
+        // provider is costed at the general rate rather than its own — and the
+        // local id cannot stand in, since it is `<slug>-<hex>`.
+        // Absent = no catalog entry (custom), and the backend keeps whatever is
+        // stored when the field is missing, so edits never unlink it.
+        catalog_id: !edit && mode === "shelf" && shelf ? shelf.id : undefined,
       };
       if (edit) {
         await api.updateProvider(edit.id, input);

@@ -109,6 +109,7 @@ pub fn run_import(
         let provider = Provider {
             id: id.clone(),
             name,
+            catalog_id: None,
             protocol,
             base_url: raw.base_url.clone(),
             api_path: raw.api_path.clone(),

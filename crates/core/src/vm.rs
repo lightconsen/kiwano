@@ -442,6 +442,11 @@ pub struct CatalogEntryVm {
     /// field existed fall back to USD, the price table's base currency.
     #[serde(default = "default_catalog_currency")]
     pub currency: String,
+    /// The provider's own site (`https://deepseek.com/`). Published since the
+    /// Hub started carrying it; nothing local can stand in for it, so the field
+    /// only ever comes from there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website: Option<String>,
     /// Billing mode; unknown Hub tags survive as `CatalogBilling::Other`.
     pub billing: CatalogBilling,
     /// Derived at load time from the local provider list (same endpoint =

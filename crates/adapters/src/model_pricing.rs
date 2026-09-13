@@ -91,7 +91,7 @@ pub struct PriceTiers {
 }
 
 /// One row of models.json (prices = currency per million tokens, TEXT decimals).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelPriceEntry {
     /// The catalog provider entry this price belongs to. The Hub prices a model
     /// per provider, so the same `model_id` may appear once per provider at

@@ -454,6 +454,32 @@ fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
     vm::load_catalog(&state.store, &state.aux)
 }
 
+/// The price mirror — the rows the gateway charges with — so the Models page can
+/// price every model a provider serves, not just the entry's flagship.
+#[tauri::command]
+fn list_model_prices(state: State<AppState>) -> Result<Vec<pricing::ModelPriceEntry>, String> {
+    pricing::list_model_prices(&state.store)
+}
+
+/// Open a vendor's site in the user's browser.
+///
+/// The URL comes from the Hub's catalog, which the app does not control, so it
+/// is fenced here rather than trusted: this hands a string to the OS opener, and
+/// anything but http(s) would let a catalog reach a local file or a registered
+/// scheme handler. A rejected URL is an error the caller shows, not a silent
+/// no-op.
+#[tauri::command]
+fn open_url(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
+        return Err(format!("refusing to open a non-http(s) url: {trimmed}"));
+    }
+    app.opener()
+        .open_url(trimmed, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_dashboard(
     state: State<AppState>,
@@ -1015,6 +1041,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_gateway_status,
+            list_model_prices,
+            open_url,
             list_providers,
             add_provider,
             update_provider,

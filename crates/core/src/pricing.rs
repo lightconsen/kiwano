@@ -7,7 +7,11 @@
 //! metadata + conversion used across the usage/dashboard surfaces.
 
 use crate::vm::Aux;
-use kiwano_adapters::model_pricing::{ModelPriceEntry, ModelsDoc};
+/// Re-exported: the app's `list_model_prices` command hands these rows to the
+/// frontend, and the app deliberately depends on `kiwano-core` alone rather than
+/// reaching into the adapters crate for a type.
+pub use kiwano_adapters::model_pricing::ModelPriceEntry;
+use kiwano_adapters::model_pricing::ModelsDoc;
 use std::collections::HashMap;
 
 /// app_settings KV key holding the last-seeded models.json version.
@@ -294,6 +298,16 @@ pub fn preferred_currency(aux: &Aux) -> String {
 ///
 /// The rates are the Hub's, so the list describes what was actually seeded
 /// rather than what some snapshot once offered.
+/// The rows the gateway charges with, for the Models page's per-model detail.
+///
+/// The catalog carries one representative price per provider; what each of a
+/// provider's models costs lives here — and so does each row's own tier
+/// schedule, which for any model other than the flagship is the only place it
+/// is stated. Read-only, and small enough to hand over whole.
+pub fn list_model_prices(store: &kiwanod::store::Store) -> Result<Vec<ModelPriceEntry>, String> {
+    store.load_model_pricing().map_err(|e| e.to_string())
+}
+
 pub fn currency_meta(aux: &Aux) -> Result<CurrencyMetaVm, String> {
     let rates = effective_rates(aux);
     let preferred = preferred_currency(aux);

@@ -2,37 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type {
-  AgentDetect,
-  AgentId,
-  AgentRoute,
-  AgentVersionEntry,
-  AppSettings,
-  CatalogList,
-  ConfigShareReport,
-  CurrencyMeta,
-  DashboardData,
-  DashboardWindow,
-  FooterStats,
-  GatewayStatus,
-  HubSyncReport,
-  ImportReport,
-  KiwanoApi,
-  NewProviderInput,
-  PlanQuotaReport,
-  ProbeReport,
-  Protocol,
-  Provider,
-  RequestLogDetail,
-  RequestLogExport,
-  RequestLogFilter,
-  RequestLogList,
-  StrategyKind,
-  UsageAlert,
-  ApiKeyEntry,
-  UpdateInfo,
-  UpdateProgress,
-} from "./types";
+import type { AgentDetect, AgentId, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -60,6 +30,9 @@ export const tauriApi: KiwanoApi = {
     invoke<string[]>("list_models", { protocol, endpoint, apiKey }),
 
   listCatalog: () => invoke<CatalogList>("list_catalog"),
+
+  listModelPrices: () => invoke<ModelPrice[]>("list_model_prices"),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
 
   // Invoke args must be camelCase to reach the command's snake_case params —
   // and the key must be the parameter's own name. `agentId` would map to

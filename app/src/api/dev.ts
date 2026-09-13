@@ -1,37 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type {
-  AgentId,
-  AgentRoute,
-  AppSettings,
-  ConfigShareReport,
-  CatalogEntry,
-  CatalogList,
-  CurrencyMeta,
-  DashboardData,
-  DashboardWindow,
-  FooterStats,
-  HubSyncReport,
-  GatewayStatus,
-  ImportReport,
-  KiwanoApi,
-  NewProviderInput,
-  PlanQuotaReport,
-  ProbeReport,
-  Protocol,
-  Provider,
-  RequestLogDetail,
-  RequestLogEntry,
-  RequestLogExport,
-  RequestLogFilter,
-  RequestLogList,
-  StrategyBinding,
-  StrategyKind,
-  UsageAlert,
-  ApiKeyEntry,
-  UpdateInfo,
-  UpdateProgress,
-} from "./types";
+import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert } from "./types";
 import { AGENTS } from "./types";
 
 function protocolNote(protocol: NewProviderInput["protocol"]): string {
@@ -191,6 +160,7 @@ const catalog: CatalogEntry[] = [
     name: "DeepSeek",
     logo_color: "#4D6BFE",
     tag: "official",
+    website: "https://deepseek.com/",
     rating: 4.8,
     endpoint: "https://api.deepseek.com",
     protocol: "openai",
@@ -966,6 +936,52 @@ export const devApi: KiwanoApi = {
       return Array.from(new Set([...hit.models, ...(hit.endpoints ?? []).flatMap((x) => x.models ?? [])]));
     }
     return ["gpt-5.2", "gpt-5.2-mini", "o4-mini", "text-embedding-3-large"];
+  },
+
+  async listModelPrices(): Promise<ModelPrice[]> {
+    await delay();
+    // The mock's mirror: one row per catalog `price_ref`, plus the second model
+    // DeepSeek prices by time of day — the case the dialog exists to show, and
+    // one the catalog cannot (it names a single representative model).
+    const rows: ModelPrice[] = catalog
+      .filter((e) => e.price_ref)
+      .map((e) => ({
+        provider_id: e.id,
+        model_id: e.price_ref!.model_id,
+        display_name: e.price_ref!.display_name,
+        input: e.price_ref!.input,
+        output: e.price_ref!.output,
+        cache_read: "0.03",
+        cache_creation: "0",
+        currency: e.price_ref!.currency,
+        ...(e.price_ref!.off_peak ? { off_peak: e.price_ref!.off_peak } : {}),
+        ...(e.price_ref!.peak_hours ? { peak_hours: e.price_ref!.peak_hours } : {}),
+      }));
+    rows.push({
+      provider_id: "deepseek",
+      model_id: "deepseek-reasoner (R1)",
+      display_name: "DeepSeek Reasoner (R1)",
+      input: "0.55",
+      output: "2.19",
+      cache_read: "0.14",
+      cache_creation: "0",
+      currency: "USD",
+      off_peak: { in: "0.28", out: "1.10", cache_read: "0.07", cache_creation: "0" },
+      peak_hours: {
+        tz_offset: 480,
+        windows: [
+          { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "12:00" },
+          { days: ["mon", "tue", "wed", "thu", "fri"], start: "14:00", end: "18:00" },
+        ],
+      },
+    });
+    return rows;
+  },
+
+  async openUrl(url: string): Promise<void> {
+    // Browser dev: no OS opener. Opening a tab is the closest thing, and the
+    // real command is fenced to http(s) anyway.
+    window.open(url, "_blank", "noopener");
   },
 
   async listCatalog(): Promise<CatalogList> {

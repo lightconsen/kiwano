@@ -53,6 +53,12 @@ export const shelf = {
   tierPricePeak: "Peak price",
   tierPriceOffPeak: "Off-peak price",
   tierPriceSwitch: "Click to switch between the peak and off-peak prices",
+  /** The four rates a price row can carry, and the section that lists them. */
+  priceCacheRead: "cache hits",
+  priceCacheWrite: "cache write",
+  modelsPrices: "Models & prices",
+  noPublishedPrice: "No published price",
+  website: "Website",
   priceIn: "in",
   priceOut: "out",
   /** The cell's tooltip: the same rates, with the unit they are quoted in. */

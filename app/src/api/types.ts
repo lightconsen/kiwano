@@ -162,6 +162,25 @@ export interface PlanQuotaReport {
 }
 
 /** Currency metadata from the Hub price table (Settings selector + client conversion) */
+/** One row of the price mirror — what the gateway charges with, which is not
+    the same list as the catalog's one `price_ref` per provider. `off_peak` and
+    `peak_hours` are the row's own schedule when it publishes one, and the row's
+    `input`/`output` are then the **peak** figures. */
+export interface ModelPrice {
+  /** The catalog entry this price belongs to; "" for the general price. */
+  provider_id: string;
+  model_id: string;
+  display_name: string;
+  input: string;
+  output: string;
+  cache_read: string;
+  cache_creation: string;
+  /** ISO code the figures are denominated in (the provider's own currency) */
+  currency: string;
+  off_peak?: { in: string; out: string; cache_read: string; cache_creation: string };
+  peak_hours?: { tz_offset: number; windows: { days: string[]; start: string; end: string }[] };
+}
+
 export interface CurrencyMeta {
   /** ISO codes present in the Hub price table */
   currencies: string[];
@@ -303,6 +322,8 @@ export interface CatalogEntry {
   /** One line of prose: a price note, an audience line, a free-tier offer.
       Absent for the entries with nothing to say. */
   desc?: string;
+  /** The provider's own site, from the Hub. Open it with `openUrl`. */
+  website?: string;
   /** The representative model's price; absent for providers that price no model */
   price_ref?: CatalogPriceRef;
   /** The currency this provider bills in; the spending limit is denominated
@@ -632,6 +653,10 @@ export interface KiwanoApi {
       cloud providers reject anonymous /models calls) */
   listModels(protocol: Protocol, endpoint: string, apiKey: string): Promise<string[]>;
   listCatalog(): Promise<CatalogList>;
+  /** The price mirror: every model the gateway can cost, with its own rates. */
+  listModelPrices(): Promise<ModelPrice[]>;
+  /** Open a vendor's site in the user's browser (http/https only). */
+  openUrl(url: string): Promise<void>;
   getDashboard(window: DashboardWindow, providerId?: string, agentId?: string): Promise<DashboardData>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;

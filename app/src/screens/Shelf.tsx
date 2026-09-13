@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
-import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
+import type { Billing, CatalogEntry, ModelPrice, ProbeReport, Protocol } from "../api/types";
 import { isPeakAt, tzLabel, type PeakHours } from "../lib/peak";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
@@ -276,6 +276,64 @@ function TierChip({
     >
       {offPeak ? t("shelf.tierPriceOffPeak") : t("shelf.tierPricePeak")}
     </button>
+  );
+}
+
+/** One model and the four rates a request against it can spend, in the currency
+    the row is published in. The tier decides which numbers the first two are —
+    the cache pair follows the same block, so a discounted schedule discounts
+    them too. */
+function modelRateText(price: ModelPrice, tier: PriceTier, t: Translate): string {
+  const cur = price.currency || "USD";
+  const shown = tierRates(price, tier);
+  const cache = tier === "offPeak" && price.off_peak ? price.off_peak : price;
+  const fmt = (n: string) => fmtMoney(Number(n), cur);
+  return [
+    `${t("shelf.priceIn")} ${fmt(shown.input)}`,
+    `${t("shelf.priceOut")} ${fmt(shown.output)}`,
+    `${t("shelf.priceCacheRead")} ${fmt(cache.cache_read)}`,
+    `${t("shelf.priceCacheWrite")} ${fmt(cache.cache_creation)}`,
+  ].join(" · ");
+}
+
+/** One model of a provider: its id, its rates, and its own tier switch. The
+    switch is per model because the schedule is — a provider may price one model
+    by time of day and another flatly. */
+function ModelPriceRow({
+  modelId,
+  price,
+  t,
+}: {
+  modelId: string;
+  price: ModelPrice | null;
+  t: Translate;
+}) {
+  const [tier, setTier] = useState<PriceTier>("peak");
+  if (!price) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-line px-2.5 py-2">
+        <span className="min-w-0 truncate font-mono text-[11px]" title={modelId}>
+          {modelId}
+        </span>
+        <span className="text-[10.5px] text-mut">{t("shelf.noPublishedPrice")}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-md border border-line px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 truncate font-mono text-[11px]" title={price.model_id}>
+          {price.model_id}
+        </span>
+        <TierChip
+          rate={price}
+          tier={tier}
+          onToggle={() => setTier((v) => (v === "peak" ? "offPeak" : "peak"))}
+          t={t}
+        />
+      </div>
+      <div className="mt-1 text-[10.5px] text-mut">{modelRateText(price, tier, t)}</div>
+    </div>
   );
 }
 
@@ -740,6 +798,7 @@ function DetailDialog({
   entry,
   hubUrl,
   tier,
+  prices,
   onClose,
   onAdd,
 }: {
@@ -748,6 +807,8 @@ function DetailDialog({
   /// The tier the row was showing when it was opened; the dialog spells both
   /// out below the hero either way.
   tier: PriceTier;
+  /// The price mirror, for the per-model list below.
+  prices: ModelPrice[];
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
@@ -758,6 +819,29 @@ function DetailDialog({
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),
   ];
+  const website = entry.website;
+
+  // The models this provider serves, its representative one first — that is the
+  // figure the shelf shows, so it is the one a reader arrives looking for.
+  const modelIds = [
+    ...new Set(
+      [entry.price_ref?.model_id, ...endpoints.flatMap((e) => e.models)].filter(
+        (id): id is string => !!id,
+      ),
+    ),
+  ];
+
+  /** The mirror row for one model: this provider's own first, then the general
+      one (`""`), which is the order the gateway prices in. Matching is exact —
+      a model the mirror spells differently simply has no row, and says so. */
+  const priceFor = (modelId: string) => {
+    const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+    return (
+      prices.find((p) => same(p.provider_id, entry.id) && same(p.model_id, modelId)) ??
+      prices.find((p) => p.provider_id === "" && same(p.model_id, modelId)) ??
+      null
+    );
+  };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       {/* overflow-x-hidden: same WKWebView hardening as the other modals */}
@@ -798,12 +882,40 @@ function DetailDialog({
               );
             })()}
 
-          <div className="mt-2.5 flex gap-4 text-[11.5px] text-mut">
+          <div className="mt-2.5 flex flex-wrap items-center gap-4 text-[11.5px] text-mut">
             <span>
               {t("shelf.billing")}{" "}
               <span className="text-ink">{billingLabel(entry.billing, t)}</span>
             </span>
+            {website && (
+              <button
+                type="button"
+                className="cursor-pointer hover:underline"
+                style={{ color: "var(--kiwi)" }}
+                title={website}
+                onClick={() => api.openUrl(website).catch(() => {})}
+              >
+                {t("shelf.website")}
+              </button>
+            )}
           </div>
+
+          {/* Every model this provider serves, with the rates the gateway
+              charges by. The catalog names one representative price per
+              provider, so without this the rest of them — and any schedule of
+              their own — are invisible. */}
+          {modelIds.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 text-[10px] font-medium text-mut">
+                {t("shelf.modelsPrices")}
+              </div>
+              <div className="space-y-1.5">
+                {modelIds.map((id) => (
+                  <ModelPriceRow key={id} modelId={id} price={priceFor(id)} t={t} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* one card per protocol: endpoint URL + keyless Test + models */}
           <div className="mt-3">
@@ -875,6 +987,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   const hubUrl = useHubUrl();
   const { sort, view, remember, rememberView } = useShelfPrefs();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
+  const [prices, setPrices] = useState<ModelPrice[]>([]);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
   const [query, setQuery] = useState("");
   // Catalog row clicked → model detail dialog
@@ -887,6 +1000,13 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
 
   useEffect(() => {
     api.listCatalog().then(setCatalog);
+    // The price mirror is a second, smaller read: the catalog names one
+    // representative price per provider, and the dialog's per-model list needs
+    // the rest of them.
+    api
+      .listModelPrices()
+      .then(setPrices)
+      .catch(() => {});
   }, []);
 
   /** Pull the Hub catalog into the local cache, then re-read it. The sync is
@@ -1208,6 +1328,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           entry={detail.entry}
           hubUrl={hubUrl}
           tier={detail.tier}
+          prices={prices}
           onClose={() => setDetail(null)}
           onAdd={(e) => {
             setDetail(null);

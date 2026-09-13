@@ -169,8 +169,8 @@ fn providers_list(ctx: &mut Ctx, agent: Option<&str>) -> Result<(), CliError> {
 fn providers_add(args: &AddArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     let input = new_provider_input(args)?;
     let created = {
-        let store = ctx.store()?;
-        vm::add_provider(store, &input)?
+        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        vm::add_provider(store, aux, &input)?
     };
     let text = format!("added {} ({})", created.id, created.name);
     ctx.out.emit(&created, || text);
@@ -1023,6 +1023,18 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
                 format!("synced {} entries from {hub_url}", report.fetched)
             };
             ctx.out.emit(&report, || text);
+            // The sync may have brought the catalog a provider can now be
+            // matched against. Before the reload below, so one pass picks up
+            // both.
+            let linked = {
+                let (store, aux) = (ctx.store()?, ctx.aux()?);
+                vm::link_providers(store, aux)?
+            };
+            if linked > 0 {
+                ctx.out.note(format!(
+                    "linked {linked} provider(s) to their catalog entry"
+                ));
+            }
             // A price refresh only reaches cost recording through a reload.
             ctx.after_mutation();
             Ok(())

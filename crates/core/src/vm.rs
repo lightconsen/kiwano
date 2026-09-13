@@ -1574,7 +1574,11 @@ fn vm_endpoints(p: &Provider) -> Vec<ProviderEndpointVm> {
         .collect()
 }
 
-pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderVm, String> {
+pub fn add_provider(
+    store: &Store,
+    aux: &Aux,
+    input: &NewProviderInput,
+) -> Result<ProviderVm, String> {
     let now = rfc3339(unix_now());
     let id = format!(
         "{}-{}",
@@ -1601,7 +1605,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
     // number+unit+reset-cycle columns are left NULL (v10 form dropped them).
     let billing = billing_to_db(&input.billing)?;
     let is_plan = billing == kiwanod::store::Billing::Subscription;
-    let provider = Provider {
+    let mut provider = Provider {
         id: id.clone(),
         name: input.name.trim().to_string(),
         // Which catalog entry this came from, if it was added from the shelf.
@@ -1647,6 +1651,13 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
         created_at: now.clone(),
         updated_at: now,
     };
+    // Nobody named an entry — a hand-added provider, or the CLI — so infer it
+    // from the endpoint where that is unambiguous. Worth doing at all because
+    // the row's link is what prices its requests at its own rate rather than at
+    // whichever entry sorts first (`link_providers` has the long version).
+    if provider.catalog_id.is_none() {
+        provider.catalog_id = catalog_id_for(&catalog_snapshot(aux).entries, &provider);
+    }
     store.insert_provider(&provider).map_err(e2s)?;
 
     // compute view fields before partially moving `provider`
@@ -2157,6 +2168,11 @@ pub fn set_agent_takeover(
                 }
                 Err(e) => eprintln!("kiwano: current-provider import skipped: {e}"),
             }
+            // The import leaves the link empty (the agent's config knows
+            // nothing about our catalog), and this is the one path where the
+            // provider starts carrying traffic before any backfill pass runs —
+            // takeover is followed immediately by real requests.
+            let _ = link_providers(store, aux);
         }
         let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
         let key = format!("kw-ag-{agent}-{rand}");
@@ -2769,7 +2785,15 @@ fn normalize_catalog_entry(e: &mut CatalogEntryVm) {
     }
 }
 
-pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
+/// The cached Hub catalog, parsed and normalized.
+///
+/// One reader for every path that has to see the same entries: the shelf, and
+/// the endpoint matching that links a provider to its entry and marks the
+/// shelf's "already added" badge. Normalizing here is what makes the primary
+/// endpoint matchable at all — `normalize_catalog_entry` is what moves it out
+/// of `endpoints`, and a matcher that saw the raw list would be looking at the
+/// extras only.
+fn catalog_snapshot(aux: &Aux) -> CatalogListVm {
     // No cache, or a cache we cannot parse, is an empty shelf. A parse failure
     // used to fall back to the bundled copy, which meant a corrupted cache was
     // answered with stale data instead of being visibly broken; the next sync
@@ -2781,25 +2805,137 @@ pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
             total: 0,
             entries: Vec::new(),
         });
-    let keys: HashSet<String> = store
+    for e in &mut list.entries {
+        normalize_catalog_entry(e);
+    }
+    list
+}
+
+/// Every endpoint key a local provider answers on: its base URL and each
+/// additional per-protocol endpoint.
+fn provider_endpoint_keys(p: &Provider) -> Vec<String> {
+    std::iter::once(&p.base_url)
+        .chain(p.endpoints.iter().map(|e| &e.base_url))
+        .map(|u| endpoint_key(u))
+        .collect()
+}
+
+/// Every endpoint key a catalog entry advertises, its primary first.
+fn catalog_endpoint_keys(e: &CatalogEntryVm) -> Vec<String> {
+    std::iter::once(&e.endpoint)
+        .chain(e.endpoints.iter().map(|x| &x.endpoint))
+        .map(|u| endpoint_key(u))
+        .collect()
+}
+
+/// Does a local endpoint name the same place as a catalog one?
+///
+/// Equal keys, or whichever is shorter being a *path* prefix of the other: the
+/// user typed a bare host (`api.deepseek.com`) where the entry names a deeper
+/// path (`api.deepseek.com/anthropic`), or imported an agent config that
+/// carries the path (`api.deepseek.com/v1`) where the entry names the bare
+/// host. Same host, same service.
+///
+/// The `/` boundary is what keeps a host from swallowing its neighbours:
+/// `api.deepseek.com` matches neither `api.deepseek.com.evil.com` nor
+/// `api.deepseek.com:8443`. A non-default port staying distinct is deliberate —
+/// a replica on another port is not the vendor's endpoint.
+///
+/// An empty key matches nothing: `strip_prefix("")` would otherwise make it a
+/// prefix of every key.
+fn endpoint_matches(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    let (short, long) = if a.len() < b.len() { (a, b) } else { (b, a) };
+    long.strip_prefix(short)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// The catalog entry a provider's endpoints point at, when exactly one does.
+///
+/// The provider's extra per-protocol endpoints are part of the set, mirroring
+/// `added`: an entry whose second-protocol URL is what the user typed is the
+/// same entry. Protocol itself is not part of the test — filtering on it would
+/// let the badge and this link disagree about which entry a URL names.
+///
+/// Two or more matching entries resolve to `None` rather than to a guess: two
+/// entries on one host mean the endpoint cannot tell them apart, and picking one
+/// is the silent mis-pricing this exists to prevent. A provider that matches
+/// nothing — self-hosted, an aggregator the Hub does not list — is the same
+/// `None`, and that is an answer, not a failure.
+fn catalog_id_for(entries: &[CatalogEntryVm], p: &Provider) -> Option<String> {
+    let local = provider_endpoint_keys(p);
+    let matching = |e: &&CatalogEntryVm| {
+        catalog_endpoint_keys(e)
+            .iter()
+            .any(|cat| local.iter().any(|l| endpoint_matches(l, cat)))
+    };
+    let mut found = entries.iter().filter(matching);
+    let first = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
+    Some(first.id.clone())
+}
+
+/// Fill in the catalog link on providers that have none.
+///
+/// The link is what prices a request at its own provider's rate, and it is
+/// written when a provider is added from the shelf — and only then, so
+/// everything hand-added, added from the CLI, imported, or present before the
+/// column existed has none. With the Hub pricing per entry, an unlinked
+/// provider is costed at *another* entry's rate, so the link is inferred from
+/// the endpoint wherever that is unambiguous ([`catalog_id_for`]).
+///
+/// Only `NULL`s are considered: a link is a fact that decides a price, so it is
+/// never re-derived, never overwritten, never cleared — the same rule
+/// `update_provider` follows for an edit that carries no catalog id. The row's
+/// own `updated_at` rides along, so a backfill does not read as a user edit.
+///
+/// Returns how many rows were linked: a caller with a running gateway needs to
+/// know whether the daemon's in-memory copy just went stale.
+pub fn link_providers(store: &Store, aux: &Aux) -> Result<usize, String> {
+    let list = catalog_snapshot(aux);
+    // Never synced: nothing to infer from, and nothing to write.
+    if list.entries.is_empty() {
+        return Ok(0);
+    }
+    let mut linked = 0;
+    for mut p in store.list_providers().map_err(e2s)? {
+        if p.catalog_id.is_some() {
+            continue;
+        }
+        let Some(id) = catalog_id_for(&list.entries, &p) else {
+            continue; // a custom endpoint, or an ambiguous one
+        };
+        p.catalog_id = Some(id);
+        store.update_provider(&p).map_err(e2s)?;
+        linked += 1;
+    }
+    Ok(linked)
+}
+
+pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
+    // The badge and the link answer the same question — "is this entry one the
+    // user already has?" — so they match endpoints by the same rule. A
+    // provider whose link was inferred is then not offered for adding a second
+    // time, which is what it would otherwise be.
+    let local: Vec<String> = store
         .list_providers()
         .unwrap_or_default()
         .iter()
-        .flat_map(|p| {
-            let mut keys = vec![endpoint_key(&p.base_url)];
-            keys.extend(p.endpoints.iter().map(|e| endpoint_key(&e.base_url)));
-            keys
-        })
+        .flat_map(provider_endpoint_keys)
         .collect();
+    let mut list = catalog_snapshot(aux);
     for e in &mut list.entries {
-        // Before `added`: it matches on the endpoints, and the primary only
-        // lands in `endpoint` once the list has been split.
-        normalize_catalog_entry(e);
-        let mut endpoints = vec![&e.endpoint];
-        endpoints.extend(e.endpoints.iter().map(|x| &x.endpoint));
-        e.added = endpoints
+        let catalog = catalog_endpoint_keys(e);
+        e.added = catalog
             .iter()
-            .any(|url| keys.contains(&endpoint_key(url)));
+            .any(|cat| local.iter().any(|l| endpoint_matches(l, cat)));
     }
     list
 }
@@ -2822,6 +2958,12 @@ mod tests {
 
     fn store() -> Store {
         Store::open_in_memory().expect("in-memory store")
+    }
+
+    /// An `Aux` with nothing cached, so nothing can be inferred from a catalog
+    /// — what the tests that are not about the link want.
+    fn linkless_aux() -> Aux {
+        Aux::open_in_memory().unwrap()
     }
 
     fn provider(id: &str, name: &str, billing: Billing) -> Provider {
@@ -3178,6 +3320,291 @@ mod tests {
         assert_eq!(s.bindings_for_agent("codex").unwrap().len(), 2);
     }
 
+    // ── provider ↔ catalog link ──────────────────────────────────────────
+
+    /// A catalog covering the shapes the link has to tell apart: an entry whose
+    /// endpoint names a deeper path than a user types, an entry advertising two
+    /// paths, a bare host, and two entries sharing one host — which must stay
+    /// unlinked, because the endpoint cannot say which of them is meant.
+    const LINK_CATALOG: &str = r#"{"total":5,"entries":[
+        {"id":"deepseek","name":"DeepSeek","tag":"official","rating":4.8,
+         "billing":"payg","currency":"USD",
+         "endpoints":[{"protocol":"openai","endpoint":"https://api.deepseek.com/anthropic"}]},
+        {"id":"kimi-for-coding","name":"Kimi For Coding","tag":"official","rating":4,
+         "billing":"plan","currency":"USD",
+         "endpoints":[{"protocol":"openai","endpoint":"https://api.kimi.com/coding/v1"},
+                      {"protocol":"anthropic","endpoint":"https://api.kimi.com/coding"}]},
+        {"id":"bare-host","name":"Bare Host","tag":"third","rating":3,
+         "billing":"payg","currency":"USD",
+         "endpoints":[{"protocol":"openai","endpoint":"https://api.bare.example"}]},
+        {"id":"host-one","name":"Host One","tag":"third","rating":3,
+         "billing":"payg","currency":"USD",
+         "endpoints":[{"protocol":"openai","endpoint":"https://api.example.com/one"}]},
+        {"id":"host-two","name":"Host Two","tag":"third","rating":3,
+         "billing":"payg","currency":"USD",
+         "endpoints":[{"protocol":"openai","endpoint":"https://api.example.com/two"}]}
+    ]}"#;
+
+    fn catalog_aux() -> Aux {
+        let aux = Aux::open_in_memory().unwrap();
+        aux.save_hub_cache(LINK_CATALOG, "2026-09-07T00:00:00Z")
+            .unwrap();
+        aux
+    }
+
+    /// The link as stored. The inference writes the row, so this is where the
+    /// answer can be read — `ProviderVm` deliberately does not carry it.
+    fn stored_catalog_id(s: &Store, id: &str) -> Option<String> {
+        s.get_provider(id)
+            .unwrap()
+            .expect("provider row")
+            .catalog_id
+    }
+
+    /// The smallest input `add_provider` takes, so a test can vary the endpoint
+    /// and leave everything else alone.
+    fn catalog_input(name: &str, endpoint: &str) -> NewProviderInput {
+        NewProviderInput {
+            catalog_id: None,
+            name: name.into(),
+            api_key: "sk-test".into(),
+            endpoint: endpoint.into(),
+            protocol: "openai".into(),
+            model_default: String::new(),
+            billing: "payg".into(),
+            billing_config: BillingConfigInput {
+                limit_value: None,
+                limit_unit: None,
+                reset_period: None,
+                plan_limits: None,
+            },
+            agents: Vec::new(),
+            endpoints: Vec::new(),
+            advanced: None,
+            plan_query: None,
+        }
+    }
+
+    /// The boundary the matching rule turns on. A future "simplify to
+    /// `starts_with`" has to fail here rather than silently link a lookalike
+    /// host to a vendor's prices.
+    #[test]
+    fn endpoint_matches_takes_a_path_boundary() {
+        // Equal keys, and either direction of the path prefix: a bare host
+        // typed by the user, or a path an imported config carries.
+        assert!(endpoint_matches("api.deepseek.com", "api.deepseek.com"));
+        assert!(endpoint_matches(
+            "api.deepseek.com",
+            "api.deepseek.com/anthropic"
+        ));
+        assert!(endpoint_matches(
+            "api.deepseek.com/anthropic",
+            "api.deepseek.com"
+        ));
+        assert!(endpoint_matches("api.deepseek.com/v1", "api.deepseek.com"));
+
+        // …and what must not match: a neighbour host, another port, and two
+        // different sub-services under one host.
+        assert!(!endpoint_matches(
+            "api.deepseek.com",
+            "api.deepseek.com.evil.com"
+        ));
+        assert!(!endpoint_matches(
+            "api.deepseek.com",
+            "api.deepseek.com:8443"
+        ));
+        assert!(!endpoint_matches(
+            "api.deepseek.com/v1",
+            "api.deepseek.com/anthropic"
+        ));
+        // An empty key would otherwise be a prefix of everything.
+        assert!(!endpoint_matches("", "api.deepseek.com"));
+        assert!(!endpoint_matches("api.deepseek.com", ""));
+    }
+
+    /// Added from the CLI or by hand, the endpoint still names the entry:
+    /// that is what makes the provider's own prices reachable.
+    #[test]
+    fn add_provider_links_the_unique_catalog_entry() {
+        let s = store();
+        let aux = catalog_aux();
+
+        // A bare host where the entry names a deeper path.
+        let vm = add_provider(
+            &s,
+            &aux,
+            &catalog_input("DeepSeek", "https://api.deepseek.com"),
+        )
+        .unwrap();
+        assert_eq!(stored_catalog_id(&s, &vm.id).as_deref(), Some("deepseek"));
+
+        // A path the entry advertises among two — still one entry, one link.
+        let vm = add_provider(
+            &s,
+            &aux,
+            &catalog_input("KFC", "https://api.kimi.com/coding"),
+        )
+        .unwrap();
+        assert_eq!(
+            stored_catalog_id(&s, &vm.id).as_deref(),
+            Some("kimi-for-coding")
+        );
+
+        // The other direction: the local URL carries the deeper path.
+        let vm = add_provider(
+            &s,
+            &aux,
+            &catalog_input("Bare", "https://api.bare.example/v1"),
+        )
+        .unwrap();
+        assert_eq!(stored_catalog_id(&s, &vm.id).as_deref(), Some("bare-host"));
+    }
+
+    /// A caller that names an entry is the authority; the inference fills in
+    /// what nobody said.
+    #[test]
+    fn add_provider_keeps_an_explicit_catalog_id() {
+        let s = store();
+        let aux = catalog_aux();
+
+        let mut input = catalog_input("DeepSeek", "https://api.deepseek.com");
+        input.catalog_id = Some("kimi-for-coding".into());
+        let vm = add_provider(&s, &aux, &input).unwrap();
+        assert_eq!(
+            stored_catalog_id(&s, &vm.id).as_deref(),
+            Some("kimi-for-coding"),
+            "the caller's answer, not the endpoint's"
+        );
+
+        // Even when it names nothing: an id is a statement, not a hint to be
+        // corrected into something the endpoint suggests.
+        let mut input = catalog_input("Unlisted", "https://api.deepseek.com");
+        input.catalog_id = Some("not-a-real-entry".into());
+        let vm = add_provider(&s, &aux, &input).unwrap();
+        assert_eq!(
+            stored_catalog_id(&s, &vm.id).as_deref(),
+            Some("not-a-real-entry")
+        );
+    }
+
+    /// Two entries on one host: the endpoint cannot say which is meant, and a
+    /// guess here is a wrong price with nothing to show for it.
+    #[test]
+    fn add_provider_does_not_guess_between_ambiguous_entries() {
+        let s = store();
+        let aux = catalog_aux();
+        let vm = add_provider(
+            &s,
+            &aux,
+            &catalog_input("Ambiguous", "https://api.example.com"),
+        )
+        .unwrap();
+        assert_eq!(stored_catalog_id(&s, &vm.id), None);
+    }
+
+    /// A genuinely custom provider — self-hosted, an aggregator the Hub does
+    /// not list — has no entry to link to, and stays that way.
+    #[test]
+    fn add_provider_leaves_a_custom_endpoint_unlinked() {
+        let s = store();
+        let aux = catalog_aux();
+        for endpoint in [
+            "https://my-own.example.com",
+            "https://api.deepseek.com.evil.com",
+            "https://api.deepseek.com:8443",
+        ] {
+            let vm = add_provider(&s, &aux, &catalog_input("Custom", endpoint)).unwrap();
+            assert_eq!(stored_catalog_id(&s, &vm.id), None, "{endpoint}");
+        }
+    }
+
+    /// The provider's extra per-protocol endpoints are part of the match, the
+    /// same set the shelf's `added` derives from.
+    #[test]
+    fn add_provider_links_from_an_extra_endpoint() {
+        let s = store();
+        let aux = catalog_aux();
+        let mut input = catalog_input("KFC", "https://my-own.example.com");
+        input.endpoints = vec![NewEndpointInput {
+            protocol: "anthropic".into(),
+            endpoint: "https://api.kimi.com/coding".into(),
+        }];
+        let vm = add_provider(&s, &aux, &input).unwrap();
+        assert_eq!(
+            stored_catalog_id(&s, &vm.id).as_deref(),
+            Some("kimi-for-coding")
+        );
+    }
+
+    /// The backfill, on rows that predate the column: only `NULL`s are touched,
+    /// an existing link is left alone down to its `updated_at` (a backfill is
+    /// not a user edit), and a second run has nothing left to do.
+    #[test]
+    fn link_providers_fills_only_nulls() {
+        let s = store();
+        let aux = catalog_aux();
+
+        let mut ds = provider("ds", "DeepSeek", Billing::Metered);
+        ds.base_url = "https://api.deepseek.com".into();
+        let mut kfc = provider("kfc", "Kimi For Coding", Billing::Metered);
+        kfc.base_url = "https://api.kimi.com/coding".into();
+        kfc.catalog_id = Some("kimi-for-coding".into());
+        let mut ambiguous = provider("amb", "Ambiguous", Billing::Metered);
+        ambiguous.base_url = "https://api.example.com".into();
+        for p in [&ds, &kfc, &ambiguous] {
+            s.insert_provider(p).unwrap();
+        }
+
+        assert_eq!(link_providers(&s, &aux).unwrap(), 1);
+        assert_eq!(stored_catalog_id(&s, "ds").as_deref(), Some("deepseek"));
+        assert_eq!(
+            stored_catalog_id(&s, "kfc").as_deref(),
+            Some("kimi-for-coding")
+        );
+        assert_eq!(stored_catalog_id(&s, "amb"), None);
+        assert_eq!(
+            s.get_provider("kfc").unwrap().unwrap().updated_at,
+            kfc.updated_at,
+            "a link already made is a fact, not something to re-derive"
+        );
+
+        // Idempotent: the second pass has nothing to write.
+        assert_eq!(link_providers(&s, &aux).unwrap(), 0);
+    }
+
+    /// Never synced: there is nothing to infer from, so nothing is written —
+    /// and nothing is cleared either.
+    #[test]
+    fn link_providers_is_a_noop_without_a_catalog() {
+        let s = store();
+        let mut p = provider("ds", "DeepSeek", Billing::Metered);
+        p.base_url = "https://api.deepseek.com".into();
+        s.insert_provider(&p).unwrap();
+
+        assert_eq!(link_providers(&s, &linkless_aux()).unwrap(), 0);
+        assert_eq!(stored_catalog_id(&s, "ds"), None);
+    }
+
+    /// The shelf's badge asks the same question as the link — "is this entry
+    /// one the user already has?" — so it answers the same way. Otherwise a
+    /// linked provider would still be offered for adding a second time.
+    #[test]
+    fn catalog_added_matches_the_link_rule() {
+        let aux = catalog_aux();
+        let s = store();
+        let mut p = provider("ds", "DeepSeek", Billing::Metered);
+        p.base_url = "https://api.deepseek.com".into();
+        s.insert_provider(&p).unwrap();
+
+        let added: Vec<String> = load_catalog(&s, &aux)
+            .entries
+            .into_iter()
+            .filter(|e| e.added)
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(added, ["deepseek"]);
+    }
+
     #[test]
     fn catalog_added_derives_from_provider_endpoints() {
         let aux = Aux::open_in_memory().unwrap();
@@ -3310,7 +3737,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        let vm = add_provider(&s, &input).unwrap();
+        let vm = add_provider(&s, &linkless_aux(), &input).unwrap();
         assert_eq!(
             s.primary_provider_id("codex").unwrap().as_deref(),
             Some(vm.id.as_str())
@@ -3356,7 +3783,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        add_provider(&s, &input).unwrap();
+        add_provider(&s, &linkless_aux(), &input).unwrap();
 
         let rows = s.list_providers().unwrap();
         assert_eq!(rows.len(), 1);
@@ -3396,7 +3823,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        let vm = add_provider(&s, &input).unwrap();
+        let vm = add_provider(&s, &linkless_aux(), &input).unwrap();
         assert_eq!(vm.endpoints.len(), 1);
         assert_eq!(vm.endpoints[0].protocol, "anthropic");
         // display_base strips the scheme (same as the primary endpoint field)

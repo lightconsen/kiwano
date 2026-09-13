@@ -37,6 +37,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   last, which is what the old table did: a cost could move without any price
   moving.
 
+  Providers that never went through the shelf — added by hand, from the command
+  line, imported, or present before the column existed — are linked on their own
+  where the answer is unambiguous: `providers add` infers the entry from the
+  endpoint, and the app and `catalog sync` fill in the rest afterwards, once per
+  provider. An endpoint naming no entry (self-hosted, an aggregator the Hub does
+  not list) or two of them is left alone rather than guessed at, and a link that
+  already exists is never re-derived. Note that linking an existing provider
+  changes *future* costs only, and can therefore move a spend limit, without any
+  price having changed.
+
 ### Changed
 
 - **Model prices now come only from the Hub.** They used to come from a table

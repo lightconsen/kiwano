@@ -250,6 +250,14 @@ entries carry) live in the app's form, not in a shared layer. If that mapping
 moves into `kiwano-core` later, this becomes a one-command shortcut — until
 then it is a convenience the CLI does without, not a capability it lacks.
 
+What the CLI *does* record is which entry a provider corresponds to, since that
+is what prices its requests at the entry's own published rates. It is inferred
+from the endpoint rather than asked for: `providers add` links the provider when
+its endpoint names exactly one entry, and `catalog sync` does the same for
+providers that have no link yet. Nothing is guessed — an endpoint that matches
+no entry, or more than one (two entries sharing a host), stays unlinked and is
+priced at the general rate.
+
 ## How this maps onto the app
 
 Every user-facing capability of the desktop app is reachable here except the

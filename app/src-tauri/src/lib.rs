@@ -218,6 +218,18 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
             Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
             _ => {}
         }
+        // …and a provider may now be linkable to a catalog entry it could not
+        // be matched against before (this is where a first-run install gets its
+        // catalog at all). The daemon holds the link in memory, so a change
+        // has to reach it the same way the price table does.
+        match vm::link_providers(&state.store, &state.aux) {
+            Ok(linked) if linked > 0 => {
+                tracing::info!(linked, "providers linked to their catalog entries");
+                sidecar::notify_reload(&state.admin);
+            }
+            Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
+            _ => {}
+        }
     });
 }
 
@@ -378,7 +390,7 @@ fn add_provider(
     state: State<AppState>,
     input: vm::NewProviderInput,
 ) -> Result<vm::ProviderVm, String> {
-    let vm = vm::add_provider(&state.store, &input)?;
+    let vm = vm::add_provider(&state.store, &state.aux, &input)?;
     after_mutation(&state);
     Ok(vm)
 }
@@ -745,7 +757,19 @@ fn apply_agent_route(state: State<AppState>, target: String, source: String) -> 
 #[tauri::command]
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     let hub_url = vm::ui_settings(&state.aux).hub_url;
-    sync::sync_from_hub(&state.aux, &hub_url)
+    let report = sync::sync_from_hub(&state.aux, &hub_url)?;
+    // The sync may have brought the catalog a provider can now be matched
+    // against. A manual sync does not otherwise touch the daemon, so the reload
+    // is owed only when this actually wrote something.
+    match vm::link_providers(&state.store, &state.aux) {
+        Ok(linked) if linked > 0 => {
+            tracing::info!(linked, "providers linked to their catalog entries");
+            sidecar::notify_reload(&state.admin);
+        }
+        Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
+        _ => {}
+    }
+    Ok(report)
 }
 
 // ── Multi-key rotation (spec §4.1 P1) ──
@@ -924,6 +948,18 @@ pub fn run() {
                     tracing::info!(version = r.version, rows = r.seeded, "model pricing seeded")
                 }
                 Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
+                _ => {}
+            }
+            // A provider added before the link existed — or imported from
+            // another manager — gets it now, from the cached catalog, instead
+            // of waiting on a sync that may turn out to be a sha match or a
+            // failure. Cheap after the first run: one catalog parse, no writes.
+            match vm::link_providers(&store, &aux) {
+                Ok(linked) if linked > 0 => {
+                    tracing::info!(linked, "providers linked to their catalog entries");
+                    sidecar::notify_reload(&admin);
+                }
+                Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
                 _ => {}
             }
             app.manage(AppState {

@@ -1253,6 +1253,48 @@ fn catalog_list_filters_by_tag_and_name() {
     assert!(tagged.iter().all(|e| e["tag"] == "official"), "{tagged:?}");
 }
 
+/// `providers add` records which catalog entry its endpoint names — the link
+/// that costs the provider's requests at its own published rate instead of at
+/// whichever entry happens to sort first. Nobody on the command line can state
+/// it, so it is inferred; the CLI is the path with no shelf to name one.
+#[test]
+fn providers_add_links_the_catalog_entry() {
+    let (_dir, db) = temp_db();
+    {
+        let aux = kiwano_core::auxiliary::Aux::open(&db).unwrap();
+        aux.save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
+            .unwrap();
+    }
+
+    // The URL `docs/cli.md` has users type: the entry's path, not its host.
+    let (code, _, err) = run(
+        &db,
+        &[
+            "providers",
+            "add",
+            "--name",
+            "DeepSeek",
+            "--endpoint",
+            "https://api.deepseek.com/anthropic",
+            "--key",
+            "sk-test",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+
+    let store = kiwanod::store::Store::open(&db).unwrap();
+    let rows: Vec<(String, Option<String>)> = store
+        .list_providers()
+        .unwrap()
+        .into_iter()
+        .map(|p| (p.name, p.catalog_id))
+        .collect();
+    assert_eq!(
+        rows,
+        [("DeepSeek".to_string(), Some("deepseek".to_string()))]
+    );
+}
+
 /// Two entries, carrying only the fields the wire format requires (`id`, `name`,
 /// `tag`, `rating`, `billing`) plus an endpoint list — the app derives the rest.
 const SEED_CATALOG: &str = r#"{"total":2,"entries":[

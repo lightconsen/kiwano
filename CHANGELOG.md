@@ -19,6 +19,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **The Models shelf's Category column is an icon.** A shield for official,
+  layers for aggregate, boxes for third-party, a gift for the free tier — the
+  glyphs the filter chips already carry, which is what makes an icon enough:
+  the legend is the row directly above the table. The name stays as the
+  tooltip and as the accessible name, and the width it gives back goes to the
+  price.
+
 ### Added
 
 - **The Models shelf says how you pay.** Every row has a Billing column —

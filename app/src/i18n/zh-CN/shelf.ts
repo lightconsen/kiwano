@@ -25,10 +25,10 @@ export const shelf = {
   colPrice: "价格",
   colActions: "操作",
 
-  viewByProvider: "Provider",
+  viewByProvider: "供应商",
   viewByModel: "模型",
-  groupMeta: "{n} 个 Provider · {m} 个有价格",
-  groupMetaOne: "1 个 Provider · {m} 个有价格",
+  groupMeta: "{n} 个供应商 · {m} 个有价格",
+  groupMetaOne: "1 个供应商 · {m} 个有价格",
   groupPriceTitle: "每百万 token 的输入价格，从低到高",
 
   tierPricePeak: "峰价",
@@ -68,10 +68,10 @@ export const shelf = {
   connect: "+ 连接",
   add: "+ 添加",
 
-  searchPlaceholder: "搜索 Provider…",
+  searchPlaceholder: "搜索供应商…",
   refreshAria: "从 Hub 刷新",
   refreshTitle: "从 Kiwano Hub 获取最新目录",
-  noMatches: "没有匹配的 Provider",
+  noMatches: "没有匹配的供应商",
   /** 与 noMatches 刻意分开:目录为空和「筛选没命中」是两回事,后者才是用户自己造成的。
    *  已无内置回落,所以从未连上 Hub 的机器看到的是这一句。 */
   notSynced: "尚未获取目录 —— 从 Kiwano Hub 获取",

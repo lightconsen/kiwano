@@ -587,8 +587,10 @@ pub struct SettingsVm {
     pub hub_logged_in: bool,
     #[serde(default = "default_hub_url")]
     pub hub_url: String,
-    /// Preferred display currency (ISO code); per-provider amounts convert
-    /// into it via the Hub's published exchange rates.
+    /// Preferred display currency (ISO code). Only the Dashboard converts into
+    /// it, via the Hub's published exchange rates — rolling per-currency
+    /// buckets into one number is what it is for. Everywhere else an amount
+    /// keeps the currency it was priced in.
     #[serde(default = "default_preferred_currency")]
     pub preferred_currency: String,
     /// Auto-check for app updates at startup (opt-out; silent, notification only).

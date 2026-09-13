@@ -1,0 +1,49 @@
+[Unit]
+Description=Kiwano gateway (local AI model router)
+Documentation=https://github.com/lightconsen/kiwano
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kiwano
+Group=kiwano
+
+# Both are set explicitly rather than left to the defaults. Without
+# KIWANO_DB_PATH the gateway resolves its database from $HOME, and a service
+# with no HOME set falls back to a path relative to WorkingDirectory — which is
+# not the file the CLI on the same host would read unless it is told the same
+# thing. The admin socket then lands beside the database, per AdminEndpoint.
+Environment=KIWANO_DB_PATH=/var/lib/kiwano/kiwano.db
+Environment=KIWANO_DATA_PORT=8317
+WorkingDirectory=/var/lib/kiwano
+
+ExecStart=/usr/bin/kiwano-gateway
+
+# SIGTERM is the *graceful* path, not just a courtesy: the gateway checkpoints
+# its SQLite write-ahead log and removes the socket on the way out, and a
+# process the OS kills outright does neither. Give it room to finish both.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+Restart=on-failure
+RestartSec=5
+
+# The database holds every upstream credential in the clear, protected by file
+# permissions alone (0700 directory, 0600 file). These harden what is around it:
+# the unit needs no privileges, no writable system paths, and no access to any
+# user's home — the gateway reads agent configs nowhere.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# Creates /var/lib/kiwano owned by the service user, and is the one writable
+# path ProtectSystem=strict leaves it.
+StateDirectory=kiwano
+
+[Install]
+WantedBy=multi-user.target

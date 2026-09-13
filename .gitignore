@@ -17,6 +17,9 @@ src-tauri/gen/schemas
 # target triple, never project content.
 src-tauri/binaries/
 
+# The server bundle staged by release.yml before it is uploaded to the release.
+dist-cli/
+
 # Editor / OS
 .DS_Store
 .idea

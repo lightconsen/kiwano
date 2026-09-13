@@ -750,6 +750,51 @@ jobs:
           esac
           echo "gateway sidecar present in the ${{ matrix.target }} bundle"
 
+      # The server bundle: the CLI and the daemon, plus a unit file and install
+      # notes. Packaged here rather than in its own job so it reuses this leg's
+      # target directory — the gateway binary is already built for exactly this
+      # triple by the sidecar step above.
+      #
+      # `cargo build -p kiwano` deliberately does not go through
+      # `src-tauri/build.rs`, so it cannot fail on a missing sidecar and needs
+      # none of the Tauri system libraries the app build requires.
+      - name: Package the CLI server bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          triple='${{ matrix.target }}'
+          exe=""
+          case "$triple" in *windows*) exe=".exe" ;; esac
+
+          cargo build -p kiwano --release --target "$triple" --locked
+
+          rm -rf dist-cli && mkdir -p dist-cli/pkg
+          cp "target/$triple/release/kiwano$exe" dist-cli/pkg/
+          cp "target/$triple/release/kiwano-gateway$exe" dist-cli/pkg/
+          cp packaging/kiwano-gateway.service dist-cli/pkg/
+          cp packaging/INSTALL.md dist-cli/pkg/
+
+          tar czf "dist-cli/kiwano-$triple.tar.gz" -C dist-cli/pkg .
+
+          # A bundle whose client cannot print its own version is not one worth
+          # shipping, and a version that disagrees with the tag means something
+          # in the version plumbing is wrong.
+          ./dist-cli/pkg/kiwano$exe --version
+          built=$(./dist-cli/pkg/kiwano$exe --version | awk '{print $NF}')
+          [ "$built" = "${GITHUB_REF_NAME#v}" ] \
+            || { echo "::error::kiwano --version says $built, the tag is $GITHUB_REF_NAME"; exit 1; }
+
+          # And the daemon has to be in there: the bundle is useless without it,
+          # which is the same failure the sidecar check above exists for.
+          tar tzf "dist-cli/kiwano-$triple.tar.gz" | grep -q '^\./kiwano-gateway' \
+            || { echo "::error::the server bundle has no kiwano-gateway"; exit 1; }
+
+      - name: Upload the server bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist-cli/kiwano-*.tar.gz --clobber
+
       # Mirror the built installers to Cloudflare R2 under releases/ (served at
       # hub.kiwano.cc/releases). Only the newest build lives there: names are
       # version-stripped so every release overwrites the same keys instead of
@@ -783,9 +828,11 @@ jobs:
 
           # Whitelist of real artifacts — create-dmg's support files (share/,
           # *.sh, *.icns, *.xml) never reach the staging dir, so no --exclude
-          # patchwork is needed.
+          # patchwork is needed. `dist-cli` is the second root: the server
+          # bundle is built outside `bundle/`, and it is the same kind of thing
+          # (a download for a user) so it belongs on the mirror too.
           mkdir -p mirror
-          find "$bundle" -type f \
+          find "$bundle" dist-cli -type f \
             \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
                -o -name '*.exe' -o -name '*.msi' \) -exec cp {} mirror/ \;
@@ -795,9 +842,16 @@ jobs:
           # the macOS updater pair with its arch: Tauri names both the Intel
           # and the Apple Silicon build `Kiwano.app.tar.gz`, so without this
           # they would overwrite each other on the mirror.
+          #
+          # The server bundle (`kiwano-<triple>.tar.gz`) is skipped explicitly
+          # rather than left to luck. Its name carries no version to strip
+          # today, so the sed is a no-op and the case arms are case-sensitive
+          # against a lowercase name — but that is three coincidences, and a
+          # rename here would silently publish it under the wrong key.
           for f in mirror/*; do
             name=$(basename "$f" | sed -e "s/_${version}//" -e "s/-${version}-/-/")
             case "$name" in
+              kiwano-*) ;;
               Kiwano.app.tar.gz*) name="Kiwano_${arch}.${name#Kiwano.}" ;;
             esac
             [ "$name" = "$(basename "$f")" ] || mv "$f" "mirror/$name"

@@ -251,7 +251,11 @@ pub fn apply_hub_documents(store: &kiwanod::store::Store, aux: &Aux) -> bool {
     // case: most syncs bring neither a new price table nor a new link.
     match crate::pricing::seed_model_pricing(aux) {
         Ok(r) if r.seeded > 0 => {
-            tracing::info!(version = r.version, rows = r.seeded, "hub model pricing seeded");
+            tracing::info!(
+                version = r.version,
+                rows = r.seeded,
+                "hub model pricing seeded"
+            );
             wrote = true;
         }
         Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
@@ -667,7 +671,10 @@ mod tests {
         // Idempotent: the gate is the version plus the content digest, so a
         // sync that brought nothing new does not rewrite the table or reload the
         // daemon.
-        assert!(!apply_hub_documents(&store, &aux), "a repeat writes nothing");
+        assert!(
+            !apply_hub_documents(&store, &aux),
+            "a repeat writes nothing"
+        );
     }
 
     #[test]

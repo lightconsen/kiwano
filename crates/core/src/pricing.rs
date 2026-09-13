@@ -11,11 +11,11 @@ use crate::vm::Aux;
 /// frontend, and the app deliberately depends on `kiwano-core` alone rather than
 /// reaching into the adapters crate for a type.
 pub use kiwano_adapters::model_pricing::ModelPriceEntry;
+use kiwano_adapters::model_pricing::ModelsDoc;
 /// Re-exported for the same reason, and for a better one: the gateway's limit
 /// check converts with these too, and one implementation is the only way the
 /// figure it enforces and the figure the app shows can be the same number.
 pub use kiwano_adapters::model_pricing::{convert_amount, convert_cost_buckets};
-use kiwano_adapters::model_pricing::ModelsDoc;
 use std::collections::HashMap;
 
 /// app_settings KV key holding the last-seeded models.json version.
@@ -338,7 +338,6 @@ pub fn currency_meta(aux: &Aux) -> Result<CurrencyMetaVm, String> {
         preferred,
     })
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -526,11 +526,19 @@ mod tests {
         s.insert_provider(&p).unwrap();
 
         // Under the ceiling: routed.
-        crate::plan_quota::cache_write(&s, "glm-1", &plan_report(50.0, Some("2026-09-14T10:00:00Z")));
+        crate::plan_quota::cache_write(
+            &s,
+            "glm-1",
+            &plan_report(50.0, Some("2026-09-14T10:00:00Z")),
+        );
         assert!(evaluate(&s).blocked("glm-1").is_none());
 
         // At it: out, and for the reason claimed.
-        crate::plan_quota::cache_write(&s, "glm-1", &plan_report(95.0, Some("2026-09-14T10:00:00Z")));
+        crate::plan_quota::cache_write(
+            &s,
+            "glm-1",
+            &plan_report(95.0, Some("2026-09-14T10:00:00Z")),
+        );
         match evaluate(&s).blocked("glm-1") {
             Some(BlockReason::PlanWindow { window, util, pct }) => {
                 assert_eq!(window, "five_hour");
@@ -542,7 +550,11 @@ mod tests {
 
         // A window the report does not mention is not evidence of a hit: with a
         // stale cache of the other shape, the provider routes again.
-        crate::plan_quota::cache_write(&s, "glm-1", &plan_report(0.0, Some("2026-09-14T15:00:00Z")));
+        crate::plan_quota::cache_write(
+            &s,
+            "glm-1",
+            &plan_report(0.0, Some("2026-09-14T15:00:00Z")),
+        );
         assert!(evaluate(&s).blocked("glm-1").is_none());
     }
 

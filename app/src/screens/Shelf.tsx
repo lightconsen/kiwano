@@ -827,16 +827,23 @@ function DetailDialog({
   const [showAllModels, setShowAllModels] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
 
-  /** The mirror row for one model: this provider's own first, then the general
-      one (`""`), which is the order the gateway prices in. Matching is exact —
-      a model the mirror spells differently simply has no row, and says so. */
+  /** The mirror row for one model, in the order the gateway prices in: this
+      provider's own row first, then — the gateway's own tolerance for a model
+      the provider does not price — the model's lowest-`provider_id` row, which
+      is what such a model is actually billed at. Showing "no price" there would
+      put the dialog at odds with the bill. `localeCompare` sorts the empty
+      (general) id first, as the gateway does; the Hub no longer publishes those,
+      but a table seeded before it stopped still has them.
+
+      Matching is exact, so a model the mirror spells differently has no row at
+      all — the gateway's normalized and prefix matching is not reproduced here,
+      and that difference is known. */
   const priceFor = (modelId: string) => {
     const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-    return (
-      prices.find((p) => same(p.provider_id, entry.id) && same(p.model_id, modelId)) ??
-      prices.find((p) => p.provider_id === "" && same(p.model_id, modelId)) ??
-      null
-    );
+    const forModel = prices.filter((p) => same(p.model_id, modelId));
+    const own = forModel.find((p) => same(p.provider_id, entry.id));
+    if (own) return own;
+    return [...forModel].sort((a, b) => a.provider_id.localeCompare(b.provider_id))[0] ?? null;
   };
 
   // The models this provider serves, ordered so that a capped list keeps what a

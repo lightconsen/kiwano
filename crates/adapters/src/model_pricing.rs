@@ -387,9 +387,11 @@ struct Rates {
 /// or whose day list is empty, never matches: matching is what turns a typo into
 /// a wrong price, and the conservative direction is to charge the peak.
 ///
-/// Note that a row carrying tiers is the row's *own* schedule: when one general
-/// row prices several providers (no published row names a provider yet), a
-/// reseller is billed on the publisher's clock too.
+/// Note that a row carrying tiers is the row's *own* schedule. Since the Hub
+/// names the provider on every row it publishes, a reseller that prices a model
+/// itself is billed on its own clock; only a model it does not price — billed
+/// from another provider's row — puts it on that provider's clock, which is the
+/// best available answer rather than a chosen one.
 pub fn is_peak(hours: &PeakHours, at: i64) -> bool {
     use chrono::{Datelike, Timelike};
 

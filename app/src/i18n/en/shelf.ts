@@ -46,6 +46,12 @@ export const shelf = {
 
   /** Time-of-day pricing: the chip in a price cell whose number depends on when
       the request runs, and the two labels the detail dialog's price block uses. */
+  /** The two figures in a price cell are per-million-token rates, and are
+      meaningless unlabelled — `¥9 / ¥27` could be any pair of numbers. */
+  priceIn: "in",
+  priceOut: "out",
+  /** The cell's tooltip: the same rates, with the unit they are quoted in. */
+  priceUnit: "{rates} per million tokens",
   peakTier: "peak/off-peak",
   peakRates: "Peak",
   offPeakRates: "Off-peak",

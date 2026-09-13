@@ -184,6 +184,15 @@ function windowText(hours: PeakHours, t: Translate): string {
     .join(t("shelf.windowSep"));
 }
 
+/** A pair of rates, labelled and in the currency they are published in:
+    `in ¥9 / out ¥27`. The two numbers are meaningless unlabelled — any two
+    figures could sit either side of a slash, and which one a request spends
+    most of is exactly what a reader is comparing. */
+function rateText(rate: { input: string; output: string; currency: string }, t: Translate): string {
+  const cur = rate.currency || "USD";
+  return `${t("shelf.priceIn")} ${fmtMoney(Number(rate.input), cur)} / ${t("shelf.priceOut")} ${fmtMoney(Number(rate.output), cur)}`;
+}
+
 /** The one line that says what a tiered price means: the peak rates, the
     off-peak rates, and when each applies — **on the vendor's clock**, named, so
     a reader is never left to assume their own. */
@@ -192,11 +201,14 @@ function tierDetail(
   tiers: NonNullable<ReturnType<typeof tiersOf>>,
   t: Translate,
 ): string {
-  const cur = rate.currency || "USD";
-  const fmt = (n: string) => fmtMoney(Number(n), cur);
   return [
-    `${t("shelf.peakRates")} ${fmt(rate.input)} / ${fmt(rate.output)}`,
-    `${t("shelf.offPeakRates")} ${fmt(tiers.off.in)} / ${fmt(tiers.off.out)}`,
+    `${t("shelf.peakRates")} ${rateText(rate, t)}`,
+    // The off-peak block spells its keys `in`/`out` (the published shape);
+    // `rateText` takes the pair, so the mapping happens here.
+    `${t("shelf.offPeakRates")} ${rateText(
+      { input: tiers.off.in, output: tiers.off.out, currency: rate.currency },
+      t,
+    )}`,
     `${t("shelf.peakHours")}: ${windowText(tiers.hours, t)} (${t("shelf.vendorTime", {
       offset: tzLabel(tiers.hours.tz_offset),
     })})`,
@@ -270,23 +282,20 @@ function priceValue(e: CatalogEntry): number | null {
     would show a derived number that moves with a Settings choice and hides what
     the provider charges — the display currency is the Dashboard's, and the
     price a reader compares across providers has to be the price they pay. */
-function priceText(e: CatalogEntry): string {
+function priceText(e: CatalogEntry, t: Translate): string {
   const p = e.price_ref;
   if (!p) return e.desc ?? "";
-  const inRate = Number(p.input);
-  const outRate = Number(p.output);
-  if (!Number.isFinite(inRate) || !Number.isFinite(outRate)) return e.desc ?? "";
-  const cur = p.currency || "USD";
-  const fmt = (n: number) => fmtMoney(n, cur);
-  return `${p.display_name} · ${fmt(inRate)} / ${fmt(outRate)}`;
+  if (!Number.isFinite(Number(p.input)) || !Number.isFinite(Number(p.output))) return e.desc ?? "";
+  return `${p.display_name} · ${rateText(p, t)}`;
 }
+
 
 /** The price cell's text. A plan provider is bought rather than metered, so its
     `desc` leads — "from ¥49 /mo" is what the reader would actually pay — and
     the rates after it say what the same models cost per token. For every other
     billing mode the two are the same sentence, and this is `priceText`. */
-function rowPriceText(e: CatalogEntry): string {
-  const rate = priceText(e);
+function rowPriceText(e: CatalogEntry, t: Translate): string {
+  const rate = priceText(e, t);
   if (e.billing !== "plan") return rate;
   const offer = e.desc ?? "";
   // Equal when the entry prices no model and `desc` is all there is.
@@ -568,11 +577,10 @@ function buildModelGroups(entries: CatalogEntry[], query: string): ModelGroup[] 
     would compare two different things. */
 function groupPriceText(rate: ModelGroupRow["rate"], t: Translate): string {
   if (!rate) return t("common.none");
-  const inRate = Number(rate.input);
-  const outRate = Number(rate.output);
-  if (!Number.isFinite(inRate) || !Number.isFinite(outRate)) return t("common.none");
-  const cur = rate.currency || "USD";
-  return `${fmtMoney(inRate, cur)} / ${fmtMoney(outRate, cur)}`;
+  if (!Number.isFinite(Number(rate.input)) || !Number.isFinite(Number(rate.output))) {
+    return t("common.none");
+  }
+  return rateText(rate, t);
 }
 
 function Row({
@@ -597,9 +605,12 @@ function Row({
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
-  const price = modelId
-    ? groupPriceText(modelRate(entry, modelId), t)
-    : rowPriceText(entry);
+  const rate = modelId ? modelRate(entry, modelId) : (entry.price_ref ?? null);
+  const price = modelId ? groupPriceText(rate, t) : rowPriceText(entry, t);
+  /** The tooltip: the same figures plus the unit they are quoted in, which the
+      table has no room to repeat on every row. A cell with no rates behind it
+      (a plan's offer, a provider that prices no model) says only what it says. */
+  const priceHint = rate ? t("shelf.priceUnit", { rates: price }) : price;
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className={`py-2 ${indent ? "pl-10" : "pl-4"} pr-2`}>
@@ -638,7 +649,7 @@ function Row({
             provider's own one-liner when it prices nothing. `title` because the
             cell can truncate. */}
         <span className="flex items-center">
-          <span className="min-w-0 truncate" title={price}>
+          <span className="min-w-0 truncate" title={priceHint}>
             {price}
           </span>
           {/* The figures beside it are the peak ones, which is not obvious from
@@ -679,7 +690,7 @@ function DetailDialog({
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
-  const price = priceText(entry);
+  const price = priceText(entry, t);
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),

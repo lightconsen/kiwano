@@ -232,6 +232,24 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
 /// the field with it), turns one registration into a stream of them.
 ///
 /// Failures stay silent; the next launch realigns.
+///
+/// # The check is on the flag, not on the path
+///
+/// `is_enabled` answers "is there a login item", not "does it point at *this*
+/// executable" — and the plugin records a path when it registers one. So an
+/// item that names a binary this app no longer is still reads as enabled, this
+/// returns early, and it never gets corrected.
+///
+/// That is not hypothetical: the 0.1.9 rename made the app's executable
+/// `kiwano-app`, and on Windows an install whose *Launch at login* was already
+/// on kept a registry entry naming the old `kiwano.exe` — now the name of the
+/// command-line client, and a different program entirely. The consequence is an
+/// old copy of the app starting at login. There is no self-heal, deliberately:
+/// rewriting the item on every launch is the macOS "Background Items Added"
+/// spam this early return exists to avoid, and comparing registered paths is
+/// platform-specific work the plugin does not expose. The CHANGELOG tells
+/// affected users to reinstall once or toggle the setting, which does rewrite
+/// it.
 fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
     use tauri_plugin_autostart::ManagerExt;
     let mgr = app.autolaunch();

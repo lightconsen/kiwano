@@ -68,9 +68,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   (`/usr/bin/kiwano-app`, `kiwano-app.exe`).
 
   > **Windows, one-time:** if you had *Launch at login* enabled, the login item
-  > still points at the old `kiwano.exe` filename, which the installer does not
-  > remove. Reinstall once — or re-toggle the setting — to clear it. macOS has no
-  > equivalent: its login item points at the app bundle.
+  > still names the app's executable as it was before this release —
+  > `kiwano.exe`, which is now the name of the *command-line client*. Read that
+  > carefully: the login item points at the old **desktop app**, sitting in the
+  > install directory under a filename it no longer uses. The CLI is not
+  > involved and never was (it was `kiwano-cli.exe` back then, and the app never
+  > registered it). Left alone, you may get an old build of the app starting at
+  > login.
+  >
+  > Reinstall once, or toggle *Launch at login* off and on, to re-register it
+  > against `kiwano-app.exe`. macOS has no equivalent: its login item points at
+  > the app bundle, which did not change.
 
 - **`kiwano-cli` is gone**, with no compatibility alias. Everything it did is
   available under `kiwano`; the subcommands now nest (`keys …` under

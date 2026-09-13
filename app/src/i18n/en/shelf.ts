@@ -57,6 +57,10 @@ export const shelf = {
   priceCacheRead: "cache hits",
   priceCacheWrite: "cache write",
   modelsPrices: "MODELS & PRICES · {n}",
+  /** The same heading under a filter: what is left, out of what there was. */
+  modelsPricesFiltered: "MODELS & PRICES · {n} of {total}",
+  searchModels: "Search models…",
+  noMatchingModels: "No model matches",
   showAllModels: "Show the other {n}",
   showFewerModels: "Show fewer",
   noPublishedPrice: "No published price",

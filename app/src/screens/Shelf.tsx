@@ -190,6 +190,11 @@ function windowText(hours: PeakHours, t: Translate): string {
 /// list reachable.
 const MODEL_ROWS_SHOWN = 8;
 
+/// Past this many models the section grows a filter of its own. Reading a list
+/// stops working somewhere around here — that is the point at which a reader is
+/// hunting for one model rather than taking in the set.
+const MODEL_SEARCH_ABOVE = 10;
+
 /// Which of a row's two prices its cell is showing. The row's own figures are
 /// the **peak** ones (the published table's rule), so that is where every cell
 /// starts.
@@ -827,6 +832,7 @@ function DetailDialog({
   ];
   const website = entry.website;
   const [showAllModels, setShowAllModels] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
 
   /** The mirror row for one model: this provider's own first, then the general
       one (`""`), which is the order the gateway prices in. Matching is exact —
@@ -853,6 +859,20 @@ function DetailDialog({
   ]
     .map((id) => ({ id, price: priceFor(id) }))
     .sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
+
+  // The section's own filter. It matches the model's id and the mirror's
+  // display name for it: the two differ often enough — `deepseek-chat (V3)`
+  // against `DeepSeek Chat (V3)` — that matching the id alone would refuse a
+  // query a reader can see the answer to. Case-insensitive, and the cap applies
+  // to whatever it leaves, so a broad query cannot grow the section back.
+  const needle = modelQuery.trim().toLowerCase();
+  const matched = needle
+    ? models.filter(
+        (m) =>
+          m.id.toLowerCase().includes(needle) ||
+          (m.price?.display_name ?? "").toLowerCase().includes(needle),
+      )
+    : models;
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       {/* overflow-x-hidden: same WKWebView hardening as the other modals */}
@@ -926,15 +946,36 @@ function DetailDialog({
               their own — are invisible. */}
           {models.length > 0 && (
             <div className="mt-3">
+              {/* The heading counts what the filter has left, so it never
+                  disagrees with the rows under it. */}
               <div className="mb-1 text-[10px] font-medium text-mut">
-                {t("shelf.modelsPrices", { n: models.length })}
+                {needle
+                  ? t("shelf.modelsPricesFiltered", { n: matched.length, total: models.length })
+                  : t("shelf.modelsPrices", { n: models.length })}
               </div>
-              <div className="space-y-1.5">
-                {(showAllModels ? models : models.slice(0, MODEL_ROWS_SHOWN)).map((m) => (
-                  <ModelPriceRow key={m.id} modelId={m.id} price={m.price} t={t} />
-                ))}
-              </div>
-              {models.length > MODEL_ROWS_SHOWN && (
+              {models.length > MODEL_SEARCH_ABOVE && (
+                <div className="relative mb-1.5">
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mut" />
+                  <input
+                    className="h-7 w-full rounded-md border border-line bg-surface pl-7 pr-2 text-[12px]"
+                    placeholder={t("shelf.searchModels")}
+                    value={modelQuery}
+                    onChange={(e) => setModelQuery(e.target.value)}
+                  />
+                </div>
+              )}
+              {matched.length === 0 ? (
+                <div className="rounded-md border border-line px-2.5 py-2 text-[10.5px] text-mut">
+                  {t("shelf.noMatchingModels")}
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {(showAllModels ? matched : matched.slice(0, MODEL_ROWS_SHOWN)).map((m) => (
+                    <ModelPriceRow key={m.id} modelId={m.id} price={m.price} t={t} />
+                  ))}
+                </div>
+              )}
+              {matched.length > MODEL_ROWS_SHOWN && (
                 <button
                   type="button"
                   className="mt-1.5 cursor-pointer text-[10.5px] hover:underline"
@@ -943,7 +984,7 @@ function DetailDialog({
                 >
                   {showAllModels
                     ? t("shelf.showFewerModels")
-                    : t("shelf.showAllModels", { n: models.length - MODEL_ROWS_SHOWN })}
+                    : t("shelf.showAllModels", { n: matched.length - MODEL_ROWS_SHOWN })}
                 </button>
               )}
             </div>

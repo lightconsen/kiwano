@@ -254,6 +254,10 @@ function TierChip({
   const tiers = tiersOf(rate);
   if (!tiers) return null;
   const offPeak = tier === "offPeak";
+  // Both states are marked, and by what they mean: the peak rate is the
+  // expensive one, so it wears the palette's "mind this" amber — not the red,
+  // which this app reserves for failures — and off-peak, the discount, wears
+  // the kiwi green. A neutral chip said nothing about either.
   return (
     <button
       type="button"
@@ -261,7 +265,7 @@ function TierChip({
       style={
         offPeak
           ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" }
-          : { background: "var(--surface2)", color: "var(--mut)" }
+          : { background: "var(--amber-soft)", color: "var(--amber)" }
       }
       title={`${tierDetail(rate, tiers, t)} · ${t("shelf.tierPriceSwitch")}`}
       aria-pressed={offPeak}

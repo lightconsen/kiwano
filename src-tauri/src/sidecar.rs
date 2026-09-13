@@ -120,7 +120,17 @@ fn shared_db_path() -> PathBuf {
 /// process's environment and derives the same default from the same file
 /// location.
 pub fn admin_endpoint() -> AdminEndpoint {
-    AdminEndpoint::from_env(&shared_db_path())
+    admin_endpoint_for(&shared_db_path())
+}
+
+/// [`admin_endpoint`] for an explicit database path.
+///
+/// The CLI takes `--db`, so it cannot resolve through [`shared_db_path`]'s
+/// environment lookup. The resolution is otherwise identical — the same
+/// [`AdminEndpoint::from_env`] on the same kind of path — which is what keeps
+/// two clients from disagreeing about where the plane is.
+pub fn admin_endpoint_for(db: &Path) -> AdminEndpoint {
+    AdminEndpoint::from_env(db)
 }
 
 /// The admin token, read out of the row the gateway minted it into.
@@ -129,27 +139,30 @@ pub fn admin_endpoint() -> AdminEndpoint {
 /// install the app is up before the gateway has ever run. Deliberately never
 /// creates the file — an empty database conjured up by a token lookup would
 /// then be migrated by whichever process got there first.
-fn read_admin_token(path: &Path) -> Option<String> {
-    if !path.is_file() {
+pub fn admin_token_for(db: &Path) -> Option<String> {
+    if !db.is_file() {
         return None;
     }
-    Store::open(path)
+    Store::open(db)
         .ok()?
         .app_setting(ADMIN_TOKEN_KEY)
         .filter(|t| !t.trim().is_empty())
 }
 
-/// [`read_admin_token`] against the shared database, cached once found.
+/// [`admin_token_for`] against the shared database, cached once found.
 ///
 /// The row does not change under a running gateway, so the first success is
 /// kept; a miss is retried, because the gateway may simply not have started
 /// yet. Two opens at most, in the ordinary case where the app starts first.
+///
+/// The cache is why this is the app's form and not the CLI's: a CLI process
+/// resolves its own `--db` once and reads the token from there.
 fn admin_token() -> Option<String> {
     static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     if let Some(token) = CACHED.get() {
         return Some(token.clone());
     }
-    let token = read_admin_token(&shared_db_path())?;
+    let token = admin_token_for(&shared_db_path())?;
     let _ = CACHED.set(token.clone());
     Some(token)
 }
@@ -226,7 +239,16 @@ fn endpoint_http(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
 /// the *startup* question — "is a gateway of ours already running, and which
 /// version?" — answered by the same call.
 pub fn gateway_status(endpoint: &AdminEndpoint) -> Option<serde_json::Value> {
-    let body = endpoint_body(endpoint, &status_request(admin_token().as_deref()))?;
+    status_for(endpoint, admin_token().as_deref())
+}
+
+/// [`gateway_status`] with the token supplied by the caller.
+///
+/// A CLI reads its token out of its own `--db`, so the cached, env-resolved
+/// [`admin_token`] would be the wrong one to send. `None` simply omits the
+/// header, and `/status` answers with the liveness subset.
+pub fn status_for(endpoint: &AdminEndpoint, token: Option<&str>) -> Option<serde_json::Value> {
+    let body = endpoint_body(endpoint, &status_request(token))?;
     serde_json::from_str(&body).ok()
 }
 
@@ -249,8 +271,13 @@ pub fn ping_admin(endpoint: &AdminEndpoint) -> bool {
 /// looks like) lands in the same `false`, as does one that does not answer at
 /// all. [`restart`] treats all of them the same way.
 pub fn request_shutdown(endpoint: &AdminEndpoint) -> bool {
-    let accepted = endpoint_http(endpoint, &shutdown_request(admin_token().as_deref()))
-        .is_some_and(|line| line.contains("200"));
+    shutdown_for(endpoint, admin_token().as_deref())
+}
+
+/// [`request_shutdown`] with the token supplied by the caller.
+pub fn shutdown_for(endpoint: &AdminEndpoint, token: Option<&str>) -> bool {
+    let accepted =
+        endpoint_http(endpoint, &shutdown_request(token)).is_some_and(|line| line.contains("200"));
     if !accepted {
         return false;
     }
@@ -356,7 +383,19 @@ pub fn restart(endpoint: &AdminEndpoint) -> std::io::Result<Child> {
 /// refusal (no token readable) means the gateway keeps routing what it has
 /// until the next start, which is why this returns nothing to check.
 pub fn notify_reload(endpoint: &AdminEndpoint) {
-    let _ = endpoint_http(endpoint, &reload_request(admin_token().as_deref()));
+    let _ = reload(endpoint, admin_token().as_deref());
+}
+
+/// [`notify_reload`] with the token supplied by the caller, returning the
+/// gateway's answer.
+///
+/// The app can afford to discard the reply; a command-line caller cannot. It
+/// prints `agents_routed` on success or the refusal reason on failure, and its
+/// exit code depends on which it got — so this reads to EOF for the body rather
+/// than stopping at the status line.
+pub fn reload(endpoint: &AdminEndpoint, token: Option<&str>) -> Option<serde_json::Value> {
+    let body = endpoint_body(endpoint, &reload_request(token))?;
+    serde_json::from_str(&body).ok()
 }
 
 /// TCP connect-time probe of an endpoint (host or URL). Measures the
@@ -695,13 +734,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("kiwano.db");
         let store = Store::open(&path).unwrap();
-        assert_eq!(read_admin_token(&path), None);
+        assert_eq!(admin_token_for(&path), None);
         store.set_app_setting(ADMIN_TOKEN_KEY, "tok-abc").unwrap();
         drop(store);
-        assert_eq!(read_admin_token(&path), Some("tok-abc".to_string()));
+        assert_eq!(admin_token_for(&path), Some("tok-abc".to_string()));
 
         let missing = dir.path().join("not-yet.db");
-        assert_eq!(read_admin_token(&missing), None);
+        assert_eq!(admin_token_for(&missing), None);
         assert!(
             !missing.exists(),
             "a token lookup must not bring a database into being"
@@ -947,6 +986,14 @@ mod tests {
             1,
             "the reload request reached the gateway"
         );
+
+        // The body-returning form is what a command-line caller needs: the app
+        // can discard the reply, but the CLI prints `agents_routed` and exits
+        // non-zero on a refusal, so `reload` has to read one.
+        let reply = reload(&gw.endpoint, None).expect("the reload reply");
+        assert_eq!(reply["ok"], true);
+        assert_eq!(reply["agents_routed"], 1);
+        assert_eq!(gw.reloads.load(Ordering::SeqCst), 2);
 
         // The request on the wire is a complete, well-formed reload. What it
         // carries *besides* the path is not asserted here: the token comes out

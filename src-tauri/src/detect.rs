@@ -48,7 +48,9 @@ pub struct AgentVersionVm {
 }
 
 /// Phase 1: which agents are installed on this machine.
-#[tauri::command(async)]
+///
+/// Tauri-free on purpose: the app's `detect_agents` command is a thin wrapper,
+/// and a command-line caller reaches this directly.
 pub fn detect_agents() -> Vec<AgentDetectVm> {
     let cli = detect_cli_agents().unwrap_or_default();
     let mut vms: Vec<AgentDetectVm> = CLI_AGENTS
@@ -70,8 +72,11 @@ pub fn detect_agents() -> Vec<AgentDetectVm> {
     vms
 }
 
-/// Phase 2: version strings for the installed CLI agents (async; tooltips only).
-#[tauri::command(async)]
+/// Phase 2: version strings for the installed CLI agents (tooltips only).
+///
+/// Slow by construction — one `--version` subprocess per agent, each through the
+/// login shell — which is why it is a separate call from [`detect_agents`] and
+/// why a caller should make it opt-in.
 pub fn probe_agent_versions() -> Vec<AgentVersionVm> {
     let cli = detect_cli_agents().unwrap_or_default();
     let mut vms: Vec<AgentVersionVm> = CLI_AGENTS

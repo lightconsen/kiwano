@@ -23,7 +23,6 @@ use kiwano_gateway::store::{RequestLogFilter, Store};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
-use detect::{detect_agents, probe_agent_versions};
 use sidecar::AdminEndpoint;
 use vm::Aux;
 
@@ -469,6 +468,27 @@ fn update_settings(
         after_mutation(&state);
     }
     Ok(vm)
+}
+
+// ── Agent detection and currency metadata ──
+//
+// Both readers are parameterless or take only the auxiliary connection, so they
+// carry no Tauri state themselves; these wrappers exist to give the frontend
+// the command names it invokes.
+
+#[tauri::command(async)]
+fn detect_agents() -> Vec<detect::AgentDetectVm> {
+    detect::detect_agents()
+}
+
+#[tauri::command(async)]
+fn probe_agent_versions() -> Vec<detect::AgentVersionVm> {
+    detect::probe_agent_versions()
+}
+
+#[tauri::command]
+fn get_currency_meta(state: State<AppState>) -> Result<pricing::CurrencyMetaVm, String> {
+    pricing::currency_meta(&state.aux)
 }
 
 // ── Plan quota (the reader itself lives in the gateway crate: the same code
@@ -995,7 +1015,7 @@ pub fn run() {
             check_app_update,
             update::download_and_install_app_update,
             get_pending_update,
-            pricing::get_currency_meta,
+            get_currency_meta,
             get_plan_quota,
             open_log_folder,
         ])

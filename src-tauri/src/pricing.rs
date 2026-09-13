@@ -177,17 +177,17 @@ pub fn preferred_currency(aux: &Aux) -> String {
     crate::vm::ui_settings(aux).preferred_currency
 }
 
-/// Persist the preferred display currency into the ui settings JSON.
-/// (Writes go through vm::update_settings, which validates the code.)
-#[tauri::command]
-pub fn get_currency_meta(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<CurrencyMetaVm, String> {
-    // The effective doc, not the bundled one: a Hub-supplied currency must be
-    // selectable, and a bundled-only currency must not be offered once the Hub
-    // table has replaced it — the list has to describe what was seeded.
-    let doc = effective_doc(&state.aux).0;
-    let preferred = preferred_currency(&state.aux);
+/// Currencies to offer, the rates to convert with, and the preferred one.
+///
+/// No Tauri involvement: the app's `get_currency_meta` command is a wrapper that
+/// hands over `state.aux`, and a command-line caller passes its own.
+///
+/// The effective doc, not the bundled one: a Hub-supplied currency must be
+/// selectable, and a bundled-only currency must not be offered once the Hub
+/// table has replaced it — the list has to describe what was seeded.
+pub fn currency_meta(aux: &Aux) -> Result<CurrencyMetaVm, String> {
+    let doc = effective_doc(aux).0;
+    let preferred = preferred_currency(aux);
     let currencies = displayable_currencies(&doc.exchange_rates, &preferred);
     Ok(CurrencyMetaVm {
         currencies,

@@ -59,6 +59,30 @@ pub struct ImportReport {
 /// registered `export_config` IPC command — that surface is dormant (no
 /// frontend screen calls it) and must not leak when it is finally wired up.
 /// Pass `true` only for a local backup that never leaves the machine.
+/// Write an export to `path`, owner-only on unix.
+///
+/// The file holds plaintext credentials when `include_keys` is set, and
+/// `std::fs::write` creates it with whatever the umask allows — which on a
+/// shared machine can be world-readable. The database this is a backup of is
+/// already 0600 (see `crate::store`'s `harden_permissions`); the export should
+/// not be the thing that undoes it.
+///
+/// Returns the number of providers written.
+pub fn export_config_to_file(
+    store: &Store,
+    path: &str,
+    include_keys: bool,
+) -> Result<usize, String> {
+    let json = export_config(store, include_keys)?;
+    std::fs::write(path, &json).map_err(|e| format!("cannot write {path}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(store.list_providers().map_err(|e| e.to_string())?.len())
+}
+
 pub fn export_config(store: &Store, include_keys: bool) -> Result<String, String> {
     let mut providers = store.list_providers().map_err(|e| e.to_string())?;
     if !include_keys {

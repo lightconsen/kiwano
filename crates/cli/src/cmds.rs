@@ -9,12 +9,14 @@ use std::collections::BTreeMap;
 use kiwano_core::detect;
 use kiwano_core::sidecar;
 use kiwano_core::vm;
+use kiwano_core::{import, pricing, share, sync};
 use kiwano_gateway::store::{Provider, RequestLogFilter, StrategyType, UsageTotals};
 use kiwano_gateway::strategy::QuotaConfig;
 
 use crate::cli::{
-    AddArgs, AgentsCmd, BindingCmd, DashboardArgs, EditArgs, GatewayCmd, KeysCmd, LogFilterArgs,
-    LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd, UsageArgs,
+    AddArgs, AgentsCmd, BindingCmd, CatalogCmd, ConfigCmd, DashboardArgs, EditArgs, GatewayCmd,
+    ImportCmd, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd, SettingsCmd,
+    UsageArgs,
 };
 use crate::output::{ellipsize, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
@@ -783,6 +785,219 @@ pub fn gateway(cmd: &GatewayCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     }
 }
 
+// ── settings / config / catalog / import ────────────────────────────────────
+
+pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        SettingsCmd::Get => {
+            let settings = {
+                let (store, aux) = (ctx.store()?, ctx.aux()?);
+                // The home-taking form: `build_settings` would resolve $HOME
+                // itself, ignoring --home and reporting on the wrong tree.
+                vm::build_settings_with_home(store, aux, &ctx.home)?
+            };
+            let text = render_settings(&settings);
+            ctx.out.emit(&settings, || text);
+            Ok(())
+        }
+        SettingsCmd::Set { keys, patch } => {
+            let patch = settings_patch(keys, patch.as_deref())?;
+            let settings = {
+                let (store, aux) = (ctx.store()?, ctx.aux()?);
+                vm::update_settings(store, aux, &patch)?
+            };
+            // Only some settings change routing; reloading for the rest would
+            // be noise on every `settings set`.
+            if touches_routing(&patch) {
+                ctx.after_mutation();
+            }
+            let text = render_settings(&settings);
+            ctx.out.emit(&settings, || text);
+            Ok(())
+        }
+    }
+}
+
+/// `--key k=v` pairs plus an optional `--patch` object, merged.
+///
+/// Values are parsed as JSON when they parse, so `false` is a boolean and `30`
+/// a number; anything else stays the string that was typed. That is what makes
+/// `settings set --key cost_alert=false` work without a typed flag per setting.
+fn settings_patch(pairs: &[String], patch: Option<&str>) -> Result<serde_json::Value, CliError> {
+    let mut merged = match patch {
+        Some(raw) => serde_json::from_str::<serde_json::Value>(raw)
+            .map_err(|e| CliError::usage(format!("--patch is not valid JSON: {e}")))?,
+        None => serde_json::json!({}),
+    };
+    let object = merged
+        .as_object_mut()
+        .ok_or_else(|| CliError::usage("--patch must be a JSON object"))?;
+
+    for pair in pairs {
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| CliError::usage(format!("--key expects KEY=VALUE, got {pair:?}")))?;
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(CliError::usage(format!(
+                "--key has an empty name: {pair:?}"
+            )));
+        }
+        let value = match serde_json::from_str::<serde_json::Value>(value) {
+            Ok(parsed) => parsed,
+            Err(_) => serde_json::Value::String(value.to_string()),
+        };
+        object.insert(key.to_string(), value);
+    }
+    Ok(merged)
+}
+
+/// Whether a settings patch can change what the gateway routes.
+///
+/// The GUI reloads on any settings change; for a scripted `settings set` that
+/// would mean an admin round-trip per key, most of which cannot affect routing
+/// at all. The set here is the conservative one: anything that could plausibly
+/// reach the route table or the limits evaluation.
+fn touches_routing(patch: &serde_json::Value) -> bool {
+    const ROUTING_KEYS: [&str; 4] = [
+        "auto_failover",
+        "gateway_listen",
+        "request_logs",
+        "log_retention_days",
+    ];
+    match patch.as_object() {
+        Some(map) => map.keys().any(|k| ROUTING_KEYS.contains(&k.as_str())),
+        None => false,
+    }
+}
+
+pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        ConfigCmd::Export { out, include_keys } => {
+            let path = out.to_string_lossy();
+            let count = {
+                let store = ctx.store()?;
+                share::export_config_to_file(store, &path, *include_keys)?
+            };
+            let text = format!("wrote {count} providers to {path}");
+            ctx.out.emit(
+                &serde_json::json!({ "path": path, "providers": count }),
+                || text,
+            );
+            if *include_keys {
+                ctx.out
+                    .note("note: the file contains provider API keys — it is written owner-only");
+            }
+            Ok(())
+        }
+        ConfigCmd::Import { file } => {
+            let path = file.to_string_lossy();
+            let json = std::fs::read_to_string(file)
+                .map_err(|e| runtime(format!("cannot read {path}: {e}")))?;
+            let report = {
+                let store = ctx.store()?;
+                share::import_config(store, &json)?
+            };
+            let text = format!(
+                "added {} providers, kept {}, applied {} routes",
+                report.providers_added, report.providers_kept, report.routes_applied
+            );
+            ctx.out.emit(&report, || text);
+            ctx.after_mutation();
+            Ok(())
+        }
+    }
+}
+
+pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        CatalogCmd::List { tag, search } => {
+            let mut catalog = {
+                let (store, aux) = (ctx.store()?, ctx.aux()?);
+                vm::load_catalog(store, aux)
+            };
+            if let Some(tag) = tag {
+                catalog.entries.retain(|e| e.tag == *tag);
+            }
+            if let Some(search) = search {
+                let needle = search.to_lowercase();
+                catalog
+                    .entries
+                    .retain(|e| e.name.to_lowercase().contains(&needle));
+            }
+            let text = render_catalog(&catalog);
+            ctx.out.emit(&catalog, || text);
+            Ok(())
+        }
+        CatalogCmd::Sync => {
+            let hub_url = {
+                let aux = ctx.aux()?;
+                vm::ui_settings(aux).hub_url
+            };
+            let report = {
+                let aux = ctx.aux()?;
+                sync::sync_from_hub(aux, &hub_url)?
+            };
+            let text = if report.unchanged {
+                format!(
+                    "already current ({} entries, synced {})",
+                    report.fetched, report.synced_at
+                )
+            } else {
+                format!("synced {} entries from {hub_url}", report.fetched)
+            };
+            ctx.out.emit(&report, || text);
+            // A price refresh only reaches cost recording through a reload.
+            ctx.after_mutation();
+            Ok(())
+        }
+        CatalogCmd::Currency => {
+            let meta = {
+                let aux = ctx.aux()?;
+                pricing::currency_meta(aux)?
+            };
+            let text = format!(
+                "preferred {} · {} currencies",
+                meta.preferred,
+                meta.currencies.len()
+            );
+            ctx.out.emit(&meta, || text);
+            Ok(())
+        }
+    }
+}
+
+pub fn import(cmd: &ImportCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    match cmd {
+        ImportCmd::CcSwitch => {
+            let root = ctx.home.join(".cc-switch");
+            let report = {
+                let store = ctx.store()?;
+                import::run_import(
+                    store,
+                    Some(&root.join("cc-switch.db")),
+                    Some(&root.join("config.json")),
+                )
+            };
+            let text = format!(
+                "imported {}, skipped {}{}",
+                report.imported,
+                report.skipped,
+                if report.detail.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{}", report.detail.join("\n"))
+                }
+            );
+            ctx.out.emit(&report, || text);
+            if report.imported > 0 {
+                ctx.after_mutation();
+            }
+            Ok(())
+        }
+    }
+}
+
 // ── input mapping ───────────────────────────────────────────────────────────
 
 /// Turn the flags into the app's `NewProviderInput`.
@@ -959,6 +1174,75 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
         })
         .collect();
     render_table(&head, &rows)
+}
+
+fn render_settings(settings: &vm::SettingsVm) -> String {
+    // The shape is the app's; this is the summary a shell wants. `--json`
+    // carries the full object.
+    let mut out = format!(
+        "hub {} · preferred currency {}",
+        settings.hub_url, settings.preferred_currency
+    );
+    out.push_str(&format!(
+        "\nrequest logs {} · retention {} days · cost alerts {}",
+        if settings.request_logs { "on" } else { "off" },
+        settings.log_retention_days,
+        if settings.cost_alert { "on" } else { "off" }
+    ));
+    out.push_str(&format!(
+        "\nauto failover {} · auto check update {}",
+        if settings.auto_failover { "on" } else { "off" },
+        if settings.auto_check_update {
+            "on"
+        } else {
+            "off"
+        }
+    ));
+    if settings.takeovers.is_empty() {
+        out.push_str("\nno agent is taken over");
+    } else {
+        out.push_str("\ntakeovers:");
+        for t in &settings.takeovers {
+            out.push_str(&format!(
+                "\n  {:<16} {}{}",
+                t.agent,
+                if t.enabled { "routed" } else { "not routed" },
+                t.placeholder_key
+                    .as_deref()
+                    .map(|k| format!("  {k}"))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    out
+}
+
+fn render_catalog(catalog: &vm::CatalogListVm) -> String {
+    if catalog.entries.is_empty() {
+        return "(no matching catalog entries)".to_string();
+    }
+    let head = ["ID", "NAME", "TAG", "PROTOCOL", "ENDPOINT", "ADDED"];
+    let rows: Vec<Vec<String>> = catalog
+        .entries
+        .iter()
+        .map(|e| {
+            vec![
+                ellipsize(&e.id, 24),
+                ellipsize(&e.name, 24),
+                e.tag.clone(),
+                e.protocol.clone(),
+                ellipsize(&e.endpoint, 36),
+                if e.added { "yes" } else { "no" }.to_string(),
+            ]
+        })
+        .collect();
+    let mut out = render_table(&head, &rows);
+    out.push_str(&format!(
+        "\n{} of {} entries",
+        catalog.entries.len(),
+        catalog.total
+    ));
+    out
 }
 
 fn render_logs(list: &vm::RequestLogListVm) -> String {

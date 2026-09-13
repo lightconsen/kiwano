@@ -785,13 +785,7 @@ fn export_config(
     path: String,
     include_keys: Option<bool>,
 ) -> Result<usize, String> {
-    let json = share::export_config(&state.store, include_keys.unwrap_or(false))?;
-    std::fs::write(&path, &json).map_err(|e| e.to_string())?;
-    Ok(state
-        .store
-        .list_providers()
-        .map_err(|e| e.to_string())?
-        .len())
+    share::export_config_to_file(&state.store, &path, include_keys.unwrap_or(false))
 }
 
 #[tauri::command(async)]

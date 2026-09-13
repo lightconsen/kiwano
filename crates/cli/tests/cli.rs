@@ -817,6 +817,177 @@ fn gateway_stop_reports_when_there_is_nothing_to_stop() {
     );
 }
 
+// ── settings / config / catalog / import ────────────────────────────────────
+
+#[test]
+fn settings_read_and_write_round_trip() {
+    let (dir, db) = temp_db();
+    // A private home, so the assertion does not depend on what agent configs
+    // the machine running the tests happens to have.
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let home_arg = home.display().to_string();
+
+    let (code, out, err) = run(&db, &["--home", &home_arg, "--json", "settings", "get"]);
+    assert_eq!(code, 0, "{err}");
+    let before: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(before["log_retention_days"], 30, "the default");
+
+    // Values are parsed as JSON, so `false` lands as a boolean and `7` as a
+    // number — that is what makes one flag serve every setting.
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--home",
+            &home_arg,
+            "--json",
+            "settings",
+            "set",
+            "--key",
+            "cost_alert=false",
+            "--key",
+            "log_retention_days=7",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let after: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(after["cost_alert"], false);
+    assert_eq!(after["log_retention_days"], 7);
+
+    // It persists, rather than only being echoed.
+    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "settings", "get"]);
+    let reread: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(reread["cost_alert"], false);
+}
+
+#[test]
+fn settings_rejects_a_malformed_patch_and_a_bare_key() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(&db, &["settings", "set", "--patch", "{bad"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("valid JSON"), "{err}");
+
+    let (code, _, err) = run(&db, &["settings", "set", "--key", "no-equals-sign"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("KEY=VALUE"), "{err}");
+
+    let (code, _, err) = run(&db, &["settings", "set", "--patch", "[]"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("object"), "{err}");
+}
+
+/// With `--include-keys` the file holds live credentials, so it must not be
+/// created world-readable — the database it backs up is 0600 already.
+#[test]
+fn config_export_is_owner_only_and_round_trips() {
+    let (dir, db) = temp_db();
+    add_provider(&db, "alpha", &["claude"]);
+    let out_path = dir.path().join("config.json");
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "config",
+            "export",
+            "--out",
+            &out_path.display().to_string(),
+            "--include-keys",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out_path.is_file());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&out_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "credentials in a file must not be group-readable"
+        );
+    }
+
+    // Into a fresh database: the provider and its binding come back.
+    let (_dir2, db2) = temp_db();
+    let (code, _, err) = run(
+        &db2,
+        &[
+            "config",
+            "import",
+            "--file",
+            &out_path.display().to_string(),
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db2).unwrap();
+    let providers = store.list_providers().unwrap();
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].name, "alpha");
+    assert!(
+        store.primary_provider_id("claude").unwrap().is_some(),
+        "the route came with it"
+    );
+}
+
+#[test]
+fn config_import_reports_a_missing_file() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(
+        &db,
+        &["config", "import", "--file", "/nonexistent/config.json"],
+    );
+    assert_eq!(code, 3);
+    assert!(err.contains("cannot read"), "{err}");
+}
+
+#[test]
+fn catalog_list_filters_by_tag_and_name() {
+    let (_dir, db) = temp_db();
+    let (code, out, err) = run(&db, &["--json", "catalog", "list"]);
+    assert_eq!(code, 0, "{err}");
+    let all: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let total = all["total"].as_i64().unwrap();
+    assert!(total > 0, "the bundled catalog should not be empty");
+
+    let (_, out, _) = run(&db, &["--json", "catalog", "list", "--search", "deepseek"]);
+    let filtered: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let entries = filtered["entries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    assert!(
+        entries.iter().all(|e| e["name"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .contains("deepseek")),
+        "{entries:?}"
+    );
+
+    let (_, out, _) = run(&db, &["--json", "catalog", "list", "--tag", "official"]);
+    let tagged: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        tagged["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["tag"] == "official"),
+        "{tagged}"
+    );
+}
+
+/// Most machines have no cc-switch; that is an answer, not an error.
+#[test]
+fn cc_switch_import_succeeds_when_there_is_nothing_to_import() {
+    let (dir, db) = temp_db();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let (code, out, err) = run(
+        &db,
+        &["--home", &home.display().to_string(), "import", "cc-switch"],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("imported 0"), "{out}");
+}
+
 // ── output discipline ───────────────────────────────────────────────────────
 
 /// The defect this rewrite fixes: a mutation under `--json` used to print its

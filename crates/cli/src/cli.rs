@@ -106,6 +106,87 @@ pub enum Command {
     /// The gateway daemon
     #[command(subcommand)]
     Gateway(GatewayCmd),
+
+    /// Gateway and UI settings
+    #[command(subcommand)]
+    Settings(SettingsCmd),
+
+    /// Whole-configuration export and import (the `kiwano-config v1` format)
+    #[command(subcommand)]
+    Config(ConfigCmd),
+
+    /// The provider catalog: what the shelf offers, and the Hub it syncs from
+    #[command(subcommand)]
+    Catalog(CatalogCmd),
+
+    /// Migrate a configuration from cc-switch
+    #[command(subcommand)]
+    Import(ImportCmd),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SettingsCmd {
+    /// Every setting, as stored
+    Get,
+
+    /// Change settings
+    ///
+    /// Values are parsed as JSON when they look like JSON, so `false`, `30` and
+    /// `{"a":1}` all land as their type rather than as strings.
+    Set {
+        /// `key=value`, repeatable
+        #[arg(long = "key", value_name = "KEY=VALUE")]
+        keys: Vec<String>,
+
+        /// A JSON object merged over the current settings
+        #[arg(long, value_name = "JSON")]
+        patch: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCmd {
+    /// Write the whole configuration to a file
+    Export {
+        #[arg(long, value_name = "PATH")]
+        out: PathBuf,
+
+        /// Include provider API keys. The file is written owner-only (`0600`).
+        #[arg(long)]
+        include_keys: bool,
+    },
+
+    /// Merge a configuration file in (matched by name and endpoint)
+    Import {
+        #[arg(long, value_name = "PATH")]
+        file: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CatalogCmd {
+    /// What the shelf offers
+    List {
+        /// official | aggregate | third | free
+        #[arg(long, value_name = "TAG")]
+        tag: Option<String>,
+
+        /// Case-insensitive substring of the provider name
+        #[arg(long, value_name = "QUERY")]
+        search: Option<String>,
+    },
+
+    /// Pull the catalog and pricing from the Hub
+    Sync,
+
+    /// Currencies and exchange rates in use
+    Currency,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ImportCmd {
+    /// Read `~/.cc-switch` and migrate its providers in
+    CcSwitch,
 }
 
 #[derive(Debug, Subcommand)]

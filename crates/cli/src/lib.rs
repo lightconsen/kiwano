@@ -242,6 +242,22 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::gateway(cmd, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Settings(cmd) => {
+            cmds::settings(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Config(cmd) => {
+            cmds::config(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Catalog(cmd) => {
+            cmds::catalog(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Import(cmd) => {
+            cmds::import(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
     }
 }
 

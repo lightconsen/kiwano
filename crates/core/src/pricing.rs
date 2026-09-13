@@ -6,7 +6,7 @@
 //! currency metadata + conversion used across the usage/dashboard surfaces.
 
 use crate::vm::Aux;
-use kiwano_adapters::model_pricing::ModelsDoc;
+use kiwano_adapters::model_pricing::{ModelPriceEntry, ModelsDoc};
 use std::collections::HashMap;
 
 /// app_settings KV key holding the last-seeded models.json version.
@@ -86,6 +86,44 @@ fn shas_match(fetched: Option<&str>, seeded: Option<&str>) -> bool {
     }
 }
 
+/// Delete the price rows whose `model_id` is not in `keep`; returns how many.
+///
+/// A temp table rather than `NOT IN (?, ?, …)`: the placeholder list is capped
+/// by SQLite's variable limit (999 by default) while this is however many models
+/// the Hub publishes. The connection outlives the call, so the table is dropped
+/// rather than left behind.
+///
+/// An empty `keep` deletes every row, which is the intended reading of a
+/// document that prices nothing. The caller logs it.
+fn prune_absent(conn: &rusqlite::Connection, keep: &[ModelPriceEntry]) -> Result<usize, String> {
+    conn.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS keep_price (model_id TEXT PRIMARY KEY);
+         DELETE FROM keep_price;",
+    )
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut stmt = conn
+            .prepare("INSERT OR IGNORE INTO keep_price (model_id) VALUES (?1)")
+            .map_err(|e| e.to_string())?;
+        for m in keep {
+            stmt.execute(rusqlite::params![m.model_id])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    let removed = conn
+        .execute(
+            "DELETE FROM model_pricing
+              WHERE model_id NOT IN (SELECT model_id FROM keep_price)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch("DROP TABLE IF EXISTS keep_price")
+        .map_err(|e| e.to_string())?;
+    Ok(removed)
+}
+
 /// Upsert the price rows into the shared `model_pricing` table.
 ///
 /// Gated on version **and** content hash. Each half covers what the other
@@ -119,37 +157,78 @@ pub fn seed_model_pricing(aux: &Aux) -> Result<SeededReport, String> {
     // different sources, and the column exists to tell them apart.
     let source = if sha.is_some() { "hub" } else { "bundled" };
 
-    let conn = aux.conn.lock().expect("aux mutex poisoned");
+    let mut guard = aux.conn.lock().expect("aux mutex poisoned");
     let mut seeded = 0usize;
-    for m in &doc.models {
-        let n = conn
-            .execute(
-                "INSERT INTO model_pricing (model_id, display_name, input, output,
-                                            cache_read, cache_creation, currency, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(model_id) DO UPDATE SET
-                    display_name = ?2, input = ?3, output = ?4,
-                    cache_read = ?5, cache_creation = ?6, currency = ?7, source = ?8
-                 -- COALESCE: legacy rows may carry a NULL source, and
-                 -- `NULL <> ?` is NULL (falsy), which would silently skip them.
-                 WHERE display_name <> ?2 OR input <> ?3 OR output <> ?4
-                    OR cache_read <> ?5 OR cache_creation <> ?6 OR currency <> ?7
-                    OR COALESCE(source, '') <> ?8",
-                rusqlite::params![
-                    m.model_id,
-                    m.display_name,
-                    m.input,
-                    m.output,
-                    m.cache_read,
-                    m.cache_creation,
-                    m.currency,
-                    source,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-        seeded += n;
+    let removed;
+    // One transaction for the upserts and the prune: they are one statement
+    // about the table's contents, and a crash between them would leave it
+    // half-seeded and half-pruned. Committed before the settings below, which
+    // take the same mutex.
+    {
+        let tx = guard.transaction().map_err(|e| e.to_string())?;
+        for m in &doc.models {
+            let n = tx
+                .execute(
+                    "INSERT INTO model_pricing (model_id, display_name, input, output,
+                                                cache_read, cache_creation, currency, source)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(model_id) DO UPDATE SET
+                        display_name = ?2, input = ?3, output = ?4,
+                        cache_read = ?5, cache_creation = ?6, currency = ?7, source = ?8
+                     -- COALESCE: legacy rows may carry a NULL source, and
+                     -- `NULL <> ?` is NULL (falsy), which would silently skip them.
+                     WHERE display_name <> ?2 OR input <> ?3 OR output <> ?4
+                        OR cache_read <> ?5 OR cache_creation <> ?6 OR currency <> ?7
+                        OR COALESCE(source, '') <> ?8",
+                    rusqlite::params![
+                        m.model_id,
+                        m.display_name,
+                        m.input,
+                        m.output,
+                        m.cache_read,
+                        m.cache_creation,
+                        m.currency,
+                        source,
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            seeded += n;
+        }
+
+        // Rows this document no longer carries are removed, so the table ends up
+        // *equal* to the document rather than the union of every document ever
+        // seeded. Without this an upsert-only seed is a ratchet, and a model the
+        // Hub drops stays priced forever: the data repo cut its table from 192
+        // rows to 39, and every client that had synced the larger one kept
+        // costing the 153 vendor prices that were deliberately deleted.
+        //
+        // Deliberately not scoped by `source`. An install seeded from the old
+        // bundled snapshot holds `source = 'bundled'` rows, and sparing those is
+        // exactly how the table stops matching the document. The target is
+        // "local table == this document", whoever wrote the row.
+        removed = prune_absent(&tx, &doc.models)?;
+        tx.commit().map_err(|e| e.to_string())?;
     }
-    drop(conn);
+    drop(guard);
+
+    // Say what happened when it is not nothing. Clearing the whole table is the
+    // case worth shouting about: it is the correct reading of a document that
+    // prices nothing, and it is also indistinguishable from a Hub accident if
+    // nobody writes it down.
+    if removed > 0 {
+        if doc.models.is_empty() {
+            tracing::warn!(
+                removed,
+                "the price document is empty; every local price row was removed"
+            );
+        } else {
+            tracing::info!(
+                removed,
+                kept = doc.models.len(),
+                "price rows no longer in the document were removed"
+            );
+        }
+    }
 
     aux.set_setting(SEEDED_VERSION_KEY, &doc.version.to_string())
         .map_err(|e| e.to_string())?;
@@ -234,6 +313,101 @@ mod tests {
 
     fn rates() -> HashMap<String, f64> {
         HashMap::from([("USD".to_string(), 1.0), ("CNY".to_string(), 7.1)])
+    }
+
+    /// A price document carrying `ids`, as the Hub would publish it.
+    fn doc_json_ids(version: i64, ids: &[&str]) -> String {
+        let models: Vec<serde_json::Value> = ids
+            .iter()
+            .map(|id| {
+                serde_json::json!({
+                    "model_id": id, "display_name": id,
+                    "input": "1", "output": "2",
+                    "cache_read": "0", "cache_creation": "0",
+                    "currency": "USD",
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "version": version,
+            "generated_at": "2026-09-13T00:00:00Z",
+            "exchange_rates": { "USD": 1.0 },
+            "models": models,
+        })
+        .to_string()
+    }
+
+    /// An `Aux` on a database that also has `model_pricing`.
+    ///
+    /// That table belongs to the gateway store's migrations, not to `Aux`, and
+    /// an in-memory database cannot be shared between two connections — so the
+    /// store opens the file first and `Aux` joins it. In-memory would fail with
+    /// "no such table: model_pricing".
+    fn seeded_aux() -> (tempfile::TempDir, Aux) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        drop(kiwanod::store::Store::open(&path).unwrap());
+        let aux = Aux::open(&path).unwrap();
+        (dir, aux)
+    }
+
+    /// Every `model_id` the local price table currently holds.
+    fn priced_ids(aux: &Aux) -> Vec<String> {
+        let conn = aux.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT model_id FROM model_pricing ORDER BY model_id")
+            .unwrap();
+        let ids = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        ids
+    }
+
+    /// A row the document drops has to stop being priced.
+    ///
+    /// The seed was upsert-only, which made the table a ratchet: the data repo
+    /// cut its table from 192 rows to 39, and every client that had synced the
+    /// larger one went on costing all 153 vendor prices it had deleted — while
+    /// the shelf, reading a catalog that *had* been migrated, showed nothing of
+    /// the kind.
+    #[test]
+    fn a_row_the_document_drops_stops_being_priced() {
+        let (_dir, aux) = seeded_aux();
+
+        aux.save_hub_models_cache(1, &doc_json_ids(1, &["a", "b", "c"]), &"a".repeat(64), "t")
+            .unwrap();
+        seed_model_pricing(&aux).unwrap();
+        assert_eq!(priced_ids(&aux), ["a", "b", "c"]);
+
+        aux.save_hub_models_cache(2, &doc_json_ids(2, &["a", "b"]), &"b".repeat(64), "t")
+            .unwrap();
+        let report = seed_model_pricing(&aux).unwrap();
+        assert!(!report.skipped, "a newer version re-seeds");
+        assert_eq!(
+            priced_ids(&aux),
+            ["a", "b"],
+            "the dropped row is gone, not merely untouched"
+        );
+    }
+
+    /// An empty document means "nothing is priced", and it clears the table.
+    /// That is the right reading and also indistinguishable from a Hub accident,
+    /// which is why `seed_model_pricing` logs the removal.
+    #[test]
+    fn an_empty_document_clears_the_table() {
+        let (_dir, aux) = seeded_aux();
+
+        aux.save_hub_models_cache(1, &doc_json_ids(1, &["a", "b"]), &"a".repeat(64), "t")
+            .unwrap();
+        seed_model_pricing(&aux).unwrap();
+        assert_eq!(priced_ids(&aux).len(), 2);
+
+        aux.save_hub_models_cache(2, &doc_json_ids(2, &[]), &"b".repeat(64), "t")
+            .unwrap();
+        seed_model_pricing(&aux).unwrap();
+        assert!(priced_ids(&aux).is_empty());
     }
 
     #[test]

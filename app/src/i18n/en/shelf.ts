@@ -33,10 +33,12 @@ export const shelf = {
   colPrice: "Price",
   colActions: "Actions",
 
-  /** The two ways to read the same catalog: one row per provider, or one group
-      per model with its providers nested. */
-  viewByProvider: "By provider",
-  viewByModel: "By model",
+  /** The segment group that switches how the table is grouped: two readings of
+      one catalog, one row per provider or one group per model with its
+      providers nested. The labels are short because the control itself says
+      "group by" — both readings sit side by side. */
+  viewByProvider: "Providers",
+  viewByModel: "Models",
   /** A model group's header: how many providers serve it, and how many of them
       publish a price for it (the rest show a dash). */
   groupMeta: "{n} providers · {m} with a price",

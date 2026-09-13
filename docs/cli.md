@@ -230,8 +230,10 @@ owner-only (`0600`) for that reason. `config export` without the flag is safe to
 keep in version control; the two round-trip through `config import`, which
 merges by name and endpoint rather than overwriting.
 
-`catalog list` reads the Hub cache when it has been synced and the bundled copy
-otherwise, so it works on a machine that has never reached the network.
+`catalog list` reads the Hub cache and nothing else — there is no bundled copy, so
+a machine that has never synced lists nothing rather than a stale catalog. Run
+`catalog sync` first; that is what a fresh server should do before adding anything
+from the shelf, and after it the cache serves offline like any other.
 
 **There is no `catalog add`.** The shelf's one-click "Add" opens the provider
 form prefilled from the entry — it does not call an API of its own, so the

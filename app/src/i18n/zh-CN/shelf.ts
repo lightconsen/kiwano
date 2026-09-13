@@ -37,4 +37,7 @@ export const shelf = {
   refreshAria: "从 Hub 刷新",
   refreshTitle: "从 Kiwano Hub 获取最新目录",
   noMatches: "没有匹配的 Provider",
+  /** 与 noMatches 刻意分开:目录为空和「筛选没命中」是两回事,后者才是用户自己造成的。
+   *  已无内置回落,所以从未连上 Hub 的机器看到的是这一句。 */
+  notSynced: "尚未获取目录 —— 从 Kiwano Hub 获取",
 };

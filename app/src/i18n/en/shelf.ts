@@ -45,4 +45,9 @@ export const shelf = {
   refreshAria: "Refresh from Hub",
   refreshTitle: "Fetch the latest catalog from Kiwano Hub",
   noMatches: "No matching providers",
+  /** Distinct from noMatches on purpose: an empty catalog is a different
+   *  problem from a filter that matched nothing, and only one of them is the
+   *  user's doing. There is no bundled fallback any more, so this is what a
+   *  machine that has never reached the Hub sees. */
+  notSynced: "No catalog yet — fetch it from Kiwano Hub",
 };

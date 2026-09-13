@@ -1219,16 +1219,24 @@ fn config_import_reports_a_missing_file() {
 #[test]
 fn catalog_list_filters_by_tag_and_name() {
     let (_dir, db) = temp_db();
+    // The shelf reads the Hub cache and nothing else — there is no bundled
+    // catalog — so the fixture is the cache. That makes this deterministic
+    // instead of depending on whatever blob a release happened to compile in.
+    {
+        let aux = kiwano_core::auxiliary::Aux::open(&db).unwrap();
+        aux.save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
+            .unwrap();
+    }
+
     let (code, out, err) = run(&db, &["--json", "catalog", "list"]);
     assert_eq!(code, 0, "{err}");
     let all: serde_json::Value = serde_json::from_str(&out).unwrap();
-    let total = all["total"].as_i64().unwrap();
-    assert!(total > 0, "the bundled catalog should not be empty");
+    assert_eq!(all["total"], 2);
 
     let (_, out, _) = run(&db, &["--json", "catalog", "list", "--search", "deepseek"]);
     let filtered: serde_json::Value = serde_json::from_str(&out).unwrap();
     let entries = filtered["entries"].as_array().unwrap();
-    assert!(!entries.is_empty());
+    assert_eq!(entries.len(), 1);
     assert!(
         entries.iter().all(|e| e["name"]
             .as_str()
@@ -1240,15 +1248,21 @@ fn catalog_list_filters_by_tag_and_name() {
 
     let (_, out, _) = run(&db, &["--json", "catalog", "list", "--tag", "official"]);
     let tagged: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert!(
-        tagged["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|e| e["tag"] == "official"),
-        "{tagged}"
-    );
+    let tagged = tagged["entries"].as_array().unwrap();
+    assert_eq!(tagged.len(), 1);
+    assert!(tagged.iter().all(|e| e["tag"] == "official"), "{tagged:?}");
 }
+
+/// Two entries, carrying only the fields the wire format requires (`id`, `name`,
+/// `tag`, `rating`, `billing`) plus an endpoint list — the app derives the rest.
+const SEED_CATALOG: &str = r#"{"total":2,"entries":[
+    {"id":"deepseek","name":"DeepSeek","tag":"official","rating":4.8,
+     "billing":"payg","currency":"USD",
+     "endpoints":[{"protocol":"openai","endpoint":"https://api.deepseek.com"}]},
+    {"id":"openrouter","name":"OpenRouter","tag":"aggregate","rating":4.5,
+     "billing":"payg","currency":"USD",
+     "endpoints":[{"protocol":"openai","endpoint":"https://openrouter.ai/api/v1"}]}
+]}"#;
 
 /// Most machines have no cc-switch; that is an answer, not an error.
 #[test]

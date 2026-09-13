@@ -348,8 +348,8 @@ pub struct ProviderVm {
 /// unrecognized tag is *not* silently coerced to `payg`: it is preserved
 /// verbatim in `Other` and written back byte-identically, which keeps the hub
 /// cache round-trip stable. One bad row must not fail a whole sync — the
-/// catalog is the primary resource and a failed sync would strand the user on
-/// the bundled snapshot forever.
+/// catalog is the primary resource, and a sync that refuses a payload over one
+/// odd tag leaves the shelf on whatever it had.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum CatalogBilling {
@@ -1898,7 +1898,7 @@ pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
 /// resolves, and `#[serde(default)]` cannot repair it: the value is already
 /// stored, so the default never applies again. Anyone who ran a build from
 /// before the domain change would keep failing to sync forever, and silently —
-/// a failed sync only logs and falls back to the bundled catalog.
+/// a failed sync only logs, and the shelf stays empty.
 const LEGACY_HUB_URL: &str = "https://hub.kiwano.app/catalog.json";
 
 /// Read UI settings (used by Rust-side logic like tray/autostart; the
@@ -2697,13 +2697,24 @@ pub fn build_footer_stats(
     })
 }
 
-/// Catalog shelf: Hub cache first; fall back to the bundled static
-/// catalog.json when never synced or on parse failure.
+/// Catalog shelf, read from the Hub cache. Nothing else.
+///
+/// There used to be a bundled `catalog.json` compiled into the binary as the
+/// offline fallback, and it is gone deliberately. It was a build-time copy of a
+/// separate repository that publishes on its own schedule, so it went stale by
+/// construction — and it went a whole schema migration stale without anything
+/// noticing, which is how it was found. A copy nobody remembers to refresh is a
+/// worse answer than no copy: what it produced was a shelf that silently showed
+/// the *old* shape (no prices, no descriptions) to exactly the users least able
+/// to tell why.
+///
+/// An empty cache is now an empty list, and the shelf says so rather than
+/// reporting it as "no matches" — see the empty state in `Shelf.tsx`.
 ///
 /// `added` is derived at read time from the local provider list: an entry
 /// counts as added when a provider exists at its primary OR any of its
-/// additional per-protocol endpoints. The static flags carried by
-/// catalog.json / the Hub cache are ignored.
+/// additional per-protocol endpoints. The static flags carried by the Hub cache
+/// are ignored.
 /// Fill what the Hub does not publish, and split the endpoint list.
 ///
 /// The Hub sends source-of-truth data only: identity, classification, billing,
@@ -2713,9 +2724,9 @@ pub fn build_footer_stats(
 /// the primary endpoint hoisted into its own fields (`protocol` / `endpoint` /
 /// `models`), which is the shape every screen reads.
 ///
-/// Idempotent: a payload that already carries `endpoint` was split by an older
-/// build (or is the bundled snapshot, from a catalog published before the Hub
-/// switched to one list), so its `endpoints` are extras and stay untouched.
+/// Idempotent: a payload that already carries `endpoint` was normalized by an
+/// older build — or was cached before the Hub switched to one endpoint list —
+/// so its `endpoints` are extras and stay untouched.
 fn normalize_catalog_entry(e: &mut CatalogEntryVm) {
     e.logo_color = palette_color(&e.name).to_string();
     if e.endpoint.is_empty() && !e.endpoints.is_empty() {
@@ -2727,11 +2738,17 @@ fn normalize_catalog_entry(e: &mut CatalogEntryVm) {
 }
 
 pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
-    let mut list = if let Some((payload, _)) = aux.load_hub_cache() {
-        serde_json::from_str::<CatalogListVm>(&payload).unwrap_or_else(|_| bundled_catalog())
-    } else {
-        bundled_catalog()
-    };
+    // No cache, or a cache we cannot parse, is an empty shelf. A parse failure
+    // used to fall back to the bundled copy, which meant a corrupted cache was
+    // answered with stale data instead of being visibly broken; the next sync
+    // repairs this either way.
+    let mut list = aux
+        .load_hub_cache()
+        .and_then(|(payload, _)| serde_json::from_str::<CatalogListVm>(&payload).ok())
+        .unwrap_or(CatalogListVm {
+            total: 0,
+            entries: Vec::new(),
+        });
     let keys: HashSet<String> = store
         .list_providers()
         .unwrap_or_default()
@@ -2753,16 +2770,6 @@ pub fn load_catalog(store: &Store, aux: &Aux) -> CatalogListVm {
             .any(|url| keys.contains(&endpoint_key(url)));
     }
     list
-}
-
-fn bundled_catalog() -> CatalogListVm {
-    let entries: Vec<CatalogEntryVm> =
-        serde_json::from_str(include_str!("catalog.json")).expect("catalog.json is valid");
-    // Total mirrors the bundled listing size; a Hub sync replaces both.
-    CatalogListVm {
-        total: entries.len() as i64,
-        entries,
-    }
 }
 
 /// Normalize an endpoint into its identity: host+path, lowercased, scheme
@@ -3142,7 +3149,22 @@ mod tests {
     fn catalog_added_derives_from_provider_endpoints() {
         let aux = Aux::open_in_memory().unwrap();
         let s = store();
-        // nothing added yet: the bundled static flags are ignored
+        // Seeded from the Hub cache, which is the only source now — this used to
+        // lean on the bundled catalog, and the two entries below are the ones it
+        // asserted against: DeepSeek on its primary, Kimi For Coding reachable on
+        // a second protocol at a different path.
+        let payload = r#"{"total":2,"entries":[
+            {"id":"deepseek","name":"DeepSeek","tag":"official","rating":4.8,
+             "billing":"payg","currency":"USD",
+             "endpoints":[{"protocol":"openai","endpoint":"https://api.deepseek.com"}]},
+            {"id":"kimi-for-coding","name":"Kimi For Coding","tag":"official","rating":4,
+             "billing":"plan","currency":"USD",
+             "endpoints":[{"protocol":"openai","endpoint":"https://api.kimi.com/coding/v1"},
+                          {"protocol":"anthropic","endpoint":"https://api.kimi.com/coding"}]}
+        ]}"#;
+        aux.save_hub_cache(payload, "2026-09-07T00:00:00Z").unwrap();
+
+        // nothing added yet: the flags a payload may carry are ignored
         let empty = load_catalog(&s, &aux);
         assert!(!empty.entries.iter().any(|e| e.added));
 
@@ -3163,19 +3185,21 @@ mod tests {
         // else — including DeepSeek at a different endpoint — stays addable
         assert_eq!(added, ["kimi-for-coding"]);
 
-        // a provider on the primary endpoint also marks the entry added
-        let aux2 = Aux::open_in_memory().unwrap();
+        // a provider on the primary endpoint also marks the entry added.
+        // Same `aux`, not a fresh one: `added` is derived from the store, and a
+        // fresh aux would have no cache — an empty shelf that passes for the
+        // wrong reason.
         let mut d = provider("ds", "DeepSeek", Billing::Metered);
         d.base_url = "https://api.deepseek.com".into();
         s.insert_provider(&d).unwrap();
-        let list2 = load_catalog(&s, &aux2);
+        let list2 = load_catalog(&s, &aux);
         let added2: Vec<&str> = list2
             .entries
             .iter()
             .filter(|e| e.added)
             .map(|e| e.id.as_str())
             .collect();
-        // catalog order: DeepSeek is the first bundled entry
+        // catalog order as published: DeepSeek first
         assert_eq!(added2, ["deepseek", "kimi-for-coding"]);
     }
 

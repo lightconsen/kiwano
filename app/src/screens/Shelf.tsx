@@ -595,7 +595,11 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
           {filtered.length === 0 && (
             <tr>
               <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
-                {t("shelf.noMatches")}
+                {/* An empty catalog is not a failed search. There is no bundled
+                    fallback any more, so a machine that has never synced shows
+                    this instead — and "no matching providers" would send the
+                    user off to rewrite a search term that was never wrong. */}
+                {catalog.entries.length === 0 ? t("shelf.notSynced") : t("shelf.noMatches")}
               </td>
             </tr>
           )}

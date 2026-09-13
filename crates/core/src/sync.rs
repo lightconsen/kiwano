@@ -3,10 +3,11 @@
 //! Protocol (v0): `GET {hub_url}` → JSON `{ "total": N, "entries": [...] }`,
 //! with entries shaped exactly like the GUI's `CatalogEntryVm`. After a
 //! successful sync the normalized payload is stored in the single-row aux
-//! `hub_cache`; the catalog reads the cache first and falls back to the
-//! bundled static catalog.json, so it works fully offline. The Hub only
-//! carries catalog metadata — API requests and keys never go through the
-//! Hub (spec §6.1).
+//! `hub_cache`, and the shelf reads that cache and nothing else — there is no
+//! bundled fallback, so a machine that has never synced has an empty shelf
+//! rather than a stale one. Once synced it works offline like anything cached.
+//! The Hub only carries catalog metadata — API requests and keys never go
+//! through the Hub (spec §6.1).
 //!
 //! Sync is *conditional*. `manifest.json` is published next to the artifacts
 //! with a sha256 of each; when its `catalog.sha256` already matches the copy
@@ -218,7 +219,7 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
 
     let catalog = sync_catalog(&client, aux, hub_url, &manifest_url, &mut manifest)?;
     // Best-effort: the catalog is the primary resource. A bad models.json
-    // leaves the previous pricing cache (or the bundled snapshot) in place.
+    // leaves the previous pricing cache in place.
     let pricing = sync_pricing(&client, aux, hub_url, &manifest).unwrap_or_default();
 
     Ok(vm::SyncReportVm {
@@ -241,8 +242,7 @@ fn sync_catalog(
     // ── gate ──
     // Skipping requires all three of: a remote sha, the sha we cached, and a
     // cache payload that still parses. A stray sha with no usable payload must
-    // not skip — `fetched` would be unknown, and load_catalog would quietly
-    // serve the bundled catalog instead.
+    // not skip — `fetched` would be unknown, and the shelf would be empty.
     let cached_list = aux
         .load_hub_cache()
         .and_then(|(payload, _)| parse_catalog(&payload).ok());
@@ -398,39 +398,56 @@ mod tests {
         assert!(parse_catalog(r#"{"total":1,"entries":[{"id":"x"}]}"#).is_err());
     }
 
+    /// The shelf is the Hub cache and nothing else.
+    ///
+    /// This used to assert a bundled fallback of 80+ entries. There is no
+    /// bundled catalog any more — it was a build-time copy of another repo and
+    /// had gone a whole schema migration stale — so "never synced" is now an
+    /// empty shelf, which is a state the UI has to say out loud rather than
+    /// dress up as "no matches".
     #[test]
-    fn cache_preferred_and_fallback_bundled() {
+    fn the_shelf_is_the_cache_and_nothing_else() {
         let aux = Aux::open_in_memory().unwrap();
         let store = kiwanod::store::Store::open_in_memory().unwrap();
-        // never synced → bundled fallback
-        let fallback = vm::load_catalog(&store, &aux);
-        assert_eq!(fallback.total as usize, fallback.entries.len());
-        // Multi-protocol merge puts one row per brand (openai/anthropic/gemini
-        // siblings folded in), so the entry count shrinks while the endpoint
-        // count keeps the catalog's real size
-        let endpoint_count = fallback
-            .entries
-            .iter()
-            .map(|e| 1 + e.endpoints.len())
-            .sum::<usize>();
-        assert!(fallback.entries.len() > 80);
-        assert!(endpoint_count > 100);
-        // every bundled entry carries its protocol fingerprint
-        assert!(fallback
-            .entries
-            .iter()
-            .all(|e| ["openai", "anthropic", "gemini"].contains(&e.protocol.as_str())));
 
-        // cache written → cache wins
-        let payload = serde_json::to_string(&vm::CatalogListVm {
-            total: 1,
-            entries: vec![fallback.entries[0].clone()],
-        })
-        .unwrap();
-        aux.save_hub_cache(&payload, "2026-09-07T00:00:00Z")
-            .unwrap();
+        // Never synced: empty, not stale.
+        let never = vm::load_catalog(&store, &aux);
+        assert_eq!(never.total, 0);
+        assert!(never.entries.is_empty());
+
+        // A payload carrying only the four required fields — the Hub publishes
+        // the rest, and the app derives what it can. This is also the shape
+        // tolerance the cache relies on: everything else is `serde(default)`.
+        let payload = r#"{"total":1,"entries":[{
+            "id": "x",
+            "name": "X",
+            "tag": "official",
+            "rating": 4.5,
+            "billing": "payg",
+            "endpoints": [{"protocol": "openai", "endpoint": "https://x.example.com"}]
+        }]}"#;
+        // Parse it here first: a fixture that does not deserialize would make
+        // every assertion below pass for the wrong reason (an empty shelf).
+        serde_json::from_str::<vm::CatalogListVm>(payload)
+            .unwrap_or_else(|e| panic!("the fixture must parse: {e}\n{payload}"));
+        aux.save_hub_cache(payload, "2026-09-07T00:00:00Z").unwrap();
+
         let cached = vm::load_catalog(&store, &aux);
         assert_eq!(cached.total, 1);
+        assert_eq!(cached.entries[0].name, "X");
+        // Normalization still runs on the way in: the primary is hoisted out of
+        // the endpoint list and a palette colour is derived.
+        assert_eq!(cached.entries[0].protocol, "openai");
+        assert_eq!(cached.entries[0].endpoint, "https://x.example.com");
+        assert!(!cached.entries[0].logo_color.is_empty());
+
+        // A cache we cannot parse is empty too — it used to fall back to the
+        // bundled copy, which answered a broken cache with stale data.
+        aux.save_hub_cache("{not json", "2026-09-07T00:00:00Z")
+            .unwrap();
+        let broken = vm::load_catalog(&store, &aux);
+        assert_eq!(broken.total, 0);
+        assert!(broken.entries.is_empty());
     }
 
     #[test]

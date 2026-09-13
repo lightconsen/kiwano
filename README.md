@@ -24,7 +24,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 - **Agent takeover** — connect Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes and Pi to the local gateway in one click. Each agent's original config is backed up and restored when you switch it off.
 - **Local gateway** — one always-on port with protocol normalization (anthropic / openai / gemini), so a provider that speaks one dialect can serve an agent that speaks another. Hot-reloads on change; the daemon outlives the GUI.
 - **Usage and cost** — 7-day trends for requests, tokens, cost and latency, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts.
-- **Models shelf** — a built-in Hub catalog of 82 providers (official / aggregator / third-party / free), with live search and one-click add. The catalog syncs conditionally: a manifest hash skips the download when nothing changed, and the bundled copy keeps it working offline.
+- **Models shelf** — the Kiwano Hub catalog of 82 providers (official / aggregator / third-party / free), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
 - **Request logs** — every gateway request with status, latency and token accounting; filter down to errors.
 - **cc-switch import** — read an existing cc-switch configuration and migrate it in.
 - **Self-update** — signed releases (minisign); the app checks at startup and updates in place. 0.1.2 and later update themselves to newer versions.
@@ -168,7 +168,7 @@ Layout:
 | --- | --- |
 | `app/src/` | React UI (screens, components, the `api/` layer) |
 | `app/src-tauri/` | The Tauri shell: commands, tray, watchdog, updater — the desktop app's binary is `kiwano-app` |
-| `crates/core/` | The application layer the app and the CLI share: view models, takeover, sync, share; the bundled provider catalog is `crates/core/src/catalog.json` |
+| `crates/core/` | The application layer the app and the CLI share: view models, takeover, sync, share |
 | `crates/gateway/` | The gateway daemon: routing, strategies, metering, store |
 | `crates/adapters/` | Protocol conversion, agent config take-over, pricing table (`resources/models.json`) |
 | `crates/cli/` | The `kiwano` command-line client ([docs](docs/cli.md)) |

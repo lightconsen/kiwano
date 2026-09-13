@@ -223,6 +223,230 @@ fn providers_remove_promotes_the_next_candidate() {
     );
 }
 
+// ── forwarding options (advanced / plan limits / plan query) ────────────────
+
+#[test]
+fn providers_add_stores_the_forwarding_options() {
+    let (_dir, db) = temp_db();
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--json",
+            "providers",
+            "add",
+            "--name",
+            "azure",
+            "--endpoint",
+            "https://x.openai.azure.com",
+            "--protocol",
+            "openai",
+            "--timeout",
+            "120",
+            "--retries",
+            "2",
+            "--header",
+            "api-key: az-secret",
+            // A header value may itself contain a colon — the split is on the
+            // first one only, which matters for the many that do.
+            "--header",
+            "X-Trace: a:b:c",
+            "--endpoint-extra",
+            "anthropic=https://x.anthropic.azure.com",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let _: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+    let store = Store::open(&db).unwrap();
+    let row = store.list_providers().unwrap().into_iter().next().unwrap();
+    assert_eq!(row.timeout_secs, Some(120));
+    assert_eq!(row.retries, Some(2));
+    let headers = row.headers.expect("headers stored");
+    assert!(headers.contains("az-secret"), "{headers}");
+    assert!(headers.contains("a:b:c"), "value kept whole: {headers}");
+    assert_eq!(row.endpoints.len(), 1);
+    assert_eq!(row.endpoints[0].base_url, "https://x.anthropic.azure.com");
+}
+
+/// `advanced` is an authoritative snapshot in `vm`: setting one field rewrites
+/// all three columns. An edit that names only one must therefore carry the rest
+/// over from the stored row, or it silently clears them.
+#[test]
+fn providers_edit_preserves_the_forwarding_options_it_was_not_given() {
+    let (_dir, db) = temp_db();
+    let id = add_provider(&db, "azure", &[]);
+    run(
+        &db,
+        &[
+            "providers",
+            "edit",
+            &id,
+            "--timeout",
+            "120",
+            "--header",
+            "api-key: az-secret",
+            "--endpoint-extra",
+            "anthropic=https://alt.example.com",
+        ],
+    );
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--name", "renamed"]);
+    assert_eq!(code, 0, "{err}");
+
+    let store = Store::open(&db).unwrap();
+    let row = store.get_provider(&id).unwrap().unwrap();
+    assert_eq!(row.name, "renamed");
+    assert_eq!(row.timeout_secs, Some(120), "timeout survived a rename");
+    assert!(row.headers.is_some(), "headers survived a rename");
+    assert_eq!(row.endpoints.len(), 1, "endpoints survived a rename");
+
+    // Changing one field still leaves the other two alone.
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--retries", "3"]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let row = store.get_provider(&id).unwrap().unwrap();
+    assert_eq!(row.retries, Some(3));
+    assert_eq!(row.timeout_secs, Some(120));
+
+    // …and clearing them is explicit, not a side effect of an unrelated edit.
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--no-headers"]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let row = store.get_provider(&id).unwrap().unwrap();
+    assert_eq!(row.headers, None);
+    assert_eq!(row.timeout_secs, Some(120), "only the headers were cleared");
+}
+
+#[test]
+fn forwarding_flags_reject_malformed_values() {
+    let (_dir, db) = temp_db();
+    for (args, needle) in [
+        (vec!["--header", "no-colon-here"], "Name: value"),
+        (vec!["--header", ": empty-name"], "empty name"),
+        (vec!["--endpoint-extra", "not-a-pair"], "PROTO=URL"),
+        (
+            vec!["--endpoint-extra", "grpc=https://x.example.com"],
+            "grpc",
+        ),
+        (vec!["--endpoint-extra", "openai="], "empty URL"),
+    ] {
+        let mut argv = vec![
+            "providers",
+            "add",
+            "--name",
+            "x",
+            "--endpoint",
+            "https://x.example.com",
+        ];
+        argv.extend(args.iter().copied());
+        let (code, _, err) = run(&db, &argv);
+        assert_eq!(code, 2, "should be a usage error: {argv:?} — {err}");
+        assert!(err.contains(needle), "{argv:?} → {err}");
+    }
+}
+
+#[test]
+fn plan_limits_require_plan_billing() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(
+        &db,
+        &[
+            "providers",
+            "add",
+            "--name",
+            "x",
+            "--endpoint",
+            "https://x.example.com",
+            "--plan-limit-5h",
+            "20",
+        ],
+    );
+    assert_eq!(code, 2, "payg has no plan windows to limit");
+    assert!(err.contains("plan providers"), "{err}");
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "providers",
+            "add",
+            "--name",
+            "p",
+            "--endpoint",
+            "https://p.example.com",
+            "--billing",
+            "plan",
+            "--plan-limit-5h",
+            "20",
+            "--plan-limit-weekly",
+            "60",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    let row = store.list_providers().unwrap().into_iter().next().unwrap();
+    let limits = row.plan_limits.expect("stored");
+    assert!(limits.contains("20"), "{limits}");
+    assert!(limits.contains("60"), "{limits}");
+}
+
+/// The plan query is what `providers quota` reads. Without a way to set it, that
+/// command could only ever work on providers the desktop app had configured.
+#[test]
+fn plan_query_round_trips_and_clears() {
+    let (_dir, db) = temp_db();
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--json",
+            "providers",
+            "add",
+            "--name",
+            "kimi",
+            "--endpoint",
+            "https://api.moonshot.cn/anthropic",
+            "--billing",
+            "plan",
+            "--plan-query",
+            r#"{"template":"kimi","fields":{"api_key":"sk-x"}}"#,
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let created: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let store = Store::open(&db).unwrap();
+    let row = store.get_provider(&id).unwrap().unwrap();
+    assert!(row.plan_query.as_deref().unwrap().contains("kimi"));
+
+    // Malformed JSON, and a non-object, are both refused.
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--plan-query", "not json"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("valid JSON"), "{err}");
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--plan-query", "[]"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("JSON object"), "{err}");
+
+    // Clearing is explicit — an absent --plan-query means "keep".
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--name", "kimi2"]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    assert!(store
+        .get_provider(&id)
+        .unwrap()
+        .unwrap()
+        .plan_query
+        .is_some());
+
+    let (code, _, err) = run(&db, &["providers", "edit", &id, "--clear-plan-query"]);
+    assert_eq!(code, 0, "{err}");
+    let store = Store::open(&db).unwrap();
+    assert_eq!(store.get_provider(&id).unwrap().unwrap().plan_query, None);
+
+    // And with none configured, quota says so rather than inventing an answer.
+    let (code, _, err) = run(&db, &["providers", "quota", &id]);
+    assert_eq!(code, 3);
+    assert!(err.to_lowercase().contains("plan query"), "{err}");
+}
+
 // ── keys ────────────────────────────────────────────────────────────────────
 
 #[test]

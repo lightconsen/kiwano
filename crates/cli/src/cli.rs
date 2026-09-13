@@ -496,6 +496,17 @@ pub struct EditArgs {
     /// Unbind from every agent
     #[arg(long, conflicts_with = "bind")]
     pub no_bind: bool,
+
+    #[command(flatten)]
+    pub forward: ForwardArgs,
+
+    /// Drop every custom header
+    #[arg(long, conflicts_with = "headers")]
+    pub no_headers: bool,
+
+    /// Remove the configured plan query, so `providers quota` has nothing to ask
+    #[arg(long, conflicts_with = "plan_query")]
+    pub clear_plan_query: bool,
 }
 
 /// The flags `providers add` accepts. They map onto the app's
@@ -538,6 +549,49 @@ pub struct AddArgs {
     /// Bind the new provider as the primary for this agent (repeatable)
     #[arg(long = "bind", value_name = "AGENT")]
     pub bind: Vec<String>,
+
+    #[command(flatten)]
+    pub forward: ForwardArgs,
+}
+
+/// The forwarding and quota options both `add` and `edit` take.
+///
+/// Shared rather than duplicated because their semantics have to match: every
+/// one of these is *part* of an object `vm` treats as an authoritative snapshot
+/// — `advanced` and `plan_limits` are recomputed whole — so a caller that sets
+/// one field must send the others it wants kept. `edit` fills those from the
+/// stored row; `add` has nothing to fill from.
+#[derive(Debug, Args)]
+pub struct ForwardArgs {
+    /// Upstream wait for response headers, seconds (1-3600)
+    #[arg(long, value_name = "SECS")]
+    pub timeout: Option<i64>,
+
+    /// Same-provider attempts before the strategy layer moves on (0-5)
+    #[arg(long, value_name = "N")]
+    pub retries: Option<i64>,
+
+    /// Extra request header, `Name: value` (repeatable).
+    /// Merged after credential injection, so these can override it.
+    #[arg(long = "header", value_name = "NAME: VALUE")]
+    pub headers: Vec<String>,
+
+    /// Additional endpoint for another protocol, `PROTO=URL` (repeatable)
+    #[arg(long = "endpoint-extra", value_name = "PROTO=URL")]
+    pub endpoint_extra: Vec<String>,
+
+    /// plan: how much of the five-hour window may be used, per cent
+    #[arg(long, value_name = "PCT")]
+    pub plan_limit_5h: Option<f64>,
+
+    /// plan: how much of the weekly window may be used, per cent
+    #[arg(long, value_name = "PCT")]
+    pub plan_limit_weekly: Option<f64>,
+
+    /// Token-plan quota query, as JSON: `{"template":"kimi","fields":{…}}`.
+    /// This is what `providers quota` reads.
+    #[arg(long, value_name = "JSON")]
+    pub plan_query: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

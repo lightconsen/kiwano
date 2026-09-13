@@ -14,9 +14,9 @@ use kiwano_gateway::store::{Provider, RequestLogFilter, StrategyType, UsageTotal
 use kiwano_gateway::strategy::QuotaConfig;
 
 use crate::cli::{
-    AddArgs, AgentsCmd, BindingCmd, CatalogCmd, ConfigCmd, DashboardArgs, EditArgs, GatewayCmd,
-    ImportCmd, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd, SettingsCmd,
-    UsageArgs,
+    AddArgs, AgentsCmd, BindingCmd, CatalogCmd, ConfigCmd, DashboardArgs, EditArgs, ForwardArgs,
+    GatewayCmd, ImportCmd, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd,
+    SettingsCmd, UsageArgs,
 };
 use crate::output::{ellipsize, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
@@ -263,6 +263,11 @@ fn edit_input(
         args.bind.clone()
     };
 
+    // Checked against the *effective* billing: an edit that names no billing
+    // inherits the stored one, so `--plan-limit-5h` is legitimate on a provider
+    // that is already a plan.
+    check_plan_limits(&billing, &args.forward)?;
+
     let limit_value = args.limit.or(current.period_limit);
     Ok(vm::NewProviderInput {
         name: args.name.clone().unwrap_or_else(|| current.name.clone()),
@@ -280,31 +285,26 @@ fn edit_input(
             limit_value,
             limit_unit: args.unit.clone().or_else(|| current.limit_unit.clone()),
             reset_period: args.reset.clone().or_else(|| current.reset_period.clone()),
-            plan_limits: plan_limits_input(current.plan_limits.as_deref()),
+            plan_limits: plan_limits_input(&args.forward, Some(current)),
         },
         agents,
-        endpoints: current
-            .endpoints
-            .iter()
-            .map(|e| vm::NewEndpointInput {
-                protocol: e.protocol.as_str().to_string(),
-                endpoint: e.base_url.clone(),
-            })
-            .collect(),
-        // Absent = keep, which is exactly what an edit that says nothing about
-        // advanced settings wants.
-        advanced: None,
-        plan_query: None,
-    })
-}
-
-/// `{"five_hour":20,"weekly":60}` (the stored shape) back into the input type.
-fn plan_limits_input(raw: Option<&str>) -> Option<vm::PlanLimitsInput> {
-    let v: serde_json::Value = serde_json::from_str(raw?).ok()?;
-    let number = |key: &str| v.get(key).and_then(|x| x.as_f64());
-    Some(vm::PlanLimitsInput {
-        five_hour: number("five_hour"),
-        weekly: number("weekly"),
+        // The flag list is authoritative when given; otherwise the stored
+        // endpoints are carried over, because `update_provider` rewrites the
+        // whole set and an empty list would drop them.
+        endpoints: if args.forward.endpoint_extra.is_empty() {
+            current
+                .endpoints
+                .iter()
+                .map(|e| vm::NewEndpointInput {
+                    protocol: e.protocol.as_str().to_string(),
+                    endpoint: e.base_url.clone(),
+                })
+                .collect()
+        } else {
+            parse_extra_endpoints(&args.forward.endpoint_extra)?
+        },
+        advanced: advanced_input(&args.forward, Some(current), args.no_headers)?,
+        plan_query: plan_query_input(&args.forward, args.clear_plan_query)?,
     })
 }
 
@@ -1101,6 +1101,7 @@ fn new_provider_input(args: &AddArgs) -> Result<vm::NewProviderInput, CliError> 
             return Err(CliError::usage("--limit must be positive"));
         }
     }
+    check_plan_limits(billing, &args.forward)?;
 
     Ok(vm::NewProviderInput {
         name: args.name.trim().to_string(),
@@ -1113,15 +1114,174 @@ fn new_provider_input(args: &AddArgs) -> Result<vm::NewProviderInput, CliError> 
             limit_value: args.limit,
             limit_unit: args.unit.clone(),
             reset_period,
-            plan_limits: None,
+            plan_limits: plan_limits_input(&args.forward, None),
         },
         agents: args.bind.clone(),
-        endpoints: Vec::new(),
+        endpoints: parse_extra_endpoints(&args.forward.endpoint_extra)?,
         // Absent, not empty: `advanced` is an authoritative snapshot when
-        // present, so an empty object would clear settings the user never saw.
-        advanced: None,
-        plan_query: None,
+        // present, so sending an empty object would clear settings the user
+        // never mentioned. There is nothing to preserve on add, so it is only
+        // built when a flag actually asks for it.
+        advanced: advanced_input(&args.forward, None, false)?,
+        plan_query: plan_query_input(&args.forward, false)?,
     })
+}
+
+/// Plan limits are only meaningful for a plan provider, and `vm` silently drops
+/// them otherwise — the same shape of mistake as `--limit` on a plan. Refuse
+/// rather than accept a flag that does nothing.
+fn check_plan_limits(billing: &str, forward: &ForwardArgs) -> Result<(), CliError> {
+    let asked = forward.plan_limit_5h.is_some() || forward.plan_limit_weekly.is_some();
+    if asked && billing != "plan" {
+        return Err(CliError::usage(
+            "--plan-limit-5h/--plan-limit-weekly apply to plan providers only \
+             (use --limit for payg)",
+        ));
+    }
+    Ok(())
+}
+
+/// `Name: value` → a header map.
+///
+/// Split on the *first* colon, so a value may contain one — which it very often
+/// does: `Authorization: Bearer abc:def`, or a URL.
+fn parse_headers(raw: &[String]) -> Result<BTreeMap<String, String>, CliError> {
+    let mut map = BTreeMap::new();
+    for entry in raw {
+        let (name, value) = entry.split_once(':').ok_or_else(|| {
+            CliError::usage(format!("--header expects 'Name: value', got {entry:?}"))
+        })?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(CliError::usage(format!(
+                "--header has an empty name: {entry:?}"
+            )));
+        }
+        map.insert(name.to_string(), value.trim().to_string());
+    }
+    Ok(map)
+}
+
+/// The stored `providers.headers` JSON column back into a map.
+fn headers_from_column(raw: Option<&str>) -> Option<BTreeMap<String, String>> {
+    serde_json::from_str(raw?).ok()
+}
+
+/// `PROTO=URL` → the additional-endpoint list.
+fn parse_extra_endpoints(raw: &[String]) -> Result<Vec<vm::NewEndpointInput>, CliError> {
+    raw.iter()
+        .map(|entry| {
+            let (protocol, endpoint) = entry.split_once('=').ok_or_else(|| {
+                CliError::usage(format!("--endpoint-extra expects PROTO=URL, got {entry:?}"))
+            })?;
+            let protocol = parse_protocol(protocol)?;
+            let endpoint = endpoint.trim();
+            if endpoint.is_empty() {
+                return Err(CliError::usage(format!(
+                    "--endpoint-extra has an empty URL: {entry:?}"
+                )));
+            }
+            Ok(vm::NewEndpointInput {
+                protocol: protocol.to_string(),
+                endpoint: endpoint.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The `advanced` object, or `None` for "leave it alone".
+///
+/// `vm` recomputes all three columns from this object whenever it is present,
+/// so on an edit the fields the flags did not mention are carried over from the
+/// stored row. Sending a partial object would clear them.
+fn advanced_input(
+    forward: &ForwardArgs,
+    current: Option<&Provider>,
+    clear_headers: bool,
+) -> Result<Option<vm::AdvancedInput>, CliError> {
+    let touched = forward.timeout.is_some()
+        || forward.retries.is_some()
+        || !forward.headers.is_empty()
+        || clear_headers;
+    if !touched {
+        return Ok(None);
+    }
+    let stored_headers = current.and_then(|p| headers_from_column(p.headers.as_deref()));
+    let headers = if clear_headers {
+        None
+    } else if !forward.headers.is_empty() {
+        Some(parse_headers(&forward.headers)?)
+    } else {
+        stored_headers
+    };
+    Ok(Some(vm::AdvancedInput {
+        timeout_secs: forward
+            .timeout
+            .or_else(|| current.and_then(|p| p.timeout_secs)),
+        retries: forward.retries.or_else(|| current.and_then(|p| p.retries)),
+        headers,
+    }))
+}
+
+/// `{"five_hour":20,"weekly":60}` (the stored shape) back into the input type.
+fn parse_plan_limits(raw: &str) -> Option<vm::PlanLimitsInput> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let number = |key: &str| v.get(key).and_then(|x| x.as_f64());
+    Some(vm::PlanLimitsInput {
+        five_hour: number("five_hour"),
+        weekly: number("weekly"),
+    })
+}
+
+/// The plan-mode percent limits: flags override, the stored row fills the rest.
+///
+/// `vm` recomputes the column from this object, so a partial view would clear
+/// the window the caller did not mention.
+fn plan_limits_input(
+    forward: &ForwardArgs,
+    current: Option<&Provider>,
+) -> Option<vm::PlanLimitsInput> {
+    let stored = current
+        .and_then(|p| p.plan_limits.as_deref())
+        .and_then(parse_plan_limits);
+    if forward.plan_limit_5h.is_none() && forward.plan_limit_weekly.is_none() {
+        return stored;
+    }
+    let stored = stored.unwrap_or(vm::PlanLimitsInput {
+        five_hour: None,
+        weekly: None,
+    });
+    Some(vm::PlanLimitsInput {
+        five_hour: forward.plan_limit_5h.or(stored.five_hour),
+        weekly: forward.plan_limit_weekly.or(stored.weekly),
+    })
+}
+
+/// The quota-query payload, or `None` for "keep what is stored".
+///
+/// A JSON `null` is how the API spells "clear this", which is not the same as
+/// absent — hence the separate `--clear-plan-query` flag rather than treating an
+/// empty value as a removal.
+fn plan_query_input(
+    forward: &ForwardArgs,
+    clear: bool,
+) -> Result<Option<serde_json::Value>, CliError> {
+    if clear {
+        return Ok(Some(serde_json::Value::Null));
+    }
+    match &forward.plan_query {
+        None => Ok(None),
+        Some(raw) => {
+            let parsed: serde_json::Value = serde_json::from_str(raw)
+                .map_err(|e| CliError::usage(format!("--plan-query is not valid JSON: {e}")))?;
+            if !parsed.is_object() {
+                return Err(CliError::usage(
+                    "--plan-query must be a JSON object, e.g. '{\"template\":\"kimi\",\"fields\":{}}'",
+                ));
+            }
+            Ok(Some(parsed))
+        }
+    }
 }
 
 /// The app's billing vocabulary, with the older CLI's words kept as aliases.
@@ -1194,6 +1354,22 @@ fn render_status(v: &serde_json::Value, admin: &str, footer: Option<&vm::FooterS
         out.push_str(
             "\nstore: not reported (no gateway token — point --db at the shared database)",
         );
+    }
+    // Providers the gateway is refusing to route to right now, with its reason.
+    // This is the operational answer to "why is nothing working" — the app shows
+    // it as a dimmed row — and it is derived state that exists only while the
+    // gateway runs, so `status` is the only place a shell can see it.
+    if let Some(blocked) = v["blocked"].as_array() {
+        if !blocked.is_empty() {
+            out.push_str("\nblocked:");
+            for row in blocked {
+                out.push_str(&format!(
+                    "\n  {:<28} {}",
+                    ellipsize(row["provider_id"].as_str().unwrap_or("?"), 28),
+                    row["reason"].as_str().unwrap_or("no reason given")
+                ));
+            }
+        }
     }
     if let Some(routes) = v["routes"].as_array() {
         for r in routes {
@@ -1629,4 +1805,48 @@ fn render_usage(report: &UsageReport) -> String {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_status;
+
+    /// `status` is the only place a shell can see the gateway's blocked list:
+    /// it is derived state that exists only while the gateway is running, so
+    /// there is nothing in SQLite to read it from.
+    #[test]
+    fn status_text_lists_blocked_providers() {
+        let report = serde_json::json!({
+            "version": "0.1.8",
+            "uptime_secs": 12,
+            "providers": 2,
+            "bindings": 1,
+            "placeholder_keys": 1,
+            "usage_rows": 5,
+            "blocked": [
+                { "provider_id": "capped-1", "reason": "1.00 of 1.00 requests this period" }
+            ],
+            "routes": []
+        });
+        let text = render_status(&report, "/tmp/admin.sock", None);
+        assert!(text.contains("blocked:"), "{text}");
+        assert!(text.contains("capped-1"), "{text}");
+        assert!(
+            text.contains("1.00 of 1.00 requests this period"),
+            "the gateway's reason is the whole point: {text}"
+        );
+    }
+
+    /// A healthy gateway must not carry a heading with no rows under it, and a
+    /// liveness-only answer (no token) has no such key at all.
+    #[test]
+    fn status_text_stays_quiet_when_nothing_is_blocked() {
+        let empty = serde_json::json!({
+            "version": "0.1.8", "uptime_secs": 1, "blocked": []
+        });
+        assert!(!render_status(&empty, "s", None).contains("blocked"));
+
+        let liveness = serde_json::json!({ "version": "0.1.8", "uptime_secs": 1 });
+        assert!(!render_status(&liveness, "s", None).contains("blocked"));
+    }
 }

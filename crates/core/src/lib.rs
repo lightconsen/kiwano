@@ -23,7 +23,11 @@
 pub mod aux;
 pub mod creds;
 pub mod csv;
+pub mod detect;
+pub mod import;
 pub mod pricing;
+pub mod share;
+pub mod sidecar;
 pub mod sync;
 pub mod takeover;
 pub mod vm;

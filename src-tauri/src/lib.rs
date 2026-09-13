@@ -5,10 +5,6 @@
 //! (a unix socket / named pipe, see `sidecar`) hot-swaps the gateway route
 //! table. The gateway process itself is spawned in `setup`.
 
-mod detect;
-mod import;
-mod share;
-mod sidecar;
 mod update;
 
 use std::sync::Mutex;
@@ -20,7 +16,7 @@ use tauri_plugin_notification::NotificationExt;
 // The application layer lives in `kiwano-core`, shared with the CLI. Importing
 // the module by name keeps every `vm::…` / `pricing::…` call site below
 // unchanged — `use` puts the same name in scope that `mod` did.
-use kiwano_core::{pricing, sync, vm};
+use kiwano_core::{detect, import, pricing, share, sidecar, sync, vm};
 use sidecar::AdminEndpoint;
 use vm::Aux;
 

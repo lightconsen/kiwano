@@ -2357,16 +2357,10 @@ dependencies = [
 name = "kiwano"
 version = "0.1.8"
 dependencies = [
- "chrono",
- "kiwano-adapters",
  "kiwano-core",
  "kiwano-gateway",
- "reqwest",
- "rusqlite",
  "serde",
  "serde_json",
- "serde_yaml",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -2374,9 +2368,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
- "tempfile",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -2431,6 +2423,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tempfile",
+ "tracing",
  "uuid",
 ]
 

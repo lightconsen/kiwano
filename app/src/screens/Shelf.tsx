@@ -9,6 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
@@ -842,17 +849,18 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         <div className="ml-auto flex items-center gap-2">
           {/* Two readings of one catalog: rows are providers, or rows are the
               models those providers serve. */}
-          <div className="flex flex-none overflow-hidden rounded-lg border border-line text-[12px]">
-            {VIEWS.map((v, i) => (
-              <button
-                key={v.id}
-                className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${view === v.id ? " active" : ""}`}
-                onClick={() => rememberView(v.id)}
-              >
-                {t(v.labelKey)}
-              </button>
-            ))}
-          </div>
+          <Select value={view} onValueChange={(v) => rememberView(parseView(v))}>
+            <SelectTrigger className="h-7 w-[132px] flex-none bg-surface text-[11.5px]">
+              <SelectValue>{(v) => t(VIEWS.find((x) => x.id === v)?.labelKey ?? VIEWS[0].labelKey)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {VIEWS.map((v) => (
+                <SelectItem key={v.id} value={v.id}>
+                  {t(v.labelKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {/* A failed sync is worth the room it takes; the search box shifts
               left to make it, which is the point. */}
           {hubErr && (

@@ -509,6 +509,43 @@ mod tests {
         assert!((used - 5.0).abs() < 1e-6, "got {used}");
     }
 
+    /// The percent half of `evaluate`: a plan window whose live utilization has
+    /// reached the ceiling the user set takes the provider out of the routes,
+    /// carrying the window and the numbers that decided it.
+    ///
+    /// Untested until now — the money half had tests and this did not — which
+    /// mattered the moment `window_over` started returning the window rather
+    /// than a tuple: the only thing standing behind this branch was the compiler.
+    #[test]
+    fn a_plan_window_over_its_ceiling_takes_the_provider_out_of_the_routes() {
+        use crate::store::Billing;
+        let s = Store::open_in_memory().unwrap();
+        let mut p = test_provider("glm-1");
+        p.billing = Billing::Subscription;
+        p.plan_limits = Some(r#"{"five_hour": 90}"#.into());
+        s.insert_provider(&p).unwrap();
+
+        // Under the ceiling: routed.
+        crate::plan_quota::cache_write(&s, "glm-1", &plan_report(50.0, Some("2026-09-14T10:00:00Z")));
+        assert!(evaluate(&s).blocked("glm-1").is_none());
+
+        // At it: out, and for the reason claimed.
+        crate::plan_quota::cache_write(&s, "glm-1", &plan_report(95.0, Some("2026-09-14T10:00:00Z")));
+        match evaluate(&s).blocked("glm-1") {
+            Some(BlockReason::PlanWindow { window, util, pct }) => {
+                assert_eq!(window, "five_hour");
+                assert!((util - 95.0).abs() < 1e-6, "got {util}");
+                assert!((pct - 90.0).abs() < 1e-6, "got {pct}");
+            }
+            other => panic!("expected a plan-window block, got {other:?}"),
+        }
+
+        // A window the report does not mention is not evidence of a hit: with a
+        // stale cache of the other shape, the provider routes again.
+        crate::plan_quota::cache_write(&s, "glm-1", &plan_report(0.0, Some("2026-09-14T15:00:00Z")));
+        assert!(evaluate(&s).blocked("glm-1").is_none());
+    }
+
     #[test]
     fn period_start_keys() {
         // 2026-09-07T12:34:56Z (Monday)
@@ -528,10 +565,11 @@ mod tests {
         assert_eq!(key, "all");
     }
 
-    /// A provider on a CNY limit, with no usage recorded yet.
-    fn limited_provider(store: &Store, provider_id: &str, limit: f64) -> crate::store::Provider {
+    /// A plain enabled provider, no limits and not yet stored — so a test can
+    /// shape it before inserting, since `insert_provider` is a plain INSERT.
+    fn test_provider(provider_id: &str) -> crate::store::Provider {
         use crate::store::{Billing, Protocol, Provider};
-        let p = Provider {
+        Provider {
             id: provider_id.into(),
             name: provider_id.into(),
             catalog_id: None,
@@ -541,9 +579,9 @@ mod tests {
             endpoints: Vec::new(),
             api_key: None,
             billing: Billing::Metered,
-            period_limit: Some(limit),
-            limit_unit: Some("CNY".into()),
-            reset_period: Some("monthly".into()),
+            period_limit: None,
+            limit_unit: None,
+            reset_period: None,
             plan_query: None,
             plan_limits: None,
             timeout_secs: None,
@@ -552,9 +590,50 @@ mod tests {
             enabled: true,
             created_at: crate::store::now_rfc3339(),
             updated_at: crate::store::now_rfc3339(),
-        };
+        }
+    }
+
+    /// A stored provider on a CNY amount limit, with no usage recorded yet.
+    fn limited_provider(store: &Store, provider_id: &str, limit: f64) -> crate::store::Provider {
+        let mut p = test_provider(provider_id);
+        p.period_limit = Some(limit);
+        p.limit_unit = Some("CNY".into());
+        p.reset_period = Some("monthly".into());
         store.insert_provider(&p).unwrap();
         p
+    }
+
+    /// The plan report the refresh step would have cached, with one window's
+    /// utilization set and everything else quiet.
+    fn plan_report(util: f64, resets_at: Option<&str>) -> crate::plan_quota::PlanQuotaReport {
+        use crate::plan_quota::{PlanQuotaReport, PlanTierVm};
+        PlanQuotaReport {
+            provider_id: "glm-1".into(),
+            template: "zhipu".into(),
+            success: true,
+            error: None,
+            note: None,
+            tiers: vec![
+                PlanTierVm {
+                    name: "five_hour".into(),
+                    utilization: util,
+                    resets_at: resets_at.map(str::to_string),
+                    used: None,
+                    limit: None,
+                    unit: None,
+                },
+                PlanTierVm {
+                    name: "weekly_limit".into(),
+                    utilization: 5.0,
+                    resets_at: None,
+                    used: None,
+                    limit: None,
+                    unit: None,
+                },
+            ],
+            queried_at: 0,
+            cached: false,
+        }
     }
 
     /// One metered row, in the currency given.

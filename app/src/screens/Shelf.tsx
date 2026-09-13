@@ -13,6 +13,7 @@ import { api } from "../api/client";
 import type { Billing, CatalogEntry, ProbeReport, Protocol } from "../api/types";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
+import { convertAmount, fmtMoney } from "../lib/format";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 
 // Chip icons speak the category's meaning; colors match the per-tag badge
@@ -72,6 +73,50 @@ function billingLabel(billing: Billing, t: Translate): string {
   // The lookup can miss at runtime despite the `Record` type: a newer Hub
   // catalog may name a billing tag this build has never heard of.
   return BILLING_LABEL[billing] ? t(BILLING_LABEL[billing]) : billing;
+}
+
+/** The currency to price in, and the rates to get there. An empty rate table
+    converts nothing, which is also `convertAmount`'s behaviour for a code it
+    has no rate for. */
+type Money = { rates: Record<string, number>; to: string };
+
+const SORT_KEYS = ["name", "protocol", "tag", "price"] as const;
+type SortKey = (typeof SORT_KEYS)[number];
+type Sort = { key: SortKey; dir: 1 | -1 };
+
+/** A remembered sort choice ("price:-1"), or null for the default order. A key
+    this build does not know — a value written by a newer one — falls back to
+    the default rather than sorting by nothing. */
+function parseSort(v: string | null | undefined): Sort | null {
+  if (!v) return null;
+  const [key, dir] = v.split(":");
+  if (!SORT_KEYS.includes(key as SortKey)) return null;
+  const d = Number(dir);
+  return d === 1 || d === -1 ? { key: key as SortKey, dir: d } : null;
+}
+
+const formatSort = (s: Sort | null): string | null => (s ? `${s.key}:${s.dir}` : null);
+
+/** The comparable price of an entry: the representative model's input rate, in
+    the display currency. null means no price is published at all. */
+function priceValue(e: CatalogEntry, money: Money): number | null {
+  const p = e.price_ref;
+  if (!p) return null;
+  const n = Number(p.input);
+  return Number.isFinite(n) ? convertAmount(n, p.currency || "USD", money.to, money.rates) : null;
+}
+
+/** The price cell: the representative model's name and its in/out rates, or the
+    provider's one-line description when it prices no model at all. */
+function priceText(e: CatalogEntry, money: Money): string {
+  const p = e.price_ref;
+  if (!p) return e.desc ?? "";
+  const inRate = Number(p.input);
+  const outRate = Number(p.output);
+  if (!Number.isFinite(inRate) || !Number.isFinite(outRate)) return e.desc ?? "";
+  const cur = p.currency || "USD";
+  const conv = (n: number) => fmtMoney(convertAmount(n, cur, money.to, money.rates), money.to);
+  return `${p.display_name} · ${conv(inRate)} / ${conv(outRate)}`;
 }
 
 // Probe verdict chip: green=usable, amber=route exists but needs a key,
@@ -161,17 +206,23 @@ function EndpointCard({ protocol, endpoint, models }: { protocol: Protocol; endp
   );
 }
 
-type SortKey = "name" | "protocol" | "tag";
-
 const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: string }[] = [
   { key: "name", labelKey: "shelf.colName", className: "w-[150px]" },
-  { key: "protocol", labelKey: "shelf.colProtocol", className: "w-[190px]" },
+  { key: "protocol", labelKey: "shelf.colProtocol", className: "w-[170px]" },
   { key: "tag", labelKey: "shelf.colCategory", className: "w-[84px]" },
-  { key: null, labelKey: "shelf.colPrice", className: "" },
+  { key: "price", labelKey: "shelf.colPrice", className: "" },
   { key: null, labelKey: "shelf.colActions", className: "w-[70px] text-right" },
 ];
 
-function compare(key: SortKey, a: CatalogEntry, b: CatalogEntry): number {
+/** The default order, used when the user has not picked a column: providers by
+    how much they can be trusted first, then by name. Alphabetical alone put
+    whichever aggregators happened to be called `9527code` / `a6api` on the first
+    screen — a new user's whole impression of the catalog decided by naming luck.
+    An explicit column sort replaces this rank, never the `added` pin below. */
+const byTagRank = (a: CatalogEntry, b: CatalogEntry): number =>
+  TAG_RANK[a.tag] - TAG_RANK[b.tag] || a.name.localeCompare(b.name);
+
+function compare(key: Exclude<SortKey, "price">, a: CatalogEntry, b: CatalogEntry): number {
   switch (key) {
     case "name":
       return a.name.localeCompare(b.name);
@@ -182,19 +233,43 @@ function compare(key: SortKey, a: CatalogEntry, b: CatalogEntry): number {
   }
 }
 
+/** Rows in the user's chosen order (or the default one when they have not
+    chosen). Sorting by price needs the currency conversion, and a row with no
+    published price has no place in a price ordering — it stays last whichever
+    way the arrow points, rather than the arrow flipping it to the top. */
+function orderRows(rows: CatalogEntry[], sort: Sort | null, money: Money): CatalogEntry[] {
+  if (!sort) return [...rows].sort(byTagRank);
+  // Destructured so the narrowing survives into the comparator closure.
+  const { key, dir } = sort;
+  if (key !== "price") return [...rows].sort((a, b) => compare(key, a, b) * dir);
+  return rows
+    .map((e) => ({ e, p: priceValue(e, money) }))
+    .sort((a, b) => {
+      if (a.p === null || b.p === null) {
+        if (a.p === null && b.p === null) return byTagRank(a.e, b.e);
+        return a.p === null ? 1 : -1;
+      }
+      return (a.p - b.p) * dir;
+    })
+    .map((x) => x.e);
+}
+
 function Row({
   entry,
   hubUrl,
+  money,
   onAdd,
   onOpen,
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
+  money: Money;
   onAdd: (e: CatalogEntry) => void;
   onOpen: (e: CatalogEntry) => void;
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
+  const price = priceText(entry, money);
   return (
     <tr className="cursor-pointer border-t border-line hover:bg-surface2" onClick={() => onOpen(entry)}>
       <td className="px-4 py-2">
@@ -224,7 +299,13 @@ function Row({
           {entry.tag_label}
         </span>
       </td>
-      <td className="px-2 py-2 text-[11.5px] text-mut">{entry.price_line}</td>
+      <td className="px-2 py-2 text-[11.5px] text-mut">
+        {/* The representative model's rates, or the provider's own one-liner
+            when it prices nothing. `title` because the cell can truncate. */}
+        <span className="block truncate" title={price}>
+          {price}
+        </span>
+      </td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
         {entry.added ? (
           <span className="text-[10.5px] text-mut">{t("shelf.added")}</span>
@@ -243,16 +324,19 @@ function Row({
 function DetailDialog({
   entry,
   hubUrl,
+  money,
   onClose,
   onAdd,
 }: {
   entry: CatalogEntry;
   hubUrl: string | null;
+  money: Money;
   onClose: () => void;
   onAdd: (e: CatalogEntry) => void;
 }) {
   const t = useT();
   const logo = entry.logo && hubUrl ? hubAssetUrl(hubUrl, entry.logo) : undefined;
+  const price = priceText(entry, money);
   const endpoints = [
     { protocol: entry.protocol, endpoint: entry.endpoint, models: entry.models },
     ...(entry.endpoints ?? []),
@@ -269,33 +353,25 @@ function DetailDialog({
         </DialogHeader>
 
         <div className="px-4 py-3.5">
-          {/* hero: category · rating · price */}
+          {/* hero: category · rating · the representative model's price */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded px-1.5 text-[10px]" style={tagChipStyle(entry.tag)}>
               {entry.tag_label}
             </span>
             <span className="text-[11.5px] text-mut">★ {entry.rating.toFixed(1)}</span>
-            <span className="ml-auto text-[12px] font-medium">{entry.price_line}</span>
-            {entry.price_note && <span className="text-[10.5px] text-mut">{entry.price_note}</span>}
+            {entry.price_ref && <span className="ml-auto text-[12px] font-medium">{price}</span>}
           </div>
 
-          {(entry.blurb || entry.free_offer) && (
-            <p className="mt-2 text-[11.5px] leading-relaxed text-mut">
-              {entry.free_offer && (
-                <span className="mr-2 inline-block rounded px-1.5 py-0.5 text-[10.5px]" style={tagChipStyle("free")}>
-                  {entry.free_offer}
-                </span>
-              )}
-              {entry.blurb}
-            </p>
-          )}
+          {/* The provider's one line of prose (`desc`), which is also what the
+              price cell falls back to for the eleven entries that price no
+              model. */}
+          {entry.desc && <p className="mt-2 text-[11.5px] leading-relaxed text-mut">{entry.desc}</p>}
 
           <div className="mt-2.5 flex gap-4 text-[11.5px] text-mut">
             <span>
               {t("shelf.billing")}{" "}
               <span className="text-ink">{billingLabel(entry.billing, t)}</span>
             </span>
-            <span>{entry.users}</span>
           </div>
 
           {/* one card per protocol: endpoint URL + keyless Test + models */}
@@ -329,13 +405,40 @@ function DetailDialog({
   );
 }
 
+/** The list's remembered preferences: the column sort and the currency to price
+    in. Both come from the settings blob, loaded once per screen; a save is
+    fire-and-forget so a failed write never blocks the click that caused it. */
+function useShelfPrefs() {
+  const [sort, setSort] = useState<Sort | null>(null);
+  const [money, setMoney] = useState<Money>({ rates: {}, to: "USD" });
+  useEffect(() => {
+    let alive = true;
+    api
+      .getSettings()
+      .then((s) => alive && setSort(parseSort(s.shelf_sort)))
+      .catch(() => {});
+    api
+      .getCurrencyMeta()
+      .then((m) => alive && setMoney({ rates: m.exchange_rates, to: m.preferred }))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const remember = (s: Sort | null) => {
+    setSort(s);
+    api.updateSettings({ shelf_sort: formatSort(s) }).catch(() => {});
+  };
+  return { sort, money, remember };
+}
+
 export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void }) {
   const t = useT();
   const hubUrl = useHubUrl();
+  const { sort, money, remember } = useShelfPrefs();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   // Catalog row clicked → model detail dialog
   const [detail, setDetail] = useState<CatalogEntry | null>(null);
   // Hub refresh: "busy" spins the glyph, "done" flashes a check. The header
@@ -383,19 +486,18 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         (chip === "all" || e.tag === chip) &&
         e.name.toLowerCase().includes(query.trim().toLowerCase()),
     );
-    const ordered = sort
-      ? [...rows].sort((a, b) => compare(sort.key, a, b) * sort.dir)
-      : rows;
-    // Added (or connected) providers pin to the top of any ordering — they
-    // are the ones already wired into the local setup
-    return [...ordered].sort((a, b) => Number(b.added) - Number(a.added));
-  }, [catalog, chip, query, sort]);
+    // Added (or connected) providers pin to the top of any ordering — they are
+    // the ones already wired into the local setup. The sort is stable, so a
+    // picked column keeps its order inside each group.
+    return orderRows(rows, sort, money).sort((a, b) => Number(b.added) - Number(a.added));
+  }, [catalog, chip, query, sort, money]);
 
   if (!catalog)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
 
+  // Three-state: ascending → descending → back to the default order.
   const toggleSort = (key: SortKey) =>
-    setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
+    remember(sort?.key === key ? (sort.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 });
 
   return (
     <section>
@@ -472,7 +574,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         </thead>
         <tbody>
           {filtered.map((e) => (
-            <Row key={e.id} entry={e} hubUrl={hubUrl} onAdd={onAdd} onOpen={setDetail} />
+            <Row key={e.id} entry={e} hubUrl={hubUrl} money={money} onAdd={onAdd} onOpen={setDetail} />
           ))}
           {filtered.length === 0 && (
             <tr>
@@ -487,6 +589,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
         <DetailDialog
           entry={detail}
           hubUrl={hubUrl}
+          money={money}
           onClose={() => setDetail(null)}
           onAdd={(e) => {
             setDetail(null);

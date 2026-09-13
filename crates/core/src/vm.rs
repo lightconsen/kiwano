@@ -422,6 +422,21 @@ pub struct CatalogEntryVm {
     pub tag_label: String,
     pub rating: f64,
     pub endpoint: String,
+    /// One line of prose about the provider — what the card shows under its
+    /// name. It supersedes `price_line`/`price_note`/`users`/`blurb`/
+    /// `free_offer`; absent for the entries that have nothing to say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+    /// The price of the model that represents this provider, projected at build
+    /// time from the data repo's `flagship` flag. Absent for a provider that
+    /// prices no model at all (eleven of them), which falls back to `desc`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_ref: Option<CatalogPriceRefVm>,
+    /// Deprecated by `desc`, and published as an empty string by the data repo
+    /// since the two-file migration. `default` + `skip_serializing_if` so those
+    /// empty values neither fail to parse nor reach the frontend; the fields go
+    /// away entirely once no client needs them.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub price_line: String,
     /// The currency this provider bills in. Its price rows — and therefore its
     /// spending limit — are denominated in it. Catalogs published before the
@@ -432,12 +447,33 @@ pub struct CatalogEntryVm {
     pub price_note: Option<String>,
     /// Billing mode; unknown Hub tags survive as `CatalogBilling::Other`.
     pub billing: CatalogBilling,
+    /// Deprecated by `desc` — see `price_line`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub users: String,
+    /// Deprecated by `desc` — see `price_line`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub blurb: String,
     pub added: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub free_offer: Option<String>,
     pub models: Vec<String>,
+}
+
+/// One model's price, as shown for a provider on the Models list: the terms a
+/// shopper compares before adding a provider. Figures are per million tokens in
+/// TEXT decimal form, the same shape the price table uses — the frontend parses
+/// them where it needs arithmetic.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CatalogPriceRefVm {
+    pub model_id: String,
+    /// The model's display name, e.g. "Claude Opus 5". Shown beside the figures
+    /// so a row does not read as a bare pair of numbers.
+    pub display_name: String,
+    pub input: String,
+    pub output: String,
+    /// ISO-4217 code these figures are denominated in — the provider's own
+    /// currency, so the frontend converts rather than assumes.
+    pub currency: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -581,6 +617,13 @@ pub struct SettingsVm {
     /// existed.
     #[serde(default)]
     pub tz_offset_minutes: i64,
+    /// The Models list's sort choice, remembered across sessions: `"<key>:<dir>"`
+    /// with key in name|protocol|tag|price and dir 1|-1. None means the default
+    /// order (providers you already have, then tag rank, then name). A plain
+    /// string rather than a struct on purpose — a value written by a build that
+    /// knows a sort key this one does not simply falls back to the default.
+    #[serde(default)]
+    pub shelf_sort: Option<String>,
 }
 
 pub fn default_preferred_currency() -> String {
@@ -619,6 +662,7 @@ impl Default for SettingsVm {
             auto_check_update: true,
             dismissed_update: None,
             tz_offset_minutes: 0,
+            shelf_sort: None,
         }
     }
 }

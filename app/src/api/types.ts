@@ -252,6 +252,19 @@ export interface NewProviderInput {
   };
 }
 
+/** The price of the model that represents a provider, projected at build time
+    from the data repo's `flagship` flag. Figures are per million tokens as TEXT
+    decimals in `currency`, so parse before doing arithmetic. */
+export interface CatalogPriceRef {
+  model_id: string;
+  /** e.g. "Claude Opus 5" — shown beside the figures */
+  display_name: string;
+  input: string;
+  output: string;
+  /** ISO code the figures are denominated in (the provider's own currency) */
+  currency: string;
+}
+
 export interface CatalogEntry {
   id: string;
   name: string;
@@ -271,15 +284,17 @@ export interface CatalogEntry {
   endpoint: string;
   /** Protocol fingerprint of the endpoint (drives the add-modal protocol selector) */
   protocol: Protocol;
-  /** Price line: ¥4 /M in · ¥16 /M out etc. */
-  price_line: string;
+  /** One line of prose: a price note, an audience line, a free-tier offer.
+      Supersedes price_line/price_note/users/blurb/free_offer; absent for the
+      entries with nothing to say. */
+  desc?: string;
+  /** The representative model's price; absent for providers that price no model */
+  price_ref?: CatalogPriceRef;
   /** The currency this provider bills in; the spending limit is denominated
       in it. Older catalog entries omit it → the app falls back to USD. */
   currency?: string;
   price_note?: string;
   billing: Billing;
-  users: string;
-  blurb: string;
   /** Derived at read time from the local provider list (same endpoint = added) */
   added: boolean;
   /** One-liner shown when a free quota exists */
@@ -288,6 +303,13 @@ export interface CatalogEntry {
   models: string[];
   /** Additional per-protocol endpoints merged from former sibling entries */
   endpoints?: { protocol: Protocol; endpoint: string; models: string[] }[];
+  /** @deprecated Superseded by `desc`; the Hub now publishes "" and the field
+      disappears once no client reads it. */
+  price_line?: string;
+  /** @deprecated Superseded by `desc`; the Hub now publishes "". */
+  users?: string;
+  /** @deprecated Superseded by `desc`; the Hub now publishes "". */
+  blurb?: string;
 }
 
 export interface CatalogList {
@@ -369,6 +391,9 @@ export interface AppSettings {
   hub_logged_in: boolean;
   /** Hub catalog sync endpoint (protocol v0: static JSON) */
   hub_url: string;
+  /** Models list sort choice, remembered across sessions: "<key>:<dir>".
+      null = the default order (added first, then tag rank, then name). */
+  shelf_sort: string | null;
 }
 
 /** Hub catalog sync result (tech.md §3 Hub sync protocol) */

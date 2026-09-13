@@ -54,12 +54,18 @@ shape, not every flag.
 ### Status
 
 ```
-kiwano status              gateway, store and today's totals; exit 1 when the gateway is down
+kiwano status              gateway, store, today's totals, and the blocked list
 kiwano reload              ask a running gateway to rebuild its route table
 kiwano gateway start       start one, adopting an already-running gateway
 kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
 kiwano gateway restart     stop and start
 ```
+
+`status` includes the providers the gateway is currently **refusing to route
+to**, with its reason — `capped-1  1.00 of 1.00 requests this period`. That is
+derived state which exists only while the gateway runs, so this is the only
+place a shell can see it, and it is usually the answer to "why is nothing
+routing".
 
 On a systemd host, use `systemctl restart kiwano-gateway` instead of the
 `gateway` subcommands — see INSTALL.md.
@@ -79,13 +85,40 @@ kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers probe latency|endpoint|models
 ```
 
+Both `add` and `edit` also take the forwarding and quota options:
+
+```
+--timeout SECS                 upstream wait for response headers (1–3600)
+--retries N                    same-provider attempts before failover (0–5)
+--header 'Name: value'         repeatable; merged after credential injection,
+                               so these can override the injected credentials
+--endpoint-extra PROTO=URL     repeatable; the same vendor on another protocol
+--plan-limit-5h PCT            plan: share of the five-hour window
+--plan-limit-weekly PCT        plan: share of the weekly window
+--plan-query JSON              {"template":"kimi","fields":{…}} — this is what
+                               `providers quota` reads
+```
+
+`edit` additionally takes `--no-headers` and `--clear-plan-query`.
+
 `providers edit` keeps the provider's **id**, which is why it exists: bindings,
 rotating keys and usage rows all reference it, so remove-and-add is a different
 operation. Only the flags you give are changed; everything else is carried over
 from the stored row.
 
-`--key` is omitted rather than blanked in an edit: an absent `--key` keeps the
-stored one.
+That carry-over is load-bearing for `--timeout`, `--retries`, `--header`,
+`--endpoint-extra` and `--plan-limit-*`: each is *part* of an object the
+underlying API recomputes as a whole, so an edit that names one still sends the
+others. Renaming a provider does not clear its timeout.
+
+Clearing is always explicit — `--no-headers`, `--clear-plan-query` — because an
+absent flag means keep. `--key` works the same way: omitting it keeps the stored
+key, it does not blank it.
+
+`--plan-limit-*` is refused unless the provider is a plan (the underlying layer
+silently drops the value otherwise, and a flag that does nothing is worse than
+one that refuses). `--plan-query` is what makes `providers quota` able to ask
+anything at all.
 
 ### Rotating keys
 

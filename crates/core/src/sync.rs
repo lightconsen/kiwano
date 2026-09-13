@@ -232,6 +232,45 @@ pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, Strin
     })
 }
 
+/// Apply the freshly cached Hub documents to everything derived from them.
+///
+/// A sync only rewrites two cache rows. What the app displays and the gateway
+/// bills from is *derived* state: the `model_pricing` mirror the price table is
+/// resolved out of, and the link from each local provider to its catalog entry.
+/// Both are rebuilt here — in one function rather than as a step in each caller,
+/// because that is exactly how they drifted: the startup sync did both, the
+/// manual one did neither of the price half, and the Sync button therefore
+/// reported success while the gateway went on billing what it had loaded at
+/// launch.
+///
+/// Returns true when either wrote, which is precisely when the daemon's
+/// in-memory copies are stale and it owes a reload.
+pub fn apply_hub_documents(store: &kiwanod::store::Store, aux: &Aux) -> bool {
+    let mut wrote = false;
+    // A no-op when the version and content are unchanged, which is the common
+    // case: most syncs bring neither a new price table nor a new link.
+    match crate::pricing::seed_model_pricing(aux) {
+        Ok(r) if r.seeded > 0 => {
+            tracing::info!(version = r.version, rows = r.seeded, "hub model pricing seeded");
+            wrote = true;
+        }
+        Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
+        _ => {}
+    }
+    // A provider may have become linkable to a catalog entry it could not be
+    // matched against before — this is where a first-run install gets its
+    // catalog at all.
+    match vm::link_providers(store, aux) {
+        Ok(linked) if linked > 0 => {
+            tracing::info!(linked, "providers linked to their catalog entries");
+            wrote = true;
+        }
+        Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
+        _ => {}
+    }
+    wrote
+}
+
 fn sync_catalog(
     client: &reqwest::blocking::Client,
     aux: &Aux,
@@ -589,6 +628,46 @@ mod tests {
             sync_action(Some(&other), Some(&sha), Some("cached")),
             SyncAction::Fetch
         );
+    }
+
+    /// The step the Sync button used to skip. A sync only rewrites cache rows;
+    /// what gets billed is the mirror, so a sync that cached a new price
+    /// document and stopped there left the gateway on the table it had loaded at
+    /// launch — and said nothing.
+    ///
+    /// Both halves of the DB are opened on one file here because that is what
+    /// the app does: the store's migrations own `model_pricing`, the aux schema
+    /// owns `hub_models_cache`, and the seed writes through one while reading
+    /// the other.
+    #[test]
+    fn applying_cached_documents_fills_the_price_mirror_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let store = kiwanod::store::Store::open(&path).unwrap();
+        let aux = Aux::open(&path).unwrap();
+        let doc = serde_json::json!({
+            "version": 7,
+            "exchange_rates": { "USD": 1.0, "CNY": 7.1 },
+            "models": [{
+                "model_id": "gpt-5.2", "display_name": "GPT-5.2",
+                "input": "1.75", "output": "14",
+                "cache_read": "0.175", "cache_creation": "0", "currency": "USD"
+            }]
+        })
+        .to_string();
+        aux.save_hub_models_cache(7, &doc, &"a".repeat(64), "2026-01-01T00:00:00Z")
+            .unwrap();
+        assert!(store.load_model_pricing().unwrap().is_empty());
+
+        assert!(apply_hub_documents(&store, &aux), "the first apply writes");
+        let rows = store.load_model_pricing().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].model_id, "gpt-5.2");
+
+        // Idempotent: the gate is the version plus the content digest, so a
+        // sync that brought nothing new does not rewrite the table or reload the
+        // daemon.
+        assert!(!apply_hub_documents(&store, &aux), "a repeat writes nothing");
     }
 
     #[test]

@@ -203,32 +203,12 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
                 Err(_) => {} // another attempt is coming
             }
         }
-        // The Hub may have brought a newer price table. Re-run the seed (a
-        // no-op when the version and content are unchanged) and reload the
-        // daemon so its in-memory table is rebuilt from the mirror.
-        match pricing::seed_model_pricing(&state.aux) {
-            Ok(r) if r.seeded > 0 => {
-                tracing::info!(
-                    version = r.version,
-                    rows = r.seeded,
-                    "hub model pricing seeded"
-                );
-                sidecar::notify_reload(&state.admin);
-            }
-            Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
-            _ => {}
-        }
-        // …and a provider may now be linkable to a catalog entry it could not
-        // be matched against before (this is where a first-run install gets its
-        // catalog at all). The daemon holds the link in memory, so a change
-        // has to reach it the same way the price table does.
-        match vm::link_providers(&state.store, &state.aux) {
-            Ok(linked) if linked > 0 => {
-                tracing::info!(linked, "providers linked to their catalog entries");
-                sidecar::notify_reload(&state.admin);
-            }
-            Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
-            _ => {}
+        // The Hub may have brought a newer price table or made a provider
+        // linkable. Rebuild both from the cache it just wrote and reload the
+        // daemon once — the same call the Sync button makes, so the two cannot
+        // drift apart again.
+        if sync::apply_hub_documents(&state.store, &state.aux) {
+            sidecar::notify_reload(&state.admin);
         }
     });
 }
@@ -784,16 +764,12 @@ fn apply_agent_route(state: State<AppState>, target: String, source: String) -> 
 fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
     let hub_url = vm::ui_settings(&state.aux).hub_url;
     let report = sync::sync_from_hub(&state.aux, &hub_url)?;
-    // The sync may have brought the catalog a provider can now be matched
-    // against. A manual sync does not otherwise touch the daemon, so the reload
-    // is owed only when this actually wrote something.
-    match vm::link_providers(&state.store, &state.aux) {
-        Ok(linked) if linked > 0 => {
-            tracing::info!(linked, "providers linked to their catalog entries");
-            sidecar::notify_reload(&state.admin);
-        }
-        Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
-        _ => {}
+    // Rebuild everything derived from the documents just cached — the price
+    // mirror and the provider↔catalog links — and reload the daemon once if
+    // either wrote. A manual sync does not otherwise touch the daemon, so this
+    // is the whole of its effect on what gets billed.
+    if sync::apply_hub_documents(&state.store, &state.aux) {
+        sidecar::notify_reload(&state.admin);
     }
     Ok(report)
 }

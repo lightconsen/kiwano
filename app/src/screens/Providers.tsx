@@ -10,6 +10,7 @@ import {
   Pin,
   Plus,
   RefreshCw,
+  Settings2,
   Trash2,
   X,
 } from "lucide-react";
@@ -179,16 +180,38 @@ function AgentOnboarding({
 
 /** The two values a client is configured with: where the gateway is, and this
     agent's key. They are the whole of what a user-defined agent *is* from the
-    outside, so the tab says them first and gives each one a copy button. */
-function AccessCard({ keyName, listen }: { keyName: string | null; listen: string }) {
+    outside, so they get a dialog of their own, opened from the icon beside the
+    agent's name — a tab that is a route does not need a permanent card of
+    credentials on top of it. */
+function AccessDialog({
+  label,
+  keyName,
+  listen,
+  open,
+  onClose,
+}: {
+  label: string;
+  keyName: string | null;
+  listen: string;
+  open: boolean;
+  onClose: () => void;
+}) {
   const t = useT();
   return (
-    <div className="mx-4 mt-3 rounded-lg border border-line bg-surface p-3">
-      <div className="text-[11px] font-medium text-mut">{t("providers.access")}</div>
-      <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
-      <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
-      <p className="mt-1.5 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
-    </div>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle className="text-[13px]">
+            {t("providers.accessFor", { agent: label })}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="px-5 pb-4 pt-1">
+          <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
+          <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
+          <p className="mt-2 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1212,6 +1235,9 @@ export default function Providers({
   const [takenOver, setTakenOver] = useState<Set<AgentRef> | null>(null);
   const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
   const [newAgent, setNewAgent] = useState(false);
+  // The credentials dialog, opened from the icon beside a user-defined agent's
+  // name (there is no card on the tab itself).
+  const [accessOpen, setAccessOpen] = useState(false);
   // What a client is pointed at: the gateway's own listen address from settings.
   const [listen, setListen] = useState("127.0.0.1:8317");
   const [enabling, setEnabling] = useState(false);
@@ -1474,9 +1500,11 @@ export default function Providers({
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             {/* The tab names the agent: the segment strip shows it as a letter
-                avatar, and a card of endpoint and key with no name above it is
-                a page you have to identify from the highlight in the strip. */}
-            <div className="mx-4 mt-3 flex items-center gap-2">
+                avatar, so a page with no name on it is one you have to identify
+                from the highlight over there. The credentials live one click
+                further, behind the icon — they are read once and pasted, not
+                watched. */}
+            <div className="mx-4 mt-3 flex items-center gap-1.5">
               <ProviderLogo
                 char={agentMeta(seg).chip_char}
                 color={agentMeta(seg).chip_color}
@@ -1487,8 +1515,17 @@ export default function Providers({
               {custom.note && (
                 <span className="min-w-0 truncate text-[11px] text-mut">{custom.note}</span>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
+                aria-label={t("providers.accessFor", { agent: custom.label })}
+                title={t("providers.accessFor", { agent: custom.label })}
+                onClick={() => setAccessOpen(true)}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <AccessCard keyName={custom.placeholder_key} listen={listen} />
           </div>
           <DeleteAgentButton label={custom.label} onConfirm={() => onDeleteAgent(custom.id)} />
         </div>
@@ -1608,6 +1645,16 @@ export default function Providers({
         onClose={() => setNewAgent(false)}
         onCreated={onAgentCreated}
       />
+
+      {custom && (
+        <AccessDialog
+          label={custom.label}
+          keyName={custom.placeholder_key}
+          listen={listen}
+          open={accessOpen}
+          onClose={() => setAccessOpen(false)}
+        />
+      )}
 
       {/* Single closing note. In a taken-over agent tab with a route it also
           carries the strategy context (the StrategyPanel select row has no

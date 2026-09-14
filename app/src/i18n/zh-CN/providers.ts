@@ -94,7 +94,7 @@ export const providers = {
   routeEmptyTitle: "{agent} 还没有候选 Provider",
   routeEmptyBody:
     "在下面绑定一个已有 Provider；带着这个 Agent 的 key 进来的请求，会按候选顺序走。",
-  access: "客户端如何接入",
+  accessFor: "{agent} 的接入方式",
   accessEndpoint: "端点",
   accessKey: "API Key",
   accessNote:
@@ -124,7 +124,7 @@ export const providers = {
   footerDefault:
     "切换即时生效（该 Agent 已由本地网关接管；切换仅改变路由）· API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
   footerRoute:
-    "这个 Agent 就是一条路由：上面的端点与 key 就是客户端需要的全部 · 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
+    "这个 Agent 就是一条路由：端点与 key 在名字旁边的图标里，那就是客户端需要的全部 · 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
 
   // ── Plan quota tiers ──
   tierFiveHour: "5 小时窗口",

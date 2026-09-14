@@ -113,7 +113,8 @@ export const providers = {
   routeEmptyTitle: "{agent} has no candidates yet",
   routeEmptyBody:
     "Bind an existing provider below, and requests that arrive with this agent's key will route through the candidates in order.",
-  access: "How a client reaches this agent",
+  /** The credentials dialog's title, and the name on the icon that opens it. */
+  accessFor: "How a client reaches {agent}",
   accessEndpoint: "Endpoint",
   accessKey: "API Key",
   accessNote:
@@ -145,7 +146,7 @@ export const providers = {
   /** A user-defined agent's tab: nothing here was taken over, so the default
       line's first clause would be a lie. */
   footerRoute:
-    "This agent is a route of its own: the endpoint and key above are all a client needs · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
+    "This agent is a route of its own: its endpoint and key are behind the icon beside its name, and they are all a client needs · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
 
   // ── Plan quota tiers ──
   // The backend reports these as machine keys (`five_hour`, `weekly_limit`,

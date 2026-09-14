@@ -8,7 +8,7 @@
 // The API is mocked at the `client` seam, which is the only place the screens
 // touch data (`src/api/client.ts` picks the Tauri or the browser-dev
 // implementation there), so nothing below knows the difference.
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -196,14 +196,9 @@ describe("a user-defined agent", () => {
     const segment = await screen.findByRole("button", { name: longTasks.label });
     await user.click(segment);
 
-    // The tab names the agent: the strip shows a letter avatar, so a card of
-    // endpoint and key with no name above it is a page identified only by the
-    // highlight over there.
+    // The tab names the agent: the strip shows a letter avatar, so a page with
+    // no name on it is one you have to identify from the highlight over there.
     expect(await screen.findByText(longTasks.label)).toBeInTheDocument();
-    // The access card: the two values the client is configured with, and the
-    // note the user wrote.
-    expect(await screen.findByText("http://127.0.0.1:8317")).toBeInTheDocument();
-    expect(screen.getByText(longTasks.placeholder_key!)).toBeInTheDocument();
     expect(screen.getByText(longTasks.note!)).toBeInTheDocument();
     // Its candidate is a row like any agent's…
     expect(screen.getByLabelText(en.providers.removeFromRouteAria)).toBeInTheDocument();
@@ -253,9 +248,12 @@ describe("a user-defined agent", () => {
     await waitFor(() =>
       expect(apiMock.addCustomAgent).toHaveBeenCalledWith(created.label, ""),
     );
-    // It opens on the new agent's tab: what the user wants next is to bind a
-    // provider, and that is what that tab asks for.
-    expect(await screen.findByText(created.placeholder_key!)).toBeInTheDocument();
+    // It opens on the new agent's tab, which names it: what the user wants next
+    // is to bind a provider, and that is what that tab asks for.
+    expect(await screen.findByText(created.label)).toBeInTheDocument();
+    expect(
+      screen.getByText(en.providers.routeEmptyTitle.replace("{agent}", created.label)),
+    ).toBeInTheDocument();
   });
 
   it("can change its strategy — the route is the whole of it", async () => {
@@ -288,22 +286,28 @@ describe("a user-defined agent", () => {
     expect(apiMock.getAgentRoutes).toHaveBeenCalledTimes(2);
   });
 
-  it("copies its endpoint and key from an icon, not a word", async () => {
+  it("keeps its credentials behind the icon beside its name", async () => {
+    const user = userEvent.setup();
     apiMock.listProviders.mockResolvedValue([deepseek()]);
     apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
     apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
-    await userEvent.setup().click(await screen.findByRole("button", { name: longTasks.label }));
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
 
-    // One button per value, named for what it does — an icon keeps the two
-    // short values the widest thing on the card.
-    const copies = await screen.findAllByRole("button", { name: en.common.copy });
-    expect(copies).toHaveLength(2);
-    // Icons, not words: the button carries no text of its own, so the value
-    // beside it stays the widest thing on the line.
+    // Not on the tab: credentials are read once and pasted, not watched.
+    const opens = en.providers.accessFor.replace("{agent}", longTasks.label);
+    expect(screen.queryByText(longTasks.placeholder_key!)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: opens }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(opens)).toBeInTheDocument();
+    expect(within(dialog).getByText("http://127.0.0.1:8317")).toBeInTheDocument();
+    expect(within(dialog).getByText(longTasks.placeholder_key!)).toBeInTheDocument();
+    // One copy button per value, named for what it does and carrying no text of
+    // its own — an icon keeps the value the widest thing on the line.
+    const copies = within(dialog).getAllByRole("button", { name: en.common.copy });
     expect(copies.map((b) => b.textContent)).toEqual(["", ""]);
-    expect(screen.getByText("http://127.0.0.1:8317")).toBeInTheDocument();
-    expect(screen.getByText(longTasks.placeholder_key!)).toBeInTheDocument();
   });
 
   it("is deleted in two clicks, and its segment goes with it", async () => {

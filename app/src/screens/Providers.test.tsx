@@ -489,7 +489,11 @@ describe("parking a provider", () => {
     apiMock.setProviderEnabled.mockResolvedValue(undefined);
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    await user.click(await screen.findByRole("button", { name: en.providers.disable }));
+    // The glyph is the action: a working provider offers to be turned off.
+    const button = await screen.findByRole("button", { name: en.providers.disable });
+    expect(button.querySelector("svg.lucide-power-off")).not.toBeNull();
+
+    await user.click(button);
 
     await waitFor(() =>
       expect(apiMock.setProviderEnabled).toHaveBeenCalledWith("deepseek", false),
@@ -498,5 +502,17 @@ describe("parking a provider", () => {
     // answer rather than a locally flipped flag.
     expect(apiMock.listProviders).toHaveBeenCalledTimes(2);
     expect(screen.getByText("DeepSeek")).toBeInTheDocument();
+  });
+
+  it("offers to put a parked one back", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek({ enabled: false })]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    // Same button, the other action: a parked row offers to be brought back.
+    const button = await screen.findByRole("button", { name: en.providers.enable });
+    expect(button.querySelector("svg.lucide-power")).not.toBeNull();
+    expect(button.querySelector("svg.lucide-power-off")).toBeNull();
   });
 });

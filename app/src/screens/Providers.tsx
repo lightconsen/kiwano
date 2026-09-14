@@ -11,6 +11,7 @@ import {
   Pin,
   Plus,
   Power,
+  PowerOff,
   RefreshCw,
   Settings2,
   Trash2,
@@ -943,7 +944,11 @@ function ProviderRow({
           title={p.enabled ? t("providers.disableTitle") : t("providers.enableTitle")}
           onClick={() => api.setProviderEnabled(p.id, !p.enabled).then(onChanged)}
         >
-          <Power className="h-3.5 w-3.5" />
+          {/* The glyph is the action, not the state: a working provider offers
+              to turn it off, a parked one offers to put it back. One symbol for
+              both said nothing about either — and the state is already on the
+              row, in the Status cell. */}
+          {p.enabled ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
         </Button>
         {/* Square icon buttons, one per action: the row's actions are symbols a
             reader already knows, and a padded pill around a lone glyph reads as

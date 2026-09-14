@@ -850,6 +850,10 @@ export const devApi: KiwanoApi = {
     const p: Provider = {
       id: input.name.toLowerCase().replace(/\s+/g, "-") + "-" + ++idSeq,
       name: input.name,
+      // Which catalog entry it came from: `vm::add_provider` stores it, and the
+      // edit dialog reaches the entry through it for the endpoints, the currency
+      // and the quota query the stored row may be missing.
+      catalog_id: input.catalog_id ?? null,
       logo_char: input.name.charAt(0).toUpperCase(),
       logo_color: "#555555",
       endpoint: input.endpoint.replace(/^https?:\/\//, ""),

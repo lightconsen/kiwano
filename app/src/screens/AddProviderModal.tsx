@@ -477,10 +477,16 @@ export default function AddProviderModal({
   // lock below keys on. Putting it in there is the trap: the pills would lock
   // into a read-only label saying `both`, and saving would send it.
   const billingKnown = billing === "both" || billOptions.some((b) => b.id === billing);
-  /** A shelf entry that charges both ways at one address. The catalog names two
-      arrangements, so the choice is the user's — and stays theirs after they
-      make it, which is why the pills do not lock for it. */
-  const bothEntry = !edit && shelf?.billing === "both";
+  /** A catalog entry that charges both ways at one address — the one case where
+      the billing mode is the user's to pick, because the catalog names two
+      arrangements for one host and cannot know which this provider is.
+   *
+   * It stays the user's after the fact as well: editing such a provider keeps the
+   * pills live. Refusing there would leave "delete it and re-enter the key" as
+   * the only way to change one's mind, which is a stiff price for a setting. Any
+   * other provider keeps the lock — its entry decides, and one entry per mode is
+   * how a vendor with several modes is meant to be published. */
+  const bothEntry = (edit ? editEntry?.billing : shelf?.billing) === "both";
   const unresolvedBoth = bothEntry && billing === "both";
   const billingLocked =
     (!!edit || (mode === "shelf" && !!shelf)) && billingKnown && !bothEntry;
@@ -975,8 +981,14 @@ export default function AddProviderModal({
                   {t("addProvider.billingUnknown", { billing })}
                 </p>
               )}
-              {unresolvedBoth && (
-                <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
+              {bothEntry && (
+                // Amber while the choice is still owed, muted once it is made:
+                // same sentence either way, because the fact it states — this
+                // vendor charges both — outlives the decision.
+                <p
+                  className="mt-1 text-[10.5px]"
+                  style={{ color: unresolvedBoth ? "var(--amber)" : "var(--mut)" }}
+                >
                   {t("addProvider.billingBoth")}
                 </p>
               )}

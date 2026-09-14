@@ -9,12 +9,12 @@ import {
   Gauge,
   SquarePen,
   Pin,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
   Settings2,
   Trash2,
-  Volume2,
-  VolumeX,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -936,10 +936,11 @@ function ProviderRow({
         }`}
       >
         <TestLatencyButton provider={p} />
-        {/* A speaker, as a player's sound button: the glyph shows the state the
-            row is in — sound, or muted — while the name says what clicking does.
-            That is the one on/off pair a reader already knows from every player,
-            and it needs no legend the way a power symbol or a toggle did. */}
+        {/* A player's transport pair: start it, or stop it. The glyph is the
+            action the click takes, so a working row offers ⏸ and a parked one
+            offers ▶ — and the *state* is already on the row, in the Status cell,
+            which is what frees the icons to be verbs. */}
+
         <Button
           variant="ghost"
           size="sm"
@@ -948,11 +949,7 @@ function ProviderRow({
           title={p.enabled ? t("providers.disableTitle") : t("providers.enableTitle")}
           onClick={() => api.setProviderEnabled(p.id, !p.enabled).then(onChanged)}
         >
-          {p.enabled ? (
-            <Volume2 className="h-3.5 w-3.5" />
-          ) : (
-            <VolumeX className="h-3.5 w-3.5" />
-          )}
+          {p.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
         </Button>
         {/* Square icon buttons, one per action: the row's actions are symbols a
             reader already knows, and a padded pill around a lone glyph reads as

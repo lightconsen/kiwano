@@ -489,9 +489,9 @@ describe("parking a provider", () => {
     apiMock.setProviderEnabled.mockResolvedValue(undefined);
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    // The glyph is the state, as a player's sound button: this one has sound.
+    // The glyph is the action: a working provider offers a stop.
     const stop = await screen.findByRole("button", { name: en.providers.disable });
-    expect(stop.querySelector("svg.lucide-volume-2")).not.toBeNull();
+    expect(stop.querySelector("svg.lucide-pause")).not.toBeNull();
 
     await user.click(stop);
 
@@ -510,11 +510,11 @@ describe("parking a provider", () => {
     apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    // …and a parked one wears the muted speaker, tooltip included: the state is
-    // in the glyph, the action is in the name.
+    // …and a parked one offers a start (▶, the enable glyph), tooltip included:
+    // the pair says which way the row points, the title says what the click does.
     const start = await screen.findByRole("button", { name: en.providers.enable });
-    expect(start.querySelector("svg.lucide-volume-x")).not.toBeNull();
-    expect(start.querySelector("svg.lucide-volume-2")).toBeNull();
+    expect(start.querySelector("svg.lucide-play")).not.toBeNull();
+    expect(start.querySelector("svg.lucide-pause")).toBeNull();
     expect(start).toHaveAttribute("title", en.providers.enableTitle);
   });
 });

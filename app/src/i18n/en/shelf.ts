@@ -18,12 +18,19 @@ export const shelf = {
   billingPayg: "Pay as you go",
   billingUnl: "Unlimited",
   /** A vendor that charges both ways at one address (Anthropic: an API and a
-      subscription). "PAYG" is this app's own word for pay-as-you-go — the billing
-      chips already read `PAYG / Plan / Unl` — and it is the only form short
-      enough to name two modes in a 104px column: "Pay as you go + plan" measures
-      113px against the 88px that fits. The price cell still shows the metered
-      rates. */
-  billingBoth: "PAYG + Plan",
+      subscription).
+   *
+   * "PAYG" is this app's own word for pay-as-you-go — the billing chips already
+   read `PAYG / Plan / Unl` — and it is the only form short enough to name two
+   modes in a 104px column: "Pay as you go + plan" measures 113px against the
+   88px that fits.
+   *
+   * The conjunction is `&`, which is how this dictionary joins two things a
+   label offers (`Save & enable`, `MODELS & PRICES`, `Download & install`). `+`
+   means *additional* here — the endpoint note reads `+Anthropic`, the actions
+   read `+ Add` — and "PAYG + Plan" would borrow that sense to say the two
+   charges stack, when the vendor offers either. */
+  billingBoth: "PAYG & Plan",
 
   probeOk: "OK",
   probeAuth: "Auth required",

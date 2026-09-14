@@ -196,6 +196,10 @@ describe("a user-defined agent", () => {
     const segment = await screen.findByRole("button", { name: longTasks.label });
     await user.click(segment);
 
+    // The tab names the agent: the strip shows a letter avatar, so a card of
+    // endpoint and key with no name above it is a page identified only by the
+    // highlight over there.
+    expect(await screen.findByText(longTasks.label)).toBeInTheDocument();
     // The access card: the two values the client is configured with, and the
     // note the user wrote.
     expect(await screen.findByText("http://127.0.0.1:8317")).toBeInTheDocument();
@@ -252,6 +256,54 @@ describe("a user-defined agent", () => {
     // It opens on the new agent's tab: what the user wants next is to bind a
     // provider, and that is what that tab asks for.
     expect(await screen.findByText(created.placeholder_key!)).toBeInTheDocument();
+  });
+
+  it("can change its strategy — the route is the whole of it", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    apiMock.updateAgentStrategy.mockResolvedValue(undefined);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+
+    // The strategy panel is the tab's control over what the route *is*. It used
+    // to be gated on a takeover, which a user-defined agent never has — so the
+    // tab offered no way to change the one thing it exists for.
+    const picker = await screen.findByRole("combobox", {
+      name: en.strategy.ariaFor.replace("{agent}", longTasks.label),
+    });
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: en.strategy.roundrobin }));
+
+    await waitFor(() =>
+      expect(apiMock.updateAgentStrategy).toHaveBeenCalledWith(
+        longTasks.id,
+        "roundrobin",
+        null,
+      ),
+    );
+    // …and the screen re-reads the routes, so the panel shows what was chosen.
+    expect(apiMock.getAgentRoutes).toHaveBeenCalledTimes(2);
+  });
+
+  it("copies its endpoint and key from an icon, not a word", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: longTasks.label }));
+
+    // One button per value, named for what it does — an icon keeps the two
+    // short values the widest thing on the card.
+    const copies = await screen.findAllByRole("button", { name: en.common.copy });
+    expect(copies).toHaveLength(2);
+    // Icons, not words: the button carries no text of its own, so the value
+    // beside it stays the widest thing on the line.
+    expect(copies.map((b) => b.textContent)).toEqual(["", ""]);
+    expect(screen.getByText("http://127.0.0.1:8317")).toBeInTheDocument();
+    expect(screen.getByText(longTasks.placeholder_key!)).toBeInTheDocument();
   });
 
   it("is deleted in two clicks, and its segment goes with it", async () => {

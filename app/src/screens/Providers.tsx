@@ -1,7 +1,18 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
 import { useCallback, useEffect, useMemo, useState, type FocusEvent, type ReactNode } from "react";
 
-import { ArrowDown, ArrowUp, Pencil, Pin, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  Pencil,
+  Pin,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -181,7 +192,9 @@ function AccessCard({ keyName, listen }: { keyName: string | null; listen: strin
   );
 }
 
-/** One line of the access card, with the button that makes it usable. */
+/** One line of the access card, with the button that makes it usable. The
+    button is an icon: the two lines are short values, and a word beside each of
+    them competes with the thing being copied. */
 function CopyRow({ label, value }: { label: string; value: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
@@ -203,10 +216,14 @@ function CopyRow({ label, value }: { label: string; value: string }) {
       <Button
         variant="ghost"
         size="sm"
-        className="h-6 shrink-0 px-1.5 text-[10.5px] text-mut hover:text-ink"
+        className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
+        aria-label={copied ? t("common.copied") : t("common.copy")}
+        title={copied ? t("common.copied") : t("common.copy")}
         onClick={copy}
       >
-        {copied ? t("common.copied") : t("common.copy")}
+        {/* The tick is the confirmation: no layout shift, and the row keeps its
+            width whether or not it was just used. */}
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </Button>
     </div>
   );
@@ -1456,10 +1473,22 @@ export default function Providers({
       {custom && (
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
+            {/* The tab names the agent: the segment strip shows it as a letter
+                avatar, and a card of endpoint and key with no name above it is
+                a page you have to identify from the highlight in the strip. */}
+            <div className="mx-4 mt-3 flex items-center gap-2">
+              <ProviderLogo
+                char={agentMeta(seg).chip_char}
+                color={agentMeta(seg).chip_color}
+                name={custom.label}
+                size={18}
+              />
+              <span className="text-[13px] font-semibold">{custom.label}</span>
+              {custom.note && (
+                <span className="min-w-0 truncate text-[11px] text-mut">{custom.note}</span>
+              )}
+            </div>
             <AccessCard keyName={custom.placeholder_key} listen={listen} />
-            {custom.note && (
-              <div className="mx-4 mt-1 text-[11px] text-mut">{custom.note}</div>
-            )}
           </div>
           <DeleteAgentButton label={custom.label} onConfirm={() => onDeleteAgent(custom.id)} />
         </div>
@@ -1564,10 +1593,13 @@ export default function Providers({
         </>
       )}
 
-      {/* Strategy config lives in the agent's own tab, only once it is taken over.
+      {/* Strategy config lives in the agent's own tab. For a built-in that means
+          once it is taken over (before that there is no live route to configure);
+          for a user-defined agent always — it *is* its route, and gating it on a
+          takeover left the tab with no way to change the strategy at all.
           Routes come from here (single fetch): a route created while the panel is
           mounted (first bind / copy) must show up without a tab switch. */}
-      {seg !== "all" && (takenOver?.has(seg) ?? false) && (
+      {seg !== "all" && (custom || (takenOver?.has(seg) ?? false)) && (
         <StrategyPanel agent={seg} routes={routes} onChanged={refetch} />
       )}
 

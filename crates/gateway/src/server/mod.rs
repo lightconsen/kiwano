@@ -245,6 +245,10 @@ pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Resp
         // 429 rather than 503: the provider exists and works, the caller has
         // simply spent what it was allowed to for this period.
         GatewayError::AllOverLimit { .. } => (StatusCode::TOO_MANY_REQUESTS, "provider_over_limit"),
+        // 503, not 502: nothing upstream went wrong, the provider is simply not
+        // being asked right now (open, or a recovery probe is already in
+        // flight). It clears itself once the breaker's timeout elapses.
+        GatewayError::CircuitOpen { .. } => (StatusCode::SERVICE_UNAVAILABLE, "circuit_open"),
         GatewayError::ProviderNotFound(_) => (StatusCode::SERVICE_UNAVAILABLE, "provider_missing"),
         GatewayError::UnsupportedPath(_) => (StatusCode::NOT_FOUND, "unsupported_path"),
         GatewayError::Upstream(_) | GatewayError::Http(_) => {

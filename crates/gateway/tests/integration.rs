@@ -1152,3 +1152,63 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
     );
     assert!(message.contains("key=[REDACTED]"), "{message}");
 }
+
+/// A provider whose breaker is open is refused before anything is sent: 503 with
+/// an error kind of its own, not a 502 that would blame an upstream nobody asked.
+///
+/// This is the half of the breaker that had no effect. Selection treats an open
+/// breaker as "unavailable", but only failover/roundrobin/quota consult it — the
+/// default `single` strategy deliberately looks past it. So the send path is
+/// where an open breaker has to bite, or it is decoration.
+#[tokio::test]
+async fn an_open_breaker_refuses_before_anything_is_sent() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, hits) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    // Open it the way real failures do; the default threshold is four.
+    for _ in 0..4 {
+        state.engine.record("claude", "p-ant", false, false).await;
+    }
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        hits.lock().unwrap().is_empty(),
+        "the request never reached the upstream"
+    );
+
+    // Audited under its own kind, so "the breaker refused it" stays
+    // distinguishable from "the upstream failed it".
+    let (rows, _) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    let row = rows.first().expect("the refusal is audited");
+    assert_eq!(row.error_kind.as_deref(), Some("circuit_open"));
+    assert_eq!(row.agent.as_deref(), Some("claude"));
+    assert_eq!(row.provider_id.as_deref(), Some("p-ant"));
+
+    // Nothing ran, so nothing is billed.
+    assert_eq!(
+        state.store.usage_totals(None, None, None).unwrap().requests,
+        0
+    );
+}

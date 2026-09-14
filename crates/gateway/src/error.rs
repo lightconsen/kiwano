@@ -20,6 +20,13 @@ pub enum GatewayError {
     #[error("every provider for agent `{agent}` is over its limit: {reasons}")]
     AllOverLimit { agent: String, reasons: String },
 
+    /// The provider's breaker is not admitting requests: it is open, or another
+    /// request already holds the single HalfOpen probe permit. Distinct from
+    /// `Upstream` on purpose — nothing was sent, and sending again right now is
+    /// the one thing the breaker exists to prevent.
+    #[error("provider `{provider}` is not admitting requests for agent `{agent}` (circuit open)")]
+    CircuitOpen { agent: String, provider: String },
+
     #[error("provider `{0}` not found")]
     ProviderNotFound(String),
 

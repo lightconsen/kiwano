@@ -315,13 +315,14 @@ impl SendFailure {
 /// streams. Wrapping `send()` bounds only time-to-response-headers; body
 /// reads stay under the client-wide 300s read timeout.
 ///
-/// Each attempt records breaker feedback exactly once (success is judged at
-/// response-header time, tech.md §4.7). A retryable outcome (transport error,
-/// 408/429/5xx) with attempts left backs off briefly and re-sends the same
-/// request to the same provider; the strategy layer only takes over after
-/// this loop gives up. The loop returns before any byte reaches the client,
-/// so in-flight streams are never retried; body-read failures after headers
-/// are also not retried (the breaker was already fed at header time).
+/// Each attempt asks the breaker for admission and records its feedback exactly
+/// once (success is judged at response-header time, tech.md §4.7). A retryable
+/// outcome (transport error, 408/429/5xx) with attempts left backs off briefly
+/// and re-sends the same request to the same provider; the strategy layer only
+/// takes over after this loop gives up. The loop returns before any byte
+/// reaches the client, so in-flight streams are never retried; body-read
+/// failures after headers are also not retried (the breaker was already fed at
+/// header time).
 #[allow(clippy::too_many_arguments)] // every argument is a distinct routing input
 #[allow(clippy::result_large_err)] // Err is the client-facing response, not a diagnostic
 async fn send_upstream(
@@ -339,6 +340,34 @@ async fn send_upstream(
     let attempts = provider.retries.map_or(1, |r| r as usize + 1);
     for attempt in 1..=attempts {
         let last = attempt == attempts;
+        // Admission is asked per attempt, not once per request: in HalfOpen the
+        // breaker hands out a single probe permit, and a probe that has already
+        // failed re-opened the circuit — sending the retry would be a second
+        // probe the breaker never granted. Closed admits everything, so this is
+        // free on the ordinary path.
+        let admission = state.engine.allow(agent, &provider.id).await;
+        if !admission.allowed {
+            // Not recorded as a failure: nothing was attempted, and a denial
+            // counted as a failure would drive the breaker further open on its
+            // own refusals.
+            let circuit = GatewayError::CircuitOpen {
+                agent: agent.to_string(),
+                provider: provider.id.clone(),
+            };
+            let message = circuit.to_string();
+            let resp = error_into_response(circuit, inbound);
+            crate::log_capture::persist_failure(
+                &state.store,
+                capture,
+                Some(agent.to_string()),
+                Some(attribution.to_string()),
+                Some(provider.id.clone()),
+                resp.status(),
+                "circuit_open",
+                message,
+            );
+            return Err(resp);
+        }
         let send = state
             .http
             .request(method.clone(), url)
@@ -358,7 +387,12 @@ async fn send_upstream(
                 let status = upstream.status();
                 state
                     .engine
-                    .record(agent, &provider.id, status.is_success())
+                    .record(
+                        agent,
+                        &provider.id,
+                        status.is_success(),
+                        admission.used_half_open_permit,
+                    )
                     .await;
                 if !last && is_retryable_status(status) {
                     tracing::warn!(
@@ -375,7 +409,10 @@ async fn send_upstream(
             }
             Err(failure) => {
                 let message = failure.message(url);
-                state.engine.record(agent, &provider.id, false).await;
+                state
+                    .engine
+                    .record(agent, &provider.id, false, admission.used_half_open_permit)
+                    .await;
                 if !last {
                     tracing::warn!(
                         attempt,

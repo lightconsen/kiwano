@@ -246,7 +246,9 @@ export interface Provider {
   /** Percent-of-window ceilings for plan providers; absent = none set */
   plan_limits?: PlanLimits | null;
   enabled: boolean;
-  /** Derived from agent_bindings */
+  /** Agents bound to this provider *and* routed through the gateway: a binding
+      whose agent has its own config back is a stored route, not a live one, so
+      it does not appear here (nor in serving_agents). */
   agents: AgentId[];
   /** Agents this provider would serve a request for right now — the per-agent
       slice behind the agent tabs' local "In use" badge */

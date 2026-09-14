@@ -7,6 +7,7 @@
 //! sparkline) plus a GUI-scoped `app_settings` table.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwanod::store::{
@@ -951,7 +952,37 @@ fn normalize_spark(values: &[i64]) -> Option<Vec<f64>> {
 
 // ── Provider view assembly ──
 
-pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, String> {
+/// The bound agents whose config actually points at the gateway *right now*.
+///
+/// A binding is a stored intention, not a live route: disabling a takeover
+/// restores the agent's own config and leaves the route in the store for the
+/// day it is re-enabled (`set_agent_takeover`). Until then the agent's traffic
+/// never reaches this gateway, so a provider must not read as bound to it or,
+/// worse, as *in use* by it — which is what the provider list used to claim for
+/// every binding row, including the dormant ones.
+///
+/// Recognition is by the live file (`kw-ag-<agent>-…` in the config the
+/// takeover wrote), never by the `placeholder_keys` table: a key row can
+/// outlive its rewrite. The takeover panel reads the same files and counts
+/// *more* agents than this on purpose — it also accepts a restorable backup,
+/// which is a claim about being able to undo a takeover, not about traffic
+/// arriving here.
+fn live_bound_agents(store: &Store, home: &Path) -> Result<Vec<String>, String> {
+    let bound = store.bound_agents().map_err(e2s)?;
+    Ok(bound
+        .into_iter()
+        .filter(|agent| crate::takeover::live_placeholder_key(agent, home).is_some())
+        .collect())
+}
+
+/// Provider rows for the Apps screen. `home` roots the agent config files the
+/// takeover state is read from, so a caller that knows its own tree (the CLI's
+/// `--home`) does not have to settle for `$HOME`.
+pub fn build_provider_vms(
+    store: &Store,
+    aux: &Aux,
+    home: &Path,
+) -> Result<Vec<ProviderVm>, String> {
     let providers = store.list_providers().map_err(e2s)?;
     if providers.is_empty() {
         return Ok(Vec::new());
@@ -960,11 +991,16 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
     let now = unix_now();
     let since7 = rfc3339(now - 7 * 86_400);
 
+    // Only agents that route through this gateway have a say in the badges:
+    // everything below — the agent column, "In use", the agent-count note —
+    // is a claim about live traffic, and a dormant route carries none.
+    let live: Vec<String> = live_bound_agents(store, home)?;
+
     // agent → primary provider id (single strategy)
     let mut primary: HashMap<String, String> = HashMap::new();
-    for agent in store.bound_agents().map_err(e2s)? {
-        if let Some(id) = store.primary_provider_id(&agent).map_err(e2s)? {
-            primary.insert(agent, id);
+    for agent in live.iter() {
+        if let Some(id) = store.primary_provider_id(agent).map_err(e2s)? {
+            primary.insert(agent.clone(), id);
         }
     }
 
@@ -987,9 +1023,9 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
     // is process-local and invisible here, so those two degrade to the
     // deterministic first choice / full rotation.
     let mut serving: HashMap<String, HashSet<String>> = HashMap::new();
-    for agent in store.bound_agents().map_err(e2s)? {
+    for agent in live.iter() {
         let enabled: Vec<Binding> = store
-            .bindings_for_agent(&agent)
+            .bindings_for_agent(agent)
             .map_err(e2s)?
             .into_iter()
             .filter(|b| b.enabled)
@@ -998,7 +1034,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             continue;
         };
         let strategy = store
-            .get_strategy(&agent)
+            .get_strategy(agent.as_str())
             .map_err(e2s)?
             .unwrap_or(Strategy {
                 agent: agent.clone(),
@@ -1034,7 +1070,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
             // single / failover: the head (failover degradation is breaker runtime)
             _ => HashSet::from([head]),
         };
-        serving.insert(agent, ids);
+        serving.insert(agent.clone(), ids);
     }
 
     // provider → 7d usage totals
@@ -1896,10 +1932,11 @@ pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<
 /// Update provider: rewrite the providers row + rebind agents (the new set
 /// becomes primary; removed ones are unbound). An empty api_key means keep
 /// the existing key. Returns the refreshed VM (re-aggregated so badges and
-/// notes stay consistent).
+/// notes stay consistent), read against `home` like [`build_provider_vms`].
 pub fn update_provider(
     store: &Store,
     aux: &Aux,
+    home: &Path,
     id: &str,
     input: &NewProviderInput,
 ) -> Result<ProviderVm, String> {
@@ -2011,7 +2048,7 @@ pub fn update_provider(
         }
     }
 
-    let vms = build_provider_vms(store, aux)?;
+    let vms = build_provider_vms(store, aux, home)?;
     vms.into_iter()
         .find(|v| v.id == id)
         .ok_or_else(|| "provider vanished after update".to_string())
@@ -3200,6 +3237,34 @@ mod tests {
         Aux::open_in_memory().unwrap()
     }
 
+    /// An agent config tree carrying the gateway's placeholder key for each
+    /// named agent — the live evidence `build_provider_vms` reads before a
+    /// binding counts as a route. Named agents get the key in the file their
+    /// takeover writes; every other agent stays dormant, as it would be with no
+    /// takeover ever enabled.
+    fn live_home(agents: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for agent in agents {
+            let rel = match *agent {
+                "claude" => ".claude/settings.json",
+                // auth.json rather than config.toml: the Codex config is read
+                // through the parsed detector, the rest by a value scan.
+                "codex" => ".codex/auth.json",
+                "gemini" => ".gemini/.env",
+                "grokbuild" => ".grok/config.toml",
+                "opencode" => ".config/opencode/opencode.json",
+                "openclaw" => ".openclaw/openclaw.json",
+                "hermes" => ".hermes/config.yaml",
+                "pi" => ".pi/agent/settings.json",
+                other => panic!("no agent-config fixture for {other}"),
+            };
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, format!("kw-ag-{agent}-test")).unwrap();
+        }
+        dir
+    }
+
     fn provider(id: &str, name: &str, billing: Billing) -> Provider {
         Provider {
             id: id.into(),
@@ -3399,7 +3464,8 @@ mod tests {
         })
         .unwrap();
         let aux = Aux::open_in_memory().unwrap();
-        let vms = build_provider_vms(&s, &aux).unwrap();
+        let home = live_home(&["claude"]);
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
         assert_eq!(vms.len(), 1);
         let vm = &vms[0];
         let json = serde_json::to_value(vm).unwrap();
@@ -3410,6 +3476,49 @@ mod tests {
         assert_eq!(json["agents_note"], "1 agent(s)");
         assert_eq!(json["endpoint"], "deepseek-1.example.com");
         assert_eq!(json["endpoint_note"], "OpenAI-compatible");
+    }
+
+    /// A binding whose agent never took the gateway over is not a route: the
+    /// provider list must leave that agent out of the agent column, out of
+    /// "In use", and out of the count — the route stays in the store for the
+    /// day the takeover is re-enabled, but no traffic reaches us until then.
+    #[test]
+    fn dormant_agent_bindings_are_not_counted() {
+        let s = store();
+        s.insert_provider(&provider("p1", "P One", Billing::Metered))
+            .unwrap();
+        for agent in ["claude", "codex"] {
+            s.upsert_binding(&Binding {
+                agent: agent.into(),
+                provider_id: "p1".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        }
+        let aux = Aux::open_in_memory().unwrap();
+
+        // claude is routed through the gateway, codex is not.
+        let home = live_home(&["claude"]);
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vm = &vms[0];
+        assert_eq!(vm.agents, ["claude"]);
+        assert_eq!(vm.serving_agents, ["claude"]);
+        assert!(vm.is_current);
+        assert_eq!(vm.agents_note.as_deref(), Some("1 agent(s)"));
+
+        // Nothing taken over at all: the provider reads as unbound rather than
+        // as serving an agent that has its own config back.
+        let none = live_home(&[]);
+        let vms = build_provider_vms(&s, &aux, none.path()).unwrap();
+        let vm = &vms[0];
+        assert!(vm.agents.is_empty());
+        assert!(vm.serving_agents.is_empty());
+        assert!(!vm.is_current);
+        assert_eq!(vm.agents_note, None);
     }
 
     #[test]
@@ -3440,7 +3549,8 @@ mod tests {
         })
         .unwrap();
         let aux = Aux::open_in_memory().unwrap();
-        let vms = build_provider_vms(&s, &aux).unwrap();
+        let home = live_home(&["claude"]);
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
         let alpha = vms.iter().find(|v| v.id == "a1").unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(alpha.is_current);
@@ -3490,7 +3600,8 @@ mod tests {
         s.upsert_binding(&bind("hermes", "a1", 0, None)).unwrap();
         s.upsert_binding(&bind("hermes", "d1", 1, None)).unwrap();
         let aux = Aux::open_in_memory().unwrap();
-        let vms = build_provider_vms(&s, &aux).unwrap();
+        let home = live_home(&["codex", "gemini", "hermes"]);
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(beta.is_current); // roundrobin serves every candidate
         assert_eq!(beta.serving_agents, ["codex"]);
@@ -3743,7 +3854,7 @@ mod tests {
         // emptying the endpoint list rewrites it.
         let mut edit = catalog_input("DeepSeek", "https://api.deepseek.com");
         edit.model_default = String::new();
-        update_provider(&s, &aux, &vm.id, &edit).unwrap();
+        update_provider(&s, &aux, live_home(&[]).path(), &vm.id, &edit).unwrap();
         assert_eq!(s.get_provider(&vm.id).unwrap().unwrap().model_default, None);
     }
 
@@ -3775,9 +3886,10 @@ mod tests {
             .unwrap();
 
         // An edit that says nothing about agents: nothing moves.
+        let home = live_home(&["claude"]);
         let mut edit = catalog_input("A", "https://a.example.com/v1");
         edit.agents = None;
-        update_provider(&s, &aux, &a.id, &edit).unwrap();
+        update_provider(&s, &aux, home.path(), &a.id, &edit).unwrap();
         assert_eq!(
             s.primary_provider_id("claude").unwrap().as_deref(),
             Some(b.id.as_str()),
@@ -3792,7 +3904,7 @@ mod tests {
         // Naming agents still rebinds — that is the one path that may, and the
         // reason the field is an Option rather than a Vec.
         edit.agents = Some(vec!["claude".into()]);
-        update_provider(&s, &aux, &a.id, &edit).unwrap();
+        update_provider(&s, &aux, home.path(), &a.id, &edit).unwrap();
         assert_eq!(
             s.primary_provider_id("claude").unwrap().as_deref(),
             Some(a.id.as_str())
@@ -4212,7 +4324,7 @@ mod tests {
         assert_eq!(vm.endpoint_note, "OpenAI-compatible · +Anthropic");
         // endpoints survive a fresh VM build from the store
         let aux = Aux::open_in_memory().unwrap();
-        let vms = build_provider_vms(&s, &aux).unwrap();
+        let vms = build_provider_vms(&s, &aux, live_home(&[]).path()).unwrap();
         let loaded = vms.iter().find(|v| v.id == vm.id).unwrap();
         assert_eq!(loaded.endpoints.len(), 1);
         assert_eq!(loaded.endpoint_note, "OpenAI-compatible · +Anthropic");
@@ -4268,7 +4380,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        let vm = update_provider(&s, &aux, "p1", &input).unwrap();
+        let vm = update_provider(&s, &aux, live_home(&["codex"]).path(), "p1", &input).unwrap();
         assert_eq!(vm.name, "P One Renamed");
         assert_eq!(vm.billing, "unl");
 
@@ -5205,8 +5317,9 @@ mod tests {
             })
             .unwrap();
         }
+        let home = live_home(&["claude"]);
         let in_use = |s: &Store| -> (bool, bool) {
-            let vms = build_provider_vms(s, &aux).unwrap();
+            let vms = build_provider_vms(s, &aux, home.path()).unwrap();
             let cur = |id: &str| vms.iter().find(|p| p.id == id).unwrap().is_current;
             (cur("a1"), cur("b1"))
         };

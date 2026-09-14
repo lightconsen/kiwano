@@ -660,7 +660,7 @@ function servingNow(): Set<string> {
     const b = eh * 60 + em;
     return a <= b ? n >= a && n <= b : n >= a || n <= b;
   };
-  for (const r of agentRoutes) {
+  for (const r of routedRoutes()) {
     const enabled = r.bindings.filter((b) => b.enabled);
     if (enabled.length === 0) continue;
     const head = enabled[0].provider_id;
@@ -681,8 +681,18 @@ function servingNow(): Set<string> {
 
 // vm::build_provider_vms derives ProviderVm.agents from the bindings; the mock
 // fixtures' static arrays drift from agentRoutes, so derive them the same way.
+/** Routes whose agent currently points at the gateway — the mock's stand-in
+    for the real VM's live-file check. A route the store kept for an agent that
+    has been handed its own config back is a plan, not traffic, so it must not
+    put the provider in that agent's column or under "In use". */
+function routedRoutes(): AgentRoute[] {
+  return agentRoutes.filter((r) => settings.takeovers.find((t) => t.agent === r.agent)?.enabled);
+}
+
 function agentsOf(pid: string): string[] {
-  return agentRoutes.filter((r) => r.bindings.some((b) => b.provider_id === pid)).map((r) => r.agent);
+  return routedRoutes()
+    .filter((r) => r.bindings.some((b) => b.provider_id === pid))
+    .map((r) => r.agent);
 }
 
 // Mirror vm::build_provider_vms's failover-queue classification: a non-head
@@ -691,7 +701,7 @@ function agentsOf(pid: string): string[] {
 // rotates through everyone (roundrobin) or it serves its own time window.
 function standbyFlags(): { backups: Set<string> } {
   const backups = new Set<string>();
-  for (const r of agentRoutes) {
+  for (const r of routedRoutes()) {
     const head = r.bindings.filter((b) => b.enabled)[0]?.provider_id;
     if (!head) continue;
     for (const b of r.bindings) {

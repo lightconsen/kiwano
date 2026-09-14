@@ -100,14 +100,54 @@ fn providers_add_then_list_roundtrips() {
 
 #[test]
 fn providers_list_filters_by_agent() {
-    let (_dir, db) = temp_db();
+    let (dir, db) = temp_db();
+    // A private home: which agents count as bound follows the agent configs, so
+    // the assertion must not depend on what the operator has taken over.
+    let home = dir.path().join("home");
+    let home_arg = home.display().to_string();
     add_provider(&db, "for-claude", &["claude"]);
     add_provider(&db, "unbound", &[]);
 
-    let (_, out, _) = run(&db, &["--json", "providers", "list", "--agent", "claude"]);
+    // A binding whose agent never took the gateway over is not a route: the
+    // agent's traffic goes wherever its own config points, so the provider is
+    // not listed under it.
+    let (_, out, _) = run(
+        &db,
+        &[
+            "--home",
+            &home_arg,
+            "--json",
+            "providers",
+            "list",
+            "--agent",
+            "claude",
+        ],
+    );
+    let dormant: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert!(dormant.is_empty(), "{dormant:?}");
+
+    // Once the agent is routed through the gateway, its provider is listed.
+    write_claude_config(
+        &home,
+        r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"kw-ag-claude-test"}}"#,
+    );
+    let (_, out, _) = run(
+        &db,
+        &[
+            "--home",
+            &home_arg,
+            "--json",
+            "providers",
+            "list",
+            "--agent",
+            "claude",
+        ],
+    );
     let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["name"], "for-claude");
+    assert_eq!(list[0]["agents"], serde_json::json!(["claude"]));
+    assert_eq!(list[0]["serving_agents"], serde_json::json!(["claude"]));
 }
 
 /// Billing words from the old CLI keep working, and both spellings land in the

@@ -41,6 +41,13 @@ fn env_port(name: &str, default: u16) -> u16 {
         .unwrap_or(default)
 }
 
+/// Root the agent config files live under: the tree a takeover rewrites, and
+/// the one the provider list reads the live-route evidence back from. One
+/// helper so the write and the read cannot end up looking at different trees.
+fn home_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+}
+
 fn default_db_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     std::path::PathBuf::from(home)
@@ -362,7 +369,7 @@ fn get_gateway_status(state: State<AppState>) -> vm::GatewayStatusVm {
 
 #[tauri::command]
 fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, String> {
-    vm::build_provider_vms(&state.store, &state.aux)
+    vm::build_provider_vms(&state.store, &state.aux, &home_dir())
 }
 
 #[tauri::command]
@@ -388,7 +395,7 @@ fn update_provider(
     id: String,
     input: vm::NewProviderInput,
 ) -> Result<vm::ProviderVm, String> {
-    let vm = vm::update_provider(&state.store, &state.aux, &id, &input)?;
+    let vm = vm::update_provider(&state.store, &state.aux, &home_dir(), &id, &input)?;
     after_mutation(&state);
     Ok(vm)
 }
@@ -634,14 +641,13 @@ fn clear_request_logs(state: State<AppState>) -> Result<(), String> {
 #[tauri::command]
 fn set_agent_takeover(state: State<AppState>, agent: String, enabled: bool) -> Result<(), String> {
     let data_port = state.data_port;
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     vm::set_agent_takeover(
         &state.store,
         &state.aux,
         &agent,
         enabled,
         data_port,
-        &std::path::PathBuf::from(home),
+        &home_dir(),
     )?;
     // enabling may import a provider and bind it → the route table changed
     after_mutation(&state);

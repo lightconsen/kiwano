@@ -156,7 +156,9 @@ fn providers_quota(ctx: &mut Ctx, provider_id: &str, force: bool) -> Result<(), 
 fn providers_list(ctx: &mut Ctx, agent: Option<&str>) -> Result<(), CliError> {
     let mut vms = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::build_provider_vms(store, aux)?
+        // `--home` decides which agent configs count as routed here, the same
+        // way it decides it for `settings get`.
+        vm::build_provider_vms(store, aux, &ctx.home)?
     };
     if let Some(agent) = agent {
         vms.retain(|p| p.agents.iter().any(|a| a == agent));
@@ -226,7 +228,7 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     };
     let updated = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::update_provider(store, aux, &args.provider_id, &input)?
+        vm::update_provider(store, aux, &ctx.home, &args.provider_id, &input)?
     };
     let text = format!("updated {} ({})", updated.id, updated.name);
     ctx.out.emit(&updated, || text);

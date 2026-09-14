@@ -79,6 +79,10 @@ export const shelf = {
   noMatchingModels: "No model matches",
   showAllModels: "Show the other {n}",
   showFewerModels: "Show fewer",
+  /** A model priced in length bands: the rates above the listed one apply once a
+      request's input passes the threshold. The listed rate is the lower band, so
+      this is a step *up* — and a request that ignores it is billed low. */
+  priceLongContext: "above {over} tokens · {rates}",
   noPublishedPrice: "No published price",
   website: "Website",
   priceIn: "in",

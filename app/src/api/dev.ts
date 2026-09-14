@@ -237,6 +237,10 @@ const catalog: CatalogEntry[] = [
       input: "1.60",
       output: "6.40",
       currency: "USD",
+      // Qwen is Alibaba's, and Alibaba prices most of its models in length bands:
+      // here so the shelf's tooltip and the dialog's per-model line are both
+      // exercisable offline.
+      long_context: { over: 128000, in: "4.80", out: "19.20", cache_read: "0.96", cache_creation: "0" },
     },
     currency: "USD",
     billing: "payg",
@@ -1009,6 +1013,7 @@ export const devApi: KiwanoApi = {
         currency: e.price_ref!.currency,
         ...(e.price_ref!.off_peak ? { off_peak: e.price_ref!.off_peak } : {}),
         ...(e.price_ref!.peak_hours ? { peak_hours: e.price_ref!.peak_hours } : {}),
+        ...(e.price_ref!.long_context ? { long_context: e.price_ref!.long_context } : {}),
       }));
     rows.push({
       provider_id: "deepseek",

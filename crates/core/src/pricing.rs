@@ -692,6 +692,40 @@ mod tests {
         assert!(stored.contains("peak_hours"), "{stored}");
     }
 
+    /// A length band has to survive the trip through the mirror's `tiers` blob —
+    /// and this is the one link where missing the field costs everything: the App
+    /// never reads models.json, so a band the seed does not write into
+    /// `model_pricing` is a band the gateway cannot bill and the dialog cannot
+    /// show, with nothing anywhere saying so.
+    #[test]
+    fn a_length_band_reaches_the_mirror_and_comes_back() {
+        let (aux, dir) = test_env();
+        let doc = r#"{"version":1,"generated_at":"t","exchange_rates":{"USD":1.0},"models":[
+            {"model_id":"m1","display_name":"M1","input":"2.10","output":"8.40",
+             "cache_read":"0.42","cache_creation":"0","currency":"CNY",
+             "long_context":{"over":512000,"in":"4.20","out":"16.80","cache_read":"0.84"}}]}"#;
+        // Written whole rather than through `cache_hub`, whose third argument is
+        // a price for its own single-row fixture.
+        aux.save_hub_models_cache(1, doc, &sha_a(), "2026-01-01T00:00:00Z")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&aux).unwrap().seeded, 1);
+
+        let stored = tiers_of(&aux, "m1").expect("the band reached the mirror");
+        assert!(stored.contains("long_context"), "{stored}");
+        assert!(stored.contains("512000"), "{stored}");
+
+        // Read back the way the gateway reads it: `apply_tiers` unpacks the blob
+        // into the entry, and the block's absent `cache_creation` is a zero rate
+        // rather than a band that failed to parse.
+        let store = kiwanod::store::Store::open(dir.path().join("kiwano.db")).unwrap();
+        let rows = store.load_model_pricing().unwrap();
+        let band = rows[0].long_context.as_ref().expect("the band comes back");
+        assert_eq!(band.over, 512_000);
+        assert_eq!(band.input, "4.20");
+        assert_eq!(band.cache_read, "0.84");
+        assert_eq!(band.cache_creation, "0");
+    }
+
     /// The headline case: content changed, version did not. Nothing enforces a
     /// version bump, so a version-only gate would silently keep the old prices.
     #[test]

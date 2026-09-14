@@ -173,6 +173,18 @@ export interface PlanQuotaReport {
     the same list as the catalog's one `price_ref` per provider. `off_peak` and
     `peak_hours` are the row's own schedule when it publishes one, and the row's
     `input`/`output` are then the **peak** figures. */
+/** The rates that apply once a request's input passes `over`. The row's own
+    rates are then the cheap band — the published listing is the one most requests
+    pay — and a band carries no schedule of its own. */
+export interface LongContextRates {
+  /** Input tokens **above** which these rates apply. */
+  over: number;
+  in: string;
+  out: string;
+  cache_read: string;
+  cache_creation: string;
+}
+
 export interface ModelPrice {
   /** The catalog entry this price belongs to; "" for the general price. */
   provider_id: string;
@@ -186,6 +198,7 @@ export interface ModelPrice {
   currency: string;
   off_peak?: { in: string; out: string; cache_read: string; cache_creation: string };
   peak_hours?: { tz_offset: number; windows: { days: string[]; start: string; end: string }[] };
+  long_context?: LongContextRates;
 }
 
 export interface CurrencyMeta {
@@ -317,6 +330,11 @@ export interface CatalogPriceRef {
     tz_offset: number;
     windows: { days: string[]; start: string; end: string }[];
   };
+  /** The rates above `over` input tokens, when the flagship is priced in bands.
+      A second projection of the same thing `ModelPrice.long_context` carries: the
+      shelf's price cell reads this one, the detail dialog reads the mirror's, and
+      declaring only one of them makes half the screens disagree. */
+  long_context?: LongContextRates;
 }
 
 /** What the app hands the Models page. The Hub publishes less than this: the

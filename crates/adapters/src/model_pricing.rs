@@ -47,6 +47,39 @@ pub struct OffPeakRates {
     pub cache_creation: String,
 }
 
+/// Rates that apply once a request's input passes a size — the second band some
+/// vendors price in (MiniMax M3, most of Alibaba's models).
+///
+/// The row's **own** rates are the listed band, which is the *cheap* one: the
+/// data repo's README makes that explicit ("the listed band is the cheaper one"),
+/// because the headline price a reader sees should be the one most requests pay.
+/// A client that ignores this field therefore bills a long request at the low
+/// band — understating rather than overstating, the deliberate trade recorded
+/// there.
+///
+/// There is no off-peak counterpart here, and that is a property of the document
+/// rather than of this type: a band carries one set of rates. So a row that
+/// publishes both a schedule and a band has nothing to compare against inside the
+/// band — see `compute_cost_pair`, which treats it as flat rather than inventing
+/// a discount the vendor never published.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LongContextRates {
+    /// Input tokens **above** which these rates apply. The one published figure
+    /// that is a number rather than a TEXT decimal.
+    pub over: u64,
+    #[serde(rename = "in")]
+    pub input: String,
+    #[serde(rename = "out")]
+    pub output: String,
+    /// Same rule as the row's own rates: a cache rate the document leaves out is
+    /// zero, never the band's `in`/`out`. An omitted rate is an absence of a
+    /// charge, and reading it as "the same as input" would multiply the bill.
+    #[serde(default = "zero_rate")]
+    pub cache_read: String,
+    #[serde(default = "zero_rate")]
+    pub cache_creation: String,
+}
+
 /// The cache rates the document leaves out default to 0, as the data repo's
 /// README states — not to the peak rate, which would invent a charge.
 fn zero_rate() -> String {
@@ -88,6 +121,8 @@ pub struct PriceTiers {
     pub off_peak: Option<OffPeakRates>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peak_hours: Option<PeakHours>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_context: Option<LongContextRates>,
 }
 
 /// One row of models.json (prices = currency per million tokens, TEXT decimals).
@@ -115,6 +150,10 @@ pub struct ModelPriceEntry {
     pub off_peak: Option<OffPeakRates>,
     #[serde(default)]
     pub peak_hours: Option<PeakHours>,
+    /// The rates that apply once the request's input passes `over`. The rates
+    /// above are then the band below it.
+    #[serde(default)]
+    pub long_context: Option<LongContextRates>,
 }
 
 impl ModelPriceEntry {
@@ -125,8 +164,9 @@ impl ModelPriceEntry {
         let tiers = PriceTiers {
             off_peak: self.off_peak.clone(),
             peak_hours: self.peak_hours.clone(),
+            long_context: self.long_context.clone(),
         };
-        if tiers.off_peak.is_none() && tiers.peak_hours.is_none() {
+        if tiers.off_peak.is_none() && tiers.peak_hours.is_none() && tiers.long_context.is_none() {
             return None;
         }
         serde_json::to_string(&tiers).ok()
@@ -144,6 +184,7 @@ impl ModelPriceEntry {
         };
         self.off_peak = tiers.off_peak;
         self.peak_hours = tiers.peak_hours;
+        self.long_context = tiers.long_context;
     }
 }
 
@@ -445,6 +486,25 @@ fn rates_of(input: &str, output: &str, cache_read: &str, cache_creation: &str) -
     })
 }
 
+/// The input tokens a request *sent*, which is what a length band is measured
+/// against.
+///
+/// `cache_inclusive` describes how the vendor reported the count, not how big the
+/// request was: OpenAI/Gemini style folds the cache buckets into `input_tokens`,
+/// Anthropic style reports fresh input alone. A band's `over` is a statement
+/// about the prompt's size, so both spellings have to land on the same number —
+/// which is why this cannot be left to `cost_of`, whose job is billing the fresh
+/// part.
+fn request_input(input: u64, cache_read: u64, cache_creation: u64, cache_inclusive: bool) -> u64 {
+    if cache_inclusive {
+        input
+    } else {
+        input
+            .saturating_add(cache_read)
+            .saturating_add(cache_creation)
+    }
+}
+
 /// The cost of `tokens` at `rates`, rounded to 6 decimal places.
 fn cost_of(
     rates: &Rates,
@@ -515,6 +575,11 @@ pub fn compute_cost(
 ///
 /// An `off_peak` whose rates do not parse means the row has no off-peak tier
 /// (peak-only), never zero rates: a broken discount must not become a free one.
+///
+/// Two axes meet here — the length band, chosen by the request, and the time
+/// tier, chosen by the clock. The band is settled first and both numbers use it;
+/// inside a band the schedule has nothing of its own to discount, so there the
+/// pair is equal by construction.
 pub fn compute_cost_pair(
     entry: &ModelPriceEntry,
     at: i64,
@@ -524,12 +589,29 @@ pub fn compute_cost_pair(
     cache_creation_tokens: u64,
     cache_inclusive: bool,
 ) -> Option<(f64, f64)> {
-    let peak = rates_of(
-        &entry.input,
-        &entry.output,
-        &entry.cache_read,
-        &entry.cache_creation,
-    )?;
+    // Which length band the request falls in is a question about the *request*,
+    // answered once: what it cost and what it would have cost off-peak are two
+    // answers about the same tokens, so they cannot disagree about how long it
+    // was. `over` is a statement about the size of the prompt, so the comparison
+    // uses the tokens the request sent — see `request_input`.
+    let band = entry.long_context.as_ref().filter(|lc| {
+        request_input(
+            input_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cache_inclusive,
+        ) > lc.over
+    });
+
+    let peak = match band {
+        Some(lc) => rates_of(&lc.input, &lc.output, &lc.cache_read, &lc.cache_creation)?,
+        None => rates_of(
+            &entry.input,
+            &entry.output,
+            &entry.cache_read,
+            &entry.cache_creation,
+        )?,
+    };
     let cost = |rates: &Rates| {
         cost_of(
             rates,
@@ -540,10 +622,19 @@ pub fn compute_cost_pair(
             cache_inclusive,
         )
     };
-    let off_peak = entry
-        .off_peak
-        .as_ref()
-        .and_then(|o| rates_of(&o.input, &o.output, &o.cache_read, &o.cache_creation));
+    // A band publishes one set of rates and no schedule of its own, so inside one
+    // there is nothing to compare against: the band is flat and the pair's two
+    // numbers come out equal — the shape a row with no tiers already has, and
+    // what keeps the difference between them a pure time-of-day figure. Reading
+    // the row's off-peak rates as the band's counterpart instead would invent a
+    // discount on a rate the vendor never discounted.
+    let off_peak = match band {
+        Some(_) => None,
+        None => entry
+            .off_peak
+            .as_ref()
+            .and_then(|o| rates_of(&o.input, &o.output, &o.cache_read, &o.cache_creation)),
+    };
 
     let billed = match (&entry.peak_hours, &off_peak) {
         // A schedule and something to discount: outside the windows the off-peak
@@ -953,6 +1044,7 @@ mod tests {
             currency: "USD".into(),
             off_peak: None,
             peak_hours: None,
+            long_context: None,
         }
     }
 
@@ -1133,6 +1225,127 @@ mod tests {
 
     /// `off_peak` omits `cache_creation` in the published document; absent means
     /// 0, not "the peak rate stands in".
+    /// A row that prices in length bands — MiniMax M3's published shape.
+    fn banded_entry() -> ModelPriceEntry {
+        ModelPriceEntry {
+            input: "2.10".into(),
+            output: "8.40".into(),
+            cache_read: "0.42".into(),
+            cache_creation: "0".into(),
+            long_context: Some(LongContextRates {
+                over: 512_000,
+                input: "4.20".into(),
+                output: "16.80".into(),
+                cache_read: "0.84".into(),
+                cache_creation: "0".into(),
+            }),
+            ..usage_entry()
+        }
+    }
+
+    /// The band is chosen by how big the request was, and `over` itself is still
+    /// the cheap band: the document reads "the row's own rates apply **up to**
+    /// `over`, the block's above it".
+    #[test]
+    fn a_long_request_bills_the_published_band() {
+        let e = banded_entry();
+        for (tokens, rate) in [(512_000_u64, 2.10), (512_001, 4.20), (1_000_000, 4.20)] {
+            let (billed, _) = compute_cost_pair(&e, 1_788_919_200, tokens, 0, 0, 0, false).unwrap();
+            let expected = rate * tokens as f64 / 1_000_000.0;
+            assert!(
+                (billed - expected).abs() < 1e-6,
+                "{tokens} tokens billed {billed}, expected {expected}"
+            );
+        }
+    }
+
+    /// The threshold is about the size of the prompt, so the two reporting styles
+    /// agree about it: OpenAI-style `input_tokens` already contain the cache
+    /// buckets, Anthropic's count fresh input alone.
+    #[test]
+    fn the_band_threshold_counts_the_whole_prompt() {
+        let e = banded_entry();
+        // 500k fresh + 20k cached is 520k sent, whichever way it is reported.
+        let openai = compute_cost_pair(&e, 1_788_919_200, 520_000, 0, 20_000, 0, true)
+            .unwrap()
+            .0;
+        let anthropic = compute_cost_pair(&e, 1_788_919_200, 500_000, 0, 20_000, 0, false)
+            .unwrap()
+            .0;
+        assert_eq!(openai, anthropic, "one request, one bill");
+        // And it is the band's rate that ran, not the listed one.
+        let expected = 500_000.0 * 4.20 / 1e6 + 20_000.0 * 0.84 / 1e6;
+        assert!((openai - expected).abs() < 1e-6, "{openai}");
+    }
+
+    /// Inside a band the pair's two numbers are equal. The block carries one set
+    /// of rates and no schedule, so the clock has nothing of its own to discount;
+    /// reading the row's off-peak rates as the band's counterpart would invent a
+    /// discount on a rate the vendor never discounted — and would turn the
+    /// Dashboard's "peak premium" into a figure that also moves with request
+    /// length.
+    #[test]
+    fn a_band_has_no_off_peak_of_its_own() {
+        // The DeepSeek schedule, whose off-peak rates are exactly half, plus a band.
+        let e = ModelPriceEntry {
+            long_context: Some(LongContextRates {
+                over: 512_000,
+                input: "4.20".into(),
+                output: "16.80".into(),
+                cache_read: "0.84".into(),
+                cache_creation: "0".into(),
+            }),
+            ..tiered_entry()
+        };
+
+        // Off-peak by the clock (Wed 13:00 Beijing, the lunch gap) and over the
+        // threshold: the band's own rate, and nothing to compare it against.
+        let (billed, off_peak_cost) =
+            compute_cost_pair(&e, 1_788_930_000, 600_000, 0, 0, 0, false).unwrap();
+        assert_eq!(billed, off_peak_cost);
+        assert!((billed - 4.20 * 600_000.0 / 1e6).abs() < 1e-6, "{billed}");
+
+        // Below the threshold the schedule is untouched: off-peak bills half.
+        let (short_off, _) = compute_cost_pair(&e, 1_788_930_000, 100_000, 0, 0, 0, false).unwrap();
+        assert!(
+            (short_off - 4.5 * 100_000.0 / 1e6).abs() < 1e-6,
+            "{short_off}"
+        );
+        let (short_peak, short_peak_off) =
+            compute_cost_pair(&e, 1_788_919_200, 100_000, 0, 0, 0, false).unwrap();
+        assert!(
+            (short_peak - 9.0 * 100_000.0 / 1e6).abs() < 1e-6,
+            "{short_peak}"
+        );
+        assert!(
+            short_peak > short_peak_off,
+            "the difference is the time of day"
+        );
+    }
+
+    /// A block that omits a cache rate means that rate is zero — not that the row
+    /// has no band. Making the field required would fail the whole block on the
+    /// published shape above, and every long request would silently bill at the
+    /// row's cheap rates.
+    #[test]
+    fn a_band_whose_cache_rates_are_absent_is_still_a_band() {
+        let doc: ModelsDoc = serde_json::from_str(
+            r#"{"version": 1, "exchange_rates": {"USD": 1.0}, "models": [
+                {"model_id": "m", "display_name": "M", "input": "2.10", "output": "8.40",
+                 "cache_read": "0.42", "cache_creation": "0", "currency": "CNY",
+                 "long_context": {"over": 512000, "in": "4.20", "out": "16.80",
+                                  "cache_read": "0.84"}}]}"#,
+        )
+        .expect("the published shape parses, cache_creation and all");
+        let e = &doc.models[0];
+        let band = e.long_context.as_ref().expect("the band survives");
+        assert_eq!(band.cache_creation, "0", "an absent rate is no charge");
+        assert_eq!(band.cache_read, "0.84");
+
+        let (billed, _) = compute_cost_pair(e, 1_788_919_200, 600_000, 0, 0, 0, false).unwrap();
+        assert!((billed - 4.20 * 600_000.0 / 1e6).abs() < 1e-6, "{billed}");
+    }
+
     #[test]
     fn absent_off_peak_cache_creation_is_zero() {
         let doc: ModelsDoc = serde_json::from_str(

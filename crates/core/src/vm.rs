@@ -518,10 +518,17 @@ pub struct CatalogPriceRefVm {
     /// The Hub copies these from the entry's flagship model and publishes the
     /// two together or not at all, so they are present exactly when the entry's
     /// flagship is priced by time of day.
+    /// The rate band that applies once a request's input passes `over`, on the
+    /// same terms. This projection and the mirror's row are two independent
+    /// paths to the same figures — the shelf reads this one for its price cell
+    /// and the dialog reads the mirror — so a band has to be declared on both or
+    /// half the screens would show it and half would not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub off_peak: Option<kiwano_adapters::model_pricing::OffPeakRates>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peak_hours: Option<kiwano_adapters::model_pricing::PeakHours>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_context: Option<kiwano_adapters::model_pricing::LongContextRates>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

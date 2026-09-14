@@ -1543,6 +1543,7 @@ mod tests {
         let store = crate::store::Store::open_in_memory().expect("store");
         store
             .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
                 provider_id: String::new(),
                 model_id: "claude-opus-4-8".into(),
                 off_peak: None,
@@ -1632,6 +1633,7 @@ mod tests {
         let store = crate::store::Store::open_in_memory().expect("store");
         let priced =
             |provider_id: &str, input: &str| kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
                 provider_id: provider_id.into(),
                 model_id: "m1".into(),
                 off_peak: None,
@@ -1728,6 +1730,7 @@ mod tests {
         let store = crate::store::Store::open_in_memory().expect("store");
         store
             .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
                 provider_id: String::new(),
                 model_id: "m1".into(),
                 display_name: "M1".into(),

@@ -2375,6 +2375,7 @@ impl Store {
         let rows = stmt.query_map([], |r| {
             let tiers: Option<String> = r.get(8)?;
             let mut entry = ModelPriceEntry {
+                long_context: None,
                 provider_id: r.get(0)?,
                 model_id: r.get(1)?,
                 display_name: r.get(2)?,

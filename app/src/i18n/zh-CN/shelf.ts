@@ -49,6 +49,7 @@ export const shelf = {
   noMatchingModels: "没有匹配的模型",
   showAllModels: "展开其余 {n} 个",
   showFewerModels: "收起",
+  priceLongContext: "超过 {over} tokens 后 · {rates}",
   noPublishedPrice: "没有公布价格",
   website: "官网",
   priceIn: "入",

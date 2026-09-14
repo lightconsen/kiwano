@@ -10,11 +10,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "../api/client";
-import type { CatalogBilling, CatalogEntry, ModelPrice, ProbeReport, Protocol } from "../api/types";
+import type { CatalogBilling, CatalogEntry, LongContextRates, ModelPrice, ProbeReport, Protocol } from "../api/types";
 import { tzLabel, type PeakHours } from "../lib/peak";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
-import { fmtMoney } from "../lib/format";
+import { fmtMoney, fmtTokens } from "../lib/format";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 
 /** The glyph each category wears, in the table and in the chip that filters for
@@ -318,6 +318,27 @@ function modelRateText(price: ModelPrice, tier: PriceTier, t: Translate): string
   ].join(" · ");
 }
 
+/** A length band's rates, formatted exactly like the row's above them — same
+    order, same wording, same currency. A band written differently from the line
+    it sits under would read as a different kind of number. */
+function bandRatesText(band: LongContextRates, currency: string, t: Translate): string {
+  const fmt = (n: string) => fmtMoney(Number(n), currency);
+  return [
+    `${t("shelf.priceIn")} ${fmt(band.in)}`,
+    `${t("shelf.priceOut")} ${fmt(band.out)}`,
+    `${t("shelf.priceCacheRead")} ${fmt(band.cache_read)}`,
+    `${t("shelf.priceCacheWrite")} ${fmt(band.cache_creation)}`,
+  ].join(" · ");
+}
+
+/** The sentence that says a model's price steps up past an input size. */
+function bandText(band: LongContextRates, currency: string, t: Translate): string {
+  return t("shelf.priceLongContext", {
+    over: fmtTokens(band.over),
+    rates: bandRatesText(band, currency, t),
+  });
+}
+
 /** One model of a provider: its id, its rates, and its own tier switch. The
     switch is per model because the schedule is — a provider may price one model
     by time of day and another flatly. */
@@ -355,6 +376,14 @@ function ModelPriceRow({
         />
       </div>
       <div className="mt-1 text-[10.5px] text-mut">{modelRateText(price, tier, t)}</div>
+      {/* The step-up, on its own line and outside the tier switch: a band is
+          chosen by how long the request is, not by what the reader wants to
+          look at, and it carries no schedule for the switch to flip. */}
+      {price.long_context && (
+        <div className="mt-0.5 text-[10.5px] text-mut">
+          {bandText(price.long_context, price.currency || "USD", t)}
+        </div>
+      )}
     </div>
   );
 }
@@ -785,7 +814,16 @@ function Row({
   /** The tooltip: the same figures plus the unit they are quoted in, which the
       table has no room to repeat on every row. A cell with no rates behind it
       (a plan's offer, a provider that prices no model) says only what it says. */
-  const priceHint = rate ? t("shelf.priceUnit", { rates: price }) : price;
+  const priceHint = rate
+    ? [
+        t("shelf.priceUnit", { rates: price }),
+        // The cell has room for the headline rate alone, and the headline is the
+        // band most requests pay — so the step-up lives here.
+        rate.long_context ? bandText(rate.long_context, rate.currency || "USD", t) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : price;
   const toggleTier = () => setTier((v) => (v === "peak" ? "offPeak" : "peak"));
   return (
     <tr

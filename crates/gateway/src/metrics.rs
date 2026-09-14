@@ -1,0 +1,167 @@
+//! Liveness (`GET /health`) and Prometheus-format metrics (`GET /metrics`).
+//!
+//! Both sit on the **data port**, and neither asks for a placeholder key — the
+//! only two paths here that do not. That is a deliberate exception with a narrow
+//! scope, and the reasoning is worth writing down because the rest of this plane
+//! is unforgiving on purpose:
+//!
+//! - The tools that want them are the ones that cannot hold the app's
+//!   credentials. A supervisor probing liveness has to be able to say "the
+//!   gateway is up but its store is unreadable"; a probe that needs a credential
+//!   read out of that store cannot report that the store is broken. Prometheus
+//!   scrapes over TCP, and the admin plane — where `/status` already lives — is a
+//!   unix socket, which no ordinary scraper can reach.
+//! - What they expose is counts, breaker states and a version. Never a key, never
+//!   a request body, never anything that lets a caller spend the operator's
+//!   money — which is the threat the key gate exists for (a local process posting
+//!   on the operator's upstream credentials). The names that do appear, provider
+//!   and agent ids, are the ones this machine's owner reads on their own screen.
+//!
+//! Neither is metered or logged: a scrape is not a request an agent made, and a
+//! usage row per scrape interval would quietly inflate the dashboard.
+
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+
+use crate::server::GatewayState;
+use crate::strategy::circuit_breaker::CircuitState;
+
+/// Can the gateway serve a request? Deliberately narrow: it is about the parts
+/// that answer one — the store it reads its configuration from — and about
+/// nothing else. An upstream being down is what the routed request itself
+/// reports, and it must not read as the gateway being down.
+///
+/// Nor does having nothing to route count as unhealthy. A fresh install has no
+/// takeovers and no bindings, and reporting that as a failure is the classic way
+/// to make a health check useless: a supervisor would restart it forever, and
+/// restarting does not enrol an agent.
+pub fn health(state: &GatewayState) -> Response {
+    let routed_agents = state.route_table().routes.len();
+    let store_ok = state.store.count_request_logs(None, None, None).is_ok();
+    let body = serde_json::json!({
+        "status": if store_ok { "ok" } else { "degraded" },
+        // Which half is down, so a probe's output is worth reading.
+        "store": if store_ok { "ok" } else { "unreadable" },
+        "routed_agents": routed_agents,
+        "uptime_secs": state.started_at.elapsed().as_secs(),
+        "version": state.version,
+    });
+    let status = if store_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(body)).into_response()
+}
+
+/// Prometheus text exposition (format 0.0.4).
+///
+/// Gauges throughout, including the ones that name a count: usage and log rows
+/// are pruned on a retention schedule, so a `_total` over them would be a counter
+/// that resets itself and makes every `rate()` a lie.
+pub async fn prometheus(state: &GatewayState) -> String {
+    let mut out = String::with_capacity(1024);
+    let routes = state.route_table();
+
+    out.push_str("# HELP kiwano_up 1 while the gateway can read its own store\n");
+    out.push_str("# TYPE kiwano_up gauge\n");
+    let store_ok = state.store.count_request_logs(None, None, None).is_ok();
+    out.push_str(&format!("kiwano_up {}\n", u8::from(store_ok)));
+
+    out.push_str("# HELP kiwano_build_info The build the gateway is running\n");
+    out.push_str("# TYPE kiwano_build_info gauge\n");
+    out.push_str(&format!(
+        "kiwano_build_info{{version=\"{}\"}} 1\n",
+        escape_label(state.version)
+    ));
+
+    out.push_str("# HELP kiwano_uptime_seconds Seconds since the gateway started\n");
+    out.push_str("# TYPE kiwano_uptime_seconds gauge\n");
+    out.push_str(&format!(
+        "kiwano_uptime_seconds {}\n",
+        state.started_at.elapsed().as_secs()
+    ));
+
+    out.push_str("# HELP kiwano_routed_agents Agents the route table knows\n");
+    out.push_str("# TYPE kiwano_routed_agents gauge\n");
+    out.push_str(&format!("kiwano_routed_agents {}\n", routes.routes.len()));
+
+    out.push_str("# HELP kiwano_route_candidates Providers bound to an agent\n");
+    out.push_str("# TYPE kiwano_route_candidates gauge\n");
+    for (agent, route) in &routes.routes {
+        out.push_str(&format!(
+            "kiwano_route_candidates{{agent=\"{}\"}} {}\n",
+            escape_label(agent),
+            route.candidates.len()
+        ));
+    }
+
+    // The signal this endpoint earns its keep on: which candidates the breakers
+    // have taken out of the pool, per agent.
+    out.push_str("# HELP kiwano_circuit_open 1 while a provider's breaker is open\n");
+    out.push_str("# TYPE kiwano_circuit_open gauge\n");
+    for (key, circuit) in state.engine.breaker_snapshot().await {
+        out.push_str(&format!(
+            "kiwano_circuit_open{{route=\"{}\"}} {}\n",
+            escape_label(&key),
+            u8::from(circuit == CircuitState::Open)
+        ));
+    }
+
+    if let Ok(totals) = state.store.usage_totals(None, None, None) {
+        out.push_str("# HELP kiwano_usage_rows Metered requests held\n");
+        out.push_str("# TYPE kiwano_usage_rows gauge\n");
+        out.push_str(&format!("kiwano_usage_rows {}\n", totals.requests));
+
+        out.push_str("# HELP kiwano_usage_tokens Tokens metered across those rows\n");
+        out.push_str("# TYPE kiwano_usage_tokens gauge\n");
+        for (kind, value) in [
+            ("input", totals.input_tokens),
+            ("output", totals.output_tokens),
+            ("cache_read", totals.cache_read_tokens),
+            ("cache_creation", totals.cache_creation_tokens),
+        ] {
+            out.push_str(&format!("kiwano_usage_tokens{{kind=\"{kind}\"}} {value}\n"));
+        }
+    }
+
+    if let Ok(rows) = state.store.count_request_logs(None, None, None) {
+        out.push_str("# HELP kiwano_request_log_rows Request-log rows held\n");
+        out.push_str("# TYPE kiwano_request_log_rows gauge\n");
+        out.push_str(&format!("kiwano_request_log_rows {rows}\n"));
+    }
+
+    out
+}
+
+/// Prometheus label values are double-quoted with `\`, `"` and newline escaped.
+/// The values here are user-chosen ids, so this is about a malformed exposition
+/// rather than about injecting into anything that runs.
+fn escape_label(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // An id is user-chosen, so a quote in it must not be able to break the
+    // exposition — a label that ends early makes every line after it unparseable.
+    #[test]
+    fn label_values_are_escaped() {
+        assert_eq!(escape_label("claude"), "claude");
+        assert_eq!(escape_label("a\"b"), "a\\\"b");
+        assert_eq!(escape_label("a\\b"), "a\\\\b");
+        assert_eq!(escape_label("a\nb"), "a\\nb");
+    }
+}

@@ -12,6 +12,7 @@ pub mod limits;
 pub mod log_capture;
 pub mod logging;
 pub mod meter;
+pub mod metrics;
 pub mod plan_quota;
 pub mod protocol;
 pub mod router;

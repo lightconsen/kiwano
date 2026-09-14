@@ -431,6 +431,27 @@ impl StrategyEngine {
         Self::primary(route)
     }
 
+    /// Every breaker's current state, keyed `agent:provider_id` — what the
+    /// metrics endpoint reports so an operator can see which candidate the
+    /// breakers have taken out. Read-only; nothing here admits or records.
+    pub async fn breaker_snapshot(&self) -> Vec<(String, circuit_breaker::CircuitState)> {
+        // Clone the handles out and drop the registry lock before awaiting: the
+        // breakers have their own locks, and a std guard must not cross an await.
+        let breakers: Vec<(String, Arc<CircuitBreaker>)> = self
+            .breakers
+            .lock()
+            .expect("breaker registry poisoned")
+            .iter()
+            .map(|(k, b)| (k.clone(), b.clone()))
+            .collect();
+        let mut snapshot = Vec::with_capacity(breakers.len());
+        for (key, breaker) in breakers {
+            snapshot.push((key, breaker.get_state().await));
+        }
+        snapshot.sort_by(|a, b| a.0.cmp(&b.0));
+        snapshot
+    }
+
     /// Ask a provider's breaker whether this request may be sent.
     ///
     /// `is_available` is the *route-selection* check and deliberately never

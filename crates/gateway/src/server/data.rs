@@ -8,7 +8,7 @@
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use std::sync::Arc;
@@ -18,7 +18,9 @@ use crate::protocol::{classify_path, PathProtocol};
 use crate::router::resolve_via_engine;
 use crate::server::{error_into_response, error_response, GatewayState, MAX_BODY_BYTES};
 
-/// Data-plane router: the paths agents actually call.
+/// Data-plane router: the paths agents actually call, plus the two read-only
+/// endpoints a probe or a scraper needs (see [`crate::metrics`] for why those
+/// two are the exception to this plane's key gate).
 pub fn data_plane_router(state: Arc<GatewayState>) -> Router {
     Router::new()
         .route("/v1/messages", post(proxy))
@@ -29,12 +31,28 @@ pub fn data_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/v1/completions", post(proxy))
         .route("/v1/embeddings", post(proxy))
         .route("/v1/models", get(proxy))
+        .route("/health", get(health_probe))
+        .route("/metrics", get(metrics))
         .fallback(not_found)
         .with_state(state)
 }
 
 async fn proxy(State(state): State<Arc<GatewayState>>, req: Request) -> Response {
     handle(state, req).await
+}
+
+/// Liveness for a supervisor: no key, no log row, no usage row.
+async fn health_probe(State(state): State<Arc<GatewayState>>) -> Response {
+    crate::metrics::health(&state)
+}
+
+/// Prometheus scrape: likewise outside the gate and outside the meter.
+async fn metrics(State(state): State<Arc<GatewayState>>) -> Response {
+    (
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        crate::metrics::prometheus(&state).await,
+    )
+        .into_response()
 }
 
 /// Axum-level fallback: paths no route matches never reach `handle`, so this

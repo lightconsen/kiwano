@@ -1187,6 +1187,104 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
     assert!(message.contains("key=[REDACTED]"), "{message}");
 }
 
+/// Liveness and metrics are the only data-plane paths served without a
+/// placeholder key, so what matters most is what they do *not* touch: no log row,
+/// no usage row, nothing an agent would notice.
+#[tokio::test]
+async fn health_and_metrics_answer_without_a_key_and_leave_no_trace() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (upstream_url, _) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["routed_agents"], 1);
+    assert_eq!(body["store"], "ok");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/plain"),
+        "a scraper parses this by content type"
+    );
+    let text = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(text.contains("kiwano_up 1"), "{text}");
+    assert!(
+        text.contains("kiwano_route_candidates{agent=\"claude\"} 1"),
+        "{text}"
+    );
+
+    // The series an operator reaches for on a bad day: which candidate the
+    // breakers have taken out. Worth a round trip of its own because it comes
+    // from in-memory state, not from the database.
+    for _ in 0..4 {
+        state.engine.record("claude", "p-ant", false, false).await;
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(
+        text.contains("kiwano_circuit_open{route=\"claude:p-ant\"} 1"),
+        "an open breaker is visible to the scraper: {text}"
+    );
+
+    // A scrape is not a request an agent made.
+    let (_, total) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(total, 0, "neither endpoint is audited as an agent request");
+    assert_eq!(
+        state.store.usage_totals(None, None, None).unwrap().requests,
+        0,
+        "nor metered"
+    );
+}
+
 /// A stream that goes silent is abandoned at the idle limit, and the client is
 /// told why in the dialect it is speaking — instead of holding the socket until
 /// its own read timeout fires. The row records the reason too, so a stream that

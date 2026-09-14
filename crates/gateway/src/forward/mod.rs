@@ -7,7 +7,7 @@
 //! Protocol conversion (tech.md §4.3 / adapters phase): an Anthropic
 //! inbound request (`POST /v1/messages`) bound to an OpenAI-compatible
 //! provider is converted with the `kiwano-adapters` sublayer — request via
-//! `anthropic_to_openai` (model via `model_mapper`), response (JSON + SSE)
+//! `anthropic_to_openai` (model untouched), response (JSON + SSE)
 //! back via `openai_to_anthropic` / the streaming converter — and metered
 //! from the upstream OpenAI usage fields.
 

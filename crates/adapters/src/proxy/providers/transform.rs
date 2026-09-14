@@ -151,8 +151,8 @@ pub fn anthropic_to_openai_with_reasoning_content(
 ) -> Result<Value, ProxyError> {
     let mut result = json!({});
 
-    // NOTE: model mapping is handled upstream (proxy::model_mapper); this format
-    // conversion layer only does structural conversion.
+    // NOTE: this format conversion layer only does structural conversion — it
+    // neither maps nor chooses the model, which is the caller's business.
     if let Some(model) = body.get("model").and_then(|m| m.as_str()) {
         result["model"] = json!(model);
     }
@@ -1542,7 +1542,7 @@ mod tests {
     #[test]
     fn test_model_passthrough() {
         // The format conversion layer only does structural conversion; model
-        // mapping is handled by the upstream proxy::model_mapper
+        // model choice is the caller's business, not this layer's
         let input = json!({
             "model": "gpt-4o",
             "max_tokens": 1024,

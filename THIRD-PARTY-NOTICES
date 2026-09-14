@@ -40,7 +40,7 @@ Every file below carries the declaration in its own header, naming its
 upstream source and the date it was taken. This list is the index to those
 headers, not a replacement for them.
 
-Copied whole — 20 files, all 2026-09-07. Header declaration only.
+Copied whole — 18 files, all 2026-09-07. Header declaration only.
 
   crates/adapters/src/config.rs
   crates/adapters/src/error.rs
@@ -51,14 +51,12 @@ Copied whole — 20 files, all 2026-09-07. Header declaration only.
   crates/adapters/src/grok_config.rs
   crates/adapters/src/opencode_config.rs
   crates/adapters/src/gateway_takeover.rs
-  crates/adapters/src/proxy/cache_injector.rs
   crates/adapters/src/proxy/error.rs
   crates/adapters/src/proxy/error_mapper.rs
   crates/adapters/src/proxy/json_canonical.rs
   crates/adapters/src/proxy/model_mapper.rs
   crates/adapters/src/proxy/sse.rs
   crates/adapters/src/proxy/tool_media.rs
-  crates/adapters/src/proxy/types.rs
   crates/adapters/src/proxy/providers/streaming.rs
   crates/adapters/src/proxy/providers/transform.rs
   crates/gateway/src/strategy/circuit_breaker.rs
@@ -83,7 +81,7 @@ each ported function, so any one of them can be diffed against its origin.
       what that logic exists to protect.
 
 Upstream of both crates is the same project and the same licence, so the
-notice above covers all 21 files. Nothing outside `crates/adapters` and
+notice above covers all 19 files. Nothing outside `crates/adapters` and
 `crates/gateway` is derived from cc-switch — the app, the gateway server,
 the routing and the UI are Kiwano's own, and deliberately carry no
 declaration so the provenance of a file can be read off its header.

@@ -65,12 +65,13 @@ export const addProvider = {
   // ── Plan-mode percent limits ──
   usageLimits: "Usage limits",
   usageLimitsHint: "optional · % of each plan window",
-  planFiveHourPlaceholder: "e.g. 20 · blank = no limit",
-  planWeeklyPlaceholder: "e.g. 60 · blank = no limit",
   fiveHourWindow: "5-hour window",
   weeklyWindow: "Weekly window",
   planLimitsBody:
-    "Kiwano stops routing to this provider once its live plan-quota utilization for a window reaches the percent, and resumes when usage drops back under. Takes effect when a plan query is configured.",
+    "Kiwano stops routing to this provider once its live plan-quota utilization for a window reaches the percent, and resumes when usage drops back under. Blank leaves that window unlimited.",
+  /** Rejected input: the backend keeps only this range and drops the rest
+      without a word, so an out-of-range ceiling would save as nothing. */
+  planLimitRange: "1–100, or blank for no limit",
 
   // ── Payg spending limit ──
   spendingLimit: "Spending limit",

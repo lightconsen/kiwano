@@ -59,12 +59,11 @@ export const addProvider = {
   // ── Plan-mode percent limits ──
   usageLimits: "用量上限",
   usageLimitsHint: "可选 · 各套餐窗口的百分比",
-  planFiveHourPlaceholder: "例如 20 · 留空表示不限制",
-  planWeeklyPlaceholder: "例如 60 · 留空表示不限制",
   fiveHourWindow: "5 小时窗口",
   weeklyWindow: "每周窗口",
   planLimitsBody:
-    "当该 Provider 某个窗口的实时套餐配额使用率达到该百分比时，Kiwano 会停止向其路由；用量回落到阈值以下后自动恢复。配置套餐查询后生效。",
+    "当该 Provider 某个窗口的实时套餐配额使用率达到该百分比时，Kiwano 会停止向其路由；用量回落到阈值以下后自动恢复。留空表示该窗口不设上限。",
+  planLimitRange: "填 1–100，留空表示不限制",
 
   // ── Payg spending limit ──
   spendingLimit: "消费上限",

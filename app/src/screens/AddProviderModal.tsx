@@ -40,6 +40,11 @@ import { hubAssetUrl, useHubUrl } from "../lib/hub";
 // component where the translator is available rather than at module scope
 // (a module-level `t` is impossible — it is a hook).
 
+/// The ceilings offered as one-click chips. These are the percentages people
+/// actually set: some headroom, a lot of headroom, or "only once the window is
+/// full" — which is a value, not the same as leaving the box blank.
+const PLAN_PRESET_PCTS = [80, 90, 100];
+
 function probeColor(verdict: ProbeReport["verdict"]): string {
   return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
 }
@@ -387,7 +392,63 @@ export default function AddProviderModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [agentsOpen]);
 
-  const canSave = name.trim() !== "" && endpoint.trim() !== "" && !saving;
+  /** A ceiling is a percentage in (0, 100], or blank for "no ceiling".
+   *
+   * Anything else is not a value to save. The backend keeps only that range and
+   * silently drops the rest, so `150` — or `0`, or a stray letter — used to look
+   * accepted and store nothing at all: a routing policy the user believed they
+   * had set. The dialog says so instead, and refuses the save. */
+  const invalidPct = (raw: string): boolean => {
+    if (raw.trim() === "") return false;
+    const pct = Number(raw);
+    return !Number.isFinite(pct) || pct <= 0 || pct > 100;
+  };
+
+  /** One plan-window ceiling: a field that reads as a percentage, the presets
+      beside the window's name, and the reason when it cannot be saved. */
+  const ceilingField = (value: string, setValue: (v: string) => void, name: string) => {
+    const bad = invalidPct(value);
+    return (
+      <div>
+        <div className="flex items-center gap-1.5">
+          <Input
+            className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            inputMode="decimal"
+            aria-invalid={bad}
+          />
+          <span className="text-[11.5px] text-mut">%</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <p className="text-[10px] text-mut">{name}</p>
+          {PLAN_PRESET_PCTS.map((pct) => (
+            <button
+              key={pct}
+              type="button"
+              className="chip rounded border border-line px-1.5 text-[10px] text-mut hover:text-foreground"
+              onClick={() => setValue(String(pct))}
+            >
+              {pct}%
+            </button>
+          ))}
+        </div>
+        {bad && (
+          <p className="mt-1 text-[10px]" style={{ color: "var(--red)" }}>
+            {t("addProvider.planLimitRange")}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  // An invalid ceiling is refused rather than dropped: see `invalidPct`.
+  const canSave =
+    name.trim() !== "" &&
+    endpoint.trim() !== "" &&
+    !invalidPct(planFiveHour) &&
+    !invalidPct(planWeekly) &&
+    !saving;
 
   // Billing is intrinsic to the provider: locked to the catalog entry when
   // adding from Models, and to the stored value when editing. Vendors that
@@ -906,26 +967,8 @@ export default function AddProviderModal({
                   </span>
                 </Label>
                 <div className="mt-1 grid grid-cols-2 gap-2">
-                  <div>
-                    <Input
-                      className="h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                      value={planFiveHour}
-                      onChange={(e) => setPlanFiveHour(e.target.value)}
-                      placeholder={t("addProvider.planFiveHourPlaceholder")}
-                      inputMode="decimal"
-                    />
-                    <p className="mt-1 text-[10px] text-mut">{t("addProvider.fiveHourWindow")}</p>
-                  </div>
-                  <div>
-                    <Input
-                      className="h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                      value={planWeekly}
-                      onChange={(e) => setPlanWeekly(e.target.value)}
-                      placeholder={t("addProvider.planWeeklyPlaceholder")}
-                      inputMode="decimal"
-                    />
-                    <p className="mt-1 text-[10px] text-mut">{t("addProvider.weeklyWindow")}</p>
-                  </div>
+                  {ceilingField(planFiveHour, setPlanFiveHour, t("addProvider.fiveHourWindow"))}
+                  {ceilingField(planWeekly, setPlanWeekly, t("addProvider.weeklyWindow"))}
                 </div>
                 <p className="mt-1.5 text-[10.5px] text-mut">{t("addProvider.planLimitsBody")}</p>
               </div>

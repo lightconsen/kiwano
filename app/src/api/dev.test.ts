@@ -151,6 +151,24 @@ describe("the dashboard fixtures", () => {
     expect((await api.getSettings()).custom_agents.some((a) => a.id === custom.id)).toBe(false);
   });
 
+  it("promote the next candidate when a bound provider is deleted", async () => {
+    // vm::delete_provider: a provider queued for an agent can always be
+    // deleted, and the agent it led promotes its next candidate rather than
+    // being left pointing at a row that is gone.
+    const before = await api.getAgentRoutes();
+    const route = before.find((r) => r.bindings.length > 1)!;
+    const [head, next] = route.bindings;
+
+    await api.deleteProvider(head.provider_id);
+
+    const after = (await api.getAgentRoutes()).find((r) => r.agent === route.agent)!;
+    expect(after.bindings.map((b) => b.provider_id)).not.toContain(head.provider_id);
+    expect(after.bindings[0].provider_id).toBe(next.provider_id);
+    expect(after.bindings.map((b) => b.priority)).toEqual(
+      after.bindings.map((_, i) => i),
+    );
+  });
+
   it("narrow a window to one provider or one agent", async () => {
     // The screen sets one filter and every panel answers for it, so the mock
     // has to narrow by the id it was handed — the lookup it used to do by

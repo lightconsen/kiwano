@@ -1004,6 +1004,17 @@ export const devApi: KiwanoApi = {
     await delay();
     const i = providers.findIndex((p) => p.id === id);
     if (i >= 0) providers.splice(i, 1);
+    // vm::delete_provider in the mock's smaller world: the provider's bindings
+    // go with it, and every agent whose head it was promotes the next
+    // candidate, renumbering what is left. Without this the route kept a
+    // pointer to a row that is gone — which `pnpm dev` renders as a table with
+    // a row missing rather than as the promotion the app actually performs.
+    for (const r of agentRoutes) {
+      if (!r.bindings.some((b) => b.provider_id === id)) continue;
+      const wasHead = r.bindings[0].provider_id === id;
+      r.bindings = r.bindings.filter((b) => b.provider_id !== id);
+      if (wasHead) r.bindings = r.bindings.map((b, i) => ({ ...b, priority: i }));
+    }
   },
 
   async enableProvider(id: string): Promise<void> {

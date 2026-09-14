@@ -305,6 +305,12 @@ pub struct ProviderVm {
     pub logo_color: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub logo_border: bool,
+    /// The catalog entry this provider was added from, when it came from the
+    /// shelf. The dialog needs it to reach the entry again: the entry is the
+    /// authority on the endpoints the provider answers on and on the currency it
+    /// bills in, and a stored row can be missing both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
     pub endpoint: String,
     pub protocol: String,
     pub endpoint_note: String,
@@ -1061,6 +1067,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 logo_char: logo_char(&p.name),
                 logo_color: palette_color(&p.name).to_string(),
                 logo_border: false,
+                catalog_id: p.catalog_id.clone(),
                 endpoint: display_endpoint(&p),
                 protocol: p.protocol.as_str().to_string(),
                 endpoint_note: endpoint_note(&p),
@@ -1723,6 +1730,7 @@ pub fn add_provider(
 
     // compute view fields before partially moving `provider`
     let vm_name = provider.name.clone();
+    let vm_catalog_id = provider.catalog_id.clone();
     let vm_endpoint = display_endpoint(&provider);
     let vm_note = endpoint_note(&provider);
     let vm_protocol = provider.protocol.as_str().to_string();
@@ -1744,6 +1752,7 @@ pub fn add_provider(
         logo_char: logo_char(&input.name),
         logo_color: palette_color(&input.name).to_string(),
         logo_border: false,
+        catalog_id: vm_catalog_id,
         endpoint: vm_endpoint,
         protocol: vm_protocol,
         endpoint_note: vm_note,

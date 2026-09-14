@@ -205,6 +205,10 @@ export interface Provider {
   logo_border?: boolean;
   endpoint: string;
   protocol: Protocol;
+  /** The catalog entry this provider was added from, when it came from the
+      shelf. The add/edit dialog reaches the entry through it for the endpoints
+      and the billing currency the stored row may be missing. */
+  catalog_id?: string | null;
   /** Second half of the endpoint subtitle: OpenAI compatible / qwen3:32b etc. */
   endpoint_note: string;
   /** Additional per-protocol endpoints (one provider serves multiple agent protocols) */

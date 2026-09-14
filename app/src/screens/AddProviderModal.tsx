@@ -86,6 +86,10 @@ export default function AddProviderModal({
   // the modal opens from the Models page; otherwise picked in-modal)
   const [shelf, setShelf] = useState<CatalogEntry | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
+  /** The catalog entry the provider being edited came from, when it is still
+      published. It is the authority on two things the stored row can have lost
+      — see the effect that loads it. */
+  const [editEntry, setEditEntry] = useState<CatalogEntry | null>(null);
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
   const [protocol, setProtocol] = useState<Protocol>("openai");
@@ -116,9 +120,14 @@ export default function AddProviderModal({
   // Entries published before the field existed fall back to USD; editing a
   // provider keeps the currency its limit was saved with, so re-labelling it
   // is a deliberate move rather than a side effect of opening the modal.
+  // …and to the catalog entry, because the stored unit is only half the story:
+  // `normalize_limit_unit` drops it when the limit is left blank, so a
+  // pay-as-you-go provider with no spending limit has no currency on its row at
+  // all and fell through to USD — the dialog contradicting the catalog it was
+  // added from, and the provider's own prices with it.
   const savedCurrency =
     edit?.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : null;
-  const limitCurrency = savedCurrency ?? shelf?.currency ?? "USD";
+  const limitCurrency = savedCurrency ?? editEntry?.currency ?? shelf?.currency ?? "USD";
   const [agents, setAgents] = useState<AgentId[]>([]);
   // Multi-select dropdown for agent binding (rows = logo + name)
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -322,6 +331,52 @@ export default function AddProviderModal({
       api.listCatalog().then((c) => setCatalog(c.entries));
     }
   }, [open, edit, mode, shelf, catalog]);
+
+  /// The catalog entry an edited provider was added from, when the Hub still
+  /// publishes it.
+  ///
+  /// Two things the stored row can be missing live here. **Endpoints**: a
+  /// provider added before the shelf's endpoints were carried through answers on
+  /// one protocol while its entry declares two, and nothing else can tell the
+  /// dialog what the second one is. **Currency**: it is discarded whenever the
+  /// spending limit is left blank (`normalize_limit_unit` drops the unit with
+  /// the limit), which left a pay-as-you-go provider reading as USD in the
+  /// dialog whatever the catalog says it bills in.
+  useEffect(() => {
+    if (!open || !edit?.catalog_id) {
+      setEditEntry(null);
+      return;
+    }
+    let alive = true;
+    api
+      .listCatalog()
+      .then((c) => {
+        if (alive) setEditEntry(c.entries.find((e) => e.id === edit.catalog_id) ?? null);
+      })
+      .catch(() => {
+        if (alive) setEditEntry(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, edit]);
+
+  // Fill in the endpoints the stored row is missing, once the entry lands.
+  // Union, not replace: a protocol the provider already answers on keeps the
+  // endpoint it was saved with, and only protocols it lacks are added — so the
+  // list reads the same whether the row predates the field or not. The rows are
+  // read-only in every mode, so nothing the user typed can be lost underneath
+  // them; saving is what writes them to the provider.
+  useEffect(() => {
+    if (!editEntry) return;
+    setAltEndpoints((rows) => {
+      const have = new Set<Protocol>([protocol, ...rows.map((r) => r.protocol)]);
+      const missing = (editEntry.endpoints ?? []).filter((e) => !have.has(e.protocol));
+      return missing.length === 0
+        ? rows
+        : [...rows, ...missing.map((e) => ({ protocol: e.protocol, endpoint: e.endpoint }))];
+    });
+  }, [editEntry, protocol]);
 
   // Close the agents dropdown on Escape (outside clicks are handled by the
   // transparent overlay rendered behind the open panel)
@@ -1034,8 +1089,12 @@ export default function AddProviderModal({
 
             {/* Plan quota query (edit mode): queries the provider's own plan
                 usage endpoint for quota chips. Extra credentials render per
-                template; templates without them reuse the primary API key. */}
-            {edit && (
+                template; templates without them reuse the primary API key.
+                Plan billing only: the query exists to feed the percent
+                ceilings, and those are not offered on a metered provider — so
+                configuring one here would poll a vendor's plan endpoint and
+                show plan chips for a provider that has no plan. */}
+            {edit && billing === "plan" && (
               <div>
                 <Button
                   variant="outline"

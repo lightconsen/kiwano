@@ -5,7 +5,21 @@
 
 //! Format conversion module
 //!
-//! Implements Anthropic ↔ OpenAI format conversion, for OpenRouter support
+//! One direction is converted, and it is worth naming plainly because the title
+//! "Anthropic ↔ OpenAI" suggests more: an Anthropic **request** becomes an OpenAI
+//! Chat Completions request (`anthropic_to_openai`), and an OpenAI Chat
+//! **response** — JSON or SSE — becomes an Anthropic one (`openai_to_anthropic`
+//! and the streaming converter behind [`create_anthropic_sse_stream`]).
+//!
+//! That is what a Claude Code→OpenAI-compatible provider needs, and it is the
+//! only pair this gateway converts. Not converted, and deliberately not built:
+//! the Responses API in either direction (`/v1/responses` reaches an
+//! OpenAI-speaking provider natively, and nothing else), an OpenAI Chat request
+//! arriving for an Anthropic provider, and `/v1/messages/count_tokens`. Each of
+//! those is refused with a reason rather than approximated — `resolve_inbound` in
+//! the gateway lists them — because a half-converted request is a wrong answer
+//! with no way to tell.
+//!
 //! Reference: anthropic-proxy-rs
 
 use crate::proxy::{
@@ -265,9 +279,10 @@ pub fn anthropic_to_openai_with_reasoning_content(
 /// other `stream_options` fields the client passed through are preserved —
 /// only `include_usage` is added; non-streaming requests are untouched.
 ///
-/// Shared by the Claude→openai_chat (claude.rs) and Codex Responses→Chat
-/// (transform_codex_chat.rs) conversion paths, keeping both client directions
-/// consistent.
+/// Upstream, this was shared with a Codex Responses→Chat path
+/// (`transform_codex_chat.rs`). That converter was not ported — nothing here
+/// speaks the Responses API (see the module comment on what is converted) — so
+/// this is now the only caller.
 pub fn inject_openai_stream_include_usage(result: &mut Value) {
     let is_stream = result
         .get("stream")
@@ -297,9 +312,11 @@ pub fn inject_openai_stream_include_usage(result: &mut Value) {
 ///   "auto" / "none" / "required"      (note: no "any" — use "required")
 ///   {"type": "function", "function": {"name": "<X>"}}
 ///
-/// The Responses API uses a flatter `{"type":"function","name":"X"}` selector,
-/// so it has a sibling `map_tool_choice_to_responses` in `transform_responses.rs`.
-/// Keep the two in sync.
+/// The Responses API uses a flatter `{"type":"function","name":"X"}` selector.
+/// Upstream this had a sibling — `map_tool_choice_to_responses` in
+/// `transform_responses.rs` — and the comment asked that the two be kept in
+/// sync; neither that file nor a Responses conversation path was ported, so
+/// there is nothing to keep in sync with.
 fn map_tool_choice_to_chat(tool_choice: &Value) -> Value {
     match tool_choice {
         Value::String(s) => match s.as_str() {

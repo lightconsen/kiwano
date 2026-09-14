@@ -157,6 +157,14 @@ Tauri v2 侧对应 `bundle.windows.signCommand`（云签名服务不提供私钥
    （`open_restricts_the_database_to_the_owner`，见 `crates/gateway/src/store/mod.rs`）。
    代码注释自己写着 "a keychain is planned, not done"。
 
+   > **后续（2026-09-15）：这句注释已改，且 keychain 定为不做。** 原因是和守护进程冲突，
+   > 不是没做：钥匙串按**读取进程**的签名授权，而这份凭据要给 `kiwanod` 用 —— 它是独立
+   > 守护进程，必须在 GUI 关闭时继续服务。让守护进程读钥匙串，要么弹出一个它无法应答的
+   > 系统授权框（会挂住），要么让守护进程依赖 App 开着，破坏整个设计所依赖的那条性质。
+   > 而"守护进程能无人值守读到的密钥"就只能是和数据库同盘的一个文件 —— 与现状同级，
+   > 只是多了一层同目录存放的密文与密钥。改后的说明在
+   > `crates/gateway/src/store/mod.rs` 的 `harden_permissions` 与 `Provider.api_key`。
+
    这是对用户的安全承诺，所以按事实改写，而不是留着等 keychain 落地。改动位置：
 
    | 位置 | 原表述 | 现表述 |

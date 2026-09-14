@@ -652,8 +652,10 @@ pub struct ProviderEndpoint {
 
 /// A configured upstream provider.
 ///
-/// `api_key` holds the upstream credential for MVP (P1 plan: value lives in
-/// the system keychain and this column keeps only a reference marker).
+/// `api_key` holds the upstream credential in the clear. A system keychain is not
+/// on the roadmap for it — see `harden_permissions` for the reason, which is a
+/// conflict with the daemon rather than an unimplemented feature — so what stands
+/// in the way of a leak is file permissions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -1149,11 +1151,23 @@ pub fn now_rfc3339() -> String {
 /// Restrict the database and its directory to the owning user.
 ///
 /// `providers.api_key` is the upstream credential, and it is written to disk in
-/// the clear (see the field's own note: a keychain is planned, not done). The
-/// realistic leak is not a determined local attacker — anyone who can read a
-/// file the app must decrypt unattended can read the key too — but the mundane
-/// ones: another account on a shared machine, a backup or sync client that
-/// sweeps `$HOME`, a support bundle. 0700/0600 costs nothing and closes them.
+/// the clear.
+///
+/// **That is a decision, not a deferral.** An OS keychain is read per process and
+/// gated on the reading binary's signature, and this credential is needed by
+/// `kiwanod` — a separate daemon that has to keep serving with the desktop app
+/// closed. A keychain read from there either raises a system prompt a daemon
+/// cannot answer (it would hang instead), or makes the daemon depend on the app
+/// being open, which breaks the one property the whole design rests on. A key the
+/// daemon *can* read unattended is a file on the same disk as this database, which
+/// is the protection already in place — dressed up as encryption, but the
+/// ciphertext and its key would sit in the same directory.
+///
+/// So the realistic leak is not a determined local attacker — anyone who can read
+/// a file the app must decrypt unattended can read the key too — but the mundane
+/// ones: another account on a shared machine, a backup or sync client that sweeps
+/// `$HOME`, a support bundle. 0700/0600 costs nothing and closes them, and the
+/// Windows ACL below closes them there.
 ///
 /// The directory mode carries most of the weight: `~/.kiwano` also holds
 /// `backups/` (the agent configs takeover replaced, credentials included) and

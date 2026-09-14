@@ -547,8 +547,8 @@ pub fn refresh_plan_reports(store: &Store) {
 /// than about refresh cost.
 pub const LIMIT_INTERVAL: StdDuration = StdDuration::from_secs(30);
 
-/// Re-evaluate and publish, forever. Shaped like `strategy::prober::run` — the
-/// other thing here that has to look at the world outside a request.
+/// Re-evaluate and publish, forever. The one thing in the gateway that looks at
+/// the world on a schedule rather than because a request arrived.
 pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
     loop {
         // Off the async runtime: the refresh does blocking HTTP against

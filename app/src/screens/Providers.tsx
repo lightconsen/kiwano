@@ -299,11 +299,10 @@ function deleteConsequence(p: Provider, routes: AgentRoute[] | null, t: Translat
 
 /** The row's latency test: one prompt, one number.
  *
- * It reports on the button rather than in the Status cell on purpose. That cell
- * shows the prober's reading — a reachability check every 30 seconds — and this
- * is a different measurement: a real completion, so a slow model reads slow.
- * Putting them in one cell would also mean the number changed under the reader
- * the next time the prober ticked.
+ * It reports on the button rather than in the Status cell on purpose: it is a
+ * measurement the reader just asked for — a real completion, so a slow model
+ * reads slow — and the cell is for standing facts (parked, over a limit). A
+ * number that only exists until the next refresh belongs where it was asked for.
  */
 function TestLatencyButton({ provider }: { provider: Provider }) {
   const t = useT();
@@ -832,7 +831,16 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
   );
 }
 
-/** Health cell: green dot + latency when healthy, muted note otherwise. */
+/** Status cell: whether Kiwano will use this provider, and anything known that
+    says otherwise.
+ *
+ * "Reachable" is deliberately not claimed. A background prober used to write a
+ * verdict into `provider_health` every 30s and this cell showed it as a green dot
+ * and a latency — a signal that never routed anything (the breaker, fed by real
+ * traffic, decides), bought with one HTTP request per provider per half-minute.
+ * It is gone, so an enabled provider says nothing here rather than asserting
+ * health on the strength of a 30s-old probe. A parked provider still says so, and
+ * one over a billing limit fills the cell above. */
 function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   const t = useT();
   // The provider is up and reachable — that is not what changed. What changed
@@ -850,15 +858,12 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   }
   return (
     <div className="w-[14%]">
-      {p.health.state === "ok" ? (
-        <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--kiwi)" }}>
-          <Dot state="ok" />
-          {t("providers.healthy", { latency: p.health.latency_ms ?? "" })}
-        </span>
-      ) : (
+      {/* Nothing to say is a legitimate answer: the row is enabled and nothing
+          has gone wrong that the gateway knows of. */}
+      {p.health.note && (
         <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
           <Dot state={p.health.state} />
-          {p.health.note ?? `${p.health.latency_ms}ms`}
+          {p.health.note}
         </span>
       )}
     </div>

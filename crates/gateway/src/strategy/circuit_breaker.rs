@@ -308,10 +308,11 @@ impl CircuitBreaker {
         }
     }
 
-    /// Releases only the HalfOpen permit, without touching health statistics
+    /// Releases only the HalfOpen permit, without touching health statistics.
     ///
-    /// Used in scenarios like the prober: the request outcome should not count toward
-    /// Provider health, but the occupied permit must still be released so HalfOpen does not stall
+    /// Called by `record_success` / `record_failure` when the admission that
+    /// carried the permit reports back, so a HalfOpen window cannot stall on a
+    /// probe that has already finished.
     pub fn release_half_open_permit(&self) {
         let mut current = self.half_open_requests.load(Ordering::SeqCst);
         loop {

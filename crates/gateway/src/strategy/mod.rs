@@ -14,7 +14,6 @@
 //! to feed the breaker back (key = `agent:provider_id`, tech.md §4.7.3).
 
 pub mod circuit_breaker;
-pub mod prober;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

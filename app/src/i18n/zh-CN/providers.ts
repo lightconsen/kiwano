@@ -27,7 +27,6 @@ export const providers = {
   clickAgain: "再次点击以确认",
   confirm: "确认",
   blocked: "已阻断",
-  healthy: "正常 {latency}ms",
   notRoutingTitle: "未在此处路由：{reason}",
 
   // ── Usage / quota cell ──

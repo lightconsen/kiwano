@@ -37,7 +37,6 @@ export const providers = {
   clickAgain: "Click again to confirm",
   confirm: "Confirm",
   blocked: "Blocked",
-  healthy: "Healthy {latency}ms",
   notRoutingTitle: "Not routing here: {reason}",
 
   // ── Usage / quota cell ──

@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 17;
+pub const SCHEMA_VERSION: i32 = 18;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -534,6 +534,10 @@ CREATE TABLE IF NOT EXISTS agent_limits (
 );
 "#;
 
+const MIGRATION_V18: &str = r#"
+DROP TABLE IF EXISTS provider_health;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -860,17 +864,6 @@ impl UsageTotals {
     }
 }
 
-/// One health-probe verdict (prober → `provider_health` table).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProviderHealth {
-    pub provider_id: String,
-    /// healthy | degraded | down | unknown
-    pub status: String,
-    pub last_latency_ms: Option<i64>,
-    pub last_check_at: Option<String>,
-    pub consecutive_failures: i64,
-}
-
 /// Per-provider aggregation result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderUsage {
@@ -885,17 +878,6 @@ pub struct DailyUsage {
     /// `YYYY-MM-DDTHH` from `usage_hourly`. Doubles as the sort key.
     pub day: String,
     pub totals: UsageTotals,
-}
-
-/// Health probe state of a provider (table prepared for the P1 failover engine).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HealthRecord {
-    pub provider_id: String,
-    /// healthy | degraded | down | unknown
-    pub status: String,
-    pub last_latency_ms: Option<i64>,
-    pub last_check_at: Option<String>,
-    pub consecutive_failures: i64,
 }
 
 /// One complete data-plane request awaiting persistence (tech.md: full request
@@ -1550,6 +1532,9 @@ impl Store {
         }
         if version < 17 {
             conn.execute_batch(MIGRATION_V17)?;
+        }
+        if version < 18 {
+            conn.execute_batch(MIGRATION_V18)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -2223,64 +2208,6 @@ impl Store {
         Ok(stmt.query_row(params![provider_id, since], UsageTotals::from_row)?)
     }
 
-    /// Upsert one health-probe verdict (prober, tech.md §4.7 failover).
-    pub fn upsert_provider_health(
-        &self,
-        provider_id: &str,
-        status: &str,
-        last_latency_ms: i64,
-    ) -> Result<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_health (provider_id, status, last_latency_ms, last_check_at, consecutive_failures)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(provider_id) DO UPDATE SET
-                status = ?2,
-                last_latency_ms = ?3,
-                last_check_at = ?4,
-                consecutive_failures = ?5",
-            params![
-                provider_id,
-                status,
-                last_latency_ms,
-                now_rfc3339(),
-                if status == "down" {
-                    // The streak counter increments in the same transaction: read the old value +1 (down) or reset to 0 (healthy)
-                    conn.query_row(
-                        "SELECT COALESCE((SELECT consecutive_failures FROM provider_health WHERE provider_id = ?1), 0) + 1",
-                        params![provider_id],
-                        |r| r.get::<_, i64>(0),
-                    )
-                    .unwrap_or(1)
-                } else {
-                    0
-                },
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Current health rows (for UI display and diagnostics).
-    pub fn list_provider_health(&self) -> Result<Vec<ProviderHealth>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT provider_id, status, last_latency_ms, last_check_at, consecutive_failures
-             FROM provider_health ORDER BY provider_id",
-        )?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(ProviderHealth {
-                    provider_id: row.get(0)?,
-                    status: row.get(1)?,
-                    last_latency_ms: row.get(2)?,
-                    last_check_at: row.get(3)?,
-                    consecutive_failures: row.get(4)?,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
     /// Totals grouped by provider, optionally filtered by agent, provider
     /// and/or since.
     pub fn usage_by_provider(
@@ -2875,38 +2802,6 @@ impl Store {
 
     // ---- provider health (P1 failover groundwork) ------------------------
 
-    pub fn upsert_health(&self, h: &HealthRecord) -> Result<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_health (provider_id, status, last_latency_ms,
-                                          last_check_at, consecutive_failures)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(provider_id) DO UPDATE SET
-                status = ?2, last_latency_ms = ?3, last_check_at = ?4,
-                consecutive_failures = ?5",
-            params![
-                h.provider_id,
-                h.status,
-                h.last_latency_ms,
-                h.last_check_at,
-                h.consecutive_failures,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_health(&self, provider_id: &str) -> Result<Option<HealthRecord>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT provider_id, status, last_latency_ms, last_check_at, consecutive_failures
-             FROM provider_health WHERE provider_id = ?1",
-        )?;
-        let h = stmt
-            .query_row(params![provider_id], health_from_row)
-            .optional()?;
-        Ok(h)
-    }
-
     // ---- metrics ---------------------------------------------------------
 
     pub fn metrics(&self) -> Result<StoreMetrics> {
@@ -3002,16 +2897,6 @@ fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Binding> {
         win_start: row.get(4)?,
         win_end: row.get(5)?,
         enabled: row.get::<_, i64>(6)? != 0,
-    })
-}
-
-fn health_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HealthRecord> {
-    Ok(HealthRecord {
-        provider_id: row.get(0)?,
-        status: row.get(1)?,
-        last_latency_ms: row.get(2)?,
-        last_check_at: row.get(3)?,
-        consecutive_failures: row.get(4)?,
     })
 }
 
@@ -3350,7 +3235,6 @@ mod tests {
             "agent_bindings",
             "placeholder_keys",
             "usage",
-            "provider_health",
             "request_logs",
             "request_bodies",
             "gateway_settings",
@@ -3450,7 +3334,6 @@ mod tests {
                  INSERT INTO agent_strategies (agent, type) VALUES ('gemini', 'single');
                  INSERT INTO api_keys (provider_id, api_key, enabled, created_at)
                  VALUES ('p-gem', 'sk-g2', 1, 't0');
-                 INSERT INTO provider_health (provider_id) VALUES ('p-gem');
                  INSERT INTO provider_endpoints (provider_id, protocol, base_url)
                  VALUES ('p-gem', 'gemini', 'https://g.example.com');
                  INSERT INTO model_pricing (provider_id, model_id, display_name, input, output)
@@ -3476,7 +3359,6 @@ mod tests {
         let conn = Connection::open(&db).unwrap();
         for (table, predicate) in [
             ("api_keys", "provider_id = 'p-gem'"),
-            ("provider_health", "provider_id = 'p-gem'"),
             ("provider_endpoints", "provider_id = 'p-gem'"),
             ("model_pricing", "provider_id = 'p-gem'"),
         ] {
@@ -4295,34 +4177,6 @@ mod tests {
         store
             .insert_provider(&sample_provider("p1", Protocol::OpenAI))
             .unwrap();
-
-        assert!(store.get_health("p1").unwrap().is_none());
-
-        store
-            .upsert_health(&HealthRecord {
-                provider_id: "p1".into(),
-                status: "healthy".into(),
-                last_latency_ms: Some(88),
-                last_check_at: Some(now_rfc3339()),
-                consecutive_failures: 0,
-            })
-            .unwrap();
-        let h = store.get_health("p1").unwrap().unwrap();
-        assert_eq!(h.status, "healthy");
-        assert_eq!(h.last_latency_ms, Some(88));
-
-        store
-            .upsert_health(&HealthRecord {
-                provider_id: "p1".into(),
-                status: "down".into(),
-                last_latency_ms: None,
-                last_check_at: Some(now_rfc3339()),
-                consecutive_failures: 3,
-            })
-            .unwrap();
-        let h = store.get_health("p1").unwrap().unwrap();
-        assert_eq!(h.status, "down");
-        assert_eq!(h.consecutive_failures, 3);
     }
 
     #[test]

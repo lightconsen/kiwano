@@ -11,9 +11,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwanod::store::{
-    AgentLimit, Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry,
-    RequestLogExportRow, RequestLogFilter, Store, Strategy, StrategyType, UsageTotals,
-    EXPORT_ROW_CAP,
+    AgentLimit, Billing, Binding, Provider, RequestLogDetail, RequestLogEntry, RequestLogExportRow,
+    RequestLogFilter, Store, Strategy, StrategyType, UsageTotals, EXPORT_ROW_CAP,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1376,7 +1375,7 @@ pub fn build_provider_vms(
                 None
             };
 
-            let health = health_vm(store, &p);
+            let health = health_vm(&p);
             let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7);
 
             ProviderVm {
@@ -1758,40 +1757,21 @@ fn endpoint_note(p: &Provider) -> String {
     note
 }
 
-fn health_vm(store: &Store, p: &Provider) -> HealthVm {
-    let rec = store.get_health(&p.id).ok().flatten();
-    match rec {
-        Some(HealthRecord {
-            status,
-            last_latency_ms,
-            ..
-        }) => match status.as_str() {
-            "healthy" => HealthVm {
-                state: "ok".into(),
-                latency_ms: last_latency_ms,
-                note: None,
-            },
-            "degraded" => HealthVm {
-                state: "idle".into(),
-                latency_ms: last_latency_ms,
-                note: None,
-            },
-            "down" => HealthVm {
-                state: "off".into(),
-                latency_ms: last_latency_ms,
-                note: Some("Error".into()),
-            },
-            _ => derive_health(p, last_latency_ms),
-        },
-        None => derive_health(p, None),
-    }
-}
-
-fn derive_health(p: &Provider, latency: Option<i64>) -> HealthVm {
+/// What the row says about a provider nobody has just asked.
+///
+/// The gateway used to keep a background probe's verdict here (every 30s, one
+/// HTTP request per provider, written to `provider_health`), and the row showed
+/// it as a green dot and a latency. That signal never routed anything — the
+/// breaker, fed by real traffic, is what decides — so it was a continuous
+/// background request per provider for a badge, and it is gone. An enabled
+/// provider now reads as neutral rather than as healthy, which is the honest
+/// answer to "is it up?" when the way to find out is to ask it: the row's Test
+/// button measures one, and the request log is where failures show up.
+fn health_vm(p: &Provider) -> HealthVm {
     if p.enabled {
         HealthVm {
             state: "idle".into(),
-            latency_ms: latency,
+            latency_ms: None,
             note: None,
         }
     } else {
@@ -2116,7 +2096,7 @@ pub fn add_provider(
     let vm_protocol = provider.protocol.as_str().to_string();
     let vm_endpoints = vm_endpoints(&provider);
     let vm_billing = billing_to_ui(provider.billing).to_string();
-    let vm_health = derive_health(&provider, None);
+    let vm_health = health_vm(&provider);
     let vm_advanced = advanced_vm(&provider);
 
     for agent in input.agents.iter().flatten() {

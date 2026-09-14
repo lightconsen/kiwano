@@ -121,12 +121,6 @@ async fn main() {
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
-    // Background health probing (tech.md §4.7 failover groundwork): one round every 30s, writes provider_health.
-    tokio::spawn(kiwanod::strategy::prober::run(
-        state.store.clone(),
-        kiwanod::strategy::prober::PROBE_INTERVAL,
-    ));
-
     // Billing limits, evaluated here rather than in the desktop app so they
     // hold with the app closed — the gateway is the process that routes.
     tokio::spawn(kiwanod::limits::run(

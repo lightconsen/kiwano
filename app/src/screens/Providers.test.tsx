@@ -65,7 +65,9 @@ function deepseek(over: Partial<Provider> = {}): Provider {
     agents: ["codex"],
     serving_agents: ["codex"],
     is_current: true,
-    health: { state: "ok", latency_ms: 120 },
+    // What the backend produces for an enabled provider now that no probe
+    // writes a verdict: neutral, with nothing measured.
+    health: { state: "idle", latency_ms: null },
     usage: null,
     ...over,
   };
@@ -398,8 +400,8 @@ describe("the latency test", () => {
     await user.click(await screen.findByRole("button", { name: en.providers.testLatency }));
 
     await waitFor(() => expect(apiMock.testProviderLatency).toHaveBeenCalledWith("deepseek"));
-    // The number lands on the button, not in the Status cell: that cell is the
-    // prober's reading, and this is a different measurement.
+    // The number lands on the button, not in the Status cell: the cell is for
+    // standing facts, and this is a measurement the click just asked for.
     expect(await screen.findByText("1240ms")).toBeInTheDocument();
   });
 

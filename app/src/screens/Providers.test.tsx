@@ -319,6 +319,15 @@ describe("a user-defined agent", () => {
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: longTasks.label }));
+
+    // Deleting lives in the agent's own dialog, not on the tab: the row you
+    // click around in keeps no destructive control.
+    expect(screen.queryByRole("button", { name: en.providers.deleteAgent })).toBeNull();
+    await user.click(
+      screen.getByRole("button", {
+        name: en.providers.accessFor.replace("{agent}", longTasks.label),
+      }),
+    );
     const del = await screen.findByRole("button", { name: en.providers.deleteAgent });
     await user.click(del);
     // The first click only arms it…

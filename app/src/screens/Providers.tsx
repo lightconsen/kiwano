@@ -189,12 +189,14 @@ function AccessDialog({
   listen,
   open,
   onClose,
+  onDelete,
 }: {
   label: string;
   keyName: string | null;
   listen: string;
   open: boolean;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   const t = useT();
   return (
@@ -205,10 +207,18 @@ function AccessDialog({
             {t("providers.accessFor", { agent: label })}
           </DialogTitle>
         </DialogHeader>
-        <div className="px-5 pb-4 pt-1">
+        <div className="px-5 pb-3 pt-1">
           <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
           <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
           <p className="mt-2 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
+        </div>
+        {/* Deleting lives with the rest of what this agent *is*, and one step
+            further from the pointer than the tab's own rows. */}
+        <div className="flex items-center gap-3 border-t border-line px-5 py-3">
+          <DeleteAgentButton label={label} onConfirm={onDelete} />
+          <span className="min-w-0 flex-1 text-[10.5px] text-mut">
+            {t("providers.deleteAgentNote")}
+          </span>
         </div>
       </DialogContent>
     </Dialog>
@@ -266,7 +276,7 @@ function DeleteAgentButton({ label, onConfirm }: { label: string; onConfirm: () 
     <Button
       variant="ghost"
       size="sm"
-      className="mr-4 mt-3 h-7 shrink-0 gap-1 border border-line px-2 text-[10.5px] text-mut hover:text-ink"
+      className="h-7 shrink-0 gap-1 border border-line px-2 text-[10.5px] text-mut hover:text-ink"
       style={armed ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
       title={armed ? t("providers.deleteAgentConfirm") : t("providers.deleteAgentNote")}
       aria-label={t("providers.deleteAgent")}
@@ -1497,37 +1507,32 @@ export default function Providers({
       {/* A user-defined agent's tab starts with the two values a client is
           configured with — the whole of what it is from the outside. */}
       {custom && (
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            {/* The tab names the agent: the segment strip shows it as a letter
-                avatar, so a page with no name on it is one you have to identify
-                from the highlight over there. The credentials live one click
-                further, behind the icon — they are read once and pasted, not
-                watched. */}
-            <div className="mx-4 mt-3 flex items-center gap-1.5">
-              <ProviderLogo
-                char={agentMeta(seg).chip_char}
-                color={agentMeta(seg).chip_color}
-                name={custom.label}
-                size={18}
-              />
-              <span className="text-[13px] font-semibold">{custom.label}</span>
-              {custom.note && (
-                <span className="min-w-0 truncate text-[11px] text-mut">{custom.note}</span>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
-                aria-label={t("providers.accessFor", { agent: custom.label })}
-                title={t("providers.accessFor", { agent: custom.label })}
-                onClick={() => setAccessOpen(true)}
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
-          <DeleteAgentButton label={custom.label} onConfirm={() => onDeleteAgent(custom.id)} />
+        // The tab names the agent: the strip shows it as a letter avatar, so a
+        // page with no name on it is one you have to identify from the highlight
+        // over there. Everything *about* it — the credentials, and deleting it —
+        // is behind the icon, which also keeps a destructive control out of the
+        // row you click around in.
+        <div className="mx-4 mt-3 flex items-center gap-1.5">
+          <ProviderLogo
+            char={agentMeta(seg).chip_char}
+            color={agentMeta(seg).chip_color}
+            name={custom.label}
+            size={18}
+          />
+          <span className="text-[13px] font-semibold">{custom.label}</span>
+          {custom.note && (
+            <span className="min-w-0 truncate text-[11px] text-mut">{custom.note}</span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
+            aria-label={t("providers.accessFor", { agent: custom.label })}
+            title={t("providers.accessFor", { agent: custom.label })}
+            onClick={() => setAccessOpen(true)}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+          </Button>
         </div>
       )}
 
@@ -1653,6 +1658,7 @@ export default function Providers({
           listen={listen}
           open={accessOpen}
           onClose={() => setAccessOpen(false)}
+          onDelete={() => onDeleteAgent(custom.id)}
         />
       )}
 

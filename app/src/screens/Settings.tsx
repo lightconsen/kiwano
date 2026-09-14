@@ -280,6 +280,10 @@ export default function Settings() {
                   // why that direction keeps its own button below.
                   <Switch
                     checked
+                    // The visible row is the agent's own label; without this the
+                    // control is announced (and reachable in a test) only as
+                    // "switch", one of six on this page.
+                    aria-label={tk.label}
                     disabled={takeoverBusy === tk.agent}
                     onCheckedChange={() => disableTakeover(tk.agent)}
                   />

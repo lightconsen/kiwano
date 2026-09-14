@@ -10,6 +10,11 @@ export const dashboard = {
 
   allProviders: "All providers",
   allAgents: "All agents",
+  /** Accessible names for the two filter comboboxes: the visible label is the
+      current selection, so without these a screen reader announces an unnamed
+      listbox and a test has no way to tell the two apart. */
+  filterByProvider: "Filter by provider",
+  filterByAgent: "Filter by agent",
   localSqlite: "Data stays in local SQLite",
 
   statRequests: "Requests",

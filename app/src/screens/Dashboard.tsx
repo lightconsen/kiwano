@@ -465,7 +465,11 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
         {/* Filter options come from the window's active set (traffic in the
             window), independent of the current selection */}
         <Select value={providerFilter} onValueChange={(v) => setProviderFilter(v ?? "all")}>
-          <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
+          <SelectTrigger
+            size="sm"
+            aria-label={t("dashboard.filterByProvider")}
+            className="h-7 bg-surface text-[12px] text-mut dark:bg-surface"
+          >
             {/* The value is an id; a bare <SelectValue /> would print it. */}
             <SelectValue>
               {(v) =>
@@ -484,7 +488,11 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
           </SelectContent>
         </Select>
         <Select value={agentFilter} onValueChange={(v) => setAgentFilter(v ?? "all")}>
-          <SelectTrigger size="sm" className="h-7 bg-surface text-[12px] text-mut dark:bg-surface">
+          <SelectTrigger
+            size="sm"
+            aria-label={t("dashboard.filterByAgent")}
+            className="h-7 bg-surface text-[12px] text-mut dark:bg-surface"
+          >
             <SelectValue>
               {(v) =>
                 data.filter_agents.find((a) => a.id === v)?.label ?? t("dashboard.allAgents")

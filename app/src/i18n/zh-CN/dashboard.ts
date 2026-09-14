@@ -5,6 +5,8 @@ export const dashboard = {
 
   allProviders: "全部 Provider",
   allAgents: "全部 Agent",
+  filterByProvider: "按 Provider 筛选",
+  filterByAgent: "按 Agent 筛选",
   localSqlite: "数据保存在本地 SQLite",
 
   statRequests: "请求数",

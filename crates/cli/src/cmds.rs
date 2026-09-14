@@ -222,7 +222,7 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
             .get_provider(&args.provider_id)
             .map_err(runtime)?
             .ok_or_else(|| runtime(format!("provider not found: {}", args.provider_id)))?;
-        edit_input(args, &current, store)?
+        edit_input(args, &current)?
     };
     let updated = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
@@ -242,11 +242,7 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
 /// changed fields would blank the rest — including a plan provider's percent
 /// limits. Everything is therefore carried over explicitly, and only the flags
 /// present in `args` override.
-fn edit_input(
-    args: &EditArgs,
-    current: &Provider,
-    store: &kiwanod::store::Store,
-) -> Result<vm::NewProviderInput, CliError> {
+fn edit_input(args: &EditArgs, current: &Provider) -> Result<vm::NewProviderInput, CliError> {
     let billing = match &args.billing {
         Some(raw) => parse_billing(raw)?.to_string(),
         None => vm::billing_to_ui(current.billing).to_string(),
@@ -255,12 +251,18 @@ fn edit_input(
         Some(raw) => parse_protocol(raw)?.to_string(),
         None => current.protocol.as_str().to_string(),
     };
+    // Three intents, now three values rather than three vectors: `--no-bind`
+    // unbinds everything (an authoritative empty set), naming agents binds those,
+    // and saying nothing leaves the bindings alone. That last case used to be
+    // emulated by re-sending the set already bound, which re-promoted this
+    // provider to primary for each of them and flattened their strategies — the
+    // side effect `None` now avoids.
     let agents = if args.no_bind {
-        Vec::new()
+        Some(Vec::new())
     } else if args.bind.is_empty() {
-        agents_bound_to(store, &args.provider_id)?
+        None
     } else {
-        args.bind.clone()
+        Some(args.bind.clone())
     };
 
     // Checked against the *effective* billing: an edit that names no billing
@@ -1135,7 +1137,7 @@ fn new_provider_input(args: &AddArgs) -> Result<vm::NewProviderInput, CliError> 
             reset_period,
             plan_limits: plan_limits_input(&args.forward, None),
         },
-        agents: args.bind.clone(),
+        agents: Some(args.bind.clone()),
         endpoints: parse_extra_endpoints(&args.forward.endpoint_extra)?,
         // Absent, not empty: `advanced` is an authoritative snapshot when
         // present, so sending an empty object would clear settings the user

@@ -503,7 +503,9 @@ export default function AddProviderModal({
                 limit_value: limitValue ? Number(limitValue) : undefined,
                 limit_unit: billing === "payg" ? limitCurrency : undefined,
               },
-        agents,
+        // Add only — see the binding control above: an edit leaves the bindings
+        // to the agent tabs rather than re-promoting itself through them.
+        ...(edit ? {} : { agents }),
         endpoints: altInputs,
         advanced: {
           timeout_secs: advTimeout ? Number(advTimeout) : null,
@@ -972,6 +974,13 @@ export default function AddProviderModal({
               </div>
             )}
 
+            {/* Adding only. Which providers serve an agent is the Apps screen's
+                job — its agent tabs already bind, unbind and set the strategy —
+                and a save here rebinds as a side effect: every agent in the set
+                is re-promoted to this provider as primary and has its strategy
+                flattened to Single. Saving an unrelated change must not do that,
+                so an edit neither shows the control nor sends the set. */}
+            {!edit && (
             <div className="relative">
               <Label
                 className="cursor-pointer select-none text-[11px] font-medium text-mut"
@@ -1030,6 +1039,7 @@ export default function AddProviderModal({
                 </>
               )}
             </div>
+            )}
 
             {/* Rotating keys (edit mode: multiple keys rotate automatically, spec §4.1 P1) */}
             {edit && (

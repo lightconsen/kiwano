@@ -842,7 +842,15 @@ pub struct NewProviderInput {
     pub model_default: String,
     pub billing: String,
     pub billing_config: BillingConfigInput,
-    pub agents: Vec<String>,
+    /// Agents to bind this provider to.
+    ///
+    /// Expected when adding — a new provider nothing serves is a dead row — and
+    /// **absent when editing**, where the bindings belong to the Apps screen's
+    /// agent tabs. The distinction has to be in the type: a plain `Vec` cannot
+    /// tell "no agents" from "not speaking about agents", and the difference is
+    /// whether an edit leaves the bindings alone or unbinds the lot.
+    #[serde(default)]
+    pub agents: Option<Vec<String>>,
     /// Additional per-protocol endpoints; unknown protocol strings are
     /// skipped (defaulting one to openai could collide with the primary).
     #[serde(default)]
@@ -1751,7 +1759,7 @@ pub fn add_provider(
     let vm_health = derive_health(&provider, None);
     let vm_advanced = advanced_vm(&provider);
 
-    for agent in &input.agents {
+    for agent in input.agents.iter().flatten() {
         // "Save & Enable" → becomes the primary for the chosen agents.
         store
             .upsert_strategy(agent, StrategyType::Single, None)
@@ -1776,13 +1784,17 @@ pub fn add_provider(
         plan_query: input.plan_query.clone(),
         plan_limits: None,
         enabled: true,
-        agents: input.agents.clone(),
+        agents: input.agents.clone().unwrap_or_default(),
         // Optimistic: strategy serving is only computed by build_provider_vms;
         // the list refetch right after returns the real per-agent state.
         serving_agents: vec![],
-        is_current: !input.agents.is_empty(),
+        is_current: input.agents.as_ref().is_some_and(|a| !a.is_empty()),
         status_badge: None,
-        agents_note: (!input.agents.is_empty()).then(|| format!("{} agent(s)", input.agents.len())),
+        agents_note: input
+            .agents
+            .as_ref()
+            .filter(|a| !a.is_empty())
+            .map(|a| format!("{} agent(s)", a.len())),
         health: vm_health,
         usage: None,
         advanced: vm_advanced,
@@ -1937,31 +1949,39 @@ pub fn update_provider(
     p.updated_at = rfc3339(unix_now());
     store.update_provider(&p).map_err(e2s)?;
 
-    // Rebind: unbind old agents not in the new set; new agents use the same
-    // primary logic as add
-    let new_set: std::collections::HashSet<&str> =
-        input.agents.iter().map(String::as_str).collect();
-    let old_agents: Vec<String> = store
-        .bound_agents()
-        .map_err(e2s)?
-        .into_iter()
-        .filter(|a| {
-            store
-                .bindings_for_agent(a)
-                .map(|bs| bs.iter().any(|b| b.provider_id == id))
-                .unwrap_or(false)
-        })
-        .collect();
-    for agent in &old_agents {
-        if !new_set.contains(agent.as_str()) {
-            store.delete_binding(agent, id).map_err(e2s)?;
+    // Bindings: absent leaves them exactly as they are, which is what an edit
+    // sends. They belong to the Apps screen's agent tabs — that screen binds,
+    // unbinds and sets the strategy — and this loop is not a neutral rewrite of
+    // "the same set": every agent it names is promoted to *this* provider as
+    // primary, and has its strategy flattened to Single. Running it on an
+    // unrelated save is how editing a provider's timeout silently reordered an
+    // agent's failover queue.
+    if let Some(agents) = &input.agents {
+        // Unbind old agents not in the new set; new ones use the same primary
+        // logic as add.
+        let new_set: std::collections::HashSet<&str> = agents.iter().map(String::as_str).collect();
+        let old_agents: Vec<String> = store
+            .bound_agents()
+            .map_err(e2s)?
+            .into_iter()
+            .filter(|a| {
+                store
+                    .bindings_for_agent(a)
+                    .map(|bs| bs.iter().any(|b| b.provider_id == id))
+                    .unwrap_or(false)
+            })
+            .collect();
+        for agent in &old_agents {
+            if !new_set.contains(agent.as_str()) {
+                store.delete_binding(agent, id).map_err(e2s)?;
+            }
         }
-    }
-    for agent in &input.agents {
-        store
-            .upsert_strategy(agent, StrategyType::Single, None)
-            .map_err(e2s)?;
-        bind_as_primary(store, agent, id)?;
+        for agent in agents {
+            store
+                .upsert_strategy(agent, StrategyType::Single, None)
+                .map_err(e2s)?;
+            bind_as_primary(store, agent, id)?;
+        }
     }
 
     let vms = build_provider_vms(store, aux)?;
@@ -3544,7 +3564,7 @@ mod tests {
                 reset_period: None,
                 plan_limits: None,
             },
-            agents: Vec::new(),
+            agents: None,
             endpoints: Vec::new(),
             advanced: None,
             plan_query: None,
@@ -3666,6 +3686,62 @@ mod tests {
         edit.model_default = String::new();
         update_provider(&s, &aux, &vm.id, &edit).unwrap();
         assert_eq!(s.get_provider(&vm.id).unwrap().unwrap().model_default, None);
+    }
+
+    /// An edit that names no agents leaves the bindings exactly as they are.
+    ///
+    /// Which is not the same as sending the set that is already bound: that loop
+    /// promotes *this* provider to primary for every agent it names and flattens
+    /// the agent's strategy to Single. Saving an unrelated field therefore used
+    /// to reorder an agent's failover queue and change how it routes.
+    #[test]
+    fn an_edit_that_names_no_agents_leaves_the_bindings_alone() {
+        let s = store();
+        let aux = catalog_aux();
+
+        // Two providers serving claude. The second one added is primary.
+        let mut first = catalog_input("A", "https://a.example.com/v1");
+        first.agents = Some(vec!["claude".into()]);
+        let a = add_provider(&s, &aux, &first).unwrap();
+        let mut second = catalog_input("B", "https://b.example.com/v1");
+        second.agents = Some(vec!["claude".into()]);
+        let b = add_provider(&s, &aux, &second).unwrap();
+        assert_eq!(
+            s.primary_provider_id("claude").unwrap().as_deref(),
+            Some(b.id.as_str())
+        );
+
+        // The agent is set up as a failover queue behind that primary.
+        s.upsert_strategy("claude", StrategyType::Failover, None)
+            .unwrap();
+
+        // An edit that says nothing about agents: nothing moves.
+        let mut edit = catalog_input("A", "https://a.example.com/v1");
+        edit.agents = None;
+        update_provider(&s, &aux, &a.id, &edit).unwrap();
+        assert_eq!(
+            s.primary_provider_id("claude").unwrap().as_deref(),
+            Some(b.id.as_str()),
+            "the edit must not promote itself over the standing primary"
+        );
+        assert_eq!(
+            s.get_strategy("claude").unwrap().unwrap().kind,
+            StrategyType::Failover,
+            "and must not flatten the agent's strategy"
+        );
+
+        // Naming agents still rebinds — that is the one path that may, and the
+        // reason the field is an Option rather than a Vec.
+        edit.agents = Some(vec!["claude".into()]);
+        update_provider(&s, &aux, &a.id, &edit).unwrap();
+        assert_eq!(
+            s.primary_provider_id("claude").unwrap().as_deref(),
+            Some(a.id.as_str())
+        );
+        assert_eq!(
+            s.get_strategy("claude").unwrap().unwrap().kind,
+            StrategyType::Single
+        );
     }
 
     /// A caller that names an entry is the authority; the inference fills in
@@ -3940,7 +4016,7 @@ mod tests {
                 reset_period: Some("monthly".into()),
                 plan_limits: None,
             },
-            agents: vec!["codex".into()],
+            agents: Some(vec!["codex".into()]),
             endpoints: Vec::new(),
             advanced: None,
             plan_query: None,
@@ -3976,7 +4052,7 @@ mod tests {
                 reset_period: None,
                 plan_limits: None,
             },
-            agents: vec![],
+            agents: Some(vec![]),
             endpoints: vec![
                 NewEndpointInput {
                     protocol: "anthropic".into(),
@@ -4023,7 +4099,7 @@ mod tests {
                 reset_period: None,
                 plan_limits: None,
             },
-            agents: vec![],
+            agents: Some(vec![]),
             endpoints: vec![NewEndpointInput {
                 protocol: "anthropic".into(),
                 endpoint: "https://qianfan.baidubce.com/anthropic/coding".into(),
@@ -4093,7 +4169,7 @@ mod tests {
                 reset_period: None,
                 plan_limits: None,
             },
-            agents: vec!["codex".into()], // rebind: claude dropped
+            agents: Some(vec!["codex".into()]), // rebind: claude dropped
             endpoints: Vec::new(),
             advanced: None,
             plan_query: None,

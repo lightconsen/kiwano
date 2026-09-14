@@ -262,7 +262,12 @@ export interface NewProviderInput {
     /** Plan providers only: percent-of-window ceilings */
     plan_limits?: PlanLimits | null;
   };
-  agents: AgentId[];
+  /** Agents to bind this provider to. Sent when adding — a new provider is
+      useless unbound — and **omitted when editing**, where the bindings belong
+      to the Apps screen's agent tabs. Sending them on an edit would promote this
+      provider to primary for every agent it is already bound to, and rewrite the
+      agent's strategy, as a side effect of saving anything else. */
+  agents?: AgentId[];
   /** Additional per-protocol endpoints to persist alongside the primary */
   endpoints?: { protocol: Protocol; endpoint: string }[];
   /** Plan-quota query config; null clears an existing config */

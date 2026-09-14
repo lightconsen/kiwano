@@ -846,12 +846,12 @@ export const devApi: KiwanoApi = {
       billing: input.billing,
       limit_unit: input.billing_config.limit_unit,
       enabled: true,
-      agents: input.agents,
+      agents: input.agents ?? [],
       // Optimistic, mirrors vm::add_provider; listProviders recomputes
       serving_agents: [],
-      is_current: input.agents.length > 0,
-      agents_note: input.agents.length
-        ? `${input.agents.length} agent(s)`
+      is_current: (input.agents ?? []).length > 0,
+      agents_note: (input.agents ?? []).length
+        ? `${input.agents!.length} agent(s)`
         : undefined,
       health: { state: "ok", latency_ms: null },
       usage: null,
@@ -878,7 +878,9 @@ export const devApi: KiwanoApi = {
     }));
     t.endpoint_note = endpointNote(input.protocol, t.endpoints);
     t.billing = input.billing;
-    t.agents = [...input.agents];
+    // Absent `agents` keeps the existing bindings (mirrors vm::update_provider):
+    // which providers serve an agent is edited on the Apps screen, not here.
+    if (input.agents !== undefined) t.agents = [...input.agents];
     t.serving_agents = t.agents.filter((a) => servingNow().has(`${a}/${t.id}`));
     t.is_current = t.serving_agents.length > 0;
     t.agents_note = t.agents.length ? `${t.agents.length} agent(s)` : undefined;

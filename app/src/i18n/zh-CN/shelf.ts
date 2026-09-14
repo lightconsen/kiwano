@@ -10,7 +10,8 @@ export const shelf = {
   billingPlan: "套餐",
   billingPayg: "按量付费",
   billingUnl: "无限量",
-  billingBoth: "按量 + 套餐",
+  /** 与计费芯片一致：中文也用 PAYG（见 app.billing）。 */
+  billingBoth: "PAYG + 套餐",
 
   probeOk: "正常",
   probeAuth: "需要密钥",

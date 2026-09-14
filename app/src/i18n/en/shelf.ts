@@ -18,8 +18,12 @@ export const shelf = {
   billingPayg: "Pay as you go",
   billingUnl: "Unlimited",
   /** A vendor that charges both ways at one address (Anthropic: an API and a
-      subscription). The price cell still shows the metered rates. */
-  billingBoth: "Metered + plan",
+      subscription). "PAYG" is this app's own word for pay-as-you-go — the billing
+      chips already read `PAYG / Plan / Unl` — and it is the only form short
+      enough to name two modes in a 104px column: "Pay as you go + plan" measures
+      113px against the 88px that fits. The price cell still shows the metered
+      rates. */
+  billingBoth: "PAYG + Plan",
 
   probeOk: "OK",
   probeAuth: "Auth required",

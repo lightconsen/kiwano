@@ -134,6 +134,10 @@ jobs:
         working-directory: app
         run: pnpm build
 
+      - name: Frontend tests
+        working-directory: app
+        run: pnpm test
+
       # Before the first cargo command, not after: `tauri_build::build()` in
       # app/src-tauri/build.rs resolves `externalBin` at build-script time, so a
       # missing sidecar fails clippy and the tests with "resource path

@@ -7,8 +7,8 @@
 // is the key set and the fact that the values are strings.
 //
 // The payoff is that a missing key, a typo, or a namespace someone forgot to
-// export is a `tsc` failure in `pnpm build` — which matters more than usual
-// here, because this project has no frontend test runner at all.
+// export is a `tsc` failure in `pnpm build` — before anything renders, which is
+// earlier than a test could say the same thing.
 
 /** A dictionary of nested namespaces whose leaves are all strings. */
 export type Shape<T> = {

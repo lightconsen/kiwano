@@ -3677,6 +3677,136 @@ mod tests {
         assert_eq!(s.bindings_for_agent("codex").unwrap().len(), 2);
     }
 
+    /// Binding appends to the tail of the queue: the standing primary keeps
+    /// priority 0, the new candidate takes the next free slot, and a provider
+    /// that is already bound is left exactly where it was — the command is
+    /// idempotent so a second click cannot reorder the queue.
+    #[test]
+    fn add_agent_binding_appends_a_candidate_and_never_duplicates_one() {
+        let s = store();
+        for (id, name) in [("a1", "Alpha"), ("b1", "Beta")] {
+            s.insert_provider(&provider(id, name, Billing::Metered))
+                .unwrap();
+        }
+        add_agent_binding(&s, "claude", "a1").unwrap();
+        add_agent_binding(&s, "claude", "b1").unwrap();
+        let priorities = |s: &Store| -> Vec<(String, i64)> {
+            s.bindings_for_agent("claude")
+                .unwrap()
+                .into_iter()
+                .map(|b| (b.provider_id, b.priority))
+                .collect()
+        };
+        assert_eq!(
+            priorities(&s),
+            vec![("a1".to_string(), 0), ("b1".to_string(), 1)]
+        );
+        let fresh = s.bindings_for_agent("claude").unwrap();
+        assert!(
+            fresh.iter().all(|b| b.enabled && b.weight == 1),
+            "a new candidate joins enabled, at an even weight"
+        );
+
+        // Re-binding the primary leaves it at 0.
+        add_agent_binding(&s, "claude", "a1").unwrap();
+        assert_eq!(
+            priorities(&s),
+            vec![("a1".to_string(), 0), ("b1".to_string(), 1)]
+        );
+
+        // An unknown provider is refused rather than bound to nothing.
+        assert!(add_agent_binding(&s, "claude", "ghost").is_err());
+        assert_eq!(s.bindings_for_agent("claude").unwrap().len(), 2);
+    }
+
+    /// Unbinding takes one candidate off one agent's route and touches nothing
+    /// else: another agent's binding of the same provider stays, and an empty
+    /// route is a legal state (requests fail cleanly with NoBinding until
+    /// something is bound again) rather than a reason to keep a stale row.
+    #[test]
+    fn remove_agent_binding_touches_one_route_only() {
+        let s = store();
+        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
+            .unwrap();
+        for agent in ["claude", "codex"] {
+            add_agent_binding(&s, agent, "a1").unwrap();
+        }
+
+        remove_agent_binding(&s, "claude", "a1").unwrap();
+        assert!(s.bindings_for_agent("claude").unwrap().is_empty());
+        assert!(s.primary_provider_id("claude").unwrap().is_none());
+        assert_eq!(s.bindings_for_agent("codex").unwrap().len(), 1);
+
+        // Removing what is not bound is an error, not a silent success — the
+        // caller has to be able to tell "it is gone" from "it never was".
+        assert!(remove_agent_binding(&s, "claude", "a1").is_err());
+        assert!(remove_agent_binding(&s, "claude", "ghost").is_err());
+    }
+
+    /// A binding's strategy parameters are patched one field at a time, except
+    /// the window: its two bounds are set or cleared together, because half a
+    /// window can never match and would quietly turn a rotating candidate into
+    /// one that never serves.
+    #[test]
+    fn update_agent_binding_patches_weight_and_window_together() {
+        let s = store();
+        for (id, name) in [("a1", "Alpha"), ("b1", "Beta")] {
+            s.insert_provider(&provider(id, name, Billing::Metered))
+                .unwrap();
+        }
+        add_agent_binding(&s, "claude", "a1").unwrap();
+        add_agent_binding(&s, "claude", "b1").unwrap();
+        let binding = |s: &Store| -> Binding {
+            s.bindings_for_agent("claude")
+                .unwrap()
+                .into_iter()
+                .find(|b| b.provider_id == "b1")
+                .unwrap()
+        };
+
+        update_agent_binding(
+            &s,
+            "claude",
+            "b1",
+            Some(7),
+            Some("22:00".into()),
+            Some("06:00".into()),
+        )
+        .unwrap();
+        let b = binding(&s);
+        assert_eq!(b.weight, 7);
+        assert_eq!(b.win_start.as_deref(), Some("22:00"));
+        assert_eq!(b.win_end.as_deref(), Some("06:00"));
+
+        // A patch that does not mention the window leaves it alone.
+        update_agent_binding(&s, "claude", "b1", Some(3), None, None).unwrap();
+        let b = binding(&s);
+        assert_eq!(b.weight, 3);
+        assert_eq!(b.win_start.as_deref(), Some("22:00"));
+
+        // A weight below 1 is floored: 0 would take the candidate out of a
+        // weighted rotation while still sitting in the queue.
+        update_agent_binding(&s, "claude", "b1", Some(0), None, None).unwrap();
+        assert_eq!(binding(&s).weight, 1);
+
+        // Half a window — one bound, or an empty string — clears the pair.
+        update_agent_binding(&s, "claude", "b1", None, Some("22:00".into()), None).unwrap();
+        let b = binding(&s);
+        assert!(b.win_start.is_none() && b.win_end.is_none(), "{b:?}");
+
+        // The other candidate was never touched by any of it.
+        let a1 = s
+            .bindings_for_agent("claude")
+            .unwrap()
+            .into_iter()
+            .find(|b| b.provider_id == "a1")
+            .unwrap();
+        assert_eq!((a1.weight, a1.win_start), (1, None));
+
+        // Patching something that is not bound is an error.
+        assert!(update_agent_binding(&s, "claude", "ghost", Some(1), None, None).is_err());
+    }
+
     // ── provider ↔ catalog link ──────────────────────────────────────────
 
     /// A catalog covering the shapes the link has to tell apart: an entry whose
@@ -5112,6 +5242,79 @@ mod tests {
         assert_eq!(fo.requests, 0);
         assert!(fo.by_provider.is_empty());
         assert!(fo.by_agent.is_empty());
+    }
+
+    /// The peak premium is the difference between two sums over the *same* rows,
+    /// which is only meaningful if both come out of one roll-up and are converted
+    /// the same way. Two currencies in the window make the conversion part of the
+    /// assertion rather than an identity, and a row whose model publishes no
+    /// schedule (off-peak == cost) contributes nothing to the premium.
+    #[test]
+    fn dashboard_prices_the_peak_premium_over_one_row_set() {
+        let (_dir, s, aux) = store_and_aux_on_one_file();
+        // A Hub rate table — the quote is deliberately not the real one; what is
+        // under test is that it is applied, not what it says.
+        let hub = serde_json::json!({
+            "version": 99,
+            "exchange_rates": { "USD": 1.0, "CNY": 6.0 },
+            "models": []
+        })
+        .to_string();
+        aux.save_hub_models_cache(99, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
+            .unwrap();
+        for (id, name) in [("p1", "Alpha"), ("p2", "Beta")] {
+            s.insert_provider(&provider(id, name, Billing::Metered))
+                .unwrap();
+        }
+
+        // p1: 10 USD at peak against 4 USD off-peak — a 6 USD premium — plus a
+        // row in another currency with no schedule at all (one vendor's off-peak
+        // halving applies to some models and not others).
+        let mut peak = usage_row("p1");
+        peak.cost = Some(10.0);
+        peak.cost_currency = Some("USD".into());
+        peak.cost_off_peak = Some(4.0);
+        s.record_usage(&peak).unwrap();
+        let mut flat = usage_row("p1");
+        flat.cost = Some(3.0);
+        flat.cost_currency = Some("CNY".into());
+        flat.cost_off_peak = Some(3.0);
+        s.record_usage(&flat).unwrap();
+        // p2 is billed the same either way: no premium to report.
+        let mut even = usage_row("p2");
+        even.cost = Some(2.0);
+        even.cost_currency = Some("USD".into());
+        even.cost_off_peak = Some(2.0);
+        s.record_usage(&even).unwrap();
+
+        let d = build_dashboard(&s, &aux, "7d", None, None).unwrap();
+        // (10 + 2) USD × 6 + 3 CNY; off-peak (4 + 2) × 6 + 3.
+        assert!((d.cost - 75.0).abs() < 1e-6, "{}", d.cost);
+        assert!((d.cost_off_peak - 39.0).abs() < 1e-6, "{}", d.cost_off_peak);
+        // What the reader subtracts: 36 CNY of peak rates, in the reader's own
+        // currency — the same rows priced the other way, not two populations.
+        assert!((d.cost - d.cost_off_peak - 36.0).abs() < 1e-6);
+
+        let p1 = d.by_provider.iter().find(|p| p.id == "p1").unwrap();
+        let p2 = d.by_provider.iter().find(|p| p.id == "p2").unwrap();
+        assert!((p1.cost - 63.0).abs() < 1e-6, "{}", p1.cost);
+        assert!(
+            (p1.cost_off_peak - 27.0).abs() < 1e-6,
+            "{}",
+            p1.cost_off_peak
+        );
+        assert!((p2.cost - 12.0).abs() < 1e-6);
+        assert!(
+            (p2.cost_off_peak - 12.0).abs() < 1e-6,
+            "no schedule, no premium: {}",
+            p2.cost_off_peak
+        );
+        // The slices add up to the headline they were converted from.
+        let sum: f64 = d.by_provider.iter().map(|p| p.cost).sum();
+        assert!((sum - d.cost).abs() < 1e-6, "{sum} vs {}", d.cost);
+        // …and the per-agent row is the same pair for that agent's rows.
+        assert!((d.by_agent[0].cost - 75.0).abs() < 1e-6);
+        assert!((d.by_agent[0].cost_off_peak - 39.0).abs() < 1e-6);
     }
 
     #[test]

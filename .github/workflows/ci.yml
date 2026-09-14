@@ -1,4 +1,4 @@
-# PR validation: rustfmt, clippy (-D warnings), tests, frontend typecheck+build.
+# PR validation: rustfmt, clippy (-D warnings), tests, frontend typecheck, build and tests.
 # Rust runs on Linux, macOS and Windows — macOS-gated code (detect.rs /
 # takeover.rs) only compiles on macOS, and the Windows DACL hardening in
 # store/mod.rs (`harden_permissions`) only compiles on Windows, so a matrix
@@ -138,3 +138,11 @@ jobs:
       - name: Typecheck and build
         working-directory: app
         run: pnpm build
+
+      # `vitest run` — the screen-level behaviours and the dictionary checks.
+      # After the build on purpose: tsc is the earlier and cheaper gate on the
+      # same sources, and a test run that passes while `pnpm build` fails would
+      # be reporting on a tree nobody can ship.
+      - name: Frontend tests
+        working-directory: app
+        run: pnpm test

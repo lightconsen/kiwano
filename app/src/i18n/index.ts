@@ -3,10 +3,11 @@
 // A hand-written dictionary rather than a library. The repo has no i18n
 // dependency and demonstrably avoids adding one (the landing page rolls its own,
 // `sidecar.rs` writes HTTP by hand rather than pull in `reqwest`), but the
-// decisive reason is safety: **this project has no frontend test runner**. A
-// library keyed by strings fails at runtime, where nothing would catch it;
-// these keys are typed against `en/`, so a missing or misspelled one is a `tsc`
-// failure inside `pnpm build`, which is the only automated gate there is.
+// decisive reason is safety: a library keyed by strings fails at runtime. These
+// keys are typed against `en/`, so a missing or misspelled one is a `tsc`
+// failure inside `pnpm build` — caught before anything renders, which a test
+// could only tell you after it did. (`dictionaries.test.ts` covers the half
+// types cannot: a translation that dropped a `{placeholder}`.)
 //
 // The locale is a module-level value with a listener set, mirroring
 // `src/lib/updateInstall.ts` — the app already uses that shape for state that

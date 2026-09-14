@@ -938,6 +938,23 @@ fn takeover_routes_an_agent_and_restore_puts_it_back() {
         original,
         "restore is byte-exact"
     );
+
+    // The route went with the takeover — the agent is nobody's candidate — while
+    // the provider itself stays in the list, unbound: it is the user's row, and
+    // the next takeover imports and binds it again.
+    assert!(store.bindings_for_agent("claude").unwrap().is_empty());
+    assert!(store.get_strategy("claude").unwrap().is_none());
+    let (code, out, err) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    assert_eq!(code, 0, "{err}");
+    let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    // Two rows: `ds`, plus the provider the first takeover imported out of the
+    // agent's own config. Both are still there, both unbound.
+    assert_eq!(list.len(), 2, "{list:?}");
+    let ds = list.iter().find(|p| p["name"] == "ds").expect("ds");
+    assert_eq!(ds["agents"], serde_json::json!([]));
+    assert!(list
+        .iter()
+        .all(|p| p["serving_agents"] == serde_json::json!([])));
 }
 
 #[test]

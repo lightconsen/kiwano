@@ -1122,6 +1122,11 @@ export const devApi: KiwanoApi = {
       t.placeholder_key = `kw-ag-${agent}-${suffix}`;
       t.enabled = true;
     } else {
+      // The route goes with the takeover (vm::set_agent_takeover): the agent
+      // has its own config back, so it is nobody's candidate — and the
+      // providers it named stay in the list, unbound.
+      const i = agentRoutes.findIndex((r) => r.agent === agent);
+      if (i >= 0) agentRoutes.splice(i, 1);
       t.placeholder_key = null;
       t.enabled = false;
     }

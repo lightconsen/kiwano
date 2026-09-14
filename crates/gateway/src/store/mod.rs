@@ -1470,6 +1470,17 @@ impl Store {
         Ok(s)
     }
 
+    /// Drop an agent's strategy row. Read back as the `single` default, which is
+    /// what an agent with no route routes by anyway.
+    pub fn delete_strategy(&self, agent: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "DELETE FROM agent_strategies WHERE agent = ?1",
+            params![agent],
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn upsert_binding(&self, b: &Binding) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

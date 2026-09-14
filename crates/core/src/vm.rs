@@ -954,12 +954,13 @@ fn normalize_spark(values: &[i64]) -> Option<Vec<f64>> {
 
 /// The bound agents whose config actually points at the gateway *right now*.
 ///
-/// A binding is a stored intention, not a live route: disabling a takeover
-/// restores the agent's own config and leaves the route in the store for the
-/// day it is re-enabled (`set_agent_takeover`). Until then the agent's traffic
-/// never reaches this gateway, so a provider must not read as bound to it or,
-/// worse, as *in use* by it — which is what the provider list used to claim for
-/// every binding row, including the dormant ones.
+/// Turning a takeover off drops that agent's route (`set_agent_takeover`), so
+/// what is left here is the odd row: an agent whose config was reverted behind
+/// Kiwano's back by another tool, a store written by a build that kept dormant
+/// routes, a binding an import landed on an agent that was never taken over.
+/// In every one of them the agent's traffic goes to its own provider rather than
+/// to this gateway, so a provider must not read as bound to it — or, worse, as
+/// *in use* by it, which is what the list claimed for every binding row.
 ///
 /// Recognition is by the live file (`kw-ag-<agent>-…` in the config the
 /// takeover wrote), never by the `placeholder_keys` table: a key row can
@@ -2382,6 +2383,18 @@ pub fn set_agent_takeover(
                 store.delete_placeholder_key(&k.key).map_err(e2s)?;
             }
         }
+        // …and so does the route, for the same reason one step further out: an
+        // agent that has its own config back sends us nothing, so its candidate
+        // list and strategy are stale the moment the restore lands — invisible
+        // in the agent tab (which shows the takeover onboarding again) but not
+        // in the Apps screen, which kept reading the rows as "bound" and even
+        // as "In use" (see `live_bound_agents`). The *providers* stay: they are
+        // the user's own rows, with their keys, plans and usage history, and
+        // they are what a later takeover re-imports and binds again.
+        for b in store.bindings_for_agent(agent).map_err(e2s)? {
+            store.delete_binding(agent, &b.provider_id).map_err(e2s)?;
+        }
+        store.delete_strategy(agent).map_err(e2s)?;
     }
     Ok(())
 }
@@ -4836,6 +4849,64 @@ mod tests {
             "a key with no rewritten config (and no backup) is not a takeover"
         );
         assert!(claude.placeholder_key.is_none());
+    }
+
+    /// Turning a takeover off hands the agent its own config back — and its
+    /// route with it. The providers themselves stay: they are the user's rows,
+    /// carrying the key, the plan and the usage history, and they are what a
+    /// later takeover re-imports and binds again.
+    #[test]
+    fn disabling_a_takeover_drops_the_route_and_keeps_the_providers() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let settings = tmp.path().join(".claude").join("settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, "{}").unwrap();
+
+        // Two providers serving claude, the second standing by in a failover
+        // queue: a route with something in it to lose.
+        for (id, name) in [("p1", "One"), ("p2", "Two")] {
+            s.insert_provider(&provider(id, name, Billing::Metered))
+                .unwrap();
+        }
+        s.upsert_strategy("claude", StrategyType::Failover, None)
+            .unwrap();
+        for (id, priority) in [("p1", 0), ("p2", 1)] {
+            s.upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: id.into(),
+                priority,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        }
+
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
+        assert_eq!(s.bindings_for_agent("claude").unwrap().len(), 2);
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+
+        assert!(
+            s.bindings_for_agent("claude").unwrap().is_empty(),
+            "the route goes with the takeover"
+        );
+        assert!(
+            s.get_strategy("claude").unwrap().is_none(),
+            "…including the strategy it routed by"
+        );
+        // The rows survive, and read as unbound rather than as served.
+        let vms = build_provider_vms(&s, &aux, tmp.path()).unwrap();
+        for id in ["p1", "p2"] {
+            let vm = vms
+                .iter()
+                .find(|v| v.id == id)
+                .unwrap_or_else(|| panic!("{id} was deleted with its binding"));
+            assert!(vm.agents.is_empty(), "{id} still claims an agent");
+            assert!(!vm.is_current, "{id} still reads as in use");
+        }
     }
 
     #[test]

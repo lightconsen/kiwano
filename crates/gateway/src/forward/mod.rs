@@ -10,6 +10,19 @@
 //! `anthropic_to_openai` (model untouched), response (JSON + SSE)
 //! back via `openai_to_anthropic` / the streaming converter — and metered
 //! from the upstream OpenAI usage fields.
+//!
+//! **No response cache, deliberately.** Every local gateway of this shape grows
+//! one eventually, so the reasoning is written here rather than rediscovered:
+//! an exact-match cache would almost never hit on this traffic, because every
+//! turn of an agent's conversation carries a different prompt, and a *semantic*
+//! cache — the kind that pays off on repetitive workloads — replays answers into
+//! a context that has moved on, which for a coding agent means confidently wrong
+//! edits. The saving this backend actually wants is upstream prompt-cache reuse,
+//! and that is a routing problem rather than a storage one: `roundrobin` keeps a
+//! session on one provider (see `crate::strategy`) so the provider's own cache
+//! sees the same prefix twice, and the converter strips nothing that would break
+//! it. If a cache is ever added here, it should be opt-in, off by default, and
+//! scoped to traffic a human would call repetitive.
 
 use std::future::Future;
 use std::pin::Pin;

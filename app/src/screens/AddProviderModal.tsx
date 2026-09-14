@@ -147,19 +147,8 @@ export default function AddProviderModal({
   const [advTimeout, setAdvTimeout] = useState("");
   const [advRetries, setAdvRetries] = useState("");
   const [advHeaders, setAdvHeaders] = useState<{ name: string; value: string }[]>([]);
-  // Plan-quota query config (edit mode): "" = not configured. Fields are the
-  // selected template's extra credentials (org/project IDs, AK/SK, quota URL).
-  const [pqOpen, setPqOpen] = useState(false);
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
-  /** A plan-query template's label, or its raw id when the list does not know
-      the value — the backend and the Hub catalog can both send one this build
-      has not heard of. The lookup is by id, so the map param cannot be named
-      `t`: that would shadow the translator, and `tsc` would reject the call. */
-  const templateLabel = (id: string | null | undefined): string => {
-    const tpl = PLAN_QUERY_TEMPLATES.find((x) => x.id === id);
-    return tpl ? t(tpl.labelKey) : String(id ?? "");
-  };
   // Plan-mode percent limits: per-window utilization ceilings over the
   // vendor's rolling 5-hour / weekly windows (blank = no limit on it).
   const [planFiveHour, setPlanFiveHour] = useState("");
@@ -186,7 +175,6 @@ export default function AddProviderModal({
     // vendors can be asked how much of the plan is spent.
     setPqTemplate(e.plan_query?.template ?? "");
     setPqFields({});
-    setPqOpen(false);
     resetAdvanced();
   };
 
@@ -292,7 +280,6 @@ export default function AddProviderModal({
       const pq = edit.plan_query;
       setPqTemplate(pq?.template ?? "");
       setPqFields(pq?.fields ? { ...pq.fields } : {});
-      setPqOpen(!!pq);
       setAdvOpen(!!edit.advanced);
       setAdvTimeout(edit.advanced?.timeout_secs != null ? String(edit.advanced.timeout_secs) : "");
       setAdvRetries(edit.advanced?.retries != null ? String(edit.advanced.retries) : "");
@@ -320,8 +307,7 @@ export default function AddProviderModal({
       setLimitValue("");
       setPqTemplate("");
       setPqFields({});
-      setPqOpen(false);
-      setPlanFiveHour("");
+        setPlanFiveHour("");
       setPlanWeekly("");
       setAgents([]);
     }
@@ -1109,77 +1095,6 @@ export default function AddProviderModal({
               </div>
             )}
 
-            {/* Plan quota query (edit mode): queries the provider's own plan
-                usage endpoint for quota chips. Extra credentials render per
-                template; templates without them reuse the primary API key.
-                Plan billing only: the query exists to feed the percent
-                ceilings, and those are not offered on a metered provider — so
-                configuring one here would poll a vendor's plan endpoint and
-                show plan chips for a provider that has no plan. */}
-            {edit && billing === "plan" && (
-              <div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-full justify-between text-[11.5px] text-mut"
-                  onClick={() => setPqOpen((o) => !o)}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Gauge className="h-3 w-3" />
-                    {t("addProvider.planQuotaQuery")}
-                    {pqTemplate && (
-                      <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>
-                        {templateLabel(pqTemplate)}
-                      </span>
-                    )}
-                  </span>
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${pqOpen ? "rotate-180" : ""}`} />
-                </Button>
-                {pqOpen && (
-                  <div className="mt-2 space-y-2.5">
-                    <div>
-                      <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.template")}</Label>
-                      {/* "none" sentinel: Radix SelectItem rejects empty values */}
-                      <Select
-                        value={pqTemplate === "" ? "none" : pqTemplate}
-                        onValueChange={(v) => setPqTemplate(v === "none" || v == null ? "" : v)}
-                      >
-                        <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
-                          {/* The value is the template's id, and "none" is a
-                              sentinel rather than a template. */}
-                          <SelectValue>
-                            {(v) =>
-                              v == null || v === "none"
-                                ? t("addProvider.none")
-                                : templateLabel(v)
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">{t("addProvider.none")}</SelectItem>
-                          {PLAN_QUERY_TEMPLATES.map((tpl) => (
-                            <SelectItem key={tpl.id} value={tpl.id}>
-                              {t(tpl.labelKey)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {(PLAN_QUERY_TEMPLATES.find((x) => x.id === pqTemplate)?.fields ?? []).map((f) => (
-                      <div key={f.key}>
-                        <Label className="text-[10.5px] font-medium text-mut">{t(f.labelKey)}</Label>
-                        <Input
-                          className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                          value={pqFields[f.key] ?? ""}
-                          onChange={(e) => setPqFields((m) => ({ ...m, [f.key]: e.target.value }))}
-                        />
-                      </div>
-                    ))}
-                    <p className="text-[10.5px] text-mut">{t("addProvider.planQueryBody")}</p>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Advanced forwarding settings (per provider, gateway defaults
                 when blank): timeout = time to response headers, never aborts

@@ -95,14 +95,10 @@ export const addProvider = {
   addKeyPlaceholder: "sk-… add key",
   labelPlaceholder: "Label",
 
-  // ── Plan quota query (edit mode) ──
-  planQuotaQuery: "Plan quota query",
-  template: "Template",
-  /** Select sentinel label for "no plan query configured". The stored value
-      stays the literal "none". */
-  none: "None",
-  planQueryBody:
-    "Queries the plan usage with the provider's API key (5-min cache); quota chips refresh on the Providers page.",
+  // The plan-quota query is no longer chosen here: it comes from the catalog
+  // entry, which only ever publishes a template that needs nothing but the
+  // provider's own API key. The template labels below stay because the table
+  // still maps a stored config's credential fields when one is re-saved.
 
   // ── Advanced forwarding settings ──
   advanced: "Advanced (timeout / retries / headers)",

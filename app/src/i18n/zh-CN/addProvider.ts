@@ -86,11 +86,8 @@ export const addProvider = {
   addKeyPlaceholder: "sk-… 添加密钥",
   labelPlaceholder: "标签",
 
-  // ── Plan quota query (edit mode) ──
-  planQuotaQuery: "套餐配额查询",
-  template: "模板",
-  none: "无",
-  planQueryBody: "使用该 Provider 的 API Key 查询套餐用量（5 分钟缓存）；配额标签会在 Provider 页面刷新。",
+  // 套餐查询不再在这里选：它来自 catalog 条目，而条目只会发「仅凭 API Key 即可查询」的模板。
+  // 模板标签保留，因为那张表仍用于把已存的凭据字段原样带回去。
 
   // ── Advanced forwarding settings ──
   advanced: "高级（超时 / 重试 / 请求头）",

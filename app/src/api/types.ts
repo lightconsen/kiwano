@@ -17,6 +17,22 @@ export type AgentId =
   | "openclaw"
   | "hermes"
   | "pi";
+/** An agent id as it travels through routes, bindings, usage and logs: a
+    built-in's, or one the user defined. The closed `AgentId` above stays the
+    type wherever the thing being named is a *built-in* — the takeover switch,
+    the agent registry, the icon table — so a user-defined id cannot be fed to
+    code that would go looking for its config file. */
+export type AgentRef = AgentId | (string & {});
+
+/** An agent the user defined (migration v16): a name for a route, its own key,
+    and no config file anywhere. */
+export interface CustomAgent {
+  id: string;
+  label: string;
+  note: string | null;
+  placeholder_key: string | null;
+}
+
 export type Billing = "plan" | "payg" | "unl";
 /** A **catalog** entry's billing tag: the three a local provider can hold, plus
     `both` for a vendor that charges two ways at one address — Anthropic sells an
@@ -28,7 +44,9 @@ export type CatalogBilling = Billing | "both";
 export type Protocol = "openai" | "anthropic";
 
 export interface AgentMeta {
-  id: AgentId;
+  /** Built-in in the registry; a user-defined id in the entries the resolver
+      derives (see lib/agents.ts). */
+  id: AgentRef;
   label: string;
   chip_char: string;
   chip_color: string;
@@ -247,10 +265,10 @@ export interface Provider {
   /** Agents bound to this provider *and* routed through the gateway: a binding
       whose agent has its own config back is a stored route, not a live one, so
       it does not appear here (nor in serving_agents). */
-  agents: AgentId[];
+  agents: AgentRef[];
   /** Agents this provider would serve a request for right now — the per-agent
       slice behind the agent tabs' local "In use" badge */
-  serving_agents: AgentId[];
+  serving_agents: AgentRef[];
   /** Collapsed across agents (the All tab badge); agent tabs use serving_agents */
   is_current: boolean;
   /** Badge text: backup #1 / local / … */
@@ -287,7 +305,7 @@ export interface NewProviderInput {
       to the Apps screen's agent tabs. Sending them on an edit would promote this
       provider to primary for every agent it is already bound to, and rewrite the
       agent's strategy, as a side effect of saving anything else. */
-  agents?: AgentId[];
+  agents?: AgentRef[];
   /** Additional per-protocol endpoints to persist alongside the primary */
   endpoints?: { protocol: Protocol; endpoint: string }[];
   /** Plan-quota query config; null clears an existing config */
@@ -425,7 +443,7 @@ export interface DashboardData {
     cost_off_peak: number;
   }[];
   by_agent: {
-    agent: AgentId;
+    agent: AgentRef;
     label: string;
     requests: number;
     tokens: string;
@@ -456,6 +474,9 @@ export interface AppSettings {
   close_to_tray: boolean;
   gateway_listen: string;
   takeovers: TakeoverState[];
+  /** The user's own agents. Not part of `takeovers`: that list answers "we
+      rewrote this agent's config", and these have no config to rewrite. */
+  custom_agents: CustomAgent[];
   auto_failover: boolean;
   request_logs: boolean;
   /** Request-log retention in days (gateway prunes older rows every 6h) */
@@ -579,7 +600,7 @@ export interface StrategyBinding {
 
 /** Agent routing strategy (agent_strategies + agent_bindings, tech.md §4.7) */
 export interface AgentRoute {
-  agent: AgentId;
+  agent: AgentRef;
   strategy: StrategyKind;
   /** Strategy JSON payload (quota: {"limit","unit"}; null otherwise) */
   config: string | null;
@@ -680,7 +701,7 @@ export interface UpdateProgress {
 
 export interface KiwanoApi {
   getGatewayStatus(): Promise<GatewayStatus>;
-  listProviders(filter?: AgentId | "all"): Promise<Provider[]>;
+  listProviders(filter?: AgentRef | "all"): Promise<Provider[]>;
   addProvider(input: NewProviderInput): Promise<Provider>;
   /** Update a provider (empty api_key means keep the existing key) */
   updateProvider(id: string, input: NewProviderInput): Promise<Provider>;
@@ -731,6 +752,11 @@ export interface KiwanoApi {
   /** Append a rotating key (the gateway's key pool hot-reloads immediately) */
   addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry>;
   deleteApiKey(id: number): Promise<void>;
+  /** Define a user-defined agent: a named route with its own placeholder key */
+  addCustomAgent(label: string, note?: string | null): Promise<CustomAgent>;
+  /** Delete a user-defined agent, its route and its key (usage history stays) */
+  removeCustomAgent(id: string): Promise<void>;
+
   /** Agent takeover switch (generates/deletes the placeholder key; config rewriting included from P1 on) */
   setTakeover(agent: AgentId, enabled: boolean): Promise<void>;
   /** Import config from CC Switch (auto-detects the ~/.cc-switch data source) */
@@ -738,21 +764,21 @@ export interface KiwanoApi {
   /** Agent routing strategy table (only agents with bindings) */
   getAgentRoutes(): Promise<AgentRoute[]>;
   /** Update an agent's strategy type (config only needed for quota: {"limit","unit"}) */
-  updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void>;
+  updateAgentStrategy(agent: AgentRef, strategy: StrategyKind, config?: string | null): Promise<void>;
   /** Reorder candidates: provider_id order → priority 0..n */
-  reorderAgentBindings(agent: AgentId, providerIds: string[]): Promise<void>;
+  reorderAgentBindings(agent: AgentRef, providerIds: string[]): Promise<void>;
   /** Patch one binding's strategy parameters (roundrobin weight / timewindow local window) */
   updateAgentBinding(
-    agent: AgentId,
+    agent: AgentRef,
     providerId: string,
     patch: { weight?: number; win_start?: string | null; win_end?: string | null },
   ): Promise<void>;
   /** Bind a provider to an agent as a new candidate (appended at the queue tail) */
-  addAgentBinding(agent: AgentId, providerId: string): Promise<void>;
+  addAgentBinding(agent: AgentRef, providerId: string): Promise<void>;
   /** Remove one agent's binding of a provider (other agents keep theirs) */
-  removeAgentBinding(agent: AgentId, providerId: string): Promise<void>;
+  removeAgentBinding(agent: AgentRef, providerId: string): Promise<void>;
   /** Copy another agent's whole route (strategy + ordered candidates) onto this one, replacing what it had */
-  applyAgentRoute(target: AgentId, source: AgentId): Promise<void>;
+  applyAgentRoute(target: AgentRef, source: AgentRef): Promise<void>;
   /**
    * Export the config plan to the given path; returns the Provider count.
    * API keys are omitted unless `includeKeys` is set — that flag is for a local

@@ -32,7 +32,7 @@ describe("the browser-dev mock", () => {
     // whose agent has its own config back is not a live route, so the provider
     // must not be listed under it.
     const settings = await api.getSettings();
-    const dormant = new Set(
+    const dormant = new Set<string>(
       settings.takeovers.filter((t) => !t.enabled).map((t) => t.agent),
     );
     for (const provider of await api.listProviders()) {
@@ -124,6 +124,31 @@ describe("the dashboard fixtures", () => {
       const dates = d.trend.map((t) => t.date);
       expect(new Set(dates).size, `${window} trend dates`).toBe(dates.length);
     }
+  });
+
+  it("route a user-defined agent as long as it exists", async () => {
+    // The mock's equivalent of `vm::live_bound_agents`' exception: a custom
+    // agent has no config file, so the takeover list has nothing to say about
+    // it — asking it whether the agent is routed would answer "no" and hide its
+    // providers from the All tab.
+    const settings = await api.getSettings();
+    const custom = settings.custom_agents[0];
+    expect(custom, "the fixture has a user-defined agent").toBeDefined();
+
+    const route = (await api.getAgentRoutes()).find((r) => r.agent === custom.id);
+    expect(route, "it has a route").toBeDefined();
+    expect(route!.bindings.length).toBeGreaterThan(0);
+
+    const provider = (await api.listProviders()).find((p) =>
+      route!.bindings.some((b) => b.provider_id === p.id),
+    );
+    expect(provider?.agents, "its provider names it").toContain(custom.id);
+
+    // Deleting it takes the route with it, and the provider stays.
+    await api.removeCustomAgent(custom.id);
+    expect((await api.getAgentRoutes()).some((r) => r.agent === custom.id)).toBe(false);
+    expect((await api.listProviders()).some((p) => p.id === provider!.id)).toBe(true);
+    expect((await api.getSettings()).custom_agents.some((a) => a.id === custom.id)).toBe(false);
   });
 
   it("narrow a window to one provider or one agent", async () => {

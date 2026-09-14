@@ -28,6 +28,126 @@ pub const AGENTS: [(&str, &str); 8] = [
     ("pi", "Pi"),
 ];
 
+/// Whether `id` names a built-in agent — one whose *config* this app knows how
+/// to rewrite or detect.
+///
+/// The distinction matters and is easy to blur: everything that reaches into an
+/// agent's files (`takeover`, `creds`, `import`, `detect`) must only ever see a
+/// built-in, while anything that *lists* agents (the Apps segments, the
+/// dashboard's breakdowns, the provider dialog's multi-select) shows built-ins
+/// and user-defined ones together.
+pub fn is_builtin_agent(id: &str) -> bool {
+    AGENTS.iter().any(|(a, _)| *a == id)
+}
+
+/// A user-defined agent's view: a name for a route, the key its traffic is
+/// attributed by, and nothing else — there is no config file to report on.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CustomAgentVm {
+    pub id: String,
+    pub label: String,
+    pub note: Option<String>,
+    /// Always present: the key is minted with the agent and deleted with it, so
+    /// unlike a built-in's (read out of its live config), this one cannot be
+    /// stale — the row *is* the truth here, and it is the same row the gateway
+    /// attributes by.
+    pub placeholder_key: Option<String>,
+}
+
+/// Every agent the UI should offer, built-ins first (registry order), then the
+/// user's own in the order they were created.
+fn list_agents(store: &Store) -> Result<Vec<(String, String)>, String> {
+    let mut out: Vec<(String, String)> = AGENTS
+        .iter()
+        .map(|(id, label)| (id.to_string(), label.to_string()))
+        .collect();
+    for a in store.list_custom_agents().map_err(e2s)? {
+        out.push((a.id, a.label));
+    }
+    Ok(out)
+}
+
+/// The id stem for a user-defined agent: the label's slug, or `custom` when the
+/// label has nothing slug-able in it (an all-CJK name). The check is on the
+/// label, not on `slug`'s output, so `slug`'s own empty-name fallback ("provider")
+/// cannot leak into an agent id.
+fn agent_id_stem(label: &str) -> String {
+    if label.chars().any(|c| c.is_ascii_alphanumeric()) {
+        slug(label)
+    } else {
+        "custom".to_string()
+    }
+}
+
+/// Create a user-defined agent: a row, a placeholder key, and a `single`
+/// strategy — which is all an agent *is* to the gateway, whose route table is
+/// built from those tables and never from the registry.
+///
+/// The id is derived from the label and never changes (bindings, strategies,
+/// keys and usage rows reference it); renaming moves the label only. A label the
+/// user repeats gets its own agent: the suffix is what makes that possible.
+pub fn add_custom_agent(
+    store: &Store,
+    label: &str,
+    note: Option<&str>,
+) -> Result<CustomAgentVm, String> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("an agent needs a name".to_string());
+    }
+    let id = format!(
+        "{}-{}",
+        agent_id_stem(label),
+        &uuid::Uuid::new_v4().simple().to_string()[..6]
+    );
+    let note = note.map(str::trim).filter(|n| !n.is_empty());
+    store
+        .insert_custom_agent(&kiwanod::store::CustomAgent {
+            id: id.clone(),
+            label: label.to_string(),
+            note: note.map(str::to_string),
+            created_at: rfc3339(unix_now()),
+        })
+        .map_err(e2s)?;
+    // Its key, in the same shape a takeover mints — the gateway's attribution
+    // does not care where the row came from.
+    let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let key = format!("kw-ag-{id}-{rand}");
+    store.upsert_placeholder_key(&key, &id).map_err(e2s)?;
+    // A route with no strategy still routes (the engine reads `single` for a
+    // missing row), but writing it here is what makes the agent's tab show the
+    // strategy it actually has rather than an implicit default.
+    store
+        .upsert_strategy(&id, StrategyType::Single, None)
+        .map_err(e2s)?;
+    Ok(CustomAgentVm {
+        id,
+        label: label.to_string(),
+        note: note.map(str::to_string),
+        placeholder_key: Some(key),
+    })
+}
+
+/// Delete a user-defined agent, and everything that was only about it: its
+/// bindings, its strategy, its key, its row. `usage` and `request_logs` are
+/// history and stay — the same line the provider deletion draws.
+pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
+    if store.get_custom_agent(id).map_err(e2s)?.is_none() {
+        return Err(format!("no such custom agent: {id}"));
+    }
+    for b in store.bindings_for_agent(id).map_err(e2s)? {
+        store.delete_binding(id, &b.provider_id).map_err(e2s)?;
+    }
+    store.delete_strategy(id).map_err(e2s)?;
+    for k in store.list_placeholder_keys().map_err(e2s)? {
+        if k.agent == id {
+            store.delete_placeholder_key(&k.key).map_err(e2s)?;
+        }
+    }
+    store.delete_custom_agent(id).map_err(e2s)?;
+    Ok(())
+}
+
 /// Additive-mode agents: their native config keeps multiple providers
 /// coexisting, so takeover writes a gateway-pointed provider entry and selects
 /// it, instead of replacing an exclusive provider slot like the other five.
@@ -658,6 +778,11 @@ pub struct SettingsVm {
     pub close_to_tray: bool,
     pub gateway_listen: String,
     pub takeovers: Vec<TakeoverVm>,
+    /// Agents the user defined (migration v16). Separate from `takeovers`
+    /// because the two answer different questions: a takeover says "we rewrote
+    /// this agent's config", and a custom agent has no config to rewrite.
+    #[serde(default)]
+    pub custom_agents: Vec<CustomAgentVm>,
     pub auto_failover: bool,
     pub request_logs: bool,
     /// Request-log retention in days (mirrored into gateway_settings for the sidecar).
@@ -731,6 +856,7 @@ impl Default for SettingsVm {
             close_to_tray: true,
             gateway_listen: "127.0.0.1:8317".into(),
             takeovers: Vec::new(),
+            custom_agents: Vec::new(),
             auto_failover: true,
             request_logs: true,
             log_retention_days: default_retain_days(),
@@ -968,10 +1094,22 @@ fn normalize_spark(values: &[i64]) -> Option<Vec<f64>> {
 /// which is a claim about being able to undo a takeover, not about traffic
 /// arriving here.
 fn live_bound_agents(store: &Store, home: &Path) -> Result<Vec<String>, String> {
+    let custom: Vec<String> = store
+        .list_custom_agents()
+        .map_err(e2s)?
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
     let bound = store.bound_agents().map_err(e2s)?;
     Ok(bound
         .into_iter()
-        .filter(|agent| crate::takeover::live_placeholder_key(agent, home).is_some())
+        // A user-defined agent routes as long as it exists: it has no config
+        // file for the evidence to be missing from, and asking for one would
+        // report its providers as unbound — the falsehood this whole helper was
+        // added to remove, wearing a new hat.
+        .filter(|agent| {
+            custom.contains(agent) || crate::takeover::live_placeholder_key(agent, home).is_some()
+        })
         .collect())
 }
 
@@ -2126,8 +2264,8 @@ pub fn ui_settings(aux: &Aux) -> SettingsVm {
     s
 }
 
-pub fn build_settings(aux: &Aux) -> Result<SettingsVm, String> {
-    build_settings_with_home(aux, &kiwano_adapters::config::get_home_dir())
+pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
+    build_settings_with_home(store, aux, &kiwano_adapters::config::get_home_dir())
 }
 
 /// [`build_settings`] against an explicit home directory.
@@ -2136,7 +2274,11 @@ pub fn build_settings(aux: &Aux) -> Result<SettingsVm, String> {
 /// has to say which tree to read. Production passes `$HOME`; tests pass a temp
 /// root, which is what keeps "is claude taken over" from depending on whether
 /// the developer running the suite happens to have taken claude over.
-pub fn build_settings_with_home(aux: &Aux, home: &std::path::Path) -> Result<SettingsVm, String> {
+pub fn build_settings_with_home(
+    store: &Store,
+    aux: &Aux,
+    home: &std::path::Path,
+) -> Result<SettingsVm, String> {
     let mut s: SettingsVm = ui_settings(aux);
     // A takeover *is* its rewrite: the agent's own config carries our
     // placeholder key, which is also how its requests get attributed. Neither
@@ -2159,6 +2301,22 @@ pub fn build_settings_with_home(aux: &Aux, home: &std::path::Path) -> Result<Set
                 placeholder_key: key,
                 additive: ADDITIVE_AGENTS.contains(agent),
             }
+        })
+        .collect();
+    // The user's own agents, with the key their traffic is attributed by. The
+    // key comes out of the table here — where a built-in's comes out of its
+    // config file — because for these there is no file to read: the row *is*
+    // the agent, and it is deleted with it, so it cannot outlive anything.
+    let keys = store.list_placeholder_keys().map_err(e2s)?;
+    s.custom_agents = store
+        .list_custom_agents()
+        .map_err(e2s)?
+        .into_iter()
+        .map(|a| CustomAgentVm {
+            placeholder_key: keys.iter().find(|k| k.agent == a.id).map(|k| k.key.clone()),
+            id: a.id,
+            label: a.label,
+            note: a.note,
         })
         .collect();
     Ok(s)
@@ -2207,7 +2365,7 @@ pub fn update_settings(
         }
         store.save_log_config(&cfg).map_err(e2s)?;
     }
-    build_settings(aux)
+    build_settings(store, aux)
 }
 
 // ── Request logs (request_logs + request_bodies, migration V5) ──
@@ -2876,13 +3034,25 @@ pub fn build_dashboard(
         entry.color = color.to_string();
     }
 
+    // Who gets a row: the registry in its own order (which is the order this
+    // table has always used), then the user's own agents, then anything else
+    // with traffic in the window. That last group is an agent whose route was
+    // deleted: its usage rows stay, and its traffic should not disappear from
+    // the page just because the name did.
+    let mut roster: Vec<(String, String)> = list_agents(store)?;
+    for id in store.usage_agents(Some(&since)).map_err(e2s)? {
+        if !roster.iter().any(|(a, _)| *a == id) {
+            roster.push((id.clone(), id));
+        }
+    }
+
     let mut by_agent = Vec::new();
-    for (name, label) in AGENTS {
+    for (name, label) in &roster {
         // The agent filter narrows this breakdown like every other panel,
         // leaving one row at 100% when one agent is selected. `name` is the
         // loop's, not the filter's, so skipping here is what applies it — a
         // table that kept every agent would total more than the headline.
-        if agent.is_some_and(|a| a != name) {
+        if agent.is_some_and(|a| a != name.as_str()) {
             continue;
         }
         let t = store
@@ -2899,8 +3069,8 @@ pub fn build_dashboard(
                     .collect::<Vec<_>>(),
             );
             by_agent.push(AgentDistVm {
-                agent: name.to_string(),
-                label: label.to_string(),
+                agent: name.clone(),
+                label: label.clone(),
                 requests: t.requests,
                 tokens: fmt_tokens(t.input_tokens + t.output_tokens),
                 cost: (cost_of(
@@ -2938,13 +3108,13 @@ pub fn build_dashboard(
                 .unwrap_or(pu.provider_id.clone()),
         })
         .collect();
-    let filter_agents: Vec<FilterOptionVm> = AGENTS
+    let filter_agents: Vec<FilterOptionVm> = roster
         .iter()
         .filter_map(|(name, label)| {
             let t = store.usage_totals(Some(name), None, Some(&since)).ok()?;
             (t.requests > 0).then(|| FilterOptionVm {
-                id: name.to_string(),
-                label: label.to_string(),
+                id: name.clone(),
+                label: label.clone(),
             })
         })
         .collect();
@@ -4866,7 +5036,7 @@ mod tests {
         // takeover state comes from the live files, so `$HOME` would otherwise
         // decide what these assertions see.
         let tmp = tempfile::tempdir().unwrap();
-        let v0 = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let v0 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         assert_eq!(v0.language, "system");
         assert!(v0.takeovers.iter().all(|t| !t.enabled));
 
@@ -4879,12 +5049,12 @@ mod tests {
         // The stored blob now holds a key the struct no longer declares. It has
         // to parse anyway: a failed parse falls back to every default at once,
         // which would silently reset the reader's whole settings page.
-        let reread = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         assert_eq!(reread.language, "en", "an old key is ignored, not fatal");
         // takeovers untouched by patch (read against the temp home, like every
         // other assertion here — `update_settings` builds its answer against
         // the process home, which this test must not depend on)
-        let after_patch = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let after_patch = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         assert!(after_patch.takeovers.iter().all(|t| !t.enabled));
 
         // no ~/.claude/settings.json → rejected and no key left behind
@@ -4899,7 +5069,7 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
         set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
-        let v2 = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let v2 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         let claude = v2.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(claude.enabled);
         assert!(claude
@@ -4913,7 +5083,7 @@ mod tests {
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
         set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
-        let v3 = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let v3 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         assert!(
             !v3.takeovers
                 .iter()
@@ -4941,7 +5111,7 @@ mod tests {
                 s.delete_placeholder_key(&k.key).unwrap();
             }
         }
-        let v = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(
             claude.enabled,
@@ -4960,13 +5130,134 @@ mod tests {
         aux.delete_takeover_backup("claude").unwrap();
         s.upsert_placeholder_key("kw-ag-claude-orphan", "claude")
             .unwrap();
-        let v = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(
             !claude.enabled,
             "a key with no rewritten config (and no backup) is not a takeover"
         );
         assert!(claude.placeholder_key.is_none());
+    }
+
+    /// A user-defined agent is a route and nothing else: a row, a key and a
+    /// strategy. It needs no config file to route — the empty temp home below is
+    /// the proof, since a built-in agent with the same binding reads as dormant
+    /// there.
+    #[test]
+    fn a_custom_agent_routes_without_a_config_file() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        s.insert_provider(&provider("p1", "Alpha", Billing::Metered))
+            .unwrap();
+        let a = add_custom_agent(&s, "Long Tasks", Some("night batch")).unwrap();
+
+        assert!(a.id.starts_with("long-tasks-"), "{}", a.id);
+        assert!(!is_builtin_agent(&a.id));
+        let key = a.placeholder_key.clone().expect("a key is minted with it");
+        assert!(key.starts_with(&format!("kw-ag-{}", a.id)), "{key}");
+
+        add_agent_binding(&s, &a.id, "p1").unwrap();
+        add_agent_binding(&s, "claude", "p1").unwrap(); // the control: dormant here
+        let home = live_home(&[]); // nothing taken over on this machine
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vm = &vms[0];
+        assert_eq!(vm.agents, [a.id.as_str()], "the custom agent is bound");
+        assert_eq!(
+            vm.serving_agents,
+            [a.id.as_str()],
+            "…and it serves: it has no config for the evidence to be missing from"
+        );
+        assert!(vm.is_current);
+
+        // The UI gets it, with the key it is configured by, and the takeover
+        // list is unmoved: there is no config here to take over.
+        let settings = build_settings_with_home(&s, &aux, home.path()).unwrap();
+        assert_eq!(settings.custom_agents.len(), 1);
+        assert_eq!(settings.custom_agents[0].label, "Long Tasks");
+        assert_eq!(
+            settings.custom_agents[0].placeholder_key.as_deref(),
+            Some(key.as_str())
+        );
+        assert_eq!(
+            settings.custom_agents[0].note.as_deref(),
+            Some("night batch")
+        );
+        assert!(settings.takeovers.iter().all(|t| !t.enabled));
+        assert!(
+            set_agent_takeover(&s, &aux, &a.id, true, 8317, home.path()).is_err(),
+            "takeover is for agents with a config"
+        );
+    }
+
+    /// Deleting a custom agent takes its route and its key with it and leaves
+    /// the usage history — the same line provider deletion draws. Its traffic
+    /// stays on the dashboard, under the id, because the rows that recorded it
+    /// are not the route that was deleted.
+    #[test]
+    fn removing_a_custom_agent_clears_its_route_and_keeps_its_history() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        s.insert_provider(&provider("p1", "Alpha", Billing::Metered))
+            .unwrap();
+        let a = add_custom_agent(&s, "Long Tasks", None).unwrap();
+        add_agent_binding(&s, &a.id, "p1").unwrap();
+        let mut row = usage_row("p1");
+        row.agent = a.id.clone();
+        row.cost = Some(2.0);
+        row.cost_currency = Some("CNY".into());
+        s.record_usage(&row).unwrap();
+
+        remove_custom_agent(&s, &a.id).unwrap();
+
+        assert!(s.bindings_for_agent(&a.id).unwrap().is_empty());
+        assert!(s.get_strategy(&a.id).unwrap().is_none());
+        assert!(s
+            .list_placeholder_keys()
+            .unwrap()
+            .iter()
+            .all(|k| k.agent != a.id));
+        assert!(s.get_custom_agent(&a.id).unwrap().is_none());
+        // The provider is the user's row and stays; the usage is history.
+        assert!(s.get_provider("p1").unwrap().is_some());
+        assert_eq!(s.usage_totals(Some(&a.id), None, None).unwrap().requests, 1);
+
+        // The dashboard still accounts for that traffic, labelled by its id —
+        // the agent's name is gone, its requests are not.
+        let d = build_dashboard(&s, &aux, "7d", None, None).unwrap();
+        let row = d
+            .by_agent
+            .iter()
+            .find(|r| r.agent == a.id)
+            .expect("history outlives the route");
+        assert_eq!(row.label, a.id);
+        assert!(d.filter_agents.iter().any(|f| f.id == a.id));
+
+        // And it is gone as an agent: a second removal has nothing to remove.
+        assert!(remove_custom_agent(&s, &a.id).is_err());
+    }
+
+    /// The id is derived from the name, is unique per agent even when the name
+    /// repeats, and has a word for it even when the name has no ASCII in it.
+    #[test]
+    fn custom_agent_ids_are_derived_and_unique() {
+        let s = store();
+        let first = add_custom_agent(&s, "Long Tasks", None).unwrap();
+        let second = add_custom_agent(&s, "Long Tasks", None).unwrap();
+        assert!(first.id.starts_with("long-tasks-"));
+        assert!(second.id.starts_with("long-tasks-"));
+        assert_ne!(first.id, second.id, "same name, two agents");
+        assert!(!is_builtin_agent(&first.id));
+
+        // A name with nothing slug-able in it still gets a usable id — and not
+        // `slug`'s own fallback word, which belongs to providers.
+        let cjk = add_custom_agent(&s, "长任务批处理", None).unwrap();
+        assert!(cjk.id.starts_with("custom-"), "{}", cjk.id);
+
+        // A name is required; whitespace is not one.
+        assert!(add_custom_agent(&s, "   ", None).is_err());
+        // …and a blank note is the same as no note.
+        let blank = add_custom_agent(&s, "Bare", Some("  ")).unwrap();
+        assert_eq!(blank.note, None);
     }
 
     /// Turning a takeover off hands the agent its own config back — and its
@@ -5074,7 +5365,7 @@ mod tests {
             .iter()
             .any(|k| k.agent == "claude"));
 
-        let v = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(!claude.enabled, "the file no longer routes through us");
         assert!(claude.placeholder_key.is_none());

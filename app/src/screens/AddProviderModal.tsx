@@ -21,10 +21,10 @@ import {
 } from "@/components/ui/select";
 import { api } from "../api/client";
 import { useT } from "../i18n";
+import { allAgentMetas } from "../lib/agents";
 import {
-  AGENTS,
   PLAN_QUERY_TEMPLATES,
-  type AgentId,
+  type AgentRef,
   type ApiKeyEntry,
   type Billing,
   type CatalogBilling,
@@ -135,7 +135,7 @@ export default function AddProviderModal({
   const savedCurrency =
     edit?.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : null;
   const limitCurrency = savedCurrency ?? editEntry?.currency ?? shelf?.currency ?? "USD";
-  const [agents, setAgents] = useState<AgentId[]>([]);
+  const [agents, setAgents] = useState<AgentRef[]>([]);
   // Multi-select dropdown for agent binding (rows = logo + name)
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -1078,7 +1078,7 @@ export default function AddProviderModal({
                   <span className="text-mut">{t("addProvider.selectAgents")}</span>
                 ) : (
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                    {AGENTS.filter((a) => agents.includes(a.id)).map((a) => (
+                    {allAgentMetas().filter((a) => agents.includes(a.id)).map((a) => (
                       <span
                         key={a.id}
                         className="flex items-center gap-1 rounded bg-surface2 px-1 py-0.5 text-[10.5px]"
@@ -1099,7 +1099,7 @@ export default function AddProviderModal({
                       modal lands here and closes the dropdown */}
                   <div className="fixed inset-0 z-40" onClick={() => setAgentsOpen(false)} />
                   <div className="absolute z-50 mt-1 max-h-[210px] w-full overflow-y-auto rounded-md border border-line bg-bg py-1 shadow-lg">
-                  {AGENTS.map((a) => {
+                  {allAgentMetas().map((a) => {
                     const active = agents.includes(a.id);
                     return (
                       <button

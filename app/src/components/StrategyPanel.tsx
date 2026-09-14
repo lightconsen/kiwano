@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/select";
 
 import { api } from "../api/client";
-import { AGENTS, type AgentId, type AgentRoute, type StrategyKind } from "../api/types";
+import { type AgentRef, type AgentRoute, type StrategyKind } from "../api/types";
+import { agentMeta } from "../lib/agents";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import StrategyIcon from "./StrategyIcon";
 import { Button } from "@/components/ui/button";
@@ -61,7 +62,7 @@ const DEFAULT_LIMIT: Record<"requests" | "tokens", number> = { requests: 100, to
 
 function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => void }) {
   const t = useT();
-  const meta = AGENTS.find((m) => m.id === route.agent)!;
+  const meta = agentMeta(route.agent);
   const strategy = STRATEGIES.find((s) => s.id === route.strategy);
   const hint = strategy ? t(strategy.hint) : "";
   const quota = parseQuota(route.config);
@@ -168,19 +169,19 @@ export function CopyRouteRow({
   routes,
   onChanged,
 }: {
-  agent: AgentId;
+  agent: AgentRef;
   routes: AgentRoute[];
   onChanged: () => void;
 }) {
   const t = useT();
-  const [src, setSrc] = useState<AgentId | null>(null);
+  const [src, setSrc] = useState<AgentRef | null>(null);
   const [bump, setBump] = useState(0);
   const [busy, setBusy] = useState(false);
   const sources = routes.filter((r) => r.agent !== agent && r.bindings.length > 0);
 
-  const mineMeta = AGENTS.find((m) => m.id === agent)!;
+  const mineMeta = agentMeta(agent);
   const srcRoute = src ? routes.find((r) => r.agent === src) : undefined;
-  const srcMeta = src ? AGENTS.find((m) => m.id === src)! : null;
+  const srcMeta = src ? agentMeta(src) : null;
 
   const apply = async () => {
     if (!src) return;
@@ -229,7 +230,7 @@ export function CopyRouteRow({
           <span className="flex-none">{t("strategy.copyRouteFrom")}</span>
           {/* key remounts the uncontrolled select after a cancelled pick so
               the trigger label resets */}
-          <Select key={bump} onValueChange={(v) => setSrc(v as AgentId)}>
+          <Select key={bump} onValueChange={(v) => setSrc(v as AgentRef)}>
             <SelectTrigger
               size="sm"
               aria-label={t("strategy.copyRouteAria", { agent: mineMeta.label })}
@@ -240,7 +241,7 @@ export function CopyRouteRow({
             {/* wider than the trigger: "Claude Code · 2 candidates" must fit */}
             <SelectContent className="min-w-[230px]">
               {sources.map((r) => {
-                const label = AGENTS.find((m) => m.id === r.agent)?.label ?? r.agent;
+                const label = agentMeta(r.agent).label;
                 return (
                   <SelectItem key={r.agent} value={r.agent}>
                     {t(
@@ -273,7 +274,7 @@ export default function StrategyPanel({
   routes,
   onChanged,
 }: {
-  agent: AgentId;
+  agent: AgentRef;
   routes: AgentRoute[] | null;
   onChanged?: () => void;
 }) {

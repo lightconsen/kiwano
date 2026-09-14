@@ -3,7 +3,14 @@ import { useCallback, useEffect, useMemo, useState, type FocusEvent, type ReactN
 
 import { ArrowDown, ArrowUp, Pencil, Pin, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -12,12 +19,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { agentMeta, isBuiltinAgent, rememberCustomAgents } from "../lib/agents";
 import { useT, type Translate } from "../i18n";
 import {
   AGENTS,
   PLAN_TIER_LABEL_KEYS,
   type AgentDetect,
-  type AgentId,
+  type AgentRef,
+  type CustomAgent,
   type AgentRoute,
   type PlanQuotaReport,
   type Provider,
@@ -31,7 +40,7 @@ import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
 
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
-const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
+const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[] = [
   { id: "all" },
   { id: "claude", icon: "claudecode" },
   { id: "codex", icon: "openai" },
@@ -45,12 +54,13 @@ const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
 
 // Agent labels are brand names and stay as they are; only the "all" segment
 // has a translatable label.
-function segmentLabel(t: Translate, id: AgentId | "all"): string {
+function segmentLabel(t: Translate, id: AgentRef | "all"): string {
   if (id === "all") return t("providers.all");
-  return AGENTS.find((a) => a.id === id)?.label ?? id;
+  // The registry, the user's own agents, or — for an id nothing knows — the id.
+  return agentMeta(id).label;
 }
 
-const SEGMENT_ICON: Partial<Record<AgentId, string>> = Object.fromEntries(
+const SEGMENT_ICON: Partial<Record<AgentRef, string>> = Object.fromEntries(
   SEGMENTS.filter((s) => s.icon).map((s) => [s.id, s.icon!]),
 );
 
@@ -62,13 +72,18 @@ function AgentOnboarding({
   agent,
   installed,
   takenOver,
+  kind = "takeover",
   busy,
   onTakeover,
   onAdd,
   bindSlot,
   copySlot,
 }: {
-  agent: AgentId;
+  /** "takeover": a built-in agent Kiwano has not taken over yet.
+      "route": a user-defined agent with no candidates — there is nothing to
+      take over, so the panel is only about assigning one. */
+  kind?: "takeover" | "route";
+  agent: AgentRef;
   installed: boolean;
   takenOver: boolean;
   busy: boolean;
@@ -80,11 +95,33 @@ function AgentOnboarding({
   copySlot?: ReactNode;
 }) {
   const t = useT();
-  const meta = AGENTS.find((m) => m.id === agent)!;
+  const meta = agentMeta(agent);
+  const routeOnly = kind === "route";
   return (
     <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-      <ProviderLogo icon={SEGMENT_ICON[agent]} char={meta.chip_char} name={meta.label} size={36} />
-      {takenOver ? (
+      <ProviderLogo
+        icon={SEGMENT_ICON[agent]}
+        char={meta.chip_char}
+        color={meta.chip_color}
+        name={meta.label}
+        size={36}
+      />
+      {routeOnly ? (
+        <>
+          <div className="text-[13px] font-semibold">
+            {t("providers.routeEmptyTitle", { agent: meta.label })}
+          </div>
+          <div className="max-w-[460px] text-[12px] text-mut">{t("providers.routeEmptyBody")}</div>
+          <div className="flex items-center gap-2">
+            {bindSlot}
+            <Button size="sm" className="h-7 gap-1 px-3 text-[12px] font-semibold" onClick={onAdd}>
+              <Plus className="h-3.5 w-3.5" />
+              {t("providers.addProvider")}
+            </Button>
+          </div>
+          {copySlot}
+        </>
+      ) : takenOver ? (
         <>
           <div className="text-[13px] font-semibold">
             {t("providers.takenOverTitle", { agent: meta.label })}
@@ -126,6 +163,164 @@ function AgentOnboarding({
         </>
       )}
     </div>
+  );
+}
+
+/** The two values a client is configured with: where the gateway is, and this
+    agent's key. They are the whole of what a user-defined agent *is* from the
+    outside, so the tab says them first and gives each one a copy button. */
+function AccessCard({ keyName, listen }: { keyName: string | null; listen: string }) {
+  const t = useT();
+  return (
+    <div className="mx-4 mt-3 rounded-lg border border-line bg-surface p-3">
+      <div className="text-[11px] font-medium text-mut">{t("providers.access")}</div>
+      <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
+      <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
+      <p className="mt-1.5 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
+    </div>
+  );
+}
+
+/** One line of the access card, with the button that makes it usable. */
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    // No clipboard in a browser without a user gesture (or in a test): a copy
+    // that cannot happen must not take the row down with it.
+    navigator.clipboard?.writeText(value).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
+  };
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      <span className="w-[68px] shrink-0 text-[10.5px] text-mut">{label}</span>
+      <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{value}</code>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 shrink-0 px-1.5 text-[10.5px] text-mut hover:text-ink"
+        onClick={copy}
+      >
+        {copied ? t("common.copied") : t("common.copy")}
+      </Button>
+    </div>
+  );
+}
+
+/** Delete a user-defined agent: two steps, like a provider row — the first
+    click arms it, and a stray one cannot take a route away. */
+function DeleteAgentButton({ label, onConfirm }: { label: string; onConfirm: () => void }) {
+  const t = useT();
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="mr-4 mt-3 h-7 shrink-0 gap-1 border border-line px-2 text-[10.5px] text-mut hover:text-ink"
+      style={armed ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
+      title={armed ? t("providers.deleteAgentConfirm") : t("providers.deleteAgentNote")}
+      aria-label={t("providers.deleteAgent")}
+      onClick={() => (armed ? onConfirm() : setArmed(true))}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      {armed ? t("providers.deleteAgentConfirm") : `${t("providers.deleteAgent")} ${label}`}
+    </Button>
+  );
+}
+
+/** Make a user-defined agent: a name, an optional note, and that is all the
+    form asks for — the id is derived, and the candidates are bound in the tab
+    it opens. */
+function NewAgentDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
+  const t = useT();
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const create = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const created = await api.addCustomAgent(name, note);
+      setName("");
+      setNote("");
+      onCreated(created.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle className="text-[13px]">{t("providers.newAgent")}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 px-5 pb-4 pt-1">
+          <div>
+            <Label className="text-[11px] font-medium text-mut">{t("providers.agentName")}</Label>
+            <Input
+              autoFocus
+              aria-label={t("providers.agentName")}
+              className="mt-1 h-8 text-[12px]"
+              value={name}
+              placeholder={t("providers.agentNamePlaceholder")}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && create()}
+            />
+          </div>
+          <div>
+            <Label className="text-[11px] font-medium text-mut">{t("providers.agentNote")}</Label>
+            <Input
+              aria-label={t("providers.agentNote")}
+              className="mt-1 h-8 text-[12px]"
+              value={note}
+              placeholder={t("providers.agentNotePlaceholder")}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          <p className="text-[11px] leading-relaxed text-mut">{t("providers.agentIdNote")}</p>
+          {err && (
+            <div className="text-[11px]" style={{ color: "var(--red)" }}>
+              {err}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" size="sm" className="h-7 px-3 text-[12px]" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 px-3 text-[12px] font-semibold"
+              disabled={!name.trim() || busy}
+              onClick={create}
+            >
+              {t("providers.createAgent")}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -558,7 +753,7 @@ function ProviderRow({
                 className={`relative inline-flex rounded-[4px] bg-bg${i > 0 ? "-ml-0.5" : ""}`}
                 style={{ zIndex: p.agents.length - i }}
               >
-                <AgentChip meta={AGENTS.find((m) => m.id === a)!} size={14} />
+                <AgentChip meta={agentMeta(a)} size={14} />
               </span>
             ))}
             {p.agents_note && <span className="ml-1.5 text-[11px] text-mut">{p.agents_note}</span>}
@@ -617,7 +812,7 @@ function WeightEditor({
   b,
   onChanged,
 }: {
-  agent: AgentId;
+  agent: AgentRef;
   b: StrategyBinding;
   onChanged: () => void;
 }) {
@@ -661,7 +856,7 @@ function TimeRangeEditor({
   b,
   onChanged,
 }: {
-  agent: AgentId;
+  agent: AgentRef;
   b: StrategyBinding;
   onChanged: () => void;
 }) {
@@ -758,7 +953,7 @@ function RoleCell({
   idx,
   onChanged,
 }: {
-  agent: AgentId;
+  agent: AgentRef;
   route: AgentRoute;
   b: StrategyBinding;
   idx: number;
@@ -954,7 +1149,7 @@ function AddBindingRow({
   boundIds,
   onChanged,
 }: {
-  agent: AgentId;
+  agent: AgentRef;
   providers: Provider[];
   boundIds: Set<string>;
   onChanged: () => void;
@@ -989,22 +1184,26 @@ export default function Providers({
   /** Phase 1 detection result; null = probe unavailable → show every agent */
   agentDetect?: AgentDetect[] | null;
   /** Phase 2 versions by agent id (arrive async, tooltip only) */
-  agentVersions?: Partial<Record<AgentId, string>>;
+  agentVersions?: Partial<Record<AgentRef, string>>;
   /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
-  initialAgent?: AgentId | null;
+  initialAgent?: AgentRef | null;
 }) {
   const t = useT();
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [routes, setRoutes] = useState<AgentRoute[] | null>(null);
-  const [seg, setSeg] = useState<AgentId | "all">(initialAgent ?? "all");
-  const [takenOver, setTakenOver] = useState<Set<AgentId> | null>(null);
+  const [seg, setSeg] = useState<AgentRef | "all">(initialAgent ?? "all");
+  const [takenOver, setTakenOver] = useState<Set<AgentRef> | null>(null);
+  const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
+  const [newAgent, setNewAgent] = useState(false);
+  // What a client is pointed at: the gateway's own listen address from settings.
+  const [listen, setListen] = useState("127.0.0.1:8317");
   const [enabling, setEnabling] = useState(false);
   // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
   const [quotaBusy, setQuotaBusy] = useState(false);
 
   // Segment switch that keeps the #providers/<agent> deep link truthful
-  const pickSeg = (id: AgentId | "all") => {
+  const pickSeg = (id: AgentRef | "all") => {
     setSeg(id);
     window.location.hash = id === "all" ? "providers" : `providers/${id}`;
   };
@@ -1032,10 +1231,16 @@ export default function Providers({
     api.listProviders().then(setProviders);
     // Per-agent strategy routes drive the agent-tab candidate rows
     api.getAgentRoutes().then(setRoutes).catch(() => setRoutes(null));
-    // Takeover state drives the per-agent onboarding panel
+    // Takeover state drives the per-agent onboarding panel; the same read
+    // carries the user's own agents, which drive their segments and resolver.
     api
       .getSettings()
-      .then((s) => setTakenOver(new Set(s.takeovers.filter((t) => t.enabled).map((t) => t.agent))))
+      .then((s) => {
+        setTakenOver(new Set(s.takeovers.filter((t) => t.enabled).map((t) => t.agent)));
+        setCustomAgents(s.custom_agents);
+        rememberCustomAgents(s.custom_agents);
+        if (s.gateway_listen) setListen(s.gateway_listen);
+      })
       .catch(() => {});
   }, []);
   useEffect(refetch, [refetch]);
@@ -1073,14 +1278,29 @@ export default function Providers({
     }
   };
 
+  // Built-ins (in the registry's order), then the agents the user defined —
+  // which are never "not installed": there is nothing to install.
+  const segments = useMemo(
+    () => [
+      ...SEGMENTS,
+      ...customAgents.map((a) => ({ id: a.id as AgentRef, label: a.label, icon: undefined })),
+    ],
+    [customAgents],
+  );
+
   // Only agents that phase 1 detected as installed get a segment; a failed
-  // probe (null) keeps every agent visible.
+  // probe (null) keeps every agent visible — and a user-defined agent always
+  // shows, since it has no installation to detect.
   const visibleSegments = useMemo(
     () =>
-      SEGMENTS.filter(
-        (s) => s.id === "all" || !agentDetect || agentDetect.find((d) => d.agent === s.id)?.installed,
+      segments.filter(
+        (s) =>
+          s.id === "all" ||
+          customAgents.some((a) => a.id === s.id) ||
+          !agentDetect ||
+          agentDetect.find((d) => d.agent === s.id)?.installed,
       ),
-    [agentDetect],
+    [segments, customAgents, agentDetect],
   );
 
   // Drop a hidden segment if the detection result changed under us.
@@ -1109,7 +1329,28 @@ export default function Providers({
     refetch();
   };
 
-  const onTakeover = async (agent: AgentId) => {
+  // Creating one opens its tab: what the user wants next is to bind a provider
+  // to it, and that is the tab's empty state.
+  const onAgentCreated = (id: string) => {
+    setNewAgent(false);
+    refetch();
+    pickSeg(id);
+  };
+
+  const onDeleteAgent = async (id: string) => {
+    await api.removeCustomAgent(id);
+    setSeg("all");
+    window.location.hash = "providers";
+    refetch();
+  };
+
+  // Only ever a built-in: a user-defined agent has no config to take over, so
+  // the panel that calls this is never shown for one.
+  const onTakeover = async (agent: AgentRef) => {
+    // Only ever a built-in: a user-defined agent has no config to take over, so
+    // the panel that calls this is never shown for one — and the guard is what
+    // keeps that true rather than a comment claiming it.
+    if (!isBuiltinAgent(agent)) return;
     setEnabling(true);
     try {
       await api.setTakeover(agent, true);
@@ -1126,11 +1367,17 @@ export default function Providers({
   // Inside an agent tab with bindings the list IS the strategy candidate queue
   const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
   const byId = new Map(providers.map((p) => [p.id, p]));
+  // The agent this tab belongs to, when the user defined it: routes and a key,
+  // and no config file anywhere.
+  const custom = seg === "all" ? undefined : customAgents.find((a) => a.id === seg);
   // Disabling a takeover keeps the stored route (re-enabling restores it), but
   // the agent config no longer points at the gateway — the route is dormant.
   // An agent tab for an agent that is not taken over shows the (re-)takeover
   // onboarding instead of the dormant binding rows.
-  const notTakenOver = seg !== "all" && !(takenOver?.has(seg) ?? false);
+  //
+  // A user-defined agent has no config to take over, so it is never in that
+  // state: its tab shows its route from the start.
+  const notTakenOver = seg !== "all" && !custom && !(takenOver?.has(seg) ?? false);
 
   return (
     <section className="flex min-h-full flex-col">
@@ -1149,12 +1396,33 @@ export default function Providers({
               >
                 {s.icon ? (
                   <ProviderLogo icon={s.icon} name={label} size={15} />
+                ) : s.id !== "all" && !AGENTS.some((a) => a.id === s.id) ? (
+                  // A user-defined agent has no brand mark to port: its own
+                  // letter, in the colour the resolver derived for it.
+                  <ProviderLogo
+                    char={agentMeta(s.id).chip_char}
+                    color={agentMeta(s.id).chip_color}
+                    name={label}
+                    size={15}
+                  />
                 ) : (
                   <span className="text-[12px] text-mut">{label}</span>
                 )}
               </button>
             );
           })}
+          {/* Its own button rather than part of the strip: the strip is a
+              switch between agents that exist, and this is how one comes to. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 shrink-0 px-0 text-mut hover:text-ink"
+            aria-label={t("providers.newAgent")}
+            title={t("providers.newAgentTitle")}
+            onClick={() => setNewAgent(true)}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
         </div>
         <span className="ml-1.5 text-[11.5px] text-mut">
           {t("providers.counts", { providers: providers.length, agents: agentsBound })}
@@ -1182,6 +1450,20 @@ export default function Providers({
           {t("providers.addProvider")}
         </Button>
       </div>
+
+      {/* A user-defined agent's tab starts with the two values a client is
+          configured with — the whole of what it is from the outside. */}
+      {custom && (
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <AccessCard keyName={custom.placeholder_key} listen={listen} />
+            {custom.note && (
+              <div className="mx-4 mt-1 text-[11px] text-mut">{custom.note}</div>
+            )}
+          </div>
+          <DeleteAgentButton label={custom.label} onConfirm={() => onDeleteAgent(custom.id)} />
+        </div>
+      )}
 
       {notTakenOver ? (
         <AgentOnboarding
@@ -1250,6 +1532,7 @@ export default function Providers({
           {filtered.length === 0 && seg !== "all" && (
             <AgentOnboarding
               agent={seg}
+              kind={custom ? "route" : "takeover"}
               installed={
                 agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
               }
@@ -1288,17 +1571,25 @@ export default function Providers({
         <StrategyPanel agent={seg} routes={routes} onChanged={refetch} />
       )}
 
+      <NewAgentDialog
+        open={newAgent}
+        onClose={() => setNewAgent(false)}
+        onCreated={onAgentCreated}
+      />
+
       {/* Single closing note. In a taken-over agent tab with a route it also
           carries the strategy context (the StrategyPanel select row has no
           header of its own). */}
       <div className="mt-auto truncate px-4 py-3 text-[10.5px] text-mut">
         {notTakenOver
           ? t("providers.footerNotTakenOver")
-          : seg !== "all" &&
-              (takenOver?.has(seg) ?? false) &&
-              (routes?.some((r) => r.agent === seg) ?? false)
-            ? t("providers.footerStrategy")
-            : t("providers.footerDefault")}
+          : custom
+            ? t("providers.footerRoute")
+            : seg !== "all" &&
+                (takenOver?.has(seg) ?? false) &&
+                (routes?.some((r) => r.agent === seg) ?? false)
+              ? t("providers.footerStrategy")
+              : t("providers.footerDefault")}
       </div>
     </section>
   );

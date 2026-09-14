@@ -509,7 +509,7 @@ fn get_dashboard(
 
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> Result<vm::SettingsVm, String> {
-    vm::build_settings(&state.aux)
+    vm::build_settings(&state.store, &state.aux)
 }
 
 #[tauri::command]
@@ -773,6 +773,29 @@ fn remove_agent_binding(
     provider_id: String,
 ) -> Result<(), String> {
     vm::remove_agent_binding(&state.store, &agent, &provider_id)?;
+    after_mutation(&state);
+    Ok(())
+}
+
+/// Define a user-defined agent: a named route with its own placeholder key.
+/// Nothing on disk changes — there is no config here to rewrite — so the only
+/// work is the row, the key and the default strategy.
+#[tauri::command]
+fn add_custom_agent(
+    state: State<AppState>,
+    label: String,
+    note: Option<String>,
+) -> Result<vm::CustomAgentVm, String> {
+    let created = vm::add_custom_agent(&state.store, &label, note.as_deref())?;
+    after_mutation(&state);
+    Ok(created)
+}
+
+/// Delete a user-defined agent along with its route and its key. Its usage and
+/// request logs stay, so the Dashboard keeps accounting for what ran.
+#[tauri::command]
+fn remove_custom_agent(state: State<AppState>, id: String) -> Result<(), String> {
+    vm::remove_custom_agent(&state.store, &id)?;
     after_mutation(&state);
     Ok(())
 }
@@ -1079,6 +1102,8 @@ pub fn run() {
             update_agent_binding,
             add_agent_binding,
             remove_agent_binding,
+            add_custom_agent,
+            remove_custom_agent,
             apply_agent_route,
             export_config,
             import_config,

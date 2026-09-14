@@ -2,12 +2,12 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentId, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert } from "./types";
+import type { AgentDetect, AgentId, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
 
-  listProviders: async (filter: AgentId | "all" = "all") => {
+  listProviders: async (filter: AgentRef | "all" = "all") => {
     const list = await invoke<Provider[]>("list_providers");
     return filter === "all" ? list : list.filter((p) => p.agents.includes(filter));
   },
@@ -73,6 +73,11 @@ export const tauriApi: KiwanoApi = {
 
   setTakeover: (agent: AgentId, enabled: boolean) =>
     invoke<void>("set_agent_takeover", { agent, enabled }),
+
+  addCustomAgent: (label: string, note?: string | null) =>
+    invoke<CustomAgent>("add_custom_agent", { label, note: note ?? null }),
+
+  removeCustomAgent: (id: string) => invoke<void>("remove_custom_agent", { id }),
 
   importCcSwitch: () => invoke<ImportReport>("import_cc_switch"),
 

@@ -98,6 +98,30 @@ export const providers = {
   moveDown: "Move down",
   makePrimary: "Make primary",
   makePrimaryTitle: "Make primary — move this candidate to the head of the queue",
+  // ── User-defined agents (migration v16) ──
+  /** The + at the end of the agent strip. */
+  newAgent: "New agent",
+  newAgentTitle: "Define your own agent: a named route with its own key",
+  agentName: "Name",
+  agentNamePlaceholder: "Long tasks",
+  agentNote: "Note",
+  agentNotePlaceholder: "Optional — what this route is for",
+  /** Under the form: what the user is and is not choosing. */
+  agentIdNote:
+    "The id is derived from the name and stays fixed. Nothing on disk changes: this agent is a route, so you point a client at the gateway with its key rather than taking over a config file.",
+  createAgent: "Create",
+  routeEmptyTitle: "{agent} has no candidates yet",
+  routeEmptyBody:
+    "Bind an existing provider below, and requests that arrive with this agent's key will route through the candidates in order.",
+  access: "How a client reaches this agent",
+  accessEndpoint: "Endpoint",
+  accessKey: "API Key",
+  accessNote:
+    "Any client pointed at this endpoint with this key routes by this agent's strategy, on /v1/messages or /v1/chat/completions.",
+  deleteAgent: "Delete this agent",
+  deleteAgentConfirm: "Click again to delete",
+  deleteAgentNote: "Its usage history stays.",
+
   removeFromRouteAria: "Remove from route",
   removeFromRoute: "Remove from this route (other agents keep their binding)",
 
@@ -118,6 +142,10 @@ export const providers = {
     "Agent routing strategy · rows above are the candidates in priority order (primary first) · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
   footerDefault:
     "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
+  /** A user-defined agent's tab: nothing here was taken over, so the default
+      line's first clause would be a lie. */
+  footerRoute:
+    "This agent is a route of its own: the endpoint and key above are all a client needs · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
 
   // ── Plan quota tiers ──
   // The backend reports these as machine keys (`five_hour`, `weekly_limit`,

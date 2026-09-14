@@ -618,6 +618,9 @@ struct UsageReport {
 
 pub fn agents(cmd: &AgentsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
+        AgentsCmd::List => agents_list(ctx),
+        AgentsCmd::Add { name, note } => agents_add(ctx, name, note.as_deref()),
+        AgentsCmd::Remove { id } => agents_remove(ctx, id),
         AgentsCmd::Detect => {
             let found = detect::detect_agents();
             let text = render_agents(&found);
@@ -633,6 +636,106 @@ pub fn agents(cmd: &AgentsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         AgentsCmd::Takeover { agent } => set_takeover(ctx, agent, true),
         AgentsCmd::Restore { agent } => set_takeover(ctx, agent, false),
     }
+}
+
+/// One row of `agents list`: a built-in or a user-defined agent, and the one
+/// question that differs between them — whether its traffic reaches the gateway.
+#[derive(serde::Serialize)]
+struct AgentRow {
+    id: String,
+    label: String,
+    /// "builtin" (a CLI this app knows how to route) or "custom" (a route you
+    /// defined, with no config file behind it).
+    kind: &'static str,
+    routed: bool,
+    placeholder_key: Option<String>,
+    note: Option<String>,
+}
+
+fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
+    let rows = {
+        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        let settings = vm::build_settings_with_home(store, aux, &ctx.home)?;
+        let mut rows: Vec<AgentRow> = settings
+            .takeovers
+            .into_iter()
+            .map(|t| AgentRow {
+                id: t.agent,
+                label: t.label,
+                kind: "builtin",
+                // A built-in is routed when its own config points here — which
+                // is what `takeovers[].enabled` reports, read from the file.
+                routed: t.enabled,
+                placeholder_key: t.placeholder_key,
+                note: None,
+            })
+            .collect();
+        rows.extend(settings.custom_agents.into_iter().map(|a| AgentRow {
+            id: a.id,
+            label: a.label,
+            kind: "custom",
+            // A user-defined agent has no config to point anywhere: it exists,
+            // so it routes.
+            routed: true,
+            placeholder_key: a.placeholder_key,
+            note: a.note,
+        }));
+        rows
+    };
+    let text = render_agent_rows(&rows);
+    ctx.out.emit(&rows, || text);
+    Ok(())
+}
+
+fn agents_add(ctx: &mut Ctx, name: &str, note: Option<&str>) -> Result<(), CliError> {
+    let created = {
+        let store = ctx.store()?;
+        vm::add_custom_agent(store, name, note)?
+    };
+    // The key is the whole integration surface, so it is printed rather than
+    // left to be looked up: this is the credential a client is configured with,
+    // and the gateway attributes traffic by nothing else.
+    let text = format!(
+        "added {} ({})\nplaceholder key: {}\nbind a provider: kiwano routes binding add {} <provider_id>",
+        created.id,
+        created.label,
+        created.placeholder_key.as_deref().unwrap_or("-"),
+        created.id
+    );
+    ctx.out.emit(&created, || text);
+    ctx.after_mutation();
+    Ok(())
+}
+
+fn agents_remove(ctx: &mut Ctx, id: &str) -> Result<(), CliError> {
+    {
+        let store = ctx.store()?;
+        vm::remove_custom_agent(store, id)?;
+    }
+    ctx.out
+        .line(format!("removed {id} (its usage history stays)"));
+    ctx.after_mutation();
+    Ok(())
+}
+
+fn render_agent_rows(rows: &[AgentRow]) -> String {
+    if rows.is_empty() {
+        return "(no agents)".to_string();
+    }
+    let head = ["ID", "LABEL", "KIND", "ROUTED", "KEY"];
+    let table_rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                ellipsize(&r.id, 28),
+                ellipsize(&r.label, 20),
+                r.kind.to_string(),
+                if r.routed { "yes" } else { "no" }.to_string(),
+                r.placeholder_key.clone().unwrap_or_else(|| "-".to_string()),
+            ]
+        })
+        .collect();
+    render_table(&head, &table_rows)
 }
 
 /// Take over, or restore, one agent — the operation that makes a server
@@ -871,10 +974,10 @@ pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         SettingsCmd::Get => {
             let settings = {
-                let aux = ctx.aux()?;
+                let (store, aux) = (ctx.store()?, ctx.aux()?);
                 // The home-taking form: `build_settings` would resolve $HOME
                 // itself, ignoring --home and reporting on the wrong tree.
-                vm::build_settings_with_home(aux, &ctx.home)?
+                vm::build_settings_with_home(store, aux, &ctx.home)?
             };
             let text = render_settings(&settings);
             ctx.out.emit(&settings, || text);

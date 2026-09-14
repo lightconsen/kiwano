@@ -687,6 +687,75 @@ async fn anthropic_inbound_converts_openai_sse_stream_to_anthropic_events() {
     assert_eq!(totals.cache_read_tokens, 5);
 }
 
+/// An agent the user defined routes like any other, and meters under its own
+/// name — the whole premise being that the gateway only ever needed a key and a
+/// route, never a registry entry.
+///
+/// This crate cannot call `kiwano_core::vm::add_custom_agent` (core depends on
+/// this one), so the three rows it writes are written here directly: the agent's
+/// own row, its placeholder key, and its binding. If that ever stops being the
+/// whole of it, this test is where it shows up.
+#[tokio::test]
+async fn a_user_defined_agents_key_routes_and_meters() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let agent = "long-tasks-3f9a";
+
+    let (upstream_url, captured) = mock_anthropic(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "model": "claude-sonnet-4-5",
+        "usage": {"input_tokens": 11, "output_tokens": 3}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind(agent, "p-ant", 0)).unwrap();
+    store
+        .insert_custom_agent(&kiwanod::store::CustomAgent {
+            id: agent.to_string(),
+            label: "Long tasks".to_string(),
+            note: None,
+            created_at: kiwanod::store::now_rfc3339(),
+        })
+        .unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-long-tasks-3f9a-0001", agent)
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-long-tasks-3f9a-0001"),
+        r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = response_body(response).await;
+
+    // The real key went upstream, the placeholder never did — same contract as
+    // any built-in agent's traffic. Scoped so the guard is released before the
+    // await below (a std guard across an await is a clippy error, not a style
+    // preference: the task can be suspended holding it).
+    {
+        let seen = captured.lock().unwrap();
+        assert_eq!(
+            seen.last().map(|(k, v)| (k.as_str(), v.as_str())),
+            Some(("x-api-key", REAL_KEY))
+        );
+    }
+
+    // …and it is accounted under the agent the key names, which is the point of
+    // having defined it.
+    let totals = wait_for_usage(&state, agent, 1).await;
+    assert_eq!(totals.input_tokens, 11);
+    assert_eq!(totals.output_tokens, 3);
+}
+
 /// The Gemini family is gone with its protocol and its agent: nothing speaks
 /// `/v1beta` any more, so a stray request is refused as an unknown path rather
 /// than routed to a provider in the wrong shape.

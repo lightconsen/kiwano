@@ -49,6 +49,7 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
         additive: false,
       },
     ],
+    custom_agents: [],
     auto_failover: true,
     request_logs: true,
     log_retention_days: 30,

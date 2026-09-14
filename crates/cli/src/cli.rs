@@ -391,6 +391,31 @@ pub enum ProbeCmd {
 
 #[derive(Debug, Subcommand)]
 pub enum AgentsCmd {
+    /// Every agent this store knows: the built-in ones and your own
+    ///
+    /// Custom agents are routes rather than installations — a name, a key and a
+    /// strategy — so they have no config file and nothing to detect. Bind one to
+    /// providers with `routes binding add`.
+    List,
+
+    /// Define your own agent: a named route with its own key
+    ///
+    /// Nothing is written anywhere but this database. Point any client at the
+    /// gateway with the printed key and it routes by this agent's strategy.
+    Add {
+        /// Display name; the id is derived from it and never changes
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        /// What this route is for, e.g. "cheap by day, batch at night"
+        #[arg(long, value_name = "TEXT")]
+        note: Option<String>,
+    },
+
+    /// Delete a custom agent, its route and its key
+    ///
+    /// Usage and request logs stay: the history of what ran is not the route.
+    Remove { id: String },
+
     /// Which agents are installed on this machine
     Detect,
 

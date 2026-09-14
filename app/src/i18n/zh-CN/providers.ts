@@ -81,6 +81,28 @@ export const providers = {
   moveDown: "下移",
   makePrimary: "设为主用",
   makePrimaryTitle: "设为主用 —— 将该候选移到队列首位",
+  // ── 自定义 Agent（迁移 v16）──
+  newAgent: "新建 Agent",
+  newAgentTitle: "自定义 Agent：一条有名字、有自己 key 的路由",
+  agentName: "名称",
+  agentNamePlaceholder: "长任务",
+  agentNote: "备注",
+  agentNotePlaceholder: "可选 —— 这条路由是干什么的",
+  agentIdNote:
+    "id 由名称派生且固定不变。磁盘上什么都不会改：它是一个路由，所以你把客户端指到网关并带上它的 key，而不是去接管某个配置文件。",
+  createAgent: "创建",
+  routeEmptyTitle: "{agent} 还没有候选 Provider",
+  routeEmptyBody:
+    "在下面绑定一个已有 Provider；带着这个 Agent 的 key 进来的请求，会按候选顺序走。",
+  access: "客户端如何接入",
+  accessEndpoint: "端点",
+  accessKey: "API Key",
+  accessNote:
+    "任何客户端指到这个端点、带上这个 key，就按这条 Agent 的策略走（/v1/messages 或 /v1/chat/completions）。",
+  deleteAgent: "删除这个 Agent",
+  deleteAgentConfirm: "再点一次即删除",
+  deleteAgentNote: "它的用量历史会保留。",
+
   removeFromRouteAria: "从路由中移除",
   removeFromRoute: "从该路由中移除（其他 Agent 的绑定不受影响）",
 
@@ -101,6 +123,8 @@ export const providers = {
     "Agent 路由策略 · 上方各行即按优先级排序的候选（主用在前）· 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
   footerDefault:
     "切换即时生效（该 Agent 已由本地网关接管；切换仅改变路由）· API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
+  footerRoute:
+    "这个 Agent 就是一条路由：上面的端点与 key 就是客户端需要的全部 · 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
 
   // ── Plan quota tiers ──
   tierFiveHour: "5 小时窗口",

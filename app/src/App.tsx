@@ -12,7 +12,8 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { applyTheme } from "./lib/theme";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
 import { onOpenSettings } from "./lib/updateEvents";
-import { AGENTS } from "./api/types";
+import type { AgentRef } from "./api/types";
+import { rememberCustomAgents } from "./lib/agents";
 import type {
   AgentDetect,
   AgentId,
@@ -42,18 +43,20 @@ const NAV: { id: Route; labelKey: KeyPath<Messages> }[] = [
 ];
 
 /** Hash router: #settings etc., plus an optional deep-linked agent segment
-    (#providers/openclaw) that the Apps screen adopts as its active tab. */
-function routeFromHash(): { route: Route; agent: AgentId | null } {
+    (#providers/openclaw) that the Apps screen adopts as its active tab.
+    The id is *not* checked against the registry: a user-defined agent's tab is
+    deep-linked the same way, and the Apps screen already falls back to "all"
+    for an id nothing knows. */
+function routeFromHash(): { route: Route; agent: AgentRef | null } {
   const [head, tail] = window.location.hash.slice(1).split("/");
   const route: Route = NAV.some((n) => n.id === head) ? (head as Route) : "providers";
-  const agent = AGENTS.some((a) => a.id === tail) ? (tail as AgentId) : null;
-  return { route, agent };
+  return { route, agent: tail ? decodeURIComponent(tail) : null };
 }
 
 export default function App() {
   const t = useT();
   const locale = useLocale();
-  const [route, setRoute] = useState<{ route: Route; agent: AgentId | null }>(routeFromHash);
+  const [route, setRoute] = useState<{ route: Route; agent: AgentRef | null }>(routeFromHash);
   const [tick, setTick] = useState(0);
   const [gw, setGw] = useState<GatewayStatus | null>(null);
   const [footer, setFooter] = useState<FooterStats | null>(null);
@@ -86,6 +89,10 @@ export default function App() {
     api
       .getSettings()
       .then((s) => {
+        // The agent resolver is app-wide state (the provider dialog lists
+        // agents, the Apps strip names them), and this is the one settings read
+        // that happens before any screen mounts.
+        rememberCustomAgents(s.custom_agents);
         applyTheme(s.theme);
         // The stored preference is `"system"` until the user picks one, and it
         // resolves from the OS locale — so this has to run before the first

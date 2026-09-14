@@ -9,10 +9,11 @@
 // touch data (`src/api/client.ts` picks the Tauri or the browser-dev
 // implementation there), so nothing below knows the difference.
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/i18n/en";
-import type { AgentRoute, AppSettings, Provider } from "@/api/types";
+import type { AgentRoute, AppSettings, CustomAgent, Provider } from "@/api/types";
 
 import Providers from "./Providers";
 
@@ -31,6 +32,8 @@ const { apiMock } = vi.hoisted(() => ({
     applyAgentRoute: vi.fn(),
     updateAgentStrategy: vi.fn(),
     deleteProvider: vi.fn(),
+    addCustomAgent: vi.fn(),
+    removeCustomAgent: vi.fn(),
   },
 }));
 
@@ -78,11 +81,13 @@ function codexRoute(providerIds: string[]): AgentRoute {
   };
 }
 
-/** The settings blob `getSettings` answers with. This screen reads only the
-    takeover list — whether an agent is routing through the gateway at all — so
-    the fixture carries that one field rather than a whole settings page. */
-function settingsWith(codexTakenOver: boolean): AppSettings {
+/** The settings blob `getSettings` answers with. This screen reads the takeover
+    list (is an agent routing at all), the user's own agents and the listen
+    address; the rest of a settings page is not this file's business. */
+function settingsWith(codexTakenOver: boolean, custom: CustomAgent[] = []): AppSettings {
   return {
+    gateway_listen: "127.0.0.1:8317",
+    custom_agents: custom,
     takeovers: [
       {
         agent: "codex",
@@ -100,10 +105,11 @@ function renderCodexTab(over: {
   providers: Provider[];
   routes: AgentRoute[];
   codexTakenOver: boolean;
+  custom?: CustomAgent[];
 }) {
   apiMock.listProviders.mockResolvedValue(over.providers);
   apiMock.getAgentRoutes.mockResolvedValue(over.routes);
-  apiMock.getSettings.mockResolvedValue(settingsWith(over.codexTakenOver));
+  apiMock.getSettings.mockResolvedValue(settingsWith(over.codexTakenOver, over.custom));
   return render(<Providers onAdd={() => {}} onEdit={() => {}} initialAgent="codex" />);
 }
 
@@ -162,5 +168,130 @@ describe("an agent tab", () => {
     // Nothing of the dormant route is on screen — not the candidate row, not
     // the provider it named.
     expect(screen.queryByText("DeepSeek")).toBeNull();
+  });
+});
+
+describe("a user-defined agent", () => {
+  const longTasks: CustomAgent = {
+    id: "long-tasks-3f9a",
+    label: "Long tasks",
+    note: "cheap by day, batch at night",
+    placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
+  };
+
+  /** A route for the user-defined agent: `bindings` empty or not. */
+  function customRoute(providerIds: string[]): AgentRoute {
+    return { ...codexRoute([]), agent: longTasks.id, bindings: codexRoute(providerIds).bindings };
+  }
+
+  it("gets its own segment, and a tab that says how a client reaches it", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    // The segment strip carries it by name — nothing was installed, because
+    // there is nothing to install.
+    const segment = await screen.findByRole("button", { name: longTasks.label });
+    await user.click(segment);
+
+    // The access card: the two values the client is configured with, and the
+    // note the user wrote.
+    expect(await screen.findByText("http://127.0.0.1:8317")).toBeInTheDocument();
+    expect(screen.getByText(longTasks.placeholder_key!)).toBeInTheDocument();
+    expect(screen.getByText(longTasks.note!)).toBeInTheDocument();
+    // Its candidate is a row like any agent's…
+    expect(screen.getByLabelText(en.providers.removeFromRouteAria)).toBeInTheDocument();
+    // …and there is nothing to enable: a route has no config to take over.
+    expect(screen.queryByText(en.providers.enableKiwano)).toBeNull();
+    expect(screen.queryByText(en.providers.startManagingBody.replace("{agent}", longTasks.label))).toBeNull();
+  });
+
+  it("asks for a candidate before it has any", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek({ agents: [] })]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute([])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: longTasks.label }));
+
+    // The route-only panel: bind one, and the copy says what the candidates are
+    // for — not the takeover copy, which would be about a config file that does
+    // not exist here.
+    expect(
+      await screen.findByText(en.providers.routeEmptyTitle.replace("{agent}", longTasks.label)),
+    ).toBeInTheDocument();
+    expect(screen.getByText(en.providers.routeEmptyBody)).toBeInTheDocument();
+    expect(screen.queryByText(en.providers.enableKiwano)).toBeNull();
+  });
+
+  it("is created from the + in the strip, and opens on its tab", async () => {
+    const user = userEvent.setup();
+    const created: CustomAgent = {
+      id: "nightly-7c21",
+      label: "Nightly",
+      note: null,
+      placeholder_key: "kw-ag-nightly-7c21-11aa",
+    };
+    apiMock.listProviders.mockResolvedValue([]);
+    apiMock.getAgentRoutes.mockResolvedValue([{ ...codexRoute([]), agent: created.id }]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    apiMock.addCustomAgent.mockResolvedValue(created);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: en.providers.newAgent }));
+    // The next settings read is the one the creation triggers.
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [created]));
+    await user.type(screen.getByRole("textbox", { name: en.providers.agentName }), created.label);
+    await user.click(screen.getByRole("button", { name: en.providers.createAgent }));
+
+    await waitFor(() =>
+      expect(apiMock.addCustomAgent).toHaveBeenCalledWith(created.label, ""),
+    );
+    // It opens on the new agent's tab: what the user wants next is to bind a
+    // provider, and that is what that tab asks for.
+    expect(await screen.findByText(created.placeholder_key!)).toBeInTheDocument();
+  });
+
+  it("is deleted in two clicks, and its segment goes with it", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute([])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    apiMock.removeCustomAgent.mockResolvedValue(undefined);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+    const del = await screen.findByRole("button", { name: en.providers.deleteAgent });
+    await user.click(del);
+    // The first click only arms it…
+    expect(apiMock.removeCustomAgent).not.toHaveBeenCalled();
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    await user.click(del);
+
+    await waitFor(() => expect(apiMock.removeCustomAgent).toHaveBeenCalledWith(longTasks.id));
+    // …and the tab is gone from the strip, with the screen back on All.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: longTasks.label })).toBeNull(),
+    );
+  });
+});
+
+describe("an id nothing knows", () => {
+  it("still renders — a deleted agent's rows are still in the lists", async () => {
+    // The regression the resolver exists for: a provider bound to an agent that
+    // is no longer defined used to hit a non-null assertion and take the screen
+    // down with it.
+    apiMock.listProviders.mockResolvedValue([
+      deepseek({ agents: ["ghost-77ab"], serving_agents: [], is_current: false }),
+    ]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    expect(await screen.findByText("DeepSeek")).toBeInTheDocument();
+    // Its avatar is derived from the id: the first letter it has.
+    expect(screen.getByText("G")).toBeInTheDocument();
   });
 });

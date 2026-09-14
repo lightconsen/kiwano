@@ -20,7 +20,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 15;
+pub const SCHEMA_VERSION: i32 = 16;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -496,6 +496,32 @@ ALTER TABLE provider_endpoints_new RENAME TO provider_endpoints;
 PRAGMA foreign_keys=ON;
 "#;
 
+/// v16: user-defined agents — a named route with no config file behind it.
+///
+/// The registry has been a constant in `kiwano-core` (`AGENTS`) since the first
+/// release, and everything an agent *is* has always been in tables that never
+/// heard of it: `agent_strategies`, `agent_bindings`, `placeholder_keys`, and
+/// the agent columns of `usage` / `request_logs` are all plain TEXT, and the
+/// gateway's route table is built from them without ever consulting a registry
+/// (`RouteTable::load`). So a user-defined agent needs exactly this: a row to
+/// name it and to hang a key on. No config to rewrite, nothing to detect, no
+/// backup to restore — which is the whole point of it.
+///
+/// Its id is derived from the label and never changes (bindings, strategies,
+/// keys and usage all reference it); the label can be edited. `note` is free
+/// text for the user ("cheap by day, batch at night").
+///
+/// There is deliberately no `enabled` column: an agent you do not want is an
+/// agent you delete, and its usage history stays either way.
+const MIGRATION_V16: &str = r#"
+CREATE TABLE IF NOT EXISTS custom_agents (
+    id         TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    note       TEXT,
+    created_at TEXT NOT NULL
+);
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -702,6 +728,19 @@ pub struct Binding {
 pub struct PlaceholderKey {
     pub key: String,
     pub agent: String,
+    pub created_at: String,
+}
+
+/// An agent the user defined (migration v16): a name for a route, and nothing
+/// else. It has no config file, so nothing about it is derived from disk — the
+/// row is the whole of it, plus the key the gateway attributes its traffic by.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomAgent {
+    /// Derived from the label at creation and never changed afterwards.
+    pub id: String,
+    pub label: String,
+    /// Free text: what this route is for. None when the user said nothing.
+    pub note: Option<String>,
     pub created_at: String,
 }
 
@@ -1411,12 +1450,14 @@ impl Store {
                 );
             }
         }
+        if version < 16 {
+            conn.execute_batch(MIGRATION_V16)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         Ok(())
     }
-
     // ---- providers ------------------------------------------------------
 
     pub fn insert_provider(&self, p: &Provider) -> Result<()> {
@@ -1708,6 +1749,84 @@ impl Store {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    // ---- user-defined agents (migration v16) ----------------------------
+
+    /// Every custom agent, in creation order (the segment bar appends them after
+    /// the built-ins in the order the user made them).
+    pub fn list_custom_agents(&self) -> Result<Vec<CustomAgent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, label, note, created_at FROM custom_agents ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CustomAgent {
+                id: row.get(0)?,
+                label: row.get(1)?,
+                note: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_custom_agent(&self, id: &str) -> Result<Option<CustomAgent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let found = conn
+            .query_row(
+                "SELECT id, label, note, created_at FROM custom_agents WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(CustomAgent {
+                        id: row.get(0)?,
+                        label: row.get(1)?,
+                        note: row.get(2)?,
+                        created_at: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(found)
+    }
+
+    pub fn insert_custom_agent(&self, a: &CustomAgent) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO custom_agents (id, label, note, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![a.id, a.label, a.note, a.created_at],
+        )?;
+        Ok(())
+    }
+
+    /// Rename: only the label moves. The id is referenced by bindings,
+    /// strategies, keys and usage rows, so it is not a thing a rename touches.
+    pub fn update_custom_agent_label(
+        &self,
+        id: &str,
+        label: &str,
+        note: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "UPDATE custom_agents SET label = ?2, note = ?3 WHERE id = ?1",
+            params![id, label, note],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Delete the agent's own row. Its route (bindings + strategy) and key are
+    /// the caller's to remove — `vm::remove_custom_agent` does all three in the
+    /// order that leaves nothing dangling; usage and request logs are history
+    /// and are never touched.
+    pub fn delete_custom_agent(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute("DELETE FROM custom_agents WHERE id = ?1", params![id])?;
+        Ok(n > 0)
     }
 
     // ---- extra API keys (spec §4.1 P1 multi-key rotation) -----------------------
@@ -2036,6 +2155,27 @@ impl Store {
         };
         let mut out = Vec::new();
         for row in stmt.query_map(rusqlite::params_from_iter(params), map_row)? {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Distinct agents with usage in the window, busiest first.
+    ///
+    /// The Dashboard's agent breakdown iterates the registry, which is fine
+    /// while every agent is a constant — but an agent the user defined (and
+    /// later deleted) exists only as the `agent` column of these rows. This is
+    /// how its traffic stays on the page after the route is gone.
+    pub fn usage_agents(&self, since: Option<&str>) -> Result<Vec<String>> {
+        let (cond, params) = Self::usage_filters(None, None, since);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT agent FROM usage WHERE 1=1{cond}
+             GROUP BY agent ORDER BY COUNT(*) DESC, agent ASC",
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| row.get(0))?;
+        let mut out = Vec::new();
+        for row in rows {
             out.push(row?);
         }
         Ok(out)

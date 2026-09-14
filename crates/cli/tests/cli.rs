@@ -969,6 +969,92 @@ fn takeover_rejects_an_unknown_agent() {
     assert!(err.contains("unknown agent"), "{err}");
 }
 
+/// The whole life of a user-defined agent from the command line: it is made
+/// with a name, it lists with the built-ins, a provider is bound to it with the
+/// existing route commands, and deleting it takes the route and the key with it
+/// while the history stays.
+#[test]
+fn agents_add_list_bind_and_remove_a_custom_agent() {
+    let (dir, db) = temp_db();
+    let home = dir.path().join("home");
+    let home_arg = home.display().to_string();
+
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--json",
+            "agents",
+            "add",
+            "--name",
+            "Long Tasks",
+            "--note",
+            "night batch",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let created: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+    let key = created["placeholder_key"].as_str().unwrap().to_string();
+    assert!(id.starts_with("long-tasks-"), "{id}");
+    assert!(key.starts_with(&format!("kw-ag-{id}")), "{key}");
+
+    // It lists as an agent, marked custom and routed (there is no config for it
+    // to fail to point at the gateway).
+    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "agents", "list"]);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let mine = rows
+        .iter()
+        .find(|r| r["id"] == id.as_str())
+        .unwrap_or_else(|| panic!("{id} is not in {rows:?}"));
+    assert_eq!(mine["kind"], "custom");
+    assert_eq!(mine["routed"], true);
+    assert_eq!(mine["label"], "Long Tasks");
+    assert_eq!(mine["note"], "night batch");
+
+    // Binding is the existing command: a custom agent is an agent id like any
+    // other to everything that reads routes.
+    let provider_id = add_provider(&db, "alpha", &[]);
+    let (code, _, err) = run(
+        &db,
+        &["--no-reload", "routes", "binding", "add", &id, &provider_id],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let providers: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        providers[0]["agents"],
+        serde_json::json!([id.clone()]),
+        "the provider is listed under the custom agent"
+    );
+
+    // Deleting it clears the route and the key; the provider row stays.
+    let (code, out, err) = run(&db, &["--no-reload", "agents", "remove", &id]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("usage history stays"), "{out}");
+    let store = Store::open(&db).unwrap();
+    assert!(store.bindings_for_agent(&id).unwrap().is_empty());
+    assert!(store.get_strategy(&id).unwrap().is_none());
+    assert!(store
+        .list_placeholder_keys()
+        .unwrap()
+        .iter()
+        .all(|k| k.agent != id));
+    assert!(store.get_provider(&provider_id).unwrap().is_some());
+
+    // …and a second removal has nothing to remove.
+    let (code, _, err) = run(&db, &["--no-reload", "agents", "remove", &id]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("no such custom agent"), "{err}");
+}
+
+#[test]
+fn agents_add_requires_a_name() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(&db, &["--no-reload", "agents", "add", "--name", "   "]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("needs a name"), "{err}");
+}
+
 #[test]
 fn detect_reports_the_known_agents() {
     let (dir, db) = temp_db();

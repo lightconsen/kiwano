@@ -1,6 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert } from "./types";
+import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 import { AGENTS } from "./types";
 // The same formatter the screens print with: a fixture that formats its own
 // tokens is a fixture that can disagree with the page about how they read.
@@ -479,7 +479,9 @@ function buildWindow(
   const perAgentOffPeak = splitCents(costOffPeak);
   const by_agent = AGENT_MIX.map((a, i) => ({
     agent: a.agent,
-    label: AGENTS.find((m) => m.id === a.agent)!.label,
+    // The registry's label where it has one; a user-defined agent's traffic is
+    // not in this fixture, so the fallback is the id, as in the app.
+    label: AGENTS.find((m) => m.id === a.agent)?.label ?? a.agent,
     requests: perAgent[i],
     tokens: fmtTokens(perAgentTokens[i]),
     cost: perAgentCost[i],
@@ -589,6 +591,23 @@ const settings: AppSettings = {
     { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true },
     { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true },
   ],
+  // Two user-defined agents, so `pnpm dev` can show the whole feature: a route
+  // with candidates, and one that is still empty (the state the tab's bind slot
+  // exists for).
+  custom_agents: [
+    {
+      id: "long-tasks-3f9a",
+      label: "Long tasks",
+      note: "batch work at off-peak rates",
+      placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
+    },
+    {
+      id: "scratch-91cd",
+      label: "Scratch",
+      note: null,
+      placeholder_key: "kw-ag-scratch-91cd-40aa",
+    },
+  ],
   auto_failover: true,
   request_logs: true,
   log_retention_days: 30,
@@ -663,6 +682,13 @@ const agentRoutes: AgentRoute[] = [
     bindings: [bind("deepseek", 0)],
   },
   {
+    // A user-defined agent: a route like any other, over its own key.
+    agent: "long-tasks-3f9a",
+    strategy: "failover",
+    config: null,
+    bindings: [bind("deepseek", 0), bind("kimi", 1)],
+  },
+  {
     // Kimi heads opencode (globally "In use") while standing by in claude's
     // queue — exercises the agent tabs' local vs global "In use" badge.
     agent: "opencode",
@@ -731,7 +757,13 @@ function servingNow(): Set<string> {
     has been handed its own config back is a plan, not traffic, so it must not
     put the provider in that agent's column or under "In use". */
 function routedRoutes(): AgentRoute[] {
-  return agentRoutes.filter((r) => settings.takeovers.find((t) => t.agent === r.agent)?.enabled);
+  return agentRoutes.filter(
+    (r) =>
+      // A user-defined agent routes as long as it exists: it has no config
+      // file for the takeover list to be reporting on (vm::live_bound_agents).
+      settings.custom_agents.some((a) => a.id === r.agent) ||
+      settings.takeovers.find((t) => t.agent === r.agent)?.enabled,
+  );
 }
 
 function agentsOf(pid: string): string[] {
@@ -1157,6 +1189,33 @@ export const devApi: KiwanoApi = {
     return settings;
   },
 
+  async addCustomAgent(label: string, note?: string | null): Promise<CustomAgent> {
+    await delay();
+    const created: CustomAgent = {
+      // The same shape vm::add_custom_agent derives, so a copied id reads the
+      // same in either mode.
+      id: `${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom"}-${Math.random().toString(16).slice(2, 8)}`,
+      label: label.trim(),
+      note: note?.trim() ? note.trim() : null,
+      placeholder_key: "",
+    };
+    created.placeholder_key = `kw-ag-${created.id}-${Math.random().toString(16).slice(2, 6)}`;
+    settings.custom_agents = [...settings.custom_agents, created];
+    // A route with the same default as the backend's: single, no candidates yet.
+    agentRoutes.push({ agent: created.id, strategy: "single", config: null, bindings: [] });
+    return structuredClone(created);
+  },
+
+  async removeCustomAgent(id: string): Promise<void> {
+    await delay();
+    settings.custom_agents = settings.custom_agents.filter((a) => a.id !== id);
+    // The route and the key go with it; usage rows are history and stay (the
+    // mock has none for these, but the dashboard fixtures are keyed by agent
+    // name, so a removed agent's traffic would survive here too).
+    const i = agentRoutes.findIndex((r) => r.agent === id);
+    if (i >= 0) agentRoutes.splice(i, 1);
+  },
+
   async setTakeover(agent: AgentId, enabled: boolean): Promise<void> {
     await delay();
     const t = settings.takeovers.find((x) => x.agent === agent);
@@ -1422,8 +1481,10 @@ export const devApi: KiwanoApi = {
   async detectAgents() {
     await delay(120);
     // Dev fixture: everything installed so every agent segment stays visible.
+    // The registry's own ids: `a.id` is an `AgentRef` since agents can also be
+    // user-defined, and only built-ins are detectable.
     return AGENTS.map((a) => ({
-      agent: a.id,
+      agent: a.id as AgentId,
       installed: true,
       path: `/usr/local/bin/${a.id === "grokbuild" ? "grok" : a.id === "claude-desktop" ? "claude" : a.id}`,
     }));

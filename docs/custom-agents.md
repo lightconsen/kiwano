@@ -225,3 +225,28 @@ API Key   kw-ag-my-route-3f9a
 ### P3（能力）
 
 agent 级限额、策略模板（预置「coding plan 优先」「夜间便宜」等常见组合）。
+
+## 9. P1 实现状态（2026-09-14，已完成）
+
+按 §8 落地，与设计一致的部分不再重复；**与设计有出入的三处**记在这里：
+
+1. **Dashboard 的 agent 行集合比设计稍宽**：除了「内置 ∪ 自定义」，还并入了**只在 usage 里有流量**
+   （`store::usage_agents`）的 agent。原因：删除一个自定义 agent 后它的用量记录仍在，而那些行
+   没有名字可查 —— 不并入就等于把历史从页面上抹掉。标签缺失时显示 id。
+2. **`build_settings_with_home` 又收回了 `store` 参数**（本会话早前刚把它去掉）。当时它确实不需要
+   存储层；现在要读 `custom_agents` 表，就又需要了 —— 这是数据在存储层、而不是在 `aux` 设置
+   blob 里的一处必然结果。
+3. **CLI 的 `agents list` 是新命令**（此前只有 detect/versions/takeover/restore）。它合并
+   `takeovers`（内置：是否已接管）与 `custom_agents`（自定义：永远 routed）成一张表，并打印 key ——
+   对服务器用户来说，那个 key 就是全部接入信息。
+
+实现要点（供后续改动参照）：
+- 迁移 `MIGRATION_V16`，`SCHEMA_VERSION = 16`；表 `custom_agents(id, label, note, created_at)`。
+- `vm::add_custom_agent` 写三行：表行 + `kw-ag-<id>-<rand>` 占位 key + 默认 `single` 策略；
+  `vm::remove_custom_agent` 反向清三行（usage/request_logs 保留）。
+- `vm::live_bound_agents` 对自定义 agent **恒判 live**（否则 All 页会把它显示成未绑定）。
+- 前端 `lib/agents.ts`：`agentMeta(id)` 解析器（内置 → registry，自定义 → 用户标签，未知 → 派生
+  字母头像），`isBuiltinAgent(id)` 是**类型守卫** —— 接管方向因此拿不到自定义 id。
+- 所有 `AGENTS.find(...)!` 已替换（它们是「未知 id 就崩」的隐患，而自定义 agent 让未知 id 成为常态）。
+- 测试：Rust 3 条（vm）+ 1 条（gateway 集成：带 key 的请求走通并记账）+ CLI 2 条（add/list/bind/remove
+  与空名拒绝）+ 前端 7 条（段条、接入卡、空态、创建、删除、未知 id 兜底、mock 语义）。

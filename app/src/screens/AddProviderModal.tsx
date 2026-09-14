@@ -363,6 +363,16 @@ export default function AddProviderModal({
     };
   }, [open, edit]);
 
+  // …and the quota query, on the same rule. A plan provider whose row has none
+  // still has one if its entry publishes it: Kimi for Coding is exactly that —
+  // added before the app carried the field through, so its row says nothing and
+  // the dialog reported it as a vendor with no quota endpoint at all. Only
+  // fills a blank; a template the row does carry is left alone.
+  useEffect(() => {
+    const template = editEntry?.plan_query?.template;
+    if (template) setPqTemplate((current) => current || template);
+  }, [editEntry]);
+
   // Fill in the endpoints the stored row is missing, once the entry lands.
   // Union, not replace: a protocol the provider already answers on keeps the
   // endpoint it was saved with, and only protocols it lacks are added — so the

@@ -13,7 +13,7 @@
 | 打包 | `bundle.targets: "all"`，macOS 为主（`macOSPrivateApi`、Overlay 标题栏） | updater 三平台支持面不同，见 §3 |
 | 前端 API | `src/api/tauri.ts` 与 `lib.rs` 命令 1:1 映射，另有 `dev.ts` 浏览器 mock | 新增命令需同步 `types.ts` / `tauri.ts` / `dev.ts` |
 | 守护进程 | gateway daemon 存活期长于 GUI，重启后经 admin ping 收养（`lib.rs` 底部注释） | 更新重启天然安全，无需额外处理，验收时确认即可 |
-| 隐私立场 | local-first；Hub 同步协议已实现但禁用（`lib.rs:568`），API 请求与密钥不过 Hub（spec §6.1） | 更新检查应默认可关、失败静默、无遥测 |
+| 隐私立场 | local-first；API 请求与密钥不过 Hub（spec §6.1）。Hub 同步协议已实现**并在用**（目录与价格由 `models/` 仓发布，客户端按 manifest sha 条件同步） | 更新检查应默认可关、失败静默、无遥测 |
 
 ## 1. 方案选型
 

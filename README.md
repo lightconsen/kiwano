@@ -10,7 +10,7 @@
   </p>
 </div>
 
-Kiwano is a desktop app that sits between your coding agents and your AI providers. You register providers once, it runs a local gateway on `127.0.0.1:8317`, and every agent — Claude Code, Codex, Gemini CLI and others — talks to that one port. The gateway normalizes protocols, routes each request through the strategy you picked, meters what it cost, and records what happened.
+Kiwano is a desktop app that sits between your coding agents and your AI providers. You register providers once, it runs a local gateway on `127.0.0.1:8317`, and every agent — Claude Code, Codex and others — talks to that one port. The gateway normalizes protocols, routes each request through the strategy you picked, meters what it cost, and records what happened.
 
 Your keys stay on your machine, in an owner-only local database. Requests never touch a Kiwano server.
 
@@ -20,13 +20,13 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 
 ## Features
 
-- **Provider management** — add, edit, switch and delete provider configs. Route with `single`, `failover`, `roundrobin`, `timewindow` or `quota` strategies, each with its own candidate weights and windows.
-- **Agent takeover** — connect Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes and Pi to the local gateway in one click. Each agent's original config is backed up and restored when you switch it off.
-- **Local gateway** — one always-on port with protocol normalization (anthropic / openai / gemini), so a provider that speaks one dialect can serve an agent that speaks another. Hot-reloads on change; the daemon outlives the GUI.
-- **Usage and cost** — 7-day trends for requests, tokens, cost and latency, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts.
-- **Models shelf** — the Kiwano Hub catalog of 82 providers (official / aggregator / third-party / free), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
+- **Provider management** — add, edit, switch and delete provider configs. Route with `single`, `failover`, `roundrobin`, `timewindow` or `quota` strategies, each with its own candidate weights and windows. Under any strategy but `single`, a request that fails is replayed against the next candidate instead of being handed back as your problem.
+- **Agent takeover** — connect Claude Code, Codex, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes and Pi to the local gateway in one click. Each agent's original config is backed up and restored when you switch it off.
+- **Local gateway** — one always-on port, and protocol normalization (anthropic / openai) so an OpenAI-compatible provider can serve Claude Code. Hot-reloads on change; the daemon outlives the GUI, and a stream that stalls is abandoned with an error rather than left to hang.
+- **Usage and cost** — trends for requests and tokens over today, 7 or 30 days, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts.
+- **Models shelf** — the Kiwano Hub catalog of 19 providers (official / aggregator / third-party / free), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
 - **Request logs** — every gateway request with status, latency and token accounting; filter down to errors.
-- **cc-switch import** — read an existing cc-switch configuration and migrate it in.
+- **cc-switch import** — `kiwano import cc-switch` reads an existing cc-switch configuration and migrates it in.
 - **Self-update** — signed releases (minisign); the app checks at startup and updates in place. 0.1.2 and later update themselves to newer versions.
 
 ## Download

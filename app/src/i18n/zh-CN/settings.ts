@@ -25,6 +25,13 @@ export const settings = {
   requestLogsNote: "记录每个请求及其请求体，仅保存在本地",
   logRetention: "日志保留",
   logRetentionNote: "早于该时长的记录每 6 小时清理一次",
+  streamFirstByte: "首字节等待",
+  streamFirstByteNote:
+    "上游返回响应头后再无内容时放弃该次请求。本地冷启动模型可能较慢 —— 可调大或关闭",
+  streamIdle: "流式静默",
+  streamIdleNote: "流式响应中途长时间无数据时放弃，而不是让客户端一直等到自己超时",
+  seconds: "{count} 秒",
+  off: "关闭",
   days: "{count} 天",
   costAlert: "费用提醒",
   costAlertNote: "达到周期上限时发送系统通知",

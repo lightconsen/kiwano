@@ -538,7 +538,11 @@ fn update_settings(
     }
     // The gateway re-reads the log config on /reload; ping it when the
     // request-log settings changed so the toggle applies without a restart.
-    if patch.get("request_logs").is_some() || patch.get("log_retention_days").is_some() {
+    if patch.get("request_logs").is_some()
+        || patch.get("log_retention_days").is_some()
+        || patch.get("stream_first_byte_secs").is_some()
+        || patch.get("stream_idle_secs").is_some()
+    {
         after_mutation(&state);
     }
     Ok(vm)

@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1054,6 +1055,64 @@ impl Default for LogConfig {
 
 /// `gateway_settings` key holding the serialized `LogConfig`.
 pub const LOG_CONFIG_KEY: &str = "request_logs";
+
+/// How long an upstream stream may go without producing anything
+/// (`gateway_settings` JSON blob, [`STREAM_TIMEOUTS_KEY`]).
+///
+/// `provider.timeout_secs` bounds only the wait for response *headers*. A
+/// provider that returns its headers and then goes quiet had no limit at all: the
+/// client sat on the open stream until its own 300s read timeout, which is a hang
+/// reported as a timeout rather than as the failure it is.
+///
+/// Both are 0-disabled, because a cold local model legitimately takes a long time
+/// to its first token — and a limit nobody can raise would be worse than none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamTimeouts {
+    /// How long the upstream may take to send the stream's first byte, counted
+    /// from the response's headers.
+    #[serde(default = "default_first_byte_secs")]
+    pub first_byte_secs: u64,
+    /// How long a stream may stay silent between bytes before it is abandoned.
+    #[serde(default = "default_idle_secs")]
+    pub idle_secs: u64,
+}
+
+fn default_first_byte_secs() -> u64 {
+    120
+}
+fn default_idle_secs() -> u64 {
+    120
+}
+
+impl Default for StreamTimeouts {
+    fn default() -> Self {
+        StreamTimeouts {
+            first_byte_secs: default_first_byte_secs(),
+            idle_secs: default_idle_secs(),
+        }
+    }
+}
+
+impl StreamTimeouts {
+    /// The deadline for the wait that has not been satisfied yet: the first byte,
+    /// or the next byte.
+    pub fn deadline(&self, first_byte_seen: bool) -> Option<Duration> {
+        let secs = if first_byte_seen {
+            self.idle_secs
+        } else {
+            self.first_byte_secs
+        };
+        (secs > 0).then(|| Duration::from_secs(secs))
+    }
+
+    /// True while neither limit is armed, so the stream can skip the timer.
+    pub fn disabled(&self) -> bool {
+        self.first_byte_secs == 0 && self.idle_secs == 0
+    }
+}
+
+/// `gateway_settings` key holding the serialized `StreamTimeouts`.
+pub const STREAM_TIMEOUTS_KEY: &str = "streaming";
 
 /// Row counts surfaced by the admin `/status` endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2612,6 +2671,34 @@ impl Store {
             "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = ?2",
             params![LOG_CONFIG_KEY, json],
+        )?;
+        Ok(())
+    }
+
+    /// Streaming timeouts, same contract as the log config: the GUI writes, the
+    /// gateway reads at startup and on `/reload`.
+    pub fn load_stream_timeouts(&self) -> Result<StreamTimeouts> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT value FROM gateway_settings WHERE key = ?1",
+                params![STREAM_TIMEOUTS_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(match value {
+            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            None => StreamTimeouts::default(),
+        })
+    }
+
+    pub fn save_stream_timeouts(&self, cfg: &StreamTimeouts) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let json = serde_json::to_string(cfg)?;
+        conn.execute(
+            "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![STREAM_TIMEOUTS_KEY, json],
         )?;
         Ok(())
     }

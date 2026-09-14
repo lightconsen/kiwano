@@ -53,6 +53,8 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
     auto_failover: true,
     request_logs: true,
     log_retention_days: 30,
+    stream_first_byte_secs: 120,
+    stream_idle_secs: 120,
     cost_alert: true,
     preferred_currency: "CNY",
     auto_check_update: true,
@@ -116,5 +118,51 @@ describe("the takeover switch", () => {
     expect(await screen.findByText(/codex: Error: restore failed/)).toBeInTheDocument();
     // The switch is still on, because it still is: nothing was restored.
     expect(screen.getByRole("switch", { name: "Codex" })).toBeChecked();
+  });
+});
+
+// The two waits a stream can die in. The gateway enforces them; this screen is
+// where they are set, so what has to hold here is that the stored value is what
+// is on screen — a row that reads as "off" while the gateway is holding a
+// two-minute limit is worse than no row at all.
+describe("the streaming timeouts", () => {
+  it("shows the stored waits", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    render(<Settings />);
+
+    expect(await screen.findByText(en.settings.streamFirstByte)).toBeInTheDocument();
+    expect(screen.getByText(en.settings.streamIdle)).toBeInTheDocument();
+    // Both fixtures carry 120s, one on each side of the stream.
+    expect(
+      screen.getAllByText(en.settings.seconds.replace("{count}", "120")),
+    ).toHaveLength(2);
+  });
+
+  it("says off when a limit is off, rather than showing a zero-second wait", async () => {
+    apiMock.getSettings.mockResolvedValue({ ...settingsWith(true), stream_idle_secs: 0 });
+    render(<Settings />);
+
+    expect(await screen.findByText(en.settings.streamIdle)).toBeInTheDocument();
+    expect(screen.getByText(en.settings.off)).toBeInTheDocument();
+  });
+
+  it("patches the wait the row owns", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.updateSettings.mockResolvedValue({
+      ...settingsWith(true),
+      stream_idle_secs: 0,
+    });
+    const user = userEvent.setup();
+    render(<Settings />);
+
+    // Named, so the control is findable — by a reader and by this test.
+    await user.click(await screen.findByRole("combobox", { name: en.settings.streamIdle }));
+    await user.click(await screen.findByRole("option", { name: en.settings.off }));
+
+    // Its own key, not the neighbouring row's: the two rows share a control type
+    // and differ only in which field they carry.
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith({ stream_idle_secs: 0 }),
+    );
   });
 });

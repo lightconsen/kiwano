@@ -611,6 +611,8 @@ const settings: AppSettings = {
   auto_failover: true,
   request_logs: true,
   log_retention_days: 30,
+  stream_first_byte_secs: 120,
+  stream_idle_secs: 120,
   cost_alert: true,
   preferred_currency: "CNY",
   auto_check_update: true,

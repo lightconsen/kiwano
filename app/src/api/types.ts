@@ -481,6 +481,10 @@ export interface AppSettings {
   request_logs: boolean;
   /** Request-log retention in days (gateway prunes older rows every 6h) */
   log_retention_days: number;
+  /** Abandon a stream whose first byte never arrives (0 = off) */
+  stream_first_byte_secs: number;
+  /** Abandon a stream that goes quiet mid-answer (0 = off) */
+  stream_idle_secs: number;
   /** Cost alert (spec §4.1 P1): system notification when usage reaches the per-period limit */
   cost_alert: boolean;
   /** Preferred display currency for costs (ISO code; converted via the Hub rates) */

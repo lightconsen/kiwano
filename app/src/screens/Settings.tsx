@@ -36,6 +36,50 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
   );
 }
 
+/** The waits a stream can die in: off, or a handful of sensible spans. A select
+    rather than a number field because the useful values are few and the unit
+    matters more than the precision. */
+const TIMEOUT_CHOICES = [0, 30, 60, 120, 300];
+
+function TimeoutSelect({
+  label,
+  seconds,
+  onChange,
+}: {
+  /** The row's own name. The label text sits beside the control rather than
+      inside it, so without this the control announces "120s" and nothing else. */
+  label: string;
+  seconds: number;
+  onChange: (v: number) => void;
+}) {
+  const t = useT();
+  // A stored value the list does not carry (an older install, or one set from
+  // the CLI) still has to show as itself rather than silently reading as "off".
+  const choices = TIMEOUT_CHOICES.includes(seconds)
+    ? TIMEOUT_CHOICES
+    : [...TIMEOUT_CHOICES, seconds].sort((a, b) => a - b);
+  return (
+    <Select value={String(seconds)} onValueChange={(v) => onChange(Number(v))}>
+      <SelectTrigger
+        size="sm"
+        aria-label={label}
+        className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2"
+      >
+        <SelectValue>
+          {(v) => (v === "0" ? t("settings.off") : t("settings.seconds", { count: v ?? "" }))}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {choices.map((c) => (
+          <SelectItem key={c} value={String(c)}>
+            {c === 0 ? t("settings.off") : t("settings.seconds", { count: c })}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export default function Settings() {
   const t = useT();
   const [s, setS] = useState<AppSettings | null>(null);
@@ -324,6 +368,24 @@ export default function Settings() {
                 <SelectItem value="90">{t("settings.days", { count: 90 })}</SelectItem>
               </SelectContent>
             </Select>
+          </Row>
+          {/* The two waits a stream can die in. `provider.timeout_secs` bounds
+              only the wait for headers, so without these an upstream that
+              answers 200 and then goes quiet holds the socket open until the
+              client's own read timeout. */}
+          <Row label={t("settings.streamFirstByte")} note={t("settings.streamFirstByteNote")}>
+            <TimeoutSelect
+              label={t("settings.streamFirstByte")}
+              seconds={s.stream_first_byte_secs}
+              onChange={(v) => patch({ stream_first_byte_secs: v })}
+            />
+          </Row>
+          <Row label={t("settings.streamIdle")} note={t("settings.streamIdleNote")}>
+            <TimeoutSelect
+              label={t("settings.streamIdle")}
+              seconds={s.stream_idle_secs}
+              onChange={(v) => patch({ stream_idle_secs: v })}
+            />
           </Row>
           <Row label={t("settings.costAlert")} note={t("settings.costAlertNote")}>
             <Switch checked={s.cost_alert} onCheckedChange={(v) => patch({ cost_alert: v })} />

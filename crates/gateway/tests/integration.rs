@@ -99,6 +99,8 @@ enum MockReply {
     Sse(Vec<&'static str>),
     /// A bare failure status — what a failover is for.
     Status(StatusCode),
+    /// Events, then silence forever: a stream that stalled mid-flight.
+    SseThenStall(Vec<&'static str>),
 }
 
 fn mock_response(reply: &MockReply) -> Response {
@@ -123,7 +125,26 @@ fn mock_response(reply: &MockReply) -> Response {
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/event-stream")
-                .body(Body::from_stream(ChunkStream { chunks, idx: 0 }))
+                .body(Body::from_stream(ChunkStream {
+                    chunks,
+                    idx: 0,
+                    stall_after: false,
+                }))
+                .unwrap()
+        }
+        MockReply::SseThenStall(chunks) => {
+            let chunks: Vec<Result<Bytes, std::convert::Infallible>> = chunks
+                .iter()
+                .map(|c| Ok(Bytes::from_static(c.as_bytes())))
+                .collect();
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(ChunkStream {
+                    chunks,
+                    idx: 0,
+                    stall_after: true,
+                }))
                 .unwrap()
         }
     }
@@ -133,6 +154,9 @@ fn mock_response(reply: &MockReply) -> Response {
 struct ChunkStream {
     chunks: Vec<Result<Bytes, std::convert::Infallible>>,
     idx: usize,
+    /// Keep the connection open after the chunks instead of ending the stream —
+    /// an upstream that returned its headers and then went quiet.
+    stall_after: bool,
 }
 
 impl Stream for ChunkStream {
@@ -143,6 +167,8 @@ impl Stream for ChunkStream {
             let item = self.chunks[self.idx].clone();
             self.idx += 1;
             Poll::Ready(Some(item))
+        } else if self.stall_after {
+            Poll::Pending
         } else {
             Poll::Ready(None)
         }
@@ -1159,6 +1185,62 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
         "leaked into error_message: {message}"
     );
     assert!(message.contains("key=[REDACTED]"), "{message}");
+}
+
+/// A stream that goes silent is abandoned at the idle limit, and the client is
+/// told why in the dialect it is speaking — instead of holding the socket until
+/// its own read timeout fires. The row records the reason too, so a stream that
+/// died mid-flight does not look like a short but healthy response.
+#[tokio::test]
+async fn a_stalled_stream_is_abandoned_and_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    // One second of silence is a stall. The gateway reads this at startup and on
+    // /reload, which is what makes it a setting rather than a constant.
+    store
+        .save_stream_timeouts(&kiwanod::store::StreamTimeouts {
+            first_byte_secs: 0,
+            idle_secs: 1,
+        })
+        .unwrap();
+
+    let (upstream_url, _) = mock_anthropic(MockReply::SseThenStall(vec![
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n",
+    ]))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m","stream":true}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The wait is what the limit bounds, so the client sees the stream end —
+    // with the event that explains it, not with a silent truncation.
+    let body = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(body.contains("content_block_delta"), "{body}");
+    assert!(body.contains("event: error"), "the client is told: {body}");
+    assert!(body.contains("stream_timeout"), "{body}");
+
+    // The row is written by the async stream recorder, so it lands just after
+    // the client's view of the stream ends.
+    let rows = wait_for_log(&state, 1).await;
+    let row = rows.first().expect("the stream is logged");
+    assert_eq!(row.error_kind.as_deref(), Some("stream_timeout"));
+    assert!(row.is_streaming);
 }
 
 /// A failing primary is replayed against the next candidate: the client asks

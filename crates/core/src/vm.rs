@@ -862,6 +862,14 @@ pub struct SettingsVm {
     /// Request-log retention in days (mirrored into gateway_settings for the sidecar).
     #[serde(default = "default_retain_days")]
     pub log_retention_days: u32,
+    /// How long an upstream stream may take to its first byte before the
+    /// gateway abandons it (mirrored into gateway_settings; 0 disables).
+    #[serde(default = "default_stream_first_byte_secs")]
+    pub stream_first_byte_secs: u32,
+    /// How long a stream may stay silent between bytes before the gateway
+    /// abandons it (0 disables).
+    #[serde(default = "default_stream_idle_secs")]
+    pub stream_idle_secs: u32,
     /// Cost-alert toggle (spec §4.1 P1): system notification when usage hits the per-period limit
     #[serde(default = "default_true")]
     pub cost_alert: bool,
@@ -934,6 +942,8 @@ impl Default for SettingsVm {
             auto_failover: true,
             request_logs: true,
             log_retention_days: default_retain_days(),
+            stream_first_byte_secs: default_stream_first_byte_secs(),
+            stream_idle_secs: default_stream_idle_secs(),
             cost_alert: true,
             hub_logged_in: false,
             hub_url: default_hub_url(),
@@ -953,6 +963,17 @@ pub fn default_true() -> bool {
 
 pub fn default_retain_days() -> u32 {
     30
+}
+
+/// Mirrors `kiwanod::store::StreamTimeouts::default`, which is what the gateway
+/// falls back to when the settings row is absent. Kept in step by the round-trip
+/// test below rather than by hoping.
+pub fn default_stream_first_byte_secs() -> u32 {
+    120
+}
+
+pub fn default_stream_idle_secs() -> u32 {
+    120
 }
 
 #[derive(Serialize)]
@@ -2453,6 +2474,18 @@ pub fn update_settings(
             }
         }
         store.save_log_config(&cfg).map_err(e2s)?;
+    }
+    // Same contract for the streaming timeouts: the sidecar reads them at
+    // startup and on /reload, so the two copies move together.
+    if patch.get("stream_first_byte_secs").is_some() || patch.get("stream_idle_secs").is_some() {
+        let mut cfg = store.load_stream_timeouts().unwrap_or_default();
+        if let Some(v) = patch.get("stream_first_byte_secs").and_then(|v| v.as_u64()) {
+            cfg.first_byte_secs = v;
+        }
+        if let Some(v) = patch.get("stream_idle_secs").and_then(|v| v.as_u64()) {
+            cfg.idle_secs = v;
+        }
+        store.save_stream_timeouts(&cfg).map_err(e2s)?;
     }
     build_settings(store, aux)
 }
@@ -5128,6 +5161,42 @@ mod tests {
             ui_settings(&aux).hub_url,
             "https://hub.example.com/catalog.json"
         );
+    }
+
+    // The app owns the streaming timeouts' UI and the gateway owns their
+    // enforcement, and the two halves meet in `gateway_settings`: a patch has to
+    // reach the sidecar's copy, not just this side's JSON, or the settings row
+    // would look applied and change nothing. The defaults are asserted against
+    // the gateway's own so the two cannot drift apart in silence.
+    #[test]
+    fn streaming_timeouts_round_trip_into_the_gateways_copy() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            kiwanod::store::StreamTimeouts {
+                first_byte_secs: u64::from(default_stream_first_byte_secs()),
+                idle_secs: u64::from(default_stream_idle_secs()),
+            },
+            kiwanod::store::StreamTimeouts::default(),
+            "the app's defaults and the gateway's must be the same numbers"
+        );
+
+        let vm = update_settings(&s, &aux, &serde_json::json!({ "stream_idle_secs": 45 })).unwrap();
+        assert_eq!(vm.stream_idle_secs, 45);
+
+        let cfg = s.load_stream_timeouts().unwrap();
+        assert_eq!(cfg.idle_secs, 45, "the sidecar's copy moved");
+        assert_eq!(
+            cfg.first_byte_secs,
+            u64::from(default_stream_first_byte_secs()),
+            "patching one leaves the other alone"
+        );
+
+        // And the screen reads back what it wrote.
+        let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        assert_eq!(reread.stream_idle_secs, 45);
     }
 
     #[test]

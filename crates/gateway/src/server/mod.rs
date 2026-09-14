@@ -26,7 +26,7 @@ use serde_json::json;
 
 use crate::error::{GatewayError, Result};
 use crate::router::RouteTable;
-use crate::store::{LogConfig, Protocol, Store};
+use crate::store::{LogConfig, Protocol, Store, StreamTimeouts};
 
 /// Max inbound body size forwarded to upstreams (32 MiB is generous for
 /// long-context agent payloads).
@@ -44,6 +44,9 @@ pub struct GatewayState {
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Request-log capture config, refreshed alongside the route table.
     log_cfg: RwLock<LogConfig>,
+    /// Streaming timeouts, same contract as `log_cfg`: read at startup, re-read
+    /// on `/reload` so a change lands without restarting the daemon.
+    stream_cfg: RwLock<StreamTimeouts>,
     /// Model price table, built from the GUI-seeded `model_pricing` mirror and
     /// consulted at usage-record time to cost every metered request.
     pub(crate) pricing: RwLock<kiwano_adapters::model_pricing::PricingTable>,
@@ -82,6 +85,7 @@ impl GatewayState {
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
         let log_config = store.load_log_config().unwrap_or_default();
+        let stream_cfg = store.load_stream_timeouts().unwrap_or_default();
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(300))
@@ -105,6 +109,7 @@ impl GatewayState {
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             log_cfg: RwLock::new(log_config),
+            stream_cfg: RwLock::new(stream_cfg),
             pricing: RwLock::new(pricing),
             limits: RwLock::new(Arc::new(limits)),
             started_at: Instant::now(),
@@ -160,6 +165,11 @@ impl GatewayState {
             .clone()
     }
 
+    /// Current streaming timeouts (Copy, so free).
+    pub fn stream_timeouts(&self) -> StreamTimeouts {
+        *self.stream_cfg.read().expect("stream config lock poisoned")
+    }
+
     /// Next index into a provider's key pool (round-robin, spec §4.1 P1).
     /// Pools of size <= 1 always answer 0 and never touch the map.
     pub fn next_key_index(&self, provider_id: &str, pool_len: usize) -> usize {
@@ -182,6 +192,12 @@ impl GatewayState {
         *self.route_table.write().expect("route table lock poisoned") = table;
         if let Ok(cfg) = self.store.load_log_config() {
             *self.log_cfg.write().expect("log config lock poisoned") = cfg;
+        }
+        if let Ok(cfg) = self.store.load_stream_timeouts() {
+            *self
+                .stream_cfg
+                .write()
+                .expect("stream config lock poisoned") = cfg;
         }
         // Rebuild prices too: the GUI re-seeds the mirror after a Hub refresh
         // and then reloads, which is how a price update takes effect.

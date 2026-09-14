@@ -31,6 +31,14 @@ export const settings = {
   requestLogsNote: "Record every request with bodies, local only",
   logRetention: "Log retention",
   logRetentionNote: "Rows older than this are pruned every 6h",
+  streamFirstByte: "First-byte wait",
+  streamFirstByteNote:
+    "Give up on an upstream that returns headers and then sends nothing. A cold local model can take a while — raise it, or turn it off",
+  streamIdle: "Silent stream",
+  streamIdleNote:
+    "Give up on a stream that goes quiet mid-answer, rather than holding the connection until the client times out",
+  seconds: "{count}s",
+  off: "Off",
   /** Same shape for 7/30/90 — the option is a number of days. */
   days: "{count} days",
   costAlert: "Cost alert",

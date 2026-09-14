@@ -11,6 +11,7 @@
 //! back via `openai_to_anthropic` / the streaming converter — and metered
 //! from the upstream OpenAI usage fields.
 
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -733,6 +734,8 @@ pub async fn forward(
             },
             started,
             max_body_bytes,
+            inbound,
+            state.stream_timeouts(),
         );
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
@@ -1008,6 +1011,8 @@ async fn forward_anthropic_via_openai(
             },
             started,
             max_body_bytes,
+            inbound,
+            state.stream_timeouts(),
         );
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
@@ -1233,6 +1238,31 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
     }
 }
 
+/// The error event a client can act on, shaped for the protocol it is speaking.
+///
+/// A stream that just stops looks like a truncated response — an agent client
+/// shows a parse error or nothing at all. Naming the failure in the client's own
+/// dialect is what lets it surface a reason and retry. `None` when the inbound
+/// protocol is unknown: there is no shape to imitate, so the stream ends.
+fn stream_error_event(inbound: Option<Protocol>, message: &str) -> Option<Vec<u8>> {
+    let quoted = serde_json::Value::String(message.to_string());
+    match inbound {
+        Some(Protocol::Anthropic) => Some(
+            format!(
+                "event: error\ndata: {{\"type\":\"error\",\"error\":{{\"type\":\"stream_timeout\",\"message\":{quoted}}}}}\n\n"
+            )
+            .into_bytes(),
+        ),
+        Some(Protocol::OpenAI) => Some(
+            format!(
+                "data: {{\"error\":{{\"message\":{quoted},\"type\":\"stream_timeout\"}}}}\n\ndata: [DONE]\n\n"
+            )
+            .into_bytes(),
+        ),
+        None => None,
+    }
+}
+
 /// A byte-preserving SSE passthrough stream that scans complete lines for
 /// usage events and submits the metered sample when the upstream stream ends.
 ///
@@ -1254,6 +1284,13 @@ struct SseUsageStream {
     streamed_bytes: u64,
     capture_cap: usize,
     first_chunk: Option<Instant>,
+    /// Who the client is, so a timeout can be reported in a shape it parses.
+    inbound: Option<Protocol>,
+    /// Silence limit: the first byte, then the gap between bytes.
+    timeouts: crate::store::StreamTimeouts,
+    /// Armed while a limit is outstanding; None when both limits are disabled.
+    deadline: Option<Pin<Box<tokio::time::Sleep>>>,
+    timed_out: bool,
 }
 
 impl SseUsageStream {
@@ -1263,8 +1300,10 @@ impl SseUsageStream {
         sample: UsageSample,
         started: Instant,
         capture_cap: usize,
+        inbound: Option<Protocol>,
+        timeouts: crate::store::StreamTimeouts,
     ) -> Self {
-        SseUsageStream {
+        let mut stream = SseUsageStream {
             inner,
             buffer: Vec::new(),
             scanner: UsageScanner::new(),
@@ -1277,6 +1316,67 @@ impl SseUsageStream {
             streamed_bytes: 0,
             capture_cap,
             first_chunk: None,
+            inbound,
+            timeouts,
+            deadline: None,
+            timed_out: false,
+        };
+        // The first wait is for the stream's first byte, not for a gap.
+        stream.arm();
+        stream
+    }
+
+    /// Re-arm the silence limit for the wait that is now outstanding: the first
+    /// byte until one arrives, the next byte after that.
+    fn arm(&mut self) {
+        let Some(after) = self.timeouts.deadline(self.first_chunk.is_some()) else {
+            self.deadline = None;
+            return;
+        };
+        let at = tokio::time::Instant::now() + after;
+        match self.deadline.as_mut() {
+            Some(d) => d.as_mut().reset(at),
+            None => self.deadline = Some(Box::pin(tokio::time::sleep_until(at))),
+        }
+    }
+
+    /// Give up on a stream that has stopped producing. Returns the error event
+    /// the client can act on (or ends the stream when the inbound protocol is
+    /// unknown and there is no shape to imitate).
+    fn abort_on_timeout(&mut self) -> Poll<Option<Result<Bytes, BoxError>>> {
+        let waited = self
+            .timeouts
+            .deadline(self.first_chunk.is_some())
+            .unwrap_or_default();
+        let message = format!(
+            "upstream sent nothing for {}s ({}); the gateway abandoned the stream",
+            waited.as_secs(),
+            if self.first_chunk.is_some() {
+                "no byte since the last one"
+            } else {
+                "no first byte"
+            }
+        );
+        tracing::warn!(
+            agent = %self.sample.agent,
+            provider = %self.sample.provider_id,
+            secs = waited.as_secs(),
+            first_byte_seen = self.first_chunk.is_some(),
+            "stream went silent; abandoned"
+        );
+        self.sample.status = "stream_timeout";
+        if let Some(log) = self.sample.log.as_mut() {
+            log.error_kind = Some("stream_timeout".to_string());
+            log.error_message = Some(message.clone());
+        }
+        // The stream is over either way; `finish()` runs on the next poll.
+        self.inner_ended = true;
+        match stream_error_event(self.inbound, &message) {
+            Some(bytes) => Poll::Ready(Some(Ok(Bytes::from(bytes)))),
+            None => {
+                self.finish();
+                Poll::Ready(None)
+            }
         }
     }
 
@@ -1334,11 +1434,22 @@ impl Stream for SseUsageStream {
                 self.finish();
                 return Poll::Ready(None);
             }
+            // Silence is a failure mode, not a state to wait in: without this the
+            // client would hold the open socket until its own read timeout.
+            if let Some(deadline) = self.deadline.as_mut() {
+                if deadline.as_mut().poll(cx).is_ready() {
+                    self.timed_out = true;
+                }
+            }
+            if self.timed_out {
+                return self.abort_on_timeout();
+            }
             match self.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(chunk))) => {
                     if self.first_chunk.is_none() {
                         self.first_chunk = Some(Instant::now());
                     }
+                    self.arm();
                     self.capture_chunk(&chunk);
                     self.buffer.extend_from_slice(&chunk);
                     // Emit only up to the last complete line; keep the tail.
@@ -2024,6 +2135,82 @@ mod tests {
         assert!(json.contains("req-7"), "{json}");
     }
 
+    /// A source that yields its chunks and then goes silent forever — the
+    /// stalled stream an idle limit exists for. `Pending` with no wake is
+    /// exactly what a stalled socket looks like to the poller.
+    struct StallingStream {
+        chunks: vec::IntoIter<Result<Bytes, BoxError>>,
+    }
+
+    impl Stream for StallingStream {
+        type Item = Result<Bytes, BoxError>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            match self.chunks.next() {
+                Some(c) => Poll::Ready(Some(c)),
+                None => Poll::Pending,
+            }
+        }
+    }
+
+    // A stream that stops producing is abandoned, and the client is told why in
+    // its own dialect. There used to be no limit on that wait at all: the socket
+    // stayed open until the client's own 300s read timeout, so a dead stream was
+    // reported as the client timing out rather than as the failure it is.
+    #[tokio::test]
+    async fn a_silent_stream_is_abandoned_with_an_error_in_the_clients_dialect() {
+        let inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>> =
+            Box::pin(StallingStream {
+                chunks: vec![Ok(Bytes::from_static(
+                    b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n",
+                ))]
+                .into_iter(),
+            });
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut stream = SseUsageStream::new(
+            inner,
+            tx,
+            UsageSample {
+                agent: "claude".into(),
+                provider_id: "p1".into(),
+                catalog_id: None,
+                started_unix: TEST_AT,
+                model: None,
+                usage: Usage::default(),
+                latency_ms: 0,
+                status: "ok",
+                cache_inclusive: false,
+                log: None,
+            },
+            Instant::now(),
+            0,
+            Some(Protocol::Anthropic),
+            crate::store::StreamTimeouts {
+                // The first byte arrived; only the gap is limited.
+                first_byte_secs: 0,
+                idle_secs: 1,
+            },
+        );
+
+        let mut out = String::new();
+        while let Some(item) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
+        {
+            out.push_str(&String::from_utf8_lossy(&item.expect("stream error")));
+        }
+
+        assert!(
+            out.contains("content_block_delta"),
+            "the bytes that did arrive still pass through: {out}"
+        );
+        assert!(out.contains("event: error"), "{out}");
+        assert!(out.contains("\"type\":\"stream_timeout\""), "{out}");
+
+        let sample = rx
+            .try_recv()
+            .expect("the abandoned stream still reports itself");
+        assert_eq!(sample.status, "stream_timeout");
+    }
+
     /// Synthetic chunk source with awkward boundaries (a usage event split in
     /// half, no trailing newline).
     struct ChunksStream {
@@ -2074,6 +2261,8 @@ mod tests {
             },
             Instant::now(),
             0,
+            Some(Protocol::Anthropic),
+            crate::store::StreamTimeouts::default(),
         );
 
         let mut out: Vec<Bytes> = Vec::new();

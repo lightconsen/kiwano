@@ -218,6 +218,31 @@ impl StrategyEngine {
         session: Option<&str>,
         limits: &crate::limits::LimitState,
     ) -> Result<crate::router::UpstreamProvider> {
+        Ok(self
+            .plan(store, route, session, limits)
+            .await?
+            .into_iter()
+            .next()
+            .expect("a plan always names at least one provider"))
+    }
+
+    /// The ordered candidates one request may be served by, best first.
+    ///
+    /// `select` is this list's head. The tail is what a request that fails
+    /// mid-flight is replayed against, so the client never sees a failure the
+    /// gateway could have absorbed by asking somebody else.
+    ///
+    /// Order after the head is plain priority order, deliberately not a second
+    /// strategy decision: the strategy has had its say about who goes first,
+    /// and a tail that re-weighted the rest would make "which provider served
+    /// this request" unanswerable from the config.
+    pub async fn plan(
+        &self,
+        store: &Store,
+        route: &AgentRoute,
+        session: Option<&str>,
+        limits: &crate::limits::LimitState,
+    ) -> Result<Vec<crate::router::UpstreamProvider>> {
         if route.candidates.is_empty() {
             return Err(GatewayError::NoBinding(route.agent.clone()));
         }
@@ -225,7 +250,8 @@ impl StrategyEngine {
         // but deliberately not a fallback. A limit does not promote it: the one
         // provider is unusable, which is a failure rather than a reason to
         // switch. So `single` opts out of the pruning below and answers for its
-        // own provider alone.
+        // own provider alone, which also makes its plan one entry long: only
+        // choosing a strategy that offers a fallback buys one.
         if matches!(route.strategy, StrategyType::Single) {
             if let Some(reason) = limits.blocked(&route.candidates[0].id) {
                 return Err(GatewayError::AllOverLimit {
@@ -233,7 +259,7 @@ impl StrategyEngine {
                     reasons: format!("{} ({})", route.candidates[0].name, reason.describe()),
                 });
             }
-            return Self::primary(route);
+            return Ok(vec![Self::primary(route)?]);
         }
         // Every other strategy: providers over a billing limit are not
         // candidates at all. Pruning the list here, rather than checking inside
@@ -262,13 +288,21 @@ impl StrategyEngine {
                 reasons,
             });
         }
-        match usable.strategy {
-            StrategyType::Single => Self::primary(usable),
-            StrategyType::Failover => self.select_failover(usable).await,
-            StrategyType::Roundrobin => self.select_roundrobin(usable, session).await,
-            StrategyType::Timewindow => Ok(self.select_timewindow(usable)),
-            StrategyType::Quota => self.select_quota(store, usable, limits).await,
+        let first = match usable.strategy {
+            StrategyType::Single => Self::primary(usable)?,
+            StrategyType::Failover => self.select_failover(usable).await?,
+            StrategyType::Roundrobin => self.select_roundrobin(usable, session).await?,
+            StrategyType::Timewindow => self.select_timewindow(usable),
+            StrategyType::Quota => self.select_quota(store, usable, limits).await?,
+        };
+        let mut plan = Vec::with_capacity(usable.candidates.len());
+        plan.push(first.clone());
+        for c in &usable.candidates {
+            if c.id != first.id {
+                plan.push(c.clone());
+            }
         }
+        Ok(plan)
     }
 
     /// failover: take the first breaker-available candidate in priority order; when all are open,
@@ -556,6 +590,57 @@ mod tests {
                 .unwrap()
                 .id,
             "a"
+        );
+    }
+
+    /// Candidate ids in plan order.
+    fn ids(plan: &[crate::router::UpstreamProvider]) -> Vec<&str> {
+        plan.iter().map(|c| c.id.as_str()).collect()
+    }
+
+    // The plan's head is what `select` returns; its tail is the replay order a
+    // failed request walks. Order after the head is priority, not a second
+    // strategy decision — and `single` has no tail at all, because its backup is
+    // bound rather than a fallback.
+    #[tokio::test]
+    async fn the_plan_lists_the_replay_order_and_single_has_no_tail() {
+        let engine = StrategyEngine::new();
+        let s = store();
+        let limits = crate::limits::LimitState::default();
+
+        let three = route(
+            StrategyType::Failover,
+            vec![
+                candidate("a", 1, None),
+                candidate("b", 1, None),
+                candidate("c", 1, None),
+            ],
+        );
+        assert_eq!(
+            ids(&engine.plan(&s, &three, None, &limits).await.unwrap()),
+            vec!["a", "b", "c"]
+        );
+
+        // Open the head's breaker: the plan starts at the next available
+        // candidate, and still names every candidate exactly once.
+        for _ in 0..4 {
+            engine.record("claude", "a", false, false).await;
+        }
+        assert_eq!(
+            ids(&engine.plan(&s, &three, None, &limits).await.unwrap()),
+            vec!["b", "a", "c"],
+            "the fallback order stays priority order, with the pick moved to the front"
+        );
+
+        // Bound but not a fallback: `single` answers with one provider, so the
+        // data plane has nothing to replay against.
+        let one = route(
+            StrategyType::Single,
+            vec![candidate("a", 1, None), candidate("b", 1, None)],
+        );
+        assert_eq!(
+            ids(&engine.plan(&s, &one, None, &limits).await.unwrap()),
+            vec!["a"]
         );
     }
 

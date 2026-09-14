@@ -17,7 +17,7 @@ use kiwanod::server::{
 };
 use kiwanod::store::{
     now_rfc3339, Billing, Binding, LogConfig, Protocol, Provider, RequestLogEntry,
-    RequestLogFilter, Store,
+    RequestLogFilter, Store, StrategyType,
 };
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -97,6 +97,8 @@ async fn mock_openai_capturing_body(response: MockReply) -> (String, Captured, C
 enum MockReply {
     Json(Value),
     Sse(Vec<&'static str>),
+    /// A bare failure status — what a failover is for.
+    Status(StatusCode),
 }
 
 fn mock_response(reply: &MockReply) -> Response {
@@ -105,6 +107,12 @@ fn mock_response(reply: &MockReply) -> Response {
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
             Json(v.clone()),
+        )
+            .into_response(),
+        MockReply::Status(status) => (
+            *status,
+            [(header::CONTENT_TYPE, "application/json")],
+            Json(json!({"error": {"message": "the upstream refused it"}})),
         )
             .into_response(),
         MockReply::Sse(chunks) => {
@@ -1151,6 +1159,145 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
         "leaked into error_message: {message}"
     );
     assert!(message.contains("key=[REDACTED]"), "{message}");
+}
+
+/// A failing primary is replayed against the next candidate: the client asks
+/// once and is owed one answer, not the failure the first provider had in store.
+#[tokio::test]
+async fn a_failing_primary_is_replayed_against_the_next_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (primary_url, primary_hits) =
+        mock_anthropic(MockReply::Status(StatusCode::TOO_MANY_REQUESTS)).await;
+    let (backup_url, backup_hits) = mock_anthropic(MockReply::Json(json!({
+        "served_by": "backup",
+        "usage": {"input_tokens": 7, "output_tokens": 3}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-a", Protocol::Anthropic, primary_url))
+        .unwrap();
+    store
+        .insert_provider(&provider("p-b", Protocol::Anthropic, backup_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
+    store.upsert_binding(&bind("claude", "p-b", 1)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    // Failover is what makes the backup a fallback at all; the `single` case
+    // below is the other half of that rule.
+    store
+        .upsert_strategy("claude", StrategyType::Failover, None)
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(
+        body.contains("backup"),
+        "the client sees the backup's answer: {body}"
+    );
+
+    assert!(
+        !primary_hits.lock().unwrap().is_empty(),
+        "the primary was asked first"
+    );
+    assert!(
+        !backup_hits.lock().unwrap().is_empty(),
+        "and the backup is who answered"
+    );
+
+    // Two rows for one client request — the attempt that failed and the one that
+    // answered. That pair is how a flaking primary becomes visible at all.
+    let (rows, total) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(total, 2, "both attempts are in the log");
+    let failed = rows
+        .iter()
+        .find(|r| r.provider_id.as_deref() == Some("p-a"))
+        .expect("the failed attempt is logged");
+    assert_eq!(failed.status_code, 429);
+    let served = rows
+        .iter()
+        .find(|r| r.provider_id.as_deref() == Some("p-b"))
+        .expect("the serving attempt is logged");
+    assert_eq!(served.status_code, 200);
+
+    // Tokens come only from the attempt that answered. `usage.requests` counts
+    // upstream responses, and that is unchanged by failover — a 429 from a lone
+    // provider already produced a row before any of this existed — so the pair
+    // reads as two attempts, one of them empty and one of them the real work.
+    let refused = state.store.usage_totals(None, Some("p-a"), None).unwrap();
+    assert_eq!(refused.requests, 1, "the attempt is visible");
+    assert_eq!(refused.input_tokens, 0, "but it generated nothing");
+    assert_eq!(refused.output_tokens, 0);
+    let served_totals = state.store.usage_totals(None, Some("p-b"), None).unwrap();
+    assert_eq!(served_totals.requests, 1);
+    assert_eq!(
+        served_totals.input_tokens, 7,
+        "the answer is what is billed"
+    );
+    assert_eq!(served_totals.output_tokens, 3);
+}
+
+/// `single` means exactly what it says: the backup is bound but is not a
+/// fallback, so it is never asked — not by selection, not by replay. Choosing a
+/// strategy that offers a fallback is what buys one.
+#[tokio::test]
+async fn a_single_strategy_never_replays_against_the_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (primary_url, _) = mock_anthropic(MockReply::Status(StatusCode::TOO_MANY_REQUESTS)).await;
+    let (backup_url, backup_hits) =
+        mock_anthropic(MockReply::Json(json!({"served_by": "backup"}))).await;
+    store
+        .insert_provider(&provider("p-a", Protocol::Anthropic, primary_url))
+        .unwrap();
+    store
+        .insert_provider(&provider("p-b", Protocol::Anthropic, backup_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
+    store.upsert_binding(&bind("claude", "p-b", 1)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    store
+        .upsert_strategy("claude", StrategyType::Single, None)
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "the client sees the provider it was bound to"
+    );
+    assert!(
+        backup_hits.lock().unwrap().is_empty(),
+        "the bound-but-not-a-fallback provider is never asked"
+    );
 }
 
 /// A provider whose breaker is open is refused before anything is sent: 503 with

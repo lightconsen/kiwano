@@ -117,6 +117,33 @@ pub struct RoutedRequest {
     pub provider: UpstreamProvider,
 }
 
+/// One inbound request's routing decision: who it belongs to, and every
+/// provider it may be served by, best first.
+///
+/// Separated from [`RoutedRequest`] because the two answer different questions.
+/// `RoutedRequest` is one attempt's inputs — what `forward` needs. This is the
+/// request's whole entitlement, and it is what lets the data plane replay a
+/// failed attempt against the next candidate instead of handing the client an
+/// error the gateway could have absorbed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoutedPlan {
+    pub agent: String,
+    pub attribution: Attribution,
+    /// Ordered, best first; never empty on `Ok`.
+    pub candidates: Vec<UpstreamProvider>,
+}
+
+impl RoutedPlan {
+    /// The attempt to make next: the best candidate still untried.
+    pub fn attempt(&self, tried: usize) -> Option<RoutedRequest> {
+        self.candidates.get(tried).map(|c| RoutedRequest {
+            agent: self.agent.clone(),
+            attribution: self.attribution,
+            provider: c.clone(),
+        })
+    }
+}
+
 impl UpstreamProvider {
     /// Credential pool for per-request rotation: primary first, then extras
     /// (order preserved, duplicates of the primary dropped).
@@ -301,15 +328,15 @@ pub async fn resolve_via_engine(
     limits: &crate::limits::LimitState,
     placeholder_key: Option<&str>,
     session: Option<&str>,
-) -> Result<RoutedRequest> {
+) -> Result<RoutedPlan> {
     let route = route_agent(table, placeholder_key)?;
-    let provider = engine.select(store, route, session, limits).await?;
-    Ok(RoutedRequest {
+    let candidates = engine.plan(store, route, session, limits).await?;
+    Ok(RoutedPlan {
         agent: route.agent.clone(),
         // The only attribution a routed request can have now; the variant
         // remains for historical `request_logs` rows.
         attribution: Attribution::PlaceholderKey,
-        provider,
+        candidates,
     })
 }
 

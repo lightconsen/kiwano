@@ -252,10 +252,15 @@ fn build_upstream_headers(
     Ok(out)
 }
 
-/// Whether an upstream status warrants a same-provider retry (migration v8):
-/// request timeout, rate limiting, and server-side errors. Client errors
-/// (4xx besides 408/429) are deterministic — retrying cannot help.
-fn is_retryable_status(status: StatusCode) -> bool {
+/// Whether an upstream status means "this provider did not serve it": request
+/// timeout, rate limiting, and server-side errors. Client errors (4xx besides
+/// 408/429) are deterministic — they are the request's own problem, and asking
+/// a second provider to re-reject the same body only spends money to get the
+/// same answer.
+///
+/// Read twice: by the same-provider retry loop (migration v8) and by the data
+/// plane's decision to replay the request against the next candidate.
+pub(crate) fn is_retryable_status(status: StatusCode) -> bool {
     status == StatusCode::REQUEST_TIMEOUT
         || status == StatusCode::TOO_MANY_REQUESTS
         || status.is_server_error()

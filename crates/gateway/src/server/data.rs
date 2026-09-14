@@ -144,7 +144,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     }
     // The inbound protocol is passed to `forward` below, not to attribution:
     // it decides which upstream endpoint is spoken to, never which agent pays.
-    let routed = match resolve_via_engine(
+    let plan = match resolve_via_engine(
         &table,
         &state.engine,
         &state.store,
@@ -180,32 +180,60 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         }
     };
 
-    tracing::info!(
-        method = %method,
-        path = %path,
-        agent = %routed.agent,
-        attribution = ?routed.attribution,
-        provider = %routed.provider.id,
-        body_bytes = body_bytes.len(),
-        "routing request"
-    );
+    // Replay the request down the plan until somebody serves it or the plan runs
+    // out. This is the request's own failover: the plan is ordered best-first,
+    // and a candidate that answers 408/429/5xx (or whose breaker refuses it) has
+    // simply not served this request — the client asked once and is owed one
+    // answer, not a list of the gateway's misfortunes.
+    //
+    // Attempts are logged as they happen, so a failed-over request leaves the
+    // failed candidate's row beside the one that served it: that pair is how
+    // someone learns their primary is flaking. Usage is untouched by the failed
+    // attempt — nothing was metered, so nothing was billed.
+    for tried in 0..plan.candidates.len() {
+        let last = tried + 1 == plan.candidates.len();
+        let attempt = plan.attempt(tried).expect("tried is within the plan");
+        let provider_id = attempt.provider.id.clone();
 
-    // MVP transparent forward requires the provider to speak the inbound
-    // protocol (conversion is adapters territory, wired in later phases).
-    // Ambiguous paths (GET /v1/models) forward natively to the provider.
-    // Query strings are forwarded untouched by the forward leg.
-    crate::forward::forward(
-        state,
-        method,
-        path,
-        query,
-        inbound_headers,
-        body_bytes,
-        routed,
-        inbound,
-        capture,
-    )
-    .await
+        tracing::info!(
+            method = %method,
+            path = %path,
+            agent = %plan.agent,
+            attribution = ?plan.attribution,
+            provider = %provider_id,
+            attempt = tried + 1,
+            body_bytes = body_bytes.len(),
+            "routing request"
+        );
+
+        // MVP transparent forward requires the provider to speak the inbound
+        // protocol (conversion is adapters territory, wired in later phases).
+        // Ambiguous paths (GET /v1/models) forward natively to the provider.
+        // Query strings are forwarded untouched by the forward leg.
+        let response = crate::forward::forward(
+            state.clone(),
+            method.clone(),
+            path.clone(),
+            query.clone(),
+            inbound_headers.clone(),
+            body_bytes.clone(),
+            attempt,
+            inbound,
+            capture.clone(),
+        )
+        .await;
+
+        if last || !crate::forward::is_retryable_status(response.status()) {
+            return response;
+        }
+        tracing::warn!(
+            provider = %provider_id,
+            status = %response.status(),
+            attempt = tried + 1,
+            "provider did not serve the request; failing over to the next candidate"
+        );
+    }
+    unreachable!("the loop returns on its last iteration")
 }
 
 /// Roundrobin session identity (tech.md §4.7: session-granularity rotation to

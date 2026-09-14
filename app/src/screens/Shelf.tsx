@@ -112,6 +112,18 @@ function billingLabel(billing: Billing, t: Translate): string {
   return BILLING_LABEL[billing] ? t(BILLING_LABEL[billing]) : billing;
 }
 
+/** Where a billing mode sits in the column's order, most committed first: a plan
+    is something the user signed up for, pay-as-you-go is metered, and unlimited
+    has no meter to read.
+ *
+    `null` for a tag this build does not know, which is a real state — the same
+    one `billingLabel` above handles by showing the raw word. It is not a rank,
+    so those rows sort after the three known modes whichever way the arrow
+    points, the way an unpriced row behaves in the price ordering. */
+function billingRank(billing: Billing): number | null {
+  return { plan: 0, payg: 1, unl: 2 }[billing] ?? null;
+}
+
 /** The row's category badge, derived from `tag` rather than carried in the
     payload — the same keys the filter chips use, so a badge and the chip that
     filters for it always read alike. There is no chip for `local` (the shelf
@@ -360,7 +372,7 @@ function ProtoChip({ protocol, t }: { protocol: Protocol; t: Translate }) {
   );
 }
 
-const SORT_KEYS = ["name", "price"] as const;
+const SORT_KEYS = ["name", "billing", "price"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 type Sort = { key: SortKey; dir: 1 | -1 };
 
@@ -507,7 +519,7 @@ const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: st
   { key: "name", labelKey: "shelf.colName", className: "w-[150px]" },
   { key: null, labelKey: "shelf.colProtocol", className: "w-[72px]" },
   { key: null, labelKey: "shelf.colCategory", className: "w-[48px]" },
-  { key: null, labelKey: "shelf.colBilling", className: "w-[104px]" },
+  { key: "billing", labelKey: "shelf.colBilling", className: "w-[104px]" },
   { key: "price", labelKey: "shelf.colPrice", className: "" },
   { key: null, labelKey: "shelf.colActions", className: "w-[70px] text-right" },
 ];
@@ -528,7 +540,20 @@ function orderRows(rows: CatalogEntry[], sort: Sort | null): CatalogEntry[] {
   if (!sort) return [...rows].sort(byTagRank);
   // Destructured so the narrowing survives into the comparator closure.
   const { key, dir } = sort;
-  if (key !== "price") return [...rows].sort((a, b) => a.name.localeCompare(b.name) * dir);
+  if (key === "name") return [...rows].sort((a, b) => a.name.localeCompare(b.name) * dir);
+  if (key === "billing") {
+    return [...rows].sort((a, b) => {
+      const ra = billingRank(a.billing);
+      const rb = billingRank(b.billing);
+      if (ra === null || rb === null) {
+        if (ra === null && rb === null) return a.name.localeCompare(b.name);
+        return ra === null ? 1 : -1;
+      }
+      // Within one mode by name, unflipped: the mode is what the column ranks,
+      // and flipping it should not also reverse the names inside each group.
+      return (ra - rb) * dir || a.name.localeCompare(b.name);
+    });
+  }
   return rows
     .map((e) => ({ e, p: priceValue(e) }))
     .sort((a, b) => {

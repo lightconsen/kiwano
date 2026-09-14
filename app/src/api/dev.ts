@@ -332,7 +332,13 @@ const catalog: CatalogEntry[] = [
     rating: 4.4,
     endpoint: "https://open.bigmodel.cn/api/coding/paas/v4",
     currency: "USD",
-    billing: "payg",
+    billing: "plan",
+    // One of the four catalog entries whose vendor can be asked how much of the
+    // plan is spent with nothing but the provider's key — the mock carries it so
+    // the add modal's ceiling fields are reachable in `pnpm dev`. The other
+    // fourteen plan entries publish no such endpoint, and `kimi` below is one of
+    // them: between the two, both sides of that gate are exercisable.
+    plan_query: { template: "zhipu" },
     added: false,
     models: ["glm-5", "glm-5-air"],
     protocol: "openai",

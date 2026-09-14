@@ -493,6 +493,52 @@ mod tests {
         assert!(broken.entries.is_empty());
     }
 
+    /// `plan_query` has to survive the sync's own re-serialization.
+    ///
+    /// `sync_catalog` parses the Hub's payload into the view model and then
+    /// serializes *that* into `hub_cache` — it caches the parsed shape, not the
+    /// bytes it downloaded. So a field the view model does not name is gone by
+    /// the end of the first sync, and stays gone, because the cache is the only
+    /// thing the shelf reads. Nothing fails and nothing logs; the field simply
+    /// never arrives. That is why this is pinned rather than left to serde's
+    /// `default`: the failure mode is silence, and the fix is one line that a
+    /// later cleanup could as easily delete.
+    #[test]
+    fn a_catalog_entrys_plan_query_survives_the_cache_roundtrip() {
+        let aux = Aux::open_in_memory().unwrap();
+        let store = kiwanod::store::Store::open_in_memory().unwrap();
+        let body = r#"{"total":2,"entries":[
+            {"id": "kimi-for-coding", "name": "Kimi for Coding", "tag": "official",
+             "rating": 4.5, "billing": "plan", "plan_query": {"template": "kimi"},
+             "endpoints": [{"protocol": "openai", "endpoint": "https://api.example.com"}]},
+            {"id": "deepseek", "name": "DeepSeek", "tag": "official",
+             "rating": 4.8, "billing": "plan",
+             "endpoints": [{"protocol": "openai", "endpoint": "https://api.deepseek.com"}]}
+        ]}"#;
+
+        // The exact three steps the sync takes: parse, re-serialize, cache.
+        let list = parse_catalog(body).expect("the fixture must parse");
+        let cached_body = serde_json::to_string(&list).unwrap();
+        aux.save_hub_cache(&cached_body, "2026-09-14T00:00:00Z")
+            .unwrap();
+
+        let cached = vm::load_catalog(&store, &aux);
+        assert_eq!(cached.total, 2);
+        assert_eq!(
+            cached.entries[0]
+                .plan_query
+                .as_ref()
+                .and_then(|q| q.get("template"))
+                .and_then(|t| t.as_str()),
+            Some("kimi"),
+            "the template the add modal gates its ceiling fields on"
+        );
+        // The other fourteen plan providers publish none, and the modal reads
+        // that absence as "do not offer a ceiling" rather than "no template
+        // chosen yet" — so a missing field is a real answer, not a gap.
+        assert!(cached.entries[1].plan_query.is_none());
+    }
+
     #[test]
     fn footer_hub_synced_tracks_today() {
         let aux = Aux::open_in_memory().unwrap();

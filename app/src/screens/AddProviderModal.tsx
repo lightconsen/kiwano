@@ -172,7 +172,10 @@ export default function AddProviderModal({
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
     setFetchedModels(null);
     setFetchError(null);
-    setPqTemplate("");
+    // The entry's own quota query, when it publishes one: the ceiling fields are
+    // gated on it, so this is what opens them for the four providers whose
+    // vendors can be asked how much of the plan is spent.
+    setPqTemplate(e.plan_query?.template ?? "");
     setPqFields({});
     setPqOpen(false);
     resetAdvanced();
@@ -344,6 +347,18 @@ export default function AddProviderModal({
   const billingKnown = billOptions.some((b) => b.id === billing);
   const billingLocked = (!!edit || (mode === "shelf" && !!shelf)) && billingKnown;
 
+  // Whether the percent ceilings are worth offering, which is a question about
+  // the vendor's API and not about how it charges. The fields are compared
+  // against utilization the provider's own endpoint reports, so without one to
+  // ask they would set a ceiling nothing could ever measure — and the Providers
+  // page's ring reads a missing report as 0%, i.e. a permanent green zero rather
+  // than "unknown".
+  //
+  // Adding from the shelf: only the catalog says whether an endpoint exists.
+  // Editing: whatever template is selected, which is also the escape hatch for a
+  // custom provider — pick one and the fields appear.
+  const canQueryQuota = edit ? pqTemplate !== "" : !!shelf?.plan_query?.template;
+
   // Non-empty credential fields of the selected template (empty rows dropped)
   const pqFieldInputs = (): Record<string, string> => {
     const def = PLAN_QUERY_TEMPLATES.find((t) => t.id === pqTemplate);
@@ -412,9 +427,19 @@ export default function AddProviderModal({
             ? {
                 // Percent limits only; the backend clears the legacy
                 // number+unit+reset columns for plan rows.
+                //
+                // Gated on the same condition that renders the fields, because a
+                // ceiling on a provider nothing can measure is worse than none:
+                // the Providers ring reads a missing report as 0%, so the user
+                // gets a comfortable green zero while the plan empties. Reachable
+                // by clearing the template on a provider that had one — the
+                // fields unmount, the numbers stay in state, and saving would
+                // keep a ceiling with nothing behind it. Both blank → the backend
+                // stores NULL, which is the honest state.
                 plan_limits: {
-                  five_hour: planFiveHour.trim() ? Number(planFiveHour) : undefined,
-                  weekly: planWeekly.trim() ? Number(planWeekly) : undefined,
+                  five_hour:
+                    canQueryQuota && planFiveHour.trim() ? Number(planFiveHour) : undefined,
+                  weekly: canQueryQuota && planWeekly.trim() ? Number(planWeekly) : undefined,
                 },
               }
             : {
@@ -428,8 +453,18 @@ export default function AddProviderModal({
           retries: advRetries ? Number(advRetries) : null,
           headers: Object.keys(headerMap).length > 0 ? headerMap : undefined,
         },
-        // Edit only: "" = clear the config, a template = authoritative snapshot.
-        plan_query: edit ? (pqTemplate ? { template: pqTemplate, fields: pqFieldInputs() } : null) : undefined,
+        // Edit: "" = clear the config, a template = authoritative snapshot.
+        // Shelf: carry the entry's own query, the same shape with no fields —
+        // credentials are the user's, and the fields UI only exists in edit mode.
+        // Without this the ceilings the form just offered would be stored against
+        // a provider nothing can measure.
+        plan_query: edit
+          ? pqTemplate
+            ? { template: pqTemplate, fields: pqFieldInputs() }
+            : null
+          : mode === "shelf" && shelf?.plan_query?.template
+            ? { template: shelf.plan_query.template }
+            : undefined,
         // Add from the shelf only: which catalog entry this is. The gateway
         // prices a request by catalog entry, so without it a shelf-added
         // provider is costed at the general rate rather than its own — and the
@@ -800,7 +835,14 @@ export default function AddProviderModal({
               )}
             </div>
 
-            {billing === "plan" && (
+            {billing === "plan" && !canQueryQuota && (
+              <div className="flex h-8 items-center gap-1.5 text-[11.5px] text-mut">
+                <Gauge className="h-3.5 w-3.5" />
+                {t("addProvider.noQuotaEndpoint")}
+              </div>
+            )}
+
+            {billing === "plan" && canQueryQuota && (
               <div>
                 <Label className="text-[11px] font-medium text-mut">
                   {t("addProvider.usageLimits")}

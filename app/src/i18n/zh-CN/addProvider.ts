@@ -72,6 +72,7 @@ export const addProvider = {
   currencyTitle: "{currency} —— 该 Provider 的计费货币",
 
   // ── Unlimited ──
+  noQuotaEndpoint: "厂商未提供额度查询接口 · 无法仅凭你的 Key 读取套餐用量",
   noQuotaConfig: "未配置配额 · 列表中不显示用量信息",
 
   // ── Agent binding ──

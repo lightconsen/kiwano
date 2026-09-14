@@ -447,6 +447,22 @@ pub struct CatalogEntryVm {
     /// only ever comes from there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub website: Option<String>,
+    /// How to read this provider's plan usage, when the vendor's own endpoint
+    /// can answer with nothing but the provider's key: `{"template": "<id>"}`,
+    /// and never anything else — credentials are the user's, and a catalog is
+    /// public.
+    ///
+    /// Only four entries carry it. `billing == Plan` does **not** imply it: the
+    /// other fourteen plan providers publish no such endpoint, or want a second
+    /// credential. That distinction is the whole point of the field — it is what
+    /// separates "bills by plan" from "can be asked how much of the plan is
+    /// spent", and only the latter is worth offering a ceiling for.
+    ///
+    /// Declaring it here is not bookkeeping: `sync` re-serializes the parsed
+    /// catalog before caching it, so a field this struct does not name is gone by
+    /// the end of the first sync and no frontend can read it afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_query: Option<serde_json::Value>,
     /// Billing mode; unknown Hub tags survive as `CatalogBilling::Other`.
     pub billing: CatalogBilling,
     /// Derived at load time from the local provider list (same endpoint =

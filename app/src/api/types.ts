@@ -329,6 +329,12 @@ export interface CatalogEntry {
   /** The currency this provider bills in; the spending limit is denominated
       in it. Older catalog entries omit it → the app falls back to USD. */
   currency?: string;
+  /** How to read this provider's plan usage, when the vendor's own endpoint can
+      answer with nothing but the provider's key. Only four catalog entries carry
+      it, and `billing === "plan"` does not imply it: the field is the difference
+      between "bills by plan" and "can be asked how much of the plan is spent",
+      and only the latter justifies offering a ceiling. */
+  plan_query?: { template: string };
   billing: Billing;
   /** Derived at read time from the local provider list (same endpoint = added) */
   added: boolean;

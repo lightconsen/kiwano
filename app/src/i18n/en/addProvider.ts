@@ -77,6 +77,10 @@ export const addProvider = {
   spendingLimitHint: "optional · leave blank to show the usage trend",
   currencyTitle: "{currency} — the currency this provider bills in",
 
+  // ── Plan, but nothing that can be asked ──
+  noQuotaEndpoint:
+    "No quota endpoint · this vendor publishes no way to read plan usage with your key alone",
+
   // ── Unlimited ──
   noQuotaConfig: "No quota config · usage info hidden in lists",
 

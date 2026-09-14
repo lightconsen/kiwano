@@ -3005,6 +3005,28 @@ fn provider_endpoint_keys(p: &Provider) -> Vec<String> {
         .collect()
 }
 
+/// The credential stored for `provider_id`, but **only** when `endpoint` is one
+/// of the endpoints that provider already answers on.
+///
+/// The add/edit form deliberately keeps the key out of the webview: it shows a
+/// masked placeholder and sends a blank when the user has not typed a new one
+/// (blank = keep the stored key). So a Test or a Fetch pressed from the edit
+/// dialog arrives with nothing to authenticate with, and both used to fail —
+/// the probe reported `auth`, and the model list refused outright — for a
+/// provider whose key was sitting right there.
+///
+/// The endpoint has to match, and that is the point rather than a nicety: the
+/// URL field is editable, so reading the stored key for whatever address is in
+/// the box would turn a Test button into a way to post someone's credential to a
+/// host of the typer's choosing. Matching the stored endpoints keeps the button
+/// meaning "does my saved configuration still work".
+pub fn stored_key_for(store: &Store, provider_id: &str, endpoint: &str) -> Option<String> {
+    let p = store.get_provider(provider_id).ok().flatten()?;
+    let wanted = endpoint_key(endpoint);
+    let known = provider_endpoint_keys(&p);
+    known.contains(&wanted).then_some(p.api_key)?
+}
+
 /// Every endpoint key a catalog entry advertises, its primary first.
 fn catalog_endpoint_keys(e: &CatalogEntryVm) -> Vec<String> {
     std::iter::once(&e.endpoint)
@@ -3741,6 +3763,41 @@ mod tests {
         assert_eq!(
             s.get_strategy("claude").unwrap().unwrap().kind,
             StrategyType::Single
+        );
+    }
+
+    /// A stored key answers only for the endpoints that provider already answers
+    /// on. That guard is the reason the fallback is safe to offer at all: the URL
+    /// field is editable, and "use the saved key for whatever is in the box"
+    /// would make the Test button a way to post a credential to any host.
+    #[test]
+    fn a_stored_key_covers_only_the_providers_own_endpoints() {
+        let s = store();
+        let aux = catalog_aux();
+        let mut input = catalog_input("Kimi", "https://api.moonshot.cn");
+        input.api_key = "sk-secret".into();
+        let vm = add_provider(&s, &aux, &input).unwrap();
+
+        // Its own endpoint, however it is spelled.
+        for spelling in [
+            "https://api.moonshot.cn",
+            "api.moonshot.cn",
+            "api.moonshot.cn/",
+            "HTTPS://API.MOONSHOT.CN",
+        ] {
+            assert_eq!(
+                stored_key_for(&s, &vm.id, spelling).as_deref(),
+                Some("sk-secret"),
+                "{spelling} is where this provider answers"
+            );
+        }
+
+        // Anywhere else: nothing, so the probe goes out anonymous and reports
+        // what it finds instead of leaking the key.
+        assert_eq!(stored_key_for(&s, &vm.id, "https://evil.example.com"), None);
+        assert_eq!(
+            stored_key_for(&s, "no-such-provider", "api.moonshot.cn"),
+            None
         );
     }
 

@@ -36,6 +36,17 @@ function endpointKey(s: string): string {
     .replace(/\/+$/, "");
 }
 
+/** The mock's stand-in for `vm::stored_key_for`: the provider's key, but only
+    for an endpoint that provider already answers on — the same guard the real one
+    applies, so a probe aimed somewhere else gets no key. */
+function storedKeyFor(providerId: string | undefined, endpoint: string): string | null {
+  if (!providerId) return null;
+  const p = providers.find((x) => x.id === providerId);
+  if (!p) return null;
+  const known = [p.endpoint, ...(p.endpoints ?? []).map((e) => e.endpoint)].map(endpointKey);
+  return known.includes(endpointKey(endpoint)) ? "sk-stored" : null;
+}
+
 const providers: Provider[] = [
   {
     id: "deepseek",
@@ -927,24 +938,46 @@ export const devApi: KiwanoApi = {
 
   // Dev probe: pretend the protocol's models route answered (ok), unless the
   // endpoint is empty/decorated with "invalid" — exercises the chip styling
-  async testEndpoint(_protocol: Protocol, endpoint: string): Promise<ProbeReport> {
+  async testEndpoint(
+    _protocol: Protocol,
+    endpoint: string,
+    apiKey?: string,
+    providerId?: string,
+  ): Promise<ProbeReport> {
     await delay(500);
     const latency_ms = 200 + Math.floor(Math.random() * 300);
     if (!endpoint.trim() || endpoint.includes("invalid")) {
       return { verdict: "unreachable", status: null, latency_ms, detail: "connection failed (dev)" };
+    }
+    // Mirrors the backend: a blank key falls back to the stored one, but only
+    // for an endpoint that provider already answers on.
+    if (!apiKey?.trim() && !storedKeyFor(providerId, endpoint)) {
+      return { verdict: "auth", status: 401, latency_ms, detail: "no key for this endpoint (dev)" };
     }
     return { verdict: "ok", status: 200, latency_ms, detail: "12 models listed (dev)" };
   },
 
   // Dev model list: resolves through the catalog entry matching the endpoint
   // (primary or per-protocol), falling back to a canned OpenAI-style list
-  async listModels(_protocol: Protocol, endpoint: string, apiKey: string): Promise<string[]> {
+  async listModels(
+    _protocol: Protocol,
+    endpoint: string,
+    apiKey: string,
+    providerId?: string,
+  ): Promise<string[]> {
     await delay(600);
-    if (!apiKey.trim()) throw new Error("auth failed — check the API key");
-    const ep = endpoint.trim();
+    if (!apiKey.trim() && !storedKeyFor(providerId, endpoint)) {
+      throw new Error("no stored key covers this endpoint — enter one to fetch its models");
+    }
+    // Normalized, like the real matching: the form holds `api.moonshot.cn` where
+    // the entry publishes `https://api.moonshot.cn`, and comparing the raw
+    // strings missed every entry — so Fetch answered with the generic list even
+    // for a provider the catalog knows.
+    const ep = endpointKey(endpoint);
     const hit = catalog.find(
       (e) =>
-        e.endpoint === ep || (e.endpoints ?? []).some((x) => x.endpoint === ep),
+        endpointKey(e.endpoint) === ep ||
+        (e.endpoints ?? []).some((x) => endpointKey(x.endpoint) === ep),
     );
     if (hit) {
       return Array.from(new Set([...hit.models, ...(hit.endpoints ?? []).flatMap((x) => x.models ?? [])]));

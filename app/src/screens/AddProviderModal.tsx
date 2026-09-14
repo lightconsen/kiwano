@@ -214,14 +214,17 @@ export default function AddProviderModal({
   // surfaces as an inline error instead of a doomed request.
   const fetchModels = async () => {
     if (fetching || !endpoint.trim()) return;
-    if (!apiKey.trim()) {
+    // Blank is only a blocker when there is nothing to fall back on: the edit
+    // form never holds the stored key, and the backend uses it when the endpoint
+    // is one this provider already answers on.
+    if (!apiKey.trim() && !edit) {
       setFetchError(t("addProvider.errorNoKey"));
       return;
     }
     setFetching(true);
     setFetchError(null);
     try {
-      const list = await api.listModels(protocol, endpoint.trim(), apiKey.trim());
+      const list = await api.listModels(protocol, endpoint.trim(), apiKey.trim(), edit?.id);
       if (list.length === 0) {
         setFetchError(t("addProvider.errorNoModels"));
       } else {
@@ -239,7 +242,12 @@ export default function AddProviderModal({
     if (!row?.endpoint.trim()) return;
     setAltTesting((m) => ({ ...m, [i]: true }));
     try {
-      const report = await api.testEndpoint(row.protocol, row.endpoint.trim(), apiKey.trim() || undefined);
+      const report = await api.testEndpoint(
+        row.protocol,
+        row.endpoint.trim(),
+        apiKey.trim() || undefined,
+        edit?.id,
+      );
       setAltProbes((m) => ({ ...m, [i]: report }));
     } catch (e) {
       // Rejected invoke → visible verdict instead of a silent no-op
@@ -809,7 +817,9 @@ export default function AddProviderModal({
                     onClick={async () => {
                       setTesting(true);
                       try {
-                        setProbe(await api.testEndpoint(protocol, endpoint.trim(), apiKey.trim() || undefined));
+                        setProbe(
+            await api.testEndpoint(protocol, endpoint.trim(), apiKey.trim() || undefined, edit?.id),
+          );
                       } catch (e) {
                         // A rejected invoke (e.g. command missing in a stale app
                         // binary) must still land as a visible verdict, not vanish

@@ -666,10 +666,25 @@ export interface KiwanoApi {
   testLatency(endpoint: string): Promise<number>;
   /** Protocol-aware probe: GET the protocol's models route; 401/403 still
       proves the protocol route exists (works without a key) */
-  testEndpoint(protocol: Protocol, endpoint: string, apiKey?: string): Promise<ProbeReport>;
+  /** Probe the endpoint. A blank key is fine — a 401 still proves the route
+      exists — and `providerId` lets the edit dialog fall back to the stored
+      credential when the form holds none (it never shows the key). */
+  testEndpoint(
+    protocol: Protocol,
+    endpoint: string,
+    apiKey?: string,
+    providerId?: string,
+  ): Promise<ProbeReport>;
   /** Live model-name list from a provider endpoint (the API key is required:
       cloud providers reject anonymous /models calls) */
-  listModels(protocol: Protocol, endpoint: string, apiKey: string): Promise<string[]>;
+  /** Live model list. Needs a key — a typed one, or `providerId`'s stored key
+      when that provider already answers on this endpoint. */
+  listModels(
+    protocol: Protocol,
+    endpoint: string,
+    apiKey: string,
+    providerId?: string,
+  ): Promise<string[]>;
   listCatalog(): Promise<CatalogList>;
   /** The price mirror: every model the gateway can cost, with its own rates. */
   listModelPrices(): Promise<ModelPrice[]>;

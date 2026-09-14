@@ -23,11 +23,16 @@ export const tauriApi: KiwanoApi = {
 
   testLatency: (endpoint: string) => invoke<number>("test_latency", { endpoint }),
 
-  testEndpoint: (protocol: Protocol, endpoint: string, apiKey?: string) =>
-    invoke<ProbeReport>("test_endpoint", { protocol, endpoint, apiKey: apiKey ?? null }),
+  testEndpoint: (protocol: Protocol, endpoint: string, apiKey?: string, providerId?: string) =>
+    invoke<ProbeReport>("test_endpoint", {
+      protocol,
+      endpoint,
+      apiKey: apiKey ?? null,
+      providerId: providerId ?? null,
+    }),
 
-  listModels: (protocol: Protocol, endpoint: string, apiKey: string) =>
-    invoke<string[]>("list_models", { protocol, endpoint, apiKey }),
+  listModels: (protocol: Protocol, endpoint: string, apiKey: string, providerId?: string) =>
+    invoke<string[]>("list_models", { protocol, endpoint, apiKey, providerId: providerId ?? null }),
 
   listCatalog: () => invoke<CatalogList>("list_catalog"),
 

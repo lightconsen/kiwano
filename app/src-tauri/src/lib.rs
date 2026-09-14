@@ -409,24 +409,48 @@ fn test_latency(endpoint: String) -> Result<u64, String> {
 /// when a key is given) and classify the answer. A missing key is fine —
 /// 401/403 still proves the protocol route exists. Async: the probe uses an
 /// async HTTP client (a blocking one panics when dropped on the runtime).
+///
+/// `provider_id` is how the edit dialog's blank key gets filled in: that form
+/// never holds the stored credential, so a Test on a provider whose saved
+/// configuration is what you are checking would otherwise probe anonymously and
+/// report `auth`. Only that provider's own endpoints qualify — see
+/// `vm::stored_key_for`.
 #[tauri::command]
 async fn test_endpoint(
+    state: State<'_, AppState>,
     protocol: String,
     endpoint: String,
     api_key: Option<String>,
+    provider_id: Option<String>,
 ) -> Result<sidecar::ProbeReport, String> {
-    sidecar::probe_endpoint(&protocol, &endpoint, api_key.as_deref()).await
+    let key = api_key
+        .filter(|k| !k.trim().is_empty())
+        .or_else(|| vm::stored_key_for(&state.store, provider_id.as_deref()?, &endpoint));
+    sidecar::probe_endpoint(&protocol, &endpoint, key.as_deref()).await
 }
 
-/// Live model-name list for the Default model picker (requires the API key:
-/// cloud providers reject anonymous /models calls).
+/// Live model-name list for the Default model picker (requires an API key:
+/// cloud providers reject anonymous /models calls). Same blank-key rule as the
+/// probe: a typed key wins, and the stored one stands in for an edit.
 #[tauri::command]
 async fn list_models(
+    state: State<'_, AppState>,
     protocol: String,
     endpoint: String,
     api_key: String,
+    provider_id: Option<String>,
 ) -> Result<Vec<String>, String> {
-    sidecar::fetch_model_names(&protocol, &endpoint, &api_key).await
+    let key = if api_key.trim().is_empty() {
+        provider_id
+            .as_deref()
+            .and_then(|id| vm::stored_key_for(&state.store, id, &endpoint))
+            .ok_or_else(|| {
+                format!("no stored key covers {endpoint} — enter one to fetch its models")
+            })?
+    } else {
+        api_key
+    };
+    sidecar::fetch_model_names(&protocol, &endpoint, &key).await
 }
 
 #[tauri::command]

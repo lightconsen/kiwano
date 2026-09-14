@@ -267,6 +267,83 @@ pub(crate) fn is_retryable_status(status: StatusCode) -> bool {
         || status.is_server_error()
 }
 
+/// Ceiling on a non-streaming upstream response the gateway will hold whole.
+///
+/// An SSE body is streamed through and costs no memory however long it runs;
+/// this is about the other kind. A non-streaming body is buffered because three
+/// things need it at once — it is metered, it is captured for the request log,
+/// and on the conversion path it is rewritten — so without a ceiling a single
+/// upstream (or a proxy in front of one) could ask this process for as much
+/// memory as it liked. Past the cap the request fails with a message naming the
+/// limit, rather than a truncated answer that would be billed as a whole one.
+///
+/// 16 MiB is far past any real completion (the largest published output caps are
+/// ~64k tokens, well under a megabyte) and far enough under the 32 MiB inbound
+/// cap that a request and its answer are bounded by the same order of magnitude.
+pub const MAX_UPSTREAM_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Why a non-streaming upstream body could not be taken whole.
+enum UpstreamBodyError {
+    /// Past the cap. A distinct kind in the log, because the fix is not the same
+    /// as for a broken transport: nothing is wrong with the upstream, the answer
+    /// is simply bigger than this gateway will hold.
+    TooLarge(String),
+    /// The transport broke mid-body.
+    Read(String),
+}
+
+impl UpstreamBodyError {
+    fn message(&self) -> &str {
+        match self {
+            UpstreamBodyError::TooLarge(m) | UpstreamBodyError::Read(m) => m,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            UpstreamBodyError::TooLarge(_) => "response_too_large",
+            UpstreamBodyError::Read(_) => "upstream_error",
+        }
+    }
+}
+
+/// Read an upstream body whole, refusing to grow past `limit`.
+///
+/// Checks `content-length` first so a declared oversize fails before any of it is
+/// read, then enforces the cap while reading for upstreams that stream chunked and
+/// declare nothing.
+async fn read_upstream_body_capped(
+    upstream: &mut reqwest::Response,
+    limit: usize,
+) -> Result<Bytes, UpstreamBodyError> {
+    if let Some(len) = upstream.content_length() {
+        if len > limit as u64 {
+            return Err(UpstreamBodyError::TooLarge(format!(
+                "upstream response declares {len} bytes, over the {limit}-byte cap"
+            )));
+        }
+    }
+    let mut out: Vec<u8> = Vec::new();
+    loop {
+        let chunk = match upstream.chunk().await {
+            Ok(Some(c)) => c,
+            Ok(None) => break,
+            Err(e) => {
+                return Err(UpstreamBodyError::Read(format!(
+                    "reading upstream body failed: {e}"
+                )))
+            }
+        };
+        if out.len() + chunk.len() > limit {
+            return Err(UpstreamBodyError::TooLarge(format!(
+                "upstream response exceeded the {limit}-byte cap (this request is not streaming; ask the upstream to stream)"
+            )));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(Bytes::from(out))
+}
+
 /// A failed send attempt: either the per-provider response-header timeout
 /// elapsed or the transport itself broke (connect/DNS/reset).
 enum SendFailure {
@@ -653,7 +730,7 @@ pub async fn forward(
         }
     };
 
-    let upstream = match send_upstream(
+    let mut upstream = match send_upstream(
         &state,
         provider,
         &routed.agent,
@@ -742,13 +819,11 @@ pub async fn forward(
         *response.headers_mut() = response_headers;
         response
     } else {
-        let bytes = match upstream.bytes().await {
+        let bytes = match read_upstream_body_capped(&mut upstream, MAX_UPSTREAM_BODY_BYTES).await {
             Ok(b) => b,
             Err(e) => {
-                let resp = error_into_response(
-                    GatewayError::Upstream(format!("reading upstream body failed: {e}")),
-                    inbound,
-                );
+                let resp =
+                    error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
                 crate::log_capture::persist_failure(
                     &state.store,
                     log.as_ref().map(|l| &l.capture),
@@ -756,8 +831,8 @@ pub async fn forward(
                     Some(attribution_str(routed.attribution)),
                     Some(provider.id.clone()),
                     resp.status(),
-                    "upstream_error",
-                    format!("reading upstream body failed: {e}"),
+                    e.kind(),
+                    e.message().to_string(),
                 );
                 return resp;
             }
@@ -937,7 +1012,7 @@ async fn forward_anthropic_via_openai(
         }
     };
 
-    let upstream = match send_upstream(
+    let mut upstream = match send_upstream(
         &state,
         provider,
         &routed.agent,
@@ -1019,13 +1094,11 @@ async fn forward_anthropic_via_openai(
         *response.headers_mut() = response_headers;
         response
     } else {
-        let bytes = match upstream.bytes().await {
+        let bytes = match read_upstream_body_capped(&mut upstream, MAX_UPSTREAM_BODY_BYTES).await {
             Ok(b) => b,
             Err(e) => {
-                let resp = error_into_response(
-                    GatewayError::Upstream(format!("reading upstream body failed: {e}")),
-                    inbound,
-                );
+                let resp =
+                    error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
                 crate::log_capture::persist_failure(
                     &state.store,
                     log.as_ref().map(|l| &l.capture),
@@ -1033,8 +1106,8 @@ async fn forward_anthropic_via_openai(
                     Some(attribution_str(routed.attribution)),
                     Some(provider.id.clone()),
                     resp.status(),
-                    "upstream_error",
-                    format!("reading upstream body failed: {e}"),
+                    e.kind(),
+                    e.message().to_string(),
                 );
                 return resp;
             }

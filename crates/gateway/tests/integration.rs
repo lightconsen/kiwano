@@ -101,6 +101,8 @@ enum MockReply {
     Status(StatusCode),
     /// Events, then silence forever: a stream that stalled mid-flight.
     SseThenStall(Vec<&'static str>),
+    /// A non-streaming body of `n` bytes — past the gateway's buffering cap.
+    BigNonStreaming(usize),
 }
 
 fn mock_response(reply: &MockReply) -> Response {
@@ -132,6 +134,11 @@ fn mock_response(reply: &MockReply) -> Response {
                 }))
                 .unwrap()
         }
+        MockReply::BigNonStreaming(n) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(vec![b'x'; *n]))
+            .unwrap(),
         MockReply::SseThenStall(chunks) => {
             let chunks: Vec<Result<Bytes, std::convert::Infallible>> = chunks
                 .iter()
@@ -1185,6 +1192,55 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
         "leaked into error_message: {message}"
     );
     assert!(message.contains("key=[REDACTED]"), "{message}");
+}
+
+/// A non-streaming response is held whole — metered, logged, and on the
+/// conversion path rewritten — so it has a ceiling. Past it the request fails
+/// with a message that says which limit it hit, rather than being buffered at
+/// whatever size the upstream felt like.
+#[tokio::test]
+async fn an_oversize_non_streaming_response_is_refused_not_buffered() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // Just past the 16 MiB cap.
+    let (upstream_url, _) = mock_anthropic(MockReply::BigNonStreaming(17 * 1024 * 1024)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(
+        body.contains("cap"),
+        "the client is told which limit: {body}"
+    );
+    assert!(
+        body.len() < 1024,
+        "and is not handed the 17 MiB it was refused"
+    );
+
+    // Its own error kind: nothing is wrong with the upstream, the answer is just
+    // bigger than this gateway will hold.
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(
+        rows.first().and_then(|r| r.error_kind.as_deref()),
+        Some("response_too_large")
+    );
 }
 
 /// Liveness and metrics are the only data-plane paths served without a

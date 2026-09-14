@@ -16,8 +16,41 @@ use serde_json::Value;
 
 use crate::store::Protocol;
 
-/// Upper bound for a scanned payload; larger bodies are skipped (never metered).
-const MAX_SCAN_BYTES: usize = 2 * 1024 * 1024;
+/// Bound on the payload a scanner will look at.
+///
+/// This does not decide how much memory the gateway will spend on a body — that
+/// is decided where the body is read, `server::MAX_BODY_BYTES` for an inbound
+/// request (32 MiB) and `forward::MAX_UPSTREAM_BODY_BYTES` for a response
+/// (16 MiB). It is set to the larger of the two so that nothing the gateway
+/// accepted is skipped, because a skipped body is not metered *at all*: the
+/// biggest requests are the ones whose cost used to go missing, and they are the
+/// expensive ones.
+///
+/// It used to be 2 MiB, chosen when scanning meant building a `serde_json::Value`
+/// of the whole document — several times the body size in allocations. The scans
+/// below now read only the fields they want ([`UsageEnvelope`], [`ModelEnvelope`])
+/// and let serde consume the rest without materializing it, so the ceiling no
+/// longer has to be about memory.
+const MAX_SCAN_BYTES: usize = crate::server::MAX_BODY_BYTES;
+
+/// The part of a response the meter reads. Everything else — the messages, the
+/// completion, a 16 MiB tool result — is consumed by serde and dropped on the
+/// floor rather than turned into a `Value` tree.
+#[derive(serde::Deserialize)]
+struct UsageEnvelope {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    usage: Option<Value>,
+}
+
+/// The part of a request the meter reads: which model is being asked for, which
+/// is what prices the request.
+#[derive(serde::Deserialize)]
+struct ModelEnvelope {
+    #[serde(default)]
+    model: Option<String>,
+}
 
 /// Token counts captured from one response.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -134,21 +167,20 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
     if body.is_empty() || body.len() > MAX_SCAN_BYTES {
         return (None, None);
     }
-    let Ok(v) = serde_json::from_slice::<Value>(body) else {
+    let Ok(envelope) = serde_json::from_slice::<UsageEnvelope>(body) else {
         return (None, None);
     };
-    let model = v.get("model").and_then(Value::as_str).map(str::to_string);
     let mut scanner = UsageScanner::new();
     match protocol {
         Protocol::Anthropic => {
             // message objects carry usage at top level; error bodies do not.
-            if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
+            if let Some(u) = envelope.usage.as_ref().filter(|u| u.is_object()) {
                 scanner.merge_usage(u);
             }
         }
         Protocol::OpenAI => {
             // chat.completion / response objects carry usage at top level.
-            if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
+            if let Some(u) = envelope.usage.as_ref().filter(|u| u.is_object()) {
                 scanner.merge_usage(u);
             }
         }
@@ -156,22 +188,59 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
     // No usage recorded → report none, regardless of whether a model id was
     // seen (an all-default Usage carries no numbers worth reporting).
     let usage = (scanner.usage != Usage::default()).then_some(scanner.usage);
-    (usage, model)
+    (usage, envelope.model)
 }
 
 /// Extract the `model` field from an inbound request body (authoritative for
 /// metering; upstream stream events only serve as fallback).
+///
+/// The request is the body that gets large — long contexts, pasted files, base64
+/// images — so this reads the one field it wants and skips the rest without
+/// allocating it. It used to give up past 2 MiB, which left exactly those
+/// requests unpriced: no model, so no price, so a NULL cost in the dashboard.
 pub fn request_model(body: &[u8]) -> Option<String> {
     if body.is_empty() || body.len() > MAX_SCAN_BYTES {
         return None;
     }
-    let v = serde_json::from_slice::<Value>(body).ok()?;
-    v.get("model").and_then(Value::as_str).map(str::to_string)
+    let envelope = serde_json::from_slice::<ModelEnvelope>(body).ok()?;
+    envelope.model
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A body past the old 2 MiB ceiling came back with nothing to meter, and a
+    // request with no model is a request with no price — so the largest requests,
+    // which are the expensive ones, were the ones whose cost went missing. The
+    // scan reads only the fields it wants now, which is what lets it take a body
+    // this size at all: serde walks the rest without building it.
+    #[test]
+    fn a_large_body_is_still_scanned_for_its_model_and_usage() {
+        let filler = "x".repeat(3 * 1024 * 1024);
+
+        // The field on the far side of the filler is still reached: nothing
+        // short-circuits on size, and nothing stops at the first unknown key.
+        let model_first = format!(r#"{{"model":"claude-sonnet-4-5","messages":["{filler}"]}}"#);
+        assert_eq!(
+            request_model(model_first.as_bytes()).as_deref(),
+            Some("claude-sonnet-4-5")
+        );
+        let model_last = format!(r#"{{"messages":["{filler}"],"model":"deepseek-chat"}}"#);
+        assert_eq!(
+            request_model(model_last.as_bytes()).as_deref(),
+            Some("deepseek-chat")
+        );
+
+        let response = format!(
+            r#"{{"choices":["{filler}"],"model":"deepseek-chat","usage":{{"prompt_tokens":11,"completion_tokens":22}}}}"#
+        );
+        let (usage, model) = parse_response_usage(Protocol::OpenAI, response.as_bytes());
+        assert_eq!(model.as_deref(), Some("deepseek-chat"));
+        let usage = usage.expect("usage past the filler");
+        assert_eq!(usage.input_tokens, 11);
+        assert_eq!(usage.output_tokens, 22);
+    }
 
     #[test]
     fn parses_anthropic_non_stream() {

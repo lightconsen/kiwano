@@ -7,7 +7,7 @@ import {
   Check,
   Copy,
   Gauge,
-  Pencil,
+  SquarePen,
   Pin,
   Plus,
   RefreshCw,
@@ -902,7 +902,7 @@ function ProviderRow({
           title={t("providers.editProvider")}
           onClick={() => onEdit(p)}
         >
-          <Pencil className="h-3.5 w-3.5" />
+          <SquarePen className="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"

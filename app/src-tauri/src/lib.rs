@@ -436,6 +436,19 @@ async fn test_endpoint(
     sidecar::probe_endpoint(&protocol, &endpoint, key.as_deref()).await
 }
 
+/// One prompt round trip against a provider, for the Apps screen's Test button.
+///
+/// The provider is tested as it is stored: its own endpoint, its own key, and —
+/// when it has no default model — the model its catalog entry prices. Async:
+/// the round trip is an HTTP call, and a blocking client panics on the runtime.
+#[tauri::command]
+async fn test_provider_latency(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<vm::PromptLatencyVm, String> {
+    vm::test_provider_latency(&state.store, &state.aux, &id).await
+}
+
 /// Live model-name list for the Default model picker (requires an API key:
 /// cloud providers reject anonymous /models calls). Same blank-key rule as the
 /// probe: a typed key wins, and the stored one stands in for an edit.
@@ -1078,6 +1091,7 @@ pub fn run() {
             delete_provider,
             enable_provider,
             test_latency,
+            test_provider_latency,
             test_endpoint,
             list_models,
             list_catalog,

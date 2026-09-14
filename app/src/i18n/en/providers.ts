@@ -98,6 +98,11 @@ export const providers = {
   moveDown: "Move down",
   makePrimary: "Make primary",
   makePrimaryTitle: "Make primary — move this candidate to the head of the queue",
+  // ── Latency test (a prompt round trip, one per provider row) ──
+  testLatency: "Test latency",
+  testLatencyTitle: "Send one prompt and time the round trip",
+  testLatencyFailed: "failed",
+
   // ── User-defined agents (migration v16) ──
   /** The + at the end of the agent strip. */
   newAgent: "New agent",

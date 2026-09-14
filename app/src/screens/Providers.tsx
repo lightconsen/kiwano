@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Check,
   Copy,
+  Gauge,
   Pencil,
   Pin,
   Plus,
@@ -259,6 +260,71 @@ function CopyRow({ label, value }: { label: string; value: string }) {
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </Button>
     </div>
+  );
+}
+
+/** The row's latency test: one prompt, one number.
+ *
+ * It reports on the button rather than in the Status cell on purpose. That cell
+ * shows the prober's reading — a reachability check every 30 seconds — and this
+ * is a different measurement: a real completion, so a slow model reads slow.
+ * Putting them in one cell would also mean the number changed under the reader
+ * the next time the prober ticked.
+ */
+function TestLatencyButton({ provider }: { provider: Provider }) {
+  const t = useT();
+  const [state, setState] = useState<
+    | { kind: "idle" }
+    | { kind: "busy" }
+    | { kind: "done"; ms: number; model: string }
+    | { kind: "failed"; why: string }
+  >({ kind: "idle" });
+
+  const test = async () => {
+    setState({ kind: "busy" });
+    try {
+      const r = await api.testProviderLatency(provider.id);
+      if (r.error) setState({ kind: "failed", why: r.error });
+      else setState({ kind: "done", ms: r.latency_ms, model: r.model });
+    } catch (e) {
+      setState({ kind: "failed", why: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const label =
+    state.kind === "done"
+      ? `${state.ms}ms`
+      : state.kind === "failed"
+        ? t("providers.testLatencyFailed")
+        : t("providers.testLatency");
+  // The model in the tooltip is the one the *ping* used, not the row's
+  // remembered default: with no default set, the backend falls back to the
+  // model the catalog prices, and that is what the number is about.
+  const title =
+    state.kind === "failed"
+      ? state.why
+      : state.kind === "done"
+        ? `${t("providers.testLatencyTitle")} · ${state.model}`
+        : t("providers.testLatencyTitle");
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1 whitespace-nowrap border border-line px-1.5 text-[10.5px]"
+      style={state.kind === "failed" ? { color: "var(--red)" } : undefined}
+      aria-label={t("providers.testLatency")}
+      title={title}
+      disabled={state.kind === "busy"}
+      onClick={test}
+    >
+      {state.kind === "busy" ? (
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Gauge className="h-3.5 w-3.5" />
+      )}
+      {state.kind === "idle" ? null : <span>{label}</span>}
+    </Button>
   );
 }
 
@@ -823,10 +889,15 @@ function ProviderRow({
           confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         }`}
       >
+        <TestLatencyButton provider={p} />
+        {/* Square icon buttons, one per action: the row's actions are symbols a
+            reader already knows, and a padded pill around a lone glyph reads as
+            a label that failed to load. The delete grows into its confirmation
+            word, which is the one state that has something to say. */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px] text-mut"
+          className="h-7 w-7 shrink-0 rounded-md border border-line px-0 text-mut"
           aria-label={t("common.edit")}
           title={t("providers.editProvider")}
           onClick={() => onEdit(p)}
@@ -836,7 +907,9 @@ function ProviderRow({
         <Button
           variant="ghost"
           size="sm"
-          className={`h-7 whitespace-nowrap border border-line px-1.5 text-[10.5px]${confirmDel ? "" : " text-mut"}`}
+          className={`h-7 shrink-0 rounded-md border border-line text-[10.5px] ${
+            confirmDel ? "whitespace-nowrap px-1.5" : "w-7 px-0 text-mut"
+          }`}
           style={confirmDel ? { color: "var(--red)", borderColor: "var(--red)" } : undefined}
           aria-label={t("common.delete")}
           title={confirmDel ? t("providers.clickAgain") : t("providers.deleteProvider")}

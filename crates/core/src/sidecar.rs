@@ -29,6 +29,7 @@ use std::time::Duration;
 
 use kiwanod::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
 use kiwanod::store::Store;
+use serde::Serialize;
 
 /// The endpoint type itself, so callers in this crate name
 /// `sidecar::AdminEndpoint` and do not need to know the gateway crate's module
@@ -640,6 +641,86 @@ pub async fn fetch_model_names(
     Ok(names)
 }
 
+/// One prompt round trip, timed.
+#[derive(Debug, Serialize)]
+pub struct PromptProbe {
+    /// Wall time for the whole exchange: request sent, response read to the end.
+    pub latency_ms: u64,
+    pub status: u16,
+    /// The upstream's own words when it refused. A rejected ping is not a
+    /// latency: reporting 180ms for a 401 would read as "fast" on a provider
+    /// that never answered.
+    pub error: Option<String>,
+}
+
+/// The body a latency ping sends: one user turn, one token out.
+///
+/// Small enough to be cheap on every pricing model, large enough that the answer
+/// is a real generation — a zero-token request can be answered from a cache or
+/// refused outright. One shape for both flavors, because for a minimal ping they
+/// ask the same three fields; the protocols differ in where it goes and how it
+/// is authenticated, which is `probe_prompt`'s business, not this one's.
+fn prompt_body(model: &str) -> String {
+    serde_json::json!({
+        "model": serde_json::Value::String(model.to_string()),
+        "max_tokens": 1,
+        "messages": [{ "role": "user", "content": "ping" }],
+    })
+    .to_string()
+}
+
+/// The message inside an error body, for both flavors: Anthropic and OpenAI
+/// both put it at `error.message`.
+fn upstream_error_message(body: &str, status: u16) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.pointer("/error/message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| format!("upstream answered {status}"))
+}
+
+/// Send a prompt to `url` and time the full round trip (headers **and** body).
+///
+/// Time-to-first-byte is the number a streaming client feels, and it needs a
+/// stream to measure; the whole exchange is what a non-streaming one feels and
+/// is what this reports — one number, taken the same way for every provider,
+/// which is what makes two rows comparable.
+pub async fn probe_prompt(
+    protocol: &str,
+    url: &str,
+    api_key: &str,
+    model: &str,
+) -> Result<PromptProbe, String> {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err("API key required".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let req = apply_auth(protocol, client.post(url), Some(key))?
+        .header("content-type", "application/json")
+        .body(prompt_body(model));
+    let start = std::time::Instant::now();
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.text().await.unwrap_or_default();
+    let latency_ms = start.elapsed().as_millis() as u64;
+    Ok(PromptProbe {
+        latency_ms,
+        status,
+        error: (!(200..300).contains(&status)).then(|| upstream_error_message(&body, status)),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -815,6 +896,47 @@ mod tests {
         );
         assert!(probe_url("openai", "").is_err());
         assert!(probe_url("grpc", "https://x.example.com").is_err());
+    }
+
+    /// The ping body: one user turn, one token out — and the model it names is
+    /// the one the caller resolved, not a default of ours.
+    #[test]
+    fn the_prompt_body_is_one_turn_and_one_token() {
+        let v: serde_json::Value = serde_json::from_str(&prompt_body("kimi-k2")).unwrap();
+        assert_eq!(v["model"], "kimi-k2");
+        assert_eq!(v["max_tokens"], 1);
+        assert_eq!(v["messages"][0]["role"], "user");
+        assert_eq!(v["messages"][0]["content"], "ping");
+    }
+
+    /// A refusal is reported with the upstream's words when it has any: "fast"
+    /// is the wrong answer for a provider that rejected the request.
+    #[test]
+    fn an_error_body_is_read_for_its_message() {
+        // Both flavors put it at `error.message`.
+        assert_eq!(
+            upstream_error_message(
+                r#"{"error":{"message":"model not found","type":"invalid"}}"#,
+                404
+            ),
+            "model not found"
+        );
+        assert_eq!(
+            upstream_error_message(
+                r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+                401
+            ),
+            "invalid x-api-key"
+        );
+        // Anything else falls back to the status rather than to an empty string.
+        assert_eq!(
+            upstream_error_message("<html>nope</html>", 502),
+            "upstream answered 502"
+        );
+        assert_eq!(
+            upstream_error_message(r#"{"error":{}}"#, 400),
+            "upstream answered 400"
+        );
     }
 
     #[test]

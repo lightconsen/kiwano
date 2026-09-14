@@ -1,6 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent, PromptLatency } from "./types";
 import { AGENTS } from "./types";
 // The same formatter the screens print with: a fixture that formats its own
 // tokens is a fixture that can disagree with the page about how they read.
@@ -1020,6 +1020,21 @@ export const devApi: KiwanoApi = {
         p.is_current = p.serving_agents.length > 0;
       }
     }
+  },
+
+  async testProviderLatency(id: string): Promise<PromptLatency> {
+    // A real round trip cannot happen in a browser mock, so this answers the
+    // shape the app reads: a model, a latency, and a failure when the provider
+    // is one the fixture says is broken.
+    await delay(600);
+    const p = providers.find((x) => x.id === id);
+    if (!p) throw new Error(`provider not found: ${id}`);
+    const model = p.model_default ?? "ping-model";
+    if (p.enabled === false) {
+      return { provider_id: id, model, latency_ms: 180, status: 401, error: "invalid API key" };
+    }
+    const base = 220 + (id.length % 7) * 130;
+    return { provider_id: id, model, latency_ms: base, status: 200, error: null };
   },
 
   async testLatency(endpoint: string): Promise<number> {

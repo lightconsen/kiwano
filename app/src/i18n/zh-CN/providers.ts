@@ -81,6 +81,11 @@ export const providers = {
   moveDown: "下移",
   makePrimary: "设为主用",
   makePrimaryTitle: "设为主用 —— 将该候选移到队列首位",
+  // ── 延迟测试（每个 provider 行一次 prompt 往返）──
+  testLatency: "测试延迟",
+  testLatencyTitle: "发一条 prompt，测一次往返耗时",
+  testLatencyFailed: "失败",
+
   // ── 自定义 Agent（迁移 v16）──
   newAgent: "新建 Agent",
   newAgentTitle: "自定义 Agent：一条有名字、有自己 key 的路由",

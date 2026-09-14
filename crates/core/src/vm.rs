@@ -79,6 +79,80 @@ fn agent_id_stem(label: &str) -> String {
     }
 }
 
+/// One prompt round trip against a provider, for the Apps screen's Test button.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PromptLatencyVm {
+    pub provider_id: String,
+    /// The model the ping was sent with — it decides the number as much as the
+    /// network does, so the UI can say which one was measured.
+    pub model: String,
+    pub latency_ms: u64,
+    pub status: u16,
+    /// The upstream's own words when it refused, so a failure reads as one.
+    pub error: Option<String>,
+}
+
+/// What model to ping a provider with: its own default when it has one,
+/// otherwise the model its catalog entry publishes a price for — the one model
+/// we know the vendor serves.
+fn prompt_test_model(store: &Store, aux: &Aux, p: &Provider) -> Option<String> {
+    if let Some(m) = p
+        .model_default
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
+        return Some(m.to_string());
+    }
+    let catalog = load_catalog(store, aux);
+    let entry = catalog
+        .entries
+        .iter()
+        .find(|e| Some(e.id.as_str()) == p.catalog_id.as_deref())?;
+    entry.price_ref.as_ref().map(|r| r.model_id.clone())
+}
+
+/// Send one prompt through a provider and time it.
+///
+/// The URL is composed by the gateway's own function (`compose_upstream`), so
+/// the test measures the endpoint the gateway would actually use; the ping is a
+/// real completion, because a models-list GET answers from a different code path
+/// and a different cache and says nothing about what a request costs in time.
+pub async fn test_provider_latency(
+    store: &Store,
+    aux: &Aux,
+    id: &str,
+) -> Result<PromptLatencyVm, String> {
+    let p = store
+        .get_provider(id)
+        .map_err(e2s)?
+        .ok_or_else(|| format!("provider not found: {id}"))?;
+    let model = prompt_test_model(store, aux, &p).ok_or_else(|| {
+        "no model to test with — set a default model on this provider".to_string()
+    })?;
+    let key = p
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "this provider has no API key".to_string())?;
+    let protocol = p.protocol.as_str();
+    let path = if protocol == "anthropic" {
+        "/v1/messages"
+    } else {
+        "/v1/chat/completions"
+    };
+    let url = kiwanod::server::data::compose_upstream(&p.base_url, p.api_path.as_deref(), path);
+    let probe = crate::sidecar::probe_prompt(protocol, &url, key, &model).await?;
+    Ok(PromptLatencyVm {
+        provider_id: id.to_string(),
+        model,
+        latency_ms: probe.latency_ms,
+        status: probe.status,
+        error: probe.error,
+    })
+}
+
 /// Create a user-defined agent: a row, a placeholder key, and a `single`
 /// strategy — which is all an agent *is* to the gateway, whose route table is
 /// built from those tables and never from the registry.
@@ -5234,6 +5308,42 @@ mod tests {
 
         // And it is gone as an agent: a second removal has nothing to remove.
         assert!(remove_custom_agent(&s, &a.id).is_err());
+    }
+
+    /// The model a latency ping uses: the provider's own default, else the model
+    /// its catalog entry prices — the one model we know the vendor serves. With
+    /// neither, there is nothing to ping with, and the caller is told that
+    /// rather than handed a model id this code invented.
+    #[test]
+    fn the_latency_ping_uses_the_providers_own_model_or_its_entrys() {
+        let s = store();
+        let catalog = r#"{"total":1,"entries":[
+            {"id":"deepseek","name":"DeepSeek","tag":"official","rating":4.8,
+             "billing":"payg","currency":"USD",
+             "endpoints":[{"protocol":"openai","endpoint":"https://api.deepseek.com"}],
+             "price_ref":{"model_id":"deepseek-chat","display_name":"DeepSeek Chat",
+                          "input":"1","output":"2","currency":"USD"}}]}"#;
+        let aux = Aux::open_in_memory().unwrap();
+        aux.save_hub_cache(catalog, "2026-09-07T00:00:00Z").unwrap();
+
+        let mut p = provider("p1", "DeepSeek", Billing::Metered);
+        p.catalog_id = Some("deepseek".into());
+        s.insert_provider(&p).unwrap();
+        assert_eq!(
+            prompt_test_model(&s, &aux, &p).as_deref(),
+            Some("deepseek-chat")
+        );
+
+        // A default of its own wins: it is the model the user routes with.
+        let mut with_default = p.clone();
+        with_default.model_default = Some("deepseek-v4-flash".into());
+        assert_eq!(
+            prompt_test_model(&s, &aux, &with_default).as_deref(),
+            Some("deepseek-v4-flash")
+        );
+
+        let orphan = provider("p2", "No Catalog", Billing::Metered);
+        assert_eq!(prompt_test_model(&s, &aux, &orphan), None);
     }
 
     /// The id is derived from the name, is unique per agent even when the name

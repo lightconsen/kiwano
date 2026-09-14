@@ -571,6 +571,18 @@ export interface UsageAlert {
 export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
 
 /** Agent installation detection (phase 1: existence only — one login-shell probe) */
+/** One prompt round trip through a provider (the Apps row's Test button). */
+export interface PromptLatency {
+  provider_id: string;
+  /** The model the ping was sent with — it decides the number as much as the
+      network does. */
+  model: string;
+  latency_ms: number;
+  status: number;
+  /** The upstream's own words when it refused; null on success. */
+  error: string | null;
+}
+
 export interface AgentDetect {
   agent: AgentId;
   installed: boolean;
@@ -710,6 +722,8 @@ export interface KiwanoApi {
   /** Enable = make this Provider the current route of its bound agents */
   enableProvider(id: string): Promise<void>;
   testLatency(endpoint: string): Promise<number>;
+  /** Send one prompt through a stored provider and time the round trip */
+  testProviderLatency(id: string): Promise<PromptLatency>;
   /** Protocol-aware probe: GET the protocol's models route; 401/403 still
       proves the protocol route exists (works without a key) */
   /** Probe the endpoint. A blank key is fine — a 401 still proves the route

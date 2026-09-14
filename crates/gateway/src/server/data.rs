@@ -229,10 +229,19 @@ pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<Stri
 
 /// Build the upstream URL for a provider and inbound path.
 pub fn upstream_url(provider: &crate::router::UpstreamProvider, path: &str) -> String {
-    let base = provider.base_url.trim_end_matches('/');
-    let prefix = provider
-        .api_path
-        .as_deref()
+    compose_upstream(&provider.base_url, provider.api_path.as_deref(), path)
+}
+
+/// The same composition from its parts, for a caller that has a stored row
+/// rather than a route-table candidate — the Apps screen's latency test, which
+/// has to reach a provider that is bound to nobody.
+///
+/// One function so the two cannot compose the URL differently: a test that
+/// measured a URL the gateway would never send to would report a latency for a
+/// request nobody makes.
+pub fn compose_upstream(base_url: &str, api_path: Option<&str>, path: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    let prefix = api_path
         .map(|p| p.trim_end_matches('/'))
         .filter(|p| !p.is_empty());
     match prefix {

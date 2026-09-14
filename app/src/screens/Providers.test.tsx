@@ -34,6 +34,7 @@ const { apiMock } = vi.hoisted(() => ({
     deleteProvider: vi.fn(),
     addCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
+    testProviderLatency: vi.fn(),
   },
 }));
 
@@ -358,5 +359,58 @@ describe("an id nothing knows", () => {
     expect(await screen.findByText("DeepSeek")).toBeInTheDocument();
     // Its avatar is derived from the id: the first letter it has.
     expect(screen.getByText("G")).toBeInTheDocument();
+  });
+});
+
+describe("the latency test", () => {
+  /** The All tab, with one provider and no routes. */
+  async function renderAll() {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+    return userEvent.setup();
+  }
+
+  it("times one prompt and shows the number on the row", async () => {
+    const user = await renderAll();
+    apiMock.testProviderLatency.mockResolvedValue({
+      provider_id: "deepseek",
+      model: "deepseek-chat",
+      latency_ms: 1240,
+      status: 200,
+      error: null,
+    });
+
+    await user.click(await screen.findByRole("button", { name: en.providers.testLatency }));
+
+    await waitFor(() => expect(apiMock.testProviderLatency).toHaveBeenCalledWith("deepseek"));
+    // The number lands on the button, not in the Status cell: that cell is the
+    // prober's reading, and this is a different measurement.
+    expect(await screen.findByText("1240ms")).toBeInTheDocument();
+  });
+
+  it("reports a refused prompt as a failure, not as a fast provider", async () => {
+    const user = await renderAll();
+    apiMock.testProviderLatency.mockResolvedValue({
+      provider_id: "deepseek",
+      model: "deepseek-chat",
+      latency_ms: 180,
+      status: 401,
+      error: "invalid API key",
+    });
+
+    const button = await screen.findByRole("button", { name: en.providers.testLatency });
+    await user.click(button);
+
+    // "180ms" on a 401 would read as a very fast provider; the reason is what
+    // the row has to say, and it says it in the tooltip.
+    expect(await screen.findByText(en.providers.testLatencyFailed)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: en.providers.testLatency })).toHaveAttribute(
+        "title",
+        "invalid API key",
+      ),
+    );
   });
 });

@@ -325,6 +325,7 @@ mod tests {
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some(format!("sk-{id}")),
+            model_default: None,
             billing: Billing::Metered,
             period_limit: None,
             limit_unit: None,

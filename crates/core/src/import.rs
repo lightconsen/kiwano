@@ -115,6 +115,8 @@ pub fn run_import(
             api_path: raw.api_path.clone(),
             endpoints: Vec::new(),
             api_key: raw.api_key.clone(),
+            // The cc-switch shape has no model field to carry.
+            model_default: None,
             billing: kiwanod::store::Billing::Metered,
             period_limit: None,
             limit_unit: None,

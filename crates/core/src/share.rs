@@ -175,6 +175,9 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
                     api_path: sp.api_path.clone(),
                     endpoints: sp.endpoints.clone(),
                     api_key: sp.api_key.clone(),
+                    // A model name, not a credential: it stays useful to
+                    // whoever imports the provider.
+                    model_default: sp.model_default.clone(),
                     billing: sp.billing,
                     period_limit: sp.period_limit,
                     limit_unit: sp.limit_unit.clone(),
@@ -243,6 +246,7 @@ mod tests {
             api_path: None,
             endpoints: Vec::new(),
             api_key: api_key.map(Into::into),
+            model_default: None,
             billing: Billing::Metered,
             period_limit: None,
             limit_unit: None,

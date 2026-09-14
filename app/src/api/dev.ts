@@ -42,6 +42,7 @@ const providers: Provider[] = [
     name: "DeepSeek",
     logo_char: "D",
     catalog_id: "deepseek",
+    model_default: "deepseek-chat (V3)",
     logo_color: "#4D6BFE",
     endpoint: "api.deepseek.com",
     endpoint_note: "OpenAI-compatible · +Anthropic",
@@ -855,6 +856,7 @@ export const devApi: KiwanoApi = {
       health: { state: "ok", latency_ms: null },
       usage: null,
       advanced: input.advanced,
+      model_default: input.model_default.trim() || null,
       plan_query: input.plan_query ?? null,
       plan_limits: input.billing_config.plan_limits ?? null,
     };
@@ -867,6 +869,7 @@ export const devApi: KiwanoApi = {
     const t = providers.find((p) => p.id === id);
     if (!t) throw new Error(`provider ${id} not found`);
     t.name = input.name.trim();
+    t.model_default = input.model_default.trim() || null;
     t.endpoint = input.endpoint.replace(/^https?:\/\//, "");
     t.protocol = input.protocol;
     t.endpoints = input.endpoints?.map((e) => ({

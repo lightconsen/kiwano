@@ -323,6 +323,10 @@ pub struct ProviderVm {
     /// Raw limit unit (requests | wan_tokens | ISO currency) for edit prefill.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_unit: Option<String>,
+    /// The model the add/edit form collected as this provider's default, for
+    /// edit prefill. Absent when never set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_default: Option<String>,
     pub enabled: bool,
     pub agents: Vec<String>,
     /// Agents this provider would serve a request for right now (per-agent
@@ -825,14 +829,16 @@ pub struct NewProviderInput {
     pub api_key: String,
     pub endpoint: String,
     pub protocol: String,
-    /// Collected by the app's add/edit form and **never read** — `add_provider`
-    /// and `update_provider` ignore it, and nothing else names it. Kept because
-    /// dropping it is an API change across the frontend contract, and read by
-    /// nothing is a smaller problem than that. The CLI deliberately has no
-    /// `--model-default` flag for the same reason: a flag that does nothing is
-    /// worse than no flag. Decide whether to wire it up or remove it before
-    /// adding an eighth way to set it.
-    #[allow(dead_code)]
+    /// The model the form collected as this provider's default.
+    ///
+    /// It was carried here for a long time and read by nothing — stored in no
+    /// column and returned by no view, so reopening a provider always showed an
+    /// empty box. Persisted since v14 (`providers.model_default`), which is what
+    /// lets the edit dialog show what the add dialog asked for.
+    ///
+    /// Remembered rather than consulted: nothing picks a model from it when
+    /// routing, because the model a request uses is the one the agent sent. Empty
+    /// stores `NULL`.
     pub model_default: String,
     pub billing: String,
     pub billing_config: BillingConfigInput,
@@ -1075,6 +1081,7 @@ pub fn build_provider_vms(store: &Store, aux: &Aux) -> Result<Vec<ProviderVm>, S
                 billing: billing_to_ui(p.billing).to_string(),
                 plan_price: kiwanod::plan_quota::plan_monthly_price(p.plan_query.as_deref()),
                 limit_unit: p.limit_unit.clone(),
+                model_default: p.model_default.clone(),
                 plan_limits: p
                     .plan_limits
                     .as_deref()
@@ -1691,6 +1698,10 @@ pub fn add_provider(
         api_path: None,
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
+        // Collected by the form since it existed, and until now dropped on the
+        // floor (see `NewProviderInput::model_default`). Empty is `None`: a
+        // cleared box is "not set", not the empty string.
+        model_default: Some(input.model_default.trim().to_string()).filter(|m| !m.is_empty()),
         billing,
         period_limit: if is_plan {
             None
@@ -1731,6 +1742,7 @@ pub fn add_provider(
     // compute view fields before partially moving `provider`
     let vm_name = provider.name.clone();
     let vm_catalog_id = provider.catalog_id.clone();
+    let vm_model_default = provider.model_default.clone();
     let vm_endpoint = display_endpoint(&provider);
     let vm_note = endpoint_note(&provider);
     let vm_protocol = provider.protocol.as_str().to_string();
@@ -1760,6 +1772,7 @@ pub fn add_provider(
         billing: vm_billing,
         plan_price: None,
         limit_unit: None,
+        model_default: vm_model_default,
         plan_query: input.plan_query.clone(),
         plan_limits: None,
         enabled: true,
@@ -1861,6 +1874,10 @@ pub fn update_provider(
     p.protocol = kiwanod::store::Protocol::parse_str(&input.protocol)
         .unwrap_or(kiwanod::store::Protocol::OpenAI);
     p.endpoints = input_endpoints(input);
+    // Authoritative, like `endpoints`: the form is the only caller and always
+    // sends it, so clearing the box means "no default" rather than "leave it".
+    // Empty stores NULL.
+    p.model_default = Some(input.model_default.trim().to_string()).filter(|m| !m.is_empty());
     p.billing = billing_to_db(&input.billing)?;
     // Plan rows carry percent limits in plan_limits and NULL the legacy
     // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
@@ -2367,6 +2384,7 @@ fn import_current_provider(
     let provider = Provider {
         // Imported from another manager: no Hub catalog entry behind it.
         catalog_id: None,
+        model_default: None,
         id: format!(
             "{}-{}",
             slug(&name),
@@ -3123,6 +3141,7 @@ mod tests {
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some("sk-test".into()),
+            model_default: None,
             billing,
             period_limit: None,
             limit_unit: None,
@@ -3605,6 +3624,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(stored_catalog_id(&s, &vm.id).as_deref(), Some("bare-host"));
+    }
+
+    /// The default model the form collects survives the trip to storage and back.
+    /// It used to be dropped on the floor — collected, sent, ignored — which is
+    /// why reopening a provider showed an empty box however carefully it had been
+    /// filled in.
+    #[test]
+    fn add_provider_stores_the_default_model_and_hands_it_back() {
+        let s = store();
+        let aux = catalog_aux();
+
+        let mut input = catalog_input("DeepSeek", "https://api.deepseek.com");
+        input.model_default = "deepseek-v4-pro".into();
+        let vm = add_provider(&s, &aux, &input).unwrap();
+        assert_eq!(vm.model_default.as_deref(), Some("deepseek-v4-pro"));
+        assert_eq!(
+            s.get_provider(&vm.id)
+                .unwrap()
+                .unwrap()
+                .model_default
+                .as_deref(),
+            Some("deepseek-v4-pro"),
+            "on the row, not only in the reply"
+        );
+
+        // Whitespace is not a model name, and an empty box is "not set" rather
+        // than the empty string.
+        let mut blank = catalog_input("Blank", "https://api.blank.example/v1");
+        blank.model_default = "   ".into();
+        let blank_vm = add_provider(&s, &aux, &blank).unwrap();
+        assert_eq!(blank_vm.model_default, None);
+        assert_eq!(
+            s.get_provider(&blank_vm.id).unwrap().unwrap().model_default,
+            None
+        );
+
+        // An edit is authoritative: clearing the box clears the column, the way
+        // emptying the endpoint list rewrites it.
+        let mut edit = catalog_input("DeepSeek", "https://api.deepseek.com");
+        edit.model_default = String::new();
+        update_provider(&s, &aux, &vm.id, &edit).unwrap();
+        assert_eq!(s.get_provider(&vm.id).unwrap().unwrap().model_default, None);
     }
 
     /// A caller that names an entry is the authority; the inference fills in

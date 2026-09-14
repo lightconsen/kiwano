@@ -218,6 +218,9 @@ export interface Provider {
   plan_price?: string;
   /** Raw limit unit (requests | wan_tokens | ISO currency) for edit prefill */
   limit_unit?: string;
+  /** The model the add/edit form collected as this provider's default; absent
+      when never set. Remembered for the dialog, not consulted when routing. */
+  model_default?: string | null;
   /** Plan-quota query config; absent = not configured */
   plan_query?: PlanQuery | null;
   /** Percent-of-window ceilings for plan providers; absent = none set */

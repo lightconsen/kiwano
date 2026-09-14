@@ -158,6 +158,7 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         api_path: None,
         endpoints: Vec::new(),
         api_key: Some(REAL_KEY.to_string()),
+        model_default: None,
         billing: Billing::Metered,
         period_limit: None,
         limit_unit: None,

@@ -590,6 +590,7 @@ mod tests {
             api_path: None,
             endpoints: Vec::new(),
             api_key: None,
+            model_default: None,
             billing: Billing::Metered,
             period_limit: None,
             limit_unit: None,

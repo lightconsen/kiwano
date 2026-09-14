@@ -20,7 +20,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 13;
+pub const SCHEMA_VERSION: i32 = 14;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -390,6 +390,18 @@ ALTER TABLE providers ADD COLUMN catalog_id TEXT;
 ///
 /// Both tables take plain `ADD COLUMN`s — no primary key or CHECK moves, which
 /// is the only reason v9 and v11 had to rebuild.
+/// v14: the model an add/edit form collected as a provider's default.
+///
+/// The form has asked for it since it existed and `NewProviderInput` has carried
+/// it just as long, documented as "collected and never read" — no column, no view
+/// field, so reopening a provider showed an empty box and the choice was quietly
+/// thrown away. Storing it makes the round-trip match the form. Nothing consults
+/// it yet: it is a remembered value, and `NULL` for every provider added before
+/// this migration, which is exactly "not set".
+const MIGRATION_V14: &str = r#"
+ALTER TABLE providers ADD COLUMN model_default TEXT;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -532,6 +544,12 @@ pub struct Provider {
     #[serde(default)]
     pub endpoints: Vec<ProviderEndpoint>,
     pub api_key: Option<String>,
+    /// The model the add/edit form collected as this provider's default
+    /// (migration v14). NULL = not set, which is every provider added before the
+    /// column existed. Remembered, not consulted: nothing reads it when routing
+    /// a request — the model comes from the request itself.
+    #[serde(default)]
+    pub model_default: Option<String>,
     pub billing: Billing,
     /// User-entered spending/period cap used for the ring percentage estimate.
     pub period_limit: Option<f64>,
@@ -1283,6 +1301,9 @@ impl Store {
         if version < 13 {
             conn.execute_batch(MIGRATION_V13)?;
         }
+        if version < 14 {
+            conn.execute_batch(MIGRATION_V14)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -1298,8 +1319,8 @@ impl Store {
             "INSERT INTO providers (id, name, catalog_id, protocol, base_url, api_path, api_key,
                                     billing, period_limit, limit_unit, plan_query,
                                     plan_limits, timeout_secs, retries, headers,
-                                    reset_period, enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                                    reset_period, enabled, created_at, updated_at, model_default)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 p.id,
                 p.name,
@@ -1320,6 +1341,7 @@ impl Store {
                 p.enabled as i64,
                 p.created_at,
                 p.updated_at,
+                p.model_default,
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -1333,7 +1355,8 @@ impl Store {
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
-                    reset_period, enabled, created_at, updated_at, catalog_id
+                    reset_period, enabled, created_at, updated_at, catalog_id,
+                    model_default
              FROM providers WHERE id = ?1",
         )?;
         let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -1349,7 +1372,8 @@ impl Store {
             "SELECT id, name, protocol, base_url, api_path, api_key, billing,
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
-                    reset_period, enabled, created_at, updated_at, catalog_id
+                    reset_period, enabled, created_at, updated_at, catalog_id,
+                    model_default
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -1377,7 +1401,7 @@ impl Store {
                     api_path = ?6, api_key = ?7, billing = ?8, period_limit = ?9,
                     limit_unit = ?10, plan_query = ?11, plan_limits = ?12,
                     timeout_secs = ?13, retries = ?14, headers = ?15,
-                    reset_period = ?16, enabled = ?17, updated_at = ?18
+                    reset_period = ?16, enabled = ?17, updated_at = ?18, model_default = ?19
              WHERE id = ?1",
             params![
                 p.id,
@@ -1398,6 +1422,7 @@ impl Store {
                 p.reset_period,
                 p.enabled as i64,
                 updated,
+                p.model_default,
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -2476,6 +2501,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         enabled: row.get::<_, i64>(15)? != 0,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
+        model_default: row.get(19)?,
     })
 }
 
@@ -2591,6 +2617,7 @@ mod tests {
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some("sk-upstream".to_string()),
+            model_default: None,
             billing: Billing::Metered,
             period_limit: Some(50.0),
             limit_unit: None,
@@ -3083,6 +3110,76 @@ mod tests {
     /// v10 → v11: the price table is rebuilt keyed by `(provider_id, model_id)`.
     /// A v10 row survives as the general price, and two providers can now price
     /// the same model — which the old key could not express at all.
+    /// v14 adds the column the add/edit form has always collected and never
+    /// stored. A row written before it reads back as "not set" — which is what
+    /// it was — and the value round-trips once the column exists.
+    #[test]
+    fn migration_v14_adds_the_default_model_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v13 database with a provider in it.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing,
+                                        created_at, updated_at)
+                 VALUES ('p-old', 'Old', 'openai', 'https://api.example.com', 'metered',
+                         't0', 't0');
+                 PRAGMA user_version = 13;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let old = store.get_provider("p-old").unwrap().expect("kept");
+        assert_eq!(
+            old.model_default, None,
+            "a row written before the column has no default model"
+        );
+
+        // The value round-trips, and NULL clears it: an emptied box is "not
+        // set" rather than the empty string.
+        let mut p = sample_provider("p-model", Protocol::OpenAI);
+        p.model_default = Some("deepseek-v4-pro".into());
+        store.insert_provider(&p).unwrap();
+        assert_eq!(
+            store
+                .get_provider("p-model")
+                .unwrap()
+                .unwrap()
+                .model_default
+                .as_deref(),
+            Some("deepseek-v4-pro")
+        );
+        p.model_default = None;
+        store.update_provider(&p).unwrap();
+        assert_eq!(
+            store
+                .get_provider("p-model")
+                .unwrap()
+                .unwrap()
+                .model_default,
+            None
+        );
+    }
+
     #[test]
     fn migration_v11_keys_prices_by_provider() {
         let dir = tempfile::tempdir().unwrap();

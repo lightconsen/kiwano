@@ -279,7 +279,9 @@ export default function AddProviderModal({
       setEndpoint(edit.endpoint);
       setAltEndpoints((edit.endpoints ?? []).map((x) => ({ protocol: x.protocol, endpoint: x.endpoint })));
       setAltProbes({});
-      setModel("");
+      // What the add form collected and used to throw away: persisted since v14,
+      // so an edit shows the model that was chosen rather than an empty box.
+      setModel(edit.model_default ?? "");
       setBilling(edit.billing);
       const q = edit.usage?.quota;
       // Payg spending limit (plan providers now carry percent limits instead)

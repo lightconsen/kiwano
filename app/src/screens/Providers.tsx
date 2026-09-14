@@ -10,8 +10,6 @@ import {
   SquarePen,
   Pin,
   Plus,
-  Power,
-  PowerOff,
   RefreshCw,
   Settings2,
   Trash2,
@@ -25,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -936,20 +935,15 @@ function ProviderRow({
         }`}
       >
         <TestLatencyButton provider={p} />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 shrink-0 rounded-md border border-line px-0 text-mut"
-          aria-label={p.enabled ? t("providers.disable") : t("providers.enable")}
+        {/* A switch, not an icon button: this is a state the row is *in*, and a
+            switch is the one control that shows which state that is without
+            being told. Same vocabulary as the takeover toggles in Settings. */}
+        <Switch
+          checked={p.enabled}
+          aria-label={p.name}
           title={p.enabled ? t("providers.disableTitle") : t("providers.enableTitle")}
-          onClick={() => api.setProviderEnabled(p.id, !p.enabled).then(onChanged)}
-        >
-          {/* The glyph is the action, not the state: a working provider offers
-              to turn it off, a parked one offers to put it back. One symbol for
-              both said nothing about either — and the state is already on the
-              row, in the Status cell. */}
-          {p.enabled ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
-        </Button>
+          onCheckedChange={(v) => api.setProviderEnabled(p.id, v).then(onChanged)}
+        />
         {/* Square icon buttons, one per action: the row's actions are symbols a
             reader already knows, and a padded pill around a lone glyph reads as
             a label that failed to load. The delete grows into its confirmation

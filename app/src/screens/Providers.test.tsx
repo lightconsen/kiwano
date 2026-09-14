@@ -481,7 +481,10 @@ describe("deleting a provider that is in a route", () => {
 });
 
 describe("parking a provider", () => {
-  it("disables it instead of deleting it, and re-reads the list", async () => {
+  /** The row's switch: a state control, named after the provider it governs. */
+  const rowSwitch = () => screen.getByRole("switch", { name: "DeepSeek" });
+
+  it("switches it out of every route instead of deleting it", async () => {
     const user = userEvent.setup();
     apiMock.listProviders.mockResolvedValue([deepseek()]);
     apiMock.getAgentRoutes.mockResolvedValue([]);
@@ -489,11 +492,11 @@ describe("parking a provider", () => {
     apiMock.setProviderEnabled.mockResolvedValue(undefined);
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    // The glyph is the action: a working provider offers to be turned off.
-    const button = await screen.findByRole("button", { name: en.providers.disable });
-    expect(button.querySelector("svg.lucide-power-off")).not.toBeNull();
+    // A switch shows the state it is in — which an icon button could not do
+    // without being told, and the row's Status cell already carries the words.
+    expect(await screen.findByRole("switch", { name: "DeepSeek" })).toBeChecked();
 
-    await user.click(button);
+    await user.click(rowSwitch());
 
     await waitFor(() =>
       expect(apiMock.setProviderEnabled).toHaveBeenCalledWith("deepseek", false),
@@ -504,15 +507,17 @@ describe("parking a provider", () => {
     expect(screen.getByText("DeepSeek")).toBeInTheDocument();
   });
 
-  it("offers to put a parked one back", async () => {
+  it("reads as off for a parked provider", async () => {
     apiMock.listProviders.mockResolvedValue([deepseek({ enabled: false })]);
     apiMock.getAgentRoutes.mockResolvedValue([]);
     apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    // Same button, the other action: a parked row offers to be brought back.
-    const button = await screen.findByRole("button", { name: en.providers.enable });
-    expect(button.querySelector("svg.lucide-power")).not.toBeNull();
-    expect(button.querySelector("svg.lucide-power-off")).toBeNull();
+    expect(await screen.findByRole("switch", { name: "DeepSeek" })).not.toBeChecked();
+    // …and the tooltip says what flipping it does.
+    expect(rowSwitch()).toHaveAttribute(
+      "title",
+      en.providers.enableTitle,
+    );
   });
 });

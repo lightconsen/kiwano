@@ -85,9 +85,7 @@ export const providers = {
   delRemovedFrom: "将从 {agents} 中移除",
   delPromotes: "{provider} 将成为 {agent} 的主用",
   delEmpties: "{agent} 将没有任何 Provider",
-  disable: "停用",
   disableTitle: "停用：退出所有路由，但保留这一行与它的 key",
-  enable: "启用",
   enableTitle: "让它重新回到所绑定的路由里",
 
   // ── 延迟测试（每个 provider 行一次 prompt 往返）──

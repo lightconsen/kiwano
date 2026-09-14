@@ -106,7 +106,12 @@ export function Ring({ pct, color }: { pct: number; color?: string }) {
 
 export function Sparkline({ points }: { points: number[] }) {
   const n = points.length;
-  const pts = points.map((y, i) => `${(i * 80) / (n - 1)},${y}`).join(" ");
+  // A series with a single sample has no span to lay out, and `0 * 80 / (1 - 1)`
+  // is 0/0 — which reaches the attribute as `NaN` and is not a drawing the
+  // engine skips quietly, it is an invalid one. The backend really does send a
+  // one-element series (one day of use), so the sample goes at the start.
+  const x = (i: number) => (n > 1 ? (i * 80) / (n - 1) : 0);
+  const pts = points.map((y, i) => `${x(i)},${y}`).join(" ");
   return (
     <svg viewBox="0 0 80 14" className="h-3.5 w-20">
       <polyline points={pts} fill="none" stroke="var(--blue)" strokeWidth="1.5" />

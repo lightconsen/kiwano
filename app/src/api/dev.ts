@@ -2,6 +2,9 @@
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
 import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert } from "./types";
 import { AGENTS } from "./types";
+// The same formatter the screens print with: a fixture that formats its own
+// tokens is a fixture that can disagree with the page about how they read.
+import { fmtTokens } from "../lib/format";
 
 function protocolNote(protocol: NewProviderInput["protocol"]): string {
   return protocol === "openai" ? "OpenAI-compatible" : "Anthropic";
@@ -377,57 +380,138 @@ const catalog: CatalogEntry[] = [
   },
 ];
 
-const dashboard7d: DashboardData = {
-  window: "7d",
-  requests: 1296,
-  requests_delta_pct: 12,
-  input_tokens: 7_500_000,
-  cache_read_tokens: 4_300_000,
-  output_tokens: 1_300_000,
-  cost: 46.2,
-  // DeepSeek's rows carry a peak/off-peak schedule, so ¥3.1 of that was the
-  // premium for running at peak times — the Dashboard's one non-zero case.
-  cost_off_peak: 43.1,
-  latency_ms: 1200,
-  latency_delta_pct: 9,
-  trend: [
-    { date: "09-01", requests: 118, tokens: 900_000 },
-    { date: "09-02", requests: 132, tokens: 1_000_000 },
-    { date: "09-03", requests: 190, tokens: 1_300_000 },
-    { date: "09-04", requests: 176, tokens: 1_200_000 },
-    { date: "09-05", requests: 228, tokens: 1_500_000 },
-    { date: "09-06", requests: 186, tokens: 1_300_000 },
-    { date: "09-07", requests: 254, tokens: 1_600_000 },
-  ],
-  by_provider: [
-    { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", requests: 731, pct: 62, cost: 28.6, cost_off_peak: 25.5 },
-    { id: "kimi", name: "Kimi", color: "#555555", requests: 271, pct: 23, cost: 10.9, cost_off_peak: 10.9 },
-    { id: "glm", name: "GLM", color: "#3859FF", requests: 177, pct: 15, cost: 6.7, cost_off_peak: 6.7 },
-  ],
-  by_agent: [
-    { agent: "claude", label: "Claude Code", requests: 943, tokens: "6.2M", cost: 33.4, cost_off_peak: 31.2 },
-    { agent: "codex", label: "Codex", requests: 264, tokens: "1.9M", cost: 9.8, cost_off_peak: 9.3 },
-    { agent: "opencode", label: "OpenCode", requests: 12, tokens: "0.1M", cost: 0.4, cost_off_peak: 0.4 },
-  ],
-  // getDashboard always derives the real option lists from by_provider/by_agent
-  filter_providers: [],
-  filter_agents: [],
-};
+/** The Dashboard's fixtures, computed from one table per window.
+ *
+ * In the backend every tile is a view of the `usage` rows over the same window
+ * (`vm::build_dashboard`): the trend buckets them by day, the two breakdowns
+ * group them by provider and by agent, and the headline counts the request log —
+ * those rows plus the requests that never reached a provider. Hand-written tiles
+ * drift apart from all of that (the numbers here used to disagree about their
+ * own total, by provider and by agent and against the chart), and a mock that
+ * disagrees with itself is a `pnpm dev` session reporting that a screen is fine
+ * when it is not. So the day totals below are authored and everything else is
+ * derived.
+ *
+ * What is *not* derived: the per-provider totals the Apps screen shows. Those
+ * are a different window's fixture (`providers[].usage`) and the two are not
+ * linked, so a provider's own card can still disagree with this page.
+ */
+
+/** One window's day totals: the trend's own numbers, and the source of the rest. */
+type WindowDays = { date: string; requests: number; tokens: number }[];
+
+/** How a window's requests and cost split across providers.
+ *
+ * `offPeakRatio` is what the same request costs at the row's other rates: 1 for
+ * a vendor with no schedule, and below 1 for DeepSeek, whose rows carry one —
+ * which is what puts a non-zero peak premium on this page.
+ */
+const PROVIDER_MIX = [
+  { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", share: 0.585, costPerRequest: 0.036, offPeakRatio: 0.892 },
+  { id: "kimi", name: "Kimi", color: "#555555", share: 0.215, costPerRequest: 0.037, offPeakRatio: 1 },
+  { id: "glm", name: "GLM", color: "#3859FF", share: 0.15, costPerRequest: 0.035, offPeakRatio: 1 },
+  { id: "ollama", name: "Ollama", color: "#1c1c1e", share: 0.05, costPerRequest: 0, offPeakRatio: 1 },
+];
+
+/** Which agents drive the traffic, across every provider. Claude Code heads the
+    list because it heads the real one: it is what most of this traffic is. */
+const AGENT_MIX: { agent: AgentId; share: number }[] = [
+  { agent: "claude", share: 0.77 },
+  { agent: "codex", share: 0.2 },
+  { agent: "opencode", share: 0.03 },
+];
+
+/** Split `total` by `shares` so the parts add back up to the whole. Largest
+    remainder, because the point of this file is that the parts *do* add up. */
+function split(total: number, shares: number[]): number[] {
+  const exact = shares.map((s) => total * s);
+  const out = exact.map(Math.floor);
+  let rest = total - out.reduce((n, v) => n + v, 0);
+  const byRemainder = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (const { i } of byRemainder) {
+    if (rest <= 0) break;
+    out[i] += 1;
+    rest -= 1;
+  }
+  return out;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function buildWindow(
+  window: DashboardWindow,
+  days: WindowDays,
+  opts: { failures: number; deltaPct: number; latency: number; latencyDelta: number },
+): DashboardData {
+  const requests = days.reduce((n, d) => n + d.requests, 0);
+  const tokens = days.reduce((n, d) => n + d.tokens, 0);
+  // The headline is the request log: the rows that reached a provider plus the
+  // ones that did not (a refused key, an unreachable upstream).
+  const headlineRequests = requests + opts.failures;
+
+  const perProvider = split(requests, PROVIDER_MIX.map((p) => p.share));
+  const by_provider = PROVIDER_MIX.map((p, i) => {
+    const cost = round2(perProvider[i] * p.costPerRequest);
+    return {
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      requests: perProvider[i],
+      // The share is of the *headline*, which is the backend's divisor — so the
+      // slices need not reach 100% (traffic with no provider is still traffic).
+      pct: Math.round((perProvider[i] * 100) / Math.max(1, headlineRequests)),
+      cost,
+      cost_off_peak: round2(cost * p.offPeakRatio),
+    };
+  }).filter((p) => p.requests > 0);
+
+  const cost = round2(by_provider.reduce((n, p) => n + p.cost, 0));
+  const costOffPeak = round2(by_provider.reduce((n, p) => n + p.cost_off_peak, 0));
+  // Costs are split in cents: the agent rows are the same money as the provider
+  // rows, seen from the other side, and they have to add up to it.
+  const splitCents = (amount: number) =>
+    split(Math.round(amount * 100), AGENT_MIX.map((a) => a.share)).map((c) => c / 100);
+  const perAgent = split(requests, AGENT_MIX.map((a) => a.share));
+  const perAgentTokens = split(tokens, AGENT_MIX.map((a) => a.share));
+  const perAgentCost = splitCents(cost);
+  const perAgentOffPeak = splitCents(costOffPeak);
+  const by_agent = AGENT_MIX.map((a, i) => ({
+    agent: a.agent,
+    label: AGENTS.find((m) => m.id === a.agent)!.label,
+    requests: perAgent[i],
+    tokens: fmtTokens(perAgentTokens[i]),
+    cost: perAgentCost[i],
+    cost_off_peak: perAgentOffPeak[i],
+  })).filter((a) => a.requests > 0);
+
+  return {
+    window,
+    requests: headlineRequests,
+    requests_delta_pct: opts.deltaPct,
+    // input + output is the trend's own token total, which is how the two are
+    // read together on this page.
+    input_tokens: Math.round(tokens * 0.85),
+    output_tokens: tokens - Math.round(tokens * 0.85),
+    cache_read_tokens: Math.round(tokens * 0.85 * 0.57),
+    cost,
+    cost_off_peak: costOffPeak,
+    latency_ms: opts.latency,
+    latency_delta_pct: opts.latencyDelta,
+    trend: days,
+    by_provider,
+    by_agent,
+    // Derived per request by `getDashboard`, like the backend's.
+    filter_providers: [],
+    filter_agents: [],
+  };
+}
 
 const dashboards: Record<DashboardWindow, DashboardData> = {
-  today: {
-    ...dashboard7d,
-    window: "today",
-    requests: 288,
-    requests_delta_pct: 4,
-    input_tokens: 1_600_000,
-    cache_read_tokens: 900_000,
-    output_tokens: 300_000,
-    cost: 10.8,
-    cost_off_peak: 9.6,
-    latency_ms: 1100,
-    latency_delta_pct: 3,
-    trend: [
+  today: buildWindow(
+    "today",
+    [
       { date: "02:00", requests: 18, tokens: 120_000 },
       { date: "05:00", requests: 24, tokens: 150_000 },
       { date: "08:00", requests: 56, tokens: 360_000 },
@@ -436,30 +520,24 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
       { date: "17:00", requests: 44, tokens: 260_000 },
       { date: "20:00", requests: 32, tokens: 200_000 },
     ],
-    by_provider: [
-      { id: "deepseek", name: "DeepSeek", color: "#4D6BFE", requests: 224, pct: 78, cost: 8.4, cost_off_peak: 7.6 },
-      { id: "kimi", name: "Kimi", color: "#555555", requests: 64, pct: 22, cost: 2.4, cost_off_peak: 2.4 },
+    { failures: 7, deltaPct: 4, latency: 1100, latencyDelta: 3 },
+  ),
+  "7d": buildWindow(
+    "7d",
+    [
+      { date: "09-01", requests: 118, tokens: 900_000 },
+      { date: "09-02", requests: 132, tokens: 1_000_000 },
+      { date: "09-03", requests: 190, tokens: 1_300_000 },
+      { date: "09-04", requests: 176, tokens: 1_200_000 },
+      { date: "09-05", requests: 228, tokens: 1_500_000 },
+      { date: "09-06", requests: 186, tokens: 1_300_000 },
+      { date: "09-07", requests: 254, tokens: 1_600_000 },
     ],
-    by_agent: [
-      { agent: "claude", label: "Claude Code", requests: 201, tokens: "1.5M", cost: 8.1, cost_off_peak: 8.1 },
-      { agent: "codex", label: "Codex", requests: 66, tokens: "0.4M", cost: 2.3, cost_off_peak: 2.3 },
-      { agent: "opencode", label: "OpenCode", requests: 4, tokens: "0.02M", cost: 0.1, cost_off_peak: 0.1 },
-    ],
-  },
-  "7d": dashboard7d,
-  "30d": {
-    ...dashboard7d,
-    window: "30d",
-    requests: 5861,
-    requests_delta_pct: 23,
-    input_tokens: 33_100_000,
-    cache_read_tokens: 19_400_000,
-    output_tokens: 5_900_000,
-    cost: 203.5,
-    cost_off_peak: 191.4,
-    latency_ms: 1300,
-    latency_delta_pct: 5,
-    trend: [
+    { failures: 12, deltaPct: 12, latency: 1200, latencyDelta: 9 },
+  ),
+  "30d": buildWindow(
+    "30d",
+    [
       { date: "08-09", requests: 196, tokens: 1660000 },
       { date: "08-10", requests: 210, tokens: 1140000 },
       { date: "08-11", requests: 211, tokens: 1460000 },
@@ -491,7 +569,8 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
       { date: "09-06", requests: 152, tokens: 1490000 },
       { date: "09-07", requests: 197, tokens: 1190000 },
     ],
-  },
+    { failures: 40, deltaPct: 23, latency: 1300, latencyDelta: 5 },
+  ),
 };
 
 const settings: AppSettings = {
@@ -1047,17 +1126,16 @@ export const devApi: KiwanoApi = {
     // independent of the active filter. Ids resolve through the provider
     // list; by_provider labels are short display names, so unmatched ones
     // fall back to the label itself as the id.
-    const filter_providers = base.by_provider.map((p) => ({
-      id: providers.find((x) => x.name === p.name)?.id ?? p.name,
-      label: p.name,
-    }));
+    const filter_providers = base.by_provider.map((p) => ({ id: p.id, label: p.name }));
     const filter_agents = base.by_agent.map((a) => ({ id: a.agent, label: a.label }));
     const data: DashboardData = { ...base, filter_providers, filter_agents };
-    // The mock narrows the breakdowns only (headline stats stay fixture-wide)
+    // The mock narrows the breakdowns only (headline stats stay fixture-wide).
+    // By id, which is what the screen filters on: matching on the display name
+    // was a lookup that quietly stopped working the moment the two lists spelled
+    // a vendor differently.
     if (providerId) {
-      const name = providers.find((x) => x.id === providerId)?.name ?? providerId;
       data.by_provider = base.by_provider
-        .filter((p) => p.name === name)
+        .filter((p) => p.id === providerId)
         .map((p) => ({ ...p, pct: 100 }));
     }
     if (agentId) {

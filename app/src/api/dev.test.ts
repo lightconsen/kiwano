@@ -10,7 +10,7 @@
 // mock that answers differently from the backend sends that check the wrong way.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { KiwanoApi } from "./types";
+import type { DashboardWindow, KiwanoApi } from "./types";
 
 /** A pristine mock: `devApi` holds its fixtures in module state, so a test that
     mutates one would otherwise be read by the next test in this file. */
@@ -65,5 +65,89 @@ describe("the browser-dev mock", () => {
     expect(after.map((p) => p.id)).toEqual(providers.map((p) => p.id));
     const provider = after.find((p) => p.id === providerId);
     expect(provider?.agents ?? []).not.toContain(agent);
+  });
+});
+
+/** Every window, because a fixture that is consistent for one and not the others
+    is exactly the drift these assertions exist to catch. */
+const WINDOWS: DashboardWindow[] = ["today", "7d", "30d"];
+
+const sum = (ns: number[]) => ns.reduce((n, v) => n + v, 0);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+describe("the dashboard fixtures", () => {
+  it("are one table seen several ways", async () => {
+    for (const window of WINDOWS) {
+      const d = await api.getDashboard(window);
+      const trend = sum(d.trend.map((t) => t.requests));
+
+      // The backend's arithmetic, which the tiles only look right against: the
+      // trend, the provider split and the agent split are the same `usage` rows
+      // grouped three ways, and the headline is the request log — those rows
+      // plus the ones that never reached a provider.
+      expect(sum(d.by_provider.map((p) => p.requests)), `${window} by_provider`).toBe(trend);
+      expect(sum(d.by_agent.map((a) => a.requests)), `${window} by_agent`).toBe(trend);
+      expect(d.requests, `${window} headline`).toBeGreaterThanOrEqual(trend);
+
+      for (const p of d.by_provider) {
+        // The share is of the headline, not of the breakdown — so the slices do
+        // not have to reach 100%, they just have to be that number.
+        expect(p.pct, `${window}/${p.id} pct`).toBe(Math.round((p.requests * 100) / d.requests));
+        expect(p.requests, `${window}/${p.id} requests`).toBeGreaterThan(0);
+        expect(p.cost, `${window}/${p.id} premium`).toBeGreaterThanOrEqual(p.cost_off_peak);
+      }
+
+      // Money is the same money from both sides, and the premium is never
+      // negative (the off-peak rate is a discount or nothing at all).
+      expect(round2(sum(d.by_provider.map((p) => p.cost))), `${window} cost`).toBeCloseTo(d.cost, 2);
+      expect(round2(sum(d.by_agent.map((a) => a.cost))), `${window} agent cost`).toBeCloseTo(d.cost, 2);
+      expect(round2(sum(d.by_provider.map((p) => p.cost_off_peak))), `${window} off-peak`).toBeCloseTo(
+        d.cost_off_peak,
+        2,
+      );
+      expect(round2(sum(d.by_agent.map((a) => a.cost_off_peak))), `${window} agent off-peak`).toBeCloseTo(
+        d.cost_off_peak,
+        2,
+      );
+      expect(d.cost, `${window} premium`).toBeGreaterThanOrEqual(d.cost_off_peak);
+
+      // The trend's tokens are what the headline splits into input and output.
+      expect(d.input_tokens + d.output_tokens, `${window} tokens`).toBe(sum(d.trend.map((t) => t.tokens)));
+
+      // The option lists are the rows that had traffic, in the same order the
+      // breakdowns print them.
+      expect(d.filter_providers.map((p) => p.id)).toEqual(d.by_provider.map((p) => p.id));
+      expect(d.filter_agents.map((a) => a.id)).toEqual(d.by_agent.map((a) => a.agent));
+
+      // Buckets are distinct: the axis prints one label per bucket, and two rows
+      // sharing a date would collide as a React key and as a tick.
+      const dates = d.trend.map((t) => t.date);
+      expect(new Set(dates).size, `${window} trend dates`).toBe(dates.length);
+    }
+  });
+
+  it("narrow a window to one provider or one agent", async () => {
+    // The screen sets one filter and every panel answers for it, so the mock
+    // has to narrow by the id it was handed — the lookup it used to do by
+    // display name resolved nothing at all once a vendor was spelled two ways.
+    const one = await api.getDashboard("7d", "kimi");
+    expect(one.by_provider.map((p) => p.id)).toEqual(["kimi"]);
+    expect(one.by_provider[0].pct).toBe(100);
+    expect(one.filter_providers.map((p) => p.id)).toEqual(["deepseek", "kimi", "glm", "ollama"]);
+
+    const byAgent = await api.getDashboard("7d", undefined, "codex");
+    expect(byAgent.by_agent.map((a) => a.agent)).toEqual(["codex"]);
+  });
+
+  it("filter by ids the provider list actually has", async () => {
+    // A filter that names an id no provider answers to is a selection that
+    // narrows to nothing — the name-matching lookup this used to do stopped
+    // resolving the moment a vendor was spelled differently in the two lists.
+    const known = new Set((await api.listProviders()).map((p) => p.id));
+    for (const window of WINDOWS) {
+      for (const p of (await api.getDashboard(window)).filter_providers) {
+        expect(known.has(p.id), `${p.label} (${p.id}) is not a provider`).toBe(true);
+      }
+    }
   });
 });

@@ -932,6 +932,10 @@ async fn forward_anthropic_via_openai(
     let mut openai_body = match anthropic_to_openai(converted_body) {
         Ok(v) => v,
         Err(e) => {
+            // The reason, not a summary of it: a conversion refusal exists to say
+            // what could not be carried across, and "conversion failed" leaves the
+            // reader with no way to find out.
+            let reason = e.to_string();
             let resp = proxy_error_into_response(e, inbound);
             crate::log_capture::persist_failure(
                 &state.store,
@@ -941,7 +945,7 @@ async fn forward_anthropic_via_openai(
                 Some(provider.id.clone()),
                 resp.status(),
                 "conversion_failed",
-                "adapters conversion failed".to_string(),
+                format!("kiwanod: adapters conversion failed: {reason}"),
             );
             return resp;
         }

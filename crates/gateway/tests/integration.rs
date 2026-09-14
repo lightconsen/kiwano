@@ -1194,6 +1194,65 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
     assert!(message.contains("key=[REDACTED]"), "{message}");
 }
 
+/// A PDF on the conversion path is refused, not dropped. The document block used
+/// to fall through the converter's catch-all, so the upstream was asked to
+/// summarise text without the file — and answered. A confident answer about a
+/// document the model never saw is worse than a refusal the caller can act on.
+#[tokio::test]
+async fn a_document_on_the_conversion_path_is_refused_not_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, hits, _) =
+        mock_openai_capturing_body(MockReply::Json(json!({"ok": true}))).await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":[
+            {"type":"text","text":"summarise this"},
+            {"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}}
+        ]}]}"#,
+    )
+    .await;
+
+    // 422: the request is the problem, and no upstream was asked.
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(
+        body.contains("document"),
+        "the refusal names what could not be carried across: {body}"
+    );
+    assert!(
+        hits.lock().unwrap().is_empty(),
+        "nothing was sent: the answer would have been about the text alone"
+    );
+
+    // And the row keeps the reason, not a summary of it.
+    let rows = wait_for_log(&state, 1).await;
+    let row = rows.first().expect("the refusal is logged");
+    assert_eq!(row.error_kind.as_deref(), Some("conversion_failed"));
+    assert!(
+        row.error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("document"),
+        "the log says which block: {:?}",
+        row.error_message
+    );
+}
+
 /// An agent's own ceiling stops the request before a provider is chosen, and it
 /// holds under `single` — the default strategy, and the one that otherwise opts
 /// out of every provider-level ceiling. Reaching the provider anyway would mean

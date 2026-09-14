@@ -324,6 +324,23 @@ fn map_tool_choice_to_chat(tool_choice: &Value) -> Value {
 }
 
 /// Convert a single message into OpenAI format (may produce multiple messages)
+/// Anthropic content blocks this conversion has no OpenAI Chat equivalent for,
+/// and that carry something the user attached or the model was handed.
+///
+/// Refusing beats dropping, and the list is deliberately not "everything
+/// unknown": a block type from a newer Anthropic API must not break a request
+/// the gateway could still serve, so only these fail and anything else passes
+/// with a log line.
+const UNCONVERTIBLE_BLOCKS: &[&str] = &[
+    // PDFs and other files.
+    "document",
+    // Results the client supplied, or a server-side tool produced.
+    "search_result",
+    "web_search_tool_result",
+    "mcp_tool_result",
+    "container_upload",
+];
+
 fn convert_message_to_openai(
     role: &str,
     content: Option<&Value>,
@@ -431,7 +448,28 @@ fn convert_message_to_openai(
                     // OpenAI-compatible path).
                     reasoning_parts.push("[redacted thinking]".to_string());
                 }
-                _ => {}
+                other => {
+                    // Nothing here has an OpenAI Chat equivalent, and most of it
+                    // is something the user attached or the model was handed.
+                    // Dropping it produced a confident answer about a document
+                    // nobody read, which is worse than a refusal: the caller can
+                    // act on "this provider cannot receive it", and cannot act on
+                    // an answer that quietly left it out.
+                    if UNCONVERTIBLE_BLOCKS.contains(&other) {
+                        return Err(ProxyError::TransformError(format!(
+                            "content block `{other}` has no OpenAI Chat equivalent: the provider \
+                             speaks `openai` and the request carries content only an Anthropic \
+                             endpoint can receive"
+                        )));
+                    }
+                    // An unknown type is not evidence that it carries content —
+                    // a newer client may add one this build predates — so it is
+                    // passed over rather than failing the request, but not in
+                    // silence.
+                    if !other.is_empty() {
+                        log::warn!("anthropic→openai: no conversion for content block `{other}`");
+                    }
+                }
             }
         }
 
@@ -1450,6 +1488,55 @@ mod tests {
         );
         assert_eq!(msg["tool_calls"][0]["id"], "call_date");
         assert_eq!(msg["tool_calls"][0]["function"]["name"], "get_date");
+    }
+
+    /// A PDF used to vanish. `document` fell into the catch-all arm, so the
+    /// upstream was asked to summarise text without the file and answered
+    /// anyway — a confident answer about a document the model never saw.
+    #[test]
+    fn a_document_block_is_refused_rather_than_dropped() {
+        let input = json!({
+            "model": "m",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "summarise this"},
+                {"type": "document", "source": {
+                    "type": "base64", "media_type": "application/pdf", "data": "JVBERi0="
+                }}
+            ]}]
+        });
+
+        let err = anthropic_to_openai(input).unwrap_err();
+        assert!(
+            matches!(err, ProxyError::TransformError(_)),
+            "expected a transform refusal, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("document"),
+            "the refusal names the block so the caller knows what to change: {err}"
+        );
+    }
+
+    /// The other half of that rule: a type this build has never heard of is not
+    /// evidence that it carries content, and failing on it would break a request
+    /// the gateway could still serve. It is passed over — and logged, so it is
+    /// not dropped in silence either.
+    #[test]
+    fn an_unknown_block_type_is_passed_over_rather_than_refused() {
+        let input = json!({
+            "model": "m",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "hello"},
+                {"type": "some_future_block", "value": "?"}
+            ]}]
+        });
+
+        let out = anthropic_to_openai(input).expect("an unknown block does not fail the request");
+        // A single remaining text part collapses to a plain string — the shape
+        // this converter produces for it. What matters here is that the text
+        // survives and the unknown block leaves nothing behind.
+        assert_eq!(out["messages"][0]["content"], "hello");
     }
 
     #[test]

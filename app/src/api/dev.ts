@@ -65,7 +65,9 @@ const providers: Provider[] = [
     serving_agents: [],
     is_current: true,
     agents_note: "2 agents",
-    health: { state: "ok", latency_ms: 312 },
+    // Enabled and unmeasured: what the backend answers for a provider nothing
+    // is wrong with (no background probe writes a verdict).
+    health: { state: "idle", latency_ms: null },
     usage: {
       requests: 796,
       input_tokens: 5_400_000,
@@ -972,7 +974,7 @@ export const devApi: KiwanoApi = {
       agents_note: (input.agents ?? []).length
         ? `${input.agents!.length} agent(s)`
         : undefined,
-      health: { state: "ok", latency_ms: null },
+      health: { state: "idle", latency_ms: null },
       usage: null,
       advanced: input.advanced,
       model_default: input.model_default.trim() || null,

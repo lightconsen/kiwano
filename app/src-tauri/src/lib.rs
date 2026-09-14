@@ -898,6 +898,13 @@ fn check_usage_alerts(state: State<AppState>) -> Result<Vec<vm::UsageAlertVm>, S
 }
 
 // ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──
+//
+// Registered but unreachable from the UI: the Settings section that called them
+// was removed on 2026-09-10 (80eb138), because its actions "didn't match the
+// roadmap for config sharing" — the roadmap being community sharing, not a local
+// file. They stay (the CLI's `config export|import` goes through the same
+// `kiwano-core::share`, so the capability is live; only this app-side entry is
+// missing) and the decision not to rebuild it is recorded in `api/types.ts`.
 
 /// The frontend picks the target path via the dialog plugin first; this writes the file (file IO → async).
 /// Credentials are omitted unless `include_keys` is set (local backup only).

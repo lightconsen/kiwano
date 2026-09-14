@@ -69,10 +69,16 @@ export const AGENTS: AgentMeta[] = [
 ];
 
 export interface ProviderHealth {
-  /** ok=healthy (current) idle=standby off=disabled/not running down=failure */
-  state: "ok" | "idle" | "off";
+  /** The two states the backend can produce. `idle` is an enabled provider
+      nothing is known against — the gateway no longer probes on a timer, so
+      reachability is only measured when the row's Test button asks (see
+      components/Providers' HealthCell). `off` is a parked provider. */
+  state: "idle" | "off";
+  /** Always null today: nothing measures a provider in the background. Kept
+      because the shape is what the cell renders from. */
   latency_ms: number | null;
-  /** Status column suffix note: disabled / not running / … (omitted when healthy) */
+  /** Status column suffix note: `Disabled`, `Error`, … — omitted when there is
+      nothing to say, which is now the ordinary case. */
   note?: string;
 }
 
@@ -817,6 +823,18 @@ export interface KiwanoApi {
    * Export the config plan to the given path; returns the Provider count.
    * API keys are omitted unless `includeKeys` is set — that flag is for a local
    * backup that never leaves the machine, not for a file that gets shared.
+   */
+  /**
+   * No screen calls either of these, and that is settled rather than pending.
+   *
+   * They are left declared because the commands behind them work and the CLI
+   * covers the same capability (`kiwano config export|import`, straight through
+   * `kiwano-core::share`); what the desktop app lacks is an entry point. The
+   * Settings section that held one was removed on 2026-09-10 (80eb138) with the
+   * reason that its actions "didn't match the roadmap for config sharing" — the
+   * roadmap being the community sharing in spec §4.1 P1, which is a different
+   * feature from a local file. Rebuilding the entry means designing that, not
+   * restoring this.
    */
   exportConfig(path: string, includeKeys?: boolean): Promise<number>;
   /** Import a config plan from a file (merged by name+base_url); returns a count report */

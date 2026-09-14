@@ -1827,6 +1827,108 @@ mod tests {
         );
     }
 
+    /// The band is what a *real request* is billed at, not only what the cost
+    /// function says in isolation: over the threshold the recorded cost is the
+    /// block's rate, under it the listed one. This is the path a forwarded
+    /// request takes — `record_sample` → `compute_sample_cost` →
+    /// `compute_cost_pair` — and the only one that ends in `usage.cost`.
+    #[test]
+    fn record_sample_bills_the_band_a_long_request_falls_into() {
+        use crate::store::Protocol;
+        use kiwano_adapters::model_pricing::{LongContextRates, ModelPriceEntry};
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        // MiniMax M3's published shape: ¥2.10/¥8.40, and ¥4.20/¥16.80 above 512k.
+        store
+            .upsert_model_pricing(&ModelPriceEntry {
+                provider_id: String::new(),
+                model_id: "m1".into(),
+                display_name: "M1".into(),
+                input: "2.10".into(),
+                output: "8.40".into(),
+                cache_read: "0.42".into(),
+                cache_creation: "0".into(),
+                currency: "CNY".into(),
+                off_peak: None,
+                peak_hours: None,
+                long_context: Some(LongContextRates {
+                    over: 512_000,
+                    input: "4.20".into(),
+                    output: "16.80".into(),
+                    cache_read: "0.84".into(),
+                    cache_creation: "0".into(),
+                }),
+            })
+            .unwrap();
+        // One provider per size, so the two samples stay two figures.
+        for id in ["p-long", "p-short"] {
+            store
+                .insert_provider(&crate::store::Provider {
+                    id: id.into(),
+                    name: id.into(),
+                    catalog_id: None,
+                    protocol: Protocol::Anthropic,
+                    base_url: "https://a.example.com".into(),
+                    api_path: None,
+                    endpoints: Vec::new(),
+                    api_key: Some("sk".into()),
+                    model_default: None,
+                    billing: crate::store::Billing::Metered,
+                    period_limit: None,
+                    limit_unit: None,
+                    plan_query: None,
+                    plan_limits: None,
+                    timeout_secs: None,
+                    retries: None,
+                    headers: None,
+                    reset_period: None,
+                    enabled: true,
+                    created_at: crate::store::now_rfc3339(),
+                    updated_at: crate::store::now_rfc3339(),
+                })
+                .unwrap();
+        }
+        let state = crate::server::GatewayState::new(store).expect("state");
+
+        let sample = |provider_id: &str, input_tokens: i64| UsageSample {
+            agent: "claude".into(),
+            provider_id: provider_id.into(),
+            catalog_id: None,
+            started_unix: 1_788_919_200,
+            model: Some("m1".into()),
+            usage: Usage {
+                input_tokens,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            log: None,
+        };
+        record_sample(&state, sample("p-long", 600_000));
+        record_sample(&state, sample("p-short", 100_000));
+
+        let cost_of = |provider_id: &str| {
+            state
+                .store
+                .usage_cost_by_currency(None, Some(provider_id), None)
+                .unwrap()[0]
+                .1
+        };
+        assert!(
+            (cost_of("p-long") - 4.20 * 0.6).abs() < 1e-9,
+            "600k at the block's rate: {}",
+            cost_of("p-long")
+        );
+        assert!(
+            (cost_of("p-short") - 2.10 * 0.1).abs() < 1e-9,
+            "100k at the listed rate: {}",
+            cost_of("p-short")
+        );
+    }
+
     #[test]
     fn multi_key_pool_rotates_per_request() {
         let state =

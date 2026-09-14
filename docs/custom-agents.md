@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS custom_agents (
   查不到标签时显示 id）。
 - **不存图标/颜色**：从 label 派生（`logo_char` + `palette_color` 已存在），
   保持表最小。
+- **P1 没有「停用」态**：删除即下线（`enabled` 列留到 P2），所以建表时也不要预留。
 - 创建时同时写入一条默认策略 `Single`（与首次接管建路由的做法一致），
   使 `RouteTable::load` 立刻有它的路由。
 
@@ -97,6 +98,7 @@ API Key   kw-ag-my-route-3f9a
 任何客户端（Claude Code、某 IDE 插件、一段脚本）把这两个值填进去即可：
 
 - 路径决定**入站协议**：`/v1/messages` → Anthropic 形状，`/v1/chat/completions`（或 `/v1/responses`）→ OpenAI 形状；
+  **两条都接受，P1 不做路径限制**（要收紧是后续的过滤器特性）；
 - 候选 provider 的协议决定**是否转换**（Anthropic↔OpenAI 转换已有）；
 - 归属由 key 决定，因此同一条策略可以被任意多个客户端共用。
 
@@ -138,7 +140,7 @@ API Key   kw-ag-my-route-3f9a
 └────────────────────────────────────────┘
 ```
 
-创建后直接切到它的 tab。
+用户**只填名字**（id 自动派生，不在表单里出现）。创建后直接切到它的 tab，界面把派生的 id 与 key 一并给出来。
 
 ### 5.2 它的 tab
 
@@ -159,7 +161,7 @@ API Key   kw-ag-my-route-3f9a
 - **空态**：`还没有候选 Provider → 绑定一个`（复用现有 onboarding 的 bind slot，
   去掉 Enable 那半边，内部标记 `kind: "route-only"`）。
 - **删除**：tab 内两步确认（与 provider 行一致）；删除后段条上消失，
-  Dashboard 的用量历史保留（标签缺失时显示 id）。
+  Dashboard 的用量历史保留（标签缺失时显示 id）。P1 没有停用态——下线就是删除（§7 #2）。
 
 ### 5.3 连带屏幕
 
@@ -181,15 +183,15 @@ API Key   kw-ag-my-route-3f9a
 6. **Dashboard 的口径**：自定义 agent 的流量必须出现在 `by_agent`（否则用户在 Dashboard 上看不到
    自己的策略花了多少），但**不**新增任何限额语义（provider 级限额已经生效）。
 
-## 7. 待决策（各带推荐）
+## 7. 已决策（2026-09-14）
 
-| # | 决策 | 推荐 |
+| # | 决策 | 结论 |
 |---|---|---|
-| 1 | id 生成：用户只填显示名，id 自动派生 / 还是手填 | **自动 `slug-<4hex>`**（与 provider 同规则，id 永不变） |
-| 2 | P1 是否要「停用但保留配置」 | **不要**（删除即可，历史保留）；要的话是 P2 的 `enabled` 列 |
-| 3 | 是否限制入站路径（例如只收 `/v1/messages`） | **不限制**（路径决定协议；要限制是后续的过滤器特性） |
-| 4 | P1 是否含 `--bind` 一步到位（创建即绑定） | **含**（CLI 与弹窗都做） |
-| 5 | 是否做 agent 级限额 | **不做**（provider 级已生效）；另开特性 |
+| 1 | id 生成 | **用户只填显示名，id 自动派生 `slug-<4hex>`**（与 provider 同规则；id 生成后不随改名变） |
+| 2 | 停用 vs 删除 | **只做删除**（无 `enabled` 列）；`enabled` 开关留到 P2 再说 |
+| 3 | 入站路径限制 | **不限制**：客户端走 `/v1/messages` 或 `/v1/chat/completions` 都可以，路径决定协议 |
+| 4 | P1 是否含 `--bind` | **含**。含义见下：`agents add --bind <provider_id>` 就是「创建这条路由，并把这些**已有** provider 立刻作为它的候选」（可重复，第一个即 priority 0 / primary）——与 `providers add --bind <agent>` 同一动作的镜像，也与弹窗里的「立即绑定」是同一件事。要缩小 P1 的话，一句话就能挪到 P2 |
+| 5 | agent 级限额 | **不做**（provider 级限额已生效）；P3 另开特性 |
 
 ## 8. 分期与验收
 

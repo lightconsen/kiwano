@@ -35,6 +35,7 @@ const { apiMock } = vi.hoisted(() => ({
     addCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
     testProviderLatency: vi.fn(),
+    setProviderEnabled: vi.fn(),
   },
 }));
 
@@ -412,5 +413,90 @@ describe("the latency test", () => {
         "invalid API key",
       ),
     );
+  });
+});
+
+describe("deleting a provider that is in a route", () => {
+  /** codex's route, with the candidates named as the row would show them. */
+  function routeOf(...providers: [string, string][]): AgentRoute {
+    return {
+      agent: "codex",
+      strategy: "single",
+      config: null,
+      bindings: providers.map(([id, name], i) => ({
+        provider_id: id,
+        provider_name: name,
+        logo_char: name[0],
+        logo_color: "#4D6BFE",
+        priority: i,
+        weight: 1,
+        win_start: null,
+        win_end: null,
+        enabled: true,
+      })),
+    };
+  }
+
+  async function arm(route: AgentRoute) {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([route]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: en.common.delete }));
+    return user;
+  }
+
+  it("names the agents and the candidate that takes over", async () => {
+    await arm(routeOf(["deepseek", "DeepSeek"], ["kimi", "Kimi (Moonshot)"]));
+
+    // The consequence is on the row itself, at the moment of the decision —
+    // not in a tooltip the reader has to go looking for.
+    const hint = await screen.findByText(/removed from Codex/);
+    expect(hint).toHaveTextContent(
+      en.providers.delPromotes
+        .replace("{provider}", "Kimi (Moonshot)")
+        .replace("{agent}", "Codex"),
+    );
+  });
+
+  it("says when a route is left with nothing", async () => {
+    await arm(routeOf(["deepseek", "DeepSeek"]));
+
+    const hint = await screen.findByText(/removed from Codex/);
+    // The one case where deleting silently breaks traffic: the agent has no
+    // candidate behind it.
+    expect(hint).toHaveTextContent(en.providers.delEmpties.replace("{agent}", "Codex"));
+    expect(hint).not.toHaveTextContent("becomes the primary");
+  });
+
+  it("says nothing about a route that does not mention it", async () => {
+    // A promotion is also what roundrobin does *not* have: every candidate takes
+    // turns there, so the order is a priority, not a primary.
+    await arm({ ...routeOf(["deepseek", "DeepSeek"], ["kimi", "Kimi (Moonshot)"]), strategy: "roundrobin" });
+
+    const hint = await screen.findByText(/removed from Codex/);
+    expect(hint).not.toHaveTextContent("becomes the primary");
+  });
+});
+
+describe("parking a provider", () => {
+  it("disables it instead of deleting it, and re-reads the list", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    apiMock.setProviderEnabled.mockResolvedValue(undefined);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: en.providers.disable }));
+
+    await waitFor(() =>
+      expect(apiMock.setProviderEnabled).toHaveBeenCalledWith("deepseek", false),
+    );
+    // The row stays and the screen re-reads, so what it shows is the store's
+    // answer rather than a locally flipped flag.
+    expect(apiMock.listProviders).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("DeepSeek")).toBeInTheDocument();
   });
 });

@@ -720,7 +720,9 @@ export interface KiwanoApi {
   /** Delete a provider; if it is the primary for some agent, the next candidate is promoted automatically */
   deleteProvider(id: string): Promise<void>;
   /** Enable = make this Provider the current route of its bound agents */
-  enableProvider(id: string): Promise<void>;
+  /** Park a provider (or put it back): out of every route, keeping the row and
+      its key. The agents bound to it fall through to their next candidate. */
+  setProviderEnabled(id: string, enabled: boolean): Promise<void>;
   testLatency(endpoint: string): Promise<number>;
   /** Send one prompt through a stored provider and time the round trip */
   testProviderLatency(id: string): Promise<PromptLatency>;

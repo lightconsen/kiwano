@@ -98,6 +98,17 @@ export const providers = {
   moveDown: "Move down",
   makePrimary: "Make primary",
   makePrimaryTitle: "Make primary — move this candidate to the head of the queue",
+  // ── Deleting a provider, and parking one instead ──
+  /** The sentence a row shows while its delete is armed, in clauses joined by
+      " · " — see `deleteConsequence`. */
+  delRemovedFrom: "removed from {agents}",
+  delPromotes: "{provider} becomes the primary for {agent}",
+  delEmpties: "{agent} is left with no provider",
+  disable: "Disable",
+  disableTitle: "Park it: out of every route, keeping the row and its key",
+  enable: "Enable",
+  enableTitle: "Put it back into the routes it is bound to",
+
   // ── Latency test (a prompt round trip, one per provider row) ──
   testLatency: "Test latency",
   testLatencyTitle: "Send one prompt and time the round trip",

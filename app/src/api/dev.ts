@@ -732,7 +732,11 @@ function servingNow(): Set<string> {
     return a <= b ? n >= a && n <= b : n >= a || n <= b;
   };
   for (const r of routedRoutes()) {
-    const enabled = r.bindings.filter((b) => b.enabled);
+    // Disabled bindings and parked providers both drop out, as they do in the
+    // gateway's route table.
+    const enabled = r.bindings.filter(
+      (b) => b.enabled && providers.find((p) => p.id === b.provider_id)?.enabled !== false,
+    );
     if (enabled.length === 0) continue;
     const head = enabled[0].provider_id;
     if (r.strategy === "roundrobin") {
@@ -1017,19 +1021,18 @@ export const devApi: KiwanoApi = {
     }
   },
 
-  async enableProvider(id: string): Promise<void> {
+  async setProviderEnabled(id: string, enabled: boolean): Promise<void> {
     await delay();
+    // vm::set_provider_enabled: the row's own flag, no route touched. What
+    // changes is whether it may serve — which `servingNow` reads, the same way
+    // the gateway's route table reads `providers.enabled`.
     const target = providers.find((p) => p.id === id);
-    if (!target) return;
-    target.enabled = true;
-    target.serving_agents = target.agents.filter((a) => servingNow().has(`${a}/${target.id}`));
-    target.is_current = target.serving_agents.length > 0;
-    const peers = new Set(target.agents);
+    if (!target) throw new Error(`provider not found: ${id}`);
+    target.enabled = enabled;
+    const serving = servingNow();
     for (const p of providers) {
-      if (p.id !== id && p.agents.some((a) => peers.has(a))) {
-        p.serving_agents = p.serving_agents.filter((a) => !peers.has(a));
-        p.is_current = p.serving_agents.length > 0;
-      }
+      p.serving_agents = p.agents.filter((a) => serving.has(`${a}/${p.id}`));
+      p.is_current = p.serving_agents.length > 0;
     }
   },
 

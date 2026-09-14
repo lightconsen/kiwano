@@ -125,7 +125,8 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         ProvidersCmd::Use { provider_id, agent } => providers_use(ctx, provider_id, agent),
         ProvidersCmd::Remove { provider_id } => providers_remove(ctx, provider_id),
         ProvidersCmd::Edit(args) => providers_edit(args, ctx),
-        ProvidersCmd::Enable { provider_id } => providers_enable(ctx, provider_id),
+        ProvidersCmd::Enable { provider_id } => providers_set_enabled(ctx, provider_id, true),
+        ProvidersCmd::Disable { provider_id } => providers_set_enabled(ctx, provider_id, false),
         ProvidersCmd::Probe(cmd) => providers_probe(cmd, ctx),
         ProvidersCmd::Quota { provider_id, force } => providers_quota(ctx, provider_id, *force),
     }
@@ -316,22 +317,33 @@ fn edit_input(args: &EditArgs, current: &Provider) -> Result<vm::NewProviderInpu
     })
 }
 
-fn providers_enable(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
-    let agents = {
+/// Park a provider, or put it back. Nothing about its route changes: the row's
+/// own `enabled` decides whether it may serve, and the gateway's route table
+/// reads it on every reload.
+fn providers_set_enabled(ctx: &mut Ctx, provider_id: &str, enabled: bool) -> Result<(), CliError> {
+    let (name, agents) = {
         let store = ctx.store()?;
-        let bound = agents_bound_to(store, provider_id)?;
-        if bound.is_empty() {
-            return Err(runtime(format!(
-                "provider {provider_id} is not bound to any agent; use `routes binding add` first"
-            )));
-        }
-        vm::enable_provider(store, provider_id)?;
-        bound
+        let p = store
+            .get_provider(provider_id)
+            .map_err(runtime)?
+            .ok_or_else(|| runtime(format!("provider not found: {provider_id}")))?;
+        vm::set_provider_enabled(store, provider_id, enabled)?;
+        (p.name, agents_bound_to(store, provider_id)?)
     };
-    ctx.out.line(format!(
-        "{provider_id}: now the primary for {}",
-        agents.join(", ")
-    ));
+    // What the state *means*, not just what changed — and for a disable, who it
+    // means it for: the difference between "my requests stop going there" and
+    // "the row is gone" is the point of this command.
+    let text = if enabled {
+        format!("enabled {name} ({provider_id}) — it may serve again")
+    } else if agents.is_empty() {
+        format!("disabled {name} ({provider_id}) — it was in no route")
+    } else {
+        format!(
+            "disabled {name} ({provider_id}) — {} fall through to the next candidate",
+            agents.join(", ")
+        )
+    };
+    ctx.out.line(text);
     ctx.after_mutation();
     Ok(())
 }

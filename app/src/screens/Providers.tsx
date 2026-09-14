@@ -10,6 +10,7 @@ import {
   SquarePen,
   Pin,
   Plus,
+  Power,
   RefreshCw,
   Settings2,
   Trash2,
@@ -261,6 +262,38 @@ function CopyRow({ label, value }: { label: string; value: string }) {
       </Button>
     </div>
   );
+}
+
+/** What deleting this provider does to the routes it is in — the sentence the
+    row shows while the delete is armed.
+ *
+ * Every fact it needs is already in the screen: the provider names its agents,
+ * and `routes` holds each agent's candidate order, so the promotion ("Kimi
+ * becomes primary for Codex") and the empty case ("Codex is left with no
+ * provider") are read off the same data the agent tabs render. Two things it
+ * deliberately does not say: anything at all when the provider is in no route,
+ * and a promotion under roundrobin — there every candidate takes turns, so the
+ * order is a priority rather than a primary.
+ */
+function deleteConsequence(p: Provider, routes: AgentRoute[] | null, t: Translate): string {
+  const parts: string[] = [];
+  if (p.agents.length === 0) return "";
+  const names = p.agents.map((a) => agentMeta(a).label).join(", ");
+  parts.push(t("providers.delRemovedFrom", { agents: names }));
+  for (const agent of p.agents) {
+    const route = routes?.find((r) => r.agent === agent);
+    const bindings = route?.bindings ?? [];
+    if (bindings.length === 0 || bindings[0].provider_id !== p.id) continue;
+    const label = agentMeta(agent).label;
+    if (bindings.length === 1) {
+      parts.push(t("providers.delEmpties", { agent: label }));
+    } else if (route?.strategy !== "roundrobin") {
+      parts.push(
+        t("providers.delPromotes", { provider: bindings[1].provider_name, agent: label }),
+      );
+    }
+  }
+  return parts.join(" · ");
 }
 
 /** The row's latency test: one prompt, one number.
@@ -835,14 +868,19 @@ function ProviderRow({
   p,
   plan,
   blocked,
+  routes,
   onEdit,
   onDelete,
+  onChanged,
 }: {
   p: Provider;
   plan?: PlanQuotaReport;
   blocked?: string;
+  /** Every agent's route: what the delete confirmation reads to say what it does */
+  routes: AgentRoute[] | null;
   onEdit: (p: Provider) => void;
   onDelete: (p: Provider) => void;
+  onChanged: () => void;
 }) {
   const t = useT();
   // Delete is a two-step confirm: the first click enters the confirm state; a second click within 3 seconds actually deletes
@@ -852,7 +890,14 @@ function ProviderRow({
     const t = setTimeout(() => setConfirmDel(false), 3000);
     return () => clearTimeout(t);
   }, [confirmDel]);
+  // While the delete is armed the consequence gets a line of its own under the
+  // row: which agents lose the provider, who takes over from it, and whether a
+  // route is left with nothing. A line, not a tooltip — this is the moment the
+  // reader decides — and not squeezed into the row, whose columns are fixed
+  // fractions of its width and have no room for a sentence.
+  const consequence = confirmDel ? deleteConsequence(p, routes, t) : "";
   return (
+    <>
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
       <IdentityCell p={p} />
 
@@ -890,6 +935,16 @@ function ProviderRow({
         }`}
       >
         <TestLatencyButton provider={p} />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 shrink-0 rounded-md border border-line px-0 text-mut"
+          aria-label={p.enabled ? t("providers.disable") : t("providers.enable")}
+          title={p.enabled ? t("providers.disableTitle") : t("providers.enableTitle")}
+          onClick={() => api.setProviderEnabled(p.id, !p.enabled).then(onChanged)}
+        >
+          <Power className="h-3.5 w-3.5" />
+        </Button>
         {/* Square icon buttons, one per action: the row's actions are symbols a
             reader already knows, and a padded pill around a lone glyph reads as
             a label that failed to load. The delete grows into its confirmation
@@ -919,6 +974,15 @@ function ProviderRow({
         </Button>
       </div>
     </div>
+    {consequence && (
+      <div
+        className="flex items-center border-b border-line px-4 py-1.5 text-[10.5px]"
+        style={{ background: "color-mix(in srgb, var(--red) 10%, transparent)", color: "var(--red)" }}
+      >
+        <span className="min-w-0 flex-1 truncate">{consequence}</span>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -1658,8 +1722,10 @@ export default function Providers({
                   p={p}
                   plan={planQuotas[p.id]}
                   blocked={blocked[p.id]}
+                  routes={routes}
                   onEdit={onEdit}
                   onDelete={onDelete}
+                  onChanged={refetch}
                 />
               ))}
 

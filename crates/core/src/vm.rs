@@ -1234,13 +1234,21 @@ pub fn build_provider_vms(
     // selection; its runtime state (breaker health, roundrobin sticky sessions)
     // is process-local and invisible here, so those two degrade to the
     // deterministic first choice / full rotation.
+    // Providers the user parked: their bindings stay (the route is their intent,
+    // and re-enabling restores it), but the gateway's route table drops them
+    // (`RouteTable::load` checks `p.enabled`), so nothing may read as served.
+    let parked: HashSet<&str> = providers
+        .iter()
+        .filter(|p| !p.enabled)
+        .map(|p| p.id.as_str())
+        .collect();
     let mut serving: HashMap<String, HashSet<String>> = HashMap::new();
     for agent in live.iter() {
         let enabled: Vec<Binding> = store
             .bindings_for_agent(agent)
             .map_err(e2s)?
             .into_iter()
-            .filter(|b| b.enabled)
+            .filter(|b| b.enabled && !parked.contains(b.provider_id.as_str()))
             .collect();
         let Some(head) = enabled.first().map(|b| b.provider_id.clone()) else {
             continue;
@@ -2074,23 +2082,30 @@ pub fn add_provider(
     })
 }
 
-/// Enable = make this provider the primary of every agent it is bound to.
-pub fn enable_provider(store: &Store, id: &str) -> Result<(), String> {
-    let agents: Vec<String> = store
-        .bound_agents()
+/// Park a provider, or put it back: `enabled` decides whether this row may
+/// serve, and touches no route.
+///
+/// This is the rung between "in the route" and "deleted". A disabled provider
+/// keeps its row, its key, its prices and its usage history, and the gateway's
+/// route table skips it (`router::RouteTable::load`) — so every agent bound to it
+/// falls through to its next candidate exactly as if the row were gone, without
+/// anything being lost. Deleting stays the way to be rid of a provider; this is
+/// the way to stop using one for a while.
+///
+/// The old `enable_provider` did something else with the word: it promoted a
+/// provider to primary everywhere it was bound. `providers use --agent` is that
+/// operation, one agent at a time, and it keeps its name.
+pub fn set_provider_enabled(store: &Store, id: &str, enabled: bool) -> Result<(), String> {
+    let mut p = store
+        .get_provider(id)
         .map_err(e2s)?
-        .into_iter()
-        .filter(|a| {
-            store
-                .bindings_for_agent(a)
-                .map(|bs| bs.iter().any(|b| b.provider_id == id))
-                .unwrap_or(false)
-        })
-        .collect();
-    for agent in agents {
-        bind_as_primary(store, &agent, id)?;
+        .ok_or_else(|| format!("provider not found: {id}"))?;
+    if p.enabled == enabled {
+        return Ok(());
     }
-    Ok(())
+    p.enabled = enabled;
+    p.updated_at = rfc3339(unix_now());
+    store.update_provider(&p).map_err(e2s)
 }
 
 /// Make `provider_id` the primary for `agent`: priority 0, every other binding
@@ -2102,8 +2117,8 @@ pub fn enable_provider(store: &Store, id: &str) -> Result<(), String> {
 /// than stop here.
 ///
 /// The one place that writes "this provider is now the primary". `add_provider`'s
-/// Save & Enable, `enable_provider`, `update_provider` and the CLI's
-/// `providers use` / `providers add --bind` all land here.
+/// Save & Enable, `update_provider` and the CLI's `providers use` /
+/// `providers add --bind` all land here.
 pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
     let mut others: Vec<String> = store
         .bindings_for_agent(agent)
@@ -4528,13 +4543,15 @@ mod tests {
         assert_eq!(added2, ["deepseek", "kimi-for-coding"]);
     }
 
+    /// Disabling takes a provider out of service without taking anything away:
+    /// the binding is still there, the key is still there, and the row says so.
     #[test]
-    fn enable_provider_promotes_to_primary() {
+    fn a_disabled_provider_keeps_everything_but_its_place_in_the_route() {
         let s = store();
-        s.insert_provider(&provider("a1", "Alpha", Billing::Metered))
-            .unwrap();
-        s.insert_provider(&provider("b1", "Beta", Billing::Metered))
-            .unwrap();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("a1", "Alpha", Billing::Metered);
+        p.api_key = Some("sk-keep".into());
+        s.insert_provider(&p).unwrap();
         s.upsert_binding(&Binding {
             agent: "claude".into(),
             provider_id: "a1".into(),
@@ -4545,26 +4562,37 @@ mod tests {
             enabled: true,
         })
         .unwrap();
-        s.upsert_binding(&Binding {
-            agent: "claude".into(),
-            provider_id: "b1".into(),
-            priority: 1,
-            weight: 1,
-            win_start: None,
-            win_end: None,
-            enabled: true,
-        })
-        .unwrap();
 
-        enable_provider(&s, "b1").unwrap();
+        set_provider_enabled(&s, "a1", false).unwrap();
+        let stored = s.get_provider("a1").unwrap().unwrap();
+        assert!(!stored.enabled);
+        assert_eq!(stored.api_key.as_deref(), Some("sk-keep"));
         assert_eq!(
-            s.primary_provider_id("claude").unwrap().as_deref(),
-            Some("b1")
+            s.bindings_for_agent("claude").unwrap().len(),
+            1,
+            "the route is untouched: what changed is whether this row may serve"
         );
-        // Alpha demoted, still bound (failover groundwork)
-        let bs = s.bindings_for_agent("claude").unwrap();
-        let alpha = bs.iter().find(|b| b.provider_id == "a1").unwrap();
-        assert_eq!(alpha.priority, 1);
+        // The row reads as disabled rather than as healthy, and its agents fall
+        // through to whoever is next (nobody, here — the route is empty).
+        let home = live_home(&["claude"]);
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        assert_eq!(vms.len(), 1);
+        assert!(!vms[0].enabled);
+        assert!(
+            vms[0].serving_agents.is_empty(),
+            "a parked provider serves nobody"
+        );
+        assert_eq!(vms[0].health.note.as_deref(), Some("Disabled"));
+
+        // Back on, and the same route applies again.
+        set_provider_enabled(&s, "a1", true).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        assert!(vms[0].enabled);
+        assert_eq!(vms[0].serving_agents, ["claude"]);
+
+        // Idempotent, and an unknown id is an error rather than a no-op.
+        set_provider_enabled(&s, "a1", true).unwrap();
+        assert!(set_provider_enabled(&s, "ghost", false).is_err());
     }
 
     #[test]

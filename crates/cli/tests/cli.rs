@@ -665,13 +665,44 @@ fn providers_quota_reports_a_missing_plan_query() {
     assert!(out.is_empty(), "no payload on stdout for a failure: {out}");
 }
 
+/// Parking a provider, and putting it back: the row, its key and its route all
+/// survive, and only whether it may serve changes.
 #[test]
-fn providers_enable_refuses_an_unbound_provider() {
-    let (_dir, db) = temp_db();
-    let id = add_provider(&db, "loose", &[]);
-    let (code, _, err) = run(&db, &["providers", "enable", &id]);
-    assert_eq!(code, 3);
-    assert!(err.contains("not bound"), "{err}");
+fn providers_disable_and_enable_round_trip() {
+    let (dir, db) = temp_db();
+    let home = dir.path().join("home");
+    let home_arg = home.display().to_string();
+    let id = add_provider(&db, "alpha", &["claude"]);
+
+    let (code, out, err) = run(&db, &["--no-reload", "providers", "disable", &id]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("fall through"), "{out}");
+    assert!(out.contains("claude"), "{out}");
+
+    // Parked, not gone: the row is still there, with its key, and says which
+    // state it is in.
+    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert_eq!(list[0]["enabled"], false);
+    let store = Store::open(&db).unwrap();
+    assert_eq!(
+        store.bindings_for_agent("claude").unwrap().len(),
+        1,
+        "the route is untouched"
+    );
+
+    let (code, out, err) = run(&db, &["--no-reload", "providers", "enable", &id]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("may serve again"), "{out}");
+    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(list[0]["enabled"], true);
+
+    // An unknown id is an error rather than a quiet no-op.
+    let (code, _, err) = run(&db, &["--no-reload", "providers", "disable", "ghost"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("not found"), "{err}");
 }
 
 // ── routes ──────────────────────────────────────────────────────────────────

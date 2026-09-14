@@ -383,8 +383,8 @@ fn add_provider(
 }
 
 #[tauri::command]
-fn enable_provider(state: State<AppState>, id: String) -> Result<(), String> {
-    vm::enable_provider(&state.store, &id)?;
+fn set_provider_enabled(state: State<AppState>, id: String, enabled: bool) -> Result<(), String> {
+    vm::set_provider_enabled(&state.store, &id, enabled)?;
     after_mutation(&state);
     Ok(())
 }
@@ -1089,7 +1089,7 @@ pub fn run() {
             add_provider,
             update_provider,
             delete_provider,
-            enable_provider,
+            set_provider_enabled,
             test_latency,
             test_provider_latency,
             test_endpoint,

@@ -461,10 +461,14 @@ pub enum ProvidersCmd {
     /// Change a provider in place, keeping its id — and so every binding to it
     Edit(Box<EditArgs>),
 
-    /// Make a provider the current route of every agent bound to it
+    /// Park a provider: out of every route, keeping its row and its key
     ///
-    /// Unlike `use`, this does not touch the strategy: it reorders candidates
-    /// under whatever the agent already has configured.
+    /// The agents bound to it fall through to their next candidate, exactly as
+    /// if the row had been deleted — without losing the credential, the limits
+    /// or the usage history.
+    Disable { provider_id: String },
+
+    /// Put a parked provider back into its routes
     Enable { provider_id: String },
 
     /// Ask an endpoint whether it answers, before committing to it

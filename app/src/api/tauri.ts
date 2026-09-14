@@ -19,7 +19,8 @@ export const tauriApi: KiwanoApi = {
 
   deleteProvider: (id: string) => invoke<boolean>("delete_provider", { id }).then(() => undefined),
 
-  enableProvider: (id: string) => invoke<void>("enable_provider", { id }),
+  setProviderEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("set_provider_enabled", { id, enabled }),
 
   testLatency: (endpoint: string) => invoke<number>("test_latency", { endpoint }),
 

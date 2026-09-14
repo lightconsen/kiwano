@@ -837,6 +837,14 @@ pub struct TakeoverVm {
     pub label: String,
     pub placeholder_key: Option<String>,
     pub enabled: bool,
+    /// The files a takeover rewrites for this agent, in the form a reader would
+    /// write them (`~/.claude/settings.json`). Read out of the same function the
+    /// takeover itself writes through, so what the screen shows is the file that
+    /// would actually change — not a second list to keep in step. Empty for an
+    /// agent whose paths cannot be resolved on this platform (claude-desktop
+    /// outside macOS).
+    #[serde(default)]
+    pub config_paths: Vec<String>,
     /// Additive-mode agent (config keeps multiple providers; takeover writes a
     /// gateway entry and selects it) rather than exclusive-switch mode.
     #[serde(default)]
@@ -1521,6 +1529,16 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
         });
     }
     Ok(routes)
+}
+
+/// A path as the screen should print it: `~` for the home tree, absolute for
+/// anything outside it (a `HERMES_HOME` pointing elsewhere is a real path, and
+/// rewriting it to `~/…` would name a file that does not exist).
+fn display_path(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 /// Set or clear one agent's own ceiling. `None` clears it — an absent row is the
@@ -2448,6 +2466,11 @@ pub fn build_settings_with_home(
                 enabled: key.is_some(),
                 placeholder_key: key,
                 additive: ADDITIVE_AGENTS.contains(agent),
+                config_paths: crate::takeover::takeover_paths(agent, home)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|p| display_path(p, home))
+                    .collect(),
             }
         })
         .collect();
@@ -5235,6 +5258,50 @@ mod tests {
         // And the screen reads back what it wrote.
         let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         assert_eq!(reread.stream_idle_secs, 45);
+    }
+
+    // The files a takeover would rewrite, as the agent's settings dialog lists
+    // them. Read out of `takeover_paths` — the function the takeover itself writes
+    // through — so the list cannot drift from what a takeover actually touches,
+    // and printed with `~` because that is how the same paths read in the docs.
+    #[test]
+    fn the_takeover_vm_carries_the_files_a_takeover_rewrites() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+
+        let vm = build_settings_with_home(&s, &aux, home).unwrap();
+        let paths = |agent: &str| {
+            vm.takeovers
+                .iter()
+                .find(|t| t.agent == agent)
+                .unwrap_or_else(|| panic!("{agent} is in the registry"))
+                .config_paths
+                .clone()
+        };
+
+        assert_eq!(paths("claude"), vec!["~/.claude/settings.json"]);
+        // Two files: the config Codex reads and the auth it keeps beside it.
+        assert_eq!(
+            paths("codex"),
+            vec!["~/.codex/config.toml", "~/.codex/auth.json"]
+        );
+        assert_eq!(paths("grokbuild"), vec!["~/.grok/config.toml"]);
+        // Every built-in resolves to at least one file, so the row never renders
+        // an agent with nothing to show.
+        assert!(vm.takeovers.iter().all(|t| !t.config_paths.is_empty()));
+
+        // A path outside the home tree keeps its absolute form rather than being
+        // rewritten into a `~/…` that names nothing.
+        assert_eq!(
+            display_path(&home.join(".hermes/config.yaml"), home),
+            "~/.hermes/config.yaml"
+        );
+        assert_eq!(
+            display_path(Path::new("/opt/hermes/config.yaml"), home),
+            "/opt/hermes/config.yaml"
+        );
     }
 
     // The screen's half of an agent limit: what it writes is what the gateway

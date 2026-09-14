@@ -468,6 +468,9 @@ export interface TakeoverState {
   /** Placeholder key assigned by the gateway; null when not taken over */
   placeholder_key: string | null;
   enabled: boolean;
+  /** The files a takeover rewrites, as `~/.claude/settings.json`; empty when
+      they cannot be resolved here (claude-desktop outside macOS) */
+  config_paths: string[];
   /** Additive-mode agent (config keeps multiple providers; takeover writes a
       gateway entry and selects it) rather than exclusive-switch mode */
   additive: boolean;

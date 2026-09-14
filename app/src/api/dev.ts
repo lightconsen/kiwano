@@ -583,15 +583,22 @@ const settings: AppSettings = {
   autostart: true,
   close_to_tray: true,
   gateway_listen: "127.0.0.1:8317",
+  // `config_paths` mirrors `takeover::takeover_paths` for the host platform, so
+  // the mock answers what the real backend would for each agent's files.
   takeovers: [
-    { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false },
-    { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false },
-    { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false },
-    { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false },
-    { agent: "opencode", label: "OpenCode", placeholder_key: null, enabled: false, additive: true },
-    { agent: "openclaw", label: "OpenClaw", placeholder_key: null, enabled: false, additive: true },
-    { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true },
-    { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true },
+    { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false, config_paths: ["~/.claude/settings.json"] },
+    { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false, config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"] },
+    { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false, config_paths: ["~/.grok/config.toml"] },
+    { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false, config_paths: [
+      "~/Library/Application Support/Claude/claude_desktop_config.json",
+      "~/Library/Application Support/Claude-3p/claude_desktop_config.json",
+      "~/Library/Application Support/Claude-3p/configLibrary/kiwano.json",
+      "~/Library/Application Support/Claude-3p/configLibrary/_meta.json",
+    ] },
+    { agent: "opencode", label: "OpenCode", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.config/opencode/opencode.json"] },
+    { agent: "openclaw", label: "OpenClaw", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.openclaw/openclaw.json"] },
+    { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.hermes/config.yaml"] },
+    { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.pi/agent/models.json", "~/.pi/agent/settings.json"] },
   ],
   // Two user-defined agents, so `pnpm dev` can show the whole feature: a route
   // with candidates, and one that is still empty (the state the tab's bind slot

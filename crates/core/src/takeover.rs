@@ -93,7 +93,7 @@ pub struct BackupFile {
 /// touches `~/.codex` on disk is `enable`/`disable` below, which writes through
 /// the caller's root. A future divergence shows up as a refused write, not a
 /// silent one into the wrong tree.
-fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+pub(crate) fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     match agent {
         "claude" => Ok(vec![home.join(".claude").join("settings.json")]),
         "codex" => Ok(vec![

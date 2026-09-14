@@ -228,10 +228,94 @@ function AccessDialog({
   );
 }
 
-/** One line of the access card, with the button that makes it usable. The
-    button is an icon: the two lines are short values, and a word beside each of
-    them competes with the thing being copied. */
-function CopyRow({ label, value }: { label: string; value: string }) {
+/** One built-in agent's settings: whether Kiwano routes it, and the files a
+    takeover rewrites.
+ *
+ * The switch and the file list belong together because they are the same
+ * question from two sides — turning the takeover off is what puts those files
+ * back. Read-only apart from that switch: the config is the agent's, and this
+ * dialog is not an editor for someone else's format.
+ *
+ * A user-defined agent has no such dialog: there is no file behind it, and its
+ * own row already carries what it does have (its key, and deleting it). */
+function AgentSettingsDialog({
+  label,
+  paths,
+  takenOver,
+  busy,
+  open,
+  onClose,
+  onSetTakeover,
+}: {
+  label: string;
+  paths: string[];
+  takenOver: boolean;
+  busy: boolean;
+  open: boolean;
+  onClose: () => void;
+  onSetTakeover: (enabled: boolean) => Promise<void>;
+}) {
+  const t = useT();
+  const [err, setErr] = useState<string | null>(null);
+  const flip = async () => {
+    setErr(null);
+    try {
+      await onSetTakeover(!takenOver);
+      onClose();
+    } catch (e) {
+      // Left open with the reason: the button's whole job is to change the file
+      // on disk, and a refusal has to be visible where it was asked for.
+      setErr(String(e));
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle className="text-[13px]">
+            {t("providers.agentSettingsFor", { agent: label })}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="px-5 pb-4 pt-1">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-[12px]">
+              <Dot state={takenOver ? "ok" : "off"} />
+              {takenOver ? t("providers.agentRouted") : t("providers.agentNotRouted")}
+            </span>
+            <Button
+              size="sm"
+              className="ml-auto h-7 px-3 text-[12px] font-semibold"
+              disabled={busy}
+              onClick={flip}
+            >
+              {takenOver ? t("providers.restoreOriginal") : t("providers.enableKiwano")}
+            </Button>
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-mut">
+            {takenOver ? t("providers.agentRoutedBody") : t("providers.agentNotRoutedBody")}
+          </p>
+          {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
+
+          <div className="mt-3 border-t border-line pt-2">
+            <div className="text-[10.5px] text-mut">{t("providers.agentConfigFiles")}</div>
+            {paths.map((p) => (
+              <div key={p} className="mt-1 flex items-center gap-2">
+                <CopyValue value={p} />
+              </div>
+            ))}
+            <p className="mt-1.5 text-[10.5px] leading-relaxed text-mut">
+              {t("providers.agentConfigFilesNote")}
+            </p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A value and the button that copies it. The button is an icon: these are short
+    values, and a word beside each of them competes with the thing being copied. */
+function CopyValue({ value }: { value: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -246,8 +330,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
     );
   };
   return (
-    <div className="mt-1.5 flex items-center gap-2">
-      <span className="w-[68px] shrink-0 text-[10.5px] text-mut">{label}</span>
+    <>
       <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{value}</code>
       <Button
         variant="ghost"
@@ -261,6 +344,16 @@ function CopyRow({ label, value }: { label: string; value: string }) {
             width whether or not it was just used. */}
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </Button>
+    </>
+  );
+}
+
+/** One line of the access card: a labelled value, with the copy button. */
+function CopyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      <span className="w-[68px] shrink-0 text-[10.5px] text-mut">{label}</span>
+      <CopyValue value={value} />
     </div>
   );
 }
@@ -1399,6 +1492,11 @@ export default function Providers({
   // The credentials dialog, opened from the icon beside a user-defined agent's
   // name (there is no card on the tab itself).
   const [accessOpen, setAccessOpen] = useState(false);
+  // The built-in agent's settings dialog (its takeover, and the files behind it).
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  // The files behind each built-in agent, for the row above the table. Its own
+  // state because the takeover *set* below throws the rest of that read away.
+  const [configPathsByAgent, setConfigPathsByAgent] = useState<Record<string, string[]>>({});
   // What a client is pointed at: the gateway's own listen address from settings.
   const [listen, setListen] = useState("127.0.0.1:8317");
   // Display currency, which is also the unit a money ceiling is written in.
@@ -1443,6 +1541,9 @@ export default function Providers({
       .getSettings()
       .then((s) => {
         setTakenOver(new Set(s.takeovers.filter((t) => t.enabled).map((t) => t.agent)));
+        setConfigPathsByAgent(
+          Object.fromEntries(s.takeovers.map((k) => [k.agent, k.config_paths ?? []])),
+        );
         setCustomAgents(s.custom_agents);
         rememberCustomAgents(s.custom_agents);
         if (s.gateway_listen) setListen(s.gateway_listen);
@@ -1551,16 +1652,21 @@ export default function Providers({
     refetch();
   };
 
-  // Only ever a built-in: a user-defined agent has no config to take over, so
-  // the panel that calls this is never shown for one.
-  const onTakeover = async (agent: AgentRef) => {
-    // Only ever a built-in: a user-defined agent has no config to take over, so
-    // the panel that calls this is never shown for one — and the guard is what
-    // keeps that true rather than a comment claiming it.
+  /** Turn a built-in agent's takeover on or off.
+   *
+   * Only ever a built-in: a user-defined agent has no config to take over, so
+   * neither caller is shown for one — and the guard is what keeps that true
+   * rather than a comment claiming it.
+   *
+   * Enabling is what the Apps onboarding offers; disabling is the escape hatch
+   * back to the agent's own configuration, the same call the Settings switch
+   * makes. Either way the screen re-reads afterwards instead of assuming the
+   * outcome, and a refusal is left to the caller to show. */
+  const setAgentTakenOver = async (agent: AgentRef, enabled: boolean) => {
     if (!isBuiltinAgent(agent)) return;
     setEnabling(true);
     try {
-      await api.setTakeover(agent, true);
+      await api.setTakeover(agent, enabled);
     } finally {
       setEnabling(false);
       refetch();
@@ -1571,6 +1677,10 @@ export default function Providers({
 
   const filtered = providers.filter((p) => seg === "all" || p.agents.includes(seg));
   const agentsBound = new Set(providers.flatMap((p) => p.agents)).size;
+  // The files a takeover would rewrite for the tab in hand, read out of the
+  // settings read this screen already makes. Empty while that read is in flight
+  // or for an id the registry does not know.
+  const configPaths = seg === "all" ? [] : (configPathsByAgent[seg] ?? []);
   // Inside an agent tab with bindings the list IS the strategy candidate queue
   const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
   const byId = new Map(providers.map((p) => [p.id, p]));
@@ -1695,6 +1805,43 @@ export default function Providers({
         </div>
       )}
 
+      {/* A built-in agent's tab names itself the same way a user-defined one
+          does — the strip shows icons, so a page with no name on it is one you
+          have to identify from the highlight over there. What this one adds is
+          the file behind it: the config a takeover rewrites, which is also what
+          a user has to reach for by hand when something goes wrong. */}
+      {!custom && seg !== "all" && (
+        <div className="mx-4 mt-3 flex items-center gap-1.5">
+          <ProviderLogo
+            icon={SEGMENT_ICON[seg]}
+            char={agentMeta(seg).chip_char}
+            color={agentMeta(seg).chip_color}
+            name={agentMeta(seg).label}
+            size={18}
+          />
+          <span className="text-[13px] font-semibold">{agentMeta(seg).label}</span>
+          {configPaths.length > 0 && (
+            <span className="min-w-0 truncate font-mono text-[11px] text-mut">
+              {configPaths[0]}
+              {/* The rest are listed in the dialog rather than elided here: codex
+                  keeps two files and claude-desktop four, and a row that showed
+                  only the first would read as if that were the whole of it. */}
+              {configPaths.length > 1 ? ` +${configPaths.length - 1}` : ""}
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
+            aria-label={t("providers.agentSettingsFor", { agent: agentMeta(seg).label })}
+            title={t("providers.agentSettingsFor", { agent: agentMeta(seg).label })}
+            onClick={() => setAgentSettingsOpen(true)}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
       {notTakenOver ? (
         <AgentOnboarding
           agent={seg}
@@ -1703,7 +1850,7 @@ export default function Providers({
           }
           takenOver={false}
           busy={enabling}
-          onTakeover={() => onTakeover(seg)}
+          onTakeover={() => void setAgentTakenOver(seg, true).catch(() => {})}
           onAdd={onAdd}
         />
       ) : (
@@ -1770,7 +1917,7 @@ export default function Providers({
               }
               takenOver={true}
               busy={enabling}
-              onTakeover={() => onTakeover(seg)}
+              onTakeover={() => void setAgentTakenOver(seg, true).catch(() => {})}
               onAdd={onAdd}
               bindSlot={
                 <BindProviderSelect
@@ -1816,6 +1963,18 @@ export default function Providers({
         onClose={() => setNewAgent(false)}
         onCreated={onAgentCreated}
       />
+
+      {!custom && seg !== "all" && (
+        <AgentSettingsDialog
+          label={agentMeta(seg).label}
+          paths={configPaths}
+          takenOver={takenOver?.has(seg) ?? false}
+          busy={enabling}
+          open={agentSettingsOpen}
+          onClose={() => setAgentSettingsOpen(false)}
+          onSetTakeover={(enabled) => setAgentTakenOver(seg, enabled)}
+        />
+      )}
 
       {custom && (
         <AccessDialog

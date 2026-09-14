@@ -116,6 +116,19 @@ export const providers = {
   deleteAgentConfirm: "再点一次即删除",
   deleteAgentNote: "它的用量历史会保留。",
 
+
+  // ── 内置 agent 自己的设置（表格上方那一行，以及它的对话框）──
+  agentSettingsFor: "{agent} 设置",
+  agentRouted: "已接管",
+  agentNotRouted: "未接管",
+  agentRoutedBody:
+    "它的配置指向本地网关，请求就是这样到达这里的。还原会把原始文件放回，该 agent 之后直接连自己的 Provider。",
+  agentNotRoutedBody:
+    "启用会先备份下面的文件，把它们指向本地网关，并为该 agent 生成专属 Key。关闭接管时会从备份还原。",
+  restoreOriginal: "还原原始配置",
+  agentConfigFiles: "配置文件",
+  agentConfigFilesNote: "接管前备份，关闭接管时还原。",
+
   removeFromRouteAria: "从路由中移除",
   removeFromRoute: "从该路由中移除（其他 Agent 的绑定不受影响）",
 

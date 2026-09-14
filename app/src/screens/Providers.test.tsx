@@ -110,6 +110,8 @@ function settingsWith(codexTakenOver: boolean, custom: CustomAgent[] = []): AppS
         placeholder_key: codexTakenOver ? "kw-ag-codex-test" : null,
         enabled: codexTakenOver,
         additive: false,
+        // Two files, as `takeover_paths` gives codex.
+        config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"],
       },
     ],
   } as unknown as AppSettings;
@@ -650,5 +652,98 @@ describe("the agent's own limit", () => {
         reset_period: "day",
       }),
     );
+  });
+});
+
+// A built-in agent's tab names itself, and names the file behind it. The strip
+// above is icons only, so without this row the page has no agent name on it at
+// all — and no way to find the config a takeover rewrites, which is what someone
+// reaches for by hand when the takeover is the problem.
+describe("a built-in agent's own row", () => {
+  it("names the agent and the files a takeover would rewrite", async () => {
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    // Codex keeps two files; the row shows the first and counts the rest, and
+    // the dialog below lists them all.
+    expect(await screen.findByText("~/.codex/config.toml +1")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    ).toBeInTheDocument();
+  });
+
+  it("still names it before the agent is taken over, and offers to enable it", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: false,
+    });
+
+    // The config file exists whether or not Kiwano has rewritten it, and this is
+    // the case where someone wants to see it most.
+    await user.click(
+      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    );
+
+    expect(screen.getByText(en.providers.agentNotRouted)).toBeInTheDocument();
+    expect(screen.getByText("~/.codex/config.toml")).toBeInTheDocument();
+    expect(screen.getByText("~/.codex/auth.json")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: en.providers.enableKiwano }));
+    await waitFor(() => expect(apiMock.setTakeover).toHaveBeenCalledWith("codex", true));
+  });
+
+  it("restores the original config from the dialog", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    await user.click(
+      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    );
+    expect(screen.getByText(en.providers.agentRouted)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: en.providers.restoreOriginal }));
+    await waitFor(() => expect(apiMock.setTakeover).toHaveBeenCalledWith("codex", false));
+  });
+
+  it("is not on the all-agents tab, and not on a user-defined agent's", async () => {
+    const user = userEvent.setup();
+    const longTasks: CustomAgent = {
+      id: "long-tasks-3f9a",
+      label: "Long tasks",
+      note: null,
+      placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
+    };
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([
+      { ...codexRoute([]), agent: longTasks.id, bindings: codexRoute(["deepseek"]).bindings },
+    ]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    // The All tab has no agent, so it has no agent's file to name.
+    expect(
+      screen.queryByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    ).toBeNull();
+
+    // A user-defined agent has no config file behind it, so its own tab keeps the
+    // row it always had — the gear that opens its credentials — and gains none.
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+    expect(
+      screen.queryByLabelText(
+        en.providers.agentSettingsFor.replace("{agent}", longTasks.label),
+      ),
+    ).toBeNull();
+    expect(
+      screen.getByLabelText(en.providers.accessFor.replace("{agent}", longTasks.label)),
+    ).toBeInTheDocument();
   });
 });

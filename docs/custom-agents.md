@@ -118,7 +118,7 @@ API Key   kw-ag-my-route-3f9a
 | core vm | `live_bound_agents`：**自定义 agent 恒为 live**（它没有配置文件可读，否则会重现「All 页显示未绑定」的假象） | `crates/core/src/vm.rs` |
 | core vm | Dashboard：`by_agent` 与 `filter_agents` 的行集合改为取自 usage 的 distinct agent，标签查「内置 ∪ 自定义」 | `vm.rs:2880` / `:2941` |
 | core vm | `SettingsVm.custom_agents: Vec<CustomAgentVm { id, label, note, placeholder_key }>` —— **不塞进 `takeovers`**：那里是「我们改写了它的配置」的诚实语义，自定义 agent 没有配置 | `crates/core/src/vm.rs` |
-| CLI | `kiwano agents add --name <名字> [--note …] [--bind <provider_id>]…`、`agents remove <id>`、`agents list`（标注 custom）；`routes` / `strategy` / `bindings` 本来就吃任意 agent 字符串，无需改 | `crates/cli/src/cmds.rs`、`cli.rs` |
+| CLI | `kiwano agents add --name <名字> [--note …]`、`agents remove <id>`、`agents list`（标注 custom）；绑定走**已有的** `routes binding add <agent> <provider>` —— `routes` / `strategy` / `binding` 本来就吃任意 agent 字符串，一行都不用改 | `crates/cli/src/cmds.rs`、`cli.rs` |
 | 前端 types | `AgentId` 拆成 `BuiltinAgentId`（闭集：AGENTS、图标、接管用）+ `AgentRef = string`（路由/日志/用量等边界）；新增 `agentMeta(id)` 解析器（内置→registry；否则→派生：名称首字母 + 调色板色） | `app/src/api/types.ts` |
 | 前端 | 分段条尾部 `+`；自定义 tab（无接管态）；接入信息卡；删除；用 `agentMeta` 替换所有 `AGENTS.find(...)!`；深链校验接受自定义 id；AddProviderModal 多选列出并集 | `Providers.tsx`、`StrategyPanel.tsx`、`App.tsx`、`AddProviderModal.tsx` |
 
@@ -135,12 +135,12 @@ API Key   kw-ag-my-route-3f9a
 ┌─ 自定义 Agent ─────────────────────────┐
 │ 名称      [长任务默认路由          ]    │
 │ 备注      [比如：便宜优先 / 夜间跑批 ]  │  ← 可选
-│ 立即绑定  [DeepSeek] [Kimi] …           │  ← 可选，多选已有 provider
 │                         [取消] [创建]   │
 └────────────────────────────────────────┘
 ```
 
-用户**只填名字**（id 自动派生，不在表单里出现）。创建后直接切到它的 tab，界面把派生的 id 与 key 一并给出来。
+用户**只填名字**（id 自动派生，不在表单里出现）。创建后直接切到它的 tab，界面把派生的 id 与 key 一并给出来；
+候选 provider 在那个 tab 里绑（空态就指向这件事）。
 
 ### 5.2 它的 tab
 
@@ -190,7 +190,7 @@ API Key   kw-ag-my-route-3f9a
 | 1 | id 生成 | **用户只填显示名，id 自动派生 `slug-<4hex>`**（与 provider 同规则；id 生成后不随改名变） |
 | 2 | 停用 vs 删除 | **只做删除**（无 `enabled` 列）；`enabled` 开关留到 P2 再说 |
 | 3 | 入站路径限制 | **不限制**：客户端走 `/v1/messages` 或 `/v1/chat/completions` 都可以，路径决定协议 |
-| 4 | P1 是否含 `--bind` | **含**。含义见下：`agents add --bind <provider_id>` 就是「创建这条路由，并把这些**已有** provider 立刻作为它的候选」（可重复，第一个即 priority 0 / primary）——与 `providers add --bind <agent>` 同一动作的镜像，也与弹窗里的「立即绑定」是同一件事。要缩小 P1 的话，一句话就能挪到 P2 |
+| 4 | 创建即绑定（CLI `--bind` / 弹窗「立即绑定」多选） | **不做**（P1 分两步：先建路由，再在 tab 里绑；一步到位是 P2）。理由：`providers add --bind` 只是便利，不绑也能用；而 `routes binding add` 已经存在，命令行不必为它加新 flag |
 | 5 | agent 级限额 | **不做**（provider 级限额已生效）；P3 另开特性 |
 
 ## 8. 分期与验收
@@ -208,7 +208,7 @@ API Key   kw-ag-my-route-3f9a
 - `RouteTable::load`：含它的路由；`build_settings` 交付形状（含 key）。
 
 **CLI e2e**
-- `agents add` → `--bind` → **伪造一条带该 key 的请求走通并记为它的用量** → `agents remove` 后同 key 401。
+- `agents add` → `routes binding add`（现有命令）→ **伪造一条带该 key 的请求走通并记为它的用量** → `agents remove` 后同 key 401。
 
 **前端**
 - 创建后段条出现该 tab、tab 内**无** Enable；
@@ -220,7 +220,7 @@ API Key   kw-ag-my-route-3f9a
 ### P2（打磨）
 
 客户端片段一键复制（curl / Claude Code / 通用 base_url 填法）、自定义 agent 的导出与导入
-（把一条策略分享给别人）、`enabled` 开关。
+（把一条策略分享给别人）、`enabled` 开关、**创建即绑定**（CLI `agents add --bind …` 与弹窗多选，二者或其一）。
 
 ### P3（能力）
 

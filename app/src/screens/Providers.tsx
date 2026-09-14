@@ -1396,6 +1396,8 @@ export default function Providers({
   const [accessOpen, setAccessOpen] = useState(false);
   // What a client is pointed at: the gateway's own listen address from settings.
   const [listen, setListen] = useState("127.0.0.1:8317");
+  // Display currency, which is also the unit a money ceiling is written in.
+  const [currency, setCurrency] = useState("USD");
   const [enabling, setEnabling] = useState(false);
   // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
@@ -1439,6 +1441,7 @@ export default function Providers({
         setCustomAgents(s.custom_agents);
         rememberCustomAgents(s.custom_agents);
         if (s.gateway_listen) setListen(s.gateway_listen);
+        if (s.preferred_currency) setCurrency(s.preferred_currency);
       })
       .catch(() => {});
   }, []);
@@ -1795,7 +1798,12 @@ export default function Providers({
           Routes come from here (single fetch): a route created while the panel is
           mounted (first bind / copy) must show up without a tab switch. */}
       {seg !== "all" && (custom || (takenOver?.has(seg) ?? false)) && (
-        <StrategyPanel agent={seg} routes={routes} onChanged={refetch} />
+        <StrategyPanel
+          agent={seg}
+          routes={routes}
+          currency={currency}
+          onChanged={refetch}
+        />
       )}
 
       <NewAgentDialog

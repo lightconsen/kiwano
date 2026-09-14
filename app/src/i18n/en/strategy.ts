@@ -40,4 +40,25 @@ export const strategy = {
   pickAgent: "Pick an agent",
   candidateOne: "{agent} · {count} candidate",
   candidateOther: "{agent} · {count} candidates",
+
+
+  // ── The agent's own ceiling (its own row, under the strategy) ──
+  limitLabel: "Limit",
+  limitNone: "No limit",
+  limitEditAria: "Edit {agent}'s limit",
+  limitTitle: "{agent}'s limit",
+  limitPlaceholder: "none",
+  limitAmountAria: "Limit amount",
+  limitClear: "Clear",
+  limitUnitRequests: "requests",
+  limitUnitWanTokens: "10k tokens",
+  limitPeriodDay: "per day",
+  limitPeriodWeek: "per week",
+  limitPeriodMonth: "per month",
+  limitPeriodYear: "per year",
+  limitPeriodAll: "in total",
+  limitBody:
+    "Measured across every provider this agent uses, and enforced under every strategy — including single, whose one-provider rule says nothing about how much may be spent. Once the ceiling is reached, requests from this agent are refused until the period resets.",
+  limitMoneyNote:
+    "A money limit counts only what the price table can price. A request whose model has no published price is metered but not costed, so it does not count toward the ceiling.",
 };

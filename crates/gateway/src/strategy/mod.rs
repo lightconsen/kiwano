@@ -246,6 +246,18 @@ impl StrategyEngine {
         if route.candidates.is_empty() {
             return Err(GatewayError::NoBinding(route.agent.clone()));
         }
+        // The agent's own ceiling, before any strategy has a say — and before the
+        // `single` branch below, which is the point: `single` opts out of every
+        // *provider* ceiling on purpose (one provider, no fallback), but choosing
+        // it says nothing about how much the agent may spend. A limit that
+        // `single` could slip past would be no limit at all, since `single` is
+        // the default.
+        if let Some(reason) = limits.agent_blocked(&route.agent) {
+            return Err(GatewayError::AgentOverLimit {
+                agent: route.agent.clone(),
+                reason: reason.describe(),
+            });
+        }
         // `single` is "this one provider, no failover" — the backup is bound
         // but deliberately not a fallback. A limit does not promote it: the one
         // provider is unusable, which is a failure rather than a reason to
@@ -661,6 +673,49 @@ mod tests {
         );
         assert_eq!(
             ids(&engine.plan(&s, &one, None, &limits).await.unwrap()),
+            vec!["a"]
+        );
+    }
+
+    // The ceiling `single` cannot slip past. `single` deliberately opts out of the
+    // provider-level ceilings — one provider, no fallback — but that is a
+    // statement about failover, not about how much the agent may spend. It is also
+    // the default strategy, so a limit it ignored would be no limit at all.
+    #[tokio::test]
+    async fn an_agent_over_its_own_limit_is_refused_under_every_strategy() {
+        let engine = StrategyEngine::new();
+        let s = store();
+        let over = crate::limits::LimitState::with_agents_over([(
+            "claude".to_string(),
+            crate::limits::BlockReason::Spend {
+                used: 12.0,
+                limit: 10.0,
+                unit: "CNY".into(),
+            },
+        )]);
+
+        for strategy in [
+            StrategyType::Single,
+            StrategyType::Failover,
+            StrategyType::Roundrobin,
+        ] {
+            let r = route(
+                strategy,
+                vec![candidate("a", 1, None), candidate("b", 1, None)],
+            );
+            let err = engine.plan(&s, &r, None, &over).await.unwrap_err();
+            assert!(
+                matches!(err, GatewayError::AgentOverLimit { .. }),
+                "{strategy:?} let an over-limit agent through: {err}"
+            );
+        }
+
+        // And under the ceiling it routes exactly as before, so what gates is the
+        // limit being reached, not the existence of a limit.
+        let under = crate::limits::LimitState::default();
+        let r = route(StrategyType::Single, vec![candidate("a", 1, None)]);
+        assert_eq!(
+            ids(&engine.plan(&s, &r, None, &under).await.unwrap()),
             vec!["a"]
         );
     }

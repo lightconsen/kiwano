@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 16;
+pub const SCHEMA_VERSION: i32 = 17;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -523,6 +523,17 @@ CREATE TABLE IF NOT EXISTS custom_agents (
 );
 "#;
 
+const MIGRATION_V17: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_limits (
+    agent        TEXT PRIMARY KEY,
+    period_limit REAL NOT NULL,
+    limit_unit   TEXT,
+    reset_period TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -743,6 +754,31 @@ pub struct CustomAgent {
     /// Free text: what this route is for. None when the user said nothing.
     pub note: Option<String>,
     pub created_at: String,
+}
+
+/// What one agent may spend, measured over a reset period.
+///
+/// Deliberately a table of its own rather than a column anywhere else: a limit is
+/// not part of a strategy and must hold under every one of them, including
+/// `single` — which is the strategy that otherwise opts out of every ceiling in
+/// the codebase, by design. Keeping it separate is what makes that a decision
+/// about the *limit* rather than an accident of where it was stored.
+///
+/// The columns mirror a provider's billing limit on purpose (`period_limit`,
+/// `limit_unit`, `reset_period`): same three units, same period vocabulary, and
+/// the same `period_start` boundary, so "100 requests a day" means the same thing
+/// wherever it is written. No row for an agent means no limit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentLimit {
+    pub agent: String,
+    pub period_limit: f64,
+    /// `requests` (default), `wan_tokens`, or a 3-letter currency for a money
+    /// limit. None reads as `requests`, the same way a v1 provider row does.
+    pub limit_unit: Option<String>,
+    /// `day` | `week` | `month`, else None for all time.
+    pub reset_period: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// One extra API key of a provider (spec §4.1 P1 multi-key rotation).
@@ -1512,6 +1548,9 @@ impl Store {
         if version < 16 {
             conn.execute_batch(MIGRATION_V16)?;
         }
+        if version < 17 {
+            conn.execute_batch(MIGRATION_V17)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -1808,6 +1847,66 @@ impl Store {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    // ---- agent limits (migration v17) -----------------------------------
+
+    /// Every agent's ceiling, in agent-id order. Read whole rather than by key:
+    /// the evaluator wants all of them, and the screen asks per agent off a list
+    /// it already has.
+    pub fn list_agent_limits(&self) -> Result<Vec<AgentLimit>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT agent, period_limit, limit_unit, reset_period, created_at, updated_at
+             FROM agent_limits ORDER BY agent ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(AgentLimit {
+                    agent: r.get(0)?,
+                    period_limit: r.get(1)?,
+                    limit_unit: r.get(2)?,
+                    reset_period: r.get(3)?,
+                    created_at: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn get_agent_limit(&self, agent: &str) -> Result<Option<AgentLimit>> {
+        Ok(self
+            .list_agent_limits()?
+            .into_iter()
+            .find(|l| l.agent == agent))
+    }
+
+    /// Upsert one agent's limit. `created_at` is preserved across updates so the
+    /// row keeps saying when the ceiling was first set.
+    pub fn set_agent_limit(&self, agent: &str, limit: &AgentLimit) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO agent_limits (agent, period_limit, limit_unit, reset_period, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(agent) DO UPDATE SET
+                 period_limit = ?2, limit_unit = ?3, reset_period = ?4, updated_at = ?5",
+            params![
+                agent,
+                limit.period_limit,
+                limit.limit_unit,
+                limit.reset_period,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_agent_limit(&self, agent: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute("DELETE FROM agent_limits WHERE agent = ?1", params![agent])?;
+        Ok(n > 0)
     }
 
     // ---- user-defined agents (migration v16) ----------------------------

@@ -738,6 +738,18 @@ fn update_agent_strategy(
     Ok(())
 }
 
+/// Set or clear one agent's own spend ceiling. `None` clears it.
+#[tauri::command]
+fn set_agent_limit(
+    state: State<AppState>,
+    agent: String,
+    limit: Option<vm::AgentLimitVm>,
+) -> Result<(), String> {
+    vm::set_agent_limit(&state.store, &agent, limit)?;
+    after_mutation(&state);
+    Ok(())
+}
+
 #[tauri::command]
 fn reorder_agent_bindings(
     state: State<AppState>,
@@ -1116,6 +1128,7 @@ pub fn run() {
             import_cc_switch,
             get_agent_routes,
             update_agent_strategy,
+            set_agent_limit,
             reorder_agent_bindings,
             update_agent_binding,
             add_agent_binding,

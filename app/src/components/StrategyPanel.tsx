@@ -3,7 +3,9 @@
 // nothing when it has no bindings yet); changes take effect immediately via
 // the gateway's /reload.
 import { useState } from "react";
+import { SquarePen } from "lucide-react";
 
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -14,7 +16,12 @@ import {
 } from "@/components/ui/select";
 
 import { api } from "../api/client";
-import { type AgentRef, type AgentRoute, type StrategyKind } from "../api/types";
+import {
+  type AgentLimit,
+  type AgentRef,
+  type AgentRoute,
+  type StrategyKind,
+} from "../api/types";
 import { agentMeta } from "../lib/agents";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import StrategyIcon from "./StrategyIcon";
@@ -157,6 +164,219 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
   );
 }
 
+/** How a stored ceiling reads: "50 CNY / month", "100 requests / day".
+    A limit with no period measures everything it has ever done, which is worth
+    saying out loud rather than leaving as a blank. */
+function formatLimit(t: Translate, limit: AgentLimit): string {
+  const unit =
+    limit.limit_unit === "wan_tokens"
+      ? t("strategy.limitUnitWanTokens")
+      : limit.limit_unit && limit.limit_unit.length === 3
+        ? limit.limit_unit
+        : t("strategy.limitUnitRequests");
+  const period = limit.reset_period ? LIMIT_PERIODS[limit.reset_period] : undefined;
+  return [
+    String(limit.period_limit),
+    unit,
+    period ? t(period) : t("strategy.limitPeriodAll"),
+  ].join(" ");
+}
+
+/** The reset periods a limit can take, and what each reads as. The ids are what
+    the backend stores; `all` is the absence of one. */
+const LIMIT_PERIODS: Record<string, KeyPath<Messages>> = {
+  day: "strategy.limitPeriodDay",
+  weekly: "strategy.limitPeriodWeek",
+  monthly: "strategy.limitPeriodMonth",
+  yearly: "strategy.limitPeriodYear",
+};
+
+/** Where a limit is edited. A dialog rather than an inline field because the
+    readout is one line and the explanation is not: "no price, no count" is the
+    kind of thing that has to be said in a sentence. */
+function LimitDialog({
+  agent,
+  limit,
+  open,
+  onClose,
+  onChanged,
+  currency,
+}: {
+  agent: AgentRef;
+  limit: AgentLimit | null;
+  open: boolean;
+  onClose: () => void;
+  onChanged?: () => void;
+  /** The currency a new money limit is written in. */
+  currency: string;
+}) {
+  const t = useT();
+  const meta = agentMeta(agent);
+  const [unit, setUnit] = useState(limit?.limit_unit ?? "requests");
+  const [value, setValue] = useState(limit ? String(limit.period_limit) : "");
+  const [period, setPeriod] = useState(limit?.reset_period ?? "day");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const amount = Number(value);
+      await api.setAgentLimit(
+        agent,
+        // Blank, zero or unparseable is "no limit" rather than a ceiling of
+        // nothing — the same reading the gateway applies to a stored zero.
+        Number.isFinite(amount) && amount > 0
+          ? {
+              period_limit: amount,
+              limit_unit: unit === "requests" ? null : unit,
+              reset_period: period === "all" ? null : period,
+            }
+          : null,
+      );
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle className="text-[13px]">
+            {t("strategy.limitTitle", { agent: meta.label })}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3 px-5 pb-4 pt-1">
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0}
+              value={value}
+              placeholder={t("strategy.limitPlaceholder")}
+              aria-label={t("strategy.limitAmountAria")}
+              className="h-8 w-28 font-mono text-[12px]"
+              onChange={(e) => setValue(e.target.value)}
+            />
+            <Select value={unit} onValueChange={(v) => setUnit(v ?? "requests")}>
+              <SelectTrigger size="sm" className="h-8 w-[180px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue>
+                  {(v) =>
+                    v === "wan_tokens"
+                      ? t("strategy.limitUnitWanTokens")
+                      : v === "requests"
+                        ? t("strategy.limitUnitRequests")
+                        : String(v ?? "")
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="requests">{t("strategy.limitUnitRequests")}</SelectItem>
+                <SelectItem value="wan_tokens">{t("strategy.limitUnitWanTokens")}</SelectItem>
+                {/* A money ceiling is written in the display currency, because an
+                    agent's traffic spans providers that bill in their own. */}
+                <SelectItem value={currency}>{currency}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={period} onValueChange={(v) => setPeriod(v ?? "all")}>
+              <SelectTrigger size="sm" className="h-8 w-[150px] bg-surface2 text-[11.5px] dark:bg-surface2">
+                <SelectValue>
+                  {(v) =>
+                    v === "all"
+                      ? t("strategy.limitPeriodAll")
+                      : LIMIT_PERIODS[String(v)] && t(LIMIT_PERIODS[String(v)])
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="day">{t("strategy.limitPeriodDay")}</SelectItem>
+                <SelectItem value="weekly">{t("strategy.limitPeriodWeek")}</SelectItem>
+                <SelectItem value="monthly">{t("strategy.limitPeriodMonth")}</SelectItem>
+                <SelectItem value="yearly">{t("strategy.limitPeriodYear")}</SelectItem>
+                <SelectItem value="all">{t("strategy.limitPeriodAll")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-[11px] leading-relaxed text-mut">{t("strategy.limitBody")}</p>
+          <p className="text-[11px] leading-relaxed text-mut">{t("strategy.limitMoneyNote")}</p>
+          {err && <p className="text-[11px] text-red-400">{err}</p>}
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="h-7 px-3 text-[12px] font-semibold" disabled={busy} onClick={save}>
+              {t("common.save")}
+            </Button>
+            {limit && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-3 text-[12px]"
+                disabled={busy}
+                onClick={() => {
+                  setValue("");
+                  setUnit("requests");
+                  setPeriod("day");
+                }}
+              >
+                {t("strategy.limitClear")}
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The agent's own ceiling, as a row of its own under the strategy. Separate
+    because it is separate: it holds under every strategy, `single` included,
+    while the strategy above says only who serves the request. */
+function LimitsRow({
+  agent,
+  limit,
+  currency,
+  onChanged,
+}: {
+  agent: AgentRef;
+  limit: AgentLimit | null;
+  currency: string;
+  onChanged?: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex items-center gap-3 border-b border-line px-4 py-2">
+      <span className="w-[200px] flex-none text-[11px] text-mut">
+        {t("strategy.limitLabel")}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-ink">
+        {limit ? formatLimit(t, limit) : t("strategy.limitNone")}
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
+        aria-label={t("strategy.limitEditAria", { agent: agentMeta(agent).label })}
+        title={t("strategy.limitEditAria", { agent: agentMeta(agent).label })}
+        onClick={() => setOpen(true)}
+      >
+        <SquarePen className="h-3.5 w-3.5" />
+      </Button>
+      <LimitDialog
+        agent={agent}
+        limit={limit}
+        open={open}
+        currency={currency}
+        onClose={() => setOpen(false)}
+        onChanged={onChanged}
+      />
+    </div>
+  );
+}
+
 // One-shot route copy: apply another agent's strategy combo (type + ordered
 // candidates, weights and windows included) onto this agent, replacing its
 // current route. The confirm step is inline — no native dialog — so the
@@ -273,10 +493,13 @@ export default function StrategyPanel({
   agent,
   routes,
   onChanged,
+  currency = "USD",
 }: {
   agent: AgentRef;
   routes: AgentRoute[] | null;
   onChanged?: () => void;
+  /** Display currency, for a money ceiling's unit. */
+  currency?: string;
 }) {
   // Only this tab's agent, and only once it has a route (bindings) to configure
   const mine = routes?.filter((r) => r.agent === agent) ?? null;
@@ -289,6 +512,14 @@ export default function StrategyPanel({
       {mine.map((r) => (
         <RouteRow key={r.agent} route={r} onChanged={() => onChanged?.()} />
       ))}
+      {/* Under the strategy, not inside it: the ceiling holds whatever the
+          strategy says, so it does not belong to any one of them. */}
+      <LimitsRow
+        agent={agent}
+        limit={mine[0]?.limit ?? null}
+        currency={currency}
+        onChanged={onChanged}
+      />
     </section>
   );
 }

@@ -181,6 +181,11 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
                 crate::error::GatewayError::AllOverLimit { agent, .. } => {
                     (Some(agent.clone()), "provider_over_limit")
                 }
+                // Attributed to the agent, because that is who this refusal is
+                // about: the store holds no provider for it.
+                crate::error::GatewayError::AgentOverLimit { agent, .. } => {
+                    (Some(agent.clone()), "agent_over_limit")
+                }
                 _ => (None, "routing_error"),
             };
             let resp = error_into_response(e, inbound);

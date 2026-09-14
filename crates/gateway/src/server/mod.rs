@@ -202,6 +202,10 @@ impl GatewayState {
         // Rebuild prices too: the GUI re-seeds the mirror after a Hub refresh
         // and then reloads, which is how a price update takes effect.
         *self.pricing.write().expect("pricing lock poisoned") = resolve_pricing(&self.store);
+        // And re-evaluate the ceilings: this is the call the app makes after an
+        // edit, and a limit the user just typed should bind the next request
+        // rather than wait up to a tick (30s) for the patrol.
+        crate::limits::publish(self, crate::limits::evaluate(&self.store));
         Ok(agents)
     }
 }
@@ -261,6 +265,9 @@ pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Resp
         // 429 rather than 503: the provider exists and works, the caller has
         // simply spent what it was allowed to for this period.
         GatewayError::AllOverLimit { .. } => (StatusCode::TOO_MANY_REQUESTS, "provider_over_limit"),
+        // Same status as a provider ceiling and its own kind: "this agent has
+        // spent what it was allowed" is a different story to tell a reader.
+        GatewayError::AgentOverLimit { .. } => (StatusCode::TOO_MANY_REQUESTS, "agent_over_limit"),
         // 503, not 502: nothing upstream went wrong, the provider is simply not
         // being asked right now (open, or a recovery probe is already in
         // flight). It clears itself once the breaker's timeout elapses.

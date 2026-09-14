@@ -153,6 +153,66 @@ pub fn period_limit_usage(
     }))
 }
 
+/// Read one agent's own ceiling and how much of it is spent. `None` when there is
+/// no limit worth measuring (no row, or zero/negative).
+///
+/// The same three units a provider's limit takes, measured against the same
+/// period boundaries — but scoped to the agent, across every provider it used.
+/// That is the whole point of a limit here: a route can span providers, and "this
+/// agent may spend ¥50 a day" is a statement about the agent, not about any one of
+/// them.
+pub fn agent_limit_usage(
+    store: &Store,
+    limit: &crate::store::AgentLimit,
+) -> crate::error::Result<Option<PeriodLimit>> {
+    // `is_finite` as well: a NaN would slip through every comparison and
+    // become a ceiling that is never reached.
+    if !limit.period_limit.is_finite() || limit.period_limit <= 0.0 {
+        return Ok(None);
+    }
+    let unit = match limit.limit_unit.as_deref() {
+        Some("wan_tokens") => "wan_tokens",
+        Some(u) if u.len() == 3 => u,
+        _ => "requests",
+    };
+    let (since, period_key) = period_start(
+        Utc::now().timestamp(),
+        limit.reset_period.as_deref(),
+        store.ui_tz_offset_minutes(),
+    );
+    let used = match unit {
+        "wan_tokens" => {
+            let t = store.usage_totals(Some(&limit.agent), None, since.as_deref())?;
+            (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                as f64
+                / 10_000.0
+        }
+        // Converted before it is added, for the reason the provider limits give:
+        // the agent's traffic spans providers, and those bill in different
+        // currencies. The ceiling itself is never converted.
+        u if u.len() == 3 => {
+            let buckets =
+                store.usage_cost_by_currency(Some(&limit.agent), None, since.as_deref())?;
+            kiwano_adapters::model_pricing::convert_cost_buckets(
+                &buckets,
+                u,
+                &store.hub_exchange_rates(),
+            )
+        }
+        _ => {
+            store
+                .usage_totals(Some(&limit.agent), None, since.as_deref())?
+                .requests as f64
+        }
+    };
+    Ok(Some(PeriodLimit {
+        used,
+        limit: limit.period_limit,
+        unit: unit.to_string(),
+        period_key,
+    }))
+}
+
 /// `providers.plan_limits`: percent ceilings on the plan's own windows.
 #[derive(Debug, serde::Deserialize)]
 pub struct PlanLimits {
@@ -245,6 +305,12 @@ impl BlockReason {
 #[derive(Debug, Default)]
 pub struct LimitState {
     blocked: std::collections::HashMap<String, BlockReason>,
+    /// Agents over their own ceiling, keyed by agent id. Kept apart from
+    /// `blocked` because the two answer different questions: that one is "this
+    /// provider has spent what it was allowed", this one is "this agent has". A
+    /// provider being blocked routes around it; an agent being over its own
+    /// ceiling is the end of the request.
+    agents_over: std::collections::HashMap<String, BlockReason>,
     /// The user's UTC offset, carried along so the routing path can work out
     /// what "today" means without reading settings on every request. It rides
     /// the snapshot, so it is at worst one refresh interval stale — and it
@@ -262,6 +328,16 @@ impl LimitState {
         self.tz_offset_minutes
     }
 
+    /// Whether this agent has spent its own allowance. Read by route selection
+    /// before any strategy gets a say.
+    pub fn agent_blocked(&self, agent: &str) -> Option<&BlockReason> {
+        self.agents_over.get(agent)
+    }
+
+    pub fn agents_over_entries(&self) -> impl Iterator<Item = (&str, &BlockReason)> {
+        self.agents_over.iter().map(|(a, r)| (a.as_str(), r))
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (&str, &BlockReason)> {
         self.blocked.iter().map(|(id, r)| (id.as_str(), r))
     }
@@ -272,6 +348,17 @@ impl LimitState {
     pub fn from_reasons(reasons: impl IntoIterator<Item = (String, BlockReason)>) -> Self {
         LimitState {
             blocked: reasons.into_iter().collect(),
+            agents_over: std::collections::HashMap::new(),
+            tz_offset_minutes: 0,
+        }
+    }
+
+    /// A snapshot with exactly these agents over their own ceiling.
+    #[cfg(test)]
+    pub fn with_agents_over(reasons: impl IntoIterator<Item = (String, BlockReason)>) -> Self {
+        LimitState {
+            blocked: std::collections::HashMap::new(),
+            agents_over: reasons.into_iter().collect(),
             tz_offset_minutes: 0,
         }
     }
@@ -355,8 +442,38 @@ pub fn evaluate(store: &Store) -> LimitState {
             }
         }
     }
+    // An agent's own ceiling, measured across every provider it used. Read here
+    // rather than per request so the routing path stays a snapshot lookup, the
+    // same reason the provider limits are computed on this tick.
+    let mut agents_over = std::collections::HashMap::new();
+    match store.list_agent_limits() {
+        Ok(limits) => {
+            for limit in limits {
+                match agent_limit_usage(store, &limit) {
+                    Ok(Some(pl)) if pl.used >= pl.limit => {
+                        agents_over.insert(
+                            limit.agent,
+                            BlockReason::Spend {
+                                used: pl.used,
+                                limit: pl.limit,
+                                unit: pl.unit,
+                            },
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(
+                        agent = %limit.agent,
+                        error = %e,
+                        "agent limit not evaluated this tick; the agent stays routable"
+                    ),
+                }
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "agent limits unreadable; none enforced"),
+    }
     LimitState {
         blocked,
+        agents_over,
         tz_offset_minutes,
     }
 }
@@ -444,26 +561,49 @@ pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
         .await;
 
         if let Ok(next) = evaluated {
-            let prev = state.limits();
-            let current = state.set_limits(next);
-            // Transitions only: this is the line that answers "why did my
-            // request start failing?" without a per-tick heartbeat.
-            for (id, reason) in current.entries() {
-                if prev.blocked(id).is_none() {
-                    tracing::warn!(
-                        provider = %id,
-                        reason = %reason.describe(),
-                        "provider is over its limit; routing around it"
-                    );
-                }
-            }
-            for (id, _) in prev.entries() {
-                if current.blocked(id).is_none() {
-                    tracing::info!(provider = %id, "provider is back under its limit");
-                }
-            }
+            publish(&state, next);
         }
         tokio::time::sleep(interval).await;
+    }
+}
+
+/// Install a fresh evaluation, logging only the transitions — the line that
+/// answers "why did my request start failing?" without a per-tick heartbeat.
+///
+/// Shared with the reload path on purpose: an edit is the most likely cause of a
+/// transition, and a refresh that reported nothing would leave the one change the
+/// user just made as the only silent one.
+pub fn publish(state: &GatewayState, next: LimitState) {
+    let prev = state.limits();
+    let current = state.set_limits(next);
+    for (id, reason) in current.entries() {
+        if prev.blocked(id).is_none() {
+            tracing::warn!(
+                provider = %id,
+                reason = %reason.describe(),
+                "provider is over its limit; routing around it"
+            );
+        }
+    }
+    for (id, _) in prev.entries() {
+        if current.blocked(id).is_none() {
+            tracing::info!(provider = %id, "provider is back under its limit");
+        }
+    }
+    // An agent's own ceiling has no "around it" to describe: the request ends.
+    for (agent, reason) in current.agents_over_entries() {
+        if prev.agent_blocked(agent).is_none() {
+            tracing::warn!(
+                agent = %agent,
+                reason = %reason.describe(),
+                "agent is over its own limit; requests will be refused"
+            );
+        }
+    }
+    for (agent, _) in prev.agents_over_entries() {
+        if current.agent_blocked(agent).is_none() {
+            tracing::info!(agent = %agent, "agent is back under its own limit");
+        }
     }
 }
 
@@ -669,6 +809,101 @@ mod tests {
                 cost_off_peak: None,
             })
             .unwrap();
+    }
+
+    /// A cost row attributed to a named agent — `record_cost` is always claude,
+    /// and the point of an agent limit is that it is one agent's number.
+    fn record_agent_cost(store: &Store, agent: &str, provider_id: &str, cost: f64, currency: &str) {
+        use crate::store::UsageRecord;
+        store
+            .record_usage(&UsageRecord {
+                ts: crate::store::now_rfc3339(),
+                agent: agent.into(),
+                provider_id: provider_id.into(),
+                model: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: Some(cost),
+                cost_currency: Some(currency.into()),
+                cost_off_peak: None,
+            })
+            .unwrap();
+    }
+
+    fn agent_limit(
+        agent: &str,
+        limit: f64,
+        unit: Option<&str>,
+        period: Option<&str>,
+    ) -> crate::store::AgentLimit {
+        crate::store::AgentLimit {
+            agent: agent.into(),
+            period_limit: limit,
+            limit_unit: unit.map(str::to_string),
+            reset_period: period.map(str::to_string),
+            created_at: crate::store::now_rfc3339(),
+            updated_at: crate::store::now_rfc3339(),
+        }
+    }
+
+    /// An agent's ceiling belongs to the agent, not to any one provider: a route
+    /// spans providers, so the number is the sum across them — and another
+    /// agent's traffic is not part of it. That second half is the whole reason
+    /// this is not just the provider limit again.
+    #[test]
+    fn an_agent_limit_sums_its_providers_and_ignores_other_agents() {
+        let (_dir, store) = store_with_hub_rates(r#"{"USD":1.0,"CNY":2.0}"#);
+        for id in ["ds-1", "kimi-1"] {
+            store.insert_provider(&test_provider(id)).unwrap();
+        }
+        record_agent_cost(&store, "claude", "ds-1", 10.0, "USD");
+        record_agent_cost(&store, "claude", "kimi-1", 5.0, "CNY");
+        record_agent_cost(&store, "codex", "ds-1", 99.0, "USD");
+
+        let limit = agent_limit("claude", 50.0, Some("CNY"), Some("monthly"));
+        store.set_agent_limit("claude", &limit).unwrap();
+
+        // 10 USD at the cached 2 CNY/USD, plus 5 CNY — converted before it sums,
+        // the same way a provider's money limit does it, and the codex row is
+        // simply not this agent's.
+        let pl = agent_limit_usage(&store, &limit).unwrap().unwrap();
+        assert!((pl.used - 25.0).abs() < 1e-6, "got {}", pl.used);
+        assert_eq!(pl.unit, "CNY");
+
+        // The measurement is not the gate; `evaluate` is what turns it into one.
+        assert!(
+            evaluate(&store).agent_blocked("claude").is_none(),
+            "under the ceiling"
+        );
+        record_agent_cost(&store, "claude", "ds-1", 20.0, "USD");
+        let state = evaluate(&store);
+        let reason = state
+            .agent_blocked("claude")
+            .expect("40 USD is past a 50 CNY ceiling");
+        assert!(reason.describe().contains("CNY"), "{}", reason.describe());
+        assert!(
+            state.agent_blocked("codex").is_none(),
+            "the other agent's spend is not this agent's"
+        );
+    }
+
+    /// No row is no ceiling; a zero limit is not a ceiling of zero. Same rule a
+    /// provider's `period_limit` follows, so "0" cannot mean "refuse everything".
+    #[test]
+    fn an_absent_or_zero_agent_limit_measures_nothing() {
+        let (_dir, store) = store_with_hub_rates(r#"{"USD":1.0}"#);
+        assert!(store.get_agent_limit("claude").unwrap().is_none());
+
+        let zero = agent_limit("claude", 0.0, None, None);
+        assert!(agent_limit_usage(&store, &zero).unwrap().is_none());
+
+        // A stored zero row is still no ceiling, and does not block.
+        store.set_agent_limit("claude", &zero).unwrap();
+        assert!(evaluate(&store).agent_blocked("claude").is_none());
     }
 
     fn store_with_spend(provider_id: &str, limit: f64, spent: f64) -> Store {

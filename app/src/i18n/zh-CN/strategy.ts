@@ -34,4 +34,25 @@ export const strategy = {
   pickAgent: "选择 Agent",
   candidateOne: "{agent} · {count} 个候选",
   candidateOther: "{agent} · {count} 个候选",
+
+
+  // ── Agent 自身的限额（独立一行，位于策略下方）──
+  limitLabel: "限额",
+  limitNone: "不限",
+  limitEditAria: "编辑 {agent} 的限额",
+  limitTitle: "{agent} 的限额",
+  limitPlaceholder: "不限",
+  limitAmountAria: "限额数值",
+  limitClear: "清除",
+  limitUnitRequests: "次请求",
+  limitUnitWanTokens: "万 tokens",
+  limitPeriodDay: "每天",
+  limitPeriodWeek: "每周",
+  limitPeriodMonth: "每月",
+  limitPeriodYear: "每年",
+  limitPeriodAll: "累计",
+  limitBody:
+    "统计该 Agent 在所有 Provider 上的用量，并在任何策略下生效 —— 包括 single：它的「只有主选」说的是不做故障转移，不是可以不限额。额度用尽后，该 Agent 的请求会被拒绝，直到周期重置。",
+  limitMoneyNote:
+    "金额限额只统计价目表能定价的请求。模型没有公开价格时，请求仍会计量但算不出金额，因此不计入额度。",
 };

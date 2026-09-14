@@ -1194,6 +1194,119 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
     assert!(message.contains("key=[REDACTED]"), "{message}");
 }
 
+/// An agent's own ceiling stops the request before a provider is chosen, and it
+/// holds under `single` — the default strategy, and the one that otherwise opts
+/// out of every provider-level ceiling. Reaching the provider anyway would mean
+/// the limit only applies to people who chose a non-default strategy.
+#[tokio::test]
+async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, hits) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    store
+        .upsert_strategy("claude", StrategyType::Single, None)
+        .unwrap();
+    // A ceiling of one request a day, with the day's one request already spent.
+    let now = now_rfc3339();
+    store
+        .set_agent_limit(
+            "claude",
+            &kiwanod::store::AgentLimit {
+                agent: "claude".into(),
+                period_limit: 1.0,
+                limit_unit: None,
+                reset_period: Some("day".into()),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+        )
+        .unwrap();
+    store
+        .record_usage(&kiwanod::store::UsageRecord {
+            ts: now,
+            agent: "claude".into(),
+            provider_id: "p-ant".into(),
+            model: Some("m".into()),
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: Some(1),
+            status: "ok".into(),
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+        })
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    // The snapshot the routing path reads, as the evaluation task would publish it.
+    state.set_limits(kiwanod::limits::evaluate(&state.store));
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        hits.lock().unwrap().is_empty(),
+        "the limit is checked before a provider is chosen, not after"
+    );
+
+    let body = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(
+        body.contains("over its own limit"),
+        "the refusal says whose limit it is: {body}"
+    );
+
+    // Its own kind, so a reader can tell the agent's ceiling from a provider's.
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(
+        rows.first().and_then(|r| r.error_kind.as_deref()),
+        Some("agent_over_limit")
+    );
+
+    // Raise the ceiling and the same request goes through: the gate is the limit
+    // being reached, not the presence of one.
+    state
+        .store
+        .set_agent_limit(
+            "claude",
+            &kiwanod::store::AgentLimit {
+                agent: "claude".into(),
+                period_limit: 100.0,
+                limit_unit: None,
+                reset_period: Some("day".into()),
+                created_at: now_rfc3339(),
+                updated_at: now_rfc3339(),
+            },
+        )
+        .unwrap();
+    state.set_limits(kiwanod::limits::evaluate(&state.store));
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!hits.lock().unwrap().is_empty(), "and now it is asked");
+}
+
 /// A non-streaming response is held whole — metered, logged, and on the
 /// conversion path rewritten — so it has a ceiling. Past it the request fails
 /// with a message that says which limit it hit, rather than being buffered at

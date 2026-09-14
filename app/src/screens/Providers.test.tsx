@@ -13,7 +13,14 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/i18n/en";
-import type { AgentDetect, AgentRoute, AppSettings, CustomAgent, Provider } from "@/api/types";
+import type {
+  AgentDetect,
+  AgentLimit,
+  AgentRoute,
+  AppSettings,
+  CustomAgent,
+  Provider,
+} from "@/api/types";
 
 import Providers from "./Providers";
 
@@ -31,6 +38,7 @@ const { apiMock } = vi.hoisted(() => ({
     setTakeover: vi.fn(),
     applyAgentRoute: vi.fn(),
     updateAgentStrategy: vi.fn(),
+    setAgentLimit: vi.fn(),
     deleteProvider: vi.fn(),
     addCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
@@ -63,12 +71,15 @@ function deepseek(over: Partial<Provider> = {}): Provider {
   };
 }
 
-/** codex's stored route with the given candidates, as `getAgentRoutes` answers it. */
-function codexRoute(providerIds: string[]): AgentRoute {
+/** codex's stored route with the given candidates, as `getAgentRoutes` answers it.
+    `limit` rides the route because that is the fetch the tab already makes — it
+    is not part of the strategy, and passes through here untouched. */
+function codexRoute(providerIds: string[], limit: AgentLimit | null = null): AgentRoute {
   return {
     agent: "codex",
     strategy: "single",
     config: null,
+    limit,
     bindings: providerIds.map((id, i) => ({
       provider_id: id,
       provider_name: "DeepSeek",
@@ -119,6 +130,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.getGatewayStatus.mockResolvedValue({ running: true, port: 8317, blocked: [] });
   apiMock.removeAgentBinding.mockResolvedValue(undefined);
+  apiMock.setAgentLimit.mockResolvedValue(undefined);
 });
 
 describe("an agent tab", () => {
@@ -423,6 +435,7 @@ describe("deleting a provider that is in a route", () => {
       agent: "codex",
       strategy: "single",
       config: null,
+      limit: null,
       bindings: providers.map(([id, name], i) => ({
         provider_id: id,
         provider_name: name,
@@ -577,5 +590,63 @@ describe("the refresh button", () => {
 
     await waitFor(() => expect(apiMock.listProviders).toHaveBeenCalledTimes(2));
     expect(onRedetect).not.toHaveBeenCalled();
+  });
+});
+
+// The agent's own ceiling. Its own row is the point — the strategy above says who
+// serves the request, not how much may be spent — so what is asserted here is that
+// the row reads the stored limit, and that the dialog writes it back.
+describe("the agent's own limit", () => {
+  it("reads out the stored ceiling", async () => {
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [
+        codexRoute(["deepseek"], {
+          period_limit: 50,
+          limit_unit: "CNY",
+          reset_period: "monthly",
+        }),
+      ],
+      codexTakenOver: true,
+    });
+
+    expect(await screen.findByText(en.strategy.limitLabel)).toBeInTheDocument();
+    expect(screen.getByText("50 CNY per month")).toBeInTheDocument();
+  });
+
+  it("says no limit rather than showing a blank", async () => {
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    expect(await screen.findByText(en.strategy.limitNone)).toBeInTheDocument();
+  });
+
+  it("saves the value the dialog holds", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    await user.click(
+      await screen.findByLabelText(
+        en.strategy.limitEditAria.replace("{agent}", "Codex"),
+      ),
+    );
+    await user.type(await screen.findByLabelText(en.strategy.limitAmountAria), "25");
+    await user.click(screen.getByRole("button", { name: en.common.save }));
+
+    // The defaults the dialog opens with: counted in requests, per day.
+    await waitFor(() =>
+      expect(apiMock.setAgentLimit).toHaveBeenCalledWith("codex", {
+        period_limit: 25,
+        limit_unit: null,
+        reset_period: "day",
+      }),
+    );
   });
 });

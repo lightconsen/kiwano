@@ -20,6 +20,13 @@ pub enum GatewayError {
     #[error("every provider for agent `{agent}` is over its limit: {reasons}")]
     AllOverLimit { agent: String, reasons: String },
 
+    /// The agent has spent its own allowance for the period. Distinct from
+    /// `AllOverLimit`, which is about a provider's ceiling: here the agent's
+    /// limit is spent, and no provider choice would change that — spending more
+    /// elsewhere is exactly what the limit exists to prevent.
+    #[error("agent `{agent}` is over its own limit ({reason})")]
+    AgentOverLimit { agent: String, reason: String },
+
     /// The provider's breaker is not admitting requests: it is open, or another
     /// request already holds the single HalfOpen probe permit. Distinct from
     /// `Upstream` on purpose — nothing was sent, and sending again right now is

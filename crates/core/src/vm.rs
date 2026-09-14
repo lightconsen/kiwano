@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kiwanod::store::{
-    Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry,
+    AgentLimit, Billing, Binding, HealthRecord, Provider, RequestLogDetail, RequestLogEntry,
     RequestLogExportRow, RequestLogFilter, Store, Strategy, StrategyType, UsageTotals,
     EXPORT_ROW_CAP,
 };
@@ -1444,6 +1444,32 @@ pub struct AgentRouteVm {
     pub config: Option<String>,
     /// Candidates in ascending priority order (index 0 = primary)
     pub bindings: Vec<BindingVm>,
+    /// The agent's own ceiling, if it has one. Not part of the strategy — it
+    /// holds under every one of them — but read with the route because that is
+    /// the fetch the agent's tab already makes.
+    #[serde(default)]
+    pub limit: Option<AgentLimitVm>,
+}
+
+/// One agent's spend ceiling, as the Apps screen edits it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentLimitVm {
+    pub period_limit: f64,
+    /// `requests` (default), `wan_tokens`, or a 3-letter currency code.
+    pub limit_unit: Option<String>,
+    /// `day` | `weekly` | `monthly` | `yearly`, else None for all time.
+    pub reset_period: Option<String>,
+}
+
+impl AgentLimitVm {
+    /// Read a stored row as the screen sees it.
+    pub fn from_store(limit: Option<AgentLimit>) -> Option<Self> {
+        limit.map(|l| AgentLimitVm {
+            period_limit: l.period_limit,
+            limit_unit: l.limit_unit,
+            reset_period: l.reset_period,
+        })
+    }
 }
 
 /// One row per Agent (only agents with bindings); strategy defaults to single.
@@ -1490,11 +1516,43 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
         routes.push(AgentRouteVm {
             strategy: strategy.kind.as_str().to_string(),
             config: strategy.config,
+            limit: AgentLimitVm::from_store(store.get_agent_limit(&agent).map_err(e2s)?),
             agent,
             bindings,
         });
     }
     Ok(routes)
+}
+
+/// Set or clear one agent's own ceiling. `None` clears it — an absent row is the
+/// absence of a limit, which is what the gateway reads as "no ceiling".
+pub fn set_agent_limit(
+    store: &Store,
+    agent: &str,
+    limit: Option<AgentLimitVm>,
+) -> Result<(), String> {
+    let Some(limit) = limit else {
+        store.delete_agent_limit(agent).map_err(e2s)?;
+        return Ok(());
+    };
+    // A ceiling of zero is not a ceiling of nothing: the gateway reads it as "no
+    // limit at all" (see `limits::agent_limit_usage`), so storing one would show
+    // the user a limit that does not exist. Clear instead, and let the screen say
+    // so by showing no limit. `is_finite` first, for the reason the quota config
+    // does it: a NaN compares false against everything.
+    if !limit.period_limit.is_finite() || limit.period_limit <= 0.0 {
+        store.delete_agent_limit(agent).map_err(e2s)?;
+        return Ok(());
+    }
+    let row = AgentLimit {
+        agent: agent.to_string(),
+        period_limit: limit.period_limit,
+        limit_unit: limit.limit_unit,
+        reset_period: limit.reset_period,
+        created_at: kiwanod::store::now_rfc3339(),
+        updated_at: kiwanod::store::now_rfc3339(),
+    };
+    store.set_agent_limit(agent, &row).map_err(e2s)
 }
 
 /// Update an Agent's strategy type (+ optional JSON config); unknown types error.
@@ -5197,6 +5255,85 @@ mod tests {
         // And the screen reads back what it wrote.
         let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
         assert_eq!(reread.stream_idle_secs, 45);
+    }
+
+    // The screen's half of an agent limit: what it writes is what the gateway
+    // measures. The zero case is the one worth pinning — a stored zero would read
+    // to the user as a ceiling while the gateway reads it as no ceiling at all.
+    #[test]
+    fn an_agent_limit_round_trips_and_a_zero_clears_it() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let agent = "claude";
+
+        let p = provider("ds-1", "DeepSeek", Billing::Metered);
+        s.insert_provider(&p).unwrap();
+        s.upsert_binding(&Binding {
+            agent: agent.into(),
+            provider_id: p.id.clone(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+
+        let route = |s: &Store| {
+            build_agent_routes(s)
+                .unwrap()
+                .into_iter()
+                .find(|r| r.agent == agent)
+                .expect("the agent has a binding")
+        };
+        assert!(route(&s).limit.is_none(), "no row is no ceiling");
+
+        let limit = AgentLimitVm {
+            period_limit: 50.0,
+            limit_unit: Some("CNY".into()),
+            reset_period: Some("monthly".into()),
+        };
+        set_agent_limit(&s, agent, Some(limit.clone())).unwrap();
+        assert_eq!(
+            route(&s).limit,
+            Some(limit.clone()),
+            "the route carries it back"
+        );
+
+        // Zero is the absence of a limit, not a ceiling of nothing: it clears the
+        // row rather than storing something the gateway would ignore.
+        set_agent_limit(
+            &s,
+            agent,
+            Some(AgentLimitVm {
+                period_limit: 0.0,
+                limit_unit: None,
+                reset_period: None,
+            }),
+        )
+        .unwrap();
+        assert!(route(&s).limit.is_none());
+        assert!(s.get_agent_limit(agent).unwrap().is_none());
+
+        // And what the gateway reads is the same row, not a second copy.
+        set_agent_limit(&s, agent, Some(limit)).unwrap();
+        assert_eq!(
+            s.get_agent_limit(agent).unwrap().unwrap().period_limit,
+            50.0
+        );
+
+        // Explicitly clearing is the same shape as saving zero.
+        set_agent_limit(&s, agent, None).unwrap();
+        assert!(s.get_agent_limit(agent).unwrap().is_none());
+
+        // A screen that was never asked about limits still builds.
+        assert_eq!(
+            build_settings_with_home(&s, &aux, tmp.path())
+                .unwrap()
+                .language,
+            "system"
+        );
     }
 
     #[test]

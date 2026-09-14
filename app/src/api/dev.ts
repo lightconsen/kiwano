@@ -1,6 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent, PromptLatency } from "./types";
+import type { AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent, PromptLatency } from "./types";
 import { AGENTS } from "./types";
 // The same formatter the screens print with: a fixture that formats its own
 // tokens is a fixture that can disagree with the page about how they read.
@@ -676,12 +676,14 @@ const agentRoutes: AgentRoute[] = [
     strategy: "failover",
     config: null,
     bindings: [bind("deepseek", 0), bind("kimi", 1)],
+    limit: null,
   },
   {
     agent: "codex",
     strategy: "single",
     config: null,
     bindings: [bind("deepseek", 0)],
+    limit: null,
   },
   {
     // A user-defined agent: a route like any other, over its own key.
@@ -689,6 +691,7 @@ const agentRoutes: AgentRoute[] = [
     strategy: "failover",
     config: null,
     bindings: [bind("deepseek", 0), bind("kimi", 1)],
+    limit: null,
   },
   {
     // Kimi heads opencode (globally "In use") while standing by in claude's
@@ -697,6 +700,7 @@ const agentRoutes: AgentRoute[] = [
     strategy: "single",
     config: null,
     bindings: [bind("kimi", 0)],
+    limit: null,
   },
   {
     // Overnight window on the standby exercises the timewindow wraparound path.
@@ -704,6 +708,7 @@ const agentRoutes: AgentRoute[] = [
     strategy: "timewindow",
     config: null,
     bindings: [bind("deepseek", 0), bind("ollama", 1, ["22:00", "06:00"])],
+    limit: null,
   },
 ];
 
@@ -713,7 +718,7 @@ function strategyOf(agent: AgentId): AgentRoute {
   // Settings without a pre-seeded route behave identically.
   let route = agentRoutes.find((r) => r.agent === agent);
   if (!route) {
-    route = { agent, strategy: "single", config: null, bindings: [] };
+    route = { agent, strategy: "single", config: null, bindings: [], limit: null };
     agentRoutes.push(route);
   }
   return route;
@@ -1233,7 +1238,13 @@ export const devApi: KiwanoApi = {
     created.placeholder_key = `kw-ag-${created.id}-${Math.random().toString(16).slice(2, 6)}`;
     settings.custom_agents = [...settings.custom_agents, created];
     // A route with the same default as the backend's: single, no candidates yet.
-    agentRoutes.push({ agent: created.id, strategy: "single", config: null, bindings: [] });
+    agentRoutes.push({
+      agent: created.id,
+      strategy: "single",
+      config: null,
+      bindings: [],
+      limit: null,
+    });
     return structuredClone(created);
   },
 
@@ -1375,6 +1386,15 @@ export const devApi: KiwanoApi = {
       .map((r) => ({ ...r, bindings: r.bindings.map((b) => ({ ...b })) }));
   },
 
+  async setAgentLimit(agent: AgentId, limit: AgentLimit | null): Promise<void> {
+    await delay();
+    // Zero is the absence of a limit rather than a ceiling of nothing, mirroring
+    // vm::set_agent_limit — a fixture that stored it would show a limit the
+    // gateway would not enforce.
+    const r = strategyOf(agent);
+    r.limit = limit && limit.period_limit > 0 ? limit : null;
+  },
+
   async updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void> {
     await delay();
     strategyOf(agent).strategy = strategy;
@@ -1455,6 +1475,9 @@ export const devApi: KiwanoApi = {
       strategy: src.strategy,
       config: src.config,
       bindings: src.bindings.map((b) => ({ ...b })),
+      // The ceiling is the agent's own, not part of the route being copied:
+      // inheriting someone else's budget is not what "copy this route" means.
+      limit: existing?.limit ?? null,
     };
     const i = agentRoutes.findIndex((r) => r.agent === target);
     if (i >= 0) agentRoutes[i] = copy;

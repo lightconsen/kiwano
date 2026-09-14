@@ -2,7 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentId, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentDetect, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -86,6 +86,8 @@ export const tauriApi: KiwanoApi = {
 
   getAgentRoutes: () => invoke<AgentRoute[]>("get_agent_routes"),
 
+  setAgentLimit: (agent: AgentRef, limit: AgentLimit | null) =>
+    invoke<void>("set_agent_limit", { agent, limit }),
   updateAgentStrategy: (agent: AgentId, strategy: StrategyKind, config?: string | null) =>
     invoke<void>("update_agent_strategy", { agent, strategy, config: config ?? null }),
 

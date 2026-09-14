@@ -871,10 +871,10 @@ pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         SettingsCmd::Get => {
             let settings = {
-                let (store, aux) = (ctx.store()?, ctx.aux()?);
+                let aux = ctx.aux()?;
                 // The home-taking form: `build_settings` would resolve $HOME
                 // itself, ignoring --home and reporting on the wrong tree.
-                vm::build_settings_with_home(store, aux, &ctx.home)?
+                vm::build_settings_with_home(aux, &ctx.home)?
             };
             let text = render_settings(&settings);
             ctx.out.emit(&settings, || text);

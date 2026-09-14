@@ -509,7 +509,7 @@ fn get_dashboard(
 
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> Result<vm::SettingsVm, String> {
-    vm::build_settings(&state.store, &state.aux)
+    vm::build_settings(&state.aux)
 }
 
 #[tauri::command]

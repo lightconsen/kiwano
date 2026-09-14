@@ -2129,8 +2129,8 @@ pub fn ui_settings(aux: &Aux) -> SettingsVm {
     s
 }
 
-pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
-    build_settings_with_home(store, aux, &kiwano_adapters::config::get_home_dir())
+pub fn build_settings(aux: &Aux) -> Result<SettingsVm, String> {
+    build_settings_with_home(aux, &kiwano_adapters::config::get_home_dir())
 }
 
 /// [`build_settings`] against an explicit home directory.
@@ -2139,39 +2139,31 @@ pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
 /// has to say which tree to read. Production passes `$HOME`; tests pass a temp
 /// root, which is what keeps "is claude taken over" from depending on whether
 /// the developer running the suite happens to have taken claude over.
-pub fn build_settings_with_home(
-    store: &Store,
-    aux: &Aux,
-    home: &std::path::Path,
-) -> Result<SettingsVm, String> {
+pub fn build_settings_with_home(aux: &Aux, home: &std::path::Path) -> Result<SettingsVm, String> {
     let mut s: SettingsVm = ui_settings(aux);
-    // One read for the whole list: the placeholder_keys table is an input to
-    // the answer, never the answer itself (see the takeover module's honesty
-    // rules) — a key row can outlive its rewrite, and a rewrite can outlive a
-    // rolled-back key registration.
-    let keys = store.list_placeholder_keys().map_err(e2s)?;
+    // A takeover *is* its rewrite: the agent's own config carries our
+    // placeholder key, which is also how its requests get attributed. Neither
+    // of the other two possible claims counts here — not the `placeholder_keys`
+    // table (a row can outlive its rewrite), and not the backup (it is the
+    // escape hatch, and it outlives the rewrite by design). Counting the backup
+    // answered "is this agent ours?" with "we could undo a takeover", which is
+    // how an agent reads as taken over while its traffic goes straight to its
+    // own provider — and its provider reads as in use.
     s.takeovers = AGENTS
         .iter()
         .map(|(agent, label)| {
-            let live = crate::takeover::live_placeholder_key(agent, home);
-            let enabled = live.is_some() || crate::takeover::restorable_backup(aux, agent);
-            let key = live.or_else(|| {
-                keys.iter()
-                    .find(|k| k.agent == *agent)
-                    .map(|k| k.key.clone())
-            });
-            Ok(TakeoverVm {
+            let key = crate::takeover::live_placeholder_key(agent, home);
+            TakeoverVm {
                 agent: agent.to_string(),
                 label: label.to_string(),
-                enabled,
-                // Not reported when nothing is ours: the UI shows this key and
-                // lets the user copy it, so a leftover row must not appear as a
-                // live credential.
-                placeholder_key: key.filter(|_| enabled),
+                // The key is read out of the file, never out of the table, so
+                // what the UI offers to copy is what the agent actually sends.
+                enabled: key.is_some(),
+                placeholder_key: key,
                 additive: ADDITIVE_AGENTS.contains(agent),
-            })
+            }
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect();
     Ok(s)
 }
 
@@ -2218,7 +2210,7 @@ pub fn update_settings(
         }
         store.save_log_config(&cfg).map_err(e2s)?;
     }
-    build_settings(store, aux)
+    build_settings(aux)
 }
 
 // ── Request logs (request_logs + request_bodies, migration V5) ──
@@ -4748,7 +4740,7 @@ mod tests {
         // takeover state comes from the live files, so `$HOME` would otherwise
         // decide what these assertions see.
         let tmp = tempfile::tempdir().unwrap();
-        let v0 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v0 = build_settings_with_home(&aux, tmp.path()).unwrap();
         assert_eq!(v0.language, "system");
         assert!(v0.takeovers.iter().all(|t| !t.enabled));
 
@@ -4761,12 +4753,12 @@ mod tests {
         // The stored blob now holds a key the struct no longer declares. It has
         // to parse anyway: a failed parse falls back to every default at once,
         // which would silently reset the reader's whole settings page.
-        let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let reread = build_settings_with_home(&aux, tmp.path()).unwrap();
         assert_eq!(reread.language, "en", "an old key is ignored, not fatal");
         // takeovers untouched by patch (read against the temp home, like every
         // other assertion here — `update_settings` builds its answer against
         // the process home, which this test must not depend on)
-        let after_patch = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let after_patch = build_settings_with_home(&aux, tmp.path()).unwrap();
         assert!(after_patch.takeovers.iter().all(|t| !t.enabled));
 
         // no ~/.claude/settings.json → rejected and no key left behind
@@ -4781,7 +4773,7 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
         set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
-        let v2 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v2 = build_settings_with_home(&aux, tmp.path()).unwrap();
         let claude = v2.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(claude.enabled);
         assert!(claude
@@ -4795,7 +4787,7 @@ mod tests {
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
         set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
-        let v3 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v3 = build_settings_with_home(&aux, tmp.path()).unwrap();
         assert!(
             !v3.takeovers
                 .iter()
@@ -4823,7 +4815,7 @@ mod tests {
                 s.delete_placeholder_key(&k.key).unwrap();
             }
         }
-        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&aux, tmp.path()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(
             claude.enabled,
@@ -4842,7 +4834,7 @@ mod tests {
         aux.delete_takeover_backup("claude").unwrap();
         s.upsert_placeholder_key("kw-ag-claude-orphan", "claude")
             .unwrap();
-        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&aux, tmp.path()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(
             !claude.enabled,
@@ -4907,6 +4899,70 @@ mod tests {
             assert!(vm.agents.is_empty(), "{id} still claims an agent");
             assert!(!vm.is_current, "{id} still reads as in use");
         }
+    }
+
+    /// The state that prompted this: an agent Kiwano still holds a takeover
+    /// backup and a placeholder-key row for, whose config another tool has since
+    /// rewritten to point at the provider directly. It reads as *not* taken
+    /// over, because nothing of ours is in the file — a toggle that said
+    /// otherwise claimed traffic the gateway never sees, and the provider list
+    /// (rightly) showed the provider unbound.
+    #[test]
+    fn a_config_reverted_behind_our_back_is_not_taken_over() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let settings = tmp.path().join(".claude").join("settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_AUTH_TOKEN":"sk-real"}}"#,
+        )
+        .unwrap();
+        s.insert_provider(&provider("p1", "Relay", Billing::Metered))
+            .unwrap();
+        s.upsert_strategy("claude", StrategyType::Single, None)
+            .unwrap();
+        s.upsert_binding(&Binding {
+            agent: "claude".into(),
+            provider_id: "p1".into(),
+            priority: 0,
+            weight: 1,
+            win_start: None,
+            win_end: None,
+            enabled: true,
+        })
+        .unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
+        assert!(crate::takeover::live_placeholder_key("claude", tmp.path()).is_some());
+
+        // Another tool puts the agent's own config back. The backup row and the
+        // key row stay — Kiwano has no way to know it was not us, and nothing
+        // here pretends it did.
+        let reverted = r#"{"env":{"ANTHROPIC_BASE_URL":"https://api.deepseek.com/anthropic","ANTHROPIC_AUTH_TOKEN":"sk-other"}}"#;
+        std::fs::write(&settings, reverted).unwrap();
+        assert!(aux.load_takeover_backup("claude").is_some());
+        assert!(s
+            .list_placeholder_keys()
+            .unwrap()
+            .iter()
+            .any(|k| k.agent == "claude"));
+
+        let v = build_settings_with_home(&aux, tmp.path()).unwrap();
+        let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
+        assert!(!claude.enabled, "the file no longer routes through us");
+        assert!(claude.placeholder_key.is_none());
+        // …and the provider list agrees: the binding is still in the store, but
+        // nothing of ours is serving it.
+        let vms = build_provider_vms(&s, &aux, tmp.path()).unwrap();
+        assert!(vms.iter().all(|p| p.agents.is_empty() && !p.is_current));
+
+        // Taking it over again captures what is there *now*: the stale backup
+        // would otherwise be what restore writes back, over a config this
+        // takeover is not replacing.
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), reverted);
     }
 
     #[test]

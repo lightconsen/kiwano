@@ -24,10 +24,15 @@
 //! Three things can claim a takeover: this module's backup row, the
 //! `placeholder_keys` table, and the agent's live config. They can disagree —
 //! a rolled-back key registration over a rewritten config, a delete that
-//! failed, a `~/.codex` restored by hand — so **state is derived from
-//! evidence, never from the key table**: [`live_placeholder_key`] reads the
-//! route out of the live file and [`restorable_backup`] validates the backup,
-//! and `vm::build_settings` believes the files.
+//! failed, a `~/.codex` restored by hand or rewritten by another tool — so
+//! **state is derived from the live file and nothing else**:
+//! [`live_placeholder_key`] reads the route out of it and `vm::build_settings`
+//! reports what it finds. The key table is a registration side-effect, and
+//! [`restorable_backup`] answers a different question — whether restore has an
+//! original it can write back — which is why neither counts as state: an agent
+//! whose config was put back behind us reads as not taken over even while we
+//! still hold a backup for it, and one whose row registration was rolled back
+//! reads as taken over because the file says so.
 //!
 //! [`enable`] refuses before it touches anything (the Codex gates in
 //! `kiwano_adapters::codex_config` run first, on the text that would be
@@ -193,9 +198,13 @@ pub fn enable(
 
     let rewritten = compute_rewrites(agent, &originals, placeholder_key, data_port)?;
 
-    // Back up only on first takeover; repeated enable keeps the original
-    // text (escape-hatch semantics)
-    let first_time = aux.load_takeover_backup(agent).is_none();
+    // Back up unless what is on disk is already our route: a repeated enable
+    // must not record a loopback config as the user's original (escape-hatch
+    // semantics). The backup *row* is not the question it used to be — it can
+    // be a leftover from a takeover whose rewrite is gone (the agent's config
+    // was put back by hand or by another tool), and skipping the backup then
+    // would leave restore aimed at a config this takeover is not replacing.
+    let first_time = live_placeholder_key(agent, home).is_none();
     if first_time {
         aux.save_takeover_backup(agent, &originals)
             .map_err(|e| e.to_string())?;
@@ -1204,13 +1213,12 @@ wire_api = "responses"
     }
 
     #[test]
-    fn a_backup_that_holds_the_gateway_route_is_rejected() {
+    fn enabling_over_a_config_that_is_already_ours_captures_no_backup() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         // A config that is *already* taken over (a hand-restored ~/.codex, or a
-        // takeover whose backup row vanished): taking it over again captures the
-        // loopback route as the "original", and writing that back would
-        // re-install exactly what restore exists to remove.
+        // takeover whose backup row vanished): taking it over again must not
+        // capture the loopback route as the "original".
         let codex_dir = write_codex_config(
             &home,
             "model = \"m\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"DeepSeek\"\nbase_url = \"http://127.0.0.1:8317/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"kw-ag-codex-old\"\n",
@@ -1218,12 +1226,50 @@ wire_api = "responses"
         );
         enable(&aux, "codex", "kw-ag-codex-new", 8317, &home).unwrap();
         assert!(
-            !restorable_backup(&aux, "codex"),
-            "a loopback projection is not the user's original config"
+            aux.load_takeover_backup("codex").is_none(),
+            "what is on disk is our own route, so there is nothing to capture"
         );
         assert_eq!(
             live_placeholder_key("codex", &home).as_deref(),
             Some("kw-ag-codex-new")
+        );
+
+        let route = ProviderRoute {
+            base_url: "https://api.deepseek.com/v1".into(),
+            api_key: "sk-real".into(),
+        };
+        let report = disable(&aux, "codex", &home, Some(&route)).unwrap();
+        assert_eq!(report.outcome, RestoreOutcome::RebuiltFromProvider);
+        assert!(report.warning.is_none(), "{:?}", report.warning);
+        let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert!(toml.contains("https://api.deepseek.com/v1"), "{toml}");
+        assert!(!toml.contains("127.0.0.1"), "{toml}");
+    }
+
+    /// A row an older build could have written: a backup captured while the
+    /// config was already routed. Restore writes it back only to re-install the
+    /// loopback route it exists to remove, so `disable` discards it — loudly.
+    #[test]
+    fn a_legacy_backup_that_holds_the_gateway_route_is_rejected() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let codex_dir = write_codex_config(
+            &home,
+            "model = \"m\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"DeepSeek\"\nbase_url = \"http://127.0.0.1:8317/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"kw-ag-codex-old\"\n",
+            r#"{"OPENAI_API_KEY":"kw-ag-codex-old"}"#,
+        );
+        aux.save_takeover_backup(
+            "codex",
+            &[BackupFile {
+                path: codex_dir.join("config.toml").display().to_string(),
+                content: std::fs::read_to_string(codex_dir.join("config.toml")).unwrap(),
+                existed: true,
+            }],
+        )
+        .unwrap();
+        assert!(
+            !restorable_backup(&aux, "codex"),
+            "a loopback projection is not the user's original config"
         );
 
         let route = ProviderRoute {

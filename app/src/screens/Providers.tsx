@@ -13,6 +13,8 @@ import {
   RefreshCw,
   Settings2,
   Trash2,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,7 +25,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -935,15 +936,24 @@ function ProviderRow({
         }`}
       >
         <TestLatencyButton provider={p} />
-        {/* A switch, not an icon button: this is a state the row is *in*, and a
-            switch is the one control that shows which state that is without
-            being told. Same vocabulary as the takeover toggles in Settings. */}
-        <Switch
-          checked={p.enabled}
-          aria-label={p.name}
+        {/* A speaker, as a player's sound button: the glyph shows the state the
+            row is in — sound, or muted — while the name says what clicking does.
+            That is the one on/off pair a reader already knows from every player,
+            and it needs no legend the way a power symbol or a toggle did. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 shrink-0 rounded-md border border-line px-0 text-mut"
+          aria-label={p.enabled ? t("providers.disable") : t("providers.enable")}
           title={p.enabled ? t("providers.disableTitle") : t("providers.enableTitle")}
-          onCheckedChange={(v) => api.setProviderEnabled(p.id, v).then(onChanged)}
-        />
+          onClick={() => api.setProviderEnabled(p.id, !p.enabled).then(onChanged)}
+        >
+          {p.enabled ? (
+            <Volume2 className="h-3.5 w-3.5" />
+          ) : (
+            <VolumeX className="h-3.5 w-3.5" />
+          )}
+        </Button>
         {/* Square icon buttons, one per action: the row's actions are symbols a
             reader already knows, and a padded pill around a lone glyph reads as
             a label that failed to load. The delete grows into its confirmation

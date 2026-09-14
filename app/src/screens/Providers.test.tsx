@@ -481,10 +481,7 @@ describe("deleting a provider that is in a route", () => {
 });
 
 describe("parking a provider", () => {
-  /** The row's switch: a state control, named after the provider it governs. */
-  const rowSwitch = () => screen.getByRole("switch", { name: "DeepSeek" });
-
-  it("switches it out of every route instead of deleting it", async () => {
+  it("stops it without deleting it, and re-reads the list", async () => {
     const user = userEvent.setup();
     apiMock.listProviders.mockResolvedValue([deepseek()]);
     apiMock.getAgentRoutes.mockResolvedValue([]);
@@ -492,11 +489,11 @@ describe("parking a provider", () => {
     apiMock.setProviderEnabled.mockResolvedValue(undefined);
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    // A switch shows the state it is in — which an icon button could not do
-    // without being told, and the row's Status cell already carries the words.
-    expect(await screen.findByRole("switch", { name: "DeepSeek" })).toBeChecked();
+    // The glyph is the state, as a player's sound button: this one has sound.
+    const stop = await screen.findByRole("button", { name: en.providers.disable });
+    expect(stop.querySelector("svg.lucide-volume-2")).not.toBeNull();
 
-    await user.click(rowSwitch());
+    await user.click(stop);
 
     await waitFor(() =>
       expect(apiMock.setProviderEnabled).toHaveBeenCalledWith("deepseek", false),
@@ -507,17 +504,17 @@ describe("parking a provider", () => {
     expect(screen.getByText("DeepSeek")).toBeInTheDocument();
   });
 
-  it("reads as off for a parked provider", async () => {
+  it("offers to start a parked one", async () => {
     apiMock.listProviders.mockResolvedValue([deepseek({ enabled: false })]);
     apiMock.getAgentRoutes.mockResolvedValue([]);
     apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    expect(await screen.findByRole("switch", { name: "DeepSeek" })).not.toBeChecked();
-    // …and the tooltip says what flipping it does.
-    expect(rowSwitch()).toHaveAttribute(
-      "title",
-      en.providers.enableTitle,
-    );
+    // …and a parked one wears the muted speaker, tooltip included: the state is
+    // in the glyph, the action is in the name.
+    const start = await screen.findByRole("button", { name: en.providers.enable });
+    expect(start.querySelector("svg.lucide-volume-x")).not.toBeNull();
+    expect(start.querySelector("svg.lucide-volume-2")).toBeNull();
+    expect(start).toHaveAttribute("title", en.providers.enableTitle);
   });
 });

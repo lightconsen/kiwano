@@ -104,6 +104,8 @@ export const providers = {
   delRemovedFrom: "removed from {agents}",
   delPromotes: "{provider} becomes the primary for {agent}",
   delEmpties: "{agent} is left with no provider",
+  disable: "Disable",
+  enable: "Enable",
   disableTitle: "Park it: out of every route, keeping the row and its key",
   enableTitle: "Put it back into the routes it is bound to",
 

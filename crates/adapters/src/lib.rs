@@ -11,7 +11,6 @@
 //! - [`model_capabilities`]: image-input capability resolution
 //! - [`model_pricing`]: per-million-token price lookup + cost calculation
 //!   (matching semantics ported from cc-switch usage stats)
-//! - [`gemini_config`]: Gemini env/settings file management
 //! - [`claude_desktop_config`]: Claude Desktop gateway profile + deploymentMode
 //!   writes (macOS Claude-3p configLibrary subset)
 //! - [`grok_config`]: Grok TOML live-config management
@@ -30,7 +29,6 @@ pub mod codex_config;
 pub mod config;
 pub mod error;
 pub mod gateway_takeover;
-pub mod gemini_config;
 pub mod grok_config;
 pub mod model_capabilities;
 pub mod model_pricing;

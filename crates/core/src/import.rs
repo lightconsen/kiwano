@@ -3,11 +3,13 @@
 //! Data sources are tried in order: `~/.cc-switch/cc-switch.db` (v3.20+
 //! SQLite, read-only) and `~/.cc-switch/config.json` (older v3.x JSON).
 //! Mapping rules:
-//! - app_type → Kiwano agent id is 1:1 for all nine apps (claude,
-//!   claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi)
+//! - app_type → Kiwano agent id is 1:1 for all eight apps (claude,
+//!   claude-desktop, codex, grokbuild, opencode, openclaw, hermes, pi)
+//! - cc-switch's `gemini` rows are skipped: they target Gemini CLI, which went
+//!   with the gemini protocol, and their settings_config is Gemini-shaped, so
+//!   there is no honest protocol to import them as.
 //! - protocol anthropic: claude / claude-desktop (env.ANTHROPIC_BASE_URL +
 //!   ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY also accepted)
-//! - protocol gemini: gemini (env.GOOGLE_GEMINI_BASE_URL + GEMINI_API_KEY)
 //! - protocol openai: codex (auth.OPENAI_API_KEY + config TOML base_url),
 //!   grokbuild (config TOML, selected model row), opencode (provider fragment
 //!   options.baseURL/apiKey), openclaw + pi (baseUrl/apiKey), hermes
@@ -38,7 +40,7 @@ pub struct ImportReportVm {
 
 struct RawProvider {
     cc_id: String,
-    app: &'static str, // one of the nine Kiwano agent ids
+    app: &'static str, // one of Kiwano's agent ids
     name: String,
     base_url: String,
     api_path: Option<String>,
@@ -92,7 +94,6 @@ pub fn run_import(
     for raw in raws {
         let (name, protocol) = match raw.app {
             "claude" | "claude-desktop" => (raw.name.clone(), Protocol::Anthropic),
-            "gemini" => (raw.name.clone(), Protocol::Gemini),
             _ => (raw.name.clone(), Protocol::OpenAI),
         };
         // Skip official placeholders / empty configs
@@ -154,7 +155,7 @@ pub fn run_import(
             if existed { " · updated" } else { "" },
         ));
         if raw.is_current {
-            let agent = raw.app; // app_type == Kiwano agent id (1:1 for all nine)
+            let agent = raw.app; // app_type == Kiwano agent id (1:1 for every app)
             if store
                 .upsert_strategy(agent, StrategyType::Single, None)
                 .is_ok()
@@ -220,18 +221,6 @@ fn claude_creds(v: &Value) -> (String, Option<String>) {
     let env = v.get("env");
     let base = str_at(env.and_then(|e| e.get("ANTHROPIC_BASE_URL")));
     let key = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
-        .iter()
-        .map(|k| str_at(env.and_then(|e| e.get(*k))))
-        .find(|s| !s.is_empty());
-    (base, key)
-}
-
-/// gemini settings_config: same `{env: {...}}` shape as claude, with Gemini's
-/// own key names (GOOGLE_GEMINI_BASE_URL + GEMINI_API_KEY).
-fn gemini_creds(v: &Value) -> (String, Option<String>) {
-    let env = v.get("env");
-    let base = str_at(env.and_then(|e| e.get("GOOGLE_GEMINI_BASE_URL")));
-    let key = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
         .iter()
         .map(|k| str_at(env.and_then(|e| e.get(*k))))
         .find(|s| !s.is_empty());
@@ -351,7 +340,6 @@ fn raw_from(
 ) -> RawProvider {
     let (url, key) = match app {
         "claude" | "claude-desktop" => claude_creds(sc),
-        "gemini" => gemini_creds(sc),
         "codex" => codex_creds(sc),
         "grokbuild" => grok_creds(sc),
         "opencode" => opencode_creds(sc),
@@ -401,12 +389,20 @@ fn read_db(path: &Path) -> Result<(Vec<RawProvider>, Vec<String>), String> {
             "claude" => "claude",
             "claude-desktop" => "claude-desktop",
             "codex" => "codex",
-            "gemini" => "gemini",
             "grokbuild" => "grokbuild",
             "opencode" => "opencode",
             "openclaw" => "openclaw",
             "hermes" => "hermes",
             "pi" => "pi",
+            // Gemini CLI went with the gemini protocol; its rows have nowhere
+            // to land, and a silent openai-shaped import would be worse than a
+            // skip line the report can show.
+            "gemini" => {
+                skips.push(format!(
+                    "skip gemini/{cc_id}: the gemini protocol is no longer supported"
+                ));
+                continue;
+            }
             other => {
                 // unknown app types surface as explicit skip lines
                 skips.push(format!("skip {other}/{cc_id}: unsupported app type"));
@@ -442,12 +438,19 @@ fn read_json(path: &Path) -> Result<(Vec<RawProvider>, Vec<String>), String> {
             "claude" => "claude",
             "claude-desktop" => "claude-desktop",
             "codex" => "codex",
-            "gemini" => "gemini",
             "grokbuild" => "grokbuild",
             "opencode" => "opencode",
             "openclaw" => "openclaw",
             "hermes" => "hermes",
             "pi" => "pi",
+            "gemini" => {
+                for cc_id in providers.keys() {
+                    skips.push(format!(
+                        "skip gemini/{cc_id}: the gemini protocol is no longer supported"
+                    ));
+                }
+                continue;
+            }
             _ => {
                 for cc_id in providers.keys() {
                     skips.push(format!("skip {app_key}/{cc_id}: unsupported app type"));
@@ -507,14 +510,6 @@ mod tests {
 
     #[test]
     fn per_app_extraction() {
-        let gemini = serde_json::json!({
-            "env": { "GEMINI_API_KEY": "g-k", "GOOGLE_GEMINI_BASE_URL": "https://g.com/v1beta" }
-        });
-        assert_eq!(
-            gemini_creds(&gemini),
-            ("https://g.com/v1beta".into(), Some("g-k".into()))
-        );
-
         let grok = serde_json::json!({ "config": "theme = \"dark\"\n[models]\ndefault = \"p\"\n\n[model.\"p\"]\nname = \"P\"\nbase_url = \"https://api.x.ai/v1\"\napi_key = \"xai-k\"\n" });
         assert_eq!(
             grok_creds(&grok),
@@ -597,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn import_from_json_covers_all_nine_apps() {
+    fn import_from_json_covers_every_app_but_gemini() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         std::fs::write(
@@ -617,14 +612,19 @@ mod tests {
         .unwrap();
         let store = Store::open_in_memory().unwrap();
         let report = run_import(&store, None, Some(&path));
-        assert_eq!(report.imported, 9, "detail={:?}", report.detail);
-        assert_eq!(report.skipped, 0);
+        // Eight apps import; the gemini row is skipped, by name, in the report.
+        assert_eq!(report.imported, 8, "detail={:?}", report.detail);
+        assert_eq!(report.skipped, 1, "detail={:?}", report.detail);
+        assert!(
+            report.detail.iter().any(|d| d.contains("skip gemini/g")),
+            "detail={:?}",
+            report.detail
+        );
+        assert!(store.get_provider("ccs-gemini-g").unwrap().is_none());
 
         // protocol mapping per family
         let d = store.get_provider("ccs-claude-desktop-d").unwrap().unwrap();
         assert_eq!(d.protocol.as_str(), "anthropic");
-        let g = store.get_provider("ccs-gemini-g").unwrap().unwrap();
-        assert_eq!(g.protocol.as_str(), "gemini");
         let r = store.get_provider("ccs-grokbuild-r").unwrap().unwrap();
         assert_eq!(r.protocol.as_str(), "openai");
         assert_eq!(r.base_url, "https://r.com");
@@ -638,7 +638,6 @@ mod tests {
             "claude",
             "claude-desktop",
             "codex",
-            "gemini",
             "grokbuild",
             "opencode",
             "openclaw",
@@ -677,15 +676,14 @@ mod tests {
 
         let store = Store::open_in_memory().unwrap();
         let report = run_import(&store, Some(&db_path), None);
-        assert_eq!(report.imported, 1, "detail={:?}", report.detail);
-        assert_eq!(report.skipped, 1);
+        assert_eq!(report.imported, 0, "detail={:?}", report.detail);
+        assert_eq!(report.skipped, 2);
         assert!(report
             .detail
             .iter()
             .any(|d| d.contains("skip mysteryapp/u1")));
-        assert_eq!(
-            store.primary_provider_id("gemini").unwrap().as_deref(),
-            Some("ccs-gemini-g1")
-        );
+        // The gemini row is skipped rather than imported as something else.
+        assert!(report.detail.iter().any(|d| d.contains("skip gemini/g1")));
+        assert!(store.get_provider("ccs-gemini-g1").unwrap().is_none());
     }
 }

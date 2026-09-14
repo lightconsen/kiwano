@@ -191,7 +191,7 @@ impl GatewayState {
 }
 
 /// Extract the local placeholder key from inbound auth headers
-/// (tech.md §4.6: `x-api-key` / `Authorization: Bearer` / `x-goog-api-key`).
+/// (tech.md §4.6: `x-api-key` / `Authorization: Bearer`).
 pub fn extract_placeholder_key(headers: &HeaderMap) -> Option<String> {
     if let Some(v) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
         let v = v.trim();
@@ -207,17 +207,11 @@ pub fn extract_placeholder_key(headers: &HeaderMap) -> Option<String> {
             }
         }
     }
-    if let Some(v) = headers.get("x-goog-api-key").and_then(|v| v.to_str().ok()) {
-        let v = v.trim();
-        if !v.is_empty() {
-            return Some(v.to_string());
-        }
-    }
     None
 }
 
 /// Build a protocol-flavored JSON error response: native shape per inbound
-/// protocol family (Anthropic / OpenAI / Gemini).
+/// protocol family (Anthropic / OpenAI).
 pub fn error_response(
     inbound: Option<Protocol>,
     status: StatusCode,
@@ -230,13 +224,6 @@ pub fn error_response(
                 "message": message,
                 "type": kind,
                 "code": status.as_u16(),
-            }
-        }),
-        Some(Protocol::Gemini) => json!({
-            "error": {
-                "code": status.as_u16(),
-                "message": message,
-                "status": kind,
             }
         }),
         _ => json!({
@@ -305,12 +292,14 @@ mod tests {
             Some("kw-ag-codex-2")
         );
 
+        // The Gemini family's header went with the protocol: it is no longer a
+        // way to identify a caller.
         let mut headers = HeaderMap::new();
-        headers.insert("x-goog-api-key", HeaderValue::from_static("kw-ag-gemini-3"));
-        assert_eq!(
-            extract_placeholder_key(&headers).as_deref(),
-            Some("kw-ag-gemini-3")
+        headers.insert(
+            "x-goog-api-key",
+            HeaderValue::from_static("kw-ag-nowhere-3"),
         );
+        assert_eq!(extract_placeholder_key(&headers), None);
 
         // Bearer without a token or blank values are ignored.
         let mut headers = HeaderMap::new();

@@ -17,10 +17,9 @@ use kiwanod::store::{
 };
 use serde::{Deserialize, Serialize};
 
-pub const AGENTS: [(&str, &str); 9] = [
+pub const AGENTS: [(&str, &str); 8] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
-    ("gemini", "Gemini CLI"),
     ("grokbuild", "Grok Build"),
     ("claude-desktop", "Claude Desktop"),
     ("opencode", "OpenCode"),
@@ -1443,7 +1442,6 @@ fn protocol_label(p: kiwanod::store::Protocol) -> &'static str {
     match p {
         kiwanod::store::Protocol::OpenAI => "OpenAI-compatible",
         kiwanod::store::Protocol::Anthropic => "Anthropic",
-        kiwanod::store::Protocol::Gemini => "Gemini API",
     }
 }
 
@@ -1454,7 +1452,6 @@ fn endpoint_note(p: &Provider) -> String {
         let tag = match e.protocol {
             kiwanod::store::Protocol::OpenAI => "OpenAI",
             kiwanod::store::Protocol::Anthropic => "Anthropic",
-            kiwanod::store::Protocol::Gemini => "Gemini",
         };
         note.push_str(" · +");
         note.push_str(tag);
@@ -3255,7 +3252,6 @@ mod tests {
                 // auth.json rather than config.toml: the Codex config is read
                 // through the parsed detector, the rest by a value scan.
                 "codex" => ".codex/auth.json",
-                "gemini" => ".gemini/.env",
                 "grokbuild" => ".grok/config.toml",
                 "opencode" => ".config/opencode/opencode.json",
                 "openclaw" => ".openclaw/openclaw.json",
@@ -3581,7 +3577,7 @@ mod tests {
         }
         s.upsert_strategy("codex", StrategyType::Roundrobin, None)
             .unwrap();
-        s.upsert_strategy("gemini", StrategyType::Timewindow, None)
+        s.upsert_strategy("opencode", StrategyType::Timewindow, None)
             .unwrap();
         s.upsert_strategy("hermes", StrategyType::Timewindow, None)
             .unwrap();
@@ -3598,14 +3594,14 @@ mod tests {
         s.upsert_binding(&bind("codex", "a1", 0, None)).unwrap();
         s.upsert_binding(&bind("codex", "b1", 1, None)).unwrap();
         // windowed timewindow tail: serves its own window → not a standby
-        s.upsert_binding(&bind("gemini", "a1", 0, None)).unwrap();
-        s.upsert_binding(&bind("gemini", "c1", 1, Some(("22:00", "06:00"))))
+        s.upsert_binding(&bind("opencode", "a1", 0, None)).unwrap();
+        s.upsert_binding(&bind("opencode", "c1", 1, Some(("22:00", "06:00"))))
             .unwrap();
         // windowless timewindow tail: never picked → still a standby
         s.upsert_binding(&bind("hermes", "a1", 0, None)).unwrap();
         s.upsert_binding(&bind("hermes", "d1", 1, None)).unwrap();
         let aux = Aux::open_in_memory().unwrap();
-        let home = live_home(&["codex", "gemini", "hermes"]);
+        let home = live_home(&["codex", "opencode", "hermes"]);
         let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(beta.is_current); // roundrobin serves every candidate
@@ -3651,10 +3647,10 @@ mod tests {
         })
         .unwrap();
         // target: an unrelated failover route that gets replaced wholesale
-        s.upsert_strategy("gemini", StrategyType::Failover, None)
+        s.upsert_strategy("opencode", StrategyType::Failover, None)
             .unwrap();
         s.upsert_binding(&Binding {
-            agent: "gemini".into(),
+            agent: "opencode".into(),
             provider_id: "a1".into(),
             priority: 0,
             weight: 1,
@@ -3664,13 +3660,13 @@ mod tests {
         })
         .unwrap();
 
-        apply_agent_route(&s, "gemini", "gemini").unwrap_err();
-        apply_agent_route(&s, "gemini", "claude").unwrap_err(); // no route
-        apply_agent_route(&s, "gemini", "codex").unwrap();
+        apply_agent_route(&s, "opencode", "opencode").unwrap_err();
+        apply_agent_route(&s, "opencode", "claude").unwrap_err(); // no route
+        apply_agent_route(&s, "opencode", "codex").unwrap();
 
-        let st = s.get_strategy("gemini").unwrap().unwrap();
+        let st = s.get_strategy("opencode").unwrap().unwrap();
         assert_eq!(st.kind, StrategyType::Roundrobin);
-        let bs = s.bindings_for_agent("gemini").unwrap();
+        let bs = s.bindings_for_agent("opencode").unwrap();
         assert_eq!(bs.len(), 2);
         assert_eq!((bs[0].provider_id.as_str(), bs[0].weight), ("a1", 60));
         assert_eq!((bs[1].provider_id.as_str(), bs[1].weight), ("b1", 40));

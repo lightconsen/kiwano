@@ -22,7 +22,6 @@ use serde::Serialize;
 const CLI_AGENTS: &[(&str, &str)] = &[
     ("claude", "claude"),
     ("codex", "codex"),
-    ("gemini", "gemini"),
     ("grokbuild", "grok"),
     ("opencode", "opencode"),
     ("openclaw", "openclaw"),
@@ -226,7 +225,8 @@ mod tests {
         assert_eq!(m.get("claude").unwrap(), "/opt/homebrew/bin/claude");
         assert_eq!(m.get("grok").unwrap(), "/Users/x/.local/bin/grok");
         assert_eq!(m.get("pi").unwrap(), "/usr/bin/pi");
-        // relative path → ignored
+        // relative path → ignored (and `gemini` is no longer an agent we ask
+        // about anyway — the parser does not care which names it sees)
         assert!(!m.contains_key("gemini"));
         assert_eq!(m.len(), 4);
     }

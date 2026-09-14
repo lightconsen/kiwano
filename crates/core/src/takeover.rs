@@ -7,9 +7,8 @@
 //! never overwrites the first backup, so the user's original config can be
 //! restored no matter how many takeovers happen in a row.
 //!
-//! The MVP covered claude (settings.json), codex (config.toml + auth.json),
-//! and gemini (~/.gemini/.env; inbound protocol in the gateway's
-//! protocol.rs /v1beta branch). The expanded registry adds grokbuild
+//! The MVP covered claude (settings.json) and codex (config.toml +
+//! auth.json). The expanded registry adds grokbuild
 //! (~/.grok/config.toml, selected model's base_url/api_key/api_backend), the
 //! additive-mode agents opencode/openclaw/hermes/pi — whose takeover upserts
 //! a `kiwano-gateway` provider entry and selects it via
@@ -63,7 +62,7 @@ type Files = Vec<(String, String)>;
 /// rebuilt into it verbatim. The additive agents' `kiwano-gateway` entry and
 /// Claude Desktop's configLibrary profile are kiwano-authored projections with
 /// no faithful provider-side rebuild, so they fall through to the strip tier.
-pub const REBUILDABLE_AGENTS: [&str; 4] = ["claude", "codex", "gemini", "grokbuild"];
+pub const REBUILDABLE_AGENTS: [&str; 3] = ["claude", "codex", "grokbuild"];
 
 /// The local gateway's origin. The port comes from the caller (the sidecar's
 /// data port), and the per-agent path suffix from [`gateway_target`].
@@ -101,7 +100,6 @@ fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, S
             home.join(".codex").join("config.toml"),
             home.join(".codex").join("auth.json"),
         ]),
-        "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
         "grokbuild" => Ok(vec![home.join(".grok").join("config.toml")]),
         // claude-desktop: macOS Claude-3p configLibrary (deployment mode in
         // both claude_desktop_config.json copies + gateway profile + _meta.json)
@@ -165,7 +163,7 @@ pub fn enable(
     let paths = takeover_paths(agent, home)?;
     let mut originals: Vec<BackupFile> = Vec::new();
     for p in &paths {
-        // codex's auth.json / gemini's .env, every additive agent's config, and
+        // codex's auth.json, every additive agent's config, and
         // all claude-desktop files are allowed to be missing (treated as empty
         // files — every claude-desktop write normalizes a missing/non-object
         // document to {}). `existed` records which of the two it was, so
@@ -213,7 +211,8 @@ pub fn enable(
 
     let mut written: Vec<usize> = Vec::with_capacity(rewritten.len());
     for (index, (path, content)) in rewritten.iter().enumerate() {
-        // On first takeover ~/.gemini may not exist at all, so create the parent dir first
+        // The config's directory may not exist at all (a first takeover), so
+        // create it first
         if let Some(parent) = std::path::Path::new(path).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -266,7 +265,7 @@ fn compute_rewrites(
 
 /// The URL a takeover writes for `agent`: the gateway origin plus the path
 /// suffix that agent's base_url carries (the Responses-speaking agents append
-/// `/v1`; the Anthropic/Gemini-shaped ones take the origin bare).
+/// `/v1`; the Anthropic-shaped ones take the origin bare).
 fn gateway_target(agent: &str, data_port: u16) -> String {
     let suffix = match agent {
         "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
@@ -413,7 +412,7 @@ pub fn live_placeholder_key(agent: &str, home: &Path) -> Option<String> {
 
 /// Our placeholder key inside one file's text. A Codex `config.toml` is read
 /// through the module's parsed detector; everything else (a Codex `auth.json`,
-/// Claude's `settings.json`, gemini's `.env`, the additive agents' JSON/YAML)
+/// Claude's `settings.json`, the additive agents' JSON/YAML)
 /// is a value scan, because all of them hold the key as a string value.
 fn placeholder_in_file(path: &Path, text: &str, agent: &str) -> Option<String> {
     if agent == "codex" && path.ends_with("config.toml") {
@@ -630,9 +629,6 @@ fn strip_file(agent: &str, path: &Path, text: &str) -> Result<Option<String>, St
             &["env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_BASE_URL"],
             agent,
         ),
-        "gemini" => {
-            dotenv_without_gateway_keys(text, &["GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"])
-        }
         "grokbuild" => Ok(drop_gateway_toml_lines(text, agent)),
         other => Err(format!(
             "no fallback route for {other}: its gateway entry cannot be removed without a backup"
@@ -689,33 +685,6 @@ fn json_without_gateway_key(
         .map_err(|e| e.to_string())
 }
 
-/// Drop dotenv lines whose value is one of ours.
-fn dotenv_without_gateway_keys(text: &str, keys: &[&str]) -> Result<Option<String>, String> {
-    let mut changed = false;
-    let kept: Vec<&str> = text
-        .lines()
-        .filter(|line| {
-            let after_export = line
-                .trim_start()
-                .strip_prefix("export ")
-                .unwrap_or(line.trim_start());
-            let Some((key, value)) = after_export.split_once('=') else {
-                return true;
-            };
-            let ours = keys.contains(&key.trim())
-                && value_is_ours(value.trim().trim_matches(['"', '\'']), "");
-            if ours {
-                changed = true;
-            }
-            !ours
-        })
-        .collect();
-    if !changed {
-        return Ok(None);
-    }
-    Ok(Some(kept.join("\n")))
-}
-
 /// Drop TOML lines whose value is one of ours (the grok strip: the selected
 /// model's `base_url` / `api_key` rows). Line-level on purpose — the file is
 /// otherwise left exactly as the user wrote it, comments included.
@@ -764,7 +733,6 @@ fn rewrite(
     match agent {
         "claude" => rewrite_claude(original, target, key),
         "codex" => Err("codex files are rewritten together by codex_rewrites".into()),
-        "gemini" => rewrite_gemini_env(original, target, key),
         "grokbuild" => rewrite_grok_toml(original, target, key),
         // claude-desktop: flip both config copies to 3p mode, write the full
         // gateway profile (Kiwano-owned while takeover is active) and register
@@ -815,47 +783,6 @@ fn rewrite_claude(original: &str, target: &str, key: &str) -> Result<String, Str
     env.insert("ANTHROPIC_BASE_URL".into(), Value::String(target.into()));
     env.insert("ANTHROPIC_AUTH_TOKEN".into(), Value::String(key.into()));
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
-}
-
-/// .env (dotenv): rewrite the GOOGLE_GEMINI_BASE_URL and GEMINI_API_KEY
-/// lines, keeping all other lines and comments; missing variables are
-/// appended at the end; a missing file is treated as empty (a first
-/// takeover creates the ~/.gemini directory along with it). Values are not
-/// quoted — neither value contains whitespace.
-fn rewrite_gemini_env(original: &str, target: &str, key: &str) -> Result<String, String> {
-    let mut found_base = false;
-    let mut found_key = false;
-    let mut out = Vec::with_capacity(original.lines().count() + 2);
-    for line in original.lines() {
-        let trimmed = line.trim_start();
-        let after_export = trimmed
-            .strip_prefix("export ")
-            .unwrap_or(trimmed)
-            .trim_start();
-        let key_of = after_export.split_once('=').map(|(k, _)| k.trim());
-        match key_of {
-            Some("GOOGLE_GEMINI_BASE_URL") if !found_base => {
-                found_base = true;
-                out.push(format!("GOOGLE_GEMINI_BASE_URL={target}"));
-            }
-            Some("GEMINI_API_KEY") if !found_key => {
-                found_key = true;
-                out.push(format!("GEMINI_API_KEY={key}"));
-            }
-            _ => out.push(line.to_string()),
-        }
-    }
-    if !found_base {
-        out.push(format!("GOOGLE_GEMINI_BASE_URL={target}"));
-    }
-    if !found_key {
-        out.push(format!("GEMINI_API_KEY={key}"));
-    }
-    let mut s = out.join("\n");
-    if original.is_empty() || original.ends_with('\n') {
-        s.push('\n');
-    }
-    Ok(s)
 }
 
 /// config.toml (Grok Build): point the selected model's base_url at the
@@ -1406,58 +1333,6 @@ wire_api = "responses"
         let report = restore(&aux, "claude", &home).unwrap();
         assert_eq!(report.outcome, RestoreOutcome::NotTakenOver);
         assert!(report.warning.is_none());
-    }
-
-    #[test]
-    fn gemini_takeover_roundtrip() {
-        let (_dir, home) = temp_home();
-        let aux = Aux::open_in_memory().unwrap();
-        let gemini_dir = home.join(".gemini");
-        std::fs::create_dir_all(&gemini_dir).unwrap();
-        std::fs::write(
-            gemini_dir.join(".env"),
-            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# proxy comment\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n",
-        )
-        .unwrap();
-
-        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
-        let env = std::fs::read_to_string(gemini_dir.join(".env")).unwrap();
-        assert!(env.contains("GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\n"));
-        assert!(env.contains("GEMINI_API_KEY=kw-ag-gemini-abcd\n"));
-        assert!(env.contains("GOOGLE_GENAI_USE_VERTEXAI=false")); // other lines untouched
-        assert!(env.contains("# proxy comment")); // comment preserved
-
-        // restore = write back byte for byte
-        restore(&aux, "gemini", &home).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(gemini_dir.join(".env")).unwrap(),
-            "GOOGLE_GENAI_USE_VERTEXAI=false\nGEMINI_API_KEY=AIzaSy-old\n# proxy comment\nGOOGLE_GEMINI_BASE_URL=https://generativelanguage.googleapis.com\n"
-        );
-        assert!(aux.load_takeover_backup("gemini").is_none());
-    }
-
-    #[test]
-    fn gemini_takeover_creates_missing_env() {
-        let (_dir, home) = temp_home();
-        let aux = Aux::open_in_memory().unwrap();
-        let env_path = home.join(".gemini").join(".env");
-        // takeover works even when ~/.gemini/.env is missing entirely (dir + file are created automatically)
-        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
-        let env = std::fs::read_to_string(&env_path).unwrap();
-        assert_eq!(
-            env,
-            "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\nGEMINI_API_KEY=kw-ag-gemini-abcd\n"
-        );
-
-        // Disabling puts the directory back the way it found it: the file we
-        // created is removed, not left behind as an empty config (which an
-        // agent may read as a broken one).
-        restore(&aux, "gemini", &home).unwrap();
-        assert!(
-            !env_path.exists(),
-            "a file created by the takeover must not survive disable"
-        );
-        assert!(aux.load_takeover_backup("gemini").is_none());
     }
 
     #[test]

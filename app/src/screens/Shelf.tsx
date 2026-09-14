@@ -65,12 +65,11 @@ function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
 const PROTO_STYLE: Record<Protocol, React.CSSProperties> = {
   anthropic: { background: "var(--orange-soft)", color: "var(--orange)" },
   openai: { background: "var(--surface2)", color: "var(--mut)" },
-  gemini: { background: "var(--indigo-soft)", color: "var(--indigo)" },
 };
 
 /** One letter per protocol. The column is 17% of a 1000px window for what is
     usually one or two words, while the price column beside it is the one that
-    truncates — and a protocol set of exactly three is a set a letter can name.
+    truncates — and a protocol set of two is a set a letter can name.
 
     The letter is not the whole answer: the chip keeps its colour, carries the
     full name as its hover title and its accessible name, and the detail dialog
@@ -78,7 +77,6 @@ const PROTO_STYLE: Record<Protocol, React.CSSProperties> = {
 const PROTO_ABBR: Record<Protocol, string> = {
   anthropic: "A",
   openai: "O",
-  gemini: "G",
 };
 
 /** The spelled-out name behind an abbreviation. Reused from the add form rather
@@ -87,7 +85,6 @@ const PROTO_ABBR: Record<Protocol, string> = {
 const PROTO_LABEL: Record<Protocol, KeyPath<Messages>> = {
   anthropic: "addProvider.protoAnthropic",
   openai: "addProvider.protoOpenai",
-  gemini: "addProvider.protoGemini",
 };
 
 const TAG_RANK: Record<CatalogEntry["tag"], number> = {

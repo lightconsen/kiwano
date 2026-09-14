@@ -28,9 +28,9 @@ const MAX_MEDIA_TRAVERSAL_DEPTH: usize = 32;
 pub(crate) enum ToolMediaScope {
     /// Used by the existing image-capability sanitizer and its retry path.
     ImagesOnly,
-    /// Used by Gemini Native `generateContent`, whose existing bridge only
-    /// promises inline base64 image input. Remote URLs and malformed data URLs
-    /// must stay in the legacy tool-result representation.
+    /// Used by a bridge that only promises inline base64 image input. Remote
+    /// URLs and malformed data URLs must stay in the legacy tool-result
+    /// representation.
     InlineImagesOnly,
     /// Used by Chat conversion bridges, where user messages can carry all
     /// currently mapped Chat input modalities.

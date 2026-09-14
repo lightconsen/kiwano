@@ -687,98 +687,39 @@ async fn anthropic_inbound_converts_openai_sse_stream_to_anthropic_events() {
     assert_eq!(totals.cache_read_tokens, 5);
 }
 
-/// Spawn a mock Gemini upstream on 127.0.0.1:0 (`{model}:{method}` segment).
-async fn mock_gemini(response: MockReply) -> (String, Captured) {
-    let captured: Captured = Arc::new(Mutex::new(Vec::new()));
-    let app = Router::new()
-        .route(
-            "/v1beta/models/{model_method}",
-            post(
-                move |AxumState(c): AxumState<Captured>, headers: HeaderMap| {
-                    let reply = response.clone();
-                    async move {
-                        capture(&c, &headers, "x-goog-api-key");
-                        mock_response(&reply)
-                    }
-                },
-            ),
-        )
-        .with_state(captured.clone());
-    (spawn(app).await, captured)
-}
-
-/// Gemini CLI speaks the native Gemini API (`/v1beta/models/{model}:…`,
-/// `x-goog-api-key` auth) to a Gemini-protocol provider: passthrough +
-/// usageMetadata metering, placeholder key stripped and replaced.
+/// The Gemini family is gone with its protocol and its agent: nothing speaks
+/// `/v1beta` any more, so a stray request is refused as an unknown path rather
+/// than routed to a provider in the wrong shape.
 #[tokio::test]
-async fn gemini_inbound_passthrough_meters_usage_metadata() {
+async fn gemini_paths_are_refused() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
-
-    let upstream_body = json!({
-        "candidates": [{"content": {"parts": [{"text": "hello"}], "role": "model"}}],
-        "modelVersion": "gemini-2.5-pro",
-        "usageMetadata": {"promptTokenCount": 88, "candidatesTokenCount": 31,
-                          "cachedContentTokenCount": 12, "totalTokenCount": 119}
-    });
-    let (upstream_url, captured) = mock_gemini(MockReply::Json(upstream_body)).await;
-
+    let (upstream_url, captured) = mock_anthropic(MockReply::Json(json!({"id": "x"}))).await;
     store
-        .insert_provider(&provider("p-gem", Protocol::Gemini, upstream_url))
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
         .unwrap();
-    store.upsert_binding(&bind("gemini", "p-gem", 0)).unwrap();
-    store
-        .upsert_placeholder_key("kw-ag-gemini-test", "gemini")
-        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
-    let app = data_plane_router(state.clone());
+    let app = data_plane_router(state);
 
     let response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/v1beta/models/gemini-2.5-pro:generateContent")
                 .header("content-type", "application/json")
-                .header("x-goog-api-key", "kw-ag-gemini-test")
+                .header("x-goog-api-key", "kw-ag-gemini-old")
                 .body(Body::from(r#"{"contents":[{"parts":[{"text":"hi"}]}]}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(body["modelVersion"], "gemini-2.5-pro");
-    assert_eq!(
-        body["candidates"][0]["content"]["parts"][0]["text"],
-        "hello"
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "nothing may reach an upstream"
     );
-
-    // The real key went upstream as x-goog-api-key; the placeholder never left.
-    let captured = captured.lock().unwrap();
-    assert_eq!(
-        captured.last().map(|(k, v)| (k.as_str(), v.as_str())),
-        Some(("x-goog-api-key", REAL_KEY))
-    );
-    drop(captured);
-
-    // usageMetadata metered into SQLite, attributed to the gemini agent.
-    let totals = state
-        .store
-        .usage_totals(Some("gemini"), None, None)
-        .unwrap();
-    assert_eq!(totals.requests, 1);
-    assert_eq!(totals.input_tokens, 88);
-    assert_eq!(totals.output_tokens, 31);
-    assert_eq!(totals.cache_read_tokens, 12);
-
-    let by_provider = state
-        .store
-        .usage_by_provider(Some("gemini"), None, None)
-        .unwrap();
-    assert_eq!(by_provider.len(), 1);
-    assert_eq!(by_provider[0].provider_id, "p-gem");
 }
 
 /// A foreign key on the Anthropic path is refused for the same reason as the
@@ -1084,8 +1025,8 @@ async fn request_log_captures_client_visible_sse_stream() {
     assert_eq!(detail.response_body.as_deref(), Some(expected.as_str()));
 }
 
-/// A credential in the query string is a shape real providers use (`?key=` for
-/// Gemini), and the failure path is the one that quotes the URL back: the
+/// A credential in the query string is a shape real providers use (`?key=`),
+/// and the failure path is the one that quotes the URL back: the
 /// metadata column stores the redacted query, and `error_message` must not put
 /// the raw one back. The upstream here is a closed port, so the row is written
 /// by `persist_failure` through `SendFailure::message`.

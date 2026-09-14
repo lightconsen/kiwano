@@ -490,7 +490,7 @@ fn rates_of(input: &str, output: &str, cache_read: &str, cache_creation: &str) -
 /// against.
 ///
 /// `cache_inclusive` describes how the vendor reported the count, not how big the
-/// request was: OpenAI/Gemini style folds the cache buckets into `input_tokens`,
+/// request was: OpenAI style folds the cache buckets into `input_tokens`,
 /// Anthropic style reports fresh input alone. A band's `over` is a statement
 /// about the prompt's size, so both spellings have to land on the same number —
 /// which is why this cannot be left to `cost_of`, whose job is billing the fresh
@@ -535,7 +535,7 @@ fn cost_of(
 /// Compute the request cost (in the entry's currency) from token counts.
 ///
 /// `cache_inclusive` mirrors cc-switch's `calculate_for_app` semantics:
-/// OpenAI/Gemini style `input_tokens` already contain the cache buckets and
+/// OpenAI style `input_tokens` already contain the cache buckets and
 /// must be reduced before billing at the input rate; Anthropic's are fresh
 /// input only. Result rounded to 6 decimal places.
 ///

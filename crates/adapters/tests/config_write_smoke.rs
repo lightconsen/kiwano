@@ -1,41 +1,14 @@
 //! Self-developed smoke tests for the extracted cc-switch config writers.
 //!
 //! These exercise the Tier A modules end-to-end against real tempfiles:
-//! Gemini env serialization, Grok TOML live-config round-trips, and the
-//! shared atomic JSON writer used by every adapter.
+//! Grok TOML live-config round-trips and the shared atomic JSON writer used
+//! by every adapter.
 
 use std::fs;
 
 use kiwano_adapters::config::{atomic_write_private, read_json_file, write_json_file};
-use kiwano_adapters::gemini_config::{
-    get_gemini_env_path, parse_env_file, serialize_env_file, write_gemini_env_text_atomic,
-};
 use kiwano_adapters::grok_config::{read_grok_live_settings, write_grok_live_settings};
 use serde_json::json;
-
-#[test]
-#[serial_test::serial]
-fn gemini_env_write_round_trips_through_tempfile() {
-    let dir = tempfile::tempdir().unwrap();
-    // get_gemini_env_path() honors CC_SWITCH_TEST_HOME via get_home_dir().
-    std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
-
-    let mut map =
-        parse_env_file("GEMINI_API_KEY=k-123\nGOOGLE_GEMINI_BASE_URL=https://x.example\n");
-    assert_eq!(map.get("GEMINI_API_KEY").map(String::as_str), Some("k-123"));
-
-    write_gemini_env_text_atomic(&serialize_env_file(&map)).unwrap();
-    let env_path = get_gemini_env_path();
-    assert!(env_path.starts_with(dir.path()));
-    let written = fs::read_to_string(&env_path).unwrap();
-    map = parse_env_file(&written);
-    assert_eq!(
-        map.get("GOOGLE_GEMINI_BASE_URL").map(String::as_str),
-        Some("https://x.example")
-    );
-
-    std::env::remove_var("CC_SWITCH_TEST_HOME");
-}
 
 #[test]
 fn atomic_json_write_produces_readable_sorted_output() {

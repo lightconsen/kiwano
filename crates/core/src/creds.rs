@@ -3,15 +3,15 @@
 //! store and bind it as the agent's sole candidate — the agent's upstream
 //! stays the same on day one, just routed (and metered) through the gateway.
 //!
-//! Exclusive-switch agents (claude/codex/gemini/grokbuild) hold one provider
-//! slot in their config; the additive agents (opencode/openclaw/hermes/pi)
+//! Exclusive-switch agents (claude/codex/grokbuild) hold one provider slot in
+//! their config; the additive agents (opencode/openclaw/hermes/pi)
 //! route via a selection over multiple entries (readers live in
 //! `kiwano_adapters::gateway_takeover`). Claude Desktop is not read (MVP):
 //! its 3p configLibrary profile handling is macOS-only and adds little —
 //! the onboarding guide steers those users to manual provider entry.
 //!
-//! Official-subscription logins (Claude/Gemini OAuth, Codex ChatGPT login)
-//! have no extractable API key — `read_current_creds` returns None and the
+//! Official-subscription logins (Claude OAuth, Codex ChatGPT login) have no
+//! extractable API key — `read_current_creds` returns None and the
 //! UI's onboarding guide takes over. OAuth-token proxying is deferred (see
 //! plan backlog).
 
@@ -29,7 +29,7 @@ pub struct CurrentCreds {
     /// Friendly name when the agent's config declares one (additive agents'
     /// provider keys); None → callers fall back to the URL host.
     pub name: Option<String>,
-    /// "anthropic" | "gemini" | "openai"
+    /// "anthropic" | "openai"
     pub protocol: &'static str,
 }
 
@@ -39,7 +39,6 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
     let creds = match agent {
         "claude" => read_claude(home),
         "codex" => read_codex(home),
-        "gemini" => read_gemini(home),
         "grokbuild" => read_grokbuild(home),
         "opencode" => read_additive_one(
             home.join(".config").join("opencode").join("opencode.json"),
@@ -232,23 +231,6 @@ fn read_codex(home: &Path) -> Option<CurrentCreds> {
     })
 }
 
-/// gemini: .env GOOGLE_GEMINI_BASE_URL + GEMINI_API_KEY.
-fn read_gemini(home: &Path) -> Option<CurrentCreds> {
-    let content = std::fs::read_to_string(home.join(".gemini").join(".env")).ok()?;
-    let env = kiwano_adapters::gemini_config::parse_env_file(&content);
-    let base_url = env.get("GOOGLE_GEMINI_BASE_URL")?.trim().to_string();
-    let api_key = env.get("GEMINI_API_KEY")?.trim().to_string();
-    if base_url.is_empty() || api_key.is_empty() {
-        return None;
-    }
-    Some(CurrentCreds {
-        base_url,
-        api_key,
-        name: None,
-        protocol: "gemini",
-    })
-}
-
 /// grokbuild: the selected model's base_url + credentials (adapter handles
 /// the env_key indirection).
 fn read_grokbuild(home: &Path) -> Option<CurrentCreds> {
@@ -345,21 +327,6 @@ mod tests {
         let creds = read_current_creds("codex", &home).unwrap();
         assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
         assert_eq!(creds.api_key, "sk-ds");
-    }
-
-    #[test]
-    fn gemini_creds_from_env_file() {
-        let home = temp_home("gemini");
-        let dir = home.join(".gemini");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(".env"),
-            "GOOGLE_GEMINI_BASE_URL=https://aihubmix.com/gemini\nGEMINI_API_KEY=sk-gm\n",
-        )
-        .unwrap();
-        let creds = read_current_creds("gemini", &home).unwrap();
-        assert_eq!(creds.base_url, "https://aihubmix.com/gemini");
-        assert_eq!(creds.protocol, "gemini");
     }
 
     #[test]

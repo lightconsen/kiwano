@@ -661,8 +661,9 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, ProxyError> {
     // in input and in the cache buckets. The three buckets are mutually
     // exclusive with the identity:
     // input + cache_read + cache_creation == prompt_tokens (inclusive upstream).
-    // Symmetric with the streaming build_anthropic_usage_json (#2774) and
-    // transform_gemini's saturating_sub.
+    // Symmetric with the streaming build_anthropic_usage_json (#2774): both
+    // subtract with saturation, so a cache bucket larger than the inclusive
+    // total clamps at zero instead of wrapping.
     // Final cache_read/cache_creation: direct fields win over OpenAI nested details.
     let cached = usage
         .get("cache_read_input_tokens")

@@ -11,7 +11,6 @@ import type { KeyPath, Messages } from "../i18n";
 export type AgentId =
   | "claude"
   | "codex"
-  | "gemini"
   | "grokbuild"
   | "claude-desktop"
   | "opencode"
@@ -26,7 +25,7 @@ export type Billing = "plan" | "payg" | "unl";
     `both` is never stored. The same split Rust makes between `CatalogBilling` and
     `store::Billing`. */
 export type CatalogBilling = Billing | "both";
-export type Protocol = "openai" | "anthropic" | "gemini";
+export type Protocol = "openai" | "anthropic";
 
 export interface AgentMeta {
   id: AgentId;
@@ -43,7 +42,6 @@ export const ADDITIVE_AGENTS: AgentId[] = ["opencode", "openclaw", "hermes", "pi
 export const AGENTS: AgentMeta[] = [
   { id: "claude", label: "Claude Code", chip_char: "C", chip_color: "#D97757" },
   { id: "codex", label: "Codex", chip_char: "C", chip_color: "#0F0F0F", chip_border: true },
-  { id: "gemini", label: "Gemini CLI", chip_char: "G", chip_color: "#1E6FEB" },
   { id: "grokbuild", label: "Grok Build", chip_char: "X", chip_color: "#1A1A1A", chip_border: true },
   { id: "claude-desktop", label: "Claude Desktop", chip_char: "D", chip_color: "#B45E51" },
   { id: "opencode", label: "OpenCode", chip_char: "O", chip_color: "#7C3AED" },

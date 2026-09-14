@@ -20,7 +20,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 14;
+pub const SCHEMA_VERSION: i32 = 15;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -402,6 +402,100 @@ const MIGRATION_V14: &str = r#"
 ALTER TABLE providers ADD COLUMN model_default TEXT;
 "#;
 
+/// v15: the `gemini` protocol is gone, and so are the rows that speak it.
+///
+/// It had exactly two catalog entries (`google-ai-studio` as its only primary
+/// protocol, `openrouter` as the only one adding it) and one consumer, the
+/// Gemini CLI agent — which went with it, because a Gemini CLI can only reach a
+/// provider that speaks Gemini. Keeping a branch per layer in the validators,
+/// the adapters and the importers for that reach is not worth it.
+///
+/// Both tables are rebuilt, not just emptied, because the tag is still
+/// *writable* on an existing database: v4 widened the CHECK for Gemini CLI, v9
+/// carried the widening forward, and migrations replay in order — so narrowing
+/// v1's text (done when the data side dropped the protocol) does not survive
+/// them, and a fresh database ends up permissive too. Emptying the rows alone
+/// would leave the tag insertable by anything that is not this build.
+///
+/// The rows themselves have to go rather than stay readable: once the Rust enum
+/// loses the variant, `parse_str` has no answer for the tag and a stored
+/// `gemini` row reads as Anthropic — requests leaving in the wrong shape,
+/// failing at the vendor instead of here.
+///
+/// What the rebuild leaves behind is cleared by name, not by cascade: FKs are
+/// off for the duration (the recipe requires it), so `ON DELETE CASCADE` does
+/// not fire, and `model_pricing` never had a foreign key at all. Usage and
+/// request logs are history and stay. The retired agent's own rows go too — a
+/// binding naming `gemini` would reach the Apps screen as an agent id the
+/// frontend no longer knows.
+const MIGRATION_V15: &str = r#"
+DELETE FROM model_pricing
+    WHERE provider_id IN (SELECT id FROM providers WHERE protocol = 'gemini');
+DELETE FROM agent_bindings
+    WHERE agent = 'gemini'
+       OR provider_id IN (SELECT id FROM providers WHERE protocol = 'gemini');
+DELETE FROM api_keys
+    WHERE provider_id IN (SELECT id FROM providers WHERE protocol = 'gemini');
+DELETE FROM provider_health
+    WHERE provider_id IN (SELECT id FROM providers WHERE protocol = 'gemini');
+DELETE FROM agent_strategies WHERE agent = 'gemini';
+DELETE FROM placeholder_keys WHERE agent = 'gemini';
+
+PRAGMA foreign_keys=OFF;
+CREATE TABLE providers_new (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    protocol      TEXT NOT NULL DEFAULT 'anthropic'
+                  CHECK (protocol IN ('anthropic','openai')),
+    base_url      TEXT NOT NULL,
+    api_path      TEXT,
+    api_key       TEXT,
+    billing       TEXT NOT NULL DEFAULT 'metered'
+                  CHECK (billing IN ('subscription','metered','unlimited')),
+    period_limit  REAL,
+    limit_unit    TEXT
+                  CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens')
+                         OR (length(limit_unit) = 3 AND upper(limit_unit) = limit_unit)),
+    plan_query    TEXT,
+    reset_period  TEXT
+                  CHECK (reset_period IS NULL OR reset_period IN ('monthly','weekly','yearly')),
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    timeout_secs  INTEGER,
+    retries       INTEGER,
+    headers       TEXT,
+    plan_limits   TEXT,
+    catalog_id    TEXT,
+    model_default TEXT
+);
+INSERT INTO providers_new (id, name, catalog_id, protocol, base_url, api_path, api_key,
+                           billing, period_limit, limit_unit, plan_query, plan_limits,
+                           timeout_secs, retries, headers, reset_period, enabled,
+                           created_at, updated_at, model_default)
+    SELECT id, name, catalog_id, protocol, base_url, api_path, api_key,
+           billing, period_limit, limit_unit, plan_query, plan_limits,
+           timeout_secs, retries, headers, reset_period, enabled,
+           created_at, updated_at, model_default
+    FROM providers WHERE protocol <> 'gemini';
+DROP TABLE providers;
+ALTER TABLE providers_new RENAME TO providers;
+
+CREATE TABLE provider_endpoints_new (
+    provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    protocol    TEXT NOT NULL CHECK (protocol IN ('anthropic','openai')),
+    base_url    TEXT NOT NULL,
+    api_path    TEXT,
+    PRIMARY KEY (provider_id, protocol)
+);
+INSERT INTO provider_endpoints_new (provider_id, protocol, base_url, api_path)
+    SELECT provider_id, protocol, base_url, api_path FROM provider_endpoints
+    WHERE protocol <> 'gemini';
+DROP TABLE provider_endpoints;
+ALTER TABLE provider_endpoints_new RENAME TO provider_endpoints;
+PRAGMA foreign_keys=ON;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -418,7 +512,6 @@ UPDATE request_logs SET cost_off_peak = cost WHERE cost IS NOT NULL;
 pub enum Protocol {
     Anthropic,
     OpenAI,
-    Gemini,
 }
 
 impl Protocol {
@@ -426,7 +519,6 @@ impl Protocol {
         match self {
             Protocol::Anthropic => "anthropic",
             Protocol::OpenAI => "openai",
-            Protocol::Gemini => "gemini",
         }
     }
 
@@ -435,7 +527,6 @@ impl Protocol {
         match s {
             "anthropic" => Some(Protocol::Anthropic),
             "openai" => Some(Protocol::OpenAI),
-            "gemini" => Some(Protocol::Gemini),
             _ => None,
         }
     }
@@ -1303,6 +1394,22 @@ impl Store {
         }
         if version < 14 {
             conn.execute_batch(MIGRATION_V14)?;
+        }
+        if version < 15 {
+            // Counted before the delete rather than after: a user with a gemini
+            // provider should be able to find out where it went, and the only
+            // other trace is a catalog entry that is no longer published.
+            let dropped: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM providers WHERE protocol = 'gemini'",
+                [],
+                |r| r.get(0),
+            )?;
+            conn.execute_batch(MIGRATION_V15)?;
+            if dropped > 0 {
+                eprintln!(
+                    "kiwano: removed {dropped} provider(s) whose protocol (gemini) is no longer supported"
+                );
+            }
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -2932,9 +3039,9 @@ mod tests {
         store2.metrics().expect("re-migrate ok");
     }
 
-    /// v3 → v4 rebuild: existing providers/bindings survive, gemini accepted.
+    /// v3 → v4 rebuild: existing providers, bindings and keys survive.
     #[test]
-    fn migration_v4_rebuilds_providers_with_gemini_protocol() {
+    fn migration_v4_rebuilds_providers_and_keeps_their_rows() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("kiwano.db");
 
@@ -2963,13 +3070,112 @@ mod tests {
         assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 1);
         assert_eq!(store.list_api_keys("p-ant").unwrap().len(), 1);
 
-        // v4 widened the CHECK: gemini providers are accepted now.
-        let gem = sample_provider("p-gem", Protocol::Gemini);
-        store.insert_provider(&gem).unwrap();
-        assert_eq!(
-            store.get_provider("p-gem").unwrap().unwrap().protocol,
-            Protocol::Gemini
+        // The tag itself is gone by the time every migration has run: v4 widened
+        // this CHECK for Gemini CLI, v9 carried the widening forward, and v15
+        // rebuilt both tables narrow again (see the v15 test below for the rows
+        // written in between).
+        let conn = Connection::open(&db).unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
+                 VALUES ('p-gem', 'Gem', 'gemini', 'https://g.example.com', 'metered', 't0', 't0')",
+                [],
+            )
+            .is_err(),
+            "the gemini tag must not be writable"
         );
+    }
+
+    /// v14 → v15: the gemini protocol's rows go, and the tag stops being
+    /// writable — including on a database that was built while it was allowed.
+    #[test]
+    fn migration_v15_drops_the_gemini_protocol() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v14 database — the state a build with the protocol
+        // leaves behind: a gemini provider with rows hanging off it, next to
+        // one that must survive.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for migration in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+            ] {
+                conn.execute_batch(migration).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, api_key, billing, created_at, updated_at)
+                 VALUES ('p-gem', 'Gem', 'gemini', 'https://g.example.com', 'sk-g', 'metered', 't0', 't0'),
+                        ('p-keep', 'Keep', 'openai', 'https://k.example.com', 'sk-k', 'metered', 't0', 't0');
+                 INSERT INTO agent_bindings (agent, provider_id, priority, weight, enabled)
+                 VALUES ('gemini', 'p-gem', 0, 1, 1), ('codex', 'p-keep', 0, 1, 1);
+                 INSERT INTO agent_strategies (agent, type) VALUES ('gemini', 'single');
+                 INSERT INTO api_keys (provider_id, api_key, enabled, created_at)
+                 VALUES ('p-gem', 'sk-g2', 1, 't0');
+                 INSERT INTO provider_health (provider_id) VALUES ('p-gem');
+                 INSERT INTO provider_endpoints (provider_id, protocol, base_url)
+                 VALUES ('p-gem', 'gemini', 'https://g.example.com');
+                 INSERT INTO model_pricing (provider_id, model_id, display_name, input, output)
+                 VALUES ('p-gem', 'gemini-2.5-pro', 'Pro', '1', '2');
+                 INSERT INTO placeholder_keys (key, agent, created_at)
+                 VALUES ('kw-ag-gemini-old', 'gemini', 't0');
+                 PRAGMA user_version = 14;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+
+        // The gemini rows are gone, by name and by provider.
+        assert!(store.get_provider("p-gem").unwrap().is_none());
+        assert!(store.bindings_for_agent("gemini").unwrap().is_empty());
+        assert!(store.get_strategy("gemini").unwrap().is_none());
+        assert!(store
+            .list_placeholder_keys()
+            .unwrap()
+            .iter()
+            .all(|k| k.agent != "gemini"));
+        let conn = Connection::open(&db).unwrap();
+        for (table, predicate) in [
+            ("api_keys", "provider_id = 'p-gem'"),
+            ("provider_health", "provider_id = 'p-gem'"),
+            ("provider_endpoints", "provider_id = 'p-gem'"),
+            ("model_pricing", "provider_id = 'p-gem'"),
+        ] {
+            let left: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {predicate}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(left, 0, "{table} still holds a dropped provider's rows");
+        }
+
+        // …and everything else is exactly as it was.
+        assert!(store.get_provider("p-keep").unwrap().is_some());
+        assert_eq!(store.bindings_for_agent("codex").unwrap().len(), 1);
+        assert_eq!(store.list_api_keys("p-keep").unwrap().len(), 0);
+        // The tag cannot come back, on a database that used to allow it.
+        assert!(conn
+            .execute(
+                "INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
+                 VALUES ('p-gem2', 'Gem', 'gemini', 'https://g.example.com', 'metered', 't0', 't0')",
+                [],
+            )
+            .is_err());
     }
 
     /// v8 → v9 rebuild: providers survive with widened limit_unit CHECK
@@ -3364,26 +3570,23 @@ mod tests {
         // list reads them too
         assert_eq!(store.list_providers().unwrap()[0].endpoints.len(), 1);
 
-        // update replaces the whole set
+        // update replaces the whole set: making Anthropic primary moves the
+        // extra endpoint over to OpenAI rather than appending a second row
         let mut updated = got.clone();
-        updated.endpoints = vec![
-            ProviderEndpoint {
-                protocol: Protocol::Anthropic,
-                base_url: "https://api.example.com/anthropic/v2".into(),
-                api_path: None,
-            },
-            ProviderEndpoint {
-                protocol: Protocol::Gemini,
-                base_url: "https://api.example.com/gemini".into(),
-                api_path: None,
-            },
-        ];
+        updated.protocol = Protocol::Anthropic;
+        updated.endpoints = vec![ProviderEndpoint {
+            protocol: Protocol::OpenAI,
+            base_url: "https://api.example.com/openai/v2".into(),
+            api_path: None,
+        }];
         store.update_provider(&updated).unwrap();
         let got = store.get_provider("p-dual").unwrap().unwrap();
-        assert_eq!(got.endpoints.len(), 2);
+        assert_eq!(got.protocol, Protocol::Anthropic);
+        assert_eq!(got.endpoints.len(), 1);
+        assert_eq!(got.endpoints[0].protocol, Protocol::OpenAI);
         assert_eq!(
             got.endpoints[0].base_url,
-            "https://api.example.com/anthropic/v2"
+            "https://api.example.com/openai/v2"
         );
 
         // empty list clears every additional endpoint
@@ -3490,7 +3693,9 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 4, "missing tables repaired");
 
-            // providers rebuilt to the gemini-capable shape
+            // providers rebuilt to the current shape: the repair replays v4,
+            // which widened the protocol CHECK for Gemini CLI, and the run then
+            // reaches v15, which rebuilds both tables narrow again.
             let ddl: String = conn
                 .query_row(
                     "SELECT sql FROM sqlite_master WHERE name='providers'",
@@ -3498,7 +3703,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert!(ddl.contains("gemini"));
+            assert!(!ddl.contains("gemini"), "{ddl}");
         }
         assert_eq!(
             store

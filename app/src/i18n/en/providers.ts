@@ -26,7 +26,7 @@ export const providers = {
   enabling: "Enabling…",
   addProviderFirst: "Add provider first",
   oauthNote:
-    "Signed in with an official subscription (Claude / Gemini login, Codex ChatGPT)? Official OAuth can't be proxied yet — add a provider manually first.",
+    "Signed in with an official subscription (Claude login, Codex ChatGPT)? Official OAuth can't be proxied yet — add a provider manually first.",
 
   // ── Provider rows ──
   unbound: "Unbound",

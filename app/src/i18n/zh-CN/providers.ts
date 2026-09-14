@@ -17,7 +17,7 @@ export const providers = {
   enabling: "启用中…",
   addProviderFirst: "先添加 Provider",
   oauthNote:
-    "使用官方订阅登录（Claude / Gemini 登录、Codex ChatGPT）？官方 OAuth 目前无法代理 —— 请先手动添加一个 Provider。",
+    "使用官方订阅登录（Claude 登录、Codex ChatGPT）？官方 OAuth 目前无法代理 —— 请先手动添加一个 Provider。",
 
   // ── Provider rows ──
   unbound: "未绑定",

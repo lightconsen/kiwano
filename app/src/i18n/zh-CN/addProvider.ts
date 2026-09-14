@@ -20,7 +20,6 @@ export const addProvider = {
   protocol: "协议",
   protoOpenai: "兼容 OpenAI",
   protoAnthropic: "Anthropic",
-  protoGemini: "Gemini API",
 
   apiKey: "API Key",
   keyKeep: "留空则保留当前密钥",

@@ -35,7 +35,6 @@ const SEGMENTS: { id: AgentId | "all"; icon?: string }[] = [
   { id: "all" },
   { id: "claude", icon: "claudecode" },
   { id: "codex", icon: "openai" },
-  { id: "gemini", icon: "gemini" },
   { id: "grokbuild", icon: "grok" },
   { id: "claude-desktop", icon: "claude" },
   { id: "opencode", icon: "opencode" },

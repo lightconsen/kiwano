@@ -7,7 +7,6 @@ import { ProviderLogo } from "@/components/icons/ProviderLogo";
 export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   claude: "claudecode",
   codex: "openai",
-  gemini: "gemini",
   grokbuild: "grok",
   "claude-desktop": "claude",
   opencode: "opencode",

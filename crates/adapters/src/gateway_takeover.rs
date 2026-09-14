@@ -11,7 +11,7 @@
 //! Gateway takeover transforms for additive-mode agents (opencode, openclaw,
 //! hermes, pi).
 //!
-//! Unlike the exclusive-switch agents (claude/codex/gemini/grokbuild) whose
+//! Unlike the exclusive-switch agents (claude/codex/grokbuild) whose
 //! config holds one provider slot, these CLIs keep multi-provider configs, so
 //! "takeover" means: upsert a `kiwano-gateway` provider entry pointing at the
 //! local gateway and select it — every pre-existing provider entry survives.

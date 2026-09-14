@@ -14,7 +14,6 @@ use crate::store::{Protocol, ProviderEndpoint, Store, StrategyType};
 /// Canonical agent ids (tech.md §2.4 B: MVP takes over Claude Code + Codex).
 pub const AGENT_CLAUDE: &str = "claude";
 pub const AGENT_CODEX: &str = "codex";
-pub const AGENT_GEMINI: &str = "gemini";
 
 /// Prefix of per-agent placeholder keys: `kw-ag-<agent>-<rand>`.
 pub const PLACEHOLDER_KEY_PREFIX: &str = "kw-ag-";
@@ -459,7 +458,9 @@ mod tests {
             .endpoint_for(Protocol::Anthropic)
             .expect("alt endpoint");
         assert_eq!(got.base_url, "https://p-oai.example.com/anthropic");
-        assert!(codex.candidates[0].endpoint_for(Protocol::Gemini).is_none());
+        // The provider's own protocol is not an *additional* endpoint: it is
+        // the one its `protocol`/`base_url` columns already carry.
+        assert!(codex.candidates[0].endpoint_for(Protocol::OpenAI).is_none());
     }
 
     /// Per-provider advanced forwarding settings (migration v8) flow into
@@ -554,10 +555,10 @@ mod tests {
         // Key registered but agent has no bindings → a clean 503, not a 401:
         // the caller is identified, it simply has nothing to route to.
         store
-            .upsert_placeholder_key("kw-ag-gemini-1", AGENT_GEMINI)
+            .upsert_placeholder_key("kw-ag-codex-unbound", AGENT_CODEX)
             .unwrap();
         let table = RouteTable::load(&store).unwrap();
-        let err = resolve(&table, Some("kw-ag-gemini-1")).unwrap_err();
-        assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_GEMINI));
+        let err = resolve(&table, Some("kw-ag-codex-unbound")).unwrap_err();
+        assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_CODEX));
     }
 }

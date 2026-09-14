@@ -39,8 +39,8 @@ const REDACTED: &str = "[REDACTED]";
 ///
 /// The same list drives both halves of the metadata capture (a JSON key name
 /// in a body, a parameter name in a query string), so it has to cover the
-/// query-string spellings too — `key` is here for Gemini's `?key=AIza…`,
-/// which the body scrubber would otherwise never see.
+/// query-string spellings too — a vendor that takes its credential as
+/// `?key=AIza…` never puts it in the body, where the scrubber would see it.
 const SECRET_KEYS: &[&str] = &[
     "key",
     "apikey",

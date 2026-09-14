@@ -1,7 +1,7 @@
 // Keys for addProvider. English is the source of truth for the key set;
 // the zh-CN file must match this shape exactly (see ../types.ts).
 //
-// Protocol and billing names (OpenAI / Anthropic / Gemini API, Plan / Pay as
+// Protocol and billing names (OpenAI / Anthropic, Plan / Pay as
 // you go) are terms of art and stay close to their English form; the helper
 // text under each field is the bulk of this namespace.
 export const addProvider = {
@@ -25,7 +25,6 @@ export const addProvider = {
   protocol: "Protocol",
   protoOpenai: "OpenAI-compatible",
   protoAnthropic: "Anthropic",
-  protoGemini: "Gemini API",
 
   apiKey: "API Key",
   keyKeep: "Leave blank to keep the current key",

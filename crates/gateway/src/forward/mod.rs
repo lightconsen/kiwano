@@ -94,9 +94,9 @@ struct UsageSample {
     usage: Usage,
     latency_ms: i64,
     status: &'static str,
-    /// Input-token semantics of the outbound protocol: openai/gemini
-    /// `input_tokens` already contain the cache buckets (deducted before
-    /// billing); anthropic reports fresh input only.
+    /// Input-token semantics of the outbound protocol: openai `input_tokens`
+    /// already contain the cache buckets (deducted before billing); anthropic
+    /// reports fresh input only.
     cache_inclusive: bool,
     /// Full-log payload; None while request logging is disabled.
     log: Option<CompletedLog>,
@@ -218,11 +218,6 @@ fn build_upstream_headers(
             let value = HeaderValue::from_str(&format!("Bearer {key}"))
                 .map_err(|e| GatewayError::Upstream(e.to_string()))?;
             out.insert(axum::http::header::AUTHORIZATION, value);
-        }
-        Protocol::Gemini => {
-            let value =
-                HeaderValue::from_str(key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
-            out.insert("x-goog-api-key", value);
         }
     }
 
@@ -679,7 +674,7 @@ pub async fn forward(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
-                cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
+                cache_inclusive: provider.protocol == Protocol::OpenAI,
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -742,7 +737,7 @@ pub async fn forward(
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: if status.is_success() { "ok" } else { "error" },
-            cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
+            cache_inclusive: provider.protocol == Protocol::OpenAI,
             log,
         };
         record_sample(&state, sample);
@@ -1405,15 +1400,6 @@ mod tests {
         assert!(matches!(
             resolve_inbound(&plain, Some(Protocol::Anthropic), "/v1/messages"),
             InboundResolution::ConvertAnthropicToOpenAI
-        ));
-        // Neither endpoint nor conversion → clean mismatch.
-        assert!(matches!(
-            resolve_inbound(
-                &plain,
-                Some(Protocol::Gemini),
-                "/v1beta/models/gemini-pro:generateContent"
-            ),
-            InboundResolution::Mismatch { .. }
         ));
         // Legacy anthropic paths have no OpenAI equivalent.
         assert!(matches!(

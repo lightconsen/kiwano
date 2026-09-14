@@ -4,11 +4,7 @@ import type { AgentId, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, Catal
 import { AGENTS } from "./types";
 
 function protocolNote(protocol: NewProviderInput["protocol"]): string {
-  return protocol === "openai"
-    ? "OpenAI-compatible"
-    : protocol === "gemini"
-      ? "Gemini API"
-      : "Anthropic";
+  return protocol === "openai" ? "OpenAI-compatible" : "Anthropic";
 }
 
 // endpoint_note suffix mirrors vm::endpoint_note ("OpenAI-compatible · +Anthropic")
@@ -17,7 +13,7 @@ function endpointNote(
   endpoints?: { protocol: Protocol }[],
 ): string {
   const tags = (endpoints ?? []).map((e) =>
-    `+${e.protocol === "openai" ? "OpenAI" : e.protocol === "gemini" ? "Gemini" : "Anthropic"}`,
+    `+${e.protocol === "openai" ? "OpenAI" : "Anthropic"}`,
   );
   return [protocolNote(protocol), ...tags].join(" · ");
 }
@@ -150,7 +146,7 @@ const providers: Provider[] = [
     protocol: "openai",
     billing: "unl",
     enabled: true,
-    agents: ["gemini"],
+    agents: ["opencode"],
     serving_agents: [],
     is_current: false,
     status_badge: "Local",
@@ -300,7 +296,7 @@ const catalog: CatalogEntry[] = [
     added: true,
     models: ["qwen3:32b", "llama3.3:70b"],
   },
-  // Multi-protocol samples from the cc-switch port (anthropic / gemini fingerprints)
+  // Multi-protocol samples from the cc-switch port (anthropic / openai fingerprints)
   {
     id: "anthropic",
     name: "Anthropic",
@@ -321,27 +317,6 @@ const catalog: CatalogEntry[] = [
       display_name: "Claude Opus 5",
       input: "5",
       output: "25",
-      currency: "USD",
-    },
-  },
-  {
-    id: "google-ai-studio",
-    name: "Google AI Studio",
-    logo_color: "#1E6FEB",
-    tag: "official",
-    rating: 4.5,
-    endpoint: "https://generativelanguage.googleapis.com",
-    currency: "USD",
-    billing: "payg",
-    added: false,
-    models: ["gemini-3.6-flash", "gemini-3.6-pro"],
-    protocol: "gemini",
-    desc: "Official pricing",
-    price_ref: {
-      model_id: "gemini-3.6-flash",
-      display_name: "Gemini 3.6 Flash",
-      input: "0.75",
-      output: "3.75",
       currency: "USD",
     },
   },
@@ -432,7 +407,6 @@ const dashboard7d: DashboardData = {
   by_agent: [
     { agent: "claude", label: "Claude Code", requests: 943, tokens: "6.2M", cost: 33.4, cost_off_peak: 31.2 },
     { agent: "codex", label: "Codex", requests: 264, tokens: "1.9M", cost: 9.8, cost_off_peak: 9.3 },
-    { agent: "gemini", label: "Gemini CLI", requests: 77, tokens: "0.5M", cost: 3.0, cost_off_peak: 2.6 },
     { agent: "opencode", label: "OpenCode", requests: 12, tokens: "0.1M", cost: 0.4, cost_off_peak: 0.4 },
   ],
   // getDashboard always derives the real option lists from by_provider/by_agent
@@ -469,7 +443,6 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
     by_agent: [
       { agent: "claude", label: "Claude Code", requests: 201, tokens: "1.5M", cost: 8.1, cost_off_peak: 8.1 },
       { agent: "codex", label: "Codex", requests: 66, tokens: "0.4M", cost: 2.3, cost_off_peak: 2.3 },
-      { agent: "gemini", label: "Gemini CLI", requests: 17, tokens: "0.1M", cost: 0.4, cost_off_peak: 0.4 },
       { agent: "opencode", label: "OpenCode", requests: 4, tokens: "0.02M", cost: 0.1, cost_off_peak: 0.1 },
     ],
   },
@@ -530,7 +503,6 @@ const settings: AppSettings = {
   takeovers: [
     { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false },
     { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false },
-    { agent: "gemini", label: "Gemini CLI", placeholder_key: null, enabled: false, additive: false },
     { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false },
     { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false },
     { agent: "opencode", label: "OpenCode", placeholder_key: null, enabled: false, additive: true },
@@ -610,12 +582,6 @@ const agentRoutes: AgentRoute[] = [
     strategy: "single",
     config: null,
     bindings: [bind("deepseek", 0)],
-  },
-  {
-    agent: "gemini",
-    strategy: "quota",
-    config: '{"limit":500,"unit":"requests"}',
-    bindings: [bind("ollama", 0)],
   },
   {
     // Kimi heads opencode (globally "In use") while standing by in claude's
@@ -1390,7 +1356,6 @@ export const devApi: KiwanoApi = {
     return [
       { agent: "claude", version: "2.1.83 (Claude Code)" },
       { agent: "codex", version: "0.42.0" },
-      { agent: "gemini", version: "0.13.0" },
       { agent: "grokbuild", version: "0.9.4" },
       { agent: "claude-desktop", version: null },
       { agent: "opencode", version: "1.0.120" },

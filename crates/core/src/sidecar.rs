@@ -476,8 +476,6 @@ fn probe_url(protocol: &str, base: &str) -> Result<String, String> {
     let url = match protocol {
         "anthropic" | "openai" if already_versioned => format!("{scheme}{rest}/models"),
         "anthropic" | "openai" => format!("{scheme}{rest}/v1/models"),
-        "gemini" if already_versioned => format!("{scheme}{rest}/models"),
-        "gemini" => format!("{scheme}{rest}/v1beta/models"),
         other => return Err(format!("unknown protocol: {other}")),
     };
     Ok(url)
@@ -502,11 +500,6 @@ fn apply_auth(
                 req = req.header("x-api-key", k);
             }
             req = req.header("anthropic-version", "2023-06-01");
-        }
-        "gemini" => {
-            if let Some(k) = key {
-                req = req.header("x-goog-api-key", k);
-            }
         }
         other => return Err(format!("unknown protocol: {other}")),
     }
@@ -587,52 +580,31 @@ pub async fn probe_endpoint(
     })
 }
 
-/// Count models in a models-list body (openai/anthropic: `data[]`,
-/// gemini: `models[]`). None when the shape doesn't match.
+/// Count models in a models-list body (`data[]`). None when the shape does
+/// not match.
 fn count_models(body: &str) -> Option<usize> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
-    if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
-        return Some(arr.len());
-    }
-    if let Some(arr) = v.get("models").and_then(|d| d.as_array()) {
-        return Some(arr.len());
-    }
-    None
+    v.get("data").and_then(|d| d.as_array()).map(|a| a.len())
 }
 
-/// Extract the model ids from a models-list body (openai/anthropic: `data[].id`,
-/// gemini: `models[].name` with a `models/` prefix) plus gemini's pagination
-/// token when more pages follow.
-fn parse_models(body: &str) -> (Vec<String>, Option<String>) {
+/// Extract the model ids from a models-list body (`data[].id`).
+fn parse_models(body: &str) -> Vec<String> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
-        return (Vec::new(), None);
+        return Vec::new();
     };
-    let arr = v
-        .get("data")
+    v.get("data")
         .and_then(|d| d.as_array())
-        .or_else(|| v.get("models").and_then(|d| d.as_array()));
-    let names = arr
         .into_iter()
         .flatten()
-        .filter_map(|m| {
-            let id = m
-                .get("id")
-                .and_then(|x| x.as_str())
-                .or_else(|| m.get("name").and_then(|x| x.as_str()))?;
-            Some(id.strip_prefix("models/").unwrap_or(id).to_string())
-        })
-        .collect();
-    let token = v
-        .get("nextPageToken")
-        .and_then(|t| t.as_str())
-        .map(String::from);
-    (names, token)
+        .filter_map(|m| m.get("id").and_then(|x| x.as_str()))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Fetch the live model-name list from a provider endpoint. Requires the API
-/// key (cloud providers reject anonymous /models calls). Follows gemini's
-/// nextPageToken pagination; openai/anthropic answer in one page. Sorted and
-/// deduped for the dropdown.
+/// key (cloud providers reject anonymous /models calls). One page: both
+/// protocols answer the whole list at once. Sorted and deduped for the
+/// dropdown.
 pub async fn fetch_model_names(
     protocol: &str,
     endpoint: &str,
@@ -646,36 +618,23 @@ pub async fn fetch_model_names(
         .timeout(Duration::from_secs(8))
         .build()
         .map_err(|e| e.to_string())?;
-    let mut names: Vec<String> = Vec::new();
-    let mut page_token: Option<String> = None;
-    // Gemini pages at ~50 entries; 5 pages = 250 models, plenty for a picker
-    for _ in 0..5 {
-        let mut url = probe_url(protocol, endpoint)?;
-        if let Some(t) = &page_token {
-            url.push_str(&format!("?pageToken={t}"));
-        }
-        let req = apply_auth(protocol, client.get(&url), Some(key))?;
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| format!("connection failed: {e}"))?;
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        if !(200..300).contains(&status) {
-            return Err(match status {
-                401 | 403 => "auth failed — check the API key".into(),
-                404 | 405 => "route not found — protocol not supported".into(),
-                s if (500..600).contains(&s) => format!("upstream error {s}"),
-                s => format!("unexpected status {s}"),
-            });
-        }
-        let (page, token) = parse_models(&body);
-        names.extend(page);
-        page_token = token;
-        if page_token.is_none() {
-            break;
-        }
+    let url = probe_url(protocol, endpoint)?;
+    let req = apply_auth(protocol, client.get(&url), Some(key))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(match status {
+            401 | 403 => "auth failed — check the API key".into(),
+            404 | 405 => "route not found — protocol not supported".into(),
+            s if (500..600).contains(&s) => format!("upstream error {s}"),
+            s => format!("unexpected status {s}"),
+        });
     }
+    let mut names = parse_models(&body);
     names.sort();
     names.dedup();
     Ok(names)
@@ -844,18 +803,10 @@ mod tests {
             probe_url("anthropic", "https://api.deepseek.com/anthropic").unwrap(),
             "https://api.deepseek.com/anthropic/v1/models"
         );
-        assert_eq!(
-            probe_url("gemini", "https://generativelanguage.googleapis.com").unwrap(),
-            "https://generativelanguage.googleapis.com/v1beta/models"
-        );
         // versioned bases extend with /models as-is
         assert_eq!(
             probe_url("openai", "https://api.moonshot.cn/v1").unwrap(),
             "https://api.moonshot.cn/v1/models"
-        );
-        assert_eq!(
-            probe_url("gemini", "https://x.example.com/v1beta").unwrap(),
-            "https://x.example.com/v1beta/models"
         );
         // scheme defaults to https when absent; garbage is rejected
         assert_eq!(
@@ -867,25 +818,20 @@ mod tests {
     }
 
     #[test]
-    fn count_models_reads_both_shapes() {
+    fn count_models_reads_the_list_shape() {
         assert_eq!(count_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#), Some(2));
-        assert_eq!(count_models(r#"{"models":[{"name":"m1"}]}"#), Some(1));
         assert_eq!(count_models(r#"{"error":{}}"#), None);
         assert_eq!(count_models("<html>"), None);
     }
 
     #[test]
-    fn parse_models_reads_ids_names_and_pagination() {
-        let (names, token) = parse_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#);
-        assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
-        assert_eq!(token, None);
-        let (names, token) =
-            parse_models(r#"{"models":[{"name":"models/gemini-2.0-flash"}],"nextPageToken":"Pg"}"#);
-        assert_eq!(names, vec!["gemini-2.0-flash".to_string()]);
-        assert_eq!(token, Some("Pg".to_string()));
-        let (names, token) = parse_models("<html>");
-        assert!(names.is_empty());
-        assert_eq!(token, None);
+    fn parse_models_reads_ids() {
+        assert_eq!(
+            parse_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert!(parse_models("<html>").is_empty());
+        assert!(parse_models(r#"{"data":[{"object":"model"}]}"#).is_empty());
     }
 
     /// An in-process stand-in for a real admin plane, serving the three routes

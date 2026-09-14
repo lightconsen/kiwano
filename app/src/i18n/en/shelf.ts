@@ -17,6 +17,9 @@ export const shelf = {
   billingPlan: "Plan",
   billingPayg: "Pay as you go",
   billingUnl: "Unlimited",
+  /** A vendor that charges both ways at one address (Anthropic: an API and a
+      subscription). The price cell still shows the metered rates. */
+  billingBoth: "Metered + plan",
 
   probeOk: "OK",
   probeAuth: "Auth required",

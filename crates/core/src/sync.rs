@@ -420,10 +420,18 @@ mod tests {
             "users": "12k", "blurb": "great value", "added": false,
             "models": ["deepseek-chat"]
         });
-        let raw = serde_json::json!({ "total": 1, "entries": [entry] }).to_string();
+        // A vendor that charges two ways at one address: a tag this build knows,
+        // which it keeps and hands to the add dialog to settle.
+        let both = serde_json::json!({
+            "id": "anthropic", "name": "Anthropic", "tag": "official",
+            "rating": 4.9, "billing": "both",
+            "endpoints": [{ "protocol": "anthropic", "endpoint": "https://api.anthropic.com" }]
+        });
+        let raw = serde_json::json!({ "total": 2, "entries": [entry, both] }).to_string();
         let list = parse_catalog(&raw).unwrap();
-        assert_eq!(list.total, 1);
+        assert_eq!(list.total, 2);
         assert_eq!(list.entries[0].name, "DeepSeek");
+        assert_eq!(list.entries[1].billing, vm::CatalogBilling::Both);
         // An unrecognized billing tag is isolated, not rejected and not
         // coerced: one bad Hub row must not cost the user the whole catalog.
         assert_eq!(
@@ -432,10 +440,10 @@ mod tests {
         );
         // …and it round-trips verbatim, so the cache stays byte-stable.
         let reserialized = serde_json::to_string(&list).unwrap();
-        assert_eq!(
-            parse_catalog(&reserialized).unwrap().entries[0].billing,
-            list.entries[0].billing
-        );
+        let again = parse_catalog(&reserialized).unwrap();
+        for i in 0..2 {
+            assert_eq!(again.entries[i].billing, list.entries[i].billing);
+        }
 
         assert!(parse_catalog("{not json").is_err());
         assert!(parse_catalog(r#"{"total":1,"entries":[{"id":"x"}]}"#).is_err());

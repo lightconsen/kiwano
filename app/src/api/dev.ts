@@ -305,7 +305,9 @@ const catalog: CatalogEntry[] = [
     rating: 4.9,
     endpoint: "https://api.anthropic.com",
     currency: "USD",
-    billing: "payg",
+    // Charges both ways at this one address — an API and a Pro/Max subscription.
+    // The catalog cannot pick for the user, so the add dialog asks.
+    billing: "both",
     added: false,
     models: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"],
     protocol: "anthropic",

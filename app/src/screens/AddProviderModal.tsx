@@ -27,6 +27,7 @@ import {
   type AgentId,
   type ApiKeyEntry,
   type Billing,
+  type CatalogBilling,
   type CatalogEntry,
   type ProbeReport,
   type Protocol,
@@ -116,7 +117,9 @@ export default function AddProviderModal({
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [billing, setBilling] = useState<Billing>("payg");
+  // `CatalogBilling`, not `Billing`: a shelf entry can say `both`, which the
+  // user settles here (see `bothEntry`). Only the settled value is ever saved.
+  const [billing, setBilling] = useState<CatalogBilling>("payg");
   // Payg spending-limit number (plan providers use the percent pair below)
   const [limitValue, setLimitValue] = useState("");
   // The spending limit is denominated in the currency its provider bills in —
@@ -454,6 +457,9 @@ export default function AddProviderModal({
   const canSave =
     name.trim() !== "" &&
     endpoint.trim() !== "" &&
+    // `both` is a question, not a mode: the row cannot hold it (the backend
+    // refuses it by name), so the form does not offer to save it.
+    billing !== "both" &&
     !invalidPct(planFiveHour) &&
     !invalidPct(planWeekly) &&
     !saving;
@@ -466,8 +472,18 @@ export default function AddProviderModal({
   // visible instead of silently rewriting it to payg, and leave the picker
   // open — the backend rejects an unknown tag on save, so locking the form
   // would dead-end the entry.
-  const billingKnown = billOptions.some((b) => b.id === billing);
-  const billingLocked = (!!edit || (mode === "shelf" && !!shelf)) && billingKnown;
+  // `both` counts as known — it has a label and copy of its own — while staying
+  // out of `billOptions`, which is what the pills are built from and what the
+  // lock below keys on. Putting it in there is the trap: the pills would lock
+  // into a read-only label saying `both`, and saving would send it.
+  const billingKnown = billing === "both" || billOptions.some((b) => b.id === billing);
+  /** A shelf entry that charges both ways at one address. The catalog names two
+      arrangements, so the choice is the user's — and stays theirs after they
+      make it, which is why the pills do not lock for it. */
+  const bothEntry = !edit && shelf?.billing === "both";
+  const unresolvedBoth = bothEntry && billing === "both";
+  const billingLocked =
+    (!!edit || (mode === "shelf" && !!shelf)) && billingKnown && !bothEntry;
 
   // Whether the percent ceilings are worth offering, which is a question about
   // the vendor's API and not about how it charges. The fields are compared
@@ -936,8 +952,8 @@ export default function AddProviderModal({
                   {billOptions.find((b) => b.id === billing)?.label ?? billing}
                 </div>
               ) : (
-                <div className="mt-1 grid grid-cols-3 gap-1.5">
-                  {billOptions.map((b) => {
+                <div className={`mt-1 grid gap-1.5 ${bothEntry ? "grid-cols-2" : "grid-cols-3"}`}>
+                  {(bothEntry ? billOptions.filter((b) => b.id !== "unl") : billOptions).map((b) => {
                     const active = billing === b.id;
                     return (
                       <button
@@ -957,6 +973,11 @@ export default function AddProviderModal({
               {!billingKnown && (
                 <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
                   {t("addProvider.billingUnknown", { billing })}
+                </p>
+              )}
+              {unresolvedBoth && (
+                <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
+                  {t("addProvider.billingBoth")}
                 </p>
               )}
             </div>

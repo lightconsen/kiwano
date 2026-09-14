@@ -19,6 +19,13 @@ export type AgentId =
   | "hermes"
   | "pi";
 export type Billing = "plan" | "payg" | "unl";
+/** A **catalog** entry's billing tag: the three a local provider can hold, plus
+    `both` for a vendor that charges two ways at one address — Anthropic sells an
+    API (metered) and Pro/Max (subscription), and both answer on the same host. A
+    local row can only be one, so the add dialog asks the user to settle it and
+    `both` is never stored. The same split Rust makes between `CatalogBilling` and
+    `store::Billing`. */
+export type CatalogBilling = Billing | "both";
 export type Protocol = "openai" | "anthropic" | "gemini";
 
 export interface AgentMeta {
@@ -347,7 +354,7 @@ export interface CatalogEntry {
       between "bills by plan" and "can be asked how much of the plan is spent",
       and only the latter justifies offering a ceiling. */
   plan_query?: { template: string };
-  billing: Billing;
+  billing: CatalogBilling;
   /** Derived at read time from the local provider list (same endpoint = added) */
   added: boolean;
   /** Models the primary endpoint serves; seeds the add modal's picker */

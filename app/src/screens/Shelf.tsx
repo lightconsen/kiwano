@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "../api/client";
-import type { Billing, CatalogEntry, ModelPrice, ProbeReport, Protocol } from "../api/types";
+import type { CatalogBilling, CatalogEntry, ModelPrice, ProbeReport, Protocol } from "../api/types";
 import { tzLabel, type PeakHours } from "../lib/peak";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
@@ -98,15 +98,19 @@ const TAG_RANK: Record<CatalogEntry["tag"], number> = {
   local: 4,
 };
 
-const BILLING_LABEL: Record<Billing, KeyPath<Messages>> = {
+const BILLING_LABEL: Record<CatalogBilling, KeyPath<Messages>> = {
   plan: "shelf.billingPlan",
   payg: "shelf.billingPayg",
   unl: "shelf.billingUnl",
+  // A vendor that charges both ways at one address. The column is 104px wide, so
+  // this is the shortest honest phrasing: the row's price cell still shows the
+  // metered rates (see `rowPriceText`).
+  both: "shelf.billingBoth",
 };
 
 /** Hub catalogs may carry a billing tag this build predates: show the raw
     tag rather than a blank cell. */
-function billingLabel(billing: Billing, t: Translate): string {
+function billingLabel(billing: CatalogBilling, t: Translate): string {
   // The lookup can miss at runtime despite the `Record` type: a newer Hub
   // catalog may name a billing tag this build has never heard of.
   return BILLING_LABEL[billing] ? t(BILLING_LABEL[billing]) : billing;
@@ -116,12 +120,14 @@ function billingLabel(billing: Billing, t: Translate): string {
     is something the user signed up for, pay-as-you-go is metered, and unlimited
     has no meter to read.
  *
-    `null` for a tag this build does not know, which is a real state — the same
-    one `billingLabel` above handles by showing the raw word. It is not a rank,
-    so those rows sort after the three known modes whichever way the arrow
-    points, the way an unpriced row behaves in the price ordering. */
-function billingRank(billing: Billing): number | null {
-  return { plan: 0, payg: 1, unl: 2 }[billing] ?? null;
+    `null` for a value with no single rank: a tag this build does not know, and
+    `both` — a vendor that charges two ways is not "more" or "less" committed than
+    one that charges one. Neither is a rank, so those rows sort after the three
+    whichever way the arrow points, the way an unpriced row behaves in the price
+    ordering. */
+const BILLING_RANK: Record<string, number> = { plan: 0, payg: 1, unl: 2 };
+function billingRank(billing: CatalogBilling): number | null {
+  return BILLING_RANK[billing] ?? null;
 }
 
 /** The row's category badge, derived from `tag` rather than carried in the
@@ -422,6 +428,9 @@ function priceText(e: CatalogEntry, t: Translate, tier: PriceTier): string {
     billing mode the two are the same sentence, and this is `priceText`. */
 function rowPriceText(e: CatalogEntry, t: Translate, tier: PriceTier): string {
   const rate = priceText(e, t, tier);
+  // Everything that is not a subscription shows its per-token rates — including
+  // `both`, whose metered half is exactly what these figures are. Its other half
+  // is a monthly fee the catalog does not carry.
   if (e.billing !== "plan") return rate;
   const offer = e.desc ?? "";
   // Equal when the entry prices no model and `desc` is all there is.

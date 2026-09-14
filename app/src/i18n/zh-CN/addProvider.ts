@@ -55,6 +55,7 @@ export const addProvider = {
   billingFixed: "该 Provider 固定",
   billingFromCatalog: "来自模型库",
   billingUnknown: "无法识别的计费标签“{billing}” · 请选择一种模式",
+  billingBoth: "该厂商两种计费都有 —— 请为这条 Provider 选择一种",
 
   // ── Plan-mode percent limits ──
   usageLimits: "用量上限",

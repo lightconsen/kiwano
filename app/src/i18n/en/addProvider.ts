@@ -61,6 +61,9 @@ export const addProvider = {
   billingFromCatalog: "from the catalog",
   /** A catalog row carrying a tag this build does not know. */
   billingUnknown: "Unrecognized billing tag “{billing}” · pick a mode",
+  /** The one entry that charges both ways: the catalog names two arrangements,
+      so the choice belongs to the user and the form will not save without it. */
+  billingBoth: "This vendor charges both ways — pick the one this provider is",
 
   // ── Plan-mode percent limits ──
   usageLimits: "Usage limits",

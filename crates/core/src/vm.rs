@@ -366,6 +366,18 @@ pub enum CatalogBilling {
     Plan,
     Payg,
     Unl,
+    /// A vendor that charges both ways at **one address**: Anthropic sells an API
+    /// (metered) and Pro/Max (subscription), and both answer on
+    /// `api.anthropic.com`. A local provider row can only be one of them, so this
+    /// value never reaches the database — the user settles it when adding, and
+    /// [`billing_to_db`] refuses it with a message that says so.
+    ///
+    /// It has to be a tag of its own rather than a second catalog entry because
+    /// [`catalog_id_for`] matches a local provider to an entry by endpoint and
+    /// gives up when two entries share one: a second Anthropic entry would leave
+    /// every hand-added Anthropic provider unlinked, and unlinked ones are priced
+    /// from someone else's rates.
+    Both,
     /// Unrecognized tag, kept verbatim for lossless round-tripping.
     Other(String),
 }
@@ -376,6 +388,7 @@ impl CatalogBilling {
             CatalogBilling::Plan => "plan",
             CatalogBilling::Payg => "payg",
             CatalogBilling::Unl => "unl",
+            CatalogBilling::Both => "both",
             CatalogBilling::Other(raw) => raw,
         }
     }
@@ -387,6 +400,7 @@ impl CatalogBilling {
             "plan" => Some(CatalogBilling::Plan),
             "payg" => Some(CatalogBilling::Payg),
             "unl" => Some(CatalogBilling::Unl),
+            "both" => Some(CatalogBilling::Both),
             _ => None,
         }
     }
@@ -887,6 +901,12 @@ fn billing_to_db(ui: &str) -> Result<Billing, String> {
         "plan" => Ok(Billing::Subscription),
         "unl" => Ok(Billing::Unlimited),
         "payg" => Ok(Billing::Metered),
+        // Known, and still refused: the catalog says this vendor charges two
+        // ways, and a local row holds one. A distinct message because "unknown
+        // billing" would send whoever reads it looking for a broken catalog.
+        "both" => {
+            Err("billing \"both\" must be resolved to plan or payg before saving".to_string())
+        }
         other => Err(format!(
             "unknown billing \"{other}\" (expected plan|payg|unl)"
         )),
@@ -3262,6 +3282,15 @@ mod tests {
         assert!(err.contains("plan|payg|unl"), "{err}");
         assert!(billing_to_db("").is_err());
         assert!(billing_to_db("PAYG").is_err());
+
+        // `both` is a tag we *know*, and still refuse: the catalog is telling us
+        // the vendor charges two ways, and the local row holds one. The message
+        // has to point at the choice rather than at the catalog — "unknown
+        // billing" would send the reader looking for a data defect.
+        let err = billing_to_db("both").unwrap_err();
+        assert!(err.contains("resolved"), "{err}");
+        assert!(err.contains("plan or payg"), "{err}");
+        assert!(!err.contains("unknown"), "{err}");
     }
 
     #[test]
@@ -3271,6 +3300,7 @@ mod tests {
             ("plan", CatalogBilling::Plan),
             ("payg", CatalogBilling::Payg),
             ("unl", CatalogBilling::Unl),
+            ("both", CatalogBilling::Both),
         ] {
             assert_eq!(CatalogBilling::parse_str(raw), Some(variant.clone()));
             assert_eq!(CatalogBilling::from(raw.to_string()), variant);

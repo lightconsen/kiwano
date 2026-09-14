@@ -2008,4 +2008,130 @@ mod tests {
         assert!(message.contains("key=[REDACTED]"), "{message}");
         assert!(message.contains("failed: "), "{message}");
     }
+
+    // ── the retry loop and the per-provider timeout, end to end ──────────────
+    //
+    // `retryable_status_classification` pins which statuses *count* as
+    // retryable; nothing until now drove the loop that acts on it, or the
+    // timeout that ends a wait. Both need a socket, and neither needs a test
+    // framework: a scripted stub is a few lines of raw HTTP.
+
+    /// What one connection does. Each entry answers one connection, so a script
+    /// is also a count of how many attempts actually arrived.
+    enum Stub {
+        Answer(u16, &'static str),
+        /// Accept, then say nothing until the caller gives up — the only way to
+        /// observe a timeout rather than a refusal.
+        Silence,
+    }
+
+    /// A loopback server answering `script` in order, with the URL to call.
+    async fn stub(script: Vec<Stub>) -> (String, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a loopback port");
+        let addr = listener.local_addr().expect("a bound port has an address");
+        let handle = tokio::spawn(async move {
+            for step in script {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
+                // Read the request head; the answer does not depend on it.
+                let mut buf = [0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                match step {
+                    Stub::Answer(status, body) => {
+                        let head = format!(
+                            "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = sock.write_all(head.as_bytes()).await;
+                        let _ = sock.write_all(body.as_bytes()).await;
+                    }
+                    Stub::Silence => tokio::time::sleep(Duration::from_secs(5)).await,
+                }
+                let _ = sock.shutdown().await;
+            }
+        });
+        (format!("http://{addr}/v1/chat/completions"), handle)
+    }
+
+    /// The loop, not the predicate: a 429 is re-sent, and the second answer is
+    /// the one the caller gets.
+    #[tokio::test]
+    async fn a_retryable_status_is_retried_and_the_second_answer_stands() {
+        let (url, server) = stub(vec![
+            Stub::Answer(429, ""),
+            Stub::Answer(200, "{\"ok\":true}"),
+        ])
+        .await;
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.base_url = url.clone();
+        p.retries = Some(1);
+
+        let outcome = send_upstream(
+            &state,
+            &p,
+            "claude",
+            "claude:1",
+            Method::POST,
+            &url,
+            HeaderMap::new(),
+            Bytes::from_static(b"{}"),
+            None,
+            None,
+        )
+        .await;
+
+        let resp = outcome.expect("the retry's own answer, not a 502");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "the second attempt's answer is what the caller sees"
+        );
+        server.abort();
+    }
+
+    /// A peer that accepts and never answers: the provider's own timeout ends the
+    /// wait, and with no attempts left the caller gets a 502 instead of a hang.
+    #[tokio::test]
+    async fn a_silent_upstream_hits_the_timeout_and_answers_502() {
+        let (url, server) = stub(vec![Stub::Silence]).await;
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.base_url = url.clone();
+        p.timeout_secs = Some(1);
+        p.retries = None;
+
+        let started = std::time::Instant::now();
+        let outcome = send_upstream(
+            &state,
+            &p,
+            "claude",
+            "claude:1",
+            Method::POST,
+            &url,
+            HeaderMap::new(),
+            Bytes::from_static(b"{}"),
+            None,
+            None,
+        )
+        .await;
+
+        let resp = outcome.expect_err("a timeout is not an answer");
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        // The provider's second ended it, not the client's 300s read timeout.
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "took {:?}",
+            started.elapsed()
+        );
+        server.abort();
+    }
 }

@@ -13,7 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/i18n/en";
-import type { AgentRoute, AppSettings, CustomAgent, Provider } from "@/api/types";
+import type { AgentDetect, AgentRoute, AppSettings, CustomAgent, Provider } from "@/api/types";
 
 import Providers from "./Providers";
 
@@ -516,5 +516,66 @@ describe("parking a provider", () => {
     expect(start.querySelector("svg.lucide-play")).not.toBeNull();
     expect(start.querySelector("svg.lucide-pause")).toBeNull();
     expect(start).toHaveAttribute("title", en.providers.enableTitle);
+  });
+});
+
+describe("the refresh button", () => {
+  /** Only pi was installed when the app launched: the strip has no Codex tab. */
+  const piOnly: AgentDetect[] = [
+    { agent: "pi", installed: true, path: "/usr/bin/pi" },
+    { agent: "codex", installed: false, path: null },
+  ];
+
+  it("re-probes the machine, so a CLI installed since launch gets a tab", async () => {
+    const user = userEvent.setup();
+    const onRedetect = vi.fn();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    const view = render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={piOnly} onRedetect={onRedetect} />,
+    );
+
+    // The detection result gates the strip: codex is not installed, so no tab.
+    expect(await screen.findByRole("button", { name: "Pi" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Codex" })).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: en.common.refresh }));
+
+    await waitFor(() => expect(onRedetect).toHaveBeenCalledTimes(1));
+    // The button's other two jobs are unchanged: the local reads happen too.
+    expect(apiMock.listProviders).toHaveBeenCalledTimes(2);
+
+    // What the probe answers arrives back as a prop (App owns the result): codex
+    // is installed now, and its tab is in the strip without a restart.
+    view.rerender(
+      <Providers
+        onAdd={() => {}}
+        onEdit={() => {}}
+        agentDetect={[
+          { agent: "pi", installed: true, path: "/usr/bin/pi" },
+          { agent: "codex", installed: true, path: "/usr/local/bin/codex" },
+        ]}
+        onRedetect={onRedetect}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Codex" })).toBeInTheDocument();
+  });
+
+  it("does not re-probe on an ordinary refetch — only a click pays for it", async () => {
+    const user = userEvent.setup();
+    const onRedetect = vi.fn();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    apiMock.setProviderEnabled.mockResolvedValue(undefined);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} onRedetect={onRedetect} />);
+
+    // Parking a provider re-reads the local data; that refetch is the generic
+    // "something changed" callback, and must not drag a login shell with it.
+    await user.click(await screen.findByRole("button", { name: en.providers.disable }));
+
+    await waitFor(() => expect(apiMock.listProviders).toHaveBeenCalledTimes(2));
+    expect(onRedetect).not.toHaveBeenCalled();
   });
 });

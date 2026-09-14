@@ -13,7 +13,8 @@ export const providers = {
   all: "All",
   counts: "{providers} providers · {agents} agents bound",
   addProvider: "Add provider",
-  refreshTitle: "Refresh providers and plan quotas (bypasses the 5-min quota cache)",
+  refreshTitle:
+    "Refresh providers, plan quotas and installed agents (bypasses the 5-min quota cache)",
 
   // ── Per-agent onboarding (empty tab) ──
   takenOverTitle: "{agent} is taken over",

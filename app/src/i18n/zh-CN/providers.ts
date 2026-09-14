@@ -5,7 +5,7 @@ export const providers = {
   all: "全部",
   counts: "{providers} 个 Provider · 已绑定 {agents} 个 Agent",
   addProvider: "添加 Provider",
-  refreshTitle: "刷新 Provider 与套餐配额（绕过 5 分钟配额缓存）",
+  refreshTitle: "刷新 Provider、套餐配额与已安装 Agent（绕过 5 分钟配额缓存）",
 
   // ── Per-agent onboarding (empty tab) ──
   takenOverTitle: "{agent} 已接管",

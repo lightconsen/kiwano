@@ -1370,6 +1370,7 @@ export default function Providers({
   onEdit,
   agentDetect = null,
   agentVersions = {},
+  onRedetect,
   initialAgent = null,
 }: {
   onAdd: () => void;
@@ -1378,6 +1379,8 @@ export default function Providers({
   agentDetect?: AgentDetect[] | null;
   /** Phase 2 versions by agent id (arrive async, tooltip only) */
   agentVersions?: Partial<Record<AgentRef, string>>;
+  /** Re-run agent detection (App owns the result). The refresh button's third job */
+  onRedetect?: () => void;
   /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
   initialAgent?: AgentRef | null;
 }) {
@@ -1633,6 +1636,11 @@ export default function Providers({
           onClick={() => {
             refetch();
             refreshQuotas();
+            // Deliberately separate from `refetch`: that one is the generic
+            // "something changed" callback handed to every child, and re-probing
+            // spawns a login shell plus one subprocess per agent, so only a
+            // click should pay for it.
+            onRedetect?.();
           }}
         >
           <RefreshCw className={`h-3.5 w-3.5${quotaBusy ? " animate-spin" : ""}`} />

@@ -126,7 +126,13 @@ export default function App() {
 
   // Agent detection (phase 1 gates the Apps filter; phase 2 versions enrich
   // tooltips later). Probe failure → null → the Apps tab shows every agent.
-  useEffect(() => {
+  //
+  // Run once at startup, and again on demand: the Apps refresh re-probes, so a
+  // CLI installed after launch gets its tab without restarting the app. Phase 2
+  // is one `--version` subprocess per agent (seconds, not milliseconds), which
+  // is why it stays fire-and-forget — it fills tooltips, it is never a reason
+  // to make anyone wait.
+  const detectAgents = useCallback(() => {
     api
       .detectAgents()
       .then((list) => {
@@ -142,6 +148,7 @@ export default function App() {
       })
       .catch(() => setAgentDetect(null));
   }, []);
+  useEffect(detectAgents, [detectAgents]);
 
   // Cost alert patrol (spec §4.1 P1): poll every 60s; the backend dedupes per period,
   // so a returned alert is the first hit of that period — forward it as a system notification.
@@ -246,6 +253,7 @@ export default function App() {
             key={`p${tick}`}
             agentDetect={agentDetect}
             agentVersions={agentVersions}
+            onRedetect={detectAgents}
             initialAgent={route.agent}
             onAdd={() => setModal({ open: true, preset: null, edit: null })}
             onEdit={(p) => setModal({ open: true, preset: null, edit: p })}

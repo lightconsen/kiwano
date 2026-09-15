@@ -54,12 +54,15 @@ export default function AddProviderModal({
   open,
   preset,
   edit,
+  preferredCurrency = "USD",
   onClose,
   onSaved,
 }: {
   open: boolean;
   preset: CatalogEntry | null;
   edit: Provider | null;
+  /** The user's display currency, which seeds a new spending limit's. */
+  preferredCurrency?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -72,6 +75,8 @@ export default function AddProviderModal({
     { id: "payg", label: t("addProvider.billingPayg") },
     { id: "unl", label: t("addProvider.billingUnlimited") },
   ];
+  const protocolLabel = (id: string) =>
+    protocolOptions.find((p) => p.id === id)?.label ?? id;
   const protocolOptions: { id: Protocol; label: string }[] = [
     { id: "openai", label: t("addProvider.protoOpenai") },
     { id: "anthropic", label: t("addProvider.protoAnthropic") },
@@ -134,7 +139,18 @@ export default function AddProviderModal({
   // added from, and the provider's own prices with it.
   const savedCurrency =
     edit?.limit_unit && edit.limit_unit.length === 3 ? edit.limit_unit : null;
-  const limitCurrency = savedCurrency ?? editEntry?.currency ?? shelf?.currency ?? "USD";
+  // Held, not derived: a picker that the user can use has to. Seeded in the order
+  // the answers are trustworthy — the row's own unit (set only while it has a
+  // limit), the entry's currency (what its published prices are in), and the
+  // user's display currency, which is all a provider with no entry has to go on.
+  const [limitCurrency, setLimitCurrency] = useState(
+    savedCurrency ?? editEntry?.currency ?? shelf?.currency ?? preferredCurrency,
+  );
+  // What the limit can be denominated in: the Hub's rate table, because that is
+  // what makes the limit comparable to the costs it is measured against, plus
+  // whatever the row already says — a currency the table has since dropped must
+  // not vanish from the picker and silently re-denominate the limit.
+  const [currencies, setCurrencies] = useState<string[]>([]);
   const [agents, setAgents] = useState<AgentRef[]>([]);
   // Multi-select dropdown for agent binding (rows = logo + name)
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -161,6 +177,16 @@ export default function AddProviderModal({
   const [planFiveHour, setPlanFiveHour] = useState("");
   const [planWeekly, setPlanWeekly] = useState("");
 
+  /** Whether the form is bound to a catalog entry — Add-from-Models before the
+      user switches to Custom.
+   *
+   * The entry declared the protocol, the endpoints and the currency its prices are
+   * in, so those three are read-only while it is in play and the user's own to set
+   * otherwise: a provider typed in by hand has nobody else to declare them, and an
+   * existing row is the user's own already. The coverage badges above the endpoint
+   * list are derived from its rows, so they follow whatever is picked. */
+  const fromEntry = !edit && mode === "shelf" && !!shelf;
+
   // Prefill the form from a catalog entry (Models-page preset or in-modal pick)
   const applyShelf = (e: CatalogEntry) => {
     setName(e.name);
@@ -172,6 +198,10 @@ export default function AddProviderModal({
     setModel(e.models[0] ?? "");
     setBilling(e.billing);
     setLimitValue(e.billing === "payg" ? "50" : "");
+    // Its prices are published in this, so the limit has to be too. An entry that
+    // publishes none (the field is younger than some of them) leaves the user's own
+    // currency, which is what the initial seed would have given it.
+    setLimitCurrency(e.currency ?? preferredCurrency);
     setPlanFiveHour("");
     setPlanWeekly("");
     setAgents(e.id === "deepseek" ? ["claude", "codex"] : []);
@@ -289,6 +319,7 @@ export default function AddProviderModal({
       const q = edit.usage?.quota;
       // Payg spending limit (plan providers now carry percent limits instead)
       setLimitValue(edit.billing === "payg" && q ? String(q.limit) : "");
+      setLimitCurrency(savedCurrency ?? preferredCurrency);
       setPlanFiveHour(edit.plan_limits?.five_hour != null ? String(edit.plan_limits.five_hour) : "");
       setPlanWeekly(edit.plan_limits?.weekly != null ? String(edit.plan_limits.weekly) : "");
       setAgents([...edit.agents]);
@@ -308,6 +339,11 @@ export default function AddProviderModal({
     // pre-selects its entry directly
     setMode("shelf");
     setShelf(preset);
+    // The currency is *not* seeded in the initial state: this component stays
+    // mounted while the dialog is closed, so that would read the user's currency
+    // before the app has loaded settings and keep USD for the session. Seeded per
+    // open instead — and again by `applyShelf` below, which states the entry's own.
+    setLimitCurrency(preset?.currency ?? preferredCurrency);
     resetAdvanced();
     if (preset) {
       applyShelf(preset);
@@ -328,12 +364,34 @@ export default function AddProviderModal({
     }
   }, [open, preset, edit]);
 
+  // The currencies the limit can be denominated in, read once per open. A failure
+  // leaves the list empty and the picker showing only the currency in force, which
+  // is what it did before there was a picker at all.
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    api
+      .getCurrencyMeta()
+      .then((m) => {
+        if (alive) setCurrencies(m.currencies);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
   // Catalog loads lazily, the first time the in-modal picker is shown
   useEffect(() => {
     if (open && !edit && mode === "shelf" && !shelf && catalog === null) {
       api.listCatalog().then((c) => setCatalog(c.entries));
     }
   }, [open, edit, mode, shelf, catalog]);
+
+  /** What the picker offers. */
+  const currencyOptions = Array.from(
+    new Set([...(currencies.length ? currencies : [limitCurrency]), limitCurrency]),
+  );
 
   /// The catalog entry an edited provider was added from, when the Hub still
   /// publishes it.
@@ -372,6 +430,13 @@ export default function AddProviderModal({
   useEffect(() => {
     const template = editEntry?.plan_query?.template;
     if (template) setPqTemplate((current) => current || template);
+  }, [editEntry]);
+
+  // …and the currency with it: the row keeps one only while it has a limit, so a
+  // pay-as-you-go provider whose limit is blank has none to read and its entry is
+  // what says which currency its prices are in.
+  useEffect(() => {
+    if (editEntry?.currency) setLimitCurrency(editEntry.currency);
   }, [editEntry]);
 
   // Fill in the endpoints the stored row is missing, once the entry lands.
@@ -416,6 +481,37 @@ export default function AddProviderModal({
 
   /** One plan-window ceiling: a field that reads as a percentage, the presets
       beside the window's name, and the reason when it cannot be saved. */
+  /** One endpoint row's protocol: a badge while a catalog entry owns the form, a
+      picker when the user does. Both rows use it, and so the coverage badges above
+      follow whatever is picked here. */
+  const protocolField = (value: Protocol, onChange: (p: Protocol) => void) =>
+    fromEntry ? (
+      <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
+        <span className="truncate">{protocolLabel(value)}</span>
+      </span>
+    ) : (
+      <Select value={value} onValueChange={(v) => v && onChange(v as Protocol)}>
+        <SelectTrigger
+          className="h-8 w-[108px] flex-none bg-bg text-[11.5px] dark:bg-bg"
+          aria-label={t("addProvider.protocol")}
+        >
+          <SelectValue>{(v) => protocolLabel(String(v ?? value))}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {protocolOptions.map((p) => (
+            <SelectItem key={p.id} value={p.id}>
+              {p.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+
+  /** The protocol no endpoint covers yet, for a row that is about to be added.
+      Only two exist, so the add button runs out rather than repeating one. */
+  const nextFreeProtocol = (): Protocol =>
+    protocolOptions.find((p) => !supportedProtocols.has(p.id))?.id ?? protocol;
+
   const ceilingField = (value: string, setValue: (v: string) => void, name: string) => {
     const bad = invalidPct(value);
     return (
@@ -743,6 +839,7 @@ export default function AddProviderModal({
               <Input
                 className="mt-1 h-8 bg-bg text-[12px] dark:bg-bg"
                 value={name}
+                aria-label={t("addProvider.name")}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
@@ -796,11 +893,12 @@ export default function AddProviderModal({
               </div>
             </div>
 
-            {/* Endpoint URLs, one row per protocol: protocol badge + URL +
-                Test. The first row is the primary endpoint, the rest serve
-                agents speaking another protocol natively (same API key pool).
-                The list comes from the catalog (shelf) or the stored provider
-                (edit) — read-only, no add/remove. */}
+            {/* Endpoint URLs, one row per protocol: protocol + URL + Test. The
+                first row is the primary endpoint, the rest serve agents speaking
+                another protocol natively (same API key pool). A catalog entry
+                brings its own list and it is read-only while that entry owns the
+                form; a provider typed in by hand — and an existing row, which is
+                the user's own already — can add and drop them. */}
             <div>
               <Label className="text-[11px] font-medium text-mut">
                 {t("addProvider.endpointUrl")}{" "}
@@ -813,15 +911,16 @@ export default function AddProviderModal({
               <div className="mt-1 space-y-1.5">
                 {/* Primary endpoint row */}
                 <div className="flex items-center gap-1.5">
-                  <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
-                    <span className="truncate">
-                      {protocolOptions.find((p) => p.id === protocol)?.label ?? protocol}
-                    </span>
-                  </span>
+                  {protocolField(protocol, (p) => {
+                    setProtocol(p);
+                    // The verdict was for the old protocol's endpoint call shape
+                    setProbe(null);
+                  })}
                   <Input
                     className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
                     value={endpoint}
-                    readOnly={!edit && mode === "shelf" && !!shelf}
+                    readOnly={fromEntry}
+                    aria-label={t("addProvider.endpointUrl")}
                     onChange={(e) => {
                       setEndpoint(e.target.value);
                       setProbe(null);
@@ -861,16 +960,34 @@ export default function AddProviderModal({
                 </div>
                 {altEndpoints.map((r, i) => (
                   <div key={i} className="flex items-center gap-1.5">
-                    <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
-                      <span className="truncate">
-                        {protocolOptions.find((p) => p.id === r.protocol)?.label ?? r.protocol}
-                      </span>
-                    </span>
+                    {protocolField(r.protocol, (p) => {
+                      setAltEndpoints((rs) =>
+                        rs.map((x, j) => (j === i ? { ...x, protocol: p } : x)),
+                      );
+                      // The verdict was for the old protocol's call shape
+                      setAltProbes((m) => {
+                        const next = { ...m };
+                        delete next[i];
+                        return next;
+                      });
+                    })}
                     <span className="min-w-0 flex-1">
                       <Input
                         className="h-8 w-full bg-bg font-mono text-[12px] dark:bg-bg"
                         value={r.endpoint}
-                        readOnly
+                        readOnly={fromEntry}
+                        aria-label={t("addProvider.endpointUrl")}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setAltEndpoints((rs) =>
+                            rs.map((x, j) => (j === i ? { ...x, endpoint: value } : x)),
+                          );
+                          setAltProbes((m) => {
+                            const next = { ...m };
+                            delete next[i];
+                            return next;
+                          });
+                        }}
                       />
                     </span>
                     <Button
@@ -894,8 +1011,45 @@ export default function AddProviderModal({
                         </span>
                       )}
                     </Button>
+                    {!fromEntry && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 flex-none px-0 text-mut hover:text-ink"
+                        aria-label={t("addProvider.removeEndpoint")}
+                        title={t("addProvider.removeEndpoint")}
+                        onClick={() => {
+                          setAltEndpoints((rs) => rs.filter((_, j) => j !== i));
+                          setAltProbes({});
+                        }}
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 ))}
+                {/* A provider typed in by hand declares its own endpoints: one row
+                    per protocol it answers on. A catalog entry has already said
+                    which those are, so the button is not there while it owns the
+                    form — and with two protocols there is nothing to add once both
+                    are covered. */}
+                {!fromEntry && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11.5px] text-mut hover:text-ink"
+                    disabled={protocolOptions.every((p) => supportedProtocols.has(p.id))}
+                    onClick={() =>
+                      setAltEndpoints((rs) => [
+                        ...rs,
+                        { protocol: nextFreeProtocol(), endpoint: "" },
+                      ])
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("addProvider.addEndpoint")}
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -1031,17 +1185,28 @@ export default function AddProviderModal({
                     onChange={(e) => setLimitValue(e.target.value)}
                     placeholder="50"
                   />
-                  {/* Read-only on purpose: the limit is denominated in the
-                      provider's own currency, so there is nothing to pick. */}
-                  <Select value={limitCurrency} disabled>
+                  {/* A catalog entry states the currency its prices are in, and
+                      the limit is measured against those — so it is that while the
+                      entry owns the form. A provider typed in by hand has no such
+                      statement, and this is where the user makes it. */}
+                  <Select
+                    value={limitCurrency}
+                    disabled={fromEntry}
+                    onValueChange={(v) => v && setLimitCurrency(v)}
+                  >
                     <SelectTrigger
                       className="w-[84px] bg-bg text-[12px] dark:bg-bg"
+                      aria-label={t("addProvider.spendingLimit")}
                       title={t("addProvider.currencyTitle", { currency: limitCurrency })}
                     >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={limitCurrency}>{limitCurrency}</SelectItem>
+                      {currencyOptions.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

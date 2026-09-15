@@ -33,6 +33,8 @@ export const addProvider = {
 
   endpointUrl: "Endpoint URL",
   endpointHintShelf: "from the catalog · one per protocol · shares the API key",
+  addEndpoint: "Add endpoint",
+  removeEndpoint: "Remove this endpoint",
   endpointHint: "one per protocol · shares the API key",
   test: "Test",
 

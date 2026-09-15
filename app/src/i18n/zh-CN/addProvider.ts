@@ -28,6 +28,8 @@ export const addProvider = {
 
   endpointUrl: "端点 URL",
   endpointHintShelf: "来自模型库 · 每种协议一个 · 共用 API 密钥",
+  addEndpoint: "添加端点",
+  removeEndpoint: "移除此端点",
   endpointHint: "每种协议一个 · 共用 API 密钥",
   test: "测试",
 

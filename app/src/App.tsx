@@ -67,6 +67,10 @@ export default function App() {
   });
   const [agentDetect, setAgentDetect] = useState<AgentDetect[] | null>(null);
   const [agentVersions, setAgentVersions] = useState<Partial<Record<AgentId, string>>>({});
+  // The user's display currency. The provider dialog seeds a new spending limit
+  // with it — another local read would be a round trip, and the seed has to be
+  // there before the first paint of that field.
+  const [preferredCurrency, setPreferredCurrency] = useState("USD");
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -94,6 +98,7 @@ export default function App() {
         // that happens before any screen mounts.
         rememberCustomAgents(s.custom_agents);
         applyTheme(s.theme);
+        setPreferredCurrency(s.preferred_currency);
         // The stored preference is `"system"` until the user picks one, and it
         // resolves from the OS locale — so this has to run before the first
         // paint that shows text.
@@ -289,6 +294,7 @@ export default function App() {
         open={modal.open}
         preset={modal.preset}
         edit={modal.edit}
+        preferredCurrency={preferredCurrency}
         onClose={() => setModal({ open: false, preset: null, edit: null })}
         onSaved={refresh}
       />

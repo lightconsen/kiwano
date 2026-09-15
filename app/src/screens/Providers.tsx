@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { useReload } from "../lib/reload";
 import { agentMeta, isBuiltinAgent, rememberCustomAgents } from "../lib/agents";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import {
@@ -1636,7 +1637,7 @@ export default function Providers({
   /** Phase 2 versions by agent id (arrive async, tooltip only) */
   agentVersions?: Partial<Record<AgentRef, string>>;
   /** Re-run agent detection (App owns the result). The refresh button's third job */
-  onRedetect?: () => void;
+  onRedetect?: () => void | Promise<unknown>;
   /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
   initialAgent?: AgentRef | null;
 }) {
@@ -1689,13 +1690,19 @@ export default function Providers({
     if (initialAgent && initialAgent !== seg) setSeg(initialAgent);
   }, [initialAgent, seg]);
 
+  // Returns what it started, so a caller with a spinner can await it — the app's
+  // own reload does (`lib/reload.ts`). Nothing else awaits it: the mutations that
+  // call this pass it as a plain "something changed" callback.
   const refetch = useCallback(() => {
-    api.listProviders().then(setProviders);
+    const providers = api.listProviders().then(setProviders);
     // Per-agent strategy routes drive the agent-tab candidate rows
-    api.getAgentRoutes().then(setRoutes).catch(() => setRoutes(null));
+    const routes = api
+      .getAgentRoutes()
+      .then(setRoutes)
+      .catch(() => setRoutes(null));
     // Takeover state drives the per-agent onboarding panel; the same read
     // carries the user's own agents, which drive their segments and resolver.
-    api
+    const settings = api
       .getSettings()
       .then((s) => {
         setTakenOver(new Set(s.takeovers.filter((t) => t.enabled).map((t) => t.agent)));
@@ -1708,8 +1715,14 @@ export default function Providers({
         if (s.preferred_currency) setCurrency(s.preferred_currency);
       })
       .catch(() => {});
+    return Promise.all([providers, routes, settings]);
   }, []);
-  useEffect(refetch, [refetch]);
+  // Not `useEffect(refetch, …)`: an effect may not return a promise, which is
+  // what this now returns.
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
+  useReload(refetch);
 
   // Auto plan-quota refresh on load: one cached call per provider configured
   // with a plan query (the 5-min backend cache keeps this cheap)
@@ -1725,23 +1738,21 @@ export default function Providers({
   }, [providers]);
 
   // Manual refresh: bypasses the backend's 5-minute quota cache
+  // The forced quota read (bypasses the backend's 5-minute cache). It reports
+  // what it did rather than owning the button's busy state: all three halves of
+  // the refresh are awaited together, so one spinner covers the click.
   const refreshQuotas = async () => {
-    if (!providers || quotaBusy) return;
-    setQuotaBusy(true);
-    try {
-      const results = await Promise.all(
-        providers
-          .filter((p) => p.plan_query)
-          .map((p) => api.getPlanQuota(p.id, true).then((r) => [p.id, r] as const).catch(() => null)),
-      );
-      const fresh: Record<string, PlanQuotaReport> = {};
-      for (const r of results) {
-        if (r) fresh[r[0]] = r[1];
-      }
-      setPlanQuotas((m) => ({ ...m, ...fresh }));
-    } finally {
-      setQuotaBusy(false);
+    if (!providers) return;
+    const results = await Promise.all(
+      providers
+        .filter((p) => p.plan_query)
+        .map((p) => api.getPlanQuota(p.id, true).then((r) => [p.id, r] as const).catch(() => null)),
+    );
+    const fresh: Record<string, PlanQuotaReport> = {};
+    for (const r of results) {
+      if (r) fresh[r[0]] = r[1];
     }
+    setPlanQuotas((m) => ({ ...m, ...fresh }));
   };
 
   // Built-ins (in the registry's order), then the agents the user defined —
@@ -1909,14 +1920,24 @@ export default function Providers({
           aria-label={t("common.refresh")}
           title={t("providers.refreshTitle")}
           disabled={quotaBusy}
-          onClick={() => {
-            refetch();
-            refreshQuotas();
-            // Deliberately separate from `refetch`: that one is the generic
-            // "something changed" callback handed to every child, and re-probing
-            // spawns a login shell plus one subprocess per agent, so only a
-            // click should pay for it.
-            onRedetect?.();
+          onClick={async () => {
+            if (quotaBusy) return;
+            setQuotaBusy(true);
+            try {
+              // All three, awaited together, so the spinner ends when the last
+              // one lands rather than when the first one returns.
+              await Promise.all([
+                refetch(),
+                refreshQuotas(),
+                // Deliberately separate from `refetch`: that one is the generic
+                // "something changed" callback handed to every child, and
+                // re-probing spawns a login shell plus one subprocess per agent,
+                // so only a click should pay for it.
+                onRedetect?.(),
+              ]);
+            } finally {
+              setQuotaBusy(false);
+            }
           }}
         >
           <RefreshCw className={`h-3.5 w-3.5${quotaBusy ? " animate-spin" : ""}`} />

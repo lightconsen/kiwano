@@ -1,5 +1,5 @@
 // Settings (design/index.html #s-settings)
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
+import { useReload } from "../lib/reload";
 import { applyTheme } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
 import { startUpdateInstall, useUpdateInstall } from "../lib/updateInstall";
@@ -100,10 +101,25 @@ export default function Settings() {
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
 
+  // One handle for everything this page reads, so the app's own reload can await
+  // it (lib/reload.ts) instead of remounting the page and losing which section
+  // the reader had opened.
+  const reload = useCallback(() => {
+    const settings = api.getSettings().then(setS);
+    const currencies = api
+      .getCurrencyMeta()
+      .then((m) => setCurrencies(m.currencies))
+      .catch(() => {});
+    const stats = api
+      .getFooterStats()
+      .then((f) => setVersion(f.version))
+      .catch(() => {});
+    return Promise.all([settings, currencies, stats]);
+  }, []);
+  useReload(reload);
+
   useEffect(() => {
-    api.getSettings().then(setS);
-    api.getCurrencyMeta().then((m) => setCurrencies(m.currencies)).catch(() => {});
-    api.getFooterStats().then((f) => setVersion(f.version)).catch(() => {});
+    void reload();
 
     // About is the one place that answers "is there an update?", so it reads
     // what the silent startup check found — and re-reads when the check finds

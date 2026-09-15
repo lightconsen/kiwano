@@ -1,5 +1,6 @@
 // Dashboard (design/index.html #s-dashboard)
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -15,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { useReload } from "../lib/reload";
 import type { DashboardData, DashboardWindow, GatewayStatus } from "../api/types";
 import { fmtMoney, fmtTokens } from "../lib/format";
 import { useT, type KeyPath, type Messages } from "../i18n";
@@ -416,12 +418,16 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
   // Costs arrive already converted to the preferred currency (Settings)
   const [pref, setPref] = useState("CNY");
 
-  useEffect(() => {
-    api.getCurrencyMeta().then((m) => setPref(m.preferred)).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    api
+  // Everything this page reads, in one handle the app's own reload can await
+  // (lib/reload.ts): the display currency and the selected window's data. The
+  // window picker and the two filters are *state*, not data — they survive a
+  // reload, which is the whole reason to reload rather than remount.
+  const reload = useCallback(() => {
+    const meta = api
+      .getCurrencyMeta()
+      .then((m) => setPref(m.preferred))
+      .catch(() => {});
+    const data = api
       .getDashboard(
         win,
         providerFilter === "all" ? undefined : providerFilter,
@@ -437,8 +443,14 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
         if (agentFilter !== "all" && !d.filter_agents.some((a) => a.id === agentFilter)) {
           setAgentFilter("all");
         }
-      });
+      })
+      .catch(() => {});
+    return Promise.all([meta, data]);
   }, [win, providerFilter, agentFilter]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+  useReload(reload);
 
   if (!data)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;

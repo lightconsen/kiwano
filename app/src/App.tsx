@@ -10,6 +10,7 @@ import {
 import { api } from "./api/client";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { applyTheme } from "./lib/theme";
+import { ReloadRegistryProvider, useReloadRegistry } from "./lib/reload";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
 import { onOpenSettings } from "./lib/updateEvents";
 import type { AgentRef } from "./api/types";
@@ -57,7 +58,11 @@ export default function App() {
   const t = useT();
   const locale = useLocale();
   const [route, setRoute] = useState<{ route: Route; agent: AgentRef | null }>(routeFromHash);
-  const [tick, setTick] = useState(0);
+  // The app's own reload: what the current screen re-reads, and whether one is
+  // in flight (the button spins and disables for exactly as long as that is
+  // true). It replaces a remount — see lib/reload.ts for why that was wrong.
+  const { register: registerReload, reload: reloadScreen } = useReloadRegistry();
+  const [reloading, setReloading] = useState(false);
   const [gw, setGw] = useState<GatewayStatus | null>(null);
   const [footer, setFooter] = useState<FooterStats | null>(null);
   const [modal, setModal] = useState<{ open: boolean; preset: CatalogEntry | null; edit: Provider | null }>({
@@ -121,13 +126,28 @@ export default function App() {
     [],
   );
 
-  const refresh = useCallback(() => {
-    setTick((n) => n + 1);
-    api.getGatewayStatus().then(setGw);
-    api.getFooterStats().then(setFooter);
-  }, []);
+  // The whole of the status bar's ⟳: the current screen's data, the gateway's
+  // state, and these totals. Awaited together so the button is busy until the
+  // last of them lands — the remount this replaces gave no such signal, and no
+  // screen state survived it either.
+  const refresh = useCallback(async () => {
+    setReloading(true);
+    try {
+      await Promise.all([
+        reloadScreen(),
+        api.getGatewayStatus().then(setGw).catch(() => {}),
+        api.getFooterStats().then(setFooter).catch(() => {}),
+      ]);
+    } finally {
+      setReloading(false);
+    }
+  }, [reloadScreen]);
 
-  useEffect(refresh, [refresh]);
+  // The first load is this one's, not `refresh`'s: nothing is registered yet.
+  useEffect(() => {
+    api.getGatewayStatus().then(setGw).catch(() => {});
+    api.getFooterStats().then(setFooter).catch(() => {});
+  }, []);
 
   // Agent detection (phase 1 gates the Apps filter; phase 2 versions enrich
   // tooltips later). Probe failure → null → the Apps tab shows every agent.
@@ -137,12 +157,15 @@ export default function App() {
   // is one `--version` subprocess per agent (seconds, not milliseconds), which
   // is why it stays fire-and-forget — it fills tooltips, it is never a reason
   // to make anyone wait.
+  // Returns what it started so the caller that asked can show a spinner while the
+  // probe runs — the Apps screen's own refresh does. It is the slowest part of
+  // that click by far: a login shell plus one subprocess per agent.
   const detectAgents = useCallback(() => {
-    api
+    const detected = api
       .detectAgents()
       .then((list) => {
         setAgentDetect(list);
-        api
+        return api
           .probeAgentVersions()
           .then((vs) =>
             setAgentVersions(
@@ -152,8 +175,11 @@ export default function App() {
           .catch(() => {});
       })
       .catch(() => setAgentDetect(null));
+    return detected;
   }, []);
-  useEffect(detectAgents, [detectAgents]);
+  useEffect(() => {
+    void detectAgents();
+  }, [detectAgents]);
 
   // Cost alert patrol (spec §4.1 P1): poll every 60s; the backend dedupes per period,
   // so a returned alert is the first hit of that period — forward it as a system notification.
@@ -238,9 +264,9 @@ export default function App() {
           sibling cannot outrun its container. Chaining off, so the scroll stops
           where the content does. */}
       <main className="min-h-0 flex-1 overflow-y-auto overscroll-none">
+        <ReloadRegistryProvider value={registerReload}>
         {route.route === "providers" && (
           <Providers
-            key={`p${tick}`}
             agentDetect={agentDetect}
             agentVersions={agentVersions}
             onRedetect={detectAgents}
@@ -249,9 +275,12 @@ export default function App() {
             onEdit={(p) => setModal({ open: true, preset: null, edit: p })}
           />
         )}
-        {route.route === "shelf" && <Shelf key={`s${tick}`} onAdd={(preset) => setModal({ open: true, preset, edit: null })} />}
-        {route.route === "dashboard" && <Dashboard key={`d${tick}`} gateway={gw} />}
-        {route.route === "settings" && <Settings key={`c${tick}`} />}
+        {route.route === "shelf" && (
+          <Shelf onAdd={(preset) => setModal({ open: true, preset, edit: null })} />
+        )}
+        {route.route === "dashboard" && <Dashboard gateway={gw} />}
+        {route.route === "settings" && <Settings />}
+        </ReloadRegistryProvider>
       </main>
 
       <footer
@@ -285,20 +314,22 @@ export default function App() {
             <Dot state={gw?.running ? "ok" : "off"} size="h-[5px] w-[5px]" />
             {t("app.gateway")} <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
           </span>
-          {/* The app's own reload, beside the figures it reloads: it remounts the
-              screen (a fresh read of whatever is on it), re-reads the gateway
-              status and re-reads these totals. It lived in the header next to the
-              gateway's own dot, where it read as that indicator's control rather
-              than as the whole app's. */}
+          {/* The app's own reload, beside the figures it reloads: the screen's
+              data, the gateway's state, and these totals. Spins and disables
+              while they are in flight, so the click has an end as well as a
+              start. It lived in the header next to the gateway's own dot, where
+              it read as that indicator's control rather than as the whole
+              app's. */}
           <Button
             variant="ghost"
             size="icon-xs"
             className="text-mut"
+            disabled={reloading}
             onClick={refresh}
             aria-label={t("common.refresh")}
             title={t("common.refresh")}
           >
-            <RefreshCw className="h-3 w-3" />
+            <RefreshCw className={`h-3 w-3${reloading ? " animate-spin" : ""}`} />
           </Button>
         </span>
       </footer>

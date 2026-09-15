@@ -1,5 +1,5 @@
 // Models: Kiwano Hub cloud catalog as a sortable table (desktop-tool density)
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Boxes, Check, ChevronDown, ChevronRight, Gauge, Gift, House, Layers, RefreshCw, Search, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "../api/client";
+import { useReload } from "../lib/reload";
 import type { CatalogBilling, CatalogEntry, LongContextRates, ModelPrice, ProbeReport, Protocol } from "../api/types";
 import { tzLabel, type PeakHours } from "../lib/peak";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
@@ -1149,16 +1150,25 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   const [hub, setHub] = useState<"idle" | "busy" | "done">("idle");
   const [hubErr, setHubErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.listCatalog().then(setCatalog);
+  // Everything this page reads, in one handle the app's own status-bar reload
+  // can await (lib/reload.ts): the catalog and the price mirror behind the
+  // per-model view. What is *not* in here is the page's own state — the chip,
+  // the search box, the sort — which is the point of reloading over remounting.
+  const reload = useCallback(() => {
+    const catalog = api.listCatalog().then(setCatalog);
     // The price mirror is a second, smaller read: the catalog names one
     // representative price per provider, and the dialog's per-model list needs
     // the rest of them.
-    api
+    const prices = api
       .listModelPrices()
       .then(setPrices)
       .catch(() => {});
+    return Promise.all([catalog, prices]);
   }, []);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+  useReload(reload);
 
   /** Pull the Hub catalog into the local cache, then re-read it. The sync is
       conditional on the Hub's side (manifest sha): a Hub that has not changed

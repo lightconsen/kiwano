@@ -6,7 +6,7 @@
 // these assertions about words and numbers on a cell: a window written in the
 // reader's timezone, a discount with no window, or a step-up that only one of the
 // two screens knows about would all read as a normal row.
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ import type { CatalogEntry, CatalogList, ModelPrice } from "@/api/types";
 import { fmtMoney } from "../lib/format";
 
 import Shelf from "./Shelf";
+import { ReloadRegistryProvider } from "../lib/reload";
 
 const { apiMock } = vi.hoisted(() => ({
   apiMock: {
@@ -112,6 +113,51 @@ beforeEach(() => {
     hub_url: "https://hub.example",
   });
   apiMock.updateSettings.mockResolvedValue({});
+});
+
+/** What the status bar's ⟳ does to a screen: read the data again, keep every
+ *  choice the reader made. The button used to remount the screen — a changing
+ *  `key` — which threw the chip, the search box and the sort away with it, so
+ *  "refresh" behaved like "leave and come back". The screen now registers how to
+ *  re-read itself (`lib/reload.ts`) and the button calls that. */
+describe("the app's own reload", () => {
+  it("re-reads the data and keeps what the reader had chosen", async () => {
+    const user = userEvent.setup();
+    let reload: (() => Promise<unknown>) | null = null;
+    const register = (fn: () => Promise<unknown>) => {
+      reload = fn;
+      return () => {
+        reload = null;
+      };
+    };
+    apiMock.listCatalog.mockResolvedValue(
+      catalog([entry("deepseek", "DeepSeek"), entry("kimi", "Kimi", { tag: "third" })]),
+    );
+    apiMock.listModelPrices.mockResolvedValue([]);
+    render(
+      <ReloadRegistryProvider value={register}>
+        <Shelf onAdd={() => {}} />
+      </ReloadRegistryProvider>,
+    );
+    await screen.findByText("DeepSeek");
+    expect(apiMock.listCatalog).toHaveBeenCalledTimes(1);
+
+    // The reader narrows the list, then asks for fresh data from the status bar.
+    await user.click(screen.getByRole("button", { name: en.shelf.chipThird }));
+    expect(screen.getByRole("button", { name: en.shelf.chipThird })).toHaveClass("active");
+    expect(screen.queryByText("DeepSeek")).toBeNull();
+
+    expect(reload, "the screen registered a reload").not.toBeNull();
+    await act(() => reload!());
+
+    // Read again…
+    expect(apiMock.listCatalog).toHaveBeenCalledTimes(2);
+    // …and the chip is still the one that was picked: the row it filters out is
+    // still filtered out, which a remount would have undone.
+    expect(screen.getByRole("button", { name: en.shelf.chipThird })).toHaveClass("active");
+    expect(screen.queryByText("DeepSeek")).toBeNull();
+    expect(screen.getByText("Kimi")).toBeInTheDocument();
+  });
 });
 
 describe("a price with a schedule", () => {

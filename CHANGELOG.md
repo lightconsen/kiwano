@@ -21,6 +21,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **A refresh reads the data again instead of rebuilding the screen.** The status
+  bar's ⟳ — and the Apps page's, which does the same work plus a forced quota
+  query — used to remount whatever screen was open, so it reloaded that screen's
+  data and threw away everything else with it: the Models shelf's category and
+  search, the Dashboard's window and filters, where you had scrolled to. Each
+  screen now publishes how to re-read itself and the button awaits that, so what
+  came back changes and what you had chosen does not. It also shows that it is
+  working — the glyph spins and the button disables until the last of the reads
+  lands, where before the click had no end and a remount behind it.
+
 - **The latency test records what it measured.** An Apps row's Test button has
   always sent a real prompt and shown the number on the button, and that was the
   whole life of the measurement — which left the one case it could have settled

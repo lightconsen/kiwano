@@ -1,6 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type { AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, Billing, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanLimits, PlanQuotaReport, PlanQuery, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, UsageSummary, CustomAgent, PromptLatency } from "./types";
+import type { AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, Billing, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanLimits, PlanQuotaReport, PlanQuery, ProbeReport, Protocol, Provider, ProviderHealth, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, UsageSummary, CustomAgent, PromptLatency } from "./types";
 import { AGENTS } from "./types";
 // The same formatter the screens print with: a fixture that formats its own
 // tokens is a fixture that can disagree with the page about how they read.
@@ -76,9 +76,9 @@ const providers: Provider[] = [
     serving_agents: [],
     is_current: true,
     agents_note: "2 agents",
-    // Enabled and unmeasured: what the backend answers for a provider nothing
-    // is wrong with (no background probe writes a verdict).
-    health: { state: "idle", latency_ms: null },
+    // Measured by its own requests (`vm::health_vm`'s first source): a provider
+    // with traffic in the last day is never probed.
+    health: { state: "ok", latency_ms: 1100, source: "traffic" },
     usage: {
       requests: 796,
       input_tokens: 5_400_000,
@@ -110,7 +110,7 @@ const providers: Provider[] = [
     serving_agents: [],
     is_current: false,
     agents_note: "Failover queue",
-    health: { state: "idle", latency_ms: 287 },
+    health: { state: "ok", latency_ms: 287, source: "traffic" },
     usage: {
       requests: 295,
       input_tokens: 1_600_000,
@@ -167,7 +167,8 @@ const providers: Provider[] = [
     is_current: false,
     status_badge: "Local",
     agents_note: "1 agent",
-    health: { state: "off", latency_ms: null, note: "Not running" },
+    // A local server nothing is listening on: the probe asked and got nothing.
+    health: { state: "error", latency_ms: null, source: "probe", checked_at: "2026-09-15T07:20:00Z" },
     usage: {
       requests: 31,
       input_tokens: 150_000,
@@ -211,6 +212,9 @@ type MatrixSpec = {
   usage: UsageSummary | null;
   /** The gateway's own sentence, for a row it is refusing to route. */
   blocked?: string;
+  /** What the Status column says. Absent = enabled with nothing measured yet,
+      which is the blank cell (see `health` in the row builder below). */
+  health?: ProviderHealth;
 };
 
 const MATRIX: MatrixSpec[] = [
@@ -429,6 +433,9 @@ const MATRIX: MatrixSpec[] = [
     // is a state too (the ring and the limit line need no totals, this one has
     // neither).
     usage: null,
+    // Nothing has run through it, so the prober is the only thing that can say
+    // anything about it — which is the case the loop exists for.
+    health: { state: "ok", latency_ms: 18, source: "probe", checked_at: "2026-09-15T07:20:00Z" },
   },
 ];
 
@@ -452,7 +459,15 @@ for (const m of MATRIX) {
     agents: [],
     serving_agents: [],
     is_current: false,
-    health: { state: "idle", latency_ms: null },
+    // `vm::health_vm`'s first rule, so the fixture cannot say something the
+    // backend would not: a provider with latency in its own usage is measured by
+    // its own requests, and only a row with nothing to measure carries whatever
+    // the spec says (a probe verdict, or nothing at all).
+    health:
+      m.health ??
+      (m.usage?.latency_ms != null
+        ? { state: "ok", latency_ms: m.usage.latency_ms, source: "traffic" }
+        : { state: "idle", latency_ms: null }),
     usage: m.usage,
   });
 }

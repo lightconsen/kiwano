@@ -432,6 +432,61 @@ describe("the latency test", () => {
   });
 });
 
+/** The Status column's two measurements, which are not the same claim and must
+    not be read as one: a provider's own round trips through the gateway, and —
+    where it has had no traffic in the last day — the gateway's unsigned GET. */
+describe("the Status cell", () => {
+  /** One row per reading the cell can show. */
+  async function renderRows() {
+    apiMock.listProviders.mockResolvedValue([
+      deepseek({ id: "traffic", health: { state: "ok", latency_ms: 1100, source: "traffic" } }),
+      deepseek({
+        id: "probe",
+        health: { state: "ok", latency_ms: 18, source: "probe", checked_at: "2026-09-15T07:20:00Z" },
+      }),
+      deepseek({
+        id: "silent",
+        health: { state: "error", latency_ms: null, source: "probe", checked_at: "2026-09-15T07:20:00Z" },
+      }),
+      deepseek({
+        id: "parked",
+        enabled: false,
+        health: { state: "off", latency_ms: null, note: "Disabled" },
+      }),
+      // Enabled, never used, never probed: the cell says nothing, which is the
+      // state of a provider added a minute ago.
+      deepseek({ id: "fresh", health: { state: "idle", latency_ms: null } }),
+    ]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+  }
+
+  it("says which measurement it is showing, and what it proves", async () => {
+    await renderRows();
+
+    // The provider's own requests — one row, and the tooltip says which.
+    expect(await screen.findByText("1.1s")).toBeInTheDocument();
+    expect(screen.getAllByTitle(en.providers.latencyTraffic)).toHaveLength(1);
+
+    // The prober's verdict, tooltipped with what it is and when it ran: an
+    // unsigned request, so it is not the same claim as the number above.
+    expect(screen.getByText("18ms").closest("[title]")).toHaveAttribute(
+      "title",
+      en.providers.latencyProbe.replace("{time}", "07:20"),
+    );
+
+    // An endpoint that did not answer is a fact, not a latency.
+    expect(screen.getByText(en.providers.unreachable).closest("[title]")).toHaveAttribute(
+      "title",
+      en.providers.unreachableTitle.replace("{time}", "07:20"),
+    );
+
+    // Parked outranks both.
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+  });
+});
+
 describe("deleting a provider that is in a route", () => {
   /** codex's route, with the candidates named as the row would show them. */
   function routeOf(...providers: [string, string][]): AgentRoute {

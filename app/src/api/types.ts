@@ -69,17 +69,23 @@ export const AGENTS: AgentMeta[] = [
 ];
 
 export interface ProviderHealth {
-  /** The two states the backend can produce. `idle` is an enabled provider
-      nothing is known against — the gateway no longer probes on a timer, so
-      reachability is only measured when the row's Test button asks (see
-      components/Providers' HealthCell). `off` is a parked provider. */
-  state: "idle" | "off";
-  /** Always null today: nothing measures a provider in the background. Kept
-      because the shape is what the cell renders from. */
+  /** `ok` — measured and answering (either source below). `error` — the prober
+      asked and got no answer. `off` — parked by the user. `idle` — enabled with
+      nothing known against it yet: no traffic in the window, no verdict on file.
+      Today's equivalent of the blank cell. */
+  state: "ok" | "error" | "idle" | "off";
+  /** The round trip behind `state: "ok"`; null otherwise. */
   latency_ms: number | null;
-  /** Status column suffix note: `Disabled`, `Error`, … — omitted when there is
-      nothing to say, which is now the ordinary case. */
+  /** Status column suffix note: `Disabled` — omitted when there is nothing to
+      say, which is the ordinary case. */
   note?: string;
+  /** Where `latency_ms` came from, and the two are not the same claim:
+      `traffic` is this provider's own requests through the gateway (with the
+      user's key), `probe` is the gateway's unsigned GET to its endpoint. */
+  source?: "traffic" | "probe";
+  /** When the probe ran (RFC3339). `probe` only: a traffic average covers a
+      window, not an instant. */
+  checked_at?: string;
 }
 
 export interface QuotaState {

@@ -29,6 +29,13 @@ export const providers = {
   blocked: "已阻断",
   notRoutingTitle: "未在此处路由：{reason}",
 
+  // ── 状态列的两个测量来源 ──
+  latencyTraffic: "该 Provider 最近 24 小时自己请求的平均延迟",
+  latencyProbe:
+    "可达性：网关向该端点发起了一次不带凭据的请求 —— 它只说明那里有东西应答，不校验你的 Key · 检查于 {time}",
+  unreachable: "无响应",
+  unreachableTitle: "网关询问时该端点没有应答 · 检查于 {time}",
+
   // ── Usage / quota cell ──
   usagePlanLimits: "套餐 · 上限 {windows} · 以该 Provider 的套餐配额使用率为准{tokens}",
   usageWindowFive: "5 小时窗口 ≤ {percent}%",

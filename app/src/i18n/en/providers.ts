@@ -39,6 +39,16 @@ export const providers = {
   blocked: "Blocked",
   notRoutingTitle: "Not routing here: {reason}",
 
+  // ── The Status column's measurements ──
+  /** A latency the provider's own requests produced. */
+  latencyTraffic: "Average of this provider's own requests over the last 24 hours",
+  /** A latency the gateway's reachability check produced — a different claim,
+      and the tooltip is where the difference is spelled out. */
+  latencyProbe:
+    "Reachability: the gateway asked the endpoint — an unsigned request, so this says something answers there, not that your key works · checked {time}",
+  unreachable: "No answer",
+  unreachableTitle: "The endpoint did not answer when the gateway asked · checked {time}",
+
   // ── Usage / quota cell ──
   /** Plan row with configured percent limits: the {windows} fragment is the
       joined 5h/weekly bounds, {tokens} the optional in/out suffix. */

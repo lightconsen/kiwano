@@ -121,6 +121,15 @@ async fn main() {
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
+    // Reachability of the providers the usage table cannot speak for: one round
+    // a minute, and only about providers with no traffic of their own in the last
+    // day (`strategy::prober` — the scope is the reason this loop is affordable).
+    // It routes nothing; the Status column reads it.
+    tokio::spawn(kiwanod::strategy::prober::run(
+        state.store.clone(),
+        kiwanod::strategy::prober::PROBE_INTERVAL,
+    ));
+
     // Billing limits, evaluated here rather than in the desktop app so they
     // hold with the app closed — the gateway is the process that routes.
     tokio::spawn(kiwanod::limits::run(

@@ -990,13 +990,17 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
 /** Status cell: whether Kiwano will use this provider, and anything known that
     says otherwise.
  *
- * "Reachable" is deliberately not claimed. A background prober used to write a
- * verdict into `provider_health` every 30s and this cell showed it as a green dot
- * and a latency — a signal that never routed anything (the breaker, fed by real
- * traffic, decides), bought with one HTTP request per provider per half-minute.
- * It is gone, so an enabled provider says nothing here rather than asserting
- * health on the strength of a 30s-old probe. A parked provider still says so, and
- * one over a billing limit fills the cell above. */
+ * Three things can be said here, in this order. **Parked** (the backend's note)
+ * and **refused** (a limit, passed in as `blocked`) are facts about Kiwano's own
+ * decision. Otherwise the cell shows a **measurement**, and says which one it is,
+ * because the two are not the same claim: the provider's own requests through the
+ * gateway, with the user's key, or — when it has had no traffic in the last day —
+ * the gateway's unsigned GET to its endpoint, which proves something answers
+ * there and nothing about authorization. Both are tooltipped with what they are,
+ * and the probe with when it ran.
+ *
+ * Nothing at all is still a legitimate answer: enabled, no traffic yet, no
+ * verdict on file. That is the state of a provider added a minute ago. */
 function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   const t = useT();
   // The provider is up and reachable — that is not what changed. What changed
@@ -1012,18 +1016,52 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
       </div>
     );
   }
-  return (
-    <div className="w-[14%]">
-      {/* Nothing to say is a legitimate answer: the row is enabled and nothing
-          has gone wrong that the gateway knows of. */}
-      {p.health.note && (
+  const h = p.health;
+  // Parked: out of every route, which outranks any reading of the endpoint.
+  if (h.note) {
+    return (
+      <div className="w-[14%]">
         <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
-          <Dot state={p.health.state} />
-          {p.health.note}
+          <Dot state={h.state} />
+          {h.note}
         </span>
-      )}
+      </div>
+    );
+  }
+  // Asked and not answered: a fact rather than a number.
+  if (h.state === "error") {
+    return (
+      <div className="w-[14%]" title={t("providers.unreachableTitle", { time: fmtClock(h.checked_at) })}>
+        <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
+          <Dot state="error" />
+          {t("providers.unreachable")}
+        </span>
+      </div>
+    );
+  }
+  if (h.latency_ms == null) return <div className="w-[14%]" />;
+  return (
+    <div
+      className="w-[14%]"
+      title={
+        h.source === "probe"
+          ? t("providers.latencyProbe", { time: fmtClock(h.checked_at) })
+          : t("providers.latencyTraffic")
+      }
+    >
+      <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
+        <Dot state="ok" />
+        <span className="font-mono">{fmtLatency(h.latency_ms)}</span>
+      </span>
     </div>
   );
+}
+
+/** "HH:MM" out of the RFC3339 instant a probe was taken at — the same reading the
+    request log prints, cut to the clock: a tooltip has no room for a date, and a
+    verdict older than a day is one the prober has already replaced. */
+function fmtClock(ts?: string): string {
+  return ts ? ts.slice(11, 16) : "";
 }
 
 /** The row's routing state, as the coloured bar on its left edge draws it.

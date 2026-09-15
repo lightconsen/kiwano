@@ -19,6 +19,31 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A provider's latency is back in the Status column, read from traffic rather
+  than probed.** A background prober used to ask every endpoint every 30 seconds
+  and the row showed `Healthy 287ms`; that went this morning, because it bought a
+  request per provider per half-minute for a number that routed nothing. The
+  number now comes from the requests the provider actually served — the average
+  round trip over the last 24 hours, which the usage table already holds — and
+  the probe only asks about providers with no traffic of their own in that
+  window: one just added, or one idle since yesterday. The loop therefore costs a
+  request a minute for the rows whose answer is not already on screen, and
+  nothing for the rows in use.
+
+  The two are not the same claim, and the cell says which it is showing: your own
+  round trips went through the gateway with your key, while the probe is an
+  unsigned `GET` to the endpoint — it proves something answers there, not that
+  the key works — so each carries its own tooltip, and the probe's says when it
+  ran. An endpoint that does not answer reads `No answer` rather than a latency;
+  a parked provider still reads `Disabled`; and a provider with neither traffic
+  nor a verdict yet says nothing at all, as before.
+
+  The table the prober writes to comes back as migration v21 rather than by
+  undoing v18: that migration's `DROP` has already run on every install, and the
+  `CREATE` only ever lived in v1, which never runs again.
+
 ## [0.1.10] - 2026-09-15
 
 ### Changed

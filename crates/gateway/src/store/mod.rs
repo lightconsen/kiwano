@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 20;
+pub const SCHEMA_VERSION: i32 = 21;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -588,6 +588,33 @@ const MIGRATION_V20: &str = r#"
 ALTER TABLE providers ADD COLUMN prices TEXT;
 "#;
 
+/// v21: the health-probe verdict comes back, narrower than it left.
+///
+/// v18 dropped this table with the prober that wrote it, and a revert could not
+/// have brought it back: the `CREATE` only ever lived in v1, a migration that has
+/// already run everywhere. So this is a new migration rather than an undone one —
+/// history stands, and a database that is already past v18 gets its table here.
+///
+/// The shape is not v1's. That one carried `degraded` in its CHECK and a
+/// `consecutive_failures` streak, and between them exactly one was ever written
+/// and neither was ever read. What the prober now writes is what the Status
+/// column shows: `reachable` or `down`, the round trip it measured, and when.
+///
+/// What the prober *does* is narrower too — see `strategy::prober`: it only asks
+/// about providers with no traffic of their own in the last day, which is the
+/// only case where the answer is not already in the usage table. That is what
+/// makes a background loop affordable again, a decision the v18 commit took the
+/// other way round ("a background request per provider per half-minute, on a
+/// laptop, for a badge") when it was the *only* source of the number.
+const MIGRATION_V21: &str = r#"
+CREATE TABLE IF NOT EXISTS provider_health (
+    provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
+    status      TEXT NOT NULL CHECK (status IN ('reachable','down')),
+    latency_ms  INTEGER,
+    checked_at  TEXT NOT NULL
+);
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -698,6 +725,22 @@ pub struct ProviderEndpoint {
     pub base_url: String,
     /// Optional upstream path prefix, same semantics as `Provider.api_path`.
     pub api_path: Option<String>,
+}
+
+/// One health-probe verdict (migration v21; the prober → `provider_health`).
+///
+/// `status` is deliberately two values and not a scale: the probe is an
+/// unauthenticated GET to the endpoint, so all it can honestly report is whether
+/// something answered, and how fast. Authorization is the API key's business and
+/// the gateway never asks the probe about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHealth {
+    pub provider_id: String,
+    /// `reachable` | `down`
+    pub status: String,
+    /// The round trip it measured; NULL for a probe that got no answer.
+    pub latency_ms: Option<i64>,
+    pub checked_at: String,
 }
 
 /// A configured upstream provider.
@@ -1219,6 +1262,22 @@ pub fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
 
+/// Seconds since the Unix epoch.
+pub fn unix_now() -> i64 {
+    Utc::now().timestamp()
+}
+
+/// RFC3339 for a Unix instant, in the same shape `now_rfc3339` writes.
+///
+/// The shape matters where the result is compared rather than read: `usage.ts`
+/// filters are `ts >= ?` against a string, which sorts correctly only while
+/// every writer spells the instant the same way.
+pub fn rfc3339_from_unix(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|t| t.to_rfc3339())
+        .unwrap_or_else(now_rfc3339)
+}
+
 /// Restrict the database and its directory to the owning user.
 ///
 /// `providers.api_key` is the upstream credential, and it is written to disk in
@@ -1626,6 +1685,9 @@ impl Store {
         }
         if version < 20 {
             conn.execute_batch(MIGRATION_V20)?;
+        }
+        if version < 21 {
+            conn.execute_batch(MIGRATION_V21)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -2877,6 +2939,50 @@ impl Store {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    /// Record one health-probe verdict (the gateway's prober → `provider_health`).
+    ///
+    /// A row per provider, replaced in place: the table holds the *latest*
+    /// answer, and nothing reads a history of them.
+    pub fn upsert_provider_health(
+        &self,
+        provider_id: &str,
+        status: &str,
+        latency_ms: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_health (provider_id, status, latency_ms, checked_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider_id) DO UPDATE SET
+                status = ?2, latency_ms = ?3, checked_at = ?4",
+            params![provider_id, status, latency_ms, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Every health-probe verdict on file, for the view that shows them.
+    ///
+    /// Read whole rather than per provider: the Apps screen renders every row
+    /// from one pass, so a lookup per row would be the same query N times.
+    pub fn list_provider_health(&self) -> Result<Vec<ProviderHealth>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider_id, status, latency_ms, checked_at
+             FROM provider_health ORDER BY provider_id",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ProviderHealth {
+                    provider_id: row.get(0)?,
+                    status: row.get(1)?,
+                    latency_ms: row.get(2)?,
+                    checked_at: row.get(3)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// The prices users declared for their own providers, keyed by the provider
@@ -4153,6 +4259,99 @@ mod tests {
                 .expect("provider kept")
                 .name,
             "Old"
+        );
+    }
+
+    /// The prober's verdict lands in `provider_health`, is replaced in place,
+    /// and goes with the provider it describes.
+    #[test]
+    fn provider_health_roundtrip() {
+        let (_dir, store) = temp_store();
+        let p = sample_provider("p-probe", Protocol::OpenAI);
+        store.insert_provider(&p).unwrap();
+        store
+            .insert_provider(&sample_provider("p-other", Protocol::OpenAI))
+            .unwrap();
+        assert!(store.list_provider_health().unwrap().is_empty());
+
+        store
+            .upsert_provider_health("p-probe", "reachable", 42)
+            .unwrap();
+        let rows = store.list_provider_health().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider_id, "p-probe");
+        assert_eq!(rows[0].status, "reachable");
+        assert_eq!(rows[0].latency_ms, Some(42));
+        assert!(!rows[0].checked_at.is_empty(), "the verdict is dated");
+
+        // A second round replaces the verdict rather than adding one: the table
+        // holds the latest answer, and a provider going down is one row moving.
+        store.upsert_provider_health("p-probe", "down", 0).unwrap();
+        let rows = store.list_provider_health().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "down");
+        assert_eq!(rows[0].latency_ms, Some(0));
+
+        // The row is the provider's: deleting it takes the verdict with it (the
+        // FK cascade, which is why the table can be read without a join).
+        store.delete_provider("p-probe").unwrap();
+        assert!(store.list_provider_health().unwrap().is_empty());
+    }
+
+    /// v20 → v21: the health table comes back for a database that had it dropped.
+    #[test]
+    fn migration_v21_restores_the_health_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v20 database — the state a build without the prober
+        // leaves behind, and the one every install is in right now.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing,
+                                        created_at, updated_at)
+                 VALUES ('p-old', 'Old', 'openai', 'https://api.example.com', 'metered',
+                         't0', 't0');
+                 PRAGMA user_version = 20;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        // The table exists and is empty; the provider is untouched.
+        assert!(store.list_provider_health().unwrap().is_empty());
+        store
+            .upsert_provider_health("p-old", "reachable", 7)
+            .unwrap();
+        assert_eq!(store.list_provider_health().unwrap()[0].latency_ms, Some(7));
+        assert_eq!(
+            store.get_provider("p-old").unwrap().unwrap().name,
+            "Old",
+            "the migration is additive"
         );
     }
 

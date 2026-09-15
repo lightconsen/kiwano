@@ -453,10 +453,21 @@ pub use crate::auxiliary::Aux;
 
 #[derive(Serialize)]
 pub struct HealthVm {
+    /// `ok` | `idle` | `off` | `error` — what the dot is drawn from.
     pub state: String,
     pub latency_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Where `latency_ms` came from: `traffic` (this provider's own requests in
+    /// the window) or `probe` (the gateway's reachability check). Absent when
+    /// there is no number, and the two must not be read as one: one is a real
+    /// round trip with the user's key, the other is an unsigned hello.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// When the probe ran, for the cell's tooltip. `probe` only: a traffic
+    /// average covers a window rather than an instant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1278,6 +1289,11 @@ pub fn build_provider_vms(
 
     let now = unix_now();
     let since7 = rfc3339(now - 7 * 86_400);
+    // The window the prober scopes itself by: a provider with a request in it is
+    // one whose latency this build can already show, so the probe skips it and
+    // the row shows the traffic number instead. The two must agree, or a row
+    // would show a probe while the prober considered it spoken for.
+    let since_day = rfc3339(now - 86_400);
 
     // Only agents that route through this gateway have a say in the badges:
     // everything below — the agent column, "In use", the agent-count note —
@@ -1369,6 +1385,15 @@ pub fn build_provider_vms(
         serving.insert(agent.clone(), ids);
     }
 
+    // provider → its last probe verdict, read whole: the rows below all come
+    // from one pass over the table rather than a lookup each.
+    let health_by_id: HashMap<String, kiwanod::store::ProviderHealth> = store
+        .list_provider_health()
+        .map_err(e2s)?
+        .into_iter()
+        .map(|h| (h.provider_id.clone(), h))
+        .collect();
+
     // provider → 7d usage totals
     let mut usage_by_id: HashMap<String, UsageTotals> = HashMap::new();
     for pu in store
@@ -1431,7 +1456,7 @@ pub fn build_provider_vms(
                 None
             };
 
-            let health = health_vm(&p);
+            let health = health_vm(aux, &p, &since_day, health_by_id.get(&p.id));
             let usage = usage_vm(store, aux, &p, usage_by_id.get(&p.id), &since7);
 
             ProviderVm {
@@ -1854,19 +1879,73 @@ fn endpoint_note(p: &Provider) -> String {
 /// provider now reads as neutral rather than as healthy, which is the honest
 /// answer to "is it up?" when the way to find out is to ask it: the row's Test
 /// button measures one, and the request log is where failures show up.
-fn health_vm(p: &Provider) -> HealthVm {
-    if p.enabled {
-        HealthVm {
-            state: "idle".into(),
-            latency_ms: None,
-            note: None,
-        }
-    } else {
-        HealthVm {
+/// What the Status column shows, and where the number came from.
+///
+/// Two sources, in this order, because they answer the same question with
+/// different authority:
+///
+/// 1. **The provider's own requests** inside `since`. A round trip through the
+///    gateway, with the user's key, to the model they actually route to — the
+///    number is already in the usage table, so showing it costs nothing and it
+///    is the most honest of the two.
+/// 2. **The prober's verdict**, for a provider with nothing of its own to
+///    measure (just added, or idle since yesterday). An unsigned GET: it says
+///    whether something answers at that endpoint, never whether the key works.
+///    The `source` field is what keeps the two apart downstream.
+///
+/// A parked provider answers neither question — it is out of every route, and
+/// that is the fact worth showing.
+fn health_vm(
+    aux: &Aux,
+    p: &Provider,
+    since: &str,
+    probe: Option<&kiwanod::store::ProviderHealth>,
+) -> HealthVm {
+    if !p.enabled {
+        return HealthVm {
             state: "off".into(),
             latency_ms: None,
             note: Some("Disabled".into()),
-        }
+            source: None,
+            checked_at: None,
+        };
+    }
+    if let Some(ms) = aux.avg_latency(Some(&p.id), None, Some(since), None) {
+        return HealthVm {
+            state: "ok".into(),
+            latency_ms: Some(ms),
+            note: None,
+            source: Some("traffic".into()),
+            checked_at: None,
+        };
+    }
+    match probe {
+        Some(h) if h.status == "reachable" => HealthVm {
+            state: "ok".into(),
+            latency_ms: h.latency_ms,
+            note: None,
+            source: Some("probe".into()),
+            checked_at: Some(h.checked_at.clone()),
+        },
+        Some(h) => HealthVm {
+            // No answer at all. Not a latency to print but a fact to show: the
+            // endpoint did not respond when the prober last asked.
+            state: "error".into(),
+            latency_ms: None,
+            note: None,
+            source: Some("probe".into()),
+            checked_at: Some(h.checked_at.clone()),
+        },
+        // Nothing measured it yet — a provider added a moment ago, or one whose
+        // first probe has not come round. Nothing to say, which is what the
+        // blank cell has always meant.
+        None => HealthVm {
+            state: "idle".into(),
+            latency_ms: None,
+            note: None,
+            source: None,
+            checked_at: None,
+        },
     }
 }
 
@@ -2382,7 +2461,9 @@ pub fn add_provider(
     let vm_protocol = provider.protocol.as_str().to_string();
     let vm_endpoints = vm_endpoints(&provider);
     let vm_billing = billing_to_ui(provider.billing).to_string();
-    let vm_health = health_vm(&provider);
+    // Nothing has measured this provider yet — it was created a line ago — so
+    // `None` is what the Status column starts as, and the prober fills it in.
+    let vm_health = health_vm(aux, &provider, &rfc3339(unix_now() - 86_400), None);
     let vm_advanced = advanced_vm(&provider);
     let vm_prices = provider
         .prices
@@ -6981,6 +7062,90 @@ mod tests {
             .unwrap();
         }
         assert_eq!(in_use(&s), (false, true));
+    }
+
+    /// The Status column reads two sources and must not confuse them: a
+    /// provider's own round trips when it has any, the prober's unsigned GET
+    /// when it does not, and neither for a parked one.
+    #[test]
+    fn the_status_column_shows_a_providers_own_latency_before_a_probe() {
+        // The store and the aux have to share one file here: the traffic average
+        // comes off the aux's connection, which in production is the same
+        // database the gateway writes usage rows into.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let s = Store::open(&path).unwrap();
+        let aux = Aux::open(&path).unwrap();
+
+        let mut parked = provider("parked", "Parked", Billing::Metered);
+        parked.enabled = false;
+        for p in [
+            provider("busy", "Busy", Billing::Metered),
+            provider("idle", "Idle", Billing::Metered),
+            provider("dead", "Dead", Billing::Metered),
+            provider("fresh", "Fresh", Billing::Metered),
+            parked,
+        ] {
+            s.insert_provider(&p).unwrap();
+        }
+
+        // The prober has an opinion about all of them — including `busy`, whose
+        // verdict is stale (it had no traffic when the probe ran). That stale row
+        // is exactly what the order has to get right.
+        s.upsert_provider_health("busy", "reachable", 500).unwrap();
+        s.upsert_provider_health("idle", "reachable", 12).unwrap();
+        s.upsert_provider_health("dead", "down", 0).unwrap();
+        s.upsert_provider_health("parked", "reachable", 3).unwrap();
+
+        // Two requests of its own inside the window: 200ms on average.
+        for ms in [180, 220] {
+            let mut row = usage_row("busy");
+            row.latency_ms = Some(ms);
+            s.record_usage(&row).unwrap();
+        }
+
+        let vms = build_provider_vms(&s, &aux, std::path::Path::new("/tmp")).unwrap();
+        let health = |id: &str| &vms.iter().find(|v| v.id == id).unwrap().health;
+
+        let busy = health("busy");
+        assert_eq!(
+            busy.source.as_deref(),
+            Some("traffic"),
+            "its own round trips outrank a verdict that predates them"
+        );
+        assert_eq!(
+            busy.latency_ms,
+            Some(200),
+            "…and it is their average, not the probe's 500"
+        );
+
+        let idle = health("idle");
+        assert_eq!(idle.source.as_deref(), Some("probe"));
+        assert_eq!(idle.latency_ms, Some(12));
+        assert!(
+            idle.checked_at.is_some(),
+            "a probe is dated; a traffic average is a window"
+        );
+
+        let dead = health("dead");
+        assert_eq!(dead.state, "error", "an endpoint that did not answer");
+        assert_eq!(dead.latency_ms, None, "no answer is not a latency");
+        assert_eq!(dead.source.as_deref(), Some("probe"));
+
+        let parked_health = health("parked");
+        assert_eq!(parked_health.note.as_deref(), Some("Disabled"));
+        assert_eq!(
+            parked_health.latency_ms, None,
+            "out of every route outranks both"
+        );
+
+        let fresh = health("fresh");
+        assert_eq!(
+            fresh.source, None,
+            "never probed and never used: nothing to say"
+        );
+        assert_eq!(fresh.latency_ms, None);
+        assert_eq!(fresh.state, "idle");
     }
 
     fn usage_row(provider_id: &str) -> UsageRecord {

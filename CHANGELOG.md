@@ -28,8 +28,12 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   search, the Dashboard's window and filters, where you had scrolled to. Each
   screen now publishes how to re-read itself and the button awaits that, so what
   came back changes and what you had chosen does not. It also shows that it is
-  working — the glyph spins and the button disables until the last of the reads
-  lands, where before the click had no end and a remount behind it.
+  working, and that it finished: the glyph spins and the button disables until
+  the last of the reads lands, then turns into a check for a moment and goes
+  back. That acknowledgement is the point — the work is tens of milliseconds of
+  local reads, so the spinner is a blink, and when nothing has changed the screen
+  afterwards is identical to before. A refresh that found nothing new used to
+  read exactly like a click that did nothing.
 
 - **Hub sync and plan-quota queries are asynchronous.** Both went through
   `reqwest`'s *blocking* client, which is why each needed a thread of its own:

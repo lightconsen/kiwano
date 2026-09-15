@@ -712,6 +712,29 @@ describe("the refresh button", () => {
     expect(await screen.findByRole("button", { name: "Codex" })).toBeInTheDocument();
   });
 
+  it("says when it is done, because usually nothing moved", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+    const button = await screen.findByRole("button", { name: en.common.refresh });
+
+    // At rest it is the reload glyph (lucide names the icon on the svg, which is
+    // the button's only state handle — its label is the action).
+    expect(button.querySelector("svg.lucide-refresh-cw")).not.toBeNull();
+
+    await user.click(button);
+
+    // Every half of the refresh is awaited together, so the acknowledgement
+    // lands when the last of them does — and it is a flash, not a mode.
+    await waitFor(() => expect(button.querySelector("svg.lucide-check")).not.toBeNull());
+    await waitFor(
+      () => expect(button.querySelector("svg.lucide-refresh-cw")).not.toBeNull(),
+      { timeout: 3000 },
+    );
+  });
+
   it("does not re-probe on an ordinary refetch — only a click pays for it", async () => {
     const user = userEvent.setup();
     const onRedetect = vi.fn();

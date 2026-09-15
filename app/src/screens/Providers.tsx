@@ -1663,7 +1663,14 @@ export default function Providers({
   const [enabling, setEnabling] = useState(false);
   // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
-  const [quotaBusy, setQuotaBusy] = useState(false);
+  // The header's ⟳: in flight, and finished. Named for the whole of what it does
+  // — the provider list, the routes and settings, a forced quota read, and the
+  // agent re-probe — rather than for the half that used to own it.
+  const [refreshing, setRefreshing] = useState(false);
+  // Flashed when the last of those lands. The quota numbers are the only part of
+  // this that can visibly move, and often they have not: without the check, a
+  // refresh that found nothing new reads exactly like a click that did nothing.
+  const [refreshed, setRefreshed] = useState(false);
 
   // Segment switch that keeps the #providers/<agent> deep link truthful
   const pickSeg = (id: AgentRef | "all") => {
@@ -1754,6 +1761,13 @@ export default function Providers({
     }
     setPlanQuotas((m) => ({ ...m, ...fresh }));
   };
+
+  // `timer`, not `t`: `t` is the translator here.
+  useEffect(() => {
+    if (!refreshed) return;
+    const timer = setTimeout(() => setRefreshed(false), 1600);
+    return () => clearTimeout(timer);
+  }, [refreshed]);
 
   // Built-ins (in the registry's order), then the agents the user defined —
   // which are never "not installed": there is nothing to install.
@@ -1919,10 +1933,10 @@ export default function Providers({
           className="ml-auto h-7 w-7 px-0 text-mut"
           aria-label={t("common.refresh")}
           title={t("providers.refreshTitle")}
-          disabled={quotaBusy}
+          disabled={refreshing}
           onClick={async () => {
-            if (quotaBusy) return;
-            setQuotaBusy(true);
+            if (refreshing) return;
+            setRefreshing(true);
             try {
               // All three, awaited together, so the spinner ends when the last
               // one lands rather than when the first one returns.
@@ -1935,12 +1949,17 @@ export default function Providers({
                 // so only a click should pay for it.
                 onRedetect?.(),
               ]);
+              setRefreshed(true);
             } finally {
-              setQuotaBusy(false);
+              setRefreshing(false);
             }
           }}
         >
-          <RefreshCw className={`h-3.5 w-3.5${quotaBusy ? " animate-spin" : ""}`} />
+          {refreshed ? (
+            <Check className="h-3.5 w-3.5" style={{ color: "var(--kiwi)" }} />
+          ) : (
+            <RefreshCw className={`h-3.5 w-3.5${refreshing ? " animate-spin" : ""}`} />
+          )}
         </Button>
         <Button
           size="sm"

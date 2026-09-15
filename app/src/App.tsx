@@ -1,6 +1,6 @@
 // App shell: overlay title bar + top nav + hash routing + footer status bar (design/index.html skeleton)
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Check, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   isPermissionGranted,
@@ -63,6 +63,12 @@ export default function App() {
   // true). It replaces a remount — see lib/reload.ts for why that was wrong.
   const { register: registerReload, reload: reloadScreen } = useReloadRegistry();
   const [reloading, setReloading] = useState(false);
+  // Flashed once the reads land: this work is tens of milliseconds of local
+  // reads, so the spinner is a blink and the screen looks identical afterwards
+  // (nothing changed, or the data would have redrawn). The check is what tells
+  // the two apart — and it clears itself, because it is an acknowledgement
+  // rather than a state to read.
+  const [reloaded, setReloaded] = useState(false);
   const [gw, setGw] = useState<GatewayStatus | null>(null);
   const [footer, setFooter] = useState<FooterStats | null>(null);
   const [modal, setModal] = useState<{ open: boolean; preset: CatalogEntry | null; edit: Provider | null }>({
@@ -138,10 +144,23 @@ export default function App() {
         api.getGatewayStatus().then(setGw).catch(() => {}),
         api.getFooterStats().then(setFooter).catch(() => {}),
       ]);
+      setReloaded(true);
     } finally {
       setReloading(false);
     }
   }, [reloadScreen]);
+
+  // `timer`, not `t`: `t` is the translator here.
+  //
+  // The check says the reads came back, not that they succeeded — each half
+  // swallows its own failure, by design, and a failure shows where it always
+  // did: in what did *not* update. Here that is the gateway dot beside it, and
+  // the screen's own rows.
+  useEffect(() => {
+    if (!reloaded) return;
+    const timer = setTimeout(() => setReloaded(false), 1600);
+    return () => clearTimeout(timer);
+  }, [reloaded]);
 
   // The first load is this one's, not `refresh`'s: nothing is registered yet.
   useEffect(() => {
@@ -329,7 +348,11 @@ export default function App() {
             aria-label={t("common.refresh")}
             title={t("common.refresh")}
           >
-            <RefreshCw className={`h-3 w-3${reloading ? " animate-spin" : ""}`} />
+            {reloaded ? (
+              <Check className="h-3 w-3" style={{ color: "var(--kiwi)" }} />
+            ) : (
+              <RefreshCw className={`h-3 w-3${reloading ? " animate-spin" : ""}`} />
+            )}
           </Button>
         </span>
       </footer>

@@ -228,10 +228,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-mut">
-          <Dot state={gw?.running ? "ok" : "off"} size="h-[6px] w-[6px]" />
-          {t("app.gateway")} <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
-        </span>
       </header>
 
       <UpdateBanner />
@@ -271,13 +267,24 @@ export default function App() {
             {t("app.tokens")}
           </span>
         )}
+        {/* The two readings the bar carries, in the order they are asked about:
+            what this machine has done today, then when the catalog last agreed
+            with the Hub. */}
+        {footer?.hub_synced && (
+          <span className="flex items-center gap-1">
+            <Dot state="ok" size="h-[5px] w-[5px]" />
+            {t("app.hubSynced")}
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-2">
-          {footer?.hub_synced && (
-            <span className="flex items-center gap-1">
-              <Dot state="ok" size="h-[5px] w-[5px]" />
-              {t("app.hubSynced")}
-            </span>
-          )}
+          {/* The gateway is the process that routes, so its state belongs with
+              the totals rather than up in the title bar — the same move the
+              reload made, and for the same reason: up there it was a badge in a
+              row of controls that do not touch it. */}
+          <span className="flex items-center gap-1.5">
+            <Dot state={gw?.running ? "ok" : "off"} size="h-[5px] w-[5px]" />
+            {t("app.gateway")} <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
+          </span>
           {/* The app's own reload, beside the figures it reloads: it remounts the
               screen (a fresh read of whatever is on it), re-reads the gateway
               status and re-reads these totals. It lived in the header next to the

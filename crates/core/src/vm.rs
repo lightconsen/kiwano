@@ -1544,11 +1544,12 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
 /// anything outside it (a `HERMES_HOME` pointing elsewhere is a real path, and
 /// rewriting it to `~/…` would name a file that does not exist).
 ///
-/// Joined rather than formatted, so the separator is the platform's on both sides
-/// of the `~`. A literal `~/` glued to a Windows path produced
-/// `~/.claude\settings.json` — a spelling neither platform uses, and the reason
-/// this had to be fixed once already: the test that pinned it was written on macOS
-/// and passed there.
+/// Joined rather than formatted, so the separator this *adds* is the platform's:
+/// gluing a literal `~/` to a Windows path produced `~/.claude\settings.json`, a
+/// spelling neither platform uses. What it does not do is rewrite the separators
+/// already inside `path` — a path built component by component (as every one of
+/// these is) already spells them natively, and one that does not is somebody's
+/// own text, which is not this function's to re-punctuate.
 fn display_path(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
         Ok(rest) => Path::new("~").join(rest).display().to_string(),
@@ -5331,12 +5332,14 @@ mod tests {
         );
 
         // A path outside the home tree keeps its absolute form rather than being
-        // rewritten into a `~/…` that names nothing.
+        // rewritten into a `~/…` that names nothing. Built the way the real ones
+        // are — a component at a time — because a tail written as one literal with
+        // forward slashes keeps them on Windows: `Path` separates on either, so the
+        // raw text is what the caller wrote.
         assert_eq!(
-            display_path(&home.join(".hermes/config.yaml"), home),
+            display_path(&home.join(".hermes").join("config.yaml"), home),
             at_home(".hermes/config.yaml")
         );
-        #[cfg(unix)]
         assert_eq!(
             display_path(Path::new("/opt/hermes/config.yaml"), home),
             "/opt/hermes/config.yaml"

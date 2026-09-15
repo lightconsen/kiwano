@@ -167,9 +167,10 @@ export const providers = {
   footerDefault:
     "Switching applies instantly (the agent is taken over by the local gateway; switching only changes routing) · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
   /** A user-defined agent's tab: nothing here was taken over, so the default
-      line's first clause would be a lie. */
+      line's first clause would be a lie. It no longer points at the icon — the
+      icon names itself, and the dialog behind it opens on the credentials. */
   footerRoute:
-    "This agent is a route of its own: its endpoint and key are behind the icon beside its name, and they are all a client needs · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
+    "This agent is a route of its own · switching applies instantly · API keys are stored locally, readable only by you · requests never touch the Kiwano cloud",
 
   // ── Plan quota tiers ──
   // The backend reports these as machine keys (`five_hour`, `weekly_limit`,

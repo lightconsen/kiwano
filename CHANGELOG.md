@@ -19,21 +19,7 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
-### Fixed
-
-- **Saving a provider no longer strips the scheme from its endpoint.** The dialog
-  is handed the endpoint as the app *shows* it — `https://` removed, the api path
-  folded in — and hands that same value back on save, and nothing downstream put
-  the scheme back: the gateway composes the upstream URL by concatenation and
-  `reqwest` refuses a relative one. So opening a provider and saving it again
-  quietly made it unroutable — every request to it failed at the transport layer
-  while the row still read like a working provider, because the display strips
-  the scheme either way. A stored endpoint is now an absolute URL, at every
-  writer the dialog has (a new provider, an edited one, and the per-protocol
-  endpoint rows) plus the takeover's import of an agent's own config, which is
-  how a bare host arrives in the first place. `https://` unless the host is
-  loopback, where the likely answer is a local server and the scheme is `http://`:
-  guessing TLS at one fails at the handshake, before anything can say why.
+## [0.1.11] - 2026-09-15
 
 ### Added
 
@@ -59,6 +45,56 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   The table the prober writes to comes back as migration v21 rather than by
   undoing v18: that migration's `DROP` has already run on every install, and the
   `CREATE` only ever lived in v1, which never runs again.
+
+- **`kiwano import cc-switch` is documented.** The command reference now says what
+  the import reads (`~/.cc-switch/cc-switch.db`, or the older `config.json`) and
+  what it refuses to guess at — cc-switch's `gemini` rows, and a provider with no
+  base URL or key — so the two questions a reader has before running it ("does it
+  touch my cc-switch", "what happens to the rows it cannot map") are answered
+  where they are asked. It stays out of the README's feature list on purpose:
+  worth knowing before running the command, not before deciding what the project
+  is.
+
+### Changed
+
+- **The landing page opens in English.** It carried Chinese inline and overrode it
+  from an `en` dictionary, so a visitor whose browser asks for English got Chinese
+  first and had to press a button to fix it. The default is now the other way
+  round — the html is the English source and the dictionary carries Chinese — and
+  the toggle still works in both directions; this flips which language is the
+  fallback, it does not drop one. What describes the page rather than its content
+  moved with it: the `lang` attribute, the title, the description, the og tags,
+  and the two image `alt` texts, which were the only prose a screen reader got in
+  a language the page no longer defaults to.
+
+### Fixed
+
+- **Four claims on the landing page did not survive being checked against the
+  code**, and the page is what a visitor reads before downloading. Gemini CLI was
+  named in the hero, the takeover card, step 02 and the meta description, and the
+  gateway was said to normalize `anthropic / openai / gemini` — that protocol went
+  with the `Protocol` enum before 0.1.8, so those now name Grok Build, the third
+  agent takeover actually offers. The shelf was said to aggregate 177 providers
+  where the Hub serves 19: the count is dropped rather than corrected, because the
+  Hub owns that number and a new one only schedules the same drift. The macOS card
+  said "Universal" while the release ships `aarch64` and `x64` separately, which
+  the two buttons beneath it already said. And Windows now carries the SmartScreen
+  warning the README has always given — an unsigned installer that stops on first
+  launch reads as malware to anyone who was not told to expect it.
+
+- **Saving a provider no longer strips the scheme from its endpoint.** The dialog
+  is handed the endpoint as the app *shows* it — `https://` removed, the api path
+  folded in — and hands that same value back on save, and nothing downstream put
+  the scheme back: the gateway composes the upstream URL by concatenation and
+  `reqwest` refuses a relative one. So opening a provider and saving it again
+  quietly made it unroutable — every request to it failed at the transport layer
+  while the row still read like a working provider, because the display strips
+  the scheme either way. A stored endpoint is now an absolute URL, at every
+  writer the dialog has (a new provider, an edited one, and the per-protocol
+  endpoint rows) plus the takeover's import of an agent's own config, which is
+  how a bare host arrives in the first place. `https://` unless the host is
+  loopback, where the likely answer is a local server and the scheme is `http://`:
+  guessing TLS at one fails at the handshake, before anything can say why.
 
 ## [0.1.10] - 2026-09-15
 
@@ -368,6 +404,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   The export is a dormant feature — no screen calls it yet — but it would have
   written every key in the clear the moment one did. Keys are left out unless
   explicitly asked for.
+
+### Changed
+
+- **The landing page opens in English.** It carried Chinese inline and overrode it
+  from an `en` dictionary, so a visitor whose browser asks for English got Chinese
+  first and had to press a button to fix it. The default is now the other way
+  round — the html is the English source and the dictionary carries Chinese — and
+  the toggle still works in both directions. What describes the page rather than
+  its content moved with it: the `lang` attribute, the title, the description, the
+  og tags, and the two image `alt` texts, which were the only prose a screen
+  reader got in a language the page no longer defaults to.
 
 ### Fixed
 

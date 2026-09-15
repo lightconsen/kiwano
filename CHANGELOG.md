@@ -19,6 +19,22 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Saving a provider no longer strips the scheme from its endpoint.** The dialog
+  is handed the endpoint as the app *shows* it — `https://` removed, the api path
+  folded in — and hands that same value back on save, and nothing downstream put
+  the scheme back: the gateway composes the upstream URL by concatenation and
+  `reqwest` refuses a relative one. So opening a provider and saving it again
+  quietly made it unroutable — every request to it failed at the transport layer
+  while the row still read like a working provider, because the display strips
+  the scheme either way. A stored endpoint is now an absolute URL, at every
+  writer the dialog has (a new provider, an edited one, and the per-protocol
+  endpoint rows) plus the takeover's import of an agent's own config, which is
+  how a bare host arrives in the first place. `https://` unless the host is
+  loopback, where the likely answer is a local server and the scheme is `http://`:
+  guessing TLS at one fails at the handshake, before anything can say why.
+
 ### Added
 
 - **A provider's latency is back in the Status column, read from traffic rather

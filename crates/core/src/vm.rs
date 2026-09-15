@@ -2331,6 +2331,37 @@ fn advanced_vm(p: &Provider) -> Option<ProviderAdvancedVm> {
 /// Map the user-supplied additional endpoints to store rows; unknown protocol
 /// strings are skipped (defaulting one to openai could collide with the
 /// primary's protocol in provider_endpoints' PK).
+/// The stored form of an endpoint somebody typed: an absolute URL.
+///
+/// The dialog is shown `display_endpoint` — the scheme stripped, `api_path`
+/// folded in — and hands that back on save, so opening a provider and saving it
+/// again rewrote `https://api.deepseek.com` as `api.deepseek.com` and broke
+/// routing for that provider from then on. Nothing downstream puts the scheme
+/// back: the gateway composes the upstream URL by concatenation
+/// (`server::data::compose_upstream`) and `reqwest` refuses a relative one, so
+/// every request to it fails at the transport layer while the row still reads
+/// like a working provider. The invariant is kept here, at the one function
+/// every writer of a provider's endpoints goes through.
+///
+/// The scheme is `http://` for a loopback host and `https://` otherwise. A local
+/// server — Ollama on 11434, an LM Studio port — is both the common case and the
+/// one where the obvious guess is wrong, and it is not a case that corrects
+/// itself by trying: a TLS handshake against a plaintext listener fails before
+/// anything can say why.
+fn absolute_endpoint(raw: &str) -> String {
+    let endpoint = raw.trim();
+    if endpoint.contains("://") {
+        return endpoint.to_string();
+    }
+    let local = matches!(
+        crate::creds::host_of(endpoint)
+            .to_ascii_lowercase()
+            .as_str(),
+        "localhost" | "127.0.0.1" | "::1" | "[::1]"
+    );
+    format!("{}{endpoint}", if local { "http://" } else { "https://" })
+}
+
 fn input_endpoints(input: &NewProviderInput) -> Vec<kiwanod::store::ProviderEndpoint> {
     input
         .endpoints
@@ -2339,7 +2370,7 @@ fn input_endpoints(input: &NewProviderInput) -> Vec<kiwanod::store::ProviderEndp
             kiwanod::store::Protocol::parse_str(&e.protocol).map(|p| {
                 kiwanod::store::ProviderEndpoint {
                     protocol: p,
-                    base_url: e.endpoint.trim().to_string(),
+                    base_url: absolute_endpoint(&e.endpoint),
                     api_path: None,
                 }
             })
@@ -2402,7 +2433,7 @@ pub fn add_provider(
             .map(str::to_string),
         protocol: kiwanod::store::Protocol::parse_str(&input.protocol)
             .unwrap_or(kiwanod::store::Protocol::OpenAI),
-        base_url: input.endpoint.trim().to_string(),
+        base_url: absolute_endpoint(&input.endpoint),
         api_path: None,
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
@@ -2602,7 +2633,7 @@ pub fn update_provider(
         .ok_or_else(|| format!("provider `{id}` not found"))?;
 
     p.name = input.name.trim().to_string();
-    p.base_url = input.endpoint.trim().to_string();
+    p.base_url = absolute_endpoint(&input.endpoint);
     p.protocol = kiwanod::store::Protocol::parse_str(&input.protocol)
         .unwrap_or(kiwanod::store::Protocol::OpenAI);
     p.endpoints = input_endpoints(input);
@@ -3151,7 +3182,11 @@ fn import_current_provider(
     store: &Store,
     creds: &crate::creds::CurrentCreds,
 ) -> Result<String, String> {
-    let base = creds.base_url.trim().trim_end_matches('/');
+    // An agent's config is another tool's file, and it can hold a bare host —
+    // which is how a provider ends up stored as `api.deepseek.com` and unrouted.
+    // Normalizing before the dedup lookup also means a config that gains its
+    // scheme later still matches the row it made without one.
+    let base = absolute_endpoint(creds.base_url.trim_end_matches('/'));
     for p in store.list_providers().map_err(e2s)? {
         if p.base_url.trim().trim_end_matches('/') == base {
             return Ok(p.id);
@@ -4564,6 +4599,58 @@ mod tests {
             .unwrap()
             .expect("provider row")
             .catalog_id
+    }
+
+    fn stored_base(s: &Store, id: &str) -> String {
+        s.get_provider(id).unwrap().expect("provider row").base_url
+    }
+
+    /// A stored endpoint is an absolute URL, whatever the form it was typed in.
+    ///
+    /// The dialog is handed `display_endpoint` — scheme stripped, `api_path`
+    /// folded in — and hands it back on save, and nothing downstream adds a
+    /// scheme: the gateway concatenates and `reqwest` refuses a relative URL. So
+    /// opening a provider and saving it again used to leave a row that reads like
+    /// a working provider and fails every request.
+    #[test]
+    fn a_saved_endpoint_keeps_its_scheme() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+
+        // Typed as the dialog shows it. `absolute_endpoint` is the only thing
+        // between that and the row, and this is the case that was broken.
+        let mut bare = catalog_input("DeepSeek", "api.deepseek.com");
+        bare.endpoints = vec![NewEndpointInput {
+            protocol: "anthropic".into(),
+            endpoint: "api.deepseek.com/anthropic".into(),
+        }];
+        let vm = add_provider(&s, &aux, &bare).unwrap();
+        assert_eq!(stored_base(&s, &vm.id), "https://api.deepseek.com");
+        let extra = s.get_provider(&vm.id).unwrap().unwrap().endpoints;
+        assert_eq!(extra[0].base_url, "https://api.deepseek.com/anthropic");
+
+        // …and the edit the dialog sends back is the same stripped form, which
+        // is what used to strip the scheme off an already-correct row.
+        let vm = update_provider(&s, &aux, std::path::Path::new("/tmp"), &vm.id, &bare).unwrap();
+        assert_eq!(stored_base(&s, &vm.id), "https://api.deepseek.com");
+
+        // A local server is plain HTTP: guessing https there fails at the
+        // handshake, before anything can say why.
+        let local = catalog_input("Ollama", "localhost:11434");
+        let vm = add_provider(&s, &aux, &local).unwrap();
+        assert_eq!(stored_base(&s, &vm.id), "http://localhost:11434");
+        let loopback = catalog_input("Local", "127.0.0.1:1234");
+        let vm = add_provider(&s, &aux, &loopback).unwrap();
+        assert_eq!(stored_base(&s, &vm.id), "http://127.0.0.1:1234");
+
+        // An absolute URL is left exactly as it is, http and https alike.
+        for (typed, stored) in [
+            ("https://api.moonshot.cn", "https://api.moonshot.cn"),
+            ("http://relay.internal", "http://relay.internal"),
+        ] {
+            let vm = add_provider(&s, &aux, &catalog_input("Typed", typed)).unwrap();
+            assert_eq!(stored_base(&s, &vm.id), stored, "{typed}");
+        }
     }
 
     /// The smallest input `add_provider` takes, so a test can vary the endpoint

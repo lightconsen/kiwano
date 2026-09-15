@@ -142,8 +142,6 @@ export const providers = {
     "Agent 路由策略 · 上方各行即按优先级排序的候选（主用在前）· 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
   footerDefault:
     "切换即时生效（该 Agent 已由本地网关接管；切换仅改变路由）· API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
-  footerRoute:
-    "这个 Agent 就是一条路由 · 切换即时生效 · API 密钥仅存本机，只有你能读取 · 请求不经过 Kiwano 云端",
 
   // ── Plan quota tiers ──
   tierFiveHour: "5 小时窗口",

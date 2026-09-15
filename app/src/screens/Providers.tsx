@@ -40,6 +40,7 @@ import {
   AGENTS,
   PLAN_TIER_LABEL_KEYS,
   type AgentDetect,
+  type AgentLimit,
   type AgentRef,
   type CustomAgent,
   type AgentRoute,
@@ -51,6 +52,7 @@ import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bi
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { iconForEndpoint } from "@/components/icons/infer";
 import StrategyPanel, { CopyRouteRow } from "../components/StrategyPanel";
+import { LimitSection } from "../components/AgentLimit";
 import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
 
 // Agent filter segments — each renders the agent's brand logo (ported with
@@ -187,19 +189,27 @@ function AgentOnboarding({
     agent's name — a tab that is a route does not need a permanent card of
     credentials on top of it. */
 function AccessDialog({
+  agent,
   label,
   keyName,
   listen,
+  limit,
+  currency,
   open,
   onClose,
   onDelete,
+  onChanged,
 }: {
+  agent: AgentRef;
   label: string;
   keyName: string | null;
   listen: string;
+  limit: AgentLimit | null;
+  currency: string;
   open: boolean;
   onClose: () => void;
   onDelete: () => void;
+  onChanged?: () => void;
 }) {
   const t = useT();
   return (
@@ -214,6 +224,12 @@ function AccessDialog({
           <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
           <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
           <p className="mt-2 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
+          <LimitSection
+            agent={agent}
+            limit={limit}
+            currency={currency}
+            onChanged={onChanged}
+          />
         </div>
         {/* Deleting lives with the rest of what this agent *is*, and one step
             further from the pointer than the tab's own rows. */}
@@ -239,21 +255,30 @@ function AccessDialog({
  * A user-defined agent has no such dialog: there is no file behind it, and its
  * own row already carries what it does have (its key, and deleting it). */
 function AgentSettingsDialog({
+  agent,
   label,
   paths,
+  limit,
+  currency,
   takenOver,
   busy,
   open,
   onClose,
   onSetTakeover,
+  onChanged,
 }: {
+  agent: AgentRef;
   label: string;
   paths: string[];
+  limit: AgentLimit | null;
+  /** Display currency, for a money ceiling's unit. */
+  currency: string;
   takenOver: boolean;
   busy: boolean;
   open: boolean;
   onClose: () => void;
   onSetTakeover: (enabled: boolean) => Promise<void>;
+  onChanged?: () => void;
 }) {
   const t = useT();
   const [err, setErr] = useState<string | null>(null);
@@ -295,6 +320,13 @@ function AgentSettingsDialog({
             {takenOver ? t("providers.agentRoutedBody") : t("providers.agentNotRoutedBody")}
           </p>
           {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
+
+          <LimitSection
+            agent={agent}
+            limit={limit}
+            currency={currency}
+            onChanged={onChanged}
+          />
 
           <div className="mt-3 border-t border-line pt-2">
             <div className="text-[10.5px] text-mut">{t("providers.agentConfigFiles")}</div>
@@ -1950,12 +1982,7 @@ export default function Providers({
           Routes come from here (single fetch): a route created while the panel is
           mounted (first bind / copy) must show up without a tab switch. */}
       {seg !== "all" && (custom || (takenOver?.has(seg) ?? false)) && (
-        <StrategyPanel
-          agent={seg}
-          routes={routes}
-          currency={currency}
-          onChanged={refetch}
-        />
+        <StrategyPanel agent={seg} routes={routes} onChanged={refetch} />
       )}
 
       <NewAgentDialog
@@ -1966,8 +1993,12 @@ export default function Providers({
 
       {!custom && seg !== "all" && (
         <AgentSettingsDialog
+          agent={seg}
           label={agentMeta(seg).label}
           paths={configPaths}
+          limit={route?.limit ?? null}
+          currency={currency}
+          onChanged={refetch}
           takenOver={takenOver?.has(seg) ?? false}
           busy={enabling}
           open={agentSettingsOpen}
@@ -1978,12 +2009,16 @@ export default function Providers({
 
       {custom && (
         <AccessDialog
+          agent={custom.id}
           label={custom.label}
           keyName={custom.placeholder_key}
           listen={listen}
+          limit={route?.limit ?? null}
+          currency={currency}
           open={accessOpen}
           onClose={() => setAccessOpen(false)}
           onDelete={() => onDeleteAgent(custom.id)}
+          onChanged={refetch}
         />
       )}
 

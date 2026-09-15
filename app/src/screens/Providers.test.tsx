@@ -597,11 +597,21 @@ describe("the refresh button", () => {
   });
 });
 
-// The agent's own ceiling. Its own row is the point — the strategy above says who
-// serves the request, not how much may be spent — so what is asserted here is that
-// the row reads the stored limit, and that the dialog writes it back.
+// The agent's own ceiling, which lives in the agent's settings dialog — not in
+// the strategy panel, because it holds under every strategy rather than being
+// part of any one of them.
 describe("the agent's own limit", () => {
+  /** Open the agent's settings from the row above its table. */
+  async function openSettings(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(
+      await screen.findByLabelText(
+        en.providers.agentSettingsFor.replace("{agent}", "Codex"),
+      ),
+    );
+  }
+
   it("reads out the stored ceiling", async () => {
+    const user = userEvent.setup();
     renderCodexTab({
       providers: [deepseek()],
       routes: [
@@ -613,41 +623,72 @@ describe("the agent's own limit", () => {
       ],
       codexTakenOver: true,
     });
+    await openSettings(user);
 
-    expect(await screen.findByText(en.strategy.limitLabel)).toBeInTheDocument();
+    expect(screen.getByText(en.strategy.limitLabel)).toBeInTheDocument();
     expect(screen.getByText("50 CNY per month")).toBeInTheDocument();
   });
 
   it("says no limit rather than showing a blank", async () => {
-    renderCodexTab({
-      providers: [deepseek()],
-      routes: [codexRoute(["deepseek"])],
-      codexTakenOver: true,
-    });
-
-    expect(await screen.findByText(en.strategy.limitNone)).toBeInTheDocument();
-  });
-
-  it("saves the value the dialog holds", async () => {
     const user = userEvent.setup();
     renderCodexTab({
       providers: [deepseek()],
       routes: [codexRoute(["deepseek"])],
       codexTakenOver: true,
     });
+    await openSettings(user);
 
-    await user.click(
-      await screen.findByLabelText(
-        en.strategy.limitEditAria.replace("{agent}", "Codex"),
-      ),
-    );
+    expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
+  });
+
+  it("saves the value the section holds", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await openSettings(user);
+
     await user.type(await screen.findByLabelText(en.strategy.limitAmountAria), "25");
     await user.click(screen.getByRole("button", { name: en.common.save }));
 
-    // The defaults the dialog opens with: counted in requests, per day.
+    // The defaults the section opens with: counted in requests, per day.
     await waitFor(() =>
       expect(apiMock.setAgentLimit).toHaveBeenCalledWith("codex", {
         period_limit: 25,
+        limit_unit: null,
+        reset_period: "day",
+      }),
+    );
+  });
+
+  it("is on a user-defined agent's dialog too, where it is the only way in", async () => {
+    const user = userEvent.setup();
+    const longTasks: CustomAgent = {
+      id: "long-tasks-3f9a",
+      label: "Long tasks",
+      note: null,
+      placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
+    };
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([
+      { ...codexRoute(["deepseek"]), agent: longTasks.id },
+    ]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+    await user.click(
+      screen.getByLabelText(en.providers.accessFor.replace("{agent}", longTasks.label)),
+    );
+
+    await user.type(await screen.findByLabelText(en.strategy.limitAmountAria), "5");
+    await user.click(screen.getByRole("button", { name: en.common.save }));
+
+    await waitFor(() =>
+      expect(apiMock.setAgentLimit).toHaveBeenCalledWith(longTasks.id, {
+        period_limit: 5,
         limit_unit: null,
         reset_period: "day",
       }),

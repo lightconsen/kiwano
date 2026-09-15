@@ -1451,31 +1451,40 @@ pub struct AgentRouteVm {
     pub config: Option<String>,
     /// Candidates in ascending priority order (index 0 = primary)
     pub bindings: Vec<BindingVm>,
-    /// The agent's own ceiling, if it has one. Not part of the strategy — it
-    /// holds under every one of them — but read with the route because that is
-    /// the fetch the agent's tab already makes.
+    /// The agent's own ceilings, one per window, empty when it has none. Not part
+    /// of the strategy — they hold under every one of them — but read with the
+    /// route because that is the fetch the agent's tab already makes.
     #[serde(default)]
-    pub limit: Option<AgentLimitVm>,
+    pub limits: Vec<AgentLimitVm>,
 }
 
-/// One agent's spend ceiling, as the Apps screen edits it.
+/// One window of an agent's spend ceiling, as the Apps screen edits it.
+///
+/// An agent holds a list of these: a day's ceiling and a month's answer different
+/// questions, and being over either is being over. The screen edits the list as a
+/// set, which is why it is a `Vec` at every layer rather than a struct with a
+/// window per field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentLimitVm {
+    /// `day` | `weekly` | `monthly` | `yearly` | `all` — the window this ceiling
+    /// is measured over.
+    pub period: String,
     pub period_limit: f64,
     /// `requests` (default), `wan_tokens`, or a 3-letter currency code.
     pub limit_unit: Option<String>,
-    /// `day` | `weekly` | `monthly` | `yearly`, else None for all time.
-    pub reset_period: Option<String>,
 }
 
 impl AgentLimitVm {
-    /// Read a stored row as the screen sees it.
-    pub fn from_store(limit: Option<AgentLimit>) -> Option<Self> {
-        limit.map(|l| AgentLimitVm {
-            period_limit: l.period_limit,
-            limit_unit: l.limit_unit,
-            reset_period: l.reset_period,
-        })
+    /// Read stored rows as the screen sees them.
+    pub fn from_store(limits: Vec<AgentLimit>) -> Vec<Self> {
+        limits
+            .into_iter()
+            .map(|l| AgentLimitVm {
+                period: l.period,
+                period_limit: l.period_limit,
+                limit_unit: l.limit_unit,
+            })
+            .collect()
     }
 }
 
@@ -1523,7 +1532,7 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
         routes.push(AgentRouteVm {
             strategy: strategy.kind.as_str().to_string(),
             config: strategy.config,
-            limit: AgentLimitVm::from_store(store.get_agent_limit(&agent).map_err(e2s)?),
+            limits: AgentLimitVm::from_store(store.agent_limits_for(&agent).map_err(e2s)?),
             agent,
             bindings,
         });
@@ -1543,33 +1552,34 @@ fn display_path(path: &Path, home: &Path) -> String {
 
 /// Set or clear one agent's own ceiling. `None` clears it — an absent row is the
 /// absence of a limit, which is what the gateway reads as "no ceiling".
-pub fn set_agent_limit(
+pub fn set_agent_limits(
     store: &Store,
     agent: &str,
-    limit: Option<AgentLimitVm>,
+    limits: Vec<AgentLimitVm>,
 ) -> Result<(), String> {
-    let Some(limit) = limit else {
-        store.delete_agent_limit(agent).map_err(e2s)?;
-        return Ok(());
-    };
-    // A ceiling of zero is not a ceiling of nothing: the gateway reads it as "no
-    // limit at all" (see `limits::agent_limit_usage`), so storing one would show
-    // the user a limit that does not exist. Clear instead, and let the screen say
-    // so by showing no limit. `is_finite` first, for the reason the quota config
-    // does it: a NaN compares false against everything.
-    if !limit.period_limit.is_finite() || limit.period_limit <= 0.0 {
-        store.delete_agent_limit(agent).map_err(e2s)?;
-        return Ok(());
-    }
-    let row = AgentLimit {
-        agent: agent.to_string(),
-        period_limit: limit.period_limit,
-        limit_unit: limit.limit_unit,
-        reset_period: limit.reset_period,
-        created_at: kiwanod::store::now_rfc3339(),
-        updated_at: kiwanod::store::now_rfc3339(),
-    };
-    store.set_agent_limit(agent, &row).map_err(e2s)
+    let now = kiwanod::store::now_rfc3339();
+    let rows: Vec<AgentLimit> = limits
+        .into_iter()
+        // A window of zero is not a window of nothing: the gateway reads it as
+        // "no ceiling at all" (see `limits::agent_limit_usage`), so storing one
+        // would show the user a limit that does not exist. The screen sends what
+        // its fields hold, including an empty or half-typed one, and this is where
+        // that is dropped rather than being written down. `is_finite` first, for
+        // the reason the quota config does it: a NaN compares false against
+        // everything.
+        .filter(|l| l.period_limit.is_finite() && l.period_limit > 0.0 && !l.period.is_empty())
+        .map(|l| AgentLimit {
+            agent: agent.to_string(),
+            period: l.period,
+            period_limit: l.period_limit,
+            limit_unit: l.limit_unit,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        })
+        .collect();
+    // An empty set is how the screen says "no limit"; `replace` writes it as the
+    // absence of rows.
+    store.replace_agent_limits(agent, &rows).map_err(e2s)
 }
 
 /// Update an Agent's strategy type (+ optional JSON config); unknown types error.
@@ -5304,11 +5314,12 @@ mod tests {
         );
     }
 
-    // The screen's half of an agent limit: what it writes is what the gateway
-    // measures. The zero case is the one worth pinning — a stored zero would read
-    // to the user as a ceiling while the gateway reads it as no ceiling at all.
+    // The screen's half of an agent's ceilings: what it writes is what the gateway
+    // measures. Two windows are written at once here because that is the shape the
+    // change was for — the zero and empty cases matter for the same reason they
+    // did when there was one.
     #[test]
-    fn an_agent_limit_round_trips_and_a_zero_clears_it() {
+    fn agent_limits_round_trip_as_a_set_of_windows() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
         let tmp = tempfile::tempdir().unwrap();
@@ -5334,45 +5345,60 @@ mod tests {
                 .find(|r| r.agent == agent)
                 .expect("the agent has a binding")
         };
-        assert!(route(&s).limit.is_none(), "no row is no ceiling");
+        assert!(route(&s).limits.is_empty(), "no rows is no ceiling");
 
-        let limit = AgentLimitVm {
+        let day = AgentLimitVm {
+            period: "day".into(),
+            period_limit: 100.0,
+            limit_unit: None,
+        };
+        let month = AgentLimitVm {
+            period: "monthly".into(),
             period_limit: 50.0,
             limit_unit: Some("CNY".into()),
-            reset_period: Some("monthly".into()),
         };
-        set_agent_limit(&s, agent, Some(limit.clone())).unwrap();
+        set_agent_limits(&s, agent, vec![day.clone(), month.clone()]).unwrap();
         assert_eq!(
-            route(&s).limit,
-            Some(limit.clone()),
-            "the route carries it back"
+            route(&s).limits,
+            vec![day.clone(), month.clone()],
+            "both windows come back, in window order"
         );
 
-        // Zero is the absence of a limit, not a ceiling of nothing: it clears the
-        // row rather than storing something the gateway would ignore.
-        set_agent_limit(
+        // A window of zero is the absence of that window, not a ceiling of
+        // nothing: the gateway would ignore it while the screen showed it.
+        set_agent_limits(
             &s,
             agent,
-            Some(AgentLimitVm {
-                period_limit: 0.0,
-                limit_unit: None,
-                reset_period: None,
-            }),
+            vec![
+                day.clone(),
+                AgentLimitVm {
+                    period: "weekly".into(),
+                    period_limit: 0.0,
+                    limit_unit: None,
+                },
+            ],
         )
         .unwrap();
-        assert!(route(&s).limit.is_none());
-        assert!(s.get_agent_limit(agent).unwrap().is_none());
-
-        // And what the gateway reads is the same row, not a second copy.
-        set_agent_limit(&s, agent, Some(limit)).unwrap();
         assert_eq!(
-            s.get_agent_limit(agent).unwrap().unwrap().period_limit,
-            50.0
+            route(&s).limits,
+            vec![day.clone()],
+            "the zero window is gone"
         );
 
-        // Explicitly clearing is the same shape as saving zero.
-        set_agent_limit(&s, agent, None).unwrap();
-        assert!(s.get_agent_limit(agent).unwrap().is_none());
+        // Replacing the set keeps the surviving window's age — it is the same
+        // window, not a new one that happens to look the same.
+        let first_set = s.agent_limits_for(agent).unwrap()[0].created_at.clone();
+        set_agent_limits(&s, agent, vec![day.clone(), month.clone()]).unwrap();
+        let rows = s.agent_limits_for(agent).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.iter().find(|l| l.period == "day").unwrap().created_at,
+            first_set
+        );
+
+        // And an empty set clears them all.
+        set_agent_limits(&s, agent, vec![]).unwrap();
+        assert!(route(&s).limits.is_empty());
 
         // A screen that was never asked about limits still builds.
         assert_eq!(

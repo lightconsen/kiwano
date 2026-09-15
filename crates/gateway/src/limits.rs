@@ -175,11 +175,12 @@ pub fn agent_limit_usage(
         Some(u) if u.len() == 3 => u,
         _ => "requests",
     };
-    let (since, period_key) = period_start(
-        Utc::now().timestamp(),
-        limit.reset_period.as_deref(),
-        store.ui_tz_offset_minutes(),
-    );
+    // `all` is the stored spelling of "no reset"; `period_start` says that with
+    // `None`, and treats anything it does not recognise as monthly — so the
+    // mapping has to happen here rather than by passing the string through.
+    let reset = (limit.period != "all").then_some(limit.period.as_str());
+    let (since, period_key) =
+        period_start(Utc::now().timestamp(), reset, store.ui_tz_offset_minutes());
     let used = match unit {
         "wan_tokens" => {
             let t = store.usage_totals(Some(&limit.agent), None, since.as_deref())?;
@@ -280,7 +281,15 @@ pub enum BlockReason {
     /// A plan window's live utilization reached the ceiling configured for it.
     PlanWindow { window: String, util: f64, pct: f64 },
     /// The period's usage reached an amount limit.
-    Spend { used: f64, limit: f64, unit: String },
+    Spend {
+        used: f64,
+        limit: f64,
+        unit: String,
+        /// Which window, when it is one of several an agent holds (`day`,
+        /// `monthly`, …). None for a provider's limit, whose single period is
+        /// already named by the provider's own configuration.
+        window: Option<String>,
+    },
 }
 
 impl BlockReason {
@@ -290,9 +299,15 @@ impl BlockReason {
             BlockReason::PlanWindow { window, util, pct } => {
                 format!("{window} window at {util:.0}% of a {pct:.0}% ceiling")
             }
-            BlockReason::Spend { used, limit, unit } => {
-                format!("{used:.2} of {limit:.2} {unit} this period")
-            }
+            BlockReason::Spend {
+                used,
+                limit,
+                unit,
+                window,
+            } => match window {
+                Some(w) => format!("{used:.2} of {limit:.2} {unit} this {w}"),
+                None => format!("{used:.2} of {limit:.2} {unit} this period"),
+            },
         }
     }
 }
@@ -414,6 +429,9 @@ pub fn evaluate(store: &Store) -> LimitState {
                         used: pl.used,
                         limit: pl.limit,
                         unit: pl.unit,
+                        // A provider's limit has one period, named by the
+                        // provider's own configuration; nothing to disambiguate.
+                        window: None,
                     },
                 );
             }
@@ -451,18 +469,22 @@ pub fn evaluate(store: &Store) -> LimitState {
             for limit in limits {
                 match agent_limit_usage(store, &limit) {
                     Ok(Some(pl)) if pl.used >= pl.limit => {
-                        agents_over.insert(
-                            limit.agent,
+                        // First window to trip wins the row: which one it was
+                        // matters more than the count, and an agent over two of
+                        // them is over either way.
+                        agents_over.entry(limit.agent.clone()).or_insert_with(|| {
                             BlockReason::Spend {
                                 used: pl.used,
                                 limit: pl.limit,
                                 unit: pl.unit,
-                            },
-                        );
+                                window: Some(limit.period.clone()),
+                            }
+                        });
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(
                         agent = %limit.agent,
+                        period = %limit.period,
                         error = %e,
                         "agent limit not evaluated this tick; the agent stays routable"
                     ),
@@ -838,16 +860,21 @@ mod tests {
         agent: &str,
         limit: f64,
         unit: Option<&str>,
-        period: Option<&str>,
+        period: &str,
     ) -> crate::store::AgentLimit {
         crate::store::AgentLimit {
             agent: agent.into(),
+            period: period.into(),
             period_limit: limit,
             limit_unit: unit.map(str::to_string),
-            reset_period: period.map(str::to_string),
             created_at: crate::store::now_rfc3339(),
             updated_at: crate::store::now_rfc3339(),
         }
+    }
+
+    /// One agent's ceilings, as the screen would save them.
+    fn set_limits(store: &Store, agent: &str, limits: Vec<crate::store::AgentLimit>) {
+        store.replace_agent_limits(agent, &limits).unwrap();
     }
 
     /// An agent's ceiling belongs to the agent, not to any one provider: a route
@@ -864,8 +891,8 @@ mod tests {
         record_agent_cost(&store, "claude", "kimi-1", 5.0, "CNY");
         record_agent_cost(&store, "codex", "ds-1", 99.0, "USD");
 
-        let limit = agent_limit("claude", 50.0, Some("CNY"), Some("monthly"));
-        store.set_agent_limit("claude", &limit).unwrap();
+        let limit = agent_limit("claude", 50.0, Some("CNY"), "monthly");
+        set_limits(&store, "claude", vec![limit.clone()]);
 
         // 10 USD at the cached 2 CNY/USD, plus 5 CNY — converted before it sums,
         // the same way a provider's money limit does it, and the codex row is
@@ -896,14 +923,101 @@ mod tests {
     #[test]
     fn an_absent_or_zero_agent_limit_measures_nothing() {
         let (_dir, store) = store_with_hub_rates(r#"{"USD":1.0}"#);
-        assert!(store.get_agent_limit("claude").unwrap().is_none());
+        assert!(store.agent_limits_for("claude").unwrap().is_empty());
 
-        let zero = agent_limit("claude", 0.0, None, None);
+        let zero = agent_limit("claude", 0.0, None, "day");
         assert!(agent_limit_usage(&store, &zero).unwrap().is_none());
 
-        // A stored zero row is still no ceiling, and does not block.
-        store.set_agent_limit("claude", &zero).unwrap();
+        // A stored zero window is still no ceiling, and does not block.
+        set_limits(&store, "claude", vec![zero]);
         assert!(evaluate(&store).agent_blocked("claude").is_none());
+    }
+
+    /// An agent may hold several windows at once, and being over **any** of them
+    /// is being over: a day's ceiling is what stops one runaway session, a month's
+    /// what stops a runaway month, and the one that trips is the one the refusal
+    /// names.
+    ///
+    /// Each case below is over exactly one window and under the other, which is
+    /// the only shape that tells "any window" apart from "the last window read".
+    #[test]
+    fn an_agent_is_over_when_any_of_its_windows_is() {
+        let (_dir, store) = store_with_hub_rates(r#"{"USD":1.0}"#);
+        store.insert_provider(&test_provider("ds-1")).unwrap();
+
+        let day = agent_limit("claude", 10.0, Some("requests"), "day");
+        let month = agent_limit("claude", 100.0, Some("requests"), "monthly");
+
+        // Under both: nothing to say.
+        for _ in 0..5 {
+            record_agent_row(&store, "claude", "ds-1");
+        }
+        set_limits(&store, "claude", vec![day.clone(), month.clone()]);
+        assert!(evaluate(&store).agent_blocked("claude").is_none());
+
+        // Over the day, still under the month.
+        for _ in 0..6 {
+            record_agent_row(&store, "claude", "ds-1");
+        }
+        let state = evaluate(&store);
+        let reason = state
+            .agent_blocked("claude")
+            .expect("11 requests is past a daily ceiling of 10");
+        assert!(
+            reason.describe().contains("this day"),
+            "the refusal names the window that tripped: {}",
+            reason.describe()
+        );
+
+        // Raise the day past the spend and the month becomes the tight one — so
+        // the same usage is judged by a different window without moving it.
+        set_limits(
+            &store,
+            "claude",
+            vec![agent_limit("claude", 20.0, Some("requests"), "day"), month],
+        );
+        assert!(evaluate(&store).agent_blocked("claude").is_none());
+
+        set_limits(
+            &store,
+            "claude",
+            vec![
+                agent_limit("claude", 20.0, Some("requests"), "day"),
+                agent_limit("claude", 10.0, Some("requests"), "monthly"),
+            ],
+        );
+        let state = evaluate(&store);
+        let reason = state
+            .agent_blocked("claude")
+            .expect("11 is past a monthly 10");
+        assert!(
+            reason.describe().contains("this monthly"),
+            "{}",
+            reason.describe()
+        );
+    }
+
+    /// One usage row for an agent, priced or not — the counting units do not need
+    /// a price, and a request count is what the daily/monthly case is about.
+    fn record_agent_row(store: &Store, agent: &str, provider_id: &str) {
+        use crate::store::UsageRecord;
+        store
+            .record_usage(&UsageRecord {
+                ts: crate::store::now_rfc3339(),
+                agent: agent.into(),
+                provider_id: provider_id.into(),
+                model: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+            })
+            .unwrap();
     }
 
     fn store_with_spend(provider_id: &str, limit: f64, spent: f64) -> Store {

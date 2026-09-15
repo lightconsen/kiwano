@@ -1276,16 +1276,16 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
     // A ceiling of one request a day, with the day's one request already spent.
     let now = now_rfc3339();
     store
-        .set_agent_limit(
+        .replace_agent_limits(
             "claude",
-            &kiwanod::store::AgentLimit {
+            &[kiwanod::store::AgentLimit {
                 agent: "claude".into(),
+                period: "day".into(),
                 period_limit: 1.0,
                 limit_unit: None,
-                reset_period: Some("day".into()),
                 created_at: now.clone(),
                 updated_at: now.clone(),
-            },
+            }],
         )
         .unwrap();
     store
@@ -1341,16 +1341,16 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
     // being reached, not the presence of one.
     state
         .store
-        .set_agent_limit(
+        .replace_agent_limits(
             "claude",
-            &kiwanod::store::AgentLimit {
+            &[kiwanod::store::AgentLimit {
                 agent: "claude".into(),
+                period: "day".into(),
                 period_limit: 100.0,
                 limit_unit: None,
-                reset_period: Some("day".into()),
                 created_at: now_rfc3339(),
                 updated_at: now_rfc3339(),
-            },
+            }],
         )
         .unwrap();
     state.set_limits(kiwanod::limits::evaluate(&state.store));

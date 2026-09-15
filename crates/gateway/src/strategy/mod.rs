@@ -690,6 +690,7 @@ mod tests {
                 used: 12.0,
                 limit: 10.0,
                 unit: "CNY".into(),
+                window: None,
             },
         )]);
 
@@ -958,6 +959,7 @@ mod tests {
                 used: 31.0,
                 limit: 30.0,
                 unit: "CNY".into(),
+                window: None,
             },
         )])
     }
@@ -1060,6 +1062,7 @@ mod tests {
                     used: 31.0,
                     limit: 30.0,
                     unit: "CNY".into(),
+                    window: None,
                 },
             ),
             (
@@ -1068,6 +1071,7 @@ mod tests {
                     used: 11.0,
                     limit: 10.0,
                     unit: "CNY".into(),
+                    window: None,
                 },
             ),
         ]);

@@ -630,18 +630,19 @@ export interface AgentRoute {
   /** Strategy JSON payload (quota: {"limit","unit"}; null otherwise) */
   config: string | null;
   bindings: StrategyBinding[];
-  /** The agent's own spend ceiling; null when it has none */
-  limit: AgentLimit | null;
+  /** The agent's own ceilings, one per window; empty when it has none */
+  limits: AgentLimit[];
 }
 
-/** One agent's spend ceiling. Not part of the strategy: it holds under all of
-    them, `single` included. */
+/** One window of an agent's spend ceiling. Not part of the strategy: it holds
+    under all of them, `single` included. An agent holds several — a day's and a
+    month's answer different questions, and being over either is being over. */
 export interface AgentLimit {
+  /** `day` | `weekly` | `monthly` | `yearly` | `all` */
+  period: string;
   period_limit: number;
   /** `requests` (default), `wan_tokens`, or a 3-letter currency code */
   limit_unit: string | null;
-  /** `day` | `weekly` | `monthly` | `yearly`; null measures all time */
-  reset_period: string | null;
 }
 
 /** One data-plane request recorded by the gateway (metadata row; bodies live in the detail view) */
@@ -806,8 +807,8 @@ export interface KiwanoApi {
   getAgentRoutes(): Promise<AgentRoute[]>;
   /** Update an agent's strategy type (config only needed for quota: {"limit","unit"}) */
   updateAgentStrategy(agent: AgentRef, strategy: StrategyKind, config?: string | null): Promise<void>;
-  /** Set or clear one agent's own spend ceiling (null clears it) */
-  setAgentLimit(agent: AgentRef, limit: AgentLimit | null): Promise<void>;
+  /** Replace one agent's spend ceilings (an empty list clears them) */
+  setAgentLimits(agent: AgentRef, limits: AgentLimit[]): Promise<void>;
   /** Reorder candidates: provider_id order → priority 0..n */
   reorderAgentBindings(agent: AgentRef, providerIds: string[]): Promise<void>;
   /** Patch one binding's strategy parameters (roundrobin weight / timewindow local window) */

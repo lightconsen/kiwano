@@ -685,14 +685,14 @@ const agentRoutes: AgentRoute[] = [
     strategy: "failover",
     config: null,
     bindings: [bind("deepseek", 0), bind("kimi", 1)],
-    limit: null,
+    limits: [],
   },
   {
     agent: "codex",
     strategy: "single",
     config: null,
     bindings: [bind("deepseek", 0)],
-    limit: null,
+    limits: [],
   },
   {
     // A user-defined agent: a route like any other, over its own key.
@@ -700,7 +700,7 @@ const agentRoutes: AgentRoute[] = [
     strategy: "failover",
     config: null,
     bindings: [bind("deepseek", 0), bind("kimi", 1)],
-    limit: null,
+    limits: [],
   },
   {
     // Kimi heads opencode (globally "In use") while standing by in claude's
@@ -709,7 +709,7 @@ const agentRoutes: AgentRoute[] = [
     strategy: "single",
     config: null,
     bindings: [bind("kimi", 0)],
-    limit: null,
+    limits: [],
   },
   {
     // Overnight window on the standby exercises the timewindow wraparound path.
@@ -717,7 +717,7 @@ const agentRoutes: AgentRoute[] = [
     strategy: "timewindow",
     config: null,
     bindings: [bind("deepseek", 0), bind("ollama", 1, ["22:00", "06:00"])],
-    limit: null,
+    limits: [],
   },
 ];
 
@@ -727,7 +727,7 @@ function strategyOf(agent: AgentId): AgentRoute {
   // Settings without a pre-seeded route behave identically.
   let route = agentRoutes.find((r) => r.agent === agent);
   if (!route) {
-    route = { agent, strategy: "single", config: null, bindings: [], limit: null };
+    route = { agent, strategy: "single", config: null, bindings: [], limits: [] };
     agentRoutes.push(route);
   }
   return route;
@@ -1252,7 +1252,7 @@ export const devApi: KiwanoApi = {
       strategy: "single",
       config: null,
       bindings: [],
-      limit: null,
+      limits: [],
     });
     return structuredClone(created);
   },
@@ -1395,13 +1395,12 @@ export const devApi: KiwanoApi = {
       .map((r) => ({ ...r, bindings: r.bindings.map((b) => ({ ...b })) }));
   },
 
-  async setAgentLimit(agent: AgentId, limit: AgentLimit | null): Promise<void> {
+  async setAgentLimits(agent: AgentId, limits: AgentLimit[]): Promise<void> {
     await delay();
-    // Zero is the absence of a limit rather than a ceiling of nothing, mirroring
-    // vm::set_agent_limit — a fixture that stored it would show a limit the
-    // gateway would not enforce.
-    const r = strategyOf(agent);
-    r.limit = limit && limit.period_limit > 0 ? limit : null;
+    // A window of zero is the absence of that window rather than a ceiling of
+    // nothing, mirroring vm::set_agent_limits — a fixture that stored it would
+    // show a limit the gateway would not enforce.
+    strategyOf(agent).limits = limits.filter((l) => l.period && l.period_limit > 0);
   },
 
   async updateAgentStrategy(agent: AgentId, strategy: StrategyKind, config?: string | null): Promise<void> {
@@ -1484,9 +1483,9 @@ export const devApi: KiwanoApi = {
       strategy: src.strategy,
       config: src.config,
       bindings: src.bindings.map((b) => ({ ...b })),
-      // The ceiling is the agent's own, not part of the route being copied:
+      // The ceilings are the agent's own, not part of the route being copied:
       // inheriting someone else's budget is not what "copy this route" means.
-      limit: existing?.limit ?? null,
+      limits: existing?.limits ?? [],
     };
     const i = agentRoutes.findIndex((r) => r.agent === target);
     if (i >= 0) agentRoutes[i] = copy;

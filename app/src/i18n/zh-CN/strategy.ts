@@ -37,6 +37,8 @@ export const strategy = {
 
 
   // ── Agent 自身的限额（独立一行，位于策略下方）──
+  limitAdd: "添加周期",
+  limitRemoveAria: "移除此周期",
   limitLabel: "限额",
   limitNone: "不限",
   limitEditAria: "编辑 {agent} 的限额",
@@ -52,7 +54,7 @@ export const strategy = {
   limitPeriodYear: "每年",
   limitPeriodAll: "累计",
   limitBody:
-    "统计该 Agent 在所有 Provider 上的用量，并在任何策略下生效 —— 包括 single：它的「只有主选」说的是不做故障转移，不是可以不限额。额度用尽后，该 Agent 的请求会被拒绝，直到周期重置。",
+    "统计该 Agent 在所有 Provider 上的用量，并在任何策略下生效 —— 包括 single：它的「只有主选」说的是不做故障转移，不是可以不限额。一个 Agent 可以同时设多个周期，其中任何一个超限都会拒绝请求，直到该周期重置。",
   limitMoneyNote:
     "金额限额只统计价目表能定价的请求。模型没有公开价格时，请求仍会计量但算不出金额，因此不计入额度。",
 };

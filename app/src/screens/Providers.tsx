@@ -193,7 +193,7 @@ function AccessDialog({
   label,
   keyName,
   listen,
-  limit,
+  limits,
   currency,
   open,
   onClose,
@@ -204,7 +204,7 @@ function AccessDialog({
   label: string;
   keyName: string | null;
   listen: string;
-  limit: AgentLimit | null;
+  limits: AgentLimit[];
   currency: string;
   open: boolean;
   onClose: () => void;
@@ -230,7 +230,7 @@ function AccessDialog({
             <div className="text-[10.5px] text-mut">{t("strategy.limitLabel")}</div>
             <LimitSection
               agent={agent}
-              limit={limit}
+              limits={limits}
               currency={currency}
               onChanged={onChanged}
             />
@@ -297,7 +297,7 @@ function AgentSettingsDialog({
   agent,
   label,
   paths,
-  limit,
+  limits,
   currency,
   open,
   onClose,
@@ -306,7 +306,7 @@ function AgentSettingsDialog({
   agent: AgentRef;
   label: string;
   paths: string[];
-  limit: AgentLimit | null;
+  limits: AgentLimit[];
   /** Display currency, for a money ceiling's unit. */
   currency: string;
   open: boolean;
@@ -342,7 +342,7 @@ function AgentSettingsDialog({
             {tab === "limit" && (
               <LimitSection
                 agent={agent}
-                limit={limit}
+                limits={limits}
                 currency={currency}
                 onChanged={onChanged}
               />
@@ -2005,7 +2005,7 @@ export default function Providers({
           agent={seg}
           label={agentMeta(seg).label}
           paths={configPaths}
-          limit={route?.limit ?? null}
+          limits={route?.limits ?? []}
           currency={currency}
           onChanged={refetch}
           open={agentSettingsOpen}
@@ -2019,7 +2019,7 @@ export default function Providers({
           label={custom.label}
           keyName={custom.placeholder_key}
           listen={listen}
-          limit={route?.limit ?? null}
+          limits={route?.limits ?? []}
           currency={currency}
           open={accessOpen}
           onClose={() => setAccessOpen(false)}

@@ -38,7 +38,7 @@ const { apiMock } = vi.hoisted(() => ({
     setTakeover: vi.fn(),
     applyAgentRoute: vi.fn(),
     updateAgentStrategy: vi.fn(),
-    setAgentLimit: vi.fn(),
+    setAgentLimits: vi.fn(),
     deleteProvider: vi.fn(),
     addCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
@@ -76,12 +76,12 @@ function deepseek(over: Partial<Provider> = {}): Provider {
 /** codex's stored route with the given candidates, as `getAgentRoutes` answers it.
     `limit` rides the route because that is the fetch the tab already makes — it
     is not part of the strategy, and passes through here untouched. */
-function codexRoute(providerIds: string[], limit: AgentLimit | null = null): AgentRoute {
+function codexRoute(providerIds: string[], limits: AgentLimit[] = []): AgentRoute {
   return {
     agent: "codex",
     strategy: "single",
     config: null,
-    limit,
+    limits,
     bindings: providerIds.map((id, i) => ({
       provider_id: id,
       provider_name: "DeepSeek",
@@ -134,7 +134,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.getGatewayStatus.mockResolvedValue({ running: true, port: 8317, blocked: [] });
   apiMock.removeAgentBinding.mockResolvedValue(undefined);
-  apiMock.setAgentLimit.mockResolvedValue(undefined);
+  apiMock.setAgentLimits.mockResolvedValue(undefined);
 });
 
 describe("an agent tab", () => {
@@ -439,7 +439,7 @@ describe("deleting a provider that is in a route", () => {
       agent: "codex",
       strategy: "single",
       config: null,
-      limit: null,
+      limits: [],
       bindings: providers.map(([id, name], i) => ({
         provider_id: id,
         provider_name: name,
@@ -597,9 +597,9 @@ describe("the refresh button", () => {
   });
 });
 
-// The agent's own ceiling, which lives in the agent's settings dialog — not in
-// the strategy panel, because it holds under every strategy rather than being
-// part of any one of them.
+// The agent's own ceilings, which live in the agent's settings dialog — not in
+// the strategy panel, because they hold under every strategy, and not as one
+// window, because an agent can hold several at once.
 describe("the agent's own limit", () => {
   /** Open the agent's settings from the row above its table. */
   async function openSettings(user: ReturnType<typeof userEvent.setup>) {
@@ -610,32 +610,40 @@ describe("the agent's own limit", () => {
     );
   }
 
-  /** …and pick one of its tabs: everything is behind one, including the takeover
-      state, so a test that means the ceiling has to say so. */
+  /** …and pick one of its tabs: everything is behind one, so a test that means
+      the ceilings has to say so. */
   async function openTab(user: ReturnType<typeof userEvent.setup>, name: string) {
     await openSettings(user);
     await user.click(screen.getByRole("button", { name }));
   }
 
-  it("reads out the stored ceiling", async () => {
+  /** The amount field of one window, named by its window's label — a screen may
+      show several, so the window is part of the field's own name. */
+  const amountFor = (windowLabel: string) =>
+    screen.getByLabelText(`${en.strategy.limitAmountAria} · ${windowLabel}`);
+
+  it("shows a row per stored window, and judges them together", async () => {
     const user = userEvent.setup();
     renderCodexTab({
       providers: [deepseek()],
       routes: [
-        codexRoute(["deepseek"], {
-          period_limit: 50,
-          limit_unit: "CNY",
-          reset_period: "monthly",
-        }),
+        codexRoute(["deepseek"], [
+          { period: "day", period_limit: 100, limit_unit: null },
+          { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+        ]),
       ],
       codexTakenOver: true,
     });
     await openTab(user, en.strategy.limitLabel);
 
-    expect(screen.getByText("50 CNY per month")).toBeInTheDocument();
+    // Both windows are there, each with its own amount — the pair is what the
+    // gateway judges, so the pair is what the screen shows.
+    expect(amountFor(en.strategy.limitPeriodDay)).toHaveValue(100);
+    expect(amountFor(en.strategy.limitPeriodMonth)).toHaveValue(50);
+    expect(screen.queryByText(en.strategy.limitNone)).toBeNull();
   });
 
-  it("says no limit rather than showing a blank", async () => {
+  it("says no limit when there are no windows", async () => {
     const user = userEvent.setup();
     renderCodexTab({
       providers: [deepseek()],
@@ -647,25 +655,53 @@ describe("the agent's own limit", () => {
     expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
   });
 
-  it("saves the value the section holds", async () => {
+  it("adds a window and saves the whole set", async () => {
     const user = userEvent.setup();
     renderCodexTab({
       providers: [deepseek()],
-      routes: [codexRoute(["deepseek"])],
+      routes: [
+        codexRoute(["deepseek"], [
+          { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+        ]),
+      ],
       codexTakenOver: true,
     });
     await openTab(user, en.strategy.limitLabel);
 
-    await user.type(await screen.findByLabelText(en.strategy.limitAmountAria), "25");
+    await user.click(screen.getByRole("button", { name: en.strategy.limitAdd }));
+    // The window it opens on is one the agent does not already have.
+    await user.type(amountFor(en.strategy.limitPeriodDay), "25");
     await user.click(screen.getByRole("button", { name: en.common.save }));
 
-    // The defaults the section opens with: counted in requests, per day.
     await waitFor(() =>
-      expect(apiMock.setAgentLimit).toHaveBeenCalledWith("codex", {
-        period_limit: 25,
-        limit_unit: null,
-        reset_period: "day",
-      }),
+      expect(apiMock.setAgentLimits).toHaveBeenCalledWith("codex", [
+        { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+        { period: "day", period_limit: 25, limit_unit: null },
+      ]),
+    );
+  });
+
+  it("removes a window, and saving writes what is left", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [
+        codexRoute(["deepseek"], [
+          { period: "day", period_limit: 100, limit_unit: null },
+          { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+        ]),
+      ],
+      codexTakenOver: true,
+    });
+    await openTab(user, en.strategy.limitLabel);
+
+    await user.click(screen.getAllByRole("button", { name: en.strategy.limitRemoveAria })[0]);
+    await user.click(screen.getByRole("button", { name: en.common.save }));
+
+    await waitFor(() =>
+      expect(apiMock.setAgentLimits).toHaveBeenCalledWith("codex", [
+        { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+      ]),
     );
   });
 
@@ -689,15 +725,14 @@ describe("the agent's own limit", () => {
       screen.getByLabelText(en.providers.accessFor.replace("{agent}", longTasks.label)),
     );
 
-    await user.type(await screen.findByLabelText(en.strategy.limitAmountAria), "5");
+    await user.click(screen.getByRole("button", { name: en.strategy.limitAdd }));
+    await user.type(amountFor(en.strategy.limitPeriodDay), "5");
     await user.click(screen.getByRole("button", { name: en.common.save }));
 
     await waitFor(() =>
-      expect(apiMock.setAgentLimit).toHaveBeenCalledWith(longTasks.id, {
-        period_limit: 5,
-        limit_unit: null,
-        reset_period: "day",
-      }),
+      expect(apiMock.setAgentLimits).toHaveBeenCalledWith(longTasks.id, [
+        { period: "day", period_limit: 5, limit_unit: null },
+      ]),
     );
   });
 });

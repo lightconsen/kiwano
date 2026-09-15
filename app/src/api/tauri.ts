@@ -86,8 +86,8 @@ export const tauriApi: KiwanoApi = {
 
   getAgentRoutes: () => invoke<AgentRoute[]>("get_agent_routes"),
 
-  setAgentLimit: (agent: AgentRef, limit: AgentLimit | null) =>
-    invoke<void>("set_agent_limit", { agent, limit }),
+  setAgentLimits: (agent: AgentRef, limits: AgentLimit[]) =>
+    invoke<void>("set_agent_limits", { agent, limits }),
   updateAgentStrategy: (agent: AgentId, strategy: StrategyKind, config?: string | null) =>
     invoke<void>("update_agent_strategy", { agent, strategy, config: config ?? null }),
 

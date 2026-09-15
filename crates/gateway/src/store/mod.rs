@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 18;
+pub const SCHEMA_VERSION: i32 = 19;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -538,6 +538,35 @@ const MIGRATION_V18: &str = r#"
 DROP TABLE IF EXISTS provider_health;
 "#;
 
+// One row per window instead of one per agent. The old rows carry over as the
+// window they were: a row with no reset period was "all time", which is `all`
+// here. Rebuilding rather than editing `MIGRATION_V17` because that migration has
+// already run on every database in existence — including this machine's — and a
+// migration that has run is history.
+//
+// No CHECK on `period`, deliberately. The providers table has one
+// (`reset_period IN ('monthly','weekly','yearly')`) and paid for it: "daily" had
+// to arrive by rebuilding the table. A list of periods is a policy that grows —
+// a five-hour window is the obvious next one — and a constraint that has to be
+// dropped to extend it is a constraint that only ever costs a migration.
+const MIGRATION_V19: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_limits_by_window (
+    agent        TEXT NOT NULL,
+    period       TEXT NOT NULL,
+    period_limit REAL NOT NULL,
+    limit_unit   TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (agent, period)
+);
+INSERT OR REPLACE INTO agent_limits_by_window
+    (agent, period, period_limit, limit_unit, created_at, updated_at)
+    SELECT agent, COALESCE(reset_period, 'all'), period_limit, limit_unit, created_at, updated_at
+    FROM agent_limits;
+DROP TABLE agent_limits;
+ALTER TABLE agent_limits_by_window RENAME TO agent_limits;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -771,18 +800,27 @@ pub struct CustomAgent {
 /// about the *limit* rather than an accident of where it was stored.
 ///
 /// The columns mirror a provider's billing limit on purpose (`period_limit`,
-/// `limit_unit`, `reset_period`): same three units, same period vocabulary, and
-/// the same `period_start` boundary, so "100 requests a day" means the same thing
-/// wherever it is written. No row for an agent means no limit.
+/// `limit_unit`, and the same period vocabulary): the same three units and the
+/// same `period_start` boundary, so "100 requests a day" means the same thing
+/// wherever it is written.
+///
+/// An agent may hold **several windows at once**, and that is the point of the
+/// pair being the key rather than the agent: a day's ceiling is what stops one
+/// runaway session, a month's is what stops a runaway month, and neither answers
+/// the other's question. Being over any one of them is being over. No rows for an
+/// agent means no ceiling.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentLimit {
     pub agent: String,
+    /// `day` | `weekly` | `monthly` | `yearly` | `all` — the window this ceiling
+    /// is measured over, and half the key. `all` rather than NULL because a NULL
+    /// key is not a key: SQLite treats every NULL as distinct, so a table keyed on
+    /// (agent, period) could hold any number of "no period" rows for one agent.
+    pub period: String,
     pub period_limit: f64,
     /// `requests` (default), `wan_tokens`, or a 3-letter currency for a money
     /// limit. None reads as `requests`, the same way a v1 provider row does.
     pub limit_unit: Option<String>,
-    /// `day` | `week` | `month`, else None for all time.
-    pub reset_period: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1550,6 +1588,9 @@ impl Store {
         if version < 18 {
             conn.execute_batch(MIGRATION_V18)?;
         }
+        if version < 19 {
+            conn.execute_batch(MIGRATION_V19)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -1848,24 +1889,24 @@ impl Store {
         Ok(out)
     }
 
-    // ---- agent limits (migration v17) -----------------------------------
+    // ---- agent limits (migration v17, one row per window since v19) ------
 
-    /// Every agent's ceiling, in agent-id order. Read whole rather than by key:
-    /// the evaluator wants all of them, and the screen asks per agent off a list
-    /// it already has.
+    /// Every agent's ceilings, ordered by agent then window. Read whole rather
+    /// than by key: the evaluator wants all of them, and the screen asks per agent
+    /// off a list it already has.
     pub fn list_agent_limits(&self) -> Result<Vec<AgentLimit>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT agent, period_limit, limit_unit, reset_period, created_at, updated_at
-             FROM agent_limits ORDER BY agent ASC",
+            "SELECT agent, period, period_limit, limit_unit, created_at, updated_at
+             FROM agent_limits ORDER BY agent ASC, period ASC",
         )?;
         let rows = stmt
             .query_map([], |r| {
                 Ok(AgentLimit {
                     agent: r.get(0)?,
-                    period_limit: r.get(1)?,
-                    limit_unit: r.get(2)?,
-                    reset_period: r.get(3)?,
+                    period: r.get(1)?,
+                    period_limit: r.get(2)?,
+                    limit_unit: r.get(3)?,
                     created_at: r.get(4)?,
                     updated_at: r.get(5)?,
                 })
@@ -1874,44 +1915,57 @@ impl Store {
         Ok(rows)
     }
 
-    pub fn get_agent_limit(&self, agent: &str) -> Result<Option<AgentLimit>> {
+    /// One agent's ceilings, in window order — the shape the screen edits.
+    pub fn agent_limits_for(&self, agent: &str) -> Result<Vec<AgentLimit>> {
         Ok(self
             .list_agent_limits()?
             .into_iter()
-            .find(|l| l.agent == agent))
+            .filter(|l| l.agent == agent)
+            .collect())
     }
 
-    /// Upsert one agent's limit. `created_at` is preserved across updates so the
-    /// row keeps saying when the ceiling was first set.
-    pub fn set_agent_limit(&self, agent: &str, limit: &AgentLimit) -> Result<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+    /// Replace one agent's ceilings with exactly these. An empty slice clears
+    /// them, which is how the screen says "no limit".
+    ///
+    /// Replace rather than upsert-per-window because that is what the screen
+    /// holds: a set, edited as a set. Removing a window and saving is one call
+    /// either way, and this way a window the user deleted cannot be left behind by
+    /// a partial write.
+    pub fn replace_agent_limits(&self, agent: &str, limits: &[AgentLimit]) -> Result<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        // `created_at` of a window that survives keeps saying when it was first
+        // set, so the row does not lose its age to an unrelated edit.
+        let prior: std::collections::HashMap<String, String> = tx
+            .prepare("SELECT period, created_at FROM agent_limits WHERE agent = ?1")?
+            .query_map(params![agent], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        tx.execute("DELETE FROM agent_limits WHERE agent = ?1", params![agent])?;
         let now = now_rfc3339();
-        conn.execute(
-            "INSERT INTO agent_limits (agent, period_limit, limit_unit, reset_period, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-             ON CONFLICT(agent) DO UPDATE SET
-                 period_limit = ?2, limit_unit = ?3, reset_period = ?4, updated_at = ?5",
-            params![
-                agent,
-                limit.period_limit,
-                limit.limit_unit,
-                limit.reset_period,
-                now
-            ],
-        )?;
+        for l in limits {
+            tx.execute(
+                "INSERT INTO agent_limits (agent, period, period_limit, limit_unit, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    agent,
+                    l.period,
+                    l.period_limit,
+                    l.limit_unit,
+                    prior.get(&l.period).cloned().unwrap_or_else(|| now.clone()),
+                    now
+                ],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
-    pub fn delete_agent_limit(&self, agent: &str) -> Result<bool> {
+    pub fn delete_agent_limits(&self, agent: &str) -> Result<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n = conn.execute("DELETE FROM agent_limits WHERE agent = ?1", params![agent])?;
         Ok(n > 0)
     }
 
-    // ---- user-defined agents (migration v16) ----------------------------
-
-    /// Every custom agent, in creation order (the segment bar appends them after
-    /// the built-ins in the order the user made them).
     pub fn list_custom_agents(&self) -> Result<Vec<CustomAgent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
@@ -3403,6 +3457,45 @@ mod tests {
     /// v8 → v9 rebuild: providers survive with widened limit_unit CHECK
     /// (legacy 'cny' uppercased, units preserved), plan_query backfilled NULL,
     /// model_pricing created, usage/request_logs gain cost columns.
+    // A migration that carries data is where data goes missing quietly, so the
+    // carry-over gets its own case: a database already at v18, holding a ceiling
+    // written when an agent could only have one.
+    #[test]
+    fn migration_v19_carries_a_stored_ceiling_over_as_its_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+        {
+            let conn = Connection::open(&db).unwrap();
+            for migration in [MIGRATION_V1, MIGRATION_V17] {
+                conn.execute_batch(migration).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO agent_limits (agent, period_limit, limit_unit, reset_period, created_at, updated_at)
+                 VALUES ('claude', 50.0, 'CNY', 'monthly', 't0', 't0'),
+                        ('codex', 100.0, NULL, NULL, 't0', 't0');
+                 PRAGMA user_version = 18;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+
+        // Each row arrives as the window it was: the one that named a reset period
+        // keeps it, and the one with none was "all time", which the new key spells
+        // `all` — a nullable key is not a key, since SQLite treats every NULL as
+        // distinct.
+        let claude = store.agent_limits_for("claude").unwrap();
+        assert_eq!(claude.len(), 1);
+        assert_eq!(claude[0].period, "monthly");
+        assert_eq!(claude[0].period_limit, 50.0);
+        assert_eq!(claude[0].limit_unit.as_deref(), Some("CNY"));
+
+        let codex = store.agent_limits_for("codex").unwrap();
+        assert_eq!(codex.len(), 1, "the row with no reset period survives too");
+        assert_eq!(codex[0].period, "all");
+        assert_eq!(codex[0].limit_unit, None);
+    }
+
     #[test]
     fn migration_v9_rebuilds_providers_with_plan_query_and_cost_columns() {
         let dir = tempfile::tempdir().unwrap();

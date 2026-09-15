@@ -733,6 +733,28 @@ describe("a built-in agent's own row", () => {
     ).toBeNull();
   });
 
+  it("keeps the files behind their own tab", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await user.click(
+      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    );
+
+    // The ceiling is what the dialog opens on; the files are the other reading.
+    expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
+    expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: en.providers.agentConfigFiles }));
+
+    expect(screen.getByText("~/.codex/config.toml")).toBeInTheDocument();
+    expect(screen.getByText("~/.codex/auth.json")).toBeInTheDocument();
+    expect(screen.getByText(en.providers.agentConfigFilesNote)).toBeInTheDocument();
+  });
+
   it("restores the original config from the dialog", async () => {
     const user = userEvent.setup();
     renderCodexTab({

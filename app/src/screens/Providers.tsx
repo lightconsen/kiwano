@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "../api/client";
 import { agentMeta, isBuiltinAgent, rememberCustomAgents } from "../lib/agents";
-import { useT, type Translate } from "../i18n";
+import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import {
   AGENTS,
   PLAN_TIER_LABEL_KEYS,
@@ -224,12 +224,17 @@ function AccessDialog({
           <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
           <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
           <p className="mt-2 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
-          <LimitSection
-            agent={agent}
-            limit={limit}
-            currency={currency}
-            onChanged={onChanged}
-          />
+          <div className="mt-3 border-t border-line pt-2">
+            {/* This dialog has no tabs, so the section is named here — the same
+                words the other dialog puts on the tab that shows it. */}
+            <div className="text-[10.5px] text-mut">{t("strategy.limitLabel")}</div>
+            <LimitSection
+              agent={agent}
+              limit={limit}
+              currency={currency}
+              onChanged={onChanged}
+            />
+          </div>
         </div>
         {/* Deleting lives with the rest of what this agent *is*, and one step
             further from the pointer than the tab's own rows. */}
@@ -254,6 +259,43 @@ function AccessDialog({
  *
  * A user-defined agent has no such dialog: there is no file behind it, and its
  * own row already carries what it does have (its key, and deleting it). */
+/** Two readings of one agent's settings, switched between rather than stacked:
+    how much it may spend, and the files a takeover rewrites. The same segment
+    group the Dashboard's window and the shelf's view use — there are two, both
+    fit on a row, and naming the other reading without opening it is the point.
+
+    The takeover state and its escape hatch stay *above* this: restoring is what
+    someone opens this dialog to do, and an action behind a tab is one they have
+    to find first. */
+function SettingsTabs({
+  tab,
+  onPick,
+}: {
+  tab: AgentSettingsTab;
+  onPick: (t: AgentSettingsTab) => void;
+}) {
+  const t = useT();
+  const tabs: { id: AgentSettingsTab; labelKey: KeyPath<Messages> }[] = [
+    { id: "limit", labelKey: "strategy.limitLabel" },
+    { id: "files", labelKey: "providers.agentConfigFiles" },
+  ];
+  return (
+    <div className="mt-3 flex overflow-hidden rounded-lg border border-line text-[12px]">
+      {tabs.map((x, i) => (
+        <button
+          key={x.id}
+          className={`seg h-7 flex-1 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${tab === x.id ? " active" : ""}`}
+          onClick={() => onPick(x.id)}
+        >
+          {t(x.labelKey)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type AgentSettingsTab = "limit" | "files";
+
 function AgentSettingsDialog({
   agent,
   label,
@@ -282,6 +324,7 @@ function AgentSettingsDialog({
 }) {
   const t = useT();
   const [err, setErr] = useState<string | null>(null);
+  const [tab, setTab] = useState<AgentSettingsTab>("limit");
   const restore = async () => {
     setErr(null);
     try {
@@ -321,23 +364,28 @@ function AgentSettingsDialog({
           </p>
           {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
 
-          <LimitSection
-            agent={agent}
-            limit={limit}
-            currency={currency}
-            onChanged={onChanged}
-          />
+          <SettingsTabs tab={tab} onPick={setTab} />
 
-          <div className="mt-3 border-t border-line pt-2">
-            <div className="text-[10.5px] text-mut">{t("providers.agentConfigFiles")}</div>
-            {paths.map((p) => (
-              <div key={p} className="mt-1 flex items-center gap-2">
-                <CopyValue value={p} />
-              </div>
-            ))}
-            <p className="mt-1.5 text-[10.5px] leading-relaxed text-mut">
-              {t("providers.agentConfigFilesNote")}
-            </p>
+          <div className="mt-2.5">
+            {tab === "limit" ? (
+              <LimitSection
+                agent={agent}
+                limit={limit}
+                currency={currency}
+                onChanged={onChanged}
+              />
+            ) : (
+              <>
+                {paths.map((p) => (
+                  <div key={p} className="mt-1 flex items-center gap-2">
+                    <CopyValue value={p} />
+                  </div>
+                ))}
+                <p className="mt-1.5 text-[10.5px] leading-relaxed text-mut">
+                  {t("providers.agentConfigFilesNote")}
+                </p>
+              </>
+            )}
           </div>
         </div>
       </DialogContent>

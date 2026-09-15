@@ -103,12 +103,11 @@ export function LimitSection({
   };
 
   return (
-    <div className="mt-3 border-t border-line pt-2">
-      <div className="flex items-center gap-2">
-        <span className="text-[10.5px] text-mut">{t("strategy.limitLabel")}</span>
-        <span className="ml-auto truncate text-[11px]">
-          {limit ? formatLimit(t, limit) : t("strategy.limitNone")}
-        </span>
+    <div>
+      {/* No heading of its own: the tab that shows this names it. What the line
+          keeps is the answer — the ceiling in force right now. */}
+      <div className="text-[11px]">
+        {limit ? formatLimit(t, limit) : t("strategy.limitNone")}
       </div>
 
       {/* Two lines rather than one: the amount, its unit and the period come to

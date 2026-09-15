@@ -237,6 +237,23 @@ owner-only (`0600`) for that reason. `config export` without the flag is safe to
 keep in version control; the two round-trip through `config import`, which
 merges by name and endpoint rather than overwriting.
 
+`import cc-switch` reads `~/.cc-switch/cc-switch.db` (the v3.20+ SQLite, opened
+for reading) or the older `~/.cc-switch/config.json`, and writes only to
+Kiwano's own database. Nothing under `~/.cc-switch` is modified or deleted, so
+the two can sit side by side while you decide.
+
+It maps all eight apps it knows — claude, claude-desktop, codex, grokbuild,
+opencode, openclaw, hermes and pi — onto the agent of the same name, and
+whichever provider was *current* in cc-switch becomes that agent's primary
+binding, so what migrates is the configuration you were actually running rather
+than a list of candidates to pick from again.
+
+Two cases are reported instead of guessed at. cc-switch's `gemini` rows are
+skipped: they target Gemini CLI, their settings are Gemini-shaped, and this
+gateway speaks no protocol to import them as. A provider with no base URL or no
+key is listed as skipped rather than created empty. Every skip carries its
+reason.
+
 `catalog list` reads the Hub cache and nothing else — there is no bundled copy, so
 a machine that has never synced lists nothing rather than a stale catalog. Run
 `catalog sync` first; that is what a fresh server should do before adding anything

@@ -12,7 +12,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kiwano — 本地优先的 AI Provider 管理器</title>
-<meta name="description" content="在本地发现、对比、切换 AI 模型供应商;一键把 Claude Code、Codex、Gemini CLI 接入本地网关,逐请求计量用量,数据不出本机。">
+<meta name="description" content="在本地发现、对比、切换 AI 模型供应商;一键把 Claude Code、Codex、Grok Build 接入本地网关,逐请求计量用量,数据不出本机。">
 <meta property="og:title" content="Kiwano — 本地优先的 AI Provider 管理器">
 <meta property="og:description" content="发现、对比、切换供应商,一键接管编程 Agent;所有请求本地直连,Key 永不上传。">
 <meta property="og:image" content="assets/app-providers.png">
@@ -406,6 +406,7 @@ section.block { padding: 96px 0 0; }
 .dl-card .btn { justify-content: space-between; padding: 11px 15px; }
 .dl-card .btn .fmt { font-family: var(--font-mono); font-size: 10.5px; color: oklch(0.62 0.01 260); font-weight: 400; }
 .dl-card .btn-primary .fmt { color: oklch(0.30 0.05 132); }
+.dl-card .dl-warn { margin-top: 11px; font-size: 11.5px; line-height: 1.5; color: oklch(0.74 0.12 80); }
 .dl-foot { text-align: center; margin-top: 26px; font-size: 13px; color: var(--mut); }
 .dl-foot .dot { display: inline-block; width: 5px; height: 5px; border-radius: 999px; background: var(--kiwi); margin: 0 7px 1px; vertical-align: middle; }
 
@@ -492,7 +493,7 @@ footer { padding: 56px 0 44px; }
     <h1 class="rv" style="--d:60ms" data-i18n="hero.h1">一个入口,管好你的<br>所有 <em>AI 供应商</em></h1>
     <p class="sub rv" style="--d:120ms" data-i18n="hero.sub">
       Kiwano 是本地优先的 AI Provider 管理器:发现、对比、切换模型供应商,
-      把 <strong>Claude Code、Codex、Gemini CLI</strong> 一键接入本地网关——
+      把 <strong>Claude Code、Codex、Grok Build</strong> 一键接入本地网关——
       所有请求本地直连,API Key 只存在你的机器上。
     </p>
     <div class="dl-row rv" style="--d:180ms">
@@ -500,7 +501,7 @@ footer { padding: 56px 0 44px; }
       <a class="btn btn-lg" href="#download-win"><svg class="icon"><use href="#i-windows"/></svg>Windows</a>
       <a class="btn btn-lg" href="#download-linux"><svg class="icon"><use href="#i-linux"/></svg>Linux</a>
     </div>
-    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note">v0.1.8 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源</p>
+    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note">v0.1.10 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源</p>
     <figure class="shot rv" style="--d:300ms">
       <img src="assets/app-providers.png" width="2000" height="1300" alt="Kiwano 主界面:本机 Provider 列表,展示绑定的 Agent、近 7 日用量与额度、健康状态" fetchpriority="high">
     </figure>
@@ -525,12 +526,12 @@ footer { padding: 56px 0 44px; }
         <div class="feat rv" style="--d:60ms">
           <div class="fi"><svg class="icon"><use href="#i-plug"/></svg></div>
           <h3 data-i18n="f2.t">Agent 一键接管</h3>
-          <p data-i18n="f2.d">Claude Code、Codex、Gemini CLI 等一键指向本地网关;关闭开关即还原原始配置,随时反悔。</p>
+          <p data-i18n="f2.d">Claude Code、Codex、Grok Build 等 8 个 Agent 一键指向本地网关;关闭开关即还原原始配置,随时反悔。</p>
         </div>
         <div class="feat rv" style="--d:120ms">
           <div class="fi"><svg class="icon"><use href="#i-network"/></svg></div>
           <h3 data-i18n="f3.t">本地网关</h3>
-          <p data-i18n="f3.d">单端口常驻 <code>127.0.0.1:8317</code>,协议归一化 anthropic / openai / gemini,逐请求路由、故障转移与计量。</p>
+          <p data-i18n="f3.d">单端口常驻 <code>127.0.0.1:8317</code>,协议归一化 anthropic / openai,逐请求路由、故障转移与计量。</p>
         </div>
         <div class="feat rv">
           <div class="fi"><svg class="icon"><use href="#i-chart"/></svg></div>
@@ -540,7 +541,7 @@ footer { padding: 56px 0 44px; }
         <div class="feat rv" style="--d:60ms">
           <div class="fi"><svg class="icon"><use href="#i-store"/></svg></div>
           <h3 data-i18n="f5.t">Provider 货架</h3>
-          <p data-i18n="f5.d">Hub 目录聚合 177 家供应商,按官方 / 聚合 / 第三方 / 免费筛选,价格透明,看中即添加。</p>
+          <p data-i18n="f5.d">Hub 目录按官方 / 聚合 / 第三方 / 免费分类收录供应商,价格透明,看中即添加,离线也能翻阅。</p>
         </div>
         <div class="feat rv" style="--d:120ms">
           <div class="fi"><svg class="icon"><use href="#i-import"/></svg></div>
@@ -586,7 +587,7 @@ footer { padding: 56px 0 44px; }
         <div class="step rv" style="--d:80ms">
           <span class="no">02</span>
           <h3 data-i18n="s2.t">接管你的 Agent</h3>
-          <p data-i18n="s2.d">一键把 Claude Code / Codex / Gemini CLI 指向 <code>127.0.0.1:8317</code>,原配置自动备份。</p>
+          <p data-i18n="s2.d">一键把 Claude Code / Codex / Grok Build 指向 <code>127.0.0.1:8317</code>,原配置自动备份。</p>
         </div>
         <div class="step rv" style="--d:160ms">
           <span class="no">03</span>
@@ -660,7 +661,7 @@ footer { padding: 56px 0 44px; }
         <div class="dl-card rv" id="download-mac">
           <div class="dl-os">
             <svg class="icon"><use href="#i-apple"/></svg>
-            <div><h3>macOS</h3><div class="dl-req">macOS 12+ · Universal</div></div>
+            <div><h3>macOS</h3><div class="dl-req">macOS 12+ · Apple Silicon / Intel</div></div>
           </div>
           <div class="btns">
             <a class="btn btn-primary" href="https://hub.kiwano.cc/releases/Kiwano_aarch64.dmg" target="_blank" rel="noopener">Apple Silicon<span class="fmt">dmg · aarch64</span></a>
@@ -675,6 +676,7 @@ footer { padding: 56px 0 44px; }
           <div class="btns">
             <a class="btn" href="https://hub.kiwano.cc/releases/Kiwano_x64-setup.exe" target="_blank" rel="noopener"><span data-i18n="dl.winbtn">64 位安装包</span><span class="fmt">exe · x64</span></a>
           </div>
+          <p class="dl-warn" data-i18n="dl.winwarn">安装包尚未代码签名,首次启动 SmartScreen 会拦一次——选「更多信息 → 仍要运行」。</p>
         </div>
         <div class="dl-card rv" id="download-linux" style="--d:160ms">
           <div class="dl-os">
@@ -767,22 +769,22 @@ const I18N = {
     "hero.badge": "Local-first · API requests never touch the cloud",
     "hero.h1": "One hub for all<br>your <em>AI providers</em>",
     "hero.sub": `Kiwano is a local-first AI provider manager: discover, compare and switch model providers, and connect
-      <strong>Claude Code, Codex and Gemini CLI</strong> to a local gateway in one click —
+      <strong>Claude Code, Codex and Grok Build</strong> to a local gateway in one click —
       every request stays on your machine, and so do your API keys.`,
     "hero.dlmac": "Download for macOS",
-    "hero.note": `v0.1.8 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source`,
+    "hero.note": `v0.1.10 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source`,
     "feats.h2": "A local gateway × a provider catalog",
     "feats.p": "Neither a plain switcher nor a cloud gateway: routing and metering run locally, while the Hub catalog helps you choose.",
     "f1.t": "Provider management",
     "f1.d": `Add, switch and delete provider configs; route with <code>failover</code> / <code>roundrobin</code> / <code>timewindow</code> / <code>quota</code> strategies — one click to go live.`,
     "f2.t": "One-click agent takeover",
-    "f2.d": "Point Claude Code, Codex, Gemini CLI and more at the local gateway in one click; flip the switch off to restore the original config, anytime.",
+    "f2.d": "Point Claude Code, Codex, Grok Build and five more agents at the local gateway in one click; flip the switch off to restore the original config, anytime.",
     "f3.t": "Local gateway",
-    "f3.d": `A single resident port at <code>127.0.0.1:8317</code> normalizes anthropic / openai / gemini protocols, routing and metering every request with automatic failover.`,
+    "f3.d": `A single resident port at <code>127.0.0.1:8317</code> normalizes anthropic / openai protocols, routing and metering every request with automatic failover.`,
     "f4.t": "Usage dashboard",
     "f4.d": "7-day trends of requests, tokens, cost and latency, attributed per provider and agent — drill down to every single request.",
     "f5.t": "Provider shelf",
-    "f5.d": "The Hub catalog aggregates 177 providers, filterable by official / aggregator / third-party / free — transparent pricing, add in one click.",
+    "f5.d": "The Hub catalog files providers as official / aggregator / third-party / free — transparent pricing, add in one click, and readable offline once synced.",
     "f6.t": "cc-switch import",
     "f6.d": "Already on cc-switch? Import your existing config and migrate seamlessly — providers and bindings come along as-is.",
     "scr.h2": "Compact and restrained, built for daily use",
@@ -793,7 +795,7 @@ const I18N = {
     "s1.t": "Add a provider",
     "s1.d": "Add from the shelf in one click, or use a custom endpoint; API keys go into a local database, never uploaded.",
     "s2.t": "Take over your agents",
-    "s2.d": `Point Claude Code / Codex / Gemini CLI at <code>127.0.0.1:8317</code> in one click; the original config is backed up automatically.`,
+    "s2.d": `Point Claude Code / Codex / Grok Build at <code>127.0.0.1:8317</code> in one click; the original config is backed up automatically.`,
     "s3.t": "Switch freely",
     "s3.d": "Switching is one click in the list: agent configs are never touched again — only gateway routing changes, with automatic failover.",
     "st.h": "Four routing strategies, bad days included",
@@ -809,6 +811,7 @@ const I18N = {
     "dl.h2": "Download Kiwano",
     "dl.p": "Free, no account, works offline. Pick your platform:",
     "dl.intel": "Intel", "dl.winbtn": "64-bit installer", "dl.appimg": "Portable",
+    "dl.winwarn": "The installer is not code-signed yet, so SmartScreen stops it once — choose “More info → Run anyway”.",
     "dl.f1": "Open source", "dl.f2": "No account", "dl.f3": "Data stays on your machine",
     "srv.h2": "No desktop? It runs headless",
     "srv.p": "The client and the gateway ship in one bundle. The command line does everything the app does — add providers, pick a routing strategy, read usage and logs, and take an agent over.",

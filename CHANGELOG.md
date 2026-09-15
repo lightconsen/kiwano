@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-09-16
+
 ### Changed
 
 - **The CLI prints tables.** Listings came out as columns of text separated by

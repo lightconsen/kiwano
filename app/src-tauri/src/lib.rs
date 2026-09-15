@@ -176,12 +176,13 @@ fn spawn_watchdog(handle: tauri::AppHandle) {
 }
 
 /// Hub sync at startup: catalog + pricing, retried briefly so a login that
-/// beats the network does not settle for the cache. Runs on a plain thread for
-/// the same reason `sync_hub` is not `async` (blocking reqwest). Exhausting the
-/// retries is logged and nothing else — the Hub is an enhancement, and the
-/// cached or bundled data always works offline.
+/// beats the network does not settle for the cache. A task on Tauri's async
+/// runtime, like the sync behind the button — the HTTP is async now, so this
+/// needs neither a thread of its own nor a blocking client on one. Exhausting
+/// the retries is logged and nothing else — the Hub is an enhancement, and the
+/// cached data always works offline.
 fn spawn_hub_sync(handle: tauri::AppHandle) {
-    std::thread::spawn(move || {
+    tauri::async_runtime::spawn(async move {
         let Some(state) = handle.try_state::<AppState>() else {
             return;
         };
@@ -194,9 +195,9 @@ fn spawn_hub_sync(handle: tauri::AppHandle) {
         const RETRY_SECS: [u64; 5] = [0, 2, 6, 20, 60];
         for (attempt, delay) in RETRY_SECS.iter().enumerate() {
             if *delay > 0 {
-                std::thread::sleep(std::time::Duration::from_secs(*delay));
+                tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
             }
-            match sync::sync_from_hub(&state.aux, &hub_url) {
+            match sync::sync_from_hub(&state.aux, &hub_url).await {
                 // Already current: the manifest sha matched the cache.
                 Ok(r) => {
                     if !r.unchanged {
@@ -573,12 +574,13 @@ fn get_currency_meta(state: State<AppState>) -> Result<pricing::CurrencyMetaVm, 
 //    enforces the ceiling, so the display and the block cannot disagree) ──
 
 #[tauri::command(async)]
-fn get_plan_quota(
-    state: State<AppState>,
+async fn get_plan_quota(
+    state: State<'_, AppState>,
     provider_id: String,
     force: Option<bool>,
 ) -> Result<kiwanod::plan_quota::PlanQuotaReport, String> {
     kiwanod::plan_quota::get_plan_quota_report(&state.store, &provider_id, force.unwrap_or(false))
+        .await
 }
 
 // ── Request logs (full data-plane audit trail, migration V5) ──
@@ -839,14 +841,14 @@ fn apply_agent_route(state: State<AppState>, target: String, source: String) -> 
     Ok(())
 }
 
-/// Hub catalog sync. Deliberately a *synchronous* command: Tauri dispatches
-/// those onto its blocking thread pool, which is where a blocking reqwest
-/// client belongs — an `async` command would run it on the tokio runtime, and
-/// dropping a blocking client there panics (see sidecar.rs on the same trap).
+/// Hub catalog sync — an `async` command, because the fetch is async. It used to
+/// be a synchronous one `block_on`-ing a blocking reqwest client on Tauri's
+/// blocking pool: the same work, on a thread of its own, to satisfy a client that
+/// panics if it is dropped inside a runtime.
 #[tauri::command]
-fn sync_hub(state: State<AppState>) -> Result<vm::SyncReportVm, String> {
+async fn sync_hub(state: State<'_, AppState>) -> Result<vm::SyncReportVm, String> {
     let hub_url = vm::ui_settings(&state.aux).hub_url;
-    let report = sync::sync_from_hub(&state.aux, &hub_url)?;
+    let report = sync::sync_from_hub(&state.aux, &hub_url).await?;
     // Rebuild everything derived from the documents just cached — the price
     // mirror and the provider↔catalog links — and reload the daemon once if
     // either wrote. A manual sync does not otherwise touch the daemon, so this

@@ -542,11 +542,10 @@ pub fn clear_legacy_disables(store: &Store) -> usize {
 
 /// Refresh the cached plan reports for providers that have a query to run.
 ///
-/// Blocking HTTP — the caller runs it off the async runtime — and it is what
-/// keeps `evaluate` free of network calls. A provider whose endpoint is down
-/// keeps its previous cached answer (or none), so a flaky endpoint never
+/// It is what keeps `evaluate` free of network calls. A provider whose endpoint
+/// is down keeps its previous cached answer (or none), so a flaky endpoint never
 /// fabricates a block.
-pub fn refresh_plan_reports(store: &Store) {
+pub async fn refresh_plan_reports(store: &Store) {
     let providers = match store.list_providers() {
         Ok(p) => p,
         Err(e) => {
@@ -558,7 +557,7 @@ pub fn refresh_plan_reports(store: &Store) {
         if !p.enabled || p.plan_query.is_none() {
             continue;
         }
-        if let Err(e) = crate::plan_quota::get_plan_quota_report(store, &p.id, false) {
+        if let Err(e) = crate::plan_quota::get_plan_quota_report(store, &p.id, false).await {
             tracing::debug!(provider = %p.id, error = %e, "plan quota refresh failed");
         }
     }
@@ -573,18 +572,13 @@ pub const LIMIT_INTERVAL: StdDuration = StdDuration::from_secs(30);
 /// the world on a schedule rather than because a request arrived.
 pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
     loop {
-        // Off the async runtime: the refresh does blocking HTTP against
-        // provider endpoints. The evaluation itself is store reads only.
-        let store = state.store.clone();
-        let evaluated = tokio::task::spawn_blocking(move || {
-            refresh_plan_reports(&store);
-            evaluate(&store)
-        })
-        .await;
-
-        if let Ok(next) = evaluated {
-            publish(&state, next);
-        }
+        // No blocking island: the quota queries are awaited on the runtime like
+        // everything else the daemon does, and `evaluate` is store reads only.
+        // (This was a `spawn_blocking` because the refresh used a blocking HTTP
+        // client — the one place the daemon had to leave its own runtime to do
+        // network I/O.)
+        refresh_plan_reports(&state.store).await;
+        publish(&state, evaluate(&state.store));
         tokio::time::sleep(interval).await;
     }
 }

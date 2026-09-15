@@ -31,6 +31,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   working — the glyph spins and the button disables until the last of the reads
   lands, where before the click had no end and a remount behind it.
 
+- **Hub sync and plan-quota queries are asynchronous.** Both went through
+  `reqwest`'s *blocking* client, which is why each needed a thread of its own:
+  the app's startup sync ran on a `std::thread`, and the gateway's quota patrol
+  wrapped the refresh in `spawn_blocking` so a blocking client never had to be
+  dropped inside the runtime. They now use the async client the rest of the
+  daemon does, so both escapes are gone and the gateway no longer parks a worker
+  thread on an HTTP call every time it checks a plan quota. Nothing to see from
+  the outside: the same commands, with the same answers.
+
 - **The latency test records what it measured.** An Apps row's Test button has
   always sent a real prompt and shown the number on the button, and that was the
   whole life of the measurement — which left the one case it could have settled

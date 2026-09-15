@@ -120,30 +120,33 @@ fn parse_manifest(raw: &str) -> HubManifest {
 
 /// Never fails: an unreachable or malformed manifest means "fetch the catalog
 /// unconditionally", exactly as before this existed.
-fn fetch_manifest(client: &reqwest::blocking::Client, manifest_url: &str) -> HubManifest {
+async fn fetch_manifest(client: &reqwest::Client, manifest_url: &str) -> HubManifest {
     let Ok(resp) = client
         .get(manifest_url)
         .send()
+        .await
         .and_then(|r| r.error_for_status())
     else {
         return HubManifest::default();
     };
-    match resp.text() {
+    match resp.text().await {
         Ok(body) => parse_manifest(&body),
         Err(_) => HubManifest::default(),
     }
 }
 
-fn fetch_bytes(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, String> {
-    client
+async fn fetch_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    let bytes = client
         .get(url)
         .send()
+        .await
         .map_err(|e| format!("Hub unreachable: {e}"))?
         .error_for_status()
         .map_err(|e| format!("Hub returned an error: {e}"))?
         .bytes()
-        .map(|b| b.to_vec())
-        .map_err(|e| e.to_string())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -209,18 +212,20 @@ struct PricingOutcome {
 /// Sync both Hub resources. `hub_url` comes from settings (ui_settings.hub_url).
 /// One manifest GET serves both gates. The resources degrade independently: a
 /// pricing failure never costs the user the catalog, and vice versa.
-pub fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, String> {
+pub async fn sync_from_hub(aux: &Aux, hub_url: &str) -> Result<vm::SyncReportVm, String> {
     let manifest_url = hub_asset_url(hub_url, "manifest.json")?;
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(TIMEOUT)
         .build()
         .map_err(|e| e.to_string())?;
-    let mut manifest = fetch_manifest(&client, &manifest_url);
+    let mut manifest = fetch_manifest(&client, &manifest_url).await;
 
-    let catalog = sync_catalog(&client, aux, hub_url, &manifest_url, &mut manifest)?;
+    let catalog = sync_catalog(&client, aux, hub_url, &manifest_url, &mut manifest).await?;
     // Best-effort: the catalog is the primary resource. A bad models.json
     // leaves the previous pricing cache in place.
-    let pricing = sync_pricing(&client, aux, hub_url, &manifest).unwrap_or_default();
+    let pricing = sync_pricing(&client, aux, hub_url, &manifest)
+        .await
+        .unwrap_or_default();
 
     Ok(vm::SyncReportVm {
         fetched: catalog.fetched,
@@ -275,8 +280,8 @@ pub fn apply_hub_documents(store: &kiwanod::store::Store, aux: &Aux) -> bool {
     wrote
 }
 
-fn sync_catalog(
-    client: &reqwest::blocking::Client,
+async fn sync_catalog(
+    client: &reqwest::Client,
     aux: &Aux,
     hub_url: &str,
     manifest_url: &str,
@@ -319,7 +324,7 @@ fn sync_catalog(
         // Hash the raw bytes. The cached payload is a re-serialization
         // (different key order, spacing, omitted None fields) and would never
         // match the manifest, silently defeating the whole gate.
-        let bytes = fetch_bytes(client, hub_url)?;
+        let bytes = fetch_bytes(client, hub_url).await?;
         let remote_sha = manifest.catalog_sha.clone();
         let verified = remote_sha
             .as_deref()
@@ -329,7 +334,7 @@ fn sync_catalog(
         let list = parse_catalog(body)?;
         if !verified && remote_sha.is_some() && attempt == 0 {
             attempt += 1;
-            *manifest = fetch_manifest(client, manifest_url);
+            *manifest = fetch_manifest(client, manifest_url).await;
             continue;
         }
         break (list, remote_sha, verified);
@@ -366,8 +371,8 @@ fn pricing_doc_error(doc: &ModelsDoc) -> Option<&'static str> {
 /// nothing else: a stale manifest simply fails to match and the next sync
 /// re-reads. Storing the computed digest (rather than the manifest's) keeps the
 /// row self-describing and the column non-nullable.
-fn sync_pricing(
-    client: &reqwest::blocking::Client,
+async fn sync_pricing(
+    client: &reqwest::Client,
     aux: &Aux,
     hub_url: &str,
     manifest: &HubManifest,
@@ -384,7 +389,7 @@ fn sync_pricing(
         }
     }
 
-    let bytes = fetch_bytes(client, &hub_asset_url(hub_url, "models.json")?)?;
+    let bytes = fetch_bytes(client, &hub_asset_url(hub_url, "models.json")?).await?;
     let body = std::str::from_utf8(&bytes).map_err(|e| format!("Hub pricing is not UTF-8: {e}"))?;
     let doc: ModelsDoc = serde_json::from_str(body)
         .map_err(|e| format!("Hub pricing is not a valid models doc: {e}"))?;

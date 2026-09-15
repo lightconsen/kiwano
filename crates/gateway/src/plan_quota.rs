@@ -117,8 +117,8 @@ fn field_str<'a>(fields: &'a HashMap<String, serde_json::Value>, key: &str) -> &
 
 /// Fold a received HTTP response: outer `Err` = transient (network), inner
 /// `Err` = deterministic failure with a user-facing message.
-fn fold_response(
-    resp: reqwest::blocking::Response,
+async fn fold_response(
+    resp: reqwest::Response,
 ) -> Result<Result<serde_json::Value, String>, String> {
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -127,12 +127,15 @@ fn fold_response(
         )));
     }
     if !status.is_success() {
-        let body = resp.text().unwrap_or_default();
+        let body = resp.text().await.unwrap_or_default();
         return Ok(Err(format!("Endpoint error (HTTP {status}): {body}")));
     }
     // Read the whole body before parsing: a read failure is transient (outer
     // Err), a parse failure of a complete body is deterministic.
-    let raw = resp.text().map_err(|e| format!("Network error: {e}"))?;
+    let raw = resp
+        .text()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
     match serde_json::from_str(&raw) {
         Ok(v) => Ok(Ok(v)),
         Err(e) => Ok(Err(format!("Failed to parse the response: {e}"))),
@@ -140,15 +143,18 @@ fn fold_response(
 }
 
 /// GET a JSON endpoint and fold transport errors.
-fn fetch_json(
-    req: reqwest::blocking::RequestBuilder,
+async fn fetch_json(
+    req: reqwest::RequestBuilder,
 ) -> Result<Result<serde_json::Value, String>, String> {
-    let resp = req.send().map_err(|e| format!("Network error: {e}"))?;
-    fold_response(resp)
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+    fold_response(resp).await
 }
 
-fn blocking_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+fn client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())
@@ -156,7 +162,7 @@ fn blocking_client() -> Result<reqwest::blocking::Client, String> {
 
 // ── Kimi For Coding ──
 
-fn query_kimi(client: &reqwest::blocking::Client, api_key: &str) -> Result<QuotaOutcome, String> {
+async fn query_kimi(client: &reqwest::Client, api_key: &str) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
         return Ok(QuotaOutcome::Failed("API key is empty".to_string()));
     }
@@ -164,7 +170,7 @@ fn query_kimi(client: &reqwest::blocking::Client, api_key: &str) -> Result<Quota
         .get("https://api.kimi.com/coding/v1/usages")
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Accept", "application/json");
-    let body = match fetch_json(req)? {
+    let body = match fetch_json(req).await? {
         Ok(b) => b,
         Err(msg) => return Ok(QuotaOutcome::Failed(msg)),
     };
@@ -323,8 +329,8 @@ fn zhipu_outcome(body: &serde_json::Value) -> QuotaOutcome {
     }
 }
 
-fn query_zhipu(
-    client: &reqwest::blocking::Client,
+async fn query_zhipu(
+    client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
@@ -341,7 +347,7 @@ fn query_zhipu(
         .header("Authorization", api_key)
         .header("Content-Type", "application/json")
         .header("Accept-Language", "en-US,en");
-    let body = match fetch_json(req)? {
+    let body = match fetch_json(req).await? {
         Ok(b) => b,
         Err(msg) => return Ok(QuotaOutcome::Failed(msg)),
     };
@@ -351,8 +357,8 @@ fn query_zhipu(
 /// Zhipu team plan: personal-plan path + `?type=2` plus the
 /// bigmodel-organization / bigmodel-project headers (all three credentials
 /// required). Team plans only exist on the cn site.
-fn query_zhipu_team(
-    client: &reqwest::blocking::Client,
+async fn query_zhipu_team(
+    client: &reqwest::Client,
     api_key: &str,
     organization_id: &str,
     project_id: &str,
@@ -365,7 +371,7 @@ fn query_zhipu_team(
         .header("bigmodel-project", project_id)
         .header("Content-Type", "application/json")
         .header("Accept-Language", "en-US,en");
-    let body = match fetch_json(req)? {
+    let body = match fetch_json(req).await? {
         Ok(b) => b,
         Err(msg) => return Ok(QuotaOutcome::Failed(msg)),
     };
@@ -374,8 +380,8 @@ fn query_zhipu_team(
 
 // ── MiniMax ──
 
-fn query_minimax(
-    client: &reqwest::blocking::Client,
+async fn query_minimax(
+    client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
@@ -392,7 +398,7 @@ fn query_minimax(
         .get(&url)
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json");
-    let body = match fetch_json(req)? {
+    let body = match fetch_json(req).await? {
         Ok(b) => b,
         Err(msg) => return Ok(QuotaOutcome::Failed(msg)),
     };
@@ -479,8 +485,8 @@ fn parse_minimax_tiers(body: &serde_json::Value) -> Vec<PlanTierVm> {
 
 /// ZenMux's quota URL is user-supplied (the endpoint is not derivable from
 /// the inference base_url); the fields carry it verbatim.
-fn query_zenmux(
-    client: &reqwest::blocking::Client,
+async fn query_zenmux(
+    client: &reqwest::Client,
     quota_url: &str,
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
@@ -491,7 +497,7 @@ fn query_zenmux(
         .get(quota_url)
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Accept", "application/json");
-    let body = match fetch_json(req)? {
+    let body = match fetch_json(req).await? {
         Ok(b) => b,
         Err(msg) => return Ok(QuotaOutcome::Failed(msg)),
     };
@@ -585,8 +591,8 @@ fn parse_opencode_go_tiers(body: &serde_json::Value) -> Vec<PlanTierVm> {
     tiers
 }
 
-fn query_opencode_go(
-    client: &reqwest::blocking::Client,
+async fn query_opencode_go(
+    client: &reqwest::Client,
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
     if api_key.trim().is_empty() {
@@ -598,7 +604,7 @@ fn query_opencode_go(
         .get("https://opencode.ai/zen/go/v1/usage")
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Accept", "application/json");
-    let resp = match req.send() {
+    let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => return Err(format!("Network error: {e}")),
     };
@@ -610,7 +616,7 @@ fn query_opencode_go(
             "API key is valid but not subscribed to OpenCode Go (HTTP 403)".to_string(),
         ));
     }
-    let body = match fold_response(resp)? {
+    let body = match fold_response(resp).await? {
         Ok(b) => b,
         Err(msg) => return Ok(QuotaOutcome::Failed(msg)),
     };
@@ -812,8 +818,8 @@ fn volcengine_sign(
     (authorization, x_date, x_content_sha256)
 }
 
-fn volcengine_openapi_call(
-    client: &reqwest::blocking::Client,
+async fn volcengine_openapi_call(
+    client: &reqwest::Client,
     region: &str,
     access_key_id: &str,
     secret_access_key: &str,
@@ -838,7 +844,8 @@ fn volcengine_openapi_call(
         .header("Content-Type", VOLCENGINE_CONTENT_TYPE)
         .header("Authorization", authorization)
         .timeout(std::time::Duration::from_secs(15))
-        .send();
+        .send()
+        .await;
     let resp = match resp {
         Ok(r) => r,
         Err(e) => return VolcCall::Transient(format!("Network error: {e}")),
@@ -855,7 +862,7 @@ fn volcengine_openapi_call(
         // ResponseMetadata.Error envelope as the 200 path for signature /
         // credential errors — parse it so a rejected key surfaces as an
         // auth error with the AK/SK hint, not a generic API error.
-        let raw = resp.text().unwrap_or_default();
+        let raw = resp.text().await.unwrap_or_default();
         if let Ok(body) = serde_json::from_str::<serde_json::Value>(&raw) {
             if let Some((code, msg)) = volcengine_response_error(&body) {
                 if volcengine_is_auth_error_code(&code) {
@@ -869,7 +876,7 @@ fn volcengine_openapi_call(
         return VolcCall::Soft(format!("Endpoint error (HTTP {status}): {raw}"));
     }
 
-    let raw = match resp.text() {
+    let raw = match resp.text().await {
         Ok(b) => b,
         Err(e) => return VolcCall::Transient(format!("Network error: {e}")),
     };
@@ -978,8 +985,8 @@ fn parse_coding_plan_tiers(result: &serde_json::Value) -> Vec<PlanTierVm> {
 
 /// Agent Plan first (GetAFPUsage), then Coding Plan. Auth failures stop
 /// immediately (shared credential); transient failures propagate as Err.
-fn query_volcengine(
-    client: &reqwest::blocking::Client,
+async fn query_volcengine(
+    client: &reqwest::Client,
     base_url: &str,
     access_key_id: &str,
     secret_access_key: &str,
@@ -999,7 +1006,9 @@ fn query_volcengine(
         access_key_id,
         secret_access_key,
         "GetAFPUsage",
-    ) {
+    )
+    .await
+    {
         VolcCall::Auth(detail) => return Ok(QuotaOutcome::Failed(detail)),
         VolcCall::Transient(detail) => return Err(format!("GetAFPUsage: {detail}")),
         VolcCall::Soft(detail) => soft_errors.push(format!("GetAFPUsage: {detail}")),
@@ -1026,7 +1035,9 @@ fn query_volcengine(
         access_key_id,
         secret_access_key,
         "GetCodingPlanUsage",
-    ) {
+    )
+    .await
+    {
         VolcCall::Auth(detail) => return Ok(QuotaOutcome::Failed(detail)),
         VolcCall::Transient(detail) => return Err(format!("GetCodingPlanUsage: {detail}")),
         VolcCall::Soft(detail) => soft_errors.push(format!("GetCodingPlanUsage: {detail}")),
@@ -1075,16 +1086,16 @@ pub fn plan_monthly_price(plan_query: Option<&str>) -> Option<String> {
 /// Execute a template against its credentials. Outer `Err` = transient
 /// network failure (frontend retries); inner failure becomes a
 /// success:false report.
-fn run_template(
+async fn run_template(
     template: &str,
     fields: &HashMap<String, serde_json::Value>,
     base_url: &str,
     api_key: &str,
 ) -> Result<QuotaOutcome, String> {
-    let client = blocking_client()?;
+    let client = client()?;
     match template {
-        "kimi" => query_kimi(&client, api_key),
-        "zhipu" => query_zhipu(&client, base_url, api_key),
+        "kimi" => query_kimi(&client, api_key).await,
+        "zhipu" => query_zhipu(&client, base_url, api_key).await,
         "zhipu_team" => {
             let org = field_str(fields, "organization_id");
             let project = field_str(fields, "project_id");
@@ -1093,10 +1104,10 @@ fn run_template(
                     "The Zhipu team plan needs the API key + org ID + project ID".to_string(),
                 ))
             } else {
-                query_zhipu_team(&client, api_key, org, project)
+                query_zhipu_team(&client, api_key, org, project).await
             }
         }
-        "minimax" => query_minimax(&client, base_url, api_key),
+        "minimax" => query_minimax(&client, base_url, api_key).await,
         "zenmux" => {
             let quota_url = field_str(fields, "quota_url");
             if quota_url.is_empty() {
@@ -1104,10 +1115,10 @@ fn run_template(
                     "Fill in the ZenMux usage endpoint URL".to_string(),
                 ))
             } else {
-                query_zenmux(&client, quota_url, api_key)
+                query_zenmux(&client, quota_url, api_key).await
             }
         }
-        "opencode_go" => query_opencode_go(&client, api_key),
+        "opencode_go" => query_opencode_go(&client, api_key).await,
         "volcengine" => {
             let ak = field_str(fields, "access_key_id");
             let sk = field_str(fields, "secret_access_key");
@@ -1116,7 +1127,7 @@ fn run_template(
                     "Volcengine Ark usage queries need the account AccessKey ID + Secret (not the inference API key)".to_string(),
                 ))
             } else {
-                query_volcengine(&client, base_url, ak, sk)
+                query_volcengine(&client, base_url, ak, sk).await
             }
         }
         // Grok reports quota over an undocumented gRPC-web API — stubbed.
@@ -1165,7 +1176,7 @@ pub fn cache_write(store: &Store, provider_id: &str, report: &PlanQuotaReport) {
 /// Query one provider's plan quota. Cached for 5 minutes unless `force`.
 /// Outer `Err` = transient network failure; deterministic failures come back
 /// as a `success: false` report.
-pub fn get_plan_quota_report(
+pub async fn get_plan_quota_report(
     store: &Store,
     provider_id: &str,
     force: bool,
@@ -1196,7 +1207,7 @@ pub fn get_plan_quota_report(
         .unwrap_or_default();
     let api_key = p.api_key.clone().unwrap_or_default();
 
-    let mut report = match run_template(&template, &fields, &p.base_url, &api_key)? {
+    let mut report = match run_template(&template, &fields, &p.base_url, &api_key).await? {
         QuotaOutcome::Ok { tiers, note } => PlanQuotaReport {
             provider_id: provider_id.to_string(),
             template,
@@ -1541,23 +1552,32 @@ mod tests {
 
     // ── template dispatch + price hints ──
 
-    #[test]
-    fn unknown_template_and_grok_fail_deterministically() {
+    #[tokio::test]
+    async fn unknown_template_and_grok_fail_deterministically() {
         let fields = HashMap::new();
-        match run_template("grok", &fields, "https://x.grok.com", "k").unwrap() {
+        match run_template("grok", &fields, "https://x.grok.com", "k")
+            .await
+            .unwrap()
+        {
             QuotaOutcome::Failed(m) => assert!(m.contains("not supported yet")),
             _ => panic!("grok must fail deterministically"),
         }
-        match run_template("whatever", &fields, "https://x", "k").unwrap() {
+        match run_template("whatever", &fields, "https://x", "k")
+            .await
+            .unwrap()
+        {
             QuotaOutcome::Failed(m) => assert!(m.contains("Unknown plan query template")),
             _ => panic!("unknown template must fail"),
         }
     }
 
-    #[test]
-    fn zenmux_and_volcengine_require_fields() {
+    #[tokio::test]
+    async fn zenmux_and_volcengine_require_fields() {
         let empty = HashMap::new();
-        match run_template("zenmux", &empty, "https://x", "k").unwrap() {
+        match run_template("zenmux", &empty, "https://x", "k")
+            .await
+            .unwrap()
+        {
             QuotaOutcome::Failed(m) => assert!(m.contains("ZenMux")),
             _ => panic!("zenmux needs quota_url"),
         }
@@ -1567,6 +1587,7 @@ mod tests {
             "https://ark.cn-beijing.volces.com/api/coding",
             "",
         )
+        .await
         .unwrap()
         {
             QuotaOutcome::Failed(m) => assert!(m.contains("AccessKey")),

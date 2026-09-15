@@ -138,7 +138,11 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 fn providers_quota(ctx: &mut Ctx, provider_id: &str, force: bool) -> Result<(), CliError> {
     let report = {
         let store = ctx.store()?;
-        kiwanod::plan_quota::get_plan_quota_report(store, provider_id, force)?
+        kiwano_core::block_on(kiwanod::plan_quota::get_plan_quota_report(
+            store,
+            provider_id,
+            force,
+        ))?
     };
     // A deterministic failure (bad credentials, unknown template) comes back as
     // `success: false` rather than as an Err, and reporting it as success would
@@ -1153,7 +1157,7 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             };
             let report = {
                 let aux = ctx.aux()?;
-                sync::sync_from_hub(aux, &hub_url)?
+                kiwano_core::block_on(sync::sync_from_hub(aux, &hub_url))?
             };
             let text = if report.unchanged {
                 format!(

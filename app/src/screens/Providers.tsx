@@ -1172,8 +1172,13 @@ function ProviderRow({
       <HealthCell p={p} blocked={blocked} />
 
       {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
-          or while a delete confirmation is pending. Binding / unbinding happens
-          in the agent tabs, so there is no Enable action here. */}
+          or while a delete confirmation is pending. Everything that acts on the
+          *provider* is here — edit, delete, and the park below — which is where
+          they add up to one thing: this row is the only view that speaks for the
+          provider on its own, rather than for one agent's use of it. (The old
+          `enable` was the exception that made the name ambiguous: it promoted the
+          provider to primary for every agent it was bound to, which is the agent
+          tabs' `makePrimary` now — see `providers use` in the CLI.) */}
       <div
         className={`flex flex-1 items-center justify-end gap-1.5 transition-opacity${
           confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
@@ -1477,11 +1482,17 @@ function BindingRow({
 
       <HealthCell p={p} blocked={blocked} />
 
-      {/* Candidate ordering / membership is the only action here — provider
-          management (edit / enable / delete) stays on the All tab. Actions
-          reveal on hover; the Pin slot renders on every row (invisible for the
-          primary) so resting rows keep identical column alignment. */}
+      {/* Candidate ordering / membership, plus the provider's own latency test:
+          provider *management* (edit, park, delete) stays on the All tab. The
+          test belongs here because it measures the provider rather than this
+          binding — it records the same verdict the All row reads, so the two tabs
+          cannot end up disagreeing about what it found, and parking the provider
+          (which is a global act, and would drop it from every agent's route) is
+          deliberately not offered from a view scoped to one agent. Actions reveal
+          on hover; the Pin slot renders on every row (invisible for the primary)
+          so resting rows keep identical column alignment. */}
       <div className="flex flex-1 items-center justify-end gap-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <TestLatencyButton provider={p} onTested={onChanged} />
         {route.bindings.length > 1 && (
           <span className="flex flex-col">
             <button

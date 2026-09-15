@@ -426,6 +426,32 @@ describe("the latency test", () => {
     await waitFor(() => expect(apiMock.listProviders.mock.calls.length).toBeGreaterThan(reads));
   });
 
+  it("is on an agent's rows too, where it records the same verdict", async () => {
+    // The test measures the *provider*, not the binding, so the same button
+    // belongs on both tabs — and it writes one verdict, which is what keeps the
+    // two tabs from disagreeing about what it found. Park, edit and delete stay
+    // on the All tab: parking is global, and would drop the provider out of every
+    // agent's route from a view scoped to one.
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} initialAgent="codex" />);
+    const user = userEvent.setup();
+    apiMock.testProviderLatency.mockResolvedValue({
+      provider_id: "deepseek",
+      model: "deepseek-chat",
+      latency_ms: 218,
+      status: 200,
+      error: null,
+    });
+    const reads = apiMock.listProviders.mock.calls.length;
+
+    await user.click(await screen.findByRole("button", { name: en.providers.testLatency }));
+
+    await waitFor(() => expect(apiMock.testProviderLatency).toHaveBeenCalledWith("deepseek"));
+    await waitFor(() => expect(apiMock.listProviders.mock.calls.length).toBeGreaterThan(reads));
+  });
+
   it("reports a refused prompt as a failure, not as a fast provider", async () => {
     const user = await renderAll();
     apiMock.testProviderLatency.mockResolvedValue({

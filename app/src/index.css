@@ -219,10 +219,26 @@ textarea,
 .row:hover {
   background: var(--kiwi-soft);
 }
-.row.current {
-  /* no permanent tint: the In-use badge and the left bar mark it, hover stays
-     uniform with every other row */
+/* The row's routing state, on its left edge — the one channel the eye runs down
+   without reading. No permanent tint: the bar (and the In-use badge) mark it,
+   and hover stays uniform with every other row.
+
+   Colour is a second reading, never the first: each of these is also spelled
+   out inside the row (the In-use badge, the Status column's Disabled / Blocked),
+   so a reader who cannot tell amber from green loses the glance and nothing
+   else. A row with none of the three carries no bar — bound and idle is the
+   resting state of most of the list, and a grey bar on all of them would bury
+   the three that mean something. */
+.row.serving {
   box-shadow: inset 2px 0 0 var(--kiwi);
+}
+/* Parked by the user: out of every route, row and key kept. */
+.row.paused {
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+/* Refused by the gateway: over a spending limit or a plan ceiling. */
+.row.blocked {
+  box-shadow: inset 2px 0 0 var(--red);
 }
 
 .chip {

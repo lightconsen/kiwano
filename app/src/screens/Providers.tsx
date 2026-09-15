@@ -1026,6 +1026,24 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   );
 }
 
+/** The row's routing state, as the coloured bar on its left edge draws it.
+ *
+ * That edge is the one channel the eye runs down without reading, so the state
+ * lives there and not only in a badge. `useT` is not needed: these are class
+ * names, not labels — every state is spelled out in the row as well (the In-use
+ * badge, the Status column's Disabled/Blocked), so colour is never the only
+ * carrier.
+ *
+ * Three states only, and the rest of the list stays quiet. A provider that is
+ * bound but idle — a failover standby, a queue member whose window is not now —
+ * is the ordinary resting state of most rows, and marking it would make the bar
+ * a column of grey with the three states that matter lost inside it. */
+function rowState(p: Provider, serving: boolean, blocked?: string): string {
+  if (!p.enabled) return "paused";
+  if (blocked) return "blocked";
+  return serving ? "serving" : "";
+}
+
 function ProviderRow({
   p,
   plan,
@@ -1058,9 +1076,10 @@ function ProviderRow({
   // reader decides — and not squeezed into the row, whose columns are fixed
   // fractions of its width and have no room for a sentence.
   const consequence = confirmDel ? deleteConsequence(p, routes, t) : "";
+  const state = rowState(p, p.is_current, blocked);
   return (
     <>
-    <div className={`row group flex h-[58px] items-center border-b border-line px-4${p.is_current ? " current" : ""}`}>
+    <div className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}>
       <IdentityCell p={p} />
 
       <div className="flex w-[18%] items-center">
@@ -1382,9 +1401,10 @@ function BindingRow({
 
   // Local "In use": serving this agent right now, not merely any agent
   const inUse = p.serving_agents.includes(route.agent);
+  const state = rowState(p, inUse, blocked);
 
   return (
-    <div className={`row group flex h-[58px] items-center border-b border-line px-4${inUse ? " current" : ""}`}>
+    <div className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}>
       <IdentityCell p={p} inUse={inUse} />
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />

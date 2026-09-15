@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-09-15
+
 ### Changed
 
 - **The Models shelf prices in the provider's currency.** It converted every
@@ -35,6 +37,23 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   the legend is the row directly above the table. The name stays as the
   tooltip and as the accessible name, and the width it gives back goes to the
   price.
+
+- **The Models shelf says less per row.** The protocol column spelled every
+  protocol out — `openai anthropic gemini` — in a table whose price cell is the
+  one that truncates. Each protocol is now one letter (`O`, `A`, `G`) in its own
+  colour, with the full name on hover and as the accessible name, and the width
+  it gives back goes to the price.
+
+- **Model prices now come only from the Hub.** They used to come from a table
+  compiled into the binary as well, and the two had drifted apart: a machine
+  that had never synced showed no providers on the shelf — that snapshot is
+  already gone — yet still costed 192 models, 153 of them vendor rates the
+  catalog had deliberately dropped. The compiled table is removed, so prices
+  are seeded from the Hub's `models.json` and nothing else; until the first
+  sync there are no rates and every cost reads "—". The seed also deletes rows
+  the published document no longer carries, so a client that synced the larger
+  table stops costing what was withdrawn — and if the Hub ever publishes an
+  empty one, the app says so in its log rather than silently clearing it.
 
 ### Added
 
@@ -117,25 +136,6 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   already exists is never re-derived. Note that linking an existing provider
   changes *future* costs only, and can therefore move a spend limit, without any
   price having changed.
-
-### Changed
-
-- **The Models shelf says less per row.** The protocol column spelled every
-  protocol out — `openai anthropic gemini` — in a table whose price cell is the
-  one that truncates. Each protocol is now one letter (`O`, `A`, `G`) in its own
-  colour, with the full name on hover and as the accessible name, and the width
-  it gives back goes to the price.
-
-- **Model prices now come only from the Hub.** They used to come from a table
-  compiled into the binary as well, and the two had drifted apart: a machine
-  that had never synced showed no providers on the shelf — that snapshot is
-  already gone — yet still costed 192 models, 153 of them vendor rates the
-  catalog had deliberately dropped. The compiled table is removed, so prices
-  are seeded from the Hub's `models.json` and nothing else; until the first
-  sync there are no rates and every cost reads "—". The seed also deletes rows
-  the published document no longer carries, so a client that synced the larger
-  table stops costing what was withdrawn — and if the Hub ever publishes an
-  empty one, the app says so in its log rather than silently clearing it.
 
 ## [0.1.9] - 2026-09-13
 

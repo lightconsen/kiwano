@@ -8,7 +8,7 @@
 //!
 //! - [`vm`]: view models and the operations that produce them. The serde field
 //!   names mirror `src/api/types.ts` exactly — that file is the contract.
-//! - [`aux`]: the second SQLite connection, holding the app-scoped tables
+//! - [`auxiliary`]: the second SQLite connection, holding the app-scoped tables
 //!   (`app_settings`, `takeover_backups`, `hub_cache`, `hub_models_cache`).
 //! - [`takeover`]: rewriting an agent's config to point at the local gateway,
 //!   with backup and rollback.

@@ -260,11 +260,10 @@ function AgentSettingsDialog({
   paths,
   limit,
   currency,
-  takenOver,
   busy,
   open,
   onClose,
-  onSetTakeover,
+  onRestore,
   onChanged,
 }: {
   agent: AgentRef;
@@ -273,19 +272,20 @@ function AgentSettingsDialog({
   limit: AgentLimit | null;
   /** Display currency, for a money ceiling's unit. */
   currency: string;
-  takenOver: boolean;
   busy: boolean;
   open: boolean;
   onClose: () => void;
-  onSetTakeover: (enabled: boolean) => Promise<void>;
+  /** Put the agent's own configuration back. Enabling is the tab's onboarding
+      panel, which this row does not exist without. */
+  onRestore: () => Promise<void>;
   onChanged?: () => void;
 }) {
   const t = useT();
   const [err, setErr] = useState<string | null>(null);
-  const flip = async () => {
+  const restore = async () => {
     setErr(null);
     try {
-      await onSetTakeover(!takenOver);
+      await onRestore();
       onClose();
     } catch (e) {
       // Left open with the reason: the button's whole job is to change the file
@@ -304,20 +304,20 @@ function AgentSettingsDialog({
         <div className="px-5 pb-4 pt-1">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-[12px]">
-              <Dot state={takenOver ? "ok" : "off"} />
-              {takenOver ? t("providers.agentRouted") : t("providers.agentNotRouted")}
+              <Dot state="ok" />
+              {t("providers.agentRouted")}
             </span>
             <Button
               size="sm"
               className="ml-auto h-7 px-3 text-[12px] font-semibold"
               disabled={busy}
-              onClick={flip}
+              onClick={restore}
             >
-              {takenOver ? t("providers.restoreOriginal") : t("providers.enableKiwano")}
+              {t("providers.restoreOriginal")}
             </Button>
           </div>
           <p className="mt-2 text-[11px] leading-relaxed text-mut">
-            {takenOver ? t("providers.agentRoutedBody") : t("providers.agentNotRoutedBody")}
+            {t("providers.agentRoutedBody")}
           </p>
           {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
 
@@ -1842,7 +1842,7 @@ export default function Providers({
           have to identify from the highlight over there. What this one adds is
           the file behind it: the config a takeover rewrites, which is also what
           a user has to reach for by hand when something goes wrong. */}
-      {!custom && seg !== "all" && (
+      {!custom && seg !== "all" && (takenOver?.has(seg) ?? false) && (
         <div className="mx-4 my-0.5 flex items-center gap-1.5">
           <ProviderLogo
             icon={SEGMENT_ICON[seg]}
@@ -1991,7 +1991,7 @@ export default function Providers({
         onCreated={onAgentCreated}
       />
 
-      {!custom && seg !== "all" && (
+      {!custom && seg !== "all" && (takenOver?.has(seg) ?? false) && (
         <AgentSettingsDialog
           agent={seg}
           label={agentMeta(seg).label}
@@ -1999,11 +1999,10 @@ export default function Providers({
           limit={route?.limit ?? null}
           currency={currency}
           onChanged={refetch}
-          takenOver={takenOver?.has(seg) ?? false}
           busy={enabling}
           open={agentSettingsOpen}
           onClose={() => setAgentSettingsOpen(false)}
-          onSetTakeover={(enabled) => setAgentTakenOver(seg, enabled)}
+          onRestore={() => setAgentTakenOver(seg, false)}
         />
       )}
 

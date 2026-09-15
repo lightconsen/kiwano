@@ -144,11 +144,8 @@ export const providers = {
   /** The gear's title, and the dialog's heading — the same words for both. */
   agentSettingsFor: "{agent} settings",
   agentRouted: "Taken over",
-  agentNotRouted: "Not taken over",
   agentRoutedBody:
     "Its config points at the local gateway, which is how its traffic arrives here. Restoring puts the original file back and the agent talks to its provider directly again.",
-  agentNotRoutedBody:
-    "Enabling backs up the files below, points them at the local gateway and gives this agent its own key. Turning it off restores the backup.",
   restoreOriginal: "Restore original",
   agentConfigFiles: "Config files",
   agentConfigFilesNote: "Backed up before a takeover, restored when it is turned off.",

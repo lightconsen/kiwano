@@ -716,26 +716,21 @@ describe("a built-in agent's own row", () => {
     ).toBeInTheDocument();
   });
 
-  it("still names it before the agent is taken over, and offers to enable it", async () => {
-    const user = userEvent.setup();
+  it("is not there before the agent is taken over — the tab offers to enable it", async () => {
     renderCodexTab({
       providers: [deepseek()],
       routes: [codexRoute(["deepseek"])],
       codexTakenOver: false,
     });
 
-    // The config file exists whether or not Kiwano has rewritten it, and this is
-    // the case where someone wants to see it most.
-    await user.click(
-      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
-    );
-
-    expect(screen.getByText(en.providers.agentNotRouted)).toBeInTheDocument();
-    expect(screen.getByText("~/.codex/config.toml")).toBeInTheDocument();
-    expect(screen.getByText("~/.codex/auth.json")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: en.providers.enableKiwano }));
-    await waitFor(() => expect(apiMock.setTakeover).toHaveBeenCalledWith("codex", true));
+    // The row is about an agent Kiwano is already routing; the file it names is
+    // the agent's own until then, and getting to it is the onboarding panel's job.
+    expect(
+      await screen.findByText(en.providers.startManaging.replace("{agent}", "Codex")),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    ).toBeNull();
   });
 
   it("restores the original config from the dialog", async () => {

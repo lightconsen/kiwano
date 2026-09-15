@@ -1818,27 +1818,70 @@ fn health_vm(p: &Provider) -> HealthVm {
     }
 }
 
-/// Normalize the user-entered per-period limit unit (tech.md §2.4 A). With a
-/// limit set but no unit chosen, fall back to the legacy behavior of counting
-/// "requests"; with no limit the unit is meaningless and stored as NULL.
-/// Units are the two counting units plus any 3-letter currency code (stored
+/// The currencies a spending limit may be denominated in.
+///
+/// The Hub's rate table, because that is what makes the limit comparable with the
+/// costs it is measured against: `convert_cost_buckets` needs a rate for both
+/// sides, and a currency without one is **added** to the others at 1:1 — the bug
+/// that once let a `¥50` limit mean nothing in particular.
+///
+/// A machine that has never synced has no table at all, and then it is the two
+/// currencies the Hub publishes rates against. Empty is not "anything goes": the
+/// reason for the rule is that no rate exists, and that is true of every third
+/// currency as well.
+pub fn known_limit_currencies(store: &Store) -> Vec<String> {
+    let rates = store.hub_exchange_rates();
+    if rates.is_empty() {
+        vec!["USD".to_string(), "CNY".to_string()]
+    } else {
+        let mut codes: Vec<String> = rates.into_keys().collect();
+        codes.sort();
+        codes
+    }
+}
+
+/// Normalize the user-entered per-period limit unit (tech.md §2.4 A).
+///
+/// With a limit set but no unit chosen, fall back to the legacy behavior of
+/// counting "requests"; with no limit the unit is meaningless and stored as NULL.
+/// Units are the two counting units plus a currency code from `known` (stored
 /// uppercase; the v9 CHECK constraint enforces the same shape).
-fn normalize_limit_unit(unit: Option<&str>, has_limit: bool) -> Option<String> {
+///
+/// A currency this machine cannot price against is **refused** rather than
+/// dropped: falling back to `requests` would quietly turn a money ceiling into a
+/// request count, which is a different limit, not a smaller one.
+pub fn normalize_limit_unit(
+    unit: Option<&str>,
+    has_limit: bool,
+    known: &[String],
+) -> Result<Option<String>, String> {
     if !has_limit {
-        return None;
+        return Ok(None);
     }
     match unit {
-        Some("wan_tokens") => Some("wan_tokens".into()),
-        Some("requests") => Some("requests".into()),
+        Some("wan_tokens") => Ok(Some("wan_tokens".into())),
+        Some("requests") => Ok(Some("requests".into())),
         Some(u) => {
             let code = u.trim().to_ascii_uppercase();
-            if code.len() == 3 && code.chars().all(|c| c.is_ascii_alphabetic()) {
-                Some(code)
+            // Not a currency code at all: the legacy reading, count requests.
+            if code.len() != 3 || !code.chars().all(|c| c.is_ascii_alphabetic()) {
+                return Ok(Some("requests".into()));
+            }
+            if known.iter().any(|k| k.eq_ignore_ascii_case(&code)) {
+                Ok(Some(code))
             } else {
-                Some("requests".into())
+                Err(format!(
+                    "a limit cannot be in {code}: this machine has no rate for it, and the limit is \
+                     measured against costs priced in other currencies. Known: {}",
+                    if known.is_empty() {
+                        "none (the Hub has never been synced)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                ))
             }
         }
-        None => Some("requests".into()),
+        None => Ok(Some("requests".into())),
     }
 }
 
@@ -2097,7 +2140,8 @@ pub fn add_provider(
             normalize_limit_unit(
                 input.billing_config.limit_unit.as_deref(),
                 input.billing_config.limit_value.is_some(),
-            )
+                &known_limit_currencies(store),
+            )?
         },
         plan_query: plan_query_json,
         plan_limits: if is_plan {
@@ -2288,7 +2332,8 @@ pub fn update_provider(
         normalize_limit_unit(
             input.billing_config.limit_unit.as_deref(),
             input.billing_config.limit_value.is_some(),
-        )
+            &known_limit_currencies(store),
+        )?
     };
     p.plan_limits = if is_plan {
         plan_limits_json(input.billing_config.plan_limits.as_ref())
@@ -4239,6 +4284,90 @@ mod tests {
             endpoints: Vec::new(),
             advanced: None,
             plan_query: None,
+        }
+    }
+
+    /// A pay-as-you-go provider with a spending limit in `unit`.
+    fn limited_input(unit: &str) -> NewProviderInput {
+        let mut input = catalog_input("Limited", "https://api.limited.example");
+        input.billing_config.limit_value = Some(50.0);
+        input.billing_config.limit_unit = Some(unit.into());
+        input
+    }
+
+    /// A store that has synced the Hub, so its rate table is not empty. Written
+    /// through a second connection because the cache belongs to the GUI's schema,
+    /// which the gateway reads and does not create (see `limits::tests`).
+    fn store_with_hub_rates(rates: &str) -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let store = Store::open(&path).unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS hub_models_cache (
+                 id        INTEGER PRIMARY KEY CHECK (id = 1),
+                 version   INTEGER NOT NULL,
+                 sha256    TEXT NOT NULL,
+                 payload   TEXT NOT NULL,
+                 synced_at TEXT NOT NULL
+             )",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO hub_models_cache (id, version, sha256, payload, synced_at)
+             VALUES (1, 1, 'sha', ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![format!(
+                r#"{{"version":1,"exchange_rates":{rates},"models":[]}}"#
+            )],
+        )
+        .unwrap();
+        (dir, store)
+    }
+
+    // A limit's currency has to be one this machine can convert. The limit is
+    // measured against costs priced in other currencies, and `convert_amount` hands
+    // a currency it has no rate for back **unchanged** — added to the others at
+    // 1:1 — so a limit denominated in one fires at the wrong time.
+    //
+    // The rule lives in the normalizer, which is where every writer passes: the
+    // dialog and the CLI both build a `NewProviderInput`, and the share importer
+    // calls it directly.
+    #[test]
+    fn a_limit_currency_must_be_one_this_machine_can_convert() {
+        // Never synced: no table at all, so the two currencies the Hub publishes
+        // rates against. Empty is not "anything goes" — no rate exists for a third
+        // one either.
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        assert_eq!(known_limit_currencies(&s), vec!["USD", "CNY"]);
+        assert!(add_provider(&s, &aux, &limited_input("USD")).is_ok());
+        assert!(
+            add_provider(&s, &aux, &limited_input("cny")).is_ok(),
+            "and it is not case-sensitive"
+        );
+        let err = match add_provider(&s, &aux, &limited_input("EUR")) {
+            Err(e) => e,
+            Ok(_) => panic!("EUR has no rate on this machine"),
+        };
+        assert!(
+            err.contains("EUR") && err.contains("CNY"),
+            "the refusal names the currency and what it does know: {err}"
+        );
+
+        // Synced: the table's own list, in order.
+        let (_dir, synced) = store_with_hub_rates(r#"{"USD":1.0,"CNY":7.1,"EUR":0.9}"#);
+        let aux2 = Aux::open_in_memory().unwrap();
+        assert_eq!(known_limit_currencies(&synced), vec!["CNY", "EUR", "USD"]);
+        assert!(add_provider(&synced, &aux2, &limited_input("eur")).is_ok());
+        assert!(add_provider(&synced, &aux2, &limited_input("JPY")).is_err());
+
+        // The counting units are not currencies, and a limit in one is what the
+        // vast majority of providers have.
+        for unit in ["requests", "wan_tokens"] {
+            assert!(
+                add_provider(&s, &aux, &limited_input(unit)).is_ok(),
+                "{unit} is a counting unit"
+            );
         }
     }
 

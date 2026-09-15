@@ -169,8 +169,21 @@ fn providers_list(ctx: &mut Ctx, agent: Option<&str>) -> Result<(), CliError> {
     Ok(())
 }
 
+/// A `--unit` value, refused when this machine has no rate for that currency.
+///
+/// `vm` enforces the same rule where every writer passes — the dialog, this CLI
+/// and the config importer — and this runs it here to say *which* kind of failure
+/// it is: a typo in a flag is a usage error (exit 2), not a runtime one (exit 3).
+fn checked_unit(unit: Option<&str>, known: &[String]) -> Result<Option<String>, CliError> {
+    match unit {
+        Some(u) => vm::normalize_limit_unit(Some(u), true, known).map_err(CliError::usage),
+        None => Ok(None),
+    }
+}
+
 fn providers_add(args: &AddArgs, ctx: &mut Ctx) -> Result<(), CliError> {
-    let input = new_provider_input(args)?;
+    let known = vm::known_limit_currencies(ctx.store()?);
+    let input = new_provider_input(args, &known)?;
     let created = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
         vm::add_provider(store, aux, &input)?
@@ -225,7 +238,7 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
             .get_provider(&args.provider_id)
             .map_err(runtime)?
             .ok_or_else(|| runtime(format!("provider not found: {}", args.provider_id)))?;
-        edit_input(args, &current)?
+        edit_input(args, &current, &vm::known_limit_currencies(store))?
     };
     let updated = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
@@ -245,7 +258,11 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
 /// changed fields would blank the rest — including a plan provider's percent
 /// limits. Everything is therefore carried over explicitly, and only the flags
 /// present in `args` override.
-fn edit_input(args: &EditArgs, current: &Provider) -> Result<vm::NewProviderInput, CliError> {
+fn edit_input(
+    args: &EditArgs,
+    current: &Provider,
+    known: &[String],
+) -> Result<vm::NewProviderInput, CliError> {
     let billing = match &args.billing {
         Some(raw) => parse_billing(raw)?.to_string(),
         None => vm::billing_to_ui(current.billing).to_string(),
@@ -292,7 +309,8 @@ fn edit_input(args: &EditArgs, current: &Provider) -> Result<vm::NewProviderInpu
         billing,
         billing_config: vm::BillingConfigInput {
             limit_value,
-            limit_unit: args.unit.clone().or_else(|| current.limit_unit.clone()),
+            limit_unit: checked_unit(args.unit.as_deref(), known)?
+                .or_else(|| current.limit_unit.clone()),
             reset_period: args.reset.clone().or_else(|| current.reset_period.clone()),
             plan_limits: plan_limits_input(&args.forward, Some(current)),
         },
@@ -1208,7 +1226,7 @@ pub fn import(cmd: &ImportCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 // ── input mapping ───────────────────────────────────────────────────────────
 
 /// Turn the flags into the app's `NewProviderInput`.
-fn new_provider_input(args: &AddArgs) -> Result<vm::NewProviderInput, CliError> {
+fn new_provider_input(args: &AddArgs, known: &[String]) -> Result<vm::NewProviderInput, CliError> {
     let billing = parse_billing(&args.billing)?;
     let protocol = parse_protocol(&args.protocol)?;
 
@@ -1250,7 +1268,7 @@ fn new_provider_input(args: &AddArgs) -> Result<vm::NewProviderInput, CliError> 
         billing: billing.to_string(),
         billing_config: vm::BillingConfigInput {
             limit_value: args.limit,
-            limit_unit: args.unit.clone(),
+            limit_unit: checked_unit(args.unit.as_deref(), known)?,
             reset_period,
             plan_limits: plan_limits_input(&args.forward, None),
         },

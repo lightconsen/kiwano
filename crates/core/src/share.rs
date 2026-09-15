@@ -180,7 +180,14 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
                     model_default: sp.model_default.clone(),
                     billing: sp.billing,
                     period_limit: sp.period_limit,
-                    limit_unit: sp.limit_unit.clone(),
+                    // Same rule the dialog and the CLI apply: the currency has to be
+                    // one this machine can price against, and a shared file is the
+                    // one place it can arrive without anyone having said so.
+                    limit_unit: vm::normalize_limit_unit(
+                        sp.limit_unit.as_deref(),
+                        sp.period_limit.is_some(),
+                        &vm::known_limit_currencies(store),
+                    )?,
                     reset_period: sp.reset_period.clone(),
                     // Plan-query credentials are intentionally not shared.
                     plan_query: None,

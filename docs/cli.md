@@ -130,6 +130,13 @@ silently drops the value otherwise, and a flag that does nothing is worse than
 one that refuses). `--plan-query` is what makes `providers quota` able to ask
 anything at all.
 
+`--unit` says what a `--limit` counts: `requests`, `wan_tokens`, or a currency the
+Hub publishes a rate for. That last one is checked rather than stored, and exits 2
+with the currencies it does know: a limit is measured against costs priced in other
+currencies, and one without a rate would be added to them at 1:1. A machine that
+has never synced has no table at all, and takes `USD` and `CNY` — the two the Hub
+publishes rates against.
+
 ### Rotating keys
 
 ```

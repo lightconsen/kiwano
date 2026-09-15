@@ -567,7 +567,7 @@ pub struct AddArgs {
     #[arg(long, value_name = "N")]
     pub limit: Option<f64>,
 
-    /// Unit of `--limit`: requests | wan_tokens | a 3-letter currency code
+    /// Unit of `--limit`: requests | wan_tokens | a currency the Hub publishes a rate for
     #[arg(long, value_name = "UNIT")]
     pub unit: Option<String>,
 

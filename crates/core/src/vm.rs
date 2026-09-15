@@ -1543,9 +1543,15 @@ pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
 /// A path as the screen should print it: `~` for the home tree, absolute for
 /// anything outside it (a `HERMES_HOME` pointing elsewhere is a real path, and
 /// rewriting it to `~/…` would name a file that does not exist).
+///
+/// Joined rather than formatted, so the separator is the platform's on both sides
+/// of the `~`. A literal `~/` glued to a Windows path produced
+/// `~/.claude\settings.json` — a spelling neither platform uses, and the reason
+/// this had to be fixed once already: the test that pinned it was written on macOS
+/// and passed there.
 fn display_path(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
-        Ok(rest) => format!("~/{}", rest.display()),
+        Ok(rest) => Path::new("~").join(rest).display().to_string(),
         Err(_) => path.display().to_string(),
     }
 }
@@ -5291,23 +5297,46 @@ mod tests {
                 .clone()
         };
 
-        assert_eq!(paths("claude"), vec!["~/.claude/settings.json"]);
+        // Spelled with the platform's separator, because that is what the screen
+        // should show and what the row's copy button should hand over. A literal
+        // `~/.claude/settings.json` here is an assertion only Unix passes — which
+        // is how this test first went red, on Windows, against a `display_path`
+        // that glued `~/` to a Windows path.
+        let sep = std::path::MAIN_SEPARATOR;
+        let at_home = |tail: &str| format!("~{sep}{}", tail.replace('/', &sep.to_string()));
+        assert_eq!(paths("claude"), vec![at_home(".claude/settings.json")]);
         // Two files: the config Codex reads and the auth it keeps beside it.
         assert_eq!(
             paths("codex"),
-            vec!["~/.codex/config.toml", "~/.codex/auth.json"]
+            vec![at_home(".codex/config.toml"), at_home(".codex/auth.json")]
         );
-        assert_eq!(paths("grokbuild"), vec!["~/.grok/config.toml"]);
-        // Every built-in resolves to at least one file, so the row never renders
-        // an agent with nothing to show.
-        assert!(vm.takeovers.iter().all(|t| !t.config_paths.is_empty()));
+        assert_eq!(paths("grokbuild"), vec![at_home(".grok/config.toml")]);
+
+        // Every built-in resolves to at least one file — except the one whose
+        // takeover is macOS-only. `claude-desktop` comes back empty elsewhere by
+        // design, and the row renders nothing for it rather than a path that does
+        // not exist.
+        for t in vm.takeovers.iter().filter(|t| t.agent != "claude-desktop") {
+            assert!(!t.config_paths.is_empty(), "{} has no files", t.agent);
+        }
+        let desktop = vm
+            .takeovers
+            .iter()
+            .find(|t| t.agent == "claude-desktop")
+            .expect("claude-desktop is in the registry");
+        assert_eq!(
+            desktop.config_paths.is_empty(),
+            cfg!(not(target_os = "macos")),
+            "claude-desktop's files are macOS-only"
+        );
 
         // A path outside the home tree keeps its absolute form rather than being
         // rewritten into a `~/…` that names nothing.
         assert_eq!(
             display_path(&home.join(".hermes/config.yaml"), home),
-            "~/.hermes/config.yaml"
+            at_home(".hermes/config.yaml")
         );
+        #[cfg(unix)]
         assert_eq!(
             display_path(Path::new("/opt/hermes/config.yaml"), home),
             "/opt/hermes/config.yaml"

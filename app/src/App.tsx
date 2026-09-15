@@ -228,21 +228,10 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-2.5">
-          <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
-            <Dot state={gw?.running ? "ok" : "off"} size="h-[6px] w-[6px]" />
-            {t("app.gateway")} <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
-          </span>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-mut"
-            onClick={refresh}
-            aria-label={t("common.refresh")}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-mut">
+          <Dot state={gw?.running ? "ok" : "off"} size="h-[6px] w-[6px]" />
+          {t("app.gateway")} <span className="font-mono">{gw ? `:${gw.port}` : "…"}</span>
+        </span>
       </header>
 
       <UpdateBanner />
@@ -282,12 +271,29 @@ export default function App() {
             {t("app.tokens")}
           </span>
         )}
-        {footer?.hub_synced && (
-          <span className="ml-auto flex items-center gap-1">
-            <Dot state="ok" size="h-[5px] w-[5px]" />
-            {t("app.hubSynced")}
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-2">
+          {footer?.hub_synced && (
+            <span className="flex items-center gap-1">
+              <Dot state="ok" size="h-[5px] w-[5px]" />
+              {t("app.hubSynced")}
+            </span>
+          )}
+          {/* The app's own reload, beside the figures it reloads: it remounts the
+              screen (a fresh read of whatever is on it), re-reads the gateway
+              status and re-reads these totals. It lived in the header next to the
+              gateway's own dot, where it read as that indicator's control rather
+              than as the whole app's. */}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-mut"
+            onClick={refresh}
+            aria-label={t("common.refresh")}
+            title={t("common.refresh")}
+          >
+            <RefreshCw className="h-3 w-3" />
+          </Button>
+        </span>
       </footer>
 
       <AddProviderModal

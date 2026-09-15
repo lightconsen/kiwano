@@ -1781,7 +1781,7 @@ export default function Providers({
         // over there. Everything *about* it — the credentials, and deleting it —
         // is behind the icon, which also keeps a destructive control out of the
         // row you click around in.
-        <div className="mx-4 my-1.5 flex items-center gap-1.5">
+        <div className="mx-4 my-0.5 flex items-center gap-1.5">
           <ProviderLogo
             char={agentMeta(seg).chip_char}
             color={agentMeta(seg).chip_color}
@@ -1811,7 +1811,7 @@ export default function Providers({
           the file behind it: the config a takeover rewrites, which is also what
           a user has to reach for by hand when something goes wrong. */}
       {!custom && seg !== "all" && (
-        <div className="mx-4 my-1.5 flex items-center gap-1.5">
+        <div className="mx-4 my-0.5 flex items-center gap-1.5">
           <ProviderLogo
             icon={SEGMENT_ICON[seg]}
             char={agentMeta(seg).chip_char}

@@ -407,6 +407,25 @@ describe("the latency test", () => {
     expect(await screen.findByText("1240ms")).toBeInTheDocument();
   });
 
+  it("re-reads the row, so the cell shows what the click recorded", async () => {
+    const user = await renderAll();
+    apiMock.testProviderLatency.mockResolvedValue({
+      provider_id: "deepseek",
+      model: "deepseek-chat",
+      latency_ms: 218,
+      status: 200,
+      error: null,
+    });
+    const reads = apiMock.listProviders.mock.calls.length;
+
+    await user.click(await screen.findByRole("button", { name: en.providers.testLatency }));
+
+    // The backend records the verdict as the provider's health, so the click is
+    // also what makes the Status cell current — a stale "No answer" is exactly
+    // what this button settles.
+    await waitFor(() => expect(apiMock.listProviders.mock.calls.length).toBeGreaterThan(reads));
+  });
+
   it("reports a refused prompt as a failure, not as a fast provider", async () => {
     const user = await renderAll();
     apiMock.testProviderLatency.mockResolvedValue({
@@ -453,6 +472,23 @@ describe("the Status cell", () => {
         enabled: false,
         health: { state: "off", latency_ms: null, note: "Disabled" },
       }),
+      // A number the reader's own test produced: a real prompt, with the key.
+      deepseek({
+        id: "tested",
+        health: { state: "ok", latency_ms: 218, source: "test", checked_at: "2026-09-15T11:38:00Z" },
+      }),
+      // Answered and refused the key. Reachable — the vendor is talking — so the
+      // cell has to read as the key rather than as silence.
+      deepseek({
+        id: "refused",
+        health: {
+          state: "error",
+          latency_ms: 60,
+          source: "test",
+          checked_at: "2026-09-15T11:38:00Z",
+          error: "invalid API key",
+        },
+      }),
       // Enabled, never used, never probed: the cell says nothing, which is the
       // state of a provider added a minute ago.
       deepseek({ id: "fresh", health: { state: "idle", latency_ms: null } }),
@@ -480,6 +516,22 @@ describe("the Status cell", () => {
     expect(screen.getByText(en.providers.unreachable).closest("[title]")).toHaveAttribute(
       "title",
       en.providers.unreachableTitle.replace("{time}", "07:20"),
+    );
+
+    // The app's own test says so in its tooltip: a real prompt with the key,
+    // which is a stronger claim than either of the gateway's.
+    expect(screen.getByText("218ms").closest("[title]")).toHaveAttribute(
+      "title",
+      en.providers.latencyTest.replace("{time}", "11:38"),
+    );
+
+    // And a refusal reads as the key, not as silence — with the vendor's own
+    // words in the tooltip, since that is what tells the two apart.
+    expect(screen.getByText(en.providers.refused).closest("[title]")).toHaveAttribute(
+      "title",
+      en.providers.refusedTitle
+        .replace("{error}", "invalid API key")
+        .replace("{time}", "11:38"),
     );
 
     // Parked outranks both.

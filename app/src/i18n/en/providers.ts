@@ -46,8 +46,13 @@ export const providers = {
       and the tooltip is where the difference is spelled out. */
   latencyProbe:
     "Reachability: the gateway asked the endpoint — an unsigned request, so this says something answers there, not that your key works · checked {time}",
+  /** A latency the Apps screen's own test measured — a real prompt with the key. */
+  latencyTest: "You tested it — a real prompt, sent with this provider's key · measured {time}",
   unreachable: "No answer",
-  unreachableTitle: "The endpoint did not answer when the gateway asked · checked {time}",
+  unreachableTitle: "The endpoint did not answer when it was last asked · checked {time}",
+  /** Answered and refused the key: reachable, but not usable. */
+  refused: "Key refused",
+  refusedTitle: "The endpoint answered and refused this key: {error} · checked {time}",
 
   // ── Usage / quota cell ──
   /** Plan row with configured percent limits: the {windows} fragment is the

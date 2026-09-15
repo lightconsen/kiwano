@@ -143,7 +143,19 @@ pub async fn test_provider_latency(
         "/v1/chat/completions"
     };
     let url = kiwanod::server::data::compose_upstream(&p.base_url, p.api_path.as_deref(), path);
-    let probe = crate::sidecar::probe_prompt(protocol, &url, key, &model).await?;
+    let probe = crate::sidecar::probe_prompt(protocol, &url, key, &model).await;
+    // What the click measured outlives the click: it is recorded as this
+    // provider's verdict, so the Status column can show it. This is the one
+    // measurement that works when the provider has no traffic of its own and the
+    // prober has not been round — or is not running at all, which happens
+    // whenever the daemon up is a build from before the prober existed. The
+    // number on the button stays a readout of *this* click; the cell shows the
+    // standing verdict, which this just became.
+    let (status, latency_ms, error) = test_verdict(&probe);
+    store
+        .upsert_provider_health(id, status, latency_ms, "test", error.as_deref())
+        .map_err(e2s)?;
+    let probe = probe?;
     Ok(PromptLatencyVm {
         provider_id: id.to_string(),
         model,
@@ -151,6 +163,23 @@ pub async fn test_provider_latency(
         status: probe.status,
         error: probe.error,
     })
+}
+
+/// What the latency test's result means as a health verdict.
+///
+/// Any HTTP answer proves reachability — a 401 is the vendor saying no to the
+/// key, not the network saying nothing — so a refusal is `reachable` with the
+/// vendor's own message beside it, and only a transport failure is `down`. The
+/// distinction is the whole reason `provider_health` carries an `error` column:
+/// the two read differently on the row, and conflating them sends the reader to
+/// the wrong end of the problem.
+fn test_verdict(
+    probe: &Result<crate::sidecar::PromptProbe, String>,
+) -> (&'static str, i64, Option<String>) {
+    match probe {
+        Ok(p) => ("reachable", p.latency_ms as i64, p.error.clone()),
+        Err(e) => ("down", 0, Some(e.clone())),
+    }
 }
 
 /// Create a user-defined agent: a row, a placeholder key, and a `single`
@@ -468,6 +497,13 @@ pub struct HealthVm {
     /// average covers a window rather than an instant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<String>,
+    /// What the endpoint said when it said no — the vendor's own message for a
+    /// refused key, the transport error when nothing answered. Its presence is
+    /// what makes the cell read as "the key" rather than as "no answer": a 401
+    /// is the vendor responding, which reachability alone cannot tell apart from
+    /// silence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1908,6 +1944,7 @@ fn health_vm(
             note: Some("Disabled".into()),
             source: None,
             checked_at: None,
+            error: None,
         };
     }
     if let Some(ms) = aux.avg_latency(Some(&p.id), None, Some(since), None) {
@@ -1917,24 +1954,38 @@ fn health_vm(
             note: None,
             source: Some("traffic".into()),
             checked_at: None,
+            error: None,
         };
     }
     match probe {
+        // Answered. The number is a round trip, and `source` says whose: the
+        // prober's unsigned GET, or the Apps screen's own test — which sent a
+        // real prompt with the provider's key, and is therefore the stronger
+        // claim of the two.
         Some(h) if h.status == "reachable" => HealthVm {
-            state: "ok".into(),
+            // A refusal is reachability too: the vendor answered, and what it
+            // said was no. The cell reads that as the key rather than as
+            // silence, which is the difference the tooltip carries.
+            state: if h.error.is_some() {
+                "error".into()
+            } else {
+                "ok".into()
+            },
             latency_ms: h.latency_ms,
             note: None,
-            source: Some("probe".into()),
+            source: Some(h.source.clone()),
             checked_at: Some(h.checked_at.clone()),
+            error: h.error.clone(),
         },
         Some(h) => HealthVm {
             // No answer at all. Not a latency to print but a fact to show: the
-            // endpoint did not respond when the prober last asked.
+            // endpoint did not respond when it was last asked.
             state: "error".into(),
             latency_ms: None,
             note: None,
-            source: Some("probe".into()),
+            source: Some(h.source.clone()),
             checked_at: Some(h.checked_at.clone()),
+            error: h.error.clone(),
         },
         // Nothing measured it yet — a provider added a moment ago, or one whose
         // first probe has not come round. Nothing to say, which is what the
@@ -1945,6 +1996,7 @@ fn health_vm(
             note: None,
             source: None,
             checked_at: None,
+            error: None,
         },
     }
 }
@@ -7151,6 +7203,43 @@ mod tests {
         assert_eq!(in_use(&s), (false, true));
     }
 
+    /// What a latency test's three outcomes become on the row. The middle one is
+    /// the whole point of the `error` column: a refusal is the vendor answering,
+    /// which reachability alone cannot tell apart from silence.
+    #[test]
+    fn a_test_verdict_separates_a_refusal_from_silence() {
+        use crate::sidecar::PromptProbe;
+
+        // Answered, accepted.
+        let ok = Ok(PromptProbe {
+            latency_ms: 218,
+            status: 200,
+            error: None,
+        });
+        assert_eq!(test_verdict(&ok), ("reachable", 218, None));
+
+        // Answered, refused: reachable, and the reason travels with it.
+        let refused = Ok(PromptProbe {
+            latency_ms: 60,
+            status: 401,
+            error: Some("invalid API key".into()),
+        });
+        let (status, ms, error) = test_verdict(&refused);
+        assert_eq!(
+            status, "reachable",
+            "the vendor answered — that is the fact"
+        );
+        assert_eq!(ms, 60);
+        assert_eq!(error.as_deref(), Some("invalid API key"));
+
+        // Nobody answered.
+        let dead = Err("connection failed: dns error".to_string());
+        let (status, ms, error) = test_verdict(&dead);
+        assert_eq!(status, "down");
+        assert_eq!(ms, 0);
+        assert_eq!(error.as_deref(), Some("connection failed: dns error"));
+    }
+
     /// The Status column reads two sources and must not confuse them: a
     /// provider's own round trips when it has any, the prober's unsigned GET
     /// when it does not, and neither for a parked one.
@@ -7171,6 +7260,8 @@ mod tests {
             provider("idle", "Idle", Billing::Metered),
             provider("dead", "Dead", Billing::Metered),
             provider("fresh", "Fresh", Billing::Metered),
+            provider("tested", "Tested", Billing::Metered),
+            provider("refused", "Refused", Billing::Metered),
             parked,
         ] {
             s.insert_provider(&p).unwrap();
@@ -7179,10 +7270,20 @@ mod tests {
         // The prober has an opinion about all of them — including `busy`, whose
         // verdict is stale (it had no traffic when the probe ran). That stale row
         // is exactly what the order has to get right.
-        s.upsert_provider_health("busy", "reachable", 500).unwrap();
-        s.upsert_provider_health("idle", "reachable", 12).unwrap();
-        s.upsert_provider_health("dead", "down", 0).unwrap();
-        s.upsert_provider_health("parked", "reachable", 3).unwrap();
+        s.upsert_provider_health("busy", "reachable", 500, "probe", None)
+            .unwrap();
+        s.upsert_provider_health("idle", "reachable", 12, "probe", None)
+            .unwrap();
+        s.upsert_provider_health("dead", "down", 0, "probe", None)
+            .unwrap();
+        s.upsert_provider_health("parked", "reachable", 3, "probe", None)
+            .unwrap();
+        // The Apps screen's own test: a real prompt with the key. One answered,
+        // one refused — and a refusal is reachability with a reason, not silence.
+        s.upsert_provider_health("tested", "reachable", 218, "test", None)
+            .unwrap();
+        s.upsert_provider_health("refused", "reachable", 60, "test", Some("invalid API key"))
+            .unwrap();
 
         // Two requests of its own inside the window: 200ms on average.
         for ms in [180, 220] {
@@ -7225,6 +7326,22 @@ mod tests {
             parked_health.latency_ms, None,
             "out of every route outranks both"
         );
+
+        // A verdict the app took itself. The number and its provenance both
+        // travel: the cell says "you tested it", not "the gateway asked".
+        let tested = health("tested");
+        assert_eq!(tested.source.as_deref(), Some("test"));
+        assert_eq!(tested.latency_ms, Some(218));
+        assert_eq!(tested.state, "ok");
+        assert_eq!(tested.error, None);
+
+        // Answered and refused: reachable, with the vendor's reason. Read as an
+        // error state so the cell cannot pass it off as a working provider.
+        let refused = health("refused");
+        assert_eq!(refused.source.as_deref(), Some("test"));
+        assert_eq!(refused.state, "error");
+        assert_eq!(refused.error.as_deref(), Some("invalid API key"));
+        assert_eq!(refused.latency_ms, Some(60), "it did answer, in 60ms");
 
         let fresh = health("fresh");
         assert_eq!(

@@ -447,12 +447,21 @@ function deleteConsequence(p: Provider, routes: AgentRoute[] | null, t: Translat
 
 /** The row's latency test: one prompt, one number.
  *
- * It reports on the button rather than in the Status cell on purpose: it is a
- * measurement the reader just asked for — a real completion, so a slow model
- * reads slow — and the cell is for standing facts (parked, over a limit). A
- * number that only exists until the next refresh belongs where it was asked for.
+ * The number lands on the button — it is a measurement the reader just asked for,
+ * a real completion, so a slow model reads slow — but the click is also what
+ * makes the Status cell current. The backend records the verdict as this
+ * provider's health (`vm::test_provider_latency`), and `onTested` re-reads the
+ * row, so the cell shows what the click just found. That is the repair path for a
+ * stale or wrong verdict: a cell reading "No answer" while the endpoint plainly
+ * answers is exactly what this button can settle.
  */
-function TestLatencyButton({ provider }: { provider: Provider }) {
+function TestLatencyButton({
+  provider,
+  onTested,
+}: {
+  provider: Provider;
+  onTested: () => void;
+}) {
   const t = useT();
   const [state, setState] = useState<
     | { kind: "idle" }
@@ -469,6 +478,10 @@ function TestLatencyButton({ provider }: { provider: Provider }) {
       else setState({ kind: "done", ms: r.latency_ms, model: r.model });
     } catch (e) {
       setState({ kind: "failed", why: e instanceof Error ? e.message : String(e) });
+    } finally {
+      // Either way a verdict was recorded — a failure is a verdict too — so the
+      // row is re-read rather than left showing what it showed before.
+      onTested();
     }
   };
 
@@ -1028,27 +1041,40 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
       </div>
     );
   }
-  // Asked and not answered: a fact rather than a number.
+  // Measured, and not working. Two ways to get here, and the reason is what
+  // tells them apart: nothing answered at all, or something answered and
+  // refused the key — a 401 is the vendor talking, not the network being quiet,
+  // and reading it as silence sends the reader looking in the wrong place.
   if (h.state === "error") {
+    const said = h.error;
     return (
-      <div className="w-[14%]" title={t("providers.unreachableTitle", { time: fmtClock(h.checked_at) })}>
+      <div
+        className="w-[14%]"
+        title={
+          said
+            ? t("providers.refusedTitle", { error: said, time: fmtClock(h.checked_at) })
+            : t("providers.unreachableTitle", { time: fmtClock(h.checked_at) })
+        }
+      >
         <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
           <Dot state="error" />
-          {t("providers.unreachable")}
+          {said ? t("providers.refused") : t("providers.unreachable")}
         </span>
       </div>
     );
   }
   if (h.latency_ms == null) return <div className="w-[14%]" />;
+  // Whose measurement it is, in the tooltip: your own traffic, the gateway's
+  // unsigned GET, or the test you ran — each a different amount of proof, and
+  // the last one the only one that exercises the key on demand.
+  const title =
+    h.source === "traffic"
+      ? t("providers.latencyTraffic")
+      : h.source === "test"
+        ? t("providers.latencyTest", { time: fmtClock(h.checked_at) })
+        : t("providers.latencyProbe", { time: fmtClock(h.checked_at) });
   return (
-    <div
-      className="w-[14%]"
-      title={
-        h.source === "probe"
-          ? t("providers.latencyProbe", { time: fmtClock(h.checked_at) })
-          : t("providers.latencyTraffic")
-      }
-    >
+    <div className="w-[14%]" title={title}>
       <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
         <Dot state="ok" />
         <span className="font-mono">{fmtLatency(h.latency_ms)}</span>
@@ -1153,7 +1179,7 @@ function ProviderRow({
           confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         }`}
       >
-        <TestLatencyButton provider={p} />
+        <TestLatencyButton provider={p} onTested={onChanged} />
         {/* A player's transport pair: start it, or stop it. The glyph is the
             action the click takes, so a working row offers ⏸ and a parked one
             offers ▶ — and the *state* is already on the row, in the Status cell,

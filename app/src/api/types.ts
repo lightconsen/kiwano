@@ -69,20 +69,28 @@ export const AGENTS: AgentMeta[] = [
 ];
 
 export interface ProviderHealth {
-  /** `ok` — measured and answering (either source below). `error` — the prober
-      asked and got no answer. `off` — parked by the user. `idle` — enabled with
-      nothing known against it yet: no traffic in the window, no verdict on file.
-      Today's equivalent of the blank cell. */
+  /** `ok` — measured and answering. `error` — measured and not working: either
+      nothing answered, or something did and refused the key (see `error`).
+      `off` — parked by the user. `idle` — enabled with nothing known against it
+      yet: no traffic in the window, no verdict on file. Today's equivalent of
+      the blank cell. */
   state: "ok" | "error" | "idle" | "off";
   /** The round trip behind `state: "ok"`; null otherwise. */
   latency_ms: number | null;
   /** Status column suffix note: `Disabled` — omitted when there is nothing to
       say, which is the ordinary case. */
   note?: string;
-  /** Where `latency_ms` came from, and the two are not the same claim:
+  /** Where `latency_ms` came from, and these are not the same claim:
       `traffic` is this provider's own requests through the gateway (with the
-      user's key), `probe` is the gateway's unsigned GET to its endpoint. */
-  source?: "traffic" | "probe";
+      user's key), `probe` is the gateway's unsigned GET to its endpoint, and
+      `test` is the Apps screen's own latency test — a real prompt, sent with the
+      key, which is the strongest of the three. */
+  source?: "traffic" | "probe" | "test";
+  /** What the endpoint said when it said no: the vendor's own message for a
+      refused key ("invalid API key"), or the transport error when nothing
+      answered. Its presence is what separates "the key is wrong" from "nobody
+      answered" — a 401 is the vendor responding. */
+  error?: string;
   /** When the probe ran (RFC3339). `probe` only: a traffic average covers a
       window, not an instant. */
   checked_at?: string;

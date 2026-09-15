@@ -369,6 +369,9 @@ const MATRIX: MatrixSpec[] = [
     plan_limits: { five_hour: 50, weekly: 90 },
     plan_query: { template: "zhipu" },
     usage: null,
+    // Nothing has run through it, so the only thing that could have measured it
+    // is the row's own Test — which is the case that button exists for.
+    health: { state: "ok", latency_ms: 218, source: "test", checked_at: "2026-09-15T11:38:00Z" },
   },
   {
     id: "m-plan-over",
@@ -403,6 +406,23 @@ const MATRIX: MatrixSpec[] = [
       latency_ms: 700,
       quota: null,
       spark: null,
+    },
+  },
+  {
+    id: "m-key-refused",
+    name: "PAYG · key refused",
+    logo: "×",
+    color: "#9F1239",
+    billing: "payg",
+    usage: null,
+    // Reachable, and unusable: the vendor answered and said no. The cell has to
+    // read as the key rather than as silence — a 401 is not "nobody is home".
+    health: {
+      state: "error",
+      latency_ms: 60,
+      source: "test",
+      checked_at: "2026-09-15T11:38:00Z",
+      error: "invalid API key",
     },
   },
   {
@@ -1434,10 +1454,26 @@ export const devApi: KiwanoApi = {
     const p = providers.find((x) => x.id === id);
     if (!p) throw new Error(`provider not found: ${id}`);
     const model = p.model_default ?? "ping-model";
+    const checked_at = new Date().toISOString();
+    // …and it records the verdict, because that is what the backend does
+    // (`vm::test_provider_latency` writes it as the provider's health) and it is
+    // what makes the Status cell catch up after a click. A mock that only moved
+    // the number on the button would send `pnpm dev` looking at a cell that
+    // stays stale — the disagreement this file's header warns about.
     if (p.enabled === false) {
+      // Answered and refused: a 401 is the vendor talking, so reachability is
+      // not what failed — the key is.
+      p.health = {
+        state: "error",
+        latency_ms: 180,
+        source: "test",
+        checked_at,
+        error: "invalid API key",
+      };
       return { provider_id: id, model, latency_ms: 180, status: 401, error: "invalid API key" };
     }
     const base = 220 + (id.length % 7) * 130;
+    p.health = { state: "ok", latency_ms: base, source: "test", checked_at };
     return { provider_id: id, model, latency_ms: base, status: 200, error: null };
   },
 

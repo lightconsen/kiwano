@@ -33,8 +33,11 @@ export const providers = {
   latencyTraffic: "该 Provider 最近 24 小时自己请求的平均延迟",
   latencyProbe:
     "可达性：网关向该端点发起了一次不带凭据的请求 —— 它只说明那里有东西应答，不校验你的 Key · 检查于 {time}",
+  latencyTest: "你测试过 —— 用该 Provider 的 Key 真发了一次请求 · 测量于 {time}",
   unreachable: "无响应",
-  unreachableTitle: "网关询问时该端点没有应答 · 检查于 {time}",
+  unreachableTitle: "上次询问时该端点没有应答 · 检查于 {time}",
+  refused: "密钥被拒",
+  refusedTitle: "端点有应答但拒绝了这个 Key：{error} · 检查于 {time}",
 
   // ── Usage / quota cell ──
   usagePlanLimits: "套餐 · 上限 {windows} · 以该 Provider 的套餐配额使用率为准{tokens}",

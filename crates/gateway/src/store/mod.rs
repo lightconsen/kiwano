@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 21;
+pub const SCHEMA_VERSION: i32 = 22;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -615,6 +615,27 @@ CREATE TABLE IF NOT EXISTS provider_health (
 );
 "#;
 
+/// v22: a health verdict says who took it and what came back.
+///
+/// The table arrived in v21 with the prober, and the Apps screen's own latency
+/// test had no way to record what it measured — the button's number was the whole
+/// life of the measurement, which left the one case it could have answered (a
+/// stale or wrong verdict, with the endpoint plainly working) with nowhere to go.
+///
+/// `source` names the measurer, because the two are not the same claim: `probe`
+/// is an unsigned GET that proves something answers at that address, `test` is a
+/// real prompt sent with the provider's key. `error` carries the vendor's own
+/// message when the answer was not a success — "invalid API key" — because that
+/// is a different fact from silence, and the cell has to be able to say it.
+///
+/// No rebuild: the v21 CHECK still allows exactly the two status words, and a
+/// refusal is not a third one. A 401 *is* reachable — the vendor answered — so
+/// what went wrong belongs in `error`, not in the status.
+const MIGRATION_V22: &str = r#"
+ALTER TABLE provider_health ADD COLUMN source TEXT NOT NULL DEFAULT 'probe';
+ALTER TABLE provider_health ADD COLUMN error TEXT;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -736,11 +757,23 @@ pub struct ProviderEndpoint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderHealth {
     pub provider_id: String,
-    /// `reachable` | `down`
+    /// `reachable` | `down`.
+    ///
+    /// Two values, and a refusal is the first of them: a 401 is the vendor
+    /// answering, which is what reachability asks. Whether it *accepted* the key
+    /// is a different question — `error` carries its answer to that one.
     pub status: String,
     /// The round trip it measured; NULL for a probe that got no answer.
     pub latency_ms: Option<i64>,
     pub checked_at: String,
+    /// Who measured it: `probe` (the gateway's unsigned GET) or `test` (the
+    /// Apps screen's own latency test, which sends a real prompt with the
+    /// provider's key). The two are not the same claim — one proves something
+    /// answers there, the other proves your key works — so the cell says which.
+    pub source: String,
+    /// The vendor's own message when the answer was not a success ("invalid API
+    /// key"), or the transport error when there was no answer at all.
+    pub error: Option<String>,
 }
 
 /// A configured upstream provider.
@@ -1688,6 +1721,9 @@ impl Store {
         }
         if version < 21 {
             conn.execute_batch(MIGRATION_V21)?;
+        }
+        if version < 22 {
+            conn.execute_batch(MIGRATION_V22)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -2950,14 +2986,16 @@ impl Store {
         provider_id: &str,
         status: &str,
         latency_ms: i64,
+        source: &str,
+        error: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO provider_health (provider_id, status, latency_ms, checked_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO provider_health (provider_id, status, latency_ms, checked_at, source, error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(provider_id) DO UPDATE SET
-                status = ?2, latency_ms = ?3, checked_at = ?4",
-            params![provider_id, status, latency_ms, now_rfc3339()],
+                status = ?2, latency_ms = ?3, checked_at = ?4, source = ?5, error = ?6",
+            params![provider_id, status, latency_ms, now_rfc3339(), source, error],
         )?;
         Ok(())
     }
@@ -2969,7 +3007,7 @@ impl Store {
     pub fn list_provider_health(&self) -> Result<Vec<ProviderHealth>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT provider_id, status, latency_ms, checked_at
+            "SELECT provider_id, status, latency_ms, checked_at, source, error
              FROM provider_health ORDER BY provider_id",
         )?;
         let rows = stmt
@@ -2979,6 +3017,8 @@ impl Store {
                     status: row.get(1)?,
                     latency_ms: row.get(2)?,
                     checked_at: row.get(3)?,
+                    source: row.get(4)?,
+                    error: row.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -4275,7 +4315,7 @@ mod tests {
         assert!(store.list_provider_health().unwrap().is_empty());
 
         store
-            .upsert_provider_health("p-probe", "reachable", 42)
+            .upsert_provider_health("p-probe", "reachable", 42, "probe", None)
             .unwrap();
         let rows = store.list_provider_health().unwrap();
         assert_eq!(rows.len(), 1);
@@ -4286,16 +4326,76 @@ mod tests {
 
         // A second round replaces the verdict rather than adding one: the table
         // holds the latest answer, and a provider going down is one row moving.
-        store.upsert_provider_health("p-probe", "down", 0).unwrap();
+        store
+            .upsert_provider_health("p-probe", "down", 0, "test", Some("invalid API key"))
+            .unwrap();
         let rows = store.list_provider_health().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, "down");
+        assert_eq!(rows[0].source, "test", "the verdict says who took it");
+        assert_eq!(rows[0].error.as_deref(), Some("invalid API key"));
         assert_eq!(rows[0].latency_ms, Some(0));
 
         // The row is the provider's: deleting it takes the verdict with it (the
         // FK cascade, which is why the table can be read without a join).
         store.delete_provider("p-probe").unwrap();
         assert!(store.list_provider_health().unwrap().is_empty());
+    }
+
+    /// v21 → v22: a verdict already on file keeps its numbers and gains the two
+    /// new columns with the values that describe it — it was the prober's.
+    #[test]
+    fn migration_v22_backfills_a_verdict_already_on_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+                MIGRATION_V21,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing,
+                                        created_at, updated_at)
+                 VALUES ('p-old', 'Old', 'openai', 'https://api.example.com', 'metered',
+                         't0', 't0');
+                 INSERT INTO provider_health (provider_id, status, latency_ms, checked_at)
+                 VALUES ('p-old', 'reachable', 42, '2026-09-15T00:00:00Z');
+                 PRAGMA user_version = 21;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let rows = store.list_provider_health().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].latency_ms, Some(42), "the numbers survive");
+        assert_eq!(
+            rows[0].source, "probe",
+            "a verdict from before this migration was only ever the prober's"
+        );
+        assert_eq!(rows[0].error, None, "nothing had recorded a reason");
     }
 
     /// v20 → v21: the health table comes back for a database that had it dropped.
@@ -4345,7 +4445,7 @@ mod tests {
         // The table exists and is empty; the provider is untouched.
         assert!(store.list_provider_health().unwrap().is_empty());
         store
-            .upsert_provider_health("p-old", "reachable", 7)
+            .upsert_provider_health("p-old", "reachable", 7, "probe", None)
             .unwrap();
         assert_eq!(store.list_provider_health().unwrap()[0].latency_ms, Some(7));
         assert_eq!(

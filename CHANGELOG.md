@@ -19,6 +19,29 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **The latency test records what it measured.** An Apps row's Test button has
+  always sent a real prompt and shown the number on the button, and that was the
+  whole life of the measurement — which left the one case it could have settled
+  with nowhere to go: a Status cell reading `No answer` while the endpoint plainly
+  answers. The click now writes its verdict as that provider's health, beside the
+  prober's and the provider's own traffic, and the row is re-read, so the cell
+  shows what the click just found. It is also the only one of the three that works
+  on demand — the traffic average needs traffic, and the prober only asks about
+  providers that have none. The button is on an agent's rows as well as the All
+  row's, since it measures the *provider* rather than the binding and both tabs
+  read the one verdict; parking stays on the All tab, where it reads as what it
+  is — an act on every agent at once.
+
+  The three readings stay apart, and the cell says which it is showing: your own
+  requests, the gateway's unsigned `GET`, or the test you ran. A verdict now
+  carries the reason when there is one, and a refusal is the case that needed it:
+  a 401 is the vendor answering and saying no to your key, which is not the same
+  fact as nobody being home. It reads `Key refused`, with the vendor's own message
+  in the tooltip, rather than joining `No answer` — reading it as silence sends
+  the reader looking at the network instead of at the key.
+
 ## [0.1.11] - 2026-09-15
 
 ### Added

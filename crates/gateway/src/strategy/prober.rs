@@ -87,7 +87,10 @@ pub async fn probe_once(store: &Store, client: &reqwest::Client) {
             Ok(_) => ("reachable", started.elapsed().as_millis() as i64),
             Err(_) => ("down", 0),
         };
-        if let Err(e) = store.upsert_provider_health(&p.id, status, latency_ms) {
+        // No error text on a failure: the prober's question is reachability, and
+        // `status` already answers it. The reason a *test* failed is the app's to
+        // record — see `vm::test_provider_latency`.
+        if let Err(e) = store.upsert_provider_health(&p.id, status, latency_ms, "probe", None) {
             tracing::warn!(provider = %p.id, error = %e, "failed to persist provider health");
         } else if status == "down" {
             tracing::warn!(provider = %p.id, url = %url, "health probe: unreachable");

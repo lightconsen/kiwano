@@ -2042,23 +2042,10 @@ export default function Providers({
         />
       )}
 
-      {/* Single closing note. In a taken-over agent tab with a route it also
-          carries the strategy context (the StrategyPanel select row has no
-          header of its own).
-          A user-defined agent's tab has none: there is no takeover to explain, its
-          settings name themselves, and the privacy sentences are already on every
-          other tab this screen shows. */}
-      {!custom && (
-        <div className="mt-auto truncate px-4 py-3 text-[10.5px] text-mut">
-          {notTakenOver
-            ? t("providers.footerNotTakenOver")
-            : seg !== "all" &&
-                (takenOver?.has(seg) ?? false) &&
-                (routes?.some((r) => r.agent === seg) ?? false)
-              ? t("providers.footerStrategy")
-              : t("providers.footerDefault")}
-        </div>
-      )}
+      {/* No closing note. It had grown into a strip of standing boilerplate —
+          the privacy sentences, "switching applies instantly", how to read the
+          table — repeated at the foot of every tab, where the rows and their own
+          tooltips already say what each column means and what each control does. */}
     </section>
   );
 }

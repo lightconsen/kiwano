@@ -846,28 +846,6 @@ export default function AddProviderModal({
 
             <div>
               <Label className="text-[11px] font-medium text-mut">
-                {t("addProvider.protocol")}
-              </Label>
-              {/* Read-only coverage: every supported protocol renders as a lit
-                  badge (primary + each additional endpoint), the rest dimmed.
-                  The authoritative selection is the per-endpoint rows below. */}
-              <div className="mt-1 flex gap-1.5">
-                {protocolOptions.map((p) => (
-                  <span
-                    key={p.id}
-                    className="flex h-7 cursor-default items-center rounded-md border px-2 text-[11.5px]"
-                    style={supportedProtocols.has(p.id)
-                      ? { borderColor: "var(--kiwi-dim)", background: "var(--kiwi-soft)", color: "var(--kiwi)" }
-                      : { borderColor: "var(--line)", color: "var(--mut)" }}
-                  >
-                    {p.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-[11px] font-medium text-mut">
                 {t("addProvider.apiKey")}{" "}
                 <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
                   {edit ? t("addProvider.keyKeep") : t("addProvider.keyLocal")}
@@ -898,7 +876,13 @@ export default function AddProviderModal({
                 another protocol natively (same API key pool). A catalog entry
                 brings its own list and it is read-only while that entry owns the
                 form; a provider typed in by hand — and an existing row, which is
-                the user's own already — can add and drop them. */}
+                the user's own already — can add and drop them.
+
+                There used to be a "Protocol" block above this one: two badges,
+                one per protocol, lit for the ones the rows cover. It was the
+                rows' own union drawn a second time — its comment already said the
+                per-endpoint rows were authoritative — so it is gone, and each row
+                carries its protocol itself. */}
             <div>
               <Label className="text-[11px] font-medium text-mut">
                 {t("addProvider.endpointUrl")}{" "}

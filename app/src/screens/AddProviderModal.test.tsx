@@ -93,8 +93,8 @@ describe("adding a provider by hand", () => {
   it("lets the user pick the protocol", async () => {
     const user = await openCustom();
 
-    // The badge row above the endpoints is derived from these rows, so the
-    // picker is the authoritative control it always claimed to be.
+    // The endpoint row is where the protocol lives, and it is the only control
+    // for it — the block that used to summarise the rows was removed.
     await user.click(screen.getByRole("combobox", { name: en.addProvider.protocol }));
     await user.click(await screen.findByRole("option", { name: "Anthropic" }));
 
@@ -169,5 +169,9 @@ describe("adding a provider from the catalog", () => {
     expect(screen.queryByRole("button", { name: en.addProvider.addEndpoint })).toBeNull();
     expect(screen.queryByRole("combobox", { name: en.addProvider.protocol })).toBeNull();
     expect(screen.queryByRole("button", { name: en.addProvider.removeEndpoint })).toBeNull();
+
+    // Not a picker, but still said: the endpoint row carries its protocol, which
+    // is what the block above it used to repeat as a pair of lit badges.
+    expect(screen.getByText("Anthropic")).toBeInTheDocument();
   });
 });

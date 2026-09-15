@@ -1113,6 +1113,8 @@ mod tests {
             id: "a".into(),
             name: "a".into(),
             catalog_id: None,
+            // No declared prices: this fixture is priced by the Hub's table.
+            prices: None,
             protocol: Protocol::Anthropic,
             base_url: "https://a.example.com".into(),
             api_path: None,
@@ -1191,6 +1193,8 @@ mod tests {
             id: "a".into(),
             name: "a".into(),
             catalog_id: None,
+            // No declared prices: this fixture is priced by the Hub's table.
+            prices: None,
             protocol: Protocol::Anthropic,
             base_url: "https://a.example.com".into(),
             api_path: None,

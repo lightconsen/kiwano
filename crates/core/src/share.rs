@@ -189,6 +189,14 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> 
                         &vm::known_limit_currencies(store),
                     )?,
                     reset_period: sp.reset_period.clone(),
+                    // What the user declared this provider charges, re-validated
+                    // the way the limit's unit just above is: it travels with
+                    // the row, so a shared provider keeps being costed at its
+                    // own rates rather than falling back to the Hub's.
+                    prices: vm::import_declared_prices(
+                        sp.prices.as_deref(),
+                        &vm::known_limit_currencies(store),
+                    )?,
                     // Plan-query credentials are intentionally not shared.
                     plan_query: None,
                     // Percent limits carry over (no credentials inside).
@@ -248,6 +256,8 @@ mod tests {
             id: id.into(),
             name: name.into(),
             catalog_id: None,
+            // No declared prices: this fixture is priced by the Hub's table.
+            prices: None,
             protocol: Protocol::OpenAI,
             base_url: base_url.into(),
             api_path: None,

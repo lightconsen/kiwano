@@ -82,6 +82,26 @@ export const addProvider = {
   spendingLimitHint: "optional · leave blank to show the usage trend",
   currencyTitle: "{currency} — the currency this provider bills in",
 
+  // ── Declared prices ──
+  // Offered on pay-as-you-go, for a provider the form is the user's own: the
+  // Hub prices the models of its catalog entries, and a provider that names none
+  // has no published rate to be costed at. The section hides while an entry owns
+  // the form (adding from Models), exactly as the protocol, the endpoints and the
+  // currency do.
+  prices: "Prices",
+  pricesHint: "optional · per million tokens in {currency}",
+  priceModel: "Model",
+  priceModelPlaceholder: "model-id",
+  priceIn: "Input",
+  priceOut: "Output",
+  priceCacheRead: "Cache read",
+  priceCacheWrite: "Cache write",
+  addPrice: "Add model",
+  removePrice: "Remove this model's price",
+  pricesBody:
+    "What this provider charges. These figures cost its requests and its spending limit is measured against them, so they take precedence over the Hub's. A model you leave out is priced from the Hub's table, or recorded unpriced; a cache rate left blank charges nothing for that bucket.",
+  priceInvalid: "Every rate must be a number, zero or more",
+
   // ── Plan, but nothing that can be asked ──
   noQuotaEndpoint:
     "No quota endpoint · this vendor publishes no way to read plan usage with your key alone",

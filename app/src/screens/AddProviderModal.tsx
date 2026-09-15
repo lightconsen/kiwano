@@ -29,10 +29,12 @@ import {
   type Billing,
   type CatalogBilling,
   type CatalogEntry,
+  type DeclaredPrice,
   type ProbeReport,
   type Protocol,
   type Provider,
 } from "../api/types";
+import type { KeyPath, Messages } from "../i18n";
 import { AgentChip } from "@/components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
@@ -45,6 +47,20 @@ import { hubAssetUrl, useHubUrl } from "../lib/hub";
 /// actually set: some headroom, a lot of headroom, or "only once the window is
 /// full" — which is a value, not the same as leaving the box blank.
 const PLAN_PRESET_PCTS = [80, 90, 100];
+
+/// The four rates one declared-price row collects, in the price table's own
+/// order: `DeclaredPrice` is read back with exactly these fields, and the order
+/// is the one every price in the app is printed in (input, output, cache read,
+/// cache write).
+const RATE_FIELDS: {
+  key: keyof Omit<DeclaredPrice, "model_id">;
+  labelKey: KeyPath<Messages>;
+}[] = [
+  { key: "input", labelKey: "addProvider.priceIn" },
+  { key: "output", labelKey: "addProvider.priceOut" },
+  { key: "cache_read", labelKey: "addProvider.priceCacheRead" },
+  { key: "cache_creation", labelKey: "addProvider.priceCacheWrite" },
+];
 
 function probeColor(verdict: ProbeReport["verdict"]): string {
   return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
@@ -176,6 +192,12 @@ export default function AddProviderModal({
   // vendor's rolling 5-hour / weekly windows (blank = no limit on it).
   const [planFiveHour, setPlanFiveHour] = useState("");
   const [planWeekly, setPlanWeekly] = useState("");
+  // What this provider charges, per million tokens in the currency above — the
+  // figures the gateway costs its requests with. Held as the form wrote them
+  // (TEXT decimals, blank boxes included) so a half-typed row survives a
+  // re-render; the blanks become zeros on the way out, which is the backend's
+  // own reading of a rate nobody stated.
+  const [prices, setPrices] = useState<DeclaredPrice[]>([]);
 
   /** Whether the form is bound to a catalog entry — Add-from-Models before the
       user switches to Custom.
@@ -197,6 +219,10 @@ export default function AddProviderModal({
     setAltProbes({});
     setModel(e.models[0] ?? "");
     setBilling(e.billing);
+    // An entry prices what it publishes, so whatever the user had declared for
+    // some other provider is not this provider's prices — and leaving them would
+    // show them again if the form came back to Custom in the same session.
+    setPrices([]);
     setLimitValue(e.billing === "payg" ? "50" : "");
     // Its prices are published in this, so the limit has to be too. An entry that
     // publishes none (the field is younger than some of them) leaves the user's own
@@ -322,6 +348,10 @@ export default function AddProviderModal({
       setLimitCurrency(savedCurrency ?? preferredCurrency);
       setPlanFiveHour(edit.plan_limits?.five_hour != null ? String(edit.plan_limits.five_hour) : "");
       setPlanWeekly(edit.plan_limits?.weekly != null ? String(edit.plan_limits.weekly) : "");
+      // What the row declared, back into the boxes it came from. A null blob is
+      // read as no rows rather than an error: it is what a provider priced by
+      // the Hub carries, which is almost all of them.
+      setPrices((edit.prices?.models ?? []).map((m) => ({ ...m })));
       setAgents([...edit.agents]);
       const pq = edit.plan_query;
       setPqTemplate(pq?.template ?? "");
@@ -356,6 +386,7 @@ export default function AddProviderModal({
       setModel("");
       setBilling("payg");
       setLimitValue("");
+      setPrices([]);
       setPqTemplate("");
       setPqFields({});
         setPlanFiveHour("");
@@ -479,6 +510,42 @@ export default function AddProviderModal({
     return !Number.isFinite(pct) || pct <= 0 || pct > 100;
   };
 
+  /** A declared rate: blank (a box not filled in yet), or a number that is zero
+   * or more.
+   *
+   * Blank is allowed through because a row is entered field by field, and a
+   * rate the user never states is zero — the backend reads it that way, and the
+   * section's own note says so. Anything else is refused rather than dropped:
+   * the price table parses these as numbers when it costs a request, so a stray
+   * character would become the cost of *every* request this provider serves. */
+  const invalidRate = (raw: string): boolean => {
+    if (raw.trim() === "") return false;
+    const rate = Number(raw);
+    return !Number.isFinite(rate) || rate < 0;
+  };
+  const badPrice = prices.some((row) =>
+    RATE_FIELDS.some((f) => invalidRate(row[f.key])),
+  );
+
+  /** Patch one row: its model id, or one of its four rates. */
+  const setPrice = (i: number, patch: Partial<DeclaredPrice>) =>
+    setPrices((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
+
+  /** A new row, seeded with the default model when the form has one and does
+   * not already price it: the model this provider routes is the one whose rates
+   * the user came here to write down. */
+  const addPrice = () =>
+    setPrices((rows) => [
+      ...rows,
+      {
+        model_id: rows.some((r) => r.model_id.trim() === model.trim()) ? "" : model.trim(),
+        input: "",
+        output: "",
+        cache_read: "",
+        cache_creation: "",
+      },
+    ]);
+
   /** One plan-window ceiling: a field that reads as a percentage, the presets
       beside the window's name, and the reason when it cannot be saved. */
   /** One endpoint row's protocol: a badge while a catalog entry owns the form, a
@@ -557,6 +624,7 @@ export default function AddProviderModal({
     billing !== "both" &&
     !invalidPct(planFiveHour) &&
     !invalidPct(planWeekly) &&
+    !badPrice &&
     !saving;
 
   // Billing is intrinsic to the provider: locked to the catalog entry when
@@ -572,6 +640,15 @@ export default function AddProviderModal({
   // lock below keys on. Putting it in there is the trap: the pills would lock
   // into a read-only label saying `both`, and saving would send it.
   const billingKnown = billing === "both" || billOptions.some((b) => b.id === billing);
+  /** Whether the declared-price section is offered — and whether the save
+   * speaks about prices at all.
+   *
+   * Pay-as-you-go only: the other two modes have no per-token charge for a
+   * price to describe. And only while the form is the user's own, which is the
+   * same rule the protocol, the endpoints and the currency follow: a catalog
+   * entry prices the models it publishes, so there is nothing to declare while
+   * it owns the form. */
+  const priceRowsShown = billing === "payg" && !fromEntry;
   /** A catalog entry that charges both ways at one address — the one case where
       the billing mode is the user's to pick, because the catalog names two
       arrangements for one host and cannot know which this provider is.
@@ -685,6 +762,25 @@ export default function AddProviderModal({
                 limit_value: limitValue ? Number(limitValue) : undefined,
                 limit_unit: billing === "payg" ? limitCurrency : undefined,
               },
+        // What this provider charges, in the currency the limit is in. Absent
+        // while the section is hidden — the form is then saying nothing about
+        // prices, and the stored ones stand; an empty list is it saying "none",
+        // which clears them. That asymmetry is the whole reason the field is
+        // sent as `undefined` rather than as an empty bundle.
+        prices: priceRowsShown
+          ? {
+              currency: limitCurrency,
+              models: prices
+                .filter((row) => row.model_id.trim() !== "")
+                .map((row) => ({
+                  model_id: row.model_id.trim(),
+                  input: row.input.trim() || "0",
+                  output: row.output.trim() || "0",
+                  cache_read: row.cache_read.trim() || "0",
+                  cache_creation: row.cache_creation.trim() || "0",
+                })),
+            }
+          : undefined,
         // Add only — see the binding control above: an edit leaves the bindings
         // to the agent tabs rather than re-promoting itself through them.
         ...(edit ? {} : { agents }),
@@ -1193,6 +1289,80 @@ export default function AddProviderModal({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+              </div>
+            )}
+
+            {/* What this provider charges, for a pay-as-you-go provider with no
+                catalog entry behind it: the Hub prices its own entries' models,
+                so without these figures a hand-added provider is costed at
+                whatever the general table happens to say about the model — or
+                recorded unpriced, which leaves its spending limit with nothing
+                to measure. Two lines per model: the id, then its four rates. */}
+            {priceRowsShown && (
+              <div>
+                <Label className="text-[11px] font-medium text-mut">
+                  {t("addProvider.prices")}{" "}
+                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
+                    {t("addProvider.pricesHint", { currency: limitCurrency })}
+                  </span>
+                </Label>
+                <div className="mt-1 space-y-1.5">
+                  {prices.map((row, i) => (
+                    <div key={i} className="rounded-md border border-line px-2 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          className="h-7 min-w-0 flex-1 bg-bg font-mono text-[11.5px] dark:bg-bg"
+                          value={row.model_id}
+                          onChange={(e) => setPrice(i, { model_id: e.target.value })}
+                          aria-label={t("addProvider.priceModel")}
+                          placeholder={t("addProvider.priceModelPlaceholder")}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="flex-none text-mut"
+                          aria-label={t("addProvider.removePrice")}
+                          title={t("addProvider.removePrice")}
+                          onClick={() => setPrices((rows) => rows.filter((_, j) => j !== i))}
+                        >
+                          <XIcon />
+                        </Button>
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-1">
+                        {RATE_FIELDS.map((f) => (
+                          <label key={f.key} className="flex min-w-0 items-center gap-1.5">
+                            <span className="flex-none text-[10px] text-mut">
+                              {t(f.labelKey)}
+                            </span>
+                            <Input
+                              className="h-7 min-w-0 flex-1 bg-bg font-mono text-[11.5px] dark:bg-bg"
+                              value={row[f.key]}
+                              onChange={(e) => setPrice(i, { [f.key]: e.target.value })}
+                              inputMode="decimal"
+                              aria-invalid={invalidRate(row[f.key])}
+                              aria-label={t(f.labelKey)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-full gap-1 text-[11px] text-mut"
+                    onClick={addPrice}
+                  >
+                    <Plus className="h-3 w-3" />
+                    {t("addProvider.addPrice")}
+                  </Button>
+                  <p className="text-[10.5px] text-mut">{t("addProvider.pricesBody")}</p>
+                  {badPrice && (
+                    <p className="text-[10.5px]" style={{ color: "var(--red)" }}>
+                      {t("addProvider.priceInvalid")}
+                    </p>
+                  )}
                 </div>
               </div>
             )}

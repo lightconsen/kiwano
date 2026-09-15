@@ -72,6 +72,24 @@ export const addProvider = {
   spendingLimitHint: "可选 · 留空则显示用量趋势",
   currencyTitle: "{currency} —— 该 Provider 的计费货币",
 
+  // ── 自填价格 ──
+  // 仅在按量付费、且表单归用户自己所有时出现：模型库只为自己条目的模型定价，
+  // 而一个不属于任何条目的 Provider 没有可用的公开价格。当条目接管表单（从模型库
+  // 添加）时该区块隐藏，与协议、端点、货币三者的规则一致。
+  prices: "价格",
+  pricesHint: "可选 · 每百万 token，单位 {currency}",
+  priceModel: "模型",
+  priceModelPlaceholder: "模型 ID",
+  priceIn: "输入",
+  priceOut: "输出",
+  priceCacheRead: "缓存读取",
+  priceCacheWrite: "缓存写入",
+  addPrice: "添加模型",
+  removePrice: "移除该模型的价格",
+  pricesBody:
+    "该 Provider 的收费标准。这些数字用于计算它的请求成本，消费上限也以此为基准，因此优先于模型库的价格。价格留空的模型按模型库的表计算，查不到则记为未定价；缓存价格留空表示该项不计费。",
+  priceInvalid: "每项价格都必须是 0 或以上的数字",
+
   // ── Unlimited ──
   noQuotaEndpoint: "厂商未提供额度查询接口 · 无法仅凭你的 Key 读取套餐用量",
   noQuotaConfig: "未配置配额 · 列表中不显示用量信息",

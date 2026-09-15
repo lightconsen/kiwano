@@ -150,9 +150,18 @@ impl UsageSample {
 /// currency, with the off-peak equivalent beside it. Unpriced / unknown models
 /// yield `(None, None, None)` (row keeps NULL cost).
 ///
-/// The lookup asks for the *catalog* provider, since that is who the Hub
-/// publishes prices for; a provider that never came from the shelf asks for no
-/// provider and gets the general rate rather than nothing.
+/// Two rungs, in this order:
+///
+/// 1. **What the user declared for this provider** (`providers.prices`), keyed by
+///    the provider row's own id. It wins over the Hub's figures because it *is*
+///    the user's statement about what this provider charges — and for a provider
+///    the Hub publishes nothing for, it is the only statement anyone has made.
+///    A miss here is a miss: the declared table is asked with `find_declared`,
+///    which does not fall back to another provider's row, or a model the user
+///    left out would be billed at a neighbour's rate.
+/// 2. **The Hub's table**, asked for the *catalog* provider, since that is who
+///    the Hub publishes prices for. A provider that never came from the shelf
+///    asks for no provider and gets the general rate rather than nothing.
 fn compute_sample_cost(
     state: &GatewayState,
     sample: &UsageSample,
@@ -160,8 +169,15 @@ fn compute_sample_cost(
     let Some(model) = sample.model.as_deref().filter(|m| !m.is_empty()) else {
         return (None, None, None);
     };
+    let declared = state
+        .declared
+        .read()
+        .expect("declared pricing lock poisoned");
     let pricing = state.pricing.read().expect("pricing lock poisoned");
-    let Some(entry) = pricing.find(sample.catalog_id.as_deref().unwrap_or_default(), model) else {
+    let Some(entry) = declared
+        .find_declared(&sample.provider_id, model)
+        .or_else(|| pricing.find(sample.catalog_id.as_deref().unwrap_or_default(), model))
+    else {
         return (None, None, None);
     };
     let pair = kiwano_adapters::model_pricing::compute_cost_pair(
@@ -1792,6 +1808,8 @@ mod tests {
                 id: "p1".into(),
                 name: "p1".into(),
                 catalog_id: None,
+                // No declared prices: this fixture is priced by the Hub's table.
+                prices: None,
                 protocol: Protocol::Anthropic,
                 base_url: "https://a.example.com".into(),
                 api_path: None,
@@ -1882,6 +1900,8 @@ mod tests {
                     id: id.into(),
                     name: id.into(),
                     catalog_id: catalog_id.map(str::to_string),
+                    // No declared prices: this fixture is priced by the Hub's table.
+                    prices: None,
                     protocol: Protocol::Anthropic,
                     base_url: "https://a.example.com".into(),
                     api_path: None,
@@ -1942,6 +1962,255 @@ mod tests {
         );
     }
 
+    /// The prices a user declared for their own provider cost its requests, and
+    /// they cost them **first** — ahead of the catalog entry's published rates
+    /// and ahead of the general row.
+    ///
+    /// The case this exists for is a provider the Hub cannot price at all: a
+    /// hand-added one, which used to be costed at whatever the general table
+    /// happened to say about the model (or at nothing). The second half is the
+    /// boundary of that: a model the user did *not* declare still falls through
+    /// to the Hub's table, so declaring one price does not price the rest at a
+    /// neighbour's rate.
+    #[test]
+    fn record_sample_uses_the_prices_the_user_declared() {
+        use crate::store::Protocol;
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        let priced = |provider_id: &str, model_id: &str, input: &str| {
+            kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
+                provider_id: provider_id.into(),
+                model_id: model_id.into(),
+                off_peak: None,
+                peak_hours: None,
+                display_name: model_id.into(),
+                input: input.into(),
+                output: "0".into(),
+                cache_read: "0".into(),
+                cache_creation: "0".into(),
+                currency: "USD".into(),
+            }
+        };
+        // The Hub prices m1 generally and per catalog entry; m2 only generally.
+        store.upsert_model_pricing(&priced("", "m1", "1")).unwrap();
+        store.upsert_model_pricing(&priced("", "m2", "2")).unwrap();
+        store
+            .upsert_model_pricing(&priced("kimi", "m1", "3"))
+            .unwrap();
+
+        let declared = kiwano_adapters::model_pricing::DeclaredPrices {
+            currency: "USD".into(),
+            models: vec![kiwano_adapters::model_pricing::DeclaredPrice {
+                model_id: "m1".into(),
+                input: "9".into(),
+                output: "0".into(),
+                cache_read: "0".into(),
+                cache_creation: "0".into(),
+            }],
+        }
+        .to_json();
+        let mk =
+            |id: &str, catalog_id: Option<&str>, prices: Option<&str>| crate::store::Provider {
+                id: id.into(),
+                name: id.into(),
+                catalog_id: catalog_id.map(str::to_string),
+                prices: prices.map(str::to_string),
+                protocol: Protocol::Anthropic,
+                base_url: "https://a.example.com".into(),
+                api_path: None,
+                endpoints: Vec::new(),
+                api_key: Some("sk".into()),
+                model_default: None,
+                billing: crate::store::Billing::Metered,
+                period_limit: None,
+                limit_unit: None,
+                plan_query: None,
+                plan_limits: None,
+                timeout_secs: None,
+                retries: None,
+                headers: None,
+                reset_period: None,
+                enabled: true,
+                created_at: crate::store::now_rfc3339(),
+                updated_at: crate::store::now_rfc3339(),
+            };
+        // A hand-added provider that declared prices, one that declared none (the
+        // control, and what proves the rows are keyed by the row id rather than
+        // shared), and one that carries both a declaration and a catalog entry.
+        for p in [
+            mk("p-manual", None, Some(&declared)),
+            mk("p-other", None, None),
+            mk("p-kimi", Some("kimi"), Some(&declared)),
+        ] {
+            store.insert_provider(&p).unwrap();
+        }
+
+        let state = crate::server::GatewayState::new(store).expect("state");
+        let cost_of = |provider_id: &str| {
+            let costs = state
+                .store
+                .usage_cost_by_currency(None, Some(provider_id), None)
+                .unwrap();
+            costs[0].1
+        };
+        // 1M input tokens of m1 at each rate.
+        let sample = |provider_id: &str, catalog_id: Option<&str>, model: &str| UsageSample {
+            agent: "claude".into(),
+            provider_id: provider_id.into(),
+            catalog_id: catalog_id.map(str::to_string),
+            started_unix: TEST_AT,
+            model: Some(model.into()),
+            usage: Usage {
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            log: None,
+        };
+        record_sample(&state, sample("p-manual", None, "m1"));
+        record_sample(&state, sample("p-manual", None, "m2"));
+        record_sample(&state, sample("p-other", None, "m1"));
+        record_sample(&state, sample("p-kimi", Some("kimi"), "m1"));
+
+        // The user's own figure for m1 (9, not the general row's 1), and the
+        // Hub's general figure for the m2 they left out — a declaration prices
+        // the models it names and nothing else.
+        assert!(
+            (cost_of("p-manual") - 11.0).abs() < 1e-9,
+            "declared m1 at 9/MTok, plus the general 2/MTok for the undeclared m2"
+        );
+        assert!(
+            (cost_of("p-other") - 1.0).abs() < 1e-9,
+            "a provider that declared nothing is priced by the Hub's table"
+        );
+        // A declaration beats the catalog entry it was linked to: the user's
+        // statement about what this provider charges is the specific one.
+        assert!(
+            (cost_of("p-kimi") - 9.0).abs() < 1e-9,
+            "a declared price outranks the catalog entry's published one"
+        );
+    }
+
+    /// Prices declared *after* the gateway is up take effect on the next
+    /// `/reload` — which is the call the app makes after every provider save
+    /// (`after_mutation`), and so the only path by which a price the user just
+    /// typed reaches a running daemon.
+    ///
+    /// Without the reload, prices would land on disk and the daemon would keep
+    /// costing with the table it booted from: a spend limit measured against
+    /// figures the user had already corrected.
+    #[test]
+    fn reload_publishes_the_prices_declared_since_startup() {
+        use crate::store::Protocol;
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        store
+            .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
+                provider_id: String::new(),
+                model_id: "m1".into(),
+                off_peak: None,
+                peak_hours: None,
+                display_name: "M1".into(),
+                input: "1".into(),
+                output: "0".into(),
+                cache_read: "0".into(),
+                cache_creation: "0".into(),
+                currency: "USD".into(),
+            })
+            .unwrap();
+        store
+            .insert_provider(&crate::store::Provider {
+                id: "p-own".into(),
+                name: "Own".into(),
+                catalog_id: None,
+                prices: None,
+                protocol: Protocol::OpenAI,
+                base_url: "https://a.example.com".into(),
+                api_path: None,
+                endpoints: Vec::new(),
+                api_key: Some("sk".into()),
+                model_default: None,
+                billing: crate::store::Billing::Metered,
+                period_limit: None,
+                limit_unit: None,
+                plan_query: None,
+                plan_limits: None,
+                timeout_secs: None,
+                retries: None,
+                headers: None,
+                reset_period: None,
+                enabled: true,
+                created_at: crate::store::now_rfc3339(),
+                updated_at: crate::store::now_rfc3339(),
+            })
+            .unwrap();
+
+        let state = crate::server::GatewayState::new(store).expect("state");
+        let sample = UsageSample {
+            agent: "claude".into(),
+            provider_id: "p-own".into(),
+            catalog_id: None,
+            started_unix: TEST_AT,
+            model: Some("m1".into()),
+            usage: Usage {
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            log: None,
+        };
+        // Before anything is declared: the Hub's general rate.
+        record_sample(&state, sample.clone());
+
+        // The user declares what this provider charges, exactly as a save does.
+        let mut p = state.store.get_provider("p-own").unwrap().unwrap();
+        p.prices = Some(
+            kiwano_adapters::model_pricing::DeclaredPrices {
+                currency: "USD".into(),
+                models: vec![kiwano_adapters::model_pricing::DeclaredPrice {
+                    model_id: "m1".into(),
+                    input: "9".into(),
+                    output: "0".into(),
+                    cache_read: "0".into(),
+                    cache_creation: "0".into(),
+                }],
+            }
+            .to_json(),
+        );
+        state.store.update_provider(&p).unwrap();
+        state.reload_routes().expect("reload");
+
+        record_sample(
+            &state,
+            UsageSample {
+                started_unix: TEST_AT + 1,
+                ..sample
+            },
+        );
+
+        // 1/MTok for the request before the reload, 9/MTok for the one after —
+        // and 2 would be the sum had the reload published nothing.
+        let costs = state
+            .store
+            .usage_cost_by_currency(None, Some("p-own"), None)
+            .unwrap();
+        assert!(
+            (costs[0].1 - 10.0).abs() < 1e-9,
+            "expected 1 before the reload and 9 after, got {}",
+            costs[0].1
+        );
+    }
+
     /// A row with time-of-day tiers bills the tier the request **started** in.
     ///
     /// The same tokens, the same provider key, two instants: inside the
@@ -1994,6 +2263,8 @@ mod tests {
                     id: id.into(),
                     name: id.into(),
                     catalog_id: None,
+                    // No declared prices: this fixture is priced by the Hub's table.
+                    prices: None,
                     protocol: Protocol::Anthropic,
                     base_url: "https://a.example.com".into(),
                     api_path: None,
@@ -2096,6 +2367,8 @@ mod tests {
                     id: id.into(),
                     name: id.into(),
                     catalog_id: None,
+                    // No declared prices: this fixture is priced by the Hub's table.
+                    prices: None,
                     protocol: Protocol::Anthropic,
                     base_url: "https://a.example.com".into(),
                     api_path: None,

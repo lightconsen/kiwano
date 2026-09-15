@@ -188,6 +188,99 @@ impl ModelPriceEntry {
     }
 }
 
+/// The prices a user declared for one of their own providers — the shape of the
+/// `providers.prices` column, and of the JSON the add/edit dialog sends back.
+///
+/// This is the second source of prices, and the only one a hand-added provider
+/// has: the Hub prices the models of *its* catalog entries, and a provider that
+/// names no entry is otherwise costed at the general rate for a model the Hub
+/// happens to know, or recorded unpriced. Since the user is the only one who can
+/// say what such a provider charges, they say it here.
+///
+/// One currency per provider rather than one per row: these are what one vendor
+/// charges, and a provider billing different models in different currencies is
+/// not a thing. `parse` tolerates a blob this build cannot read — see its note.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct DeclaredPrices {
+    /// ISO code every figure below is denominated in, uppercase.
+    pub currency: String,
+    #[serde(default)]
+    pub models: Vec<DeclaredPrice>,
+}
+
+/// One model's declared rates, per million tokens as TEXT decimals like every
+/// other price in this module (the arithmetic parses them; the display does not
+/// round them on the way through).
+///
+/// The cache rates have no `Option`: a user who does not know what their vendor
+/// charges for a cache read writes nothing, and nothing is zero — the same
+/// reading the document takes for a rate it leaves out (`zero_rate`), and the
+/// one the form states plainly. Charging the input rate instead would invent a
+/// charge the vendor may not make, which is the failure mode that fires a
+/// spending limit early.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct DeclaredPrice {
+    pub model_id: String,
+    pub input: String,
+    pub output: String,
+    #[serde(default = "zero_rate")]
+    pub cache_read: String,
+    #[serde(default = "zero_rate")]
+    pub cache_creation: String,
+}
+
+impl DeclaredPrices {
+    /// Read a stored blob, tolerating one this build cannot parse.
+    ///
+    /// Malformed means "no declared prices for this provider", never an error.
+    /// The caller is `Store::load_declared_prices`, which the gateway answers a
+    /// failure of with an empty table — so erroring here would cost *every*
+    /// provider its declared prices over one bad row, exactly the trade
+    /// `ModelPriceEntry::apply_tiers` refuses.
+    pub fn parse(raw: &str) -> Option<Self> {
+        serde_json::from_str(raw).ok()
+    }
+
+    /// The blob as the `providers.prices` column holds it.
+    ///
+    /// Serialization cannot fail — every field is a `String`, or a `Vec` of
+    /// structs holding them — so the expect is a statement about the type rather
+    /// than a case to handle.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("a declared-price blob holds only strings")
+    }
+
+    /// The rows as price-table entries, keyed by the **local provider id**.
+    ///
+    /// That key is what makes this a separate table rather than more rows in the
+    /// Hub's one: `PricingTable`'s other keys are catalog entry ids, and the two
+    /// namespaces are the whole reason `Provider.catalog_id` is kept apart from
+    /// `Provider.id` (`<slug>-<hex>`). Merging them would let a catalog row and
+    /// a local row shadow each other by string equality.
+    pub fn entries(&self, provider_id: &str) -> Vec<ModelPriceEntry> {
+        self.models
+            .iter()
+            .map(|m| ModelPriceEntry {
+                provider_id: provider_id.to_string(),
+                model_id: m.model_id.clone(),
+                // The model id is the only name a declared row has; nothing else
+                // knows this vendor's display spelling for it.
+                display_name: m.model_id.clone(),
+                input: m.input.clone(),
+                output: m.output.clone(),
+                cache_read: m.cache_read.clone(),
+                cache_creation: m.cache_creation.clone(),
+                currency: self.currency.clone(),
+                // Bands and time-of-day tiers are the Hub's vocabulary, not
+                // something the form collects: a declared row is flat.
+                off_peak: None,
+                peak_hours: None,
+                long_context: None,
+            })
+            .collect()
+    }
+}
+
 /// Top-level models.json document.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelsDoc {
@@ -304,21 +397,31 @@ impl PricingTable {
             .find_map(|provider| self.get_exact(provider, model))
     }
 
-    /// One id, two rungs — the provider's price, else the fallback.
-    fn lookup(&self, provider: &str, model: &str) -> Option<&ModelPriceEntry> {
-        self.get_exact(provider, model)
-            .or_else(|| self.fallback(model))
+    /// One id, two rungs — the provider's price, else the fallback. `own_only`
+    /// drops the second rung; see `find_declared` for when that is the answer.
+    fn lookup(&self, provider: &str, model: &str, own_only: bool) -> Option<&ModelPriceEntry> {
+        let exact = self.get_exact(provider, model);
+        if own_only {
+            exact
+        } else {
+            exact.or_else(|| self.fallback(model))
+        }
     }
 
     /// Gated prefix scan: shortest table key that starts with `candidate-`,
     /// resolved for this provider. The caller applies
     /// `should_try_pricing_prefix_match` first.
-    fn get_prefix(&self, provider: &str, candidate: &str) -> Option<&ModelPriceEntry> {
+    fn get_prefix(
+        &self,
+        provider: &str,
+        candidate: &str,
+        own_only: bool,
+    ) -> Option<&ModelPriceEntry> {
         let mut prefix = String::with_capacity(candidate.len() + 1);
         prefix.push_str(candidate);
         prefix.push('-');
         let key = self.keys.iter().find(|k| k.starts_with(&prefix))?;
-        self.lookup(provider, key)
+        self.lookup(provider, key, own_only)
     }
 
     /// Resolve pricing for a raw (upstream) model id using cc-switch's matching
@@ -330,16 +433,42 @@ impl PricingTable {
     /// An empty string asks for the general price, which is also what a provider
     /// with no catalog entry gets.
     pub fn find(&self, provider_id: &str, model_id: &str) -> Option<&ModelPriceEntry> {
+        self.find_with(provider_id, model_id, false)
+    }
+
+    /// Resolve a price the **user declared** for this very provider row, or
+    /// `None` when they declared none for this model.
+    ///
+    /// The one difference from `find` is the missing last rung: a declared miss
+    /// must stay a miss. Falling back would answer "the user priced nothing for
+    /// this model" with another provider's rate and — since the declared rung is
+    /// consulted *first* — swallow the catalog price that ought to have been the
+    /// answer for a provider that has both. The ladder above it is the same one:
+    /// aliases and date snapshots resolve, so a declared `claude-sonnet-5` still
+    /// covers the `claude-sonnet-5-20250929` a request names.
+    pub fn find_declared(&self, provider_id: &str, model_id: &str) -> Option<&ModelPriceEntry> {
+        self.find_with(provider_id, model_id, true)
+    }
+
+    /// The matching ladder: exact candidate hits first, then a gated prefix
+    /// scan, with the provider breaking ties at every rung — and, unless
+    /// `own_only`, the general/any-provider fallback behind each of them.
+    fn find_with(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        own_only: bool,
+    ) -> Option<&ModelPriceEntry> {
         let provider = provider_id.trim().to_ascii_lowercase();
         let candidates = pricing_candidates(model_id);
         for candidate in &candidates {
-            if let Some(entry) = self.lookup(&provider, candidate) {
+            if let Some(entry) = self.lookup(&provider, candidate, own_only) {
                 return Some(entry);
             }
         }
         for candidate in &candidates {
             if should_try_pricing_prefix_match(candidate) {
-                if let Some(entry) = self.get_prefix(&provider, candidate) {
+                if let Some(entry) = self.get_prefix(&provider, candidate, own_only) {
                     return Some(entry);
                 }
             }
@@ -1028,6 +1157,97 @@ mod tests {
         assert_eq!(t.find("zenmux", "claude-3-5-haiku").unwrap().input, "0.8");
         // kimi-k2 exists only per provider, so the fallback picks by name.
         assert_eq!(t.find("no-such-provider", "kimi-k2").unwrap().input, "1");
+    }
+
+    // ---- declared prices (the providers.prices column) -------------------
+
+    /// One provider's declared rates, as `Store::load_declared_prices` builds
+    /// them: keyed by the local provider row id, and — unlike the Hub's table —
+    /// alone in their own table.
+    fn declared() -> PricingTable {
+        let blob = r#"{
+            "currency": "CNY",
+            "models": [
+                {"model_id": "kimi-k2", "input": "1.5", "output": "6"},
+                {"model_id": "claude-sonnet-5", "input": "12", "output": "60",
+                 "cache_read": "1.2", "cache_creation": "15"}
+            ]
+        }"#;
+        let declared = DeclaredPrices::parse(blob).expect("fixture blob parses");
+        PricingTable::from_entries(declared.entries("kimi-moonshot-4f2a1c"))
+    }
+
+    #[test]
+    fn declared_blob_reads_back_with_zero_cache_rates_by_default() {
+        let parsed = DeclaredPrices::parse(
+            r#"{"currency":"CNY","models":[{"model_id":"kimi-k2","input":"1.5","output":"6"}]}"#,
+        )
+        .expect("parses");
+        assert_eq!(parsed.currency, "CNY");
+        // A rate the user left out is zero, not the input rate: the form says
+        // so, and inventing a charge is what fires a spending limit early.
+        assert_eq!(parsed.models[0].cache_read, "0");
+        assert_eq!(parsed.models[0].cache_creation, "0");
+        // A blob this build cannot read is "no declared prices", never an
+        // error: one bad row must not cost every provider its prices.
+        assert!(DeclaredPrices::parse("not json").is_none());
+        assert_eq!(
+            DeclaredPrices::parse(r#"{"currency":"CNY"}"#)
+                .unwrap()
+                .models,
+            vec![]
+        );
+    }
+
+    #[test]
+    fn declared_entries_carry_the_currency_and_the_provider_row_id() {
+        let t = declared();
+        let entry = t.get_exact("kimi-moonshot-4f2a1c", "kimi-k2").unwrap();
+        assert_eq!(entry.currency, "CNY");
+        assert_eq!(entry.input, "1.5");
+        // Nothing else knows this vendor's spelling for the model.
+        assert_eq!(entry.display_name, "kimi-k2");
+        // Flat: bands and time-of-day tiers are the Hub's vocabulary.
+        assert!(entry.off_peak.is_none() && entry.peak_hours.is_none());
+        assert!(entry.long_context.is_none());
+    }
+
+    #[test]
+    fn find_declared_answers_from_the_declared_rows_and_never_another_provider() {
+        let declared = declared();
+        assert_eq!(
+            declared
+                .find_declared("kimi-moonshot-4f2a1c", "kimi-k2")
+                .unwrap()
+                .input,
+            "1.5"
+        );
+        // A model nobody declared is a miss, and has to stay one: the declared
+        // rung is consulted *first*, so an answer here would become the price of
+        // every request to this provider.
+        assert!(declared
+            .find_declared("kimi-moonshot-4f2a1c", "kimi-k3")
+            .is_none());
+        // …and the row id is the key, so another provider's table is empty.
+        assert!(declared
+            .find_declared("some-other-1b2c3d", "kimi-k2")
+            .is_none());
+    }
+
+    #[test]
+    fn find_declared_walks_the_same_ladder_as_find() {
+        let declared = declared();
+        // A request names a dated snapshot; the user declared the family.
+        assert!(declared
+            .find_declared("kimi-moonshot-4f2a1c", "claude-sonnet-5-20250929")
+            .is_some());
+        // Namespaced and mixed-case ids reduce to the declared one.
+        assert!(declared
+            .find_declared("kimi-moonshot-4f2a1c", "anthropic/claude-sonnet-5")
+            .is_some());
+        assert!(declared
+            .find_declared("kimi-moonshot-4f2a1c", "Kimi-K2")
+            .is_some());
     }
 
     // ---- cost calculation (ported from calculator.rs) --------------------

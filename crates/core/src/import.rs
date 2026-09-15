@@ -107,7 +107,7 @@ pub fn run_import(
         }
         let id = format!("ccs-{}-{}", raw.app, slug(&raw.cc_id));
         let now = crate::vm::rfc3339(crate::vm::unix_now());
-        let provider = Provider {
+        let mut provider = Provider {
             id: id.clone(),
             name,
             catalog_id: None,
@@ -124,6 +124,11 @@ pub fn run_import(
             reset_period: None,
             plan_query: None,
             plan_limits: None,
+            // The cc-switch shape carries no prices to import, and inventing
+            // them from another manager's fields is not this importer's job.
+            // A row already here keeps the ones the app collected — set below,
+            // after the existing row is read.
+            prices: None,
             timeout_secs: None,
             retries: None,
             headers: None,
@@ -131,12 +136,21 @@ pub fn run_import(
             created_at: now.clone(),
             updated_at: now,
         };
-        let existed = store
+        let existing = store
             .get_provider(&id)
             .map_err(|e| e.to_string())
             .ok()
-            .flatten()
-            .is_some();
+            .flatten();
+        // A re-import updates this row wholesale — the endpoint, the key and the
+        // billing are what it came to refresh — but the declared prices are not
+        // in a cc-switch file at all, and the app is the only place they can be
+        // written. Clearing them here would silently re-price the provider's
+        // requests and move its spending limit on an import nobody asked to do
+        // either.
+        if let Some(prev) = &existing {
+            provider.prices = prev.prices.clone();
+        }
+        let existed = existing.is_some();
         let up = if existed {
             store.update_provider(&provider)
         } else {

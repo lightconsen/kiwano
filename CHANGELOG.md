@@ -38,6 +38,29 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **A provider can carry the prices you type for it.** The Hub prices the models
+  of *its* catalog entries and a forwarded request is costed by looking that
+  entry up, so a provider typed in by hand had no rate of its own: it was costed
+  at whatever the general table happened to say about that model — or recorded
+  unpriced, which left its spending limit with nothing to measure. The Custom
+  add form now asks, on a pay-as-you-go provider, for the models it serves and
+  their rates per million tokens (input, output, cache read, cache write).
+
+  A declared rate outranks the Hub's, since it is the user's statement about
+  what *this* provider charges, and it is consulted before the catalog entry the
+  provider may also be linked to. A model left out still falls through to the
+  Hub's table; a cache rate left blank is zero rather than the input rate —
+  charging a cache read at the input price would invent a charge the vendor may
+  not make, and would overstate the spend a limit is measured against. Prices
+  are denominated in the currency the limit is in (one picker, because both are
+  about what the provider bills), and a currency this machine cannot convert is
+  refused rather than stored: the limit is compared against these numbers.
+
+  The figures travel on the provider row, so a shared config carries them, and
+  they are re-validated for the machine importing it the way a limit's currency
+  already was. The CLI has no flag for them yet — `providers edit` leaves them
+  alone rather than clearing them.
+
 - **The Models shelf can be read by model.** The page lists providers; a
   toggle in its header now switches to the same catalog grouped by model, each
   model holding the providers that serve it — cheapest first — so "what does

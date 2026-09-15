@@ -50,6 +50,15 @@ pub struct GatewayState {
     /// Model price table, built from the GUI-seeded `model_pricing` mirror and
     /// consulted at usage-record time to cost every metered request.
     pub(crate) pricing: RwLock<kiwano_adapters::model_pricing::PricingTable>,
+    /// The prices users declared for their own providers, keyed by the local
+    /// provider row id rather than by catalog entry. Asked **first** at
+    /// usage-record time: these are the user's own statement about what a
+    /// provider charges, and for a provider the Hub publishes nothing for they
+    /// are the only statement there is.
+    ///
+    /// A table of its own rather than more rows in `pricing`, so the two key
+    /// namespaces cannot shadow each other by string equality.
+    pub(crate) declared: RwLock<kiwano_adapters::model_pricing::PricingTable>,
     /// Providers currently over a billing limit. Derived state, recomputed by
     /// `crate::limits::run`; selection reads it, so the gateway enforces limits
     /// whether or not the desktop app is open to.
@@ -81,6 +90,23 @@ fn resolve_pricing(store: &Store) -> kiwano_adapters::model_pricing::PricingTabl
     }
 }
 
+/// The declared prices to serve from: every provider row that carries them,
+/// keyed by the row's own id (`Store::load_declared_prices`).
+///
+/// Same posture as `resolve_pricing` beside it — a read failure is logged and
+/// serves an empty table rather than refusing to start. Losing declared prices
+/// costs those providers their own rates (their requests fall back to the Hub's
+/// table); refusing to start would cost every agent its route.
+fn resolve_declared_pricing(store: &Store) -> kiwano_adapters::model_pricing::PricingTable {
+    match store.load_declared_prices() {
+        Ok(rows) => kiwano_adapters::model_pricing::PricingTable::from_entries(rows),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read the declared prices; serving none");
+            Default::default()
+        }
+    }
+}
+
 impl GatewayState {
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
@@ -95,6 +121,7 @@ impl GatewayState {
         // seeded here so the very first request already respects them, rather
         // than being served in the window before the task's first tick.
         let pricing = resolve_pricing(&store);
+        let declared = resolve_declared_pricing(&store);
         let limits = crate::limits::evaluate(&store);
         // The admin plane's token, minted before either listener can bind so
         // the row the GUI reads to authenticate is on disk before the port
@@ -111,6 +138,7 @@ impl GatewayState {
             log_cfg: RwLock::new(log_config),
             stream_cfg: RwLock::new(stream_cfg),
             pricing: RwLock::new(pricing),
+            declared: RwLock::new(declared),
             limits: RwLock::new(Arc::new(limits)),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
@@ -200,8 +228,14 @@ impl GatewayState {
                 .expect("stream config lock poisoned") = cfg;
         }
         // Rebuild prices too: the GUI re-seeds the mirror after a Hub refresh
-        // and then reloads, which is how a price update takes effect.
+        // and then reloads, which is how a price update takes effect — and this
+        // is the same call the app makes after saving a provider, which is how
+        // prices the user just declared start costing requests.
         *self.pricing.write().expect("pricing lock poisoned") = resolve_pricing(&self.store);
+        *self
+            .declared
+            .write()
+            .expect("declared pricing lock poisoned") = resolve_declared_pricing(&self.store);
         // And re-evaluate the ceilings: this is the call the app makes after an
         // edit, and a limit the user just typed should bind the next request
         // rather than wait up to a tick (30s) for the patrol.

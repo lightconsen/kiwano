@@ -362,6 +362,8 @@ mod tests {
             id: id.to_string(),
             name: format!("prov-{id}"),
             catalog_id: None,
+            // No declared prices: this fixture is priced by the Hub's table.
+            prices: None,
             protocol,
             base_url: format!("https://{id}.example.com"),
             api_path: None,

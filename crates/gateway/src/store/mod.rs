@@ -18,10 +18,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use kiwano_adapters::model_pricing::ModelPriceEntry;
+use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 19;
+pub const SCHEMA_VERSION: i32 = 20;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -567,6 +567,27 @@ DROP TABLE agent_limits;
 ALTER TABLE agent_limits_by_window RENAME TO agent_limits;
 "#;
 
+/// v20: the prices a user declares for their own provider.
+///
+/// The Hub prices the models of *its* catalog entries, and the gateway resolves
+/// a request's price through that entry id — so a provider typed in by hand,
+/// which names no entry, is costed at the general rate for a model the Hub
+/// happens to know and recorded unpriced for one it does not. The user is the
+/// only one who can say what such a provider charges, so the add/edit form asks,
+/// and this column holds the answer:
+/// `{"currency":"CNY","models":[{"model_id":"kimi-k2","input":"1.5",…}]}`.
+///
+/// A JSON blob rather than rows beside `model_pricing`, where prices otherwise
+/// live, because that table is *equal to the Hub's document*: the seeder prunes
+/// every row the document does not carry (`pricing::prune_absent`), and that
+/// prune is deliberately not scoped by `source`. Declared rows in there would be
+/// deleted by the next sync, or would force that invariant open. Travelling on
+/// the provider row also carries them into a config share, which serializes the
+/// row itself.
+const MIGRATION_V20: &str = r#"
+ALTER TABLE providers ADD COLUMN prices TEXT;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -742,6 +763,18 @@ pub struct Provider {
     /// after credential injection, so they can override the defaults.
     #[serde(default)]
     pub headers: Option<String>,
+    /// The prices the user declared for this provider, as JSON
+    /// `{"currency":"CNY","models":[…]}` (migration v20). NULL = none declared,
+    /// which is every provider the Hub prices and the only state one added from
+    /// the shelf can be in.
+    ///
+    /// Read with `model_pricing::DeclaredPrices::parse`, never by hand. The
+    /// gateway keys these rows to the provider's own `id` and consults them
+    /// *before* its catalog entry's prices, because they are the user's own
+    /// statement about what this provider charges — and, for a hand-added
+    /// provider, the only statement there is.
+    #[serde(default)]
+    pub prices: Option<String>,
     pub reset_period: Option<String>,
     pub enabled: bool,
     pub created_at: String,
@@ -1591,6 +1624,9 @@ impl Store {
         if version < 19 {
             conn.execute_batch(MIGRATION_V19)?;
         }
+        if version < 20 {
+            conn.execute_batch(MIGRATION_V20)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -1605,8 +1641,9 @@ impl Store {
             "INSERT INTO providers (id, name, catalog_id, protocol, base_url, api_path, api_key,
                                     billing, period_limit, limit_unit, plan_query,
                                     plan_limits, timeout_secs, retries, headers,
-                                    reset_period, enabled, created_at, updated_at, model_default)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                                    reset_period, enabled, created_at, updated_at, model_default,
+                                    prices)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 p.id,
                 p.name,
@@ -1628,6 +1665,7 @@ impl Store {
                 p.created_at,
                 p.updated_at,
                 p.model_default,
+                p.prices,
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -1642,7 +1680,7 @@ impl Store {
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at, catalog_id,
-                    model_default
+                    model_default, prices
              FROM providers WHERE id = ?1",
         )?;
         let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -1659,7 +1697,7 @@ impl Store {
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at, catalog_id,
-                    model_default
+                    model_default, prices
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -1687,7 +1725,8 @@ impl Store {
                     api_path = ?6, api_key = ?7, billing = ?8, period_limit = ?9,
                     limit_unit = ?10, plan_query = ?11, plan_limits = ?12,
                     timeout_secs = ?13, retries = ?14, headers = ?15,
-                    reset_period = ?16, enabled = ?17, updated_at = ?18, model_default = ?19
+                    reset_period = ?16, enabled = ?17, updated_at = ?18, model_default = ?19,
+                    prices = ?20
              WHERE id = ?1",
             params![
                 p.id,
@@ -1709,6 +1748,7 @@ impl Store {
                 p.enabled as i64,
                 updated,
                 p.model_default,
+                p.prices,
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -2839,6 +2879,37 @@ impl Store {
         Ok(out)
     }
 
+    /// The prices users declared for their own providers, keyed by the provider
+    /// row's **own** `id`.
+    ///
+    /// The second price source, beside the Hub's mirror: a provider that names no
+    /// catalog entry has no published prices to be costed at, and this is what
+    /// its requests are costed with instead. It is read into its own in-memory
+    /// table and never merged with the mirror's, so a declared row and a catalog
+    /// row cannot shadow each other by string equality — `Provider.id` is
+    /// `<slug>-<hex>` and `catalog_id` is a Hub slug, and the two namespaces are
+    /// exactly what `Provider.catalog_id`'s doc comment keeps apart.
+    ///
+    /// A blob this build cannot read is skipped, not raised: the caller answers a
+    /// read failure with an empty table, which would cost *every* provider its
+    /// declared prices over one bad row.
+    pub fn load_declared_prices(&self) -> Result<Vec<ModelPriceEntry>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, prices FROM providers WHERE prices IS NOT NULL AND prices <> ''",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, blob) = row?;
+            let Some(declared) = DeclaredPrices::parse(&blob) else {
+                continue;
+            };
+            out.extend(declared.entries(&id));
+        }
+        Ok(out)
+    }
+
     /// Test-only seeding hook. The GUI owns every production write to
     /// `model_pricing` (it shares the file through its own connection), so the
     /// gateway has no upsert of its own — but a test needs one to prove that
@@ -2910,6 +2981,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
         model_default: row.get(19)?,
+        prices: row.get(20)?,
     })
 }
 
@@ -3010,6 +3082,8 @@ mod tests {
             id: id.to_string(),
             name: format!("prov-{id}"),
             catalog_id: None,
+            // No declared prices: this fixture is priced by the Hub's table.
+            prices: None,
             protocol,
             base_url: "https://api.example.com".to_string(),
             api_path: None,
@@ -3713,6 +3787,58 @@ mod tests {
         );
     }
 
+    /// v19 → v20: an existing provider gains the declared-prices column, NULL —
+    /// "none declared", which is the state of every row that predates the form
+    /// asking for them.
+    #[test]
+    fn migration_v20_adds_the_declared_prices_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v19 database with a provider in it.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing,
+                                        created_at, updated_at)
+                 VALUES ('p-old', 'Old', 'openai', 'https://api.example.com', 'metered',
+                         't0', 't0');
+                 PRAGMA user_version = 19;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let old = store.get_provider("p-old").unwrap().expect("kept");
+        assert_eq!(
+            old.prices, None,
+            "a row written before the column declares none"
+        );
+        assert!(store.load_declared_prices().unwrap().is_empty());
+    }
+
     #[test]
     fn migration_v11_keys_prices_by_provider() {
         let dir = tempfile::tempdir().unwrap();
@@ -4027,6 +4153,58 @@ mod tests {
                 .expect("provider kept")
                 .name,
             "Old"
+        );
+    }
+
+    /// The prices a user declared survive a round trip, and `load_declared_prices`
+    /// hands them back keyed by the provider row's **own** id — which is the key
+    /// the gateway costs that provider's requests by.
+    #[test]
+    fn provider_declared_prices_roundtrip() {
+        let (_dir, store) = temp_store();
+
+        let blob = r#"{"currency":"CNY","models":[{"model_id":"kimi-k2","input":"1.5","output":"6","cache_read":"0.15","cache_creation":"1.8"}]}"#;
+        let mut p = sample_provider("p-own", Protocol::OpenAI);
+        p.prices = Some(blob.to_string());
+        store.insert_provider(&p).unwrap();
+
+        let got = store.get_provider("p-own").unwrap().unwrap();
+        assert_eq!(got.prices.as_deref(), Some(blob));
+        assert_eq!(
+            store.list_providers().unwrap()[0].prices.as_deref(),
+            Some(blob)
+        );
+
+        let rows = store.load_declared_prices().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider_id, "p-own");
+        assert_eq!(rows[0].model_id, "kimi-k2");
+        assert_eq!(rows[0].currency, "CNY");
+        assert_eq!(rows[0].input, "1.5");
+
+        // A provider that declares none contributes no rows: the column is the
+        // only thing that puts a provider in this table.
+        store
+            .insert_provider(&sample_provider("p-hub", Protocol::OpenAI))
+            .unwrap();
+        assert_eq!(store.load_declared_prices().unwrap().len(), 1);
+
+        // Clearing the column clears them — this is what a provider leaving
+        // pay-as-you-go does.
+        let mut cleared = got.clone();
+        cleared.prices = None;
+        store.update_provider(&cleared).unwrap();
+        assert!(store.load_declared_prices().unwrap().is_empty());
+
+        // A blob this build cannot read is skipped rather than raised: one bad
+        // row must not cost every provider its declared prices.
+        let mut broken = cleared.clone();
+        broken.prices = Some("{not json".to_string());
+        store.update_provider(&broken).unwrap();
+        assert!(store.load_declared_prices().unwrap().is_empty());
+        assert_eq!(
+            store.get_provider("p-own").unwrap().unwrap().prices,
+            Some("{not json".to_string())
         );
     }
 

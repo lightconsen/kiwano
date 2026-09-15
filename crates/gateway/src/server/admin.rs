@@ -320,6 +320,8 @@ mod tests {
             id: id.into(),
             name: id.into(),
             catalog_id: None,
+            // No declared prices: this fixture is priced by the Hub's table.
+            prices: None,
             protocol,
             base_url: base_url.into(),
             api_path: None,

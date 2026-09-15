@@ -232,6 +232,33 @@ export interface CurrencyMeta {
   preferred: string;
 }
 
+/** One model's rates as the user declared them (per million tokens, TEXT
+    decimals in the bundle's currency — parse before arithmetic, as everywhere
+    prices travel). */
+export interface DeclaredPrice {
+  model_id: string;
+  input: string;
+  output: string;
+  /** Zero when the user left the box blank: the vendor charges nothing for that
+      bucket. Never the input rate — that would invent a charge. */
+  cache_read: string;
+  cache_creation: string;
+}
+
+/** The prices a user declared for their own provider (`providers.prices`).
+ *
+ * The second price source beside the Hub's: the Hub prices the models of *its*
+ * catalog entries, so a provider that names no entry has no published rate to be
+ * costed at — and the user is the only one who can say what it charges. These
+ * figures cost that provider's requests and its spending limit is measured
+ * against them, which is why they take precedence over the Hub's table. */
+export interface DeclaredPrices {
+  /** ISO code every figure is denominated in. The form fills it from the same
+      picker the spending limit uses: both are about what this provider bills. */
+  currency: string;
+  models: DeclaredPrice[];
+}
+
 /** Plan-mode percent limits (providers.plan_limits JSON): per-window
     utilization ceilings enforced by the app patrol. */
 export interface PlanLimits {
@@ -265,6 +292,10 @@ export interface Provider {
   model_default?: string | null;
   /** Plan-quota query config; absent = not configured */
   plan_query?: PlanQuery | null;
+  /** The prices the user declared for this provider (`providers.prices`).
+      Absent = none declared, so its requests are priced from the Hub's table —
+      or recorded unpriced where the Hub knows nothing about the model either. */
+  prices?: DeclaredPrices | null;
   /** Percent-of-window ceilings for plan providers; absent = none set */
   plan_limits?: PlanLimits | null;
   enabled: boolean;
@@ -316,6 +347,13 @@ export interface NewProviderInput {
   endpoints?: { protocol: Protocol; endpoint: string }[];
   /** Plan-quota query config; null clears an existing config */
   plan_query?: PlanQuery | null;
+  /** The prices the user declared for this provider.
+   *
+   * Omitted when the form is not speaking about prices — the provider is not
+   * pay-as-you-go, or a catalog entry owns the form — and that omission keeps
+   * whatever is stored, because the section that would show them is hidden.
+   * An empty `models` list is the form saying "none": it clears the column. */
+  prices?: DeclaredPrices;
   /**
    * The catalog entry this provider is being added from (shelf adds only).
    * Prices are published per catalog entry, so this is what the gateway looks

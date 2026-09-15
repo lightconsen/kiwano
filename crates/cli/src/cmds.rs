@@ -296,6 +296,10 @@ fn edit_input(
         // from there — the stored link is kept when the field is absent, so an
         // edit from the shell does not unlink a provider added in the app.
         catalog_id: None,
+        // No flag asks for prices yet, and absent means "keep": a `providers
+        // edit` from the shell leaves the ones the app collected alone rather
+        // than clearing them.
+        prices: None,
         name: args.name.clone().unwrap_or_else(|| current.name.clone()),
         // An empty key means "keep the stored one" in update_provider, so this
         // is safe to leave blank when the flag is absent.
@@ -1260,6 +1264,10 @@ fn new_provider_input(args: &AddArgs, known: &[String]) -> Result<vm::NewProvide
         // No shelf on the command line; see the update path for why this is
         // absent rather than empty.
         catalog_id: None,
+        // `providers add` declares no prices either — see the update path. The
+        // provider is priced from the Hub's table, and the app's Custom form is
+        // where its own rates are typed in.
+        prices: None,
         name: args.name.trim().to_string(),
         api_key: args.key.clone().unwrap_or_default(),
         endpoint: args.endpoint.trim().to_string(),

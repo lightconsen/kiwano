@@ -194,6 +194,8 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         id: id.to_string(),
         name: format!("prov-{id}"),
         catalog_id: None,
+        // No declared prices: this fixture is priced by the Hub's table.
+        prices: None,
         protocol,
         base_url,
         api_path: None,

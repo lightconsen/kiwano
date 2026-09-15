@@ -146,8 +146,137 @@ describe("adding a provider by hand", () => {
   });
 });
 
+describe("prices a hand-added provider declares", () => {
+  it("carries the rates the user typed, in the limit's currency", async () => {
+    const user = await openCustom();
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.addPrice }));
+    await user.type(screen.getByLabelText(en.addProvider.priceModel), "kimi-k2");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceIn)[0], "1.5");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceOut)[0], "6");
+
+    // Blank cache rates are sent as zeros rather than dropped: that is the
+    // backend's reading of a rate nobody stated, and the note under the rows
+    // says so.
+    expect((await savedPayload(user)).prices).toEqual({
+      currency: "CNY",
+      models: [
+        {
+          model_id: "kimi-k2",
+          input: "1.5",
+          output: "6",
+          cache_read: "0",
+          cache_creation: "0",
+        },
+      ],
+    });
+  });
+
+  it("offers them on pay as you go only", async () => {
+    const user = await openCustom();
+    const addPrice = () => screen.queryByRole("button", { name: en.addProvider.addPrice });
+    expect(addPrice()).not.toBeNull();
+
+    // A plan is billed by the window, not by the token; the rates would describe
+    // a charge this provider does not make. And the save stops speaking about
+    // them rather than clearing what is stored: the section is simply not there
+    // for the user to have said anything.
+    await user.click(screen.getByRole("button", { name: en.addProvider.billingPlan }));
+    expect(addPrice()).toBeNull();
+    expect((await savedPayload(user)).prices).toBeUndefined();
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.billingUnlimited }));
+    expect(addPrice()).toBeNull();
+  });
+
+  it("refuses a rate that is not a number of zero or more", async () => {
+    const user = await openCustom();
+    await user.click(screen.getByRole("button", { name: en.addProvider.addPrice }));
+    await user.type(screen.getByLabelText(en.addProvider.priceModel), "kimi-k2");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceIn)[0], "-3");
+
+    // Refused rather than dropped: the price table parses these when it costs a
+    // request, so the value that reached it would be every request's cost.
+    expect(screen.getByText(en.addProvider.priceInvalid)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.addProvider.saveEnable })).toBeDisabled();
+  });
+
+  it("drops the row whose model was left blank", async () => {
+    const user = await openCustom();
+    await user.click(screen.getByRole("button", { name: en.addProvider.addPrice }));
+    await user.type(screen.getAllByLabelText(en.addProvider.priceIn)[0], "1.5");
+
+    // The id is the key the price is looked up by, so a row without one is not a
+    // price — the same reason a blank endpoint row is dropped on save.
+    expect((await savedPayload(user)).prices).toEqual({ currency: "CNY", models: [] });
+  });
+});
+
+describe("editing a provider that declares prices", () => {
+  it("reads them back into the boxes and sends the currency back", async () => {
+    const user = userEvent.setup();
+    render(
+      <AddProviderModal
+        open
+        preset={null}
+        edit={{
+          id: "manual-1a2b3c",
+          name: "Manual",
+          logo_char: "M",
+          logo_color: "#555555",
+          endpoint: "api.example.com",
+          protocol: "openai",
+          endpoint_note: "OpenAI-compatible",
+          billing: "payg",
+          limit_unit: "CNY",
+          prices: {
+            currency: "CNY",
+            models: [
+              {
+                model_id: "kimi-k2",
+                input: "1.5",
+                output: "6",
+                cache_read: "0",
+                cache_creation: "0",
+              },
+            ],
+          },
+          enabled: true,
+          agents: [],
+          serving_agents: [],
+          is_current: false,
+          health: { state: "idle", latency_ms: null },
+          usage: null,
+        }}
+        preferredCurrency="CNY"
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+    expect(await screen.findByLabelText(en.addProvider.priceModel)).toHaveValue("kimi-k2");
+    expect(screen.getAllByLabelText(en.addProvider.priceOut)[0]).toHaveValue("6");
+
+    await user.click(screen.getByRole("button", { name: en.common.save }));
+    await waitFor(() => expect(apiMock.updateProvider).toHaveBeenCalled());
+    expect(apiMock.updateProvider.mock.calls[0][1].prices).toEqual({
+      currency: "CNY",
+      models: [
+        {
+          model_id: "kimi-k2",
+          input: "1.5",
+          output: "6",
+          cache_read: "0",
+          cache_creation: "0",
+        },
+      ],
+    });
+  });
+});
+
 describe("adding a provider from the catalog", () => {
   it("keeps the entry's protocol, endpoints and currency out of the user's hands", async () => {
+    const user = userEvent.setup();
     render(
       <AddProviderModal
         open
@@ -169,6 +298,13 @@ describe("adding a provider from the catalog", () => {
     expect(screen.queryByRole("button", { name: en.addProvider.addEndpoint })).toBeNull();
     expect(screen.queryByRole("combobox", { name: en.addProvider.protocol })).toBeNull();
     expect(screen.queryByRole("button", { name: en.addProvider.removeEndpoint })).toBeNull();
+    // Prices too: the entry prices the models it publishes, so there is nothing
+    // for the user to declare while it owns the form — and the save says nothing
+    // about them rather than declaring an empty table.
+    expect(screen.queryByRole("button", { name: en.addProvider.addPrice })).toBeNull();
+    await user.click(screen.getByRole("button", { name: en.addProvider.saveEnable }));
+    await waitFor(() => expect(apiMock.addProvider).toHaveBeenCalled());
+    expect(apiMock.addProvider.mock.calls[0][0].prices).toBeUndefined();
 
     // Not a picker, but still said: the endpoint row carries its protocol, which
     // is what the block above it used to repeat as a pair of lit badges.

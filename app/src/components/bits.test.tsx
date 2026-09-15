@@ -72,17 +72,24 @@ describe("the sparkline", () => {
     expect(polyline(container)).toHaveAttribute("points", "0,2 40,4 80,6");
   });
 
-  it("lays a single sample out at the start, not at NaN", () => {
-    // One day of use is a real shape (the backend sends a one-element series),
-    // and `(0 * 80) / (1 - 1)` is 0/0.
+  it("draws a single sample as a dot, because a polyline cannot", () => {
+    // One day of use is a real shape (the backend sends a one-element series)
+    // and `(0 * 80) / (1 - 1)` is 0/0, so the sample goes at the start. A
+    // polyline through one point paints *nothing*: the slot sat empty, reading
+    // as "no data" exactly where the data says "one day".
     const { container } = render(<Sparkline points={[3]} />);
-    expect(polyline(container)).toHaveAttribute("points", "0,3");
+    expect(container.querySelector("polyline")).toBeNull();
+    const dot = container.querySelector("circle")!;
+    expect(dot).toHaveAttribute("cy", "3");
+    // Off the left edge: half a dot at x(0) = 0 would fall outside the viewBox.
+    expect(dot).toHaveAttribute("cx", "2");
     expect(container.innerHTML).not.toContain("NaN");
   });
 
   it("renders nothing, rather than NaN, for no samples at all", () => {
     const { container } = render(<Sparkline points={[]} />);
-    expect(polyline(container)).toHaveAttribute("points", "");
+    expect(container.querySelector("polyline")).toBeNull();
+    expect(container.querySelector("circle")).toBeNull();
     expect(container.innerHTML).not.toContain("NaN");
   });
 });

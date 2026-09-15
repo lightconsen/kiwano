@@ -114,7 +114,16 @@ export function Sparkline({ points }: { points: number[] }) {
   const pts = points.map((y, i) => `${x(i)},${y}`).join(" ");
   return (
     <svg viewBox="0 0 80 14" className="h-3.5 w-20">
-      <polyline points={pts} fill="none" stroke="var(--blue)" strokeWidth="1.5" />
+      {n > 1 ? (
+        <polyline points={pts} fill="none" stroke="var(--blue)" strokeWidth="1.5" />
+      ) : n === 1 ? (
+        // One sample, drawn as the sample: a polyline needs two points to make a
+        // stroke, so the single-day series rendered as nothing at all — an empty
+        // slot that read as "no data" exactly where the data says "one day".
+        // Nudged off the left edge rather than at `x(0)` = 0, where half the dot
+        // falls outside the viewBox.
+        <circle cx="2" cy={points[0]} r="1.5" fill="var(--blue)" />
+      ) : null}
     </svg>
   );
 }

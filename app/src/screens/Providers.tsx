@@ -759,7 +759,6 @@ function planPercentCell(
           <BillTag billing="plan" />
           <span>{limitLine}</span>
         </div>
-        <div className="mt-0.5 text-[10.5px] text-mut">{p.plan_price ?? ""}</div>
         {/* Live plan quota: per-window utilization from the provider's own endpoint */}
         {planLine && (
           <div
@@ -845,16 +844,6 @@ function UsageCellBody({ p, plan }: { p: Provider;
               <span>{quotaAmountText(u.quota.used, u.quota.limit, u.quota.unit)}</span>
             )}
           </div>
-          <div className="mt-0.5 text-[10.5px] text-mut">
-            {[
-              p.plan_price,
-              u.quota.resets_at
-                ? t("providers.resetsAt", { date: u.quota.resets_at.slice(5) })
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
           {/* Live plan quota: per-window utilization from the provider's own endpoint */}
           {planLine && (
             <div
@@ -931,11 +920,30 @@ function UsageCellBody({ p, plan }: { p: Provider;
           {t("providers.reqSuffix", { requests: u.requests })}
         </span>
       </div>
-      {u.spark && (
-        <span className="mt-1 block w-20">
+      {/* One second line, never two. It says what the spend bought — the tokens
+          and the latency — unless there is a 7-day trend to draw, which *is*
+          that same thing over time and is the one that gets the line. Both are
+          two-line cells then, and the column keeps one rhythm instead of
+          growing a third line on exactly the rows that have the most to show.
+
+          "A trend" means two points or more. The backend derives the series and
+          the totals from one 7-day window (`vm::usage_vm` / `Aux::provider_daily`),
+          so any provider with usage at all has a series — and the common case is
+          a *one-element* one, a provider whose traffic all landed on a single
+          day. That draws a single dot, which is not a trend and is less than the
+          numbers it would replace. */}
+      <div className="mt-0.5 flex h-4 items-center text-[10.5px] text-mut">
+        {u.spark && u.spark.length > 1 ? (
           <Sparkline points={u.spark} />
-        </span>
-      )}
+        ) : (
+          <span>
+            {t("providers.tokensLatency", {
+              tokens: fmtTokens(u.input_tokens + u.output_tokens),
+              latency: fmtLatency(u.latency_ms),
+            })}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

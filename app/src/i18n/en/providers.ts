@@ -60,7 +60,6 @@ export const providers = {
   planLimitWeekly: "wk ≤ {percent}%",
   unitReq: "req",
   unitTenKTok: "10k tok",
-  resetsAt: "resets {date}",
   /** Local-inference row: the request count renders separately in mono, so
       only the trailing unit fragment is translated. */
   reqTokSuffix: "req · {tokens} tok",

@@ -44,7 +44,6 @@ export const providers = {
   planLimitWeekly: "周 ≤ {percent}%",
   unitReq: "次",
   unitTenKTok: "万 tok",
-  resetsAt: "重置于 {date}",
   reqTokSuffix: "次 · {tokens} tok",
   inOutTokens: "输入 {input} · 输出 {output}",
   limitSuffix: "/ 上限 {limit}",

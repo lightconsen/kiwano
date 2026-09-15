@@ -259,15 +259,11 @@ function AccessDialog({
  *
  * A user-defined agent has no such dialog: there is no file behind it, and its
  * own row already carries what it does have (its key, and deleting it). */
-/** The three subjects of one agent's settings, switched between rather than
-    stacked: whether Kiwano routes it, how much it may spend, and the files a
-    takeover rewrites. The same segment group the Dashboard's window and the
-    shelf's view use — all three fit on a row, and naming the others without
-    opening them is the point.
-
-    Everything is inside a tab, including the takeover state and its escape
-    hatch: three subjects in one column is what made this dialog hard to read, and
-    leaving the first of them out would have kept the problem. */
+/** The subjects of one agent's settings, switched between rather than stacked:
+    what the agent is here (the files a takeover rewrites), and how much it may
+    spend. The same segment group the Dashboard's window and the shelf's view use —
+    both fit on a row, and naming the other reading without opening it is the
+    point. */
 function SettingsTabs({
   tab,
   onPick,
@@ -277,9 +273,8 @@ function SettingsTabs({
 }) {
   const t = useT();
   const tabs: { id: AgentSettingsTab; labelKey: KeyPath<Messages> }[] = [
-    { id: "takeover", labelKey: "providers.agentTakeoverTab" },
+    { id: "general", labelKey: "providers.agentGeneralTab" },
     { id: "limit", labelKey: "strategy.limitLabel" },
-    { id: "files", labelKey: "providers.agentConfigFiles" },
   ];
   return (
     <div className="mt-1 flex overflow-hidden rounded-lg border border-line text-[12px]">
@@ -296,7 +291,7 @@ function SettingsTabs({
   );
 }
 
-type AgentSettingsTab = "takeover" | "limit" | "files";
+type AgentSettingsTab = "general" | "limit";
 
 function AgentSettingsDialog({
   agent,
@@ -304,10 +299,8 @@ function AgentSettingsDialog({
   paths,
   limit,
   currency,
-  busy,
   open,
   onClose,
-  onRestore,
   onChanged,
 }: {
   agent: AgentRef;
@@ -316,28 +309,12 @@ function AgentSettingsDialog({
   limit: AgentLimit | null;
   /** Display currency, for a money ceiling's unit. */
   currency: string;
-  busy: boolean;
   open: boolean;
   onClose: () => void;
-  /** Put the agent's own configuration back. Enabling is the tab's onboarding
-      panel, which this row does not exist without. */
-  onRestore: () => Promise<void>;
   onChanged?: () => void;
 }) {
   const t = useT();
-  const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<AgentSettingsTab>("takeover");
-  const restore = async () => {
-    setErr(null);
-    try {
-      await onRestore();
-      onClose();
-    } catch (e) {
-      // Left open with the reason: the button's whole job is to change the file
-      // on disk, and a refusal has to be visible where it was asked for.
-      setErr(String(e));
-    }
-  };
+  const [tab, setTab] = useState<AgentSettingsTab>("general");
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[460px]">
@@ -350,37 +327,7 @@ function AgentSettingsDialog({
           <SettingsTabs tab={tab} onPick={setTab} />
 
           <div className="mt-2.5">
-            {tab === "takeover" && (
-              <>
-                <div className="flex items-center gap-3">
-                  <span className="flex items-center gap-1.5 text-[12px]">
-                    <Dot state="ok" />
-                    {t("providers.agentRouted")}
-                  </span>
-                  <Button
-                    size="sm"
-                    className="ml-auto h-7 px-3 text-[12px] font-semibold"
-                    disabled={busy}
-                    onClick={restore}
-                  >
-                    {t("providers.restoreOriginal")}
-                  </Button>
-                </div>
-                <p className="mt-2 text-[11px] leading-relaxed text-mut">
-                  {t("providers.agentRoutedBody")}
-                </p>
-                {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
-              </>
-            )}
-            {tab === "limit" && (
-              <LimitSection
-                agent={agent}
-                limit={limit}
-                currency={currency}
-                onChanged={onChanged}
-              />
-            )}
-            {tab === "files" && (
+            {tab === "general" && (
               <>
                 {paths.map((p) => (
                   <div key={p} className="mt-1 flex items-center gap-2">
@@ -391,6 +338,14 @@ function AgentSettingsDialog({
                   {t("providers.agentConfigFilesNote")}
                 </p>
               </>
+            )}
+            {tab === "limit" && (
+              <LimitSection
+                agent={agent}
+                limit={limit}
+                currency={currency}
+                onChanged={onChanged}
+              />
             )}
           </div>
         </div>
@@ -2053,10 +2008,8 @@ export default function Providers({
           limit={route?.limit ?? null}
           currency={currency}
           onChanged={refetch}
-          busy={enabling}
           open={agentSettingsOpen}
           onClose={() => setAgentSettingsOpen(false)}
-          onRestore={() => setAgentTakenOver(seg, false)}
         />
       )}
 

@@ -750,38 +750,17 @@ describe("a built-in agent's own row", () => {
       await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
     );
 
-    // Three subjects, one showing: the takeover state is what it opens on, and
-    // neither of the other two is in the DOM until its tab is picked.
-    expect(screen.getByText(en.providers.agentRouted)).toBeInTheDocument();
-    expect(screen.queryByText(en.strategy.limitNone)).toBeNull();
-    expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: en.strategy.limitLabel }));
-    expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
-    expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: en.providers.agentConfigFiles }));
-
+    // Two readings, one showing: the files are what it opens on, and the ceiling
+    // is not in the DOM at all until its tab is picked.
     expect(screen.getByText("~/.codex/config.toml")).toBeInTheDocument();
     expect(screen.getByText("~/.codex/auth.json")).toBeInTheDocument();
     expect(screen.getByText(en.providers.agentConfigFilesNote)).toBeInTheDocument();
-  });
+    expect(screen.queryByText(en.strategy.limitNone)).toBeNull();
 
-  it("restores the original config from the dialog", async () => {
-    const user = userEvent.setup();
-    renderCodexTab({
-      providers: [deepseek()],
-      routes: [codexRoute(["deepseek"])],
-      codexTakenOver: true,
-    });
+    await user.click(screen.getByRole("button", { name: en.strategy.limitLabel }));
 
-    await user.click(
-      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
-    );
-    expect(screen.getByText(en.providers.agentRouted)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: en.providers.restoreOriginal }));
-    await waitFor(() => expect(apiMock.setTakeover).toHaveBeenCalledWith("codex", false));
+    expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
+    expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
   });
 
   it("is not on the all-agents tab, and not on a user-defined agent's", async () => {

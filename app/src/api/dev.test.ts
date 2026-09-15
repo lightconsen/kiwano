@@ -75,6 +75,62 @@ const WINDOWS: DashboardWindow[] = ["today", "7d", "30d"];
 const sum = (ns: number[]) => ns.reduce((n, v) => n + v, 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+describe("the billing × limit matrix fixtures", () => {
+  it("report the rows they mark as blocked, in the gateway's own wording", async () => {
+    // The dimmed Usage cell and the Status column both read the *gateway's*
+    // answer, so a row cannot demonstrate the state by carrying a flag of its
+    // own: the reason has to come back from `getGatewayStatus`.
+    const blocked = (await api.getGatewayStatus()).blocked;
+    const rows = (await api.listProviders()).filter((p) => p.id.startsWith("m-"));
+    expect(rows.length, "the matrix is in the fixture set").toBeGreaterThan(5);
+    expect(blocked.length, "some rows demonstrate the refused state").toBeGreaterThan(0);
+    for (const b of blocked) {
+      expect(rows.some((p) => p.id === b.id), `${b.id} is a matrix row`).toBe(true);
+    }
+    // The two sentences `LimitState::describe` prints, one per arm — a mock that
+    // invents its own wording sends the reader looking for a string the backend
+    // never emits.
+    const reasons = blocked.map((b) => b.reason);
+    expect(reasons.some((r) => /^\d+\.\d\d of \d+\.\d\d \w+ this \w+$/.test(r)), reasons.join(" / ")).toBe(true);
+    expect(reasons.some((r) => /window at \d+% of a \d+% ceiling$/.test(r)), reasons.join(" / ")).toBe(true);
+  });
+
+  it("cover every branch the Usage/quota cell takes", async () => {
+    // The point of the block, asserted so a later trim has to say which state it
+    // is dropping: billing × the limit the row carries, plus the two rows with
+    // no history at all.
+    const rows = (await api.listProviders()).filter((p) => p.id.startsWith("m-"));
+    const state = (p: (typeof rows)[number]) =>
+      p.billing === "plan" && p.plan_limits
+        ? `plan+ceiling`
+        : p.billing === "plan" && p.usage?.quota
+          ? "plan+quota"
+          : p.billing === "plan"
+            ? "plan-only"
+            : p.usage?.quota
+              ? `payg+${p.usage.quota.unit}`
+              : p.usage
+                ? "payg+trend"
+                : "no-history";
+    const covered = new Set(rows.map(state));
+    for (const want of [
+      "payg+CNY",
+      "payg+requests",
+      "payg+wan_tokens",
+      "payg+trend",
+      "no-history",
+      "plan+quota",
+      "plan+ceiling",
+      "plan-only",
+    ]) {
+      expect(covered, `${want} is covered`).toContain(want);
+    }
+    // A row nothing has run through: its cell is empty, and that is a state the
+    // cell can be in rather than a gap in the fixture.
+    expect(rows.some((p) => p.usage === null)).toBe(true);
+  });
+});
+
 describe("the dashboard fixtures", () => {
   it("are one table seen several ways", async () => {
     for (const window of WINDOWS) {

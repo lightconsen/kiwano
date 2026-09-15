@@ -1,6 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type { AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent, PromptLatency } from "./types";
+import type { AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, Billing, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanLimits, PlanQuotaReport, PlanQuery, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, UsageSummary, CustomAgent, PromptLatency } from "./types";
 import { AGENTS } from "./types";
 // The same formatter the screens print with: a fixture that formats its own
 // tokens is a fixture that can disagree with the page about how they read.
@@ -60,6 +60,17 @@ const providers: Provider[] = [
     endpoints: [{ protocol: "anthropic", endpoint: "api.deepseek.com/anthropic" }],
     billing: "payg",
     limit_unit: "CNY",
+    // What the user declared this provider charges — per million tokens, in the
+    // currency its limit is in. Shown on a shelf-added row because the declared
+    // rung outranks the catalog's, so the edit dialog is where a reader can see
+    // and correct the figures a request is actually costed by.
+    prices: {
+      currency: "CNY",
+      models: [
+        { model_id: "deepseek-chat", input: "2", output: "8", cache_read: "0.2", cache_creation: "0" },
+        { model_id: "deepseek-reasoner", input: "4", output: "16", cache_read: "0.4", cache_creation: "0" },
+      ],
+    },
     enabled: true,
     agents: ["claude", "codex"],
     serving_agents: [],
@@ -169,6 +180,282 @@ const providers: Provider[] = [
     },
   },
 ];
+
+// ── The billing × limit × strategy matrix ───────────────────────────────────
+//
+// `UsageCellBody` branches on a provider's billing and on which limit it
+// carries, and the rows above cover four corners of that: payg + a currency
+// limit, plan + a quota, unlimited, and a parked one. This block is the rest of
+// the table — one row per combination the cell can render, including the two
+// shapes the gateway reports *refusing* to route (an over-spend and an
+// over-ceiling). Each row is also bound to an agent whose strategy makes the
+// columns around the cell vary: a failover standby, a weighted rotation, a
+// night window, a quota ceiling.
+//
+// `pnpm dev` → Apps → All is the page they exist for. They are deliberately
+// absent from the Dashboard fixtures, which are built from PROVIDER_MIX: a demo
+// table whose totals move every time a cell gains a state is a worse demo, and
+// those numbers are asserted against each other.
+type MatrixSpec = {
+  id: string;
+  /** The combination, not a vendor — the Provider column is its own legend. */
+  name: string;
+  logo: string;
+  color: string;
+  billing: Billing;
+  /** Payg: the unit its spending limit is counted in. */
+  limit_unit?: string;
+  plan_price?: string;
+  plan_limits?: PlanLimits;
+  plan_query?: PlanQuery;
+  usage: UsageSummary | null;
+  /** The gateway's own sentence, for a row it is refusing to route. */
+  blocked?: string;
+};
+
+const MATRIX: MatrixSpec[] = [
+  {
+    id: "m-payg-cny",
+    name: "PAYG · CNY limit",
+    logo: "¥",
+    color: "#4D6BFE",
+    billing: "payg",
+    limit_unit: "CNY",
+    usage: {
+      requests: 796,
+      input_tokens: 5_400_000,
+      cache_read_tokens: 4_300_000,
+      output_tokens: 800_000,
+      cost: 28.6,
+      cost_currency: "CNY",
+      latency_ms: 1100,
+      quota: { used: 28.6, limit: 50, unit: "CNY", resets_at: null },
+      spark: null,
+    },
+  },
+  {
+    id: "m-payg-req",
+    name: "PAYG · request limit",
+    logo: "R",
+    color: "#7C3AED",
+    billing: "payg",
+    limit_unit: "requests",
+    usage: {
+      requests: 640,
+      input_tokens: 2_100_000,
+      cache_read_tokens: 0,
+      output_tokens: 420_000,
+      cost: 42.5,
+      cost_currency: "CNY",
+      latency_ms: 860,
+      quota: { used: 640, limit: 1000, unit: "requests", resets_at: null },
+      spark: null,
+    },
+  },
+  {
+    id: "m-payg-wan",
+    name: "PAYG · 10k-token limit",
+    logo: "T",
+    color: "#0EA5E9",
+    billing: "payg",
+    limit_unit: "wan_tokens",
+    usage: {
+      requests: 210,
+      input_tokens: 900_000,
+      cache_read_tokens: 120_000,
+      output_tokens: 300_000,
+      cost: 18.2,
+      cost_currency: "CNY",
+      latency_ms: 1220,
+      quota: { used: 120, limit: 500, unit: "wan_tokens", resets_at: null },
+      spark: null,
+    },
+  },
+  {
+    id: "m-payg-trend",
+    name: "PAYG · no limit",
+    logo: "~",
+    color: "#16A34A",
+    billing: "payg",
+    usage: {
+      requests: 148,
+      input_tokens: 610_000,
+      cache_read_tokens: 40_000,
+      output_tokens: 190_000,
+      cost: 12.4,
+      cost_currency: "CNY",
+      latency_ms: 940,
+      quota: null,
+      spark: [4, 7, 3, 9, 6, 11, 8],
+    },
+  },
+  {
+    id: "m-payg-unpriced",
+    name: "PAYG · unpriced",
+    logo: "?",
+    color: "#6B7280",
+    billing: "payg",
+    usage: {
+      requests: 12,
+      input_tokens: 44_000,
+      cache_read_tokens: 0,
+      output_tokens: 9_800,
+      cost: null,
+      cost_currency: null,
+      latency_ms: 1310,
+      quota: null,
+      // One day of use: the series that has no span to draw, and the reason the
+      // sparkline draws a single sample as a dot.
+      spark: [3],
+    },
+  },
+  {
+    id: "m-payg-over",
+    name: "PAYG · over its limit",
+    logo: "!",
+    color: "#B91C1C",
+    billing: "payg",
+    limit_unit: "CNY",
+    // `LimitState::describe`'s Spend arm with no reset window, which is what a
+    // provider limited only by the form carries (`reset_period` is the CLI's and
+    // an import's to set).
+    blocked: "52.40 of 50.00 CNY this period",
+    usage: {
+      requests: 1_204,
+      input_tokens: 8_100_000,
+      cache_read_tokens: 5_600_000,
+      output_tokens: 1_100_000,
+      cost: 52.4,
+      cost_currency: "CNY",
+      latency_ms: 1180,
+      quota: { used: 52.4, limit: 50, unit: "CNY", resets_at: null },
+      spark: null,
+    },
+  },
+  {
+    id: "m-plan-quota",
+    name: "PLAN · plan quota",
+    logo: "P",
+    color: "#D97757",
+    billing: "plan",
+    plan_price: "¥49/mo",
+    plan_query: { template: "kimi" },
+    usage: {
+      requests: 295,
+      input_tokens: 1_600_000,
+      cache_read_tokens: 300_000,
+      output_tokens: 300_000,
+      cost: 10.9,
+      cost_currency: "CNY",
+      latency_ms: 287,
+      quota: { used: 295, limit: 460, unit: "requests", resets_at: "2026-09-30" },
+      spark: null,
+    },
+  },
+  {
+    id: "m-plan-ceiling",
+    name: "PLAN · 50% / 90% ceiling",
+    logo: "%",
+    color: "#DB2777",
+    billing: "plan",
+    plan_price: "¥20/mo",
+    // The report's five-hour utilization is 42.5%, so this ceiling is at 85% —
+    // the amber ring. No usage summary: the cell renders from the live report
+    // and the ceiling alone.
+    plan_limits: { five_hour: 50, weekly: 90 },
+    plan_query: { template: "zhipu" },
+    usage: null,
+  },
+  {
+    id: "m-plan-over",
+    name: "PLAN · ceiling reached",
+    logo: "!",
+    color: "#991B1B",
+    billing: "plan",
+    plan_price: "¥20/mo",
+    // Below the reported 42.5%: the ring is full and the gateway refuses.
+    // `LimitState::describe`'s PlanWindow arm, verbatim.
+    plan_limits: { five_hour: 40, weekly: 100 },
+    plan_query: { template: "minimax" },
+    blocked: "five_hour window at 43% of a 40% ceiling",
+    usage: null,
+  },
+  {
+    id: "m-plan-none",
+    name: "PLAN · no quota endpoint",
+    logo: "∅",
+    color: "#A16207",
+    billing: "plan",
+    plan_price: "¥99/mo",
+    // A plan that publishes no way to read its usage and carries no ceiling:
+    // the cell has no plan branch to take.
+    usage: {
+      requests: 12,
+      input_tokens: 88_000,
+      cache_read_tokens: 0,
+      output_tokens: 21_000,
+      cost: 3.2,
+      cost_currency: "CNY",
+      latency_ms: 700,
+      quota: null,
+      spark: null,
+    },
+  },
+  {
+    id: "m-unl",
+    name: "UNL · local",
+    logo: "∞",
+    color: "#1C1C1E",
+    billing: "unl",
+    usage: {
+      requests: 31,
+      input_tokens: 150_000,
+      cache_read_tokens: 0,
+      output_tokens: 50_000,
+      cost: null,
+      cost_currency: null,
+      latency_ms: null,
+      quota: null,
+      spark: null,
+    },
+  },
+  {
+    id: "m-unl-empty",
+    name: "UNL · no history yet",
+    logo: "·",
+    color: "#3F3F46",
+    billing: "unl",
+    // A provider nothing has run through: the cell renders nothing at all, which
+    // is a state too (the ring and the limit line need no totals, this one has
+    // neither).
+    usage: null,
+  },
+];
+
+for (const m of MATRIX) {
+  providers.push({
+    id: m.id,
+    name: m.name,
+    logo_char: m.logo,
+    logo_color: m.color,
+    endpoint: `demo.local/${m.id}`,
+    endpoint_note: protocolNote("openai"),
+    protocol: "openai",
+    billing: m.billing,
+    limit_unit: m.limit_unit,
+    plan_price: m.plan_price,
+    plan_limits: m.plan_limits,
+    plan_query: m.plan_query,
+    enabled: true,
+    // Both of these are derived from the routes by `listProviders`; the static
+    // pair here is what an unbound row keeps.
+    agents: [],
+    serving_agents: [],
+    is_current: false,
+    health: { state: "idle", latency_ms: null },
+    usage: m.usage,
+  });
+}
 
 const catalog: CatalogEntry[] = [
   {
@@ -616,6 +903,27 @@ const settings: AppSettings = {
       note: null,
       placeholder_key: "kw-ag-scratch-91cd-40aa",
     },
+    // Three more, so the routing strategies the built-in agents do not exercise
+    // (roundrobin / timewindow / quota) are reachable in `pnpm dev` — they are
+    // what the matrix rows below are bound to.
+    {
+      id: "rotating-pool-4a1f",
+      label: "Rotating pool",
+      note: "two providers, weighted rotation",
+      placeholder_key: "kw-ag-rotating-pool-4a1f-0d31",
+    },
+    {
+      id: "nightly-batch-7c2e",
+      label: "Nightly batch",
+      note: "one by day, one inside the night window",
+      placeholder_key: "kw-ag-nightly-batch-7c2e-5a90",
+    },
+    {
+      id: "quota-guard-5b8d",
+      label: "Quota guard",
+      note: "stops routing once its ceiling is reached",
+      placeholder_key: "kw-ag-quota-guard-5b8d-c41e",
+    },
   ],
   auto_failover: true,
   request_logs: true,
@@ -664,6 +972,8 @@ async function delay(ms = 120) {
 
 // ── Agent routing strategies (tech.md §4.7) ──
 
+/** One candidate of a route. `weight` is a roundrobin share (see the matrix's
+    rotating route); every other strategy reads it as 1. */
 function bind(pid: string, priority: number, win?: [string, string]): StrategyBinding {
   const p = providers.find((x) => x.id === pid)!;
   return {
@@ -684,7 +994,9 @@ const agentRoutes: AgentRoute[] = [
     agent: "claude",
     strategy: "failover",
     config: null,
-    bindings: [bind("deepseek", 0), bind("kimi", 1)],
+    // The matrix row rides the queue's tail, so the failover role is on a row
+    // that also demonstrates a limit state.
+    bindings: [bind("deepseek", 0), bind("kimi", 1), bind("m-payg-cny", 2)],
     limits: [],
   },
   {
@@ -699,7 +1011,7 @@ const agentRoutes: AgentRoute[] = [
     agent: "long-tasks-3f9a",
     strategy: "failover",
     config: null,
-    bindings: [bind("deepseek", 0), bind("kimi", 1)],
+    bindings: [bind("deepseek", 0), bind("kimi", 1), bind("m-plan-quota", 2)],
     limits: [],
   },
   {
@@ -717,6 +1029,37 @@ const agentRoutes: AgentRoute[] = [
     strategy: "timewindow",
     config: null,
     bindings: [bind("deepseek", 0), bind("ollama", 1, ["22:00", "06:00"])],
+    limits: [],
+  },
+  // The matrix's own routes: the three strategies no built-in agent runs.
+  {
+    // Every candidate serves, in proportion to its weight. Both rows carry an
+    // "In use" badge here — which is what distinguishes roundrobin from the
+    // failover queues above, where the standby is a note with no badge.
+    agent: "rotating-pool-4a1f",
+    strategy: "roundrobin",
+    config: null,
+    bindings: [{ ...bind("m-payg-req", 0), weight: 3 }, bind("m-payg-wan", 1)],
+    limits: [],
+  },
+  {
+    // The head serves whenever the window is not in force; the second candidate
+    // owns 22:00–06:00, which wraps midnight.
+    agent: "nightly-batch-7c2e",
+    strategy: "timewindow",
+    config: null,
+    bindings: [bind("m-payg-trend", 0), bind("m-unl", 1, ["22:00", "06:00"])],
+    limits: [],
+  },
+  {
+    // A ceiling the head is over: the gateway refuses to route to it, and the
+    // row reads dimmed with the reason in the Status column. The config's unit
+    // is the strategy's own vocabulary (requests | tokens) — the currency
+    // ceiling that blocked the row is the *provider's*, a different limit.
+    agent: "quota-guard-5b8d",
+    strategy: "quota",
+    config: JSON.stringify({ limit: 500, unit: "requests" }),
+    bindings: [bind("m-payg-over", 0)],
     limits: [],
   },
 ];
@@ -927,7 +1270,15 @@ function matchingLogs(filter?: RequestLogFilter): RequestLogEntry[] {
 export const devApi: KiwanoApi = {
   async getGatewayStatus(): Promise<GatewayStatus> {
     await delay();
-    return { running: true, port: 8317, blocked: [] };
+    // The rows the matrix marks as over a limit. The gateway is what decides
+    // this, and both the dimmed Usage cell and the Status column come from here
+    // — a mock that always answers `[]` leaves the state unreachable in `pnpm
+    // dev`, which is the only place it can be looked at.
+    return {
+      running: true,
+      port: 8317,
+      blocked: MATRIX.filter((m) => m.blocked).map((m) => ({ id: m.id, reason: m.blocked! })),
+    };
   },
 
   async listProviders(filter: AgentId | "all" = "all"): Promise<Provider[]> {
@@ -987,6 +1338,9 @@ export const devApi: KiwanoApi = {
       model_default: input.model_default.trim() || null,
       plan_query: input.plan_query ?? null,
       plan_limits: input.billing_config.plan_limits ?? null,
+      // What the user declared this provider charges; absent = none declared,
+      // which is how a provider priced by the Hub's table reads.
+      prices: input.prices ?? null,
     };
     providers.unshift(p);
     return p;
@@ -1017,6 +1371,11 @@ export const devApi: KiwanoApi = {
     if (input.plan_query !== undefined) t.plan_query = input.plan_query;
     t.limit_unit = input.billing_config.limit_unit;
     t.plan_limits = input.billing_config.plan_limits ?? null;
+    // Absent `prices` keeps what is stored (mirrors vm::update_provider): the
+    // form omits the field whenever its Prices section is not on screen.
+    if (input.prices !== undefined) {
+      t.prices = input.prices.models.length ? input.prices : null;
+    }
     return t;
   },
 

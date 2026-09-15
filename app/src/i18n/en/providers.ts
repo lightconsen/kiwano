@@ -130,7 +130,7 @@ export const providers = {
   routeEmptyBody:
     "Bind an existing provider below, and requests that arrive with this agent's key will route through the candidates in order.",
   /** The credentials dialog's title, and the name on the icon that opens it. */
-  accessFor: "How a client reaches {agent}",
+  accessTab: "Access",
   accessEndpoint: "Endpoint",
   accessKey: "API Key",
   accessNote:

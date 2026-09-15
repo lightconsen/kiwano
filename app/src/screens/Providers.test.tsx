@@ -313,7 +313,7 @@ describe("a user-defined agent", () => {
     await user.click(await screen.findByRole("button", { name: longTasks.label }));
 
     // Not on the tab: credentials are read once and pasted, not watched.
-    const opens = en.providers.accessFor.replace("{agent}", longTasks.label);
+    const opens = en.providers.agentSettingsFor.replace("{agent}", longTasks.label);
     expect(screen.queryByText(longTasks.placeholder_key!)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: opens }));
@@ -343,7 +343,7 @@ describe("a user-defined agent", () => {
     expect(screen.queryByRole("button", { name: en.providers.deleteAgent })).toBeNull();
     await user.click(
       screen.getByRole("button", {
-        name: en.providers.accessFor.replace("{agent}", longTasks.label),
+        name: en.providers.agentSettingsFor.replace("{agent}", longTasks.label),
       }),
     );
     const del = await screen.findByRole("button", { name: en.providers.deleteAgent });
@@ -722,8 +722,10 @@ describe("the agent's own limit", () => {
 
     await user.click(await screen.findByRole("button", { name: longTasks.label }));
     await user.click(
-      screen.getByLabelText(en.providers.accessFor.replace("{agent}", longTasks.label)),
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", longTasks.label)),
     );
+    // Its dialog has the same two subjects; this one opens on the credentials.
+    await user.click(screen.getByRole("button", { name: en.strategy.limitLabel }));
 
     await user.click(screen.getByRole("button", { name: en.strategy.limitAdd }));
     await user.type(amountFor(en.strategy.limitPeriodDay), "5");
@@ -818,16 +820,15 @@ describe("a built-in agent's own row", () => {
       screen.queryByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
     ).toBeNull();
 
-    // A user-defined agent has no config file behind it, so its own tab keeps the
-    // row it always had — the gear that opens its credentials — and gains none.
+    // A user-defined agent has no config file behind it, so its tab has no name +
+    // path row. Its gear is still there — that is where its settings live — and
+    // opens the credentials rather than a file list.
     await user.click(await screen.findByRole("button", { name: longTasks.label }));
-    expect(
-      screen.queryByLabelText(
-        en.providers.agentSettingsFor.replace("{agent}", longTasks.label),
-      ),
-    ).toBeNull();
-    expect(
-      screen.getByLabelText(en.providers.accessFor.replace("{agent}", longTasks.label)),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/~\//)).toBeNull();
+    await user.click(
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", longTasks.label)),
+    );
+    expect(screen.getByText(en.providers.accessEndpoint)).toBeInTheDocument();
+    expect(screen.queryByText(en.providers.agentConfigFilesNote)).toBeNull();
   });
 });

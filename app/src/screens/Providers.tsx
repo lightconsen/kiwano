@@ -183,11 +183,12 @@ function AgentOnboarding({
   );
 }
 
-/** The two values a client is configured with: where the gateway is, and this
-    agent's key. They are the whole of what a user-defined agent *is* from the
-    outside, so they get a dialog of their own, opened from the icon beside the
-    agent's name — a tab that is a route does not need a permanent card of
-    credentials on top of it. */
+/** One user-defined agent's settings: the two values a client is configured with
+    (where the gateway is, and this agent's key) and how much it may spend.
+ *
+ * Opened from the icon beside the agent's name — a tab that is a route does not
+ * need a permanent card of credentials on top of it. Deleting it stays outside the
+ * subjects, below, where a destructive control belongs. */
 function AccessDialog({
   agent,
   label,
@@ -212,28 +213,36 @@ function AccessDialog({
   onChanged?: () => void;
 }) {
   const t = useT();
+  const [tab, setTab] = useState<"access" | "limit">("access");
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[460px]">
         <DialogHeader>
           <DialogTitle className="text-[13px]">
-            {t("providers.accessFor", { agent: label })}
+            {t("providers.agentSettingsFor", { agent: label })}
           </DialogTitle>
         </DialogHeader>
         <div className="px-5 pb-3 pt-1">
-          <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
-          <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
-          <p className="mt-2 text-[11px] leading-relaxed text-mut">{t("providers.accessNote")}</p>
-          <div className="mt-3 border-t border-line pt-2">
-            {/* This dialog has no tabs, so the section is named here — the same
-                words the other dialog puts on the tab that shows it. */}
-            <div className="text-[10.5px] text-mut">{t("strategy.limitLabel")}</div>
-            <LimitSection
-              agent={agent}
-              limits={limits}
-              currency={currency}
-              onChanged={onChanged}
-            />
+          <SettingsTabs tabs={ACCESS_TABS} tab={tab} onPick={setTab} />
+
+          <div className="mt-2.5">
+            {tab === "access" && (
+              <>
+                <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
+                <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
+                <p className="mt-2 text-[11px] leading-relaxed text-mut">
+                  {t("providers.accessNote")}
+                </p>
+              </>
+            )}
+            {tab === "limit" && (
+              <LimitSection
+                agent={agent}
+                limits={limits}
+                currency={currency}
+                onChanged={onChanged}
+              />
+            )}
           </div>
         </div>
         {/* Deleting lives with the rest of what this agent *is*, and one step
@@ -249,33 +258,24 @@ function AccessDialog({
   );
 }
 
-/** One built-in agent's settings: whether Kiwano routes it, and the files a
-    takeover rewrites.
- *
- * The switch and the file list belong together because they are the same
- * question from two sides — turning the takeover off is what puts those files
- * back. Read-only apart from that switch: the config is the agent's, and this
- * dialog is not an editor for someone else's format.
- *
- * A user-defined agent has no such dialog: there is no file behind it, and its
- * own row already carries what it does have (its key, and deleting it). */
-/** The subjects of one agent's settings, switched between rather than stacked:
-    what the agent is here (the files a takeover rewrites), and how much it may
-    spend. The same segment group the Dashboard's window and the shelf's view use —
-    both fit on a row, and naming the other reading without opening it is the
-    point. */
-function SettingsTabs({
+/** The subjects of one agent's settings, switched between rather than stacked.
+    The same segment group the Dashboard's window and the shelf's view use — the
+    subjects fit on a row, and naming the other one without opening it is the
+    point.
+
+    Generic over which subjects, because the two dialogs hold different ones: a
+    built-in agent has files to name, a user-defined one has credentials to hand
+    out, and both have ceilings. */
+function SettingsTabs<T extends string>({
+  tabs,
   tab,
   onPick,
 }: {
-  tab: AgentSettingsTab;
-  onPick: (t: AgentSettingsTab) => void;
+  tabs: { id: T; labelKey: KeyPath<Messages> }[];
+  tab: T;
+  onPick: (t: T) => void;
 }) {
   const t = useT();
-  const tabs: { id: AgentSettingsTab; labelKey: KeyPath<Messages> }[] = [
-    { id: "general", labelKey: "providers.agentGeneralTab" },
-    { id: "limit", labelKey: "strategy.limitLabel" },
-  ];
   return (
     <div className="mt-1 flex overflow-hidden rounded-lg border border-line text-[12px]">
       {tabs.map((x, i) => (
@@ -291,8 +291,22 @@ function SettingsTabs({
   );
 }
 
-type AgentSettingsTab = "general" | "limit";
+/** What each dialog's strip holds. The ceiling is in both; the other subject is
+    what that kind of agent is from the outside. */
+const AGENT_TABS: { id: "general" | "limit"; labelKey: KeyPath<Messages> }[] = [
+  { id: "general", labelKey: "providers.agentGeneralTab" },
+  { id: "limit", labelKey: "strategy.limitLabel" },
+];
+const ACCESS_TABS: { id: "access" | "limit"; labelKey: KeyPath<Messages> }[] = [
+  { id: "access", labelKey: "providers.accessTab" },
+  { id: "limit", labelKey: "strategy.limitLabel" },
+];
 
+/** One built-in agent's settings: the files a takeover rewrites, and how much the
+    agent may spend.
+ *
+ * A user-defined agent has a dialog of its own below — there is no file behind it
+ * — and the two share this shape: a strip of subjects, and one showing. */
 function AgentSettingsDialog({
   agent,
   label,
@@ -314,7 +328,7 @@ function AgentSettingsDialog({
   onChanged?: () => void;
 }) {
   const t = useT();
-  const [tab, setTab] = useState<AgentSettingsTab>("general");
+  const [tab, setTab] = useState<"general" | "limit">("general");
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[460px]">
@@ -324,7 +338,7 @@ function AgentSettingsDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="px-5 pb-4 pt-1">
-          <SettingsTabs tab={tab} onPick={setTab} />
+          <SettingsTabs tabs={AGENT_TABS} tab={tab} onPick={setTab} />
 
           <div className="mt-2.5">
             {tab === "general" && (
@@ -1837,8 +1851,8 @@ export default function Providers({
             variant="ghost"
             size="sm"
             className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
-            aria-label={t("providers.accessFor", { agent: custom.label })}
-            title={t("providers.accessFor", { agent: custom.label })}
+            aria-label={t("providers.agentSettingsFor", { agent: custom.label })}
+            title={t("providers.agentSettingsFor", { agent: custom.label })}
             onClick={() => setAccessOpen(true)}
           >
             <Settings2 className="h-3.5 w-3.5" />

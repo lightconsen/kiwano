@@ -107,7 +107,7 @@ export const providers = {
   routeEmptyTitle: "{agent} 还没有候选 Provider",
   routeEmptyBody:
     "在下面绑定一个已有 Provider；带着这个 Agent 的 key 进来的请求，会按候选顺序走。",
-  accessFor: "{agent} 的接入方式",
+  accessTab: "接入",
   accessEndpoint: "端点",
   accessKey: "API Key",
   accessNote:

@@ -2462,6 +2462,7 @@ dependencies = [
  "clap",
  "kiwano-core",
  "kiwanod",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

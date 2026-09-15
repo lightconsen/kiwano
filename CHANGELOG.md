@@ -21,6 +21,24 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **The CLI prints tables.** Listings came out as columns of text separated by
+  spaces, which is only readable while the columns happen to line up: a long
+  provider id pushed everything after it, and there was no way to tell where one
+  column ended and the next began. They are now MySQL-shaped — a `+---+` rule
+  under the header and after the last row, `|` between the cells — and the
+  columns of numbers (request counts, token counts, costs, latencies) hug their
+  right edge, so they can be read by magnitude. The `usage` and `dashboard`
+  splits come with them: they were hand-padded to the same shape, and are now
+  the same renderer as everything else.
+
+  A table is laid out to fit the terminal it is printed to. The widest columns
+  give up space down to a floor of six characters and the cells that no longer
+  fit are elided, so a narrow window gets a narrower table rather than a wrapped
+  line. A pipe or a file has no width to fit, so nothing is narrowed and the
+  table is written whole; `COLUMNS` overrides both, which is how a script asks
+  for a specific layout. `--json` and stderr are untouched: this is the text
+  branch of the same commands.
+
 - **A refresh reads the data again instead of rebuilding the screen.** The status
   bar's ⟳ — and the Apps page's, which does the same work plus a forced quota
   query — used to remount whatever screen was open, so it reloaded that screen's

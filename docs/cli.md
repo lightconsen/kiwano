@@ -45,6 +45,25 @@ one JSON document, so `kiwano --json providers list | jq` works. Diagnostics —
 the note after a route reload, warnings, errors — go to stderr, *including*
 under `--json`.
 
+Listings come out as tables, and the columns of numbers (request counts, token
+counts, costs, latencies) are aligned to their right edge so they can be read by
+magnitude:
+
+```
++-------------------------+----------+--------+------------------+---------+---------------------------+
+| ID                      | NAME     | PROTO  | ENDPOINT         | BILLING | AGENTS                    |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+| api-deepseek-com-271eb4 | DeepSeek | openai | api.deepseek.com | payg    | codex*,demo-route-00b40a* |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+```
+
+A table is laid out to fit the terminal it is printed to: the widest columns
+give up space, down to a floor of six characters, and cells that no longer fit
+are elided with `…`. When the output is not a terminal — a pipe, a file — there
+is no width to fit, so the table is written whole; set `COLUMNS` to say one
+yourself (`COLUMNS=100 kiwano providers list`), which is also how a script gets
+the narrow layout deliberately.
+
 Errors are **not** emitted as a JSON object on stdout. Putting one there would
 make a partially-successful pipeline ambiguous about which document it was
 reading, and the exit code already carries the answer:

@@ -18,7 +18,7 @@ use crate::cli::{
     GatewayCmd, ImportCmd, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd,
     SettingsCmd, UsageArgs,
 };
-use crate::output::{ellipsize, fmt_amount, pad_to, render_table};
+use crate::output::{ellipsize, fmt_amount, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
 
 // ── status / reload ─────────────────────────────────────────────────────────
@@ -773,7 +773,7 @@ fn render_agent_rows(rows: &[AgentRow]) -> String {
             ]
         })
         .collect();
-    render_table(&head, &table_rows)
+    render_table(&head, &table_rows, &[])
 }
 
 /// Take over, or restore, one agent — the operation that makes a server
@@ -1592,7 +1592,7 @@ fn render_providers(vms: &[vm::ProviderVm]) -> String {
             ]
         })
         .collect();
-    render_table(&head, &rows)
+    render_table(&head, &rows, &[])
 }
 
 fn render_quota(report: &kiwanod::plan_quota::PlanQuotaReport) -> String {
@@ -1690,7 +1690,7 @@ fn render_catalog(catalog: &vm::CatalogListVm) -> String {
             ]
         })
         .collect();
-    let mut out = render_table(&head, &rows);
+    let mut out = render_table(&head, &rows, &[]);
     out.push_str(&format!(
         "\n{} of {} entries",
         catalog.entries.len(),
@@ -1725,7 +1725,7 @@ fn render_logs(list: &vm::RequestLogListVm) -> String {
             ]
         })
         .collect();
-    let mut out = render_table(&head, &rows);
+    let mut out = render_table(&head, &rows, &[0, 5, 6, 7, 8]);
     // The total, not the page length, is what tells a caller whether to keep
     // paging.
     out.push_str(&format!("\n{} of {} matching", list.rows.len(), list.total));
@@ -1811,31 +1811,51 @@ fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
         "\navg latency {} ms ({}%)",
         data.latency_ms, data.latency_delta_pct
     ));
+    // The two splits, as tables: they are columns of numbers with a name in
+    // front, which is what a table is for. The headline lines above stay prose —
+    // one value per line has no columns to line up.
     if !data.by_provider.is_empty() {
-        out.push_str("\nby provider:");
-        for p in &data.by_provider {
-            out.push_str(&format!(
-                "\n  {} {:>6} req  {:>3}%  {}",
-                // Padded by display width, not by `{:<24}`: a CJK provider name
-                // would otherwise push the request counts out of line.
-                pad_to(&ellipsize(&p.name, 23), 24),
-                p.requests,
-                p.pct,
-                fmt_amount(p.cost, 4)
-            ));
-        }
+        let rows: Vec<Vec<String>> = data
+            .by_provider
+            .iter()
+            .map(|p| {
+                vec![
+                    p.name.clone(),
+                    p.requests.to_string(),
+                    format!("{}%", p.pct),
+                    fmt_amount(p.cost, 4),
+                ]
+            })
+            .collect();
+        out.push('\n');
+        out.push_str(&render_table(
+            &["PROVIDER", "REQUESTS", "SHARE", "COST"],
+            &rows,
+            // Requests, share and cost are numbers; the name is not.
+            &[1, 2, 3],
+        ));
     }
     if !data.by_agent.is_empty() {
-        out.push_str("\nby agent:");
-        for a in &data.by_agent {
-            out.push_str(&format!(
-                "\n  {} {:>6} req  {:>8} tokens  {}",
-                pad_to(&ellipsize(&a.label, 23), 24),
-                a.requests,
-                a.tokens,
-                fmt_amount(a.cost, 4)
-            ));
-        }
+        let rows: Vec<Vec<String>> = data
+            .by_agent
+            .iter()
+            .map(|a| {
+                vec![
+                    a.label.clone(),
+                    a.requests.to_string(),
+                    // Already formatted by the view model, unlike the provider
+                    // split's raw counts.
+                    a.tokens.clone(),
+                    fmt_amount(a.cost, 4),
+                ]
+            })
+            .collect();
+        out.push('\n');
+        out.push_str(&render_table(
+            &["AGENT", "REQUESTS", "TOKENS", "COST"],
+            &rows,
+            &[1, 2, 3],
+        ));
     }
     out
 }
@@ -1856,7 +1876,7 @@ fn render_alerts(alerts: &[vm::UsageAlertVm]) -> String {
             ]
         })
         .collect();
-    render_table(&head, &rows)
+    render_table(&head, &rows, &[1, 2])
 }
 
 fn render_probe(report: &sidecar::ProbeReport) -> String {
@@ -1918,7 +1938,7 @@ fn render_agents(found: &[detect::AgentDetectVm]) -> String {
             ]
         })
         .collect();
-    render_table(&head, &rows)
+    render_table(&head, &rows, &[])
 }
 
 fn render_versions(versions: &[detect::AgentVersionVm]) -> String {
@@ -1932,7 +1952,7 @@ fn render_versions(versions: &[detect::AgentVersionVm]) -> String {
             ]
         })
         .collect();
-    render_table(&head, &rows)
+    render_table(&head, &rows, &[])
 }
 
 fn render_keys(keys: &[vm::ApiKeyVm], provider_id: &str) -> String {
@@ -1951,7 +1971,7 @@ fn render_keys(keys: &[vm::ApiKeyVm], provider_id: &str) -> String {
             ]
         })
         .collect();
-    render_table(&head, &rows)
+    render_table(&head, &rows, &[])
 }
 
 fn render_usage(report: &UsageReport) -> String {
@@ -1975,17 +1995,31 @@ fn render_usage(report: &UsageReport) -> String {
         out.push_str("\n(no usage in window)");
         return out;
     }
-    out.push_str("\nby provider:");
-    for (provider_id, name, totals) in &report.by_provider {
-        let label = if name.is_empty() { provider_id } else { name };
-        out.push_str(&format!(
-            "\n  {} {:>6} req  in {:>7}  out {:>7}",
-            pad_to(&ellipsize(label, 23), 24),
-            totals.requests,
-            vm::fmt_tokens(totals.input_tokens),
-            vm::fmt_tokens(totals.output_tokens)
-        ));
-    }
+    // A table, like the dashboard's splits: same shape of data, same rendering.
+    // Token counts are formatted (`1.9M`), which is still a number column — it
+    // is read by its right edge.
+    let rows: Vec<Vec<String>> = report
+        .by_provider
+        .iter()
+        .map(|(provider_id, name, totals)| {
+            vec![
+                if name.is_empty() {
+                    provider_id.clone()
+                } else {
+                    name.clone()
+                },
+                totals.requests.to_string(),
+                vm::fmt_tokens(totals.input_tokens),
+                vm::fmt_tokens(totals.output_tokens),
+            ]
+        })
+        .collect();
+    out.push('\n');
+    out.push_str(&render_table(
+        &["PROVIDER", "REQUESTS", "IN", "OUT"],
+        &rows,
+        &[1, 2, 3],
+    ));
     out
 }
 

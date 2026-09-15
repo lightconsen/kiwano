@@ -99,7 +99,33 @@ impl<'a> Out<'a> {
 /// Widths are display columns, not `char`s: a CJK provider name is twice as
 /// wide as its character count suggests, and counting characters shifted every
 /// column after the first such name.
-pub fn render_table(head: &[&str], rows: &[Vec<String>]) -> String {
+/// `right` names the columns whose cells are numbers, which hug the right edge
+/// of their column; everything else is left-aligned. Indices rather than a
+/// per-cell flag because it is a property of the *column* — a `TOKENS` column
+/// reads as a column of numbers or not at all — and because the header it
+/// indexes is passed in beside it.
+///
+/// The table is a MySQL-shaped one: a `+---+` rule under the header and after
+/// the last row, `|` between the cells. That rule is what makes a wide table
+/// readable when the columns are ragged, which they are: a provider id is 20
+/// columns and its billing tag is 5.
+///
+/// It is laid out inside the terminal when it can tell how wide that is
+/// (`table_width`): the widest columns give up space, down to a floor, and cells
+/// are ellipsized to fit. A pipe or a file has no width to fit, so nothing is
+/// narrowed and the table comes out whole.
+pub fn render_table(head: &[&str], rows: &[Vec<String>], right: &[usize]) -> String {
+    render_table_within(head, rows, right, table_width())
+}
+
+/// `render_table` with the width spelled out — what the tests drive, and what
+/// `COLUMNS` reaches when a shell exports it.
+pub fn render_table_within(
+    head: &[&str],
+    rows: &[Vec<String>],
+    right: &[usize],
+    within: Option<usize>,
+) -> String {
     let mut widths: Vec<usize> = head.iter().map(|h| display_width(h)).collect();
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
@@ -108,27 +134,121 @@ pub fn render_table(head: &[&str], rows: &[Vec<String>]) -> String {
             }
         }
     }
-    fn pad(cells: &[String], widths: &[usize]) -> String {
-        let mut line = String::new();
-        for (i, cell) in cells.iter().enumerate() {
-            if i > 0 {
-                line.push(' ');
-            }
-            match widths.get(i) {
-                Some(w) => line.push_str(&pad_to(cell, *w)),
-                None => line.push_str(cell),
-            }
+    fit(&mut widths, within);
+
+    // `| a | bb |` — two spaces of gutter per column plus the closing bar.
+    let rule = |widths: &[usize]| {
+        let mut line = String::from("+");
+        for w in widths {
+            line.push_str(&"-".repeat(w + 2));
+            line.push('+');
         }
-        line.trim_end().to_string()
-    }
+        line
+    };
+    let cells = |cells: &[String], widths: &[usize]| {
+        let mut line = String::from("|");
+        for (i, w) in widths.iter().enumerate() {
+            let cell = cells.get(i).map(String::as_str).unwrap_or("");
+            // The ellipsis is the last thing to go: a cell too wide for its
+            // column (which only happens on a narrow terminal) is shortened the
+            // same way the callers shorten theirs.
+            let cell = ellipsize(cell, *w);
+            let gap = w.saturating_sub(display_width(&cell));
+            line.push(' ');
+            if right.contains(&i) {
+                line.push_str(&" ".repeat(gap));
+                line.push_str(&cell);
+            } else {
+                line.push_str(&cell);
+                line.push_str(&" ".repeat(gap));
+            }
+            line.push_str(" |");
+        }
+        line
+    };
 
     let head_cells: Vec<String> = head.iter().map(|h| (*h).to_string()).collect();
-    let mut out = pad(&head_cells, &widths);
+    let mut out = rule(&widths);
+    out.push('\n');
+    out.push_str(&cells(&head_cells, &widths));
+    out.push('\n');
+    out.push_str(&rule(&widths));
     for row in rows {
         out.push('\n');
-        out.push_str(&pad(row, &widths));
+        out.push_str(&cells(row, &widths));
     }
+    out.push('\n');
+    out.push_str(&rule(&widths));
     out
+}
+
+/// How many columns the table has to fit in, when that is knowable.
+///
+/// `COLUMNS` first: it is what a shell, a test or a CI job can set to say "this
+/// is the width", and it is the only one of the two answers that works when
+/// output is not a terminal. Then the terminal itself (unix). `None` means the
+/// output is a pipe or a file — which has no width, so the table is not narrowed
+/// to one.
+pub fn table_width() -> Option<usize> {
+    if let Ok(cols) = std::env::var("COLUMNS") {
+        if let Ok(n) = cols.trim().parse::<usize>() {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+    terminal_width()
+}
+
+/// The tty's width, or `None` when stdout is not one.
+#[cfg(unix)]
+fn terminal_width() -> Option<usize> {
+    // `ioctl(TIOCGWINSZ)` on stdout. Not in std, and the request number differs
+    // per platform — which is the whole reason this goes through libc rather
+    // than being spelled out by hand.
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) };
+    (rc == 0 && ws.ws_col > 0).then_some(ws.ws_col as usize)
+}
+
+#[cfg(not(unix))]
+fn terminal_width() -> Option<usize> {
+    // Windows has no `COLUMNS` in practice and this build does not link the
+    // console API for it, so a table there is laid out whole. `COLUMNS` still
+    // works when something sets it.
+    None
+}
+
+/// Narrow the columns until the table fits, taking from the widest one each
+/// time (ties to the left).
+///
+/// From the widest rather than proportionally, because the widest column is the
+/// one with room to give: a table of `ID | NAME` at 60 columns should not halve
+/// a four-letter name to make room for an id nobody can read either way.
+fn fit(widths: &mut [usize], within: Option<usize>) {
+    /// Below this a column is not a column — an id elided to three characters
+    /// tells the reader nothing, and an over-long line says more.
+    const FLOOR: usize = 6;
+    let Some(max) = within else { return };
+    loop {
+        // `| a |` per column, plus the closing `|` and two spaces of gutter.
+        let total: usize = widths.iter().map(|w| w + 3).sum::<usize>() + 1;
+        if total <= max {
+            return;
+        }
+        let Some(widest) = widths
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| **w > FLOOR)
+            .max_by_key(|(i, w)| (**w, std::cmp::Reverse(*i)))
+            .map(|(i, _)| i)
+        else {
+            // Every column is at the floor: the line will be wider than the
+            // terminal, which is the honest end of "make it fit".
+            return;
+        };
+        widths[widest] -= 1;
+    }
 }
 
 /// Shorten to `max` display columns, ellipsis included.
@@ -226,27 +346,113 @@ pub fn fmt_amount(v: f64, places: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{display_width, ellipsize, fmt_amount, render_table};
+    use super::{display_width, ellipsize, fmt_amount, render_table_within};
 
     /// A CJK name is twice as wide as its character count, so a table that
     /// measured in characters put everything after it one column out per
-    /// character.
+    /// character. The borders make the invariant exact: every line is the same
+    /// number of display columns, wide names or not.
     #[test]
     fn wide_names_do_not_shift_the_columns_after_them() {
-        let table = render_table(
+        let table = render_table_within(
             &["NAME", "PROTO"],
             &[
                 vec!["alpha".to_string(), "openai".to_string()],
                 vec!["深度求索".to_string(), "openai".to_string()],
                 vec!["a".to_string(), "openai".to_string()],
             ],
+            &[],
+            None,
         );
-        // Every line, wide name or not, starts its last column at column 9.
-        for line in table.lines() {
-            let last = line.rsplit(' ').next().unwrap();
-            let start = display_width(line) - display_width(last);
-            assert_eq!(start, 9, "misaligned: {line:?}");
+        let widths: Vec<usize> = table.lines().map(display_width).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "ragged lines: {widths:?}\n{table}"
+        );
+        // …and the wide name is what the name column was sized to: 8 display
+        // columns, so its rule segment is 10 dashes.
+        assert!(
+            table.starts_with("+----------+"),
+            "{}",
+            table.lines().next().unwrap()
+        );
+    }
+
+    /// A numeric column is read from its right edge: its cells and its header
+    /// end at the same column. The one space before each closing bar is the
+    /// gutter, so it is dropped before asking whether the cell is flush.
+    #[test]
+    fn numbers_hug_the_right_edge_of_their_column() {
+        let table = render_table_within(
+            &["PROVIDER", "REQUESTS"],
+            &[
+                vec!["DeepSeek".to_string(), "4".to_string()],
+                vec!["Kimi".to_string(), "1024".to_string()],
+            ],
+            &[1],
+            None,
+        );
+        for line in table.lines().filter(|l| l.starts_with('|')) {
+            let cell = line.rsplit_once('|').unwrap().0.rsplit_once('|').unwrap().1;
+            let content = &cell[..cell.len() - 1];
+            assert!(
+                !content.ends_with(' '),
+                "a number column must be flush right: {line:?}"
+            );
+            // The header goes with them.
+            assert!(
+                content.ends_with("REQUESTS")
+                    || content
+                        .trim_start()
+                        .starts_with(|c: char| c.is_ascii_digit() || c == 'R'),
+                "{line:?}"
+            );
         }
+    }
+
+    /// A narrow terminal takes from the widest column, down to a floor, and
+    /// elides the cells that no longer fit — the table still fits.
+    #[test]
+    fn a_narrow_terminal_narrows_the_widest_columns() {
+        let heads = ["ID", "ENDPOINT"];
+        let rows = vec![vec![
+            "api-deepseek-com-271eb4".to_string(),
+            "api.deepseek.com".to_string(),
+        ]];
+
+        // Natural layout, no terminal to fit: nothing is shortened.
+        let whole = render_table_within(&heads, &rows, &[], None);
+        assert!(whole.contains("api-deepseek-com-271eb4"), "{whole}");
+
+        let narrow = render_table_within(&heads, &rows, &[], Some(30));
+        for line in narrow.lines() {
+            assert!(
+                display_width(line) <= 30,
+                "{} columns: {line}",
+                display_width(line)
+            );
+        }
+        // Both columns started wide, so both gave ground; the cells that no
+        // longer fit are elided rather than allowed to wrap the line.
+        assert!(
+            narrow.contains('…'),
+            "cells past the budget are elided: {narrow}"
+        );
+        // Elided, not mangled: what fits of the id is still its start.
+        assert!(narrow.contains("api-deep"), "{narrow}");
+    }
+
+    /// Nothing to infer a width from (a pipe, a file) means no narrowing. The
+    /// table is written whole, which is what a reader of the file wants.
+    #[test]
+    fn a_pipe_is_not_narrowed() {
+        let table = render_table_within(
+            &["ID"],
+            &[vec!["a-very-long-provider-id".to_string()]],
+            &[],
+            None,
+        );
+        assert!(table.contains("a-very-long-provider-id"), "{table}");
     }
 
     #[test]

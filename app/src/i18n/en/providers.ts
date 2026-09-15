@@ -143,6 +143,7 @@ export const providers = {
   // ── A built-in agent's own settings (the row above its table, and its dialog) ──
   /** The gear's title, and the dialog's heading — the same words for both. */
   agentSettingsFor: "{agent} settings",
+  agentTakeoverTab: "Takeover",
   agentRouted: "Taken over",
   agentRoutedBody:
     "Its config points at the local gateway, which is how its traffic arrives here. Restoring puts the original file back and the agent talks to its provider directly again.",

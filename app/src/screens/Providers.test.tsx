@@ -610,6 +610,13 @@ describe("the agent's own limit", () => {
     );
   }
 
+  /** …and pick one of its tabs: everything is behind one, including the takeover
+      state, so a test that means the ceiling has to say so. */
+  async function openTab(user: ReturnType<typeof userEvent.setup>, name: string) {
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name }));
+  }
+
   it("reads out the stored ceiling", async () => {
     const user = userEvent.setup();
     renderCodexTab({
@@ -623,9 +630,8 @@ describe("the agent's own limit", () => {
       ],
       codexTakenOver: true,
     });
-    await openSettings(user);
+    await openTab(user, en.strategy.limitLabel);
 
-    expect(screen.getByText(en.strategy.limitLabel)).toBeInTheDocument();
     expect(screen.getByText("50 CNY per month")).toBeInTheDocument();
   });
 
@@ -636,7 +642,7 @@ describe("the agent's own limit", () => {
       routes: [codexRoute(["deepseek"])],
       codexTakenOver: true,
     });
-    await openSettings(user);
+    await openTab(user, en.strategy.limitLabel);
 
     expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
   });
@@ -648,7 +654,7 @@ describe("the agent's own limit", () => {
       routes: [codexRoute(["deepseek"])],
       codexTakenOver: true,
     });
-    await openSettings(user);
+    await openTab(user, en.strategy.limitLabel);
 
     await user.type(await screen.findByLabelText(en.strategy.limitAmountAria), "25");
     await user.click(screen.getByRole("button", { name: en.common.save }));
@@ -744,7 +750,13 @@ describe("a built-in agent's own row", () => {
       await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
     );
 
-    // The ceiling is what the dialog opens on; the files are the other reading.
+    // Three subjects, one showing: the takeover state is what it opens on, and
+    // neither of the other two is in the DOM until its tab is picked.
+    expect(screen.getByText(en.providers.agentRouted)).toBeInTheDocument();
+    expect(screen.queryByText(en.strategy.limitNone)).toBeNull();
+    expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: en.strategy.limitLabel }));
     expect(screen.getByText(en.strategy.limitNone)).toBeInTheDocument();
     expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
 

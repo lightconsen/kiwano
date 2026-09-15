@@ -119,6 +119,7 @@ export const providers = {
 
   // ── 内置 agent 自己的设置（表格上方那一行，以及它的对话框）──
   agentSettingsFor: "{agent} 设置",
+  agentTakeoverTab: "接管",
   agentRouted: "已接管",
   agentRoutedBody:
     "它的配置指向本地网关，请求就是这样到达这里的。还原会把原始文件放回，该 agent 之后直接连自己的 Provider。",

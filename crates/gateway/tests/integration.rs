@@ -1474,8 +1474,11 @@ async fn health_and_metrics_answer_without_a_key_and_leave_no_trace() {
     );
     let text = String::from_utf8_lossy(&response_body(response).await).to_string();
     assert!(text.contains("kiwano_up 1"), "{text}");
+    // No token configured: `/metrics` answers any local process, but the
+    // per-agent labels are redacted (KIW-PRIV-001) — the series exists to
+    // aggregate, it just does not name the agent.
     assert!(
-        text.contains("kiwano_route_candidates{agent=\"claude\"} 1"),
+        text.contains("kiwano_route_candidates{agent=\"") && !text.contains("agent=\"claude\""),
         "{text}"
     );
 
@@ -1497,8 +1500,10 @@ async fn health_and_metrics_answer_without_a_key_and_leave_no_trace() {
         .await
         .unwrap();
     let text = String::from_utf8_lossy(&response_body(response).await).to_string();
+    // Same redaction as above: the series is there (a breaker is open), the
+    // route it names is hashed.
     assert!(
-        text.contains("kiwano_circuit_open{route=\"claude:p-ant\"} 1"),
+        text.contains("kiwano_circuit_open{route=\"") && !text.contains("route=\"claude:p-ant\""),
         "an open breaker is visible to the scraper: {text}"
     );
 
@@ -1768,4 +1773,69 @@ async fn an_open_breaker_refuses_before_anything_is_sent() {
         state.store.usage_totals(None, None, None).unwrap().requests,
         0
     );
+}
+
+/// KIW-PRIV-001: `/metrics` outside the key gate, but the identifiers in its
+/// labels are redacted when no token is configured, and configuring one
+/// (`with_metrics_token`, whence `KIWANO_METRICS_TOKEN`) gates the endpoint
+/// with `Authorization: Bearer` while unredacting the labels.
+mod metrics_auth {
+    use super::*;
+
+    async fn gateway_router(token: Option<String>) -> Router {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .insert_provider(&provider(
+                "p-ant",
+                Protocol::Anthropic,
+                "http://127.0.0.1:9".into(),
+            ))
+            .unwrap();
+        store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap().with_metrics_token(token));
+        data_plane_router(state)
+    }
+
+    async fn scrape(app: Router, auth: Option<&str>) -> (StatusCode, String) {
+        let mut builder = Request::builder().uri("/metrics");
+        if let Some(token) = auth {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let res = app
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let body = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn open_without_token_redacts_agent_labels() {
+        let app = gateway_router(None).await;
+        let (status, body) = scrape(app, None).await;
+        assert_eq!(status, StatusCode::OK);
+        // A per-agent series exists to aggregate...
+        assert!(body.contains("kiwano_route_candidates{agent=\""));
+        // ...but it does not name the agent.
+        assert!(!body.contains("agent=\"claude\""));
+        assert!(!body.contains("}claude"));
+    }
+
+    #[tokio::test]
+    async fn configured_token_gates_and_unredacts() {
+        let app = gateway_router(Some("s3cret-token".into())).await;
+
+        let (status, _) = scrape(app.clone(), None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        let (status, _) = scrape(app.clone(), Some("wrong")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        let (status, body) = scrape(app, Some("s3cret-token")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("agent=\"claude\""));
+    }
 }

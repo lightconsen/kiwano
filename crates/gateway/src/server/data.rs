@@ -7,7 +7,7 @@
 //! lives in [`crate::forward`].
 
 use axum::extract::{Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -46,13 +46,52 @@ async fn health_probe(State(state): State<Arc<GatewayState>>) -> Response {
     crate::metrics::health(&state)
 }
 
-/// Prometheus scrape: likewise outside the gate and outside the meter.
-async fn metrics(State(state): State<Arc<GatewayState>>) -> Response {
+/// Prometheus scrape: likewise outside the key gate and outside the meter.
+///
+/// When `KIWANO_METRICS_TOKEN` is configured, the `Authorization: Bearer`
+/// bearer decides between the full exposition and a 401. When none is
+/// configured the endpoint stays open — a scraper cannot be expected to hold
+/// a token before one exists — but the per-agent labels come back redacted, so
+/// the labels still aggregate without naming ids (see `crate::metrics`).
+async fn metrics(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> Response {
+    let authorized = match state.metrics_token.as_deref() {
+        None => true,
+        Some(expected) => token_bearer(&headers).is_some_and(|t| constant_time_eq(t, expected)),
+    };
+    if !authorized {
+        return error_response(
+            None,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "kiwanod: /metrics requires the `Authorization: Bearer` metrics token",
+        );
+    }
     (
         [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
-        crate::metrics::prometheus(&state).await,
+        crate::metrics::prometheus(&state, state.metrics_token.is_none()).await,
     )
         .into_response()
+}
+
+/// The `Authorization: Bearer <token>` value, when present and well-formed.
+fn token_bearer(headers: &HeaderMap) -> Option<&str> {
+    let value = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
+}
+
+/// Token compare that does not exit on the first differing byte: token
+/// comparison is the one place a timing signal is worth the few cycles it costs.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let mut diff = a.len() ^ b.len();
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        diff |= usize::from(x ^ y);
+    }
+    diff == 0
 }
 
 /// Axum-level fallback: paths no route matches never reach `handle`, so this

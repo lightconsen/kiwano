@@ -14,8 +14,17 @@
 //! - What they expose is counts, breaker states and a version. Never a key, never
 //!   a request body, never anything that lets a caller spend the operator's
 //!   money — which is the threat the key gate exists for (a local process posting
-//!   on the operator's upstream credentials). The names that do appear, provider
-//!   and agent ids, are the ones this machine's owner reads on their own screen.
+//!   on the operator's upstream credentials).
+//!
+//! The one thing a same-user process could abuse is the identifiers in the
+//! labels: which agents are routed, to which route a breaker is open. That is
+//! the machine owner's own screen content, but it does not need to be handed to
+//! any process that can reach the loopback. So `/metrics` serves per-identity
+//! labels **redacted by default** ([`redact_name`]) — a scrape still tells one
+//! agent from another without naming it. Configuring `KIWANO_METRICS_TOKEN`
+//! turns the key gate on instead: the endpoint answers with the full
+//! exposition only to a caller bearing the token, and 401s everyone else.
+//! `/health` never carries identifiers, so it is unchanged either way.
 //!
 //! Neither is metered or logged: a scrape is not a request an agent made, and a
 //! usage row per scrape interval would quietly inflate the dashboard.
@@ -23,6 +32,8 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+
+use sha2::{Digest, Sha256};
 
 use crate::server::GatewayState;
 use crate::strategy::circuit_breaker::CircuitState;
@@ -60,7 +71,11 @@ pub fn health(state: &GatewayState) -> Response {
 /// Gauges throughout, including the ones that name a count: usage and log rows
 /// are pruned on a retention schedule, so a `_total` over them would be a counter
 /// that resets itself and makes every `rate()` a lie.
-pub async fn prometheus(state: &GatewayState) -> String {
+///
+/// `redact` names the audience, not the data: `true` (no token configured) hides
+/// the per-identity labels behind [`redact_name`]; `false` (the caller just
+/// presented a valid token) is the full exposition.
+pub async fn prometheus(state: &GatewayState, redact: bool) -> String {
     let mut out = String::with_capacity(1024);
     let routes = state.route_table();
 
@@ -90,9 +105,9 @@ pub async fn prometheus(state: &GatewayState) -> String {
     out.push_str("# HELP kiwano_route_candidates Providers bound to an agent\n");
     out.push_str("# TYPE kiwano_route_candidates gauge\n");
     for (agent, route) in &routes.routes {
+        let label = redact_label(agent, redact);
         out.push_str(&format!(
-            "kiwano_route_candidates{{agent=\"{}\"}} {}\n",
-            escape_label(agent),
+            "kiwano_route_candidates{{agent=\"{label}\"}} {}\n",
             route.candidates.len()
         ));
     }
@@ -102,9 +117,9 @@ pub async fn prometheus(state: &GatewayState) -> String {
     out.push_str("# HELP kiwano_circuit_open 1 while a provider's breaker is open\n");
     out.push_str("# TYPE kiwano_circuit_open gauge\n");
     for (key, circuit) in state.engine.breaker_snapshot().await {
+        let label = redact_label(&key, redact);
         out.push_str(&format!(
-            "kiwano_circuit_open{{route=\"{}\"}} {}\n",
-            escape_label(&key),
+            "kiwano_circuit_open{{route=\"{label}\"}} {}\n",
             u8::from(circuit == CircuitState::Open)
         ));
     }
@@ -151,6 +166,30 @@ fn escape_label(value: &str) -> String {
     out
 }
 
+/// A per-identity label value: the hash when the caller is authorized to see
+/// names, [`redact_name`] otherwise.
+fn redact_label(value: &str, redact: bool) -> String {
+    if redact {
+        redact_name(value)
+    } else {
+        escape_label(value)
+    }
+}
+
+/// A per-identity label that a scrape can aggregate and `rate()` across time
+/// without ever naming the id on the wire (KIW-PRIV-001). First four bytes of
+/// SHA-256, hex: eight characters a glance cannot read back into "claude" while
+/// still distinguishing one agent from another.
+fn redact_name(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    digest[..4]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +202,28 @@ mod tests {
         assert_eq!(escape_label("a\"b"), "a\\\"b");
         assert_eq!(escape_label("a\\b"), "a\\\\b");
         assert_eq!(escape_label("a\nb"), "a\\nb");
+    }
+
+    // The redaction is what an unsupervised scrape gets: stable across scrapes
+    // (so `rate()` over a label works), different per id, and unreadable back
+    // to the original by sight.
+    #[test]
+    fn redact_stays_stable_distinct_and_unreadable() {
+        let a = redact_name("claude");
+        let b = redact_name("codex");
+        assert_eq!(a, redact_name("claude"));
+        assert_eq!(a.len(), 8);
+        assert_ne!(a, b);
+        assert!(!a.contains("claude"));
+        assert!(!b.contains("codex"));
+        assert_eq!(redact_label("claude", true), a);
+        assert_eq!(redact_label("claude", false), "claude");
+    }
+
+    // A deterministic fixture so a change to the digest is a deliberate act,
+    // not an unnoticed one.
+    #[test]
+    fn redact_fixture_is_stable() {
+        assert_eq!(redact_name("claude"), "c857d09d");
     }
 }

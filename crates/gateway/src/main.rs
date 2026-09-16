@@ -33,6 +33,17 @@ fn default_db_path() -> PathBuf {
         .join(DEFAULT_DB_FILE)
 }
 
+/// Optional bearer token for `/metrics` (KIW-PRIV-001). Non-empty turns the
+/// key gate on; unset keeps the open-but-redacted default so an existing
+/// Prometheus scrape keeps working. The daemon logs `true`/`false` only —
+/// never the token itself.
+fn metrics_token_from_env() -> Option<String> {
+    match std::env::var("KIWANO_METRICS_TOKEN") {
+        Ok(v) if !v.is_empty() => Some(v),
+        _ => None,
+    }
+}
+
 fn db_path_from_env() -> PathBuf {
     match std::env::var("KIWANO_DB_PATH") {
         Ok(v) if !v.is_empty() => PathBuf::from(v),
@@ -73,8 +84,10 @@ async fn main() {
     // disabled carries a marker nothing would ever clear now.
     kiwanod::limits::clear_legacy_disables(&store);
 
+    let metrics_token = metrics_token_from_env();
+    let metrics_enabled = metrics_token.is_some();
     let state = match GatewayState::new(store) {
-        Ok(s) => Arc::new(s),
+        Ok(s) => Arc::new(s.with_metrics_token(metrics_token)),
         Err(e) => {
             tracing::error!(error = %e, "cannot initialize gateway state");
             std::process::exit(1);
@@ -109,6 +122,7 @@ async fn main() {
         admin = %admin_endpoint.describe(),
         db = %db_path.display(),
         agents_routed = agents,
+        metrics_token = metrics_enabled,
         version = state.version,
         "kiwanod ready"
     );

@@ -122,6 +122,27 @@ server usable — the gateway only routes keys it minted itself, so an agent
 pointed at the port by hand is refused), read the logs, export the config. See
 [`docs/cli.md`](docs/cli.md) for the full command reference.
 
+### Monitoring the gateway
+
+The data plane (`127.0.0.1:8317`) carries two read-only endpoints outside the
+agent-key gate, for the tools that cannot hold the app's credentials: `GET
+/health` (liveness for a supervisor) and `GET /metrics` (Prometheus text
+format, gauges for routed agents, route candidates, open breakers and usage
+counts — never a key or a request body).
+
+By default `/metrics` answers any local process, but the per-agent labels come
+back **hashed**, so a scrape still distinguishes agents without naming them.
+To see the full names and require auth, run the daemon with a token:
+
+```bash
+KIWANO_METRICS_TOKEN=<token> kiwanod
+```
+
+`/metrics` then serves `Authorization: Bearer <token>` (a Prometheus
+`bearer_token` config) to that token alone and 401s everyone else — under
+systemd, put the variable in the unit's `Environment=`. `/health` never
+carries identifiers, so it is unchanged either way.
+
 ## Requirements
 
 - macOS (Apple Silicon or Intel), Windows 10 or later, or Linux x86_64

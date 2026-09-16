@@ -65,6 +65,11 @@ pub struct GatewayState {
     limits: RwLock<Arc<crate::limits::LimitState>>,
     pub started_at: Instant,
     pub version: &'static str,
+    /// Optional bearer token guarding `/metrics` (KIW-PRIV-001). Set by the
+    /// daemon from `KIWANO_METRICS_TOKEN`. Absent, `/metrics` stays open to any
+    /// loopback caller but serves per-agent labels redacted; configured, only a
+    /// caller holding the token sees the full exposition (see `crate::metrics`).
+    metrics_token: Option<Arc<str>>,
     /// Flipped by the signal handler and by `POST /shutdown`. Owned here so the
     /// admin plane can request a graceful stop — the app needs that to replace
     /// a gateway left over from another version, and a daemon it adopted is not
@@ -142,8 +147,18 @@ impl GatewayState {
             limits: RwLock::new(Arc::new(limits)),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
+            metrics_token: None,
             shutdown,
         })
+    }
+
+    /// Opt `/metrics` into bearer-token auth (KIW-PRIV-001). Called from the
+    /// daemon's startup env `KIWANO_METRICS_TOKEN`; empty or unset keeps the
+    /// open-and-redacted default, so an existing Prometheus scrape keeps
+    /// working without reconfiguration.
+    pub fn with_metrics_token(mut self, token: Option<String>) -> Self {
+        self.metrics_token = token.filter(|t| !t.is_empty()).map(Arc::from);
+        self
     }
 
     /// A receiver the serve loops await; resolves once a stop is requested.

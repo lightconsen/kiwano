@@ -260,7 +260,7 @@ impl GatewayState {
 }
 
 /// Extract the local placeholder key from inbound auth headers
-/// (tech.md §4.6: `x-api-key` / `Authorization: Bearer`).
+/// (tech.md §4.6: `x-api-key` / `Authorization: Bearer` / `x-goog-api-key`).
 pub fn extract_placeholder_key(headers: &HeaderMap) -> Option<String> {
     if let Some(v) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
         let v = v.trim();
@@ -276,11 +276,18 @@ pub fn extract_placeholder_key(headers: &HeaderMap) -> Option<String> {
             }
         }
     }
+    // Gemini CLI's auth header for the native Gemini API.
+    if let Some(v) = headers.get("x-goog-api-key").and_then(|v| v.to_str().ok()) {
+        let v = v.trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
+        }
+    }
     None
 }
 
 /// Build a protocol-flavored JSON error response: native shape per inbound
-/// protocol family (Anthropic / OpenAI).
+/// protocol family (Anthropic / OpenAI / Gemini).
 pub fn error_response(
     inbound: Option<Protocol>,
     status: StatusCode,
@@ -293,6 +300,16 @@ pub fn error_response(
                 "message": message,
                 "type": kind,
                 "code": status.as_u16(),
+            }
+        }),
+        // Gemini's error envelope: code/message/status, where `status` is the
+        // family name the API uses (e.g. `INVALID_ARGUMENT`) — here the
+        // gateway's own kind, since it is the one refusing the request.
+        Some(Protocol::Gemini) => json!({
+            "error": {
+                "code": status.as_u16(),
+                "message": message,
+                "status": kind,
             }
         }),
         _ => json!({
@@ -368,14 +385,14 @@ mod tests {
             Some("kw-ag-codex-2")
         );
 
-        // The Gemini family's header went with the protocol: it is no longer a
-        // way to identify a caller.
+        // Gemini CLI carries the placeholder key here, speaking the native
+        // Gemini API.
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-goog-api-key",
-            HeaderValue::from_static("kw-ag-nowhere-3"),
+        headers.insert("x-goog-api-key", HeaderValue::from_static("kw-ag-gemini-3"));
+        assert_eq!(
+            extract_placeholder_key(&headers).as_deref(),
+            Some("kw-ag-gemini-3")
         );
-        assert_eq!(extract_placeholder_key(&headers), None);
 
         // Bearer without a token or blank values are ignored.
         let mut headers = HeaderMap::new();

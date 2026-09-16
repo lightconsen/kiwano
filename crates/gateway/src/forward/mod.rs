@@ -47,7 +47,7 @@ use kiwano_adapters::proxy::providers::transform::{
 
 use crate::error::GatewayError;
 use crate::log_capture::{cap_body, RequestCapture};
-use crate::meter::{parse_response_usage, request_model, Usage, UsageScanner};
+use crate::meter::{model_from_path, parse_response_usage, request_model, Usage, UsageScanner};
 use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::data::upstream_url;
 use crate::server::{error_into_response, error_response, GatewayState};
@@ -248,6 +248,12 @@ fn build_upstream_headers(
             let value = HeaderValue::from_str(&format!("Bearer {key}"))
                 .map_err(|e| GatewayError::Upstream(e.to_string()))?;
             out.insert(axum::http::header::AUTHORIZATION, value);
+        }
+        // The native Gemini API takes its credential in `x-goog-api-key`.
+        Protocol::Gemini => {
+            let value =
+                HeaderValue::from_str(key).map_err(|e| GatewayError::Upstream(e.to_string()))?;
+            out.insert("x-goog-api-key", value);
         }
     }
 
@@ -793,7 +799,9 @@ pub async fn forward(
         "upstream responded"
     );
 
-    let model = request_model(&body);
+    // The body states the model for the JSON-API protocols; the native Gemini
+    // API names it in the path instead, so that shape is read from there.
+    let model = request_model(&body).or_else(|| model_from_path(&path));
 
     // reqwest consumes the Response on bytes()/bytes_stream(), so snapshot
     // the client-facing headers first.
@@ -823,7 +831,7 @@ pub async fn forward(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
-                cache_inclusive: provider.protocol == Protocol::OpenAI,
+                cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -886,7 +894,7 @@ pub async fn forward(
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: if status.is_success() { "ok" } else { "error" },
-            cache_inclusive: provider.protocol == Protocol::OpenAI,
+            cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
             log,
         };
         record_sample(&state, sample);
@@ -1365,6 +1373,15 @@ fn stream_error_event(inbound: Option<Protocol>, message: &str) -> Option<Vec<u8
             )
             .into_bytes(),
         ),
+        // Gemini's SSE error event carries the same code/message/status
+        // envelope as its non-streaming errors; a stream event is not a
+        // response body, so the status is the family name rather than a number.
+        Some(Protocol::Gemini) => Some(
+            format!(
+                "data: {{\"error\":{{\"code\":504,\"message\":{quoted},\"status\":\"DEADLINE_EXCEEDED\"}}}}\n\n"
+            )
+            .into_bytes(),
+        ),
         None => None,
     }
 }
@@ -1663,6 +1680,26 @@ mod tests {
         // Legacy anthropic paths have no OpenAI equivalent.
         assert!(matches!(
             resolve_inbound(&plain, Some(Protocol::Anthropic), "/v1/complete"),
+            InboundResolution::Mismatch { .. }
+        ));
+
+        // Gemini conversion is not a thing: a Gemini inbound reaches a Gemini
+        // provider natively, and any other pairing is a clean mismatch rather
+        // than a silently mistranslated request.
+        assert!(matches!(
+            resolve_inbound(
+                &provider(Protocol::Gemini, None),
+                Some(Protocol::Gemini),
+                "/v1beta/models/gemini-pro:generateContent"
+            ),
+            InboundResolution::Native
+        ));
+        assert!(matches!(
+            resolve_inbound(
+                &plain,
+                Some(Protocol::Gemini),
+                "/v1beta/models/gemini-pro:generateContent"
+            ),
             InboundResolution::Mismatch { .. }
         ));
     }

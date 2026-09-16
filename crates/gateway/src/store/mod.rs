@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 22;
+pub const SCHEMA_VERSION: i32 = 23;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -636,6 +636,73 @@ ALTER TABLE provider_health ADD COLUMN source TEXT NOT NULL DEFAULT 'probe';
 ALTER TABLE provider_health ADD COLUMN error TEXT;
 "#;
 
+/// v23: the Gemini protocol comes back (Gemini CLI's native API), so both
+/// protocol CHECK constraints widen to accept it.
+///
+/// A rebuild rather than an edit of the older migrations: v4 and v9 widened the
+/// same constraint for the same protocol before v15 narrowed it again, and
+/// migrations replay in order — so the CHECK that survives on disk is whichever
+/// rebuild ran last, and only a new one can widen what v15 closed.
+///
+/// Unlike v15 this deletes nothing: no row is retired here, and the column list
+/// is v15's plus `prices` (added by v20 — the only column change since), or the
+/// rebuild would silently drop it.
+const MIGRATION_V23: &str = r#"
+PRAGMA foreign_keys=OFF;
+CREATE TABLE providers_new (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    protocol      TEXT NOT NULL DEFAULT 'anthropic'
+                  CHECK (protocol IN ('anthropic','openai','gemini')),
+    base_url      TEXT NOT NULL,
+    api_path      TEXT,
+    api_key       TEXT,
+    billing       TEXT NOT NULL DEFAULT 'metered'
+                  CHECK (billing IN ('subscription','metered','unlimited')),
+    period_limit  REAL,
+    limit_unit    TEXT
+                  CHECK (limit_unit IS NULL OR limit_unit IN ('requests','wan_tokens')
+                         OR (length(limit_unit) = 3 AND upper(limit_unit) = limit_unit)),
+    plan_query    TEXT,
+    reset_period  TEXT
+                  CHECK (reset_period IS NULL OR reset_period IN ('monthly','weekly','yearly')),
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    timeout_secs  INTEGER,
+    retries       INTEGER,
+    headers       TEXT,
+    plan_limits   TEXT,
+    catalog_id    TEXT,
+    model_default TEXT,
+    prices        TEXT
+);
+INSERT INTO providers_new (id, name, catalog_id, protocol, base_url, api_path, api_key,
+                           billing, period_limit, limit_unit, plan_query, plan_limits,
+                           timeout_secs, retries, headers, reset_period, enabled,
+                           created_at, updated_at, model_default, prices)
+    SELECT id, name, catalog_id, protocol, base_url, api_path, api_key,
+           billing, period_limit, limit_unit, plan_query, plan_limits,
+           timeout_secs, retries, headers, reset_period, enabled,
+           created_at, updated_at, model_default, prices
+    FROM providers;
+DROP TABLE providers;
+ALTER TABLE providers_new RENAME TO providers;
+
+CREATE TABLE provider_endpoints_new (
+    provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    protocol    TEXT NOT NULL CHECK (protocol IN ('anthropic','openai','gemini')),
+    base_url    TEXT NOT NULL,
+    api_path    TEXT,
+    PRIMARY KEY (provider_id, protocol)
+);
+INSERT INTO provider_endpoints_new (provider_id, protocol, base_url, api_path)
+    SELECT provider_id, protocol, base_url, api_path FROM provider_endpoints;
+DROP TABLE provider_endpoints;
+ALTER TABLE provider_endpoints_new RENAME TO provider_endpoints;
+PRAGMA foreign_keys=ON;
+"#;
+
 const MIGRATION_V13: &str = r#"
 ALTER TABLE model_pricing ADD COLUMN tiers TEXT;
 
@@ -652,6 +719,7 @@ UPDATE request_logs SET cost_off_peak = cost WHERE cost IS NOT NULL;
 pub enum Protocol {
     Anthropic,
     OpenAI,
+    Gemini,
 }
 
 impl Protocol {
@@ -659,6 +727,7 @@ impl Protocol {
         match self {
             Protocol::Anthropic => "anthropic",
             Protocol::OpenAI => "openai",
+            Protocol::Gemini => "gemini",
         }
     }
 
@@ -667,6 +736,7 @@ impl Protocol {
         match s {
             "anthropic" => Some(Protocol::Anthropic),
             "openai" => Some(Protocol::OpenAI),
+            "gemini" => Some(Protocol::Gemini),
             _ => None,
         }
     }
@@ -1724,6 +1794,9 @@ impl Store {
         }
         if version < 22 {
             conn.execute_batch(MIGRATION_V22)?;
+        }
+        if version < 23 {
+            conn.execute_batch(MIGRATION_V23)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -3568,10 +3641,10 @@ mod tests {
         assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 1);
         assert_eq!(store.list_api_keys("p-ant").unwrap().len(), 1);
 
-        // The tag itself is gone by the time every migration has run: v4 widened
-        // this CHECK for Gemini CLI, v9 carried the widening forward, and v15
-        // rebuilt both tables narrow again (see the v15 test below for the rows
-        // written in between).
+        // The tag is writable by the time every migration has run: v4 widened
+        // this CHECK for Gemini CLI, v9 carried the widening forward, v15
+        // rebuilt both tables narrow, and v23 — the last word — widened it back
+        // (see the v15 test below for the rows written in between).
         let conn = Connection::open(&db).unwrap();
         assert!(
             conn.execute(
@@ -3579,9 +3652,11 @@ mod tests {
                  VALUES ('p-gem', 'Gem', 'gemini', 'https://g.example.com', 'metered', 't0', 't0')",
                 [],
             )
-            .is_err(),
-            "the gemini tag must not be writable"
+            .is_ok(),
+            "the gemini tag is accepted again after v23"
         );
+        conn.execute("DELETE FROM providers WHERE id = 'p-gem'", [])
+            .unwrap();
     }
 
     /// v14 → v15: the gemini protocol's rows go, and the tag stops being
@@ -3664,14 +3739,17 @@ mod tests {
         assert!(store.get_provider("p-keep").unwrap().is_some());
         assert_eq!(store.bindings_for_agent("codex").unwrap().len(), 1);
         assert_eq!(store.list_api_keys("p-keep").unwrap().len(), 0);
-        // The tag cannot come back, on a database that used to allow it.
+        // v15 closed the tag, and v23 reopened it: writing a gemini provider
+        // succeeds again, while the rows v15 deleted above stay deleted.
         assert!(conn
             .execute(
                 "INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
                  VALUES ('p-gem2', 'Gem', 'gemini', 'https://g.example.com', 'metered', 't0', 't0')",
                 [],
             )
-            .is_err());
+            .is_ok());
+        conn.execute("DELETE FROM providers WHERE id = 'p-gem2'", [])
+            .unwrap();
     }
 
     /// v8 → v9 rebuild: providers survive with widened limit_unit CHECK
@@ -3689,6 +3767,30 @@ mod tests {
             for migration in [MIGRATION_V1, MIGRATION_V17] {
                 conn.execute_batch(migration).unwrap();
             }
+            // This fixture hand-builds a v18 database, so `providers` has to
+            // look like one: the columns the migrations between v1 and v18 add.
+            // A later migration rebuilds that table and reads its columns by
+            // name, so a providers table left at the v1 shape fails there
+            // rather than here — with a `no such column` that says nothing
+            // about agent ceilings. (v20 adds `prices`; that migration runs.)
+            conn.execute_batch(
+                "ALTER TABLE providers ADD COLUMN limit_unit TEXT;
+                 ALTER TABLE providers ADD COLUMN timeout_secs INTEGER;
+                 ALTER TABLE providers ADD COLUMN retries INTEGER;
+                 ALTER TABLE providers ADD COLUMN headers TEXT;
+                 ALTER TABLE providers ADD COLUMN plan_limits TEXT;
+                 ALTER TABLE providers ADD COLUMN plan_query TEXT;
+                 ALTER TABLE providers ADD COLUMN catalog_id TEXT;
+                 ALTER TABLE providers ADD COLUMN model_default TEXT;
+                 CREATE TABLE IF NOT EXISTS provider_endpoints (
+                     provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+                     protocol    TEXT NOT NULL CHECK (protocol IN ('anthropic','openai')),
+                     base_url    TEXT NOT NULL,
+                     api_path    TEXT,
+                     PRIMARY KEY (provider_id, protocol)
+                 );",
+            )
+            .unwrap();
             conn.execute_batch(
                 "INSERT INTO agent_limits (agent, period_limit, limit_unit, reset_period, created_at, updated_at)
                  VALUES ('claude', 50.0, 'CNY', 'monthly', 't0', 't0'),
@@ -3983,6 +4085,84 @@ mod tests {
             "a row written before the column declares none"
         );
         assert!(store.load_declared_prices().unwrap().is_empty());
+    }
+
+    /// v22 → v23: the protocol CHECK widens for Gemini again, and the rebuild
+    /// keeps every column and every row.
+    ///
+    /// A rebuild whose column list is stale drops what it forgets, silently —
+    /// which is what this case exists to catch, `prices` in particular: v20
+    /// added it *after* the shape v15 left behind, so a v23 that copied v15's
+    /// column list would take the declared prices with it.
+    #[test]
+    fn migration_v23_widens_the_protocol_check_for_gemini() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v22 database holding a provider with everything set.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+                MIGRATION_V21,
+                MIGRATION_V22,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO providers (id, name, protocol, base_url, billing, created_at,
+                                        updated_at, prices, model_default)
+                 VALUES ('p-ant', 'Ant', 'anthropic', 'https://api.example.com', 'metered',
+                         't0', 't0', '{\"m\":{\"input\":1.0,\"output\":2.0}}', 'claude-sonnet-4-5');
+                 INSERT INTO agent_bindings (agent, provider_id, priority)
+                 VALUES ('claude', 'p-ant', 0);
+                 INSERT INTO provider_endpoints (provider_id, protocol, base_url)
+                 VALUES ('p-ant', 'openai', 'https://api.example.com/v1');
+                 PRAGMA user_version = 22;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+
+        let kept = store.get_provider("p-ant").unwrap().expect("kept");
+        assert!(
+            kept.prices.is_some(),
+            "the prices column survives the rebuild"
+        );
+        assert_eq!(kept.model_default.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(kept.endpoints.len(), 1, "the extra endpoint survives");
+        assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 1);
+
+        // And the widened CHECK: the tag is writable again.
+        let conn = Connection::open(&db).unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO providers (id, name, protocol, base_url, billing, created_at, updated_at)
+                 VALUES ('p-gem', 'Gem', 'gemini', 'https://generativelanguage.googleapis.com', 'metered', 't0', 't0')",
+                [],
+            )
+            .is_ok(),
+            "v23 accepts the gemini tag"
+        );
     }
 
     #[test]
@@ -4281,8 +4461,9 @@ mod tests {
             assert_eq!(n, 4, "missing tables repaired");
 
             // providers rebuilt to the current shape: the repair replays v4,
-            // which widened the protocol CHECK for Gemini CLI, and the run then
-            // reaches v15, which rebuilds both tables narrow again.
+            // which widened the protocol CHECK for Gemini CLI, v15 rebuilt both
+            // tables narrow, and the run ends at v23, which widens it back for
+            // the same protocol.
             let ddl: String = conn
                 .query_row(
                     "SELECT sql FROM sqlite_master WHERE name='providers'",
@@ -4290,7 +4471,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert!(!ddl.contains("gemini"), "{ddl}");
+            assert!(ddl.contains("gemini"), "{ddl}");
         }
         assert_eq!(
             store

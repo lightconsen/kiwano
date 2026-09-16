@@ -42,6 +42,12 @@ struct UsageEnvelope {
     model: Option<String>,
     #[serde(default)]
     usage: Option<Value>,
+    // Gemini spells both of these differently: the counts ride `usageMetadata`
+    // and the model id `modelVersion` (there is no top-level `model`).
+    #[serde(default, rename = "usageMetadata")]
+    usage_metadata: Option<Value>,
+    #[serde(default, rename = "modelVersion")]
+    model_version: Option<String>,
 }
 
 /// The part of a request the meter reads: which model is being asked for, which
@@ -116,6 +122,14 @@ impl UsageScanner {
                 if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
                     self.merge_usage(u);
                 }
+                // Gemini streamGenerateContent (alt=sse): every event carries a
+                // cumulative `usageMetadata`, with `modelVersion` alongside.
+                if let Some(u) = v.get("usageMetadata").filter(|u| u.is_object()) {
+                    self.merge_usage(u);
+                }
+                if let Some(m) = v.get("modelVersion").and_then(Value::as_str) {
+                    self.model = Some(m.to_string());
+                }
             }
         }
     }
@@ -147,6 +161,18 @@ impl UsageScanner {
             .pointer("/prompt_tokens_details/cached_tokens")
             .and_then(Value::as_i64)
         {
+            self.usage.cache_read_tokens = n;
+        }
+        // Gemini flavor (`usageMetadata` on generateContent /
+        // streamGenerateContent). Its `promptTokenCount` includes the cached
+        // bucket, which is why the provider's `cache_inclusive` is set.
+        if let Some(n) = get("promptTokenCount") {
+            self.usage.input_tokens = n;
+        }
+        if let Some(n) = get("candidatesTokenCount") {
+            self.usage.output_tokens = n;
+        }
+        if let Some(n) = get("cachedContentTokenCount") {
             self.usage.cache_read_tokens = n;
         }
     }
@@ -184,11 +210,18 @@ pub fn parse_response_usage(protocol: Protocol, body: &[u8]) -> (Option<Usage>, 
                 scanner.merge_usage(u);
             }
         }
+        Protocol::Gemini => {
+            // generateContent reports `usageMetadata`; the model id is
+            // `modelVersion` (no `model` field exists).
+            if let Some(u) = envelope.usage_metadata.as_ref().filter(|u| u.is_object()) {
+                scanner.merge_usage(u);
+            }
+        }
     }
     // No usage recorded → report none, regardless of whether a model id was
     // seen (an all-default Usage carries no numbers worth reporting).
     let usage = (scanner.usage != Usage::default()).then_some(scanner.usage);
-    (usage, envelope.model)
+    (usage, envelope.model.or(envelope.model_version))
 }
 
 /// Extract the `model` field from an inbound request body (authoritative for
@@ -204,6 +237,21 @@ pub fn request_model(body: &[u8]) -> Option<String> {
     }
     let envelope = serde_json::from_slice::<ModelEnvelope>(body).ok()?;
     envelope.model
+}
+
+/// The model id for the native Gemini API, which names it in the path
+/// (`/v1beta/models/{model}:{method}`) instead of the body. `None` for every
+/// other path shape — a body that states its model stays the authority.
+///
+/// Without this a Gemini request is metered with no model, and a request with
+/// no model is a request with no price: a NULL cost in the dashboard.
+pub fn model_from_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/v1beta/models/")?;
+    // The action shares the component with the model (`{model}:{method}`), so
+    // the id is everything before the colon. The list path has no segment left
+    // after the prefix, and anything with a further slash is not this shape.
+    let model = rest.split(':').next().unwrap_or_default();
+    (!model.is_empty() && !model.contains('/')).then(|| model.to_string())
 }
 
 #[cfg(test)]
@@ -335,5 +383,59 @@ mod tests {
         );
         assert_eq!(request_model(b"{}"), None);
         assert_eq!(request_model(b""), None);
+    }
+
+    // Gemini names its model in the path, not the body — and without a model
+    // there is no price, so this is what keeps a Gemini request off NULL cost.
+    #[test]
+    fn model_from_gemini_path() {
+        assert_eq!(
+            model_from_path("/v1beta/models/gemini-2.5-pro:generateContent").as_deref(),
+            Some("gemini-2.5-pro")
+        );
+        assert_eq!(
+            model_from_path("/v1beta/models/gemini-2.5-flash:streamGenerateContent").as_deref(),
+            Some("gemini-2.5-flash")
+        );
+        assert_eq!(
+            model_from_path("/v1beta/models/gemini-2.5-pro:countTokens").as_deref(),
+            Some("gemini-2.5-pro")
+        );
+        // The list path and every other protocol's paths say nothing.
+        assert_eq!(model_from_path("/v1beta/models"), None);
+        assert_eq!(model_from_path("/v1beta/models/"), None);
+        assert_eq!(model_from_path("/v1/messages"), None);
+        assert_eq!(model_from_path("/v1beta/models/a/b:generateContent"), None);
+    }
+
+    #[test]
+    fn parses_gemini_non_stream() {
+        let body = br#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],
+            "modelVersion":"gemini-2.5-pro",
+            "usageMetadata":{"promptTokenCount":88,"candidatesTokenCount":31,
+                             "cachedContentTokenCount":12,"totalTokenCount":119}}"#;
+        let (usage, model) = parse_response_usage(Protocol::Gemini, body);
+        let u = usage.expect("usageMetadata is metered");
+        assert_eq!(u.input_tokens, 88);
+        assert_eq!(u.output_tokens, 31);
+        assert_eq!(u.cache_read_tokens, 12);
+        assert_eq!(model.as_deref(), Some("gemini-2.5-pro"));
+    }
+
+    // Every Gemini SSE event carries a cumulative `usageMetadata`, so the last
+    // one to arrive is the request's total.
+    #[test]
+    fn scans_gemini_sse_stream() {
+        let mut scanner = UsageScanner::new();
+        scanner.feed_line(
+            r#"data: {"candidates":[],"usageMetadata":{"promptTokenCount":88},"modelVersion":"gemini-2.5-flash"}"#,
+        );
+        scanner.feed_line(
+            r#"data: {"candidates":[{"content":{"parts":[{"text":"x"}]}}],"usageMetadata":{"promptTokenCount":88,"candidatesTokenCount":9,"cachedContentTokenCount":12},"modelVersion":"gemini-2.5-flash"}"#,
+        );
+        assert_eq!(scanner.usage().input_tokens, 88);
+        assert_eq!(scanner.usage().output_tokens, 9);
+        assert_eq!(scanner.usage().cache_read_tokens, 12);
+        assert_eq!(scanner.model(), Some("gemini-2.5-flash"));
     }
 }

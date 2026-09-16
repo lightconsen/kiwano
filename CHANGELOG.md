@@ -19,6 +19,61 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-16
+
+### Fixed
+
+- **Timewindows follow the timezone you saved, not the host's (KIW-FUNC-001).**
+  The Timewindow strategy picked its candidate with `chrono::Local`, and the
+  Apps view mirrored the same mistake — so a gateway running on a UTC host for
+  a UTC+8 user could hit its window at the wrong hour, and the UI would agree
+  with the wrong answer. Both now read the persisted `tz_offset_minutes`, the
+  same value quota and billing already used, and a cross-timezone test pins
+  that a window resolves against the stored offset rather than the host zone.
+
+- **Quota over-limit no longer pretends the first backup is serving
+  (KIW-FUNC-002).** The route-planner keeps backups that are over the quota in
+  a separate `fallback` list, the Apps view marks them with a `Fallback` badge
+  (its tooltip says the runtime breaker decides, which is the honest contract),
+  and the CLI's `*` marker follows the same `serving_agents` list.
+
+- **Plan-quota refreshes run in parallel (KIW-OPS-001).** `refresh_plan_reports`
+  awaited providers one by one, each up to its 15s timeout, so N unreachable
+  providers delayed the new limit snapshot by N×15s while old limits kept
+  serving. It now queries with `join_all` and publishes one evaluation, with
+  tests that the queries do not serialize and that parked or query-less
+  providers are skipped.
+
+- **A refresh re-reads the screen in front of you, and reloads that can fail
+  say so (KIW-UX-001/002/003).** The reload registry went from a single slot to
+  a `Set`, so an embedded panel registering after its parent screen no longer
+  overrides it — the Dashboard's Request Logs re-reads with the status-bar ⟳
+  now. The Providers refresh errors go through the retryable error state
+  instead of an unhandled rejection, stale rows stay visible under a banner,
+  and the refresh scope is stated as "this screen": settings and agent
+  detection are read at launch, not on every click.
+
+### Security
+
+- **`/metrics` redacts the identifiers and can require a token
+  (KIW-PRIV-001).** The Prometheus endpoint stays open to tools that cannot
+  hold the app's credentials, but its per-agent labels are now SHA-256-hashed
+  unless the daemon runs with `KIWANO_METRICS_TOKEN` set — then it serves the
+  full exposition only to `Authorization: Bearer <token>` and 401s everyone
+  else. Constant-time compare, and the token itself never appears in logs.
+  `/health` carries no identifiers and is unchanged.
+
+- **The installer will not trust a mirror's self-checksum silently
+  (KIW-SUP-001).** When github.com is unreachable, the mirror's own digest can
+  prove a download is intact but not untampered, so installing against it is
+  now opt-in (`--insecure-mirror-checksum`); without it the install refuses
+  and names the two ways out.
+
+- **Provider icons are pinned to local assets (KIW-SEC-001).** A registry
+  contract test locks the icon table to build-time local imports and bare SVGs
+  free of scripts and event handlers, and the README records that remote or
+  Hub-served content must be sanitized and gated by a CSP before it renders.
+
 ## [0.1.12] - 2026-09-16
 
 ### Changed

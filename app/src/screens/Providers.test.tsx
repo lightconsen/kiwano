@@ -988,3 +988,96 @@ describe("a built-in agent's own row", () => {
     expect(screen.queryByText(en.providers.agentConfigFilesNote)).toBeNull();
   });
 });
+
+// The quota strategy's over-threshold state: the configured first backup is
+// *first in line*, not in use — which backup actually serves depends on the
+// gateway's breakers at request time, so the badge is a config claim with a
+// different mark ("Fallback") and the over-threshold primary claims nothing.
+describe("the quota fallback badge", () => {
+  const over = () => [
+    deepseek({
+      id: "quota-primary",
+      name: "Quota Primary",
+      agents: ["codex"],
+      serving_agents: [],
+      is_current: false,
+    }),
+    deepseek({
+      id: "quota-backup",
+      name: "Quota Backup",
+      agents: ["codex"],
+      serving_agents: [],
+      is_current: false,
+      fallback_agents: ["codex"],
+    }),
+  ];
+
+  it("reads as Fallback, not In use, on the All tab", async () => {
+    apiMock.listProviders.mockResolvedValue(over());
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["quota-primary", "quota-backup"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    expect(await screen.findByText("Quota Backup")).toBeInTheDocument();
+    const chip = screen.getByText(en.providers.quotaFallback);
+    // First in line behind an exhausted primary — a configured state, which is
+    // why the honest claim is about the config and the tooltip says what it is.
+    expect(chip).toHaveAttribute("title", en.providers.quotaFallbackTitle);
+    // Neither row claims to be serving: the primary is over its threshold, and
+    // the backup is not serving yet either.
+    expect(screen.queryAllByText(en.providers.inUse)).toHaveLength(0);
+  });
+
+  it("badges the same claim on an agent tab", async () => {
+    apiMock.listProviders.mockResolvedValue(over());
+    apiMock.getAgentRoutes.mockResolvedValue([codexRoute(["quota-primary", "quota-backup"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} initialAgent="codex" />);
+
+    expect(await screen.findByText(en.providers.quotaFallback)).toBeInTheDocument();
+    expect(screen.queryByText(en.providers.inUse)).toBeNull();
+  });
+});
+
+// A provider read that failed. `refetch` absorbs every branch's failure — a
+// mutation or the app's ⟳ that calls it fire-and-forget must never hit an
+// unhandled rejection — and the screen says what went wrong where the reader
+// can see it: the initial failure takes the empty state (endless "Loading…"
+// would be waiting on a read that is not coming), a later failure keeps the
+// stale rows under a banner.
+describe("a failed provider read", () => {
+  it("shows the failure and a retry instead of loading forever", async () => {
+    apiMock.listProviders.mockRejectedValue(new Error("invoke failed: gateway unreachable"));
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    expect(await screen.findByText(en.common.loadFailed)).toBeInTheDocument();
+    // The raw failure never reads as a sentence, so it lives in the tooltip —
+    // on the alert strip itself, which is where the title attaches.
+    expect(screen.getByRole("alert")).toHaveAttribute(
+      "title",
+      expect.stringContaining("gateway unreachable"),
+    );
+
+    // Retry recovers once the read can be made again.
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    await userEvent.setup().click(screen.getByRole("button", { name: en.common.retry }));
+    expect(await screen.findByText("DeepSeek")).toBeInTheDocument();
+  });
+
+  it("keeps stale rows, and says the re-read failed, rather than dropping them", async () => {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+    const user = userEvent.setup();
+    expect(await screen.findByText("DeepSeek")).toBeInTheDocument();
+
+    // The next read fails: the row stays (stale beats blank), the failure is said.
+    apiMock.listProviders.mockRejectedValue(new Error("invoke failed"));
+    await user.click(screen.getByRole("button", { name: en.common.refresh }));
+    await waitFor(() => expect(screen.getByText(en.common.loadFailed)).toBeInTheDocument());
+    expect(screen.getByText("DeepSeek")).toBeInTheDocument();
+  });
+});

@@ -16,6 +16,9 @@ export const common = {
   add: "Add",
   refresh: "Refresh",
   retry: "Retry",
+  /** A read a screen could not make. The raw failure rides in the tooltip — it
+      is rarely a sentence, and this is. */
+  loadFailed: "Couldn't read this screen's data",
   loading: "Loading…",
   none: "—",
   enabled: "Enabled",

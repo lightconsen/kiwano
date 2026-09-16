@@ -249,4 +249,17 @@ describe("the dashboard fixtures", () => {
       }
     }
   });
+
+  it("badges a quota strategy's first backup as fallback, not in use", async () => {
+    // Mirrors vm::build_provider_vms: while the quota head is over its ceiling
+    // (the fixture's 1204 requests against a limit of 500), it stops serving
+    // and the first backup reads as first-in-line rather than as in use — the
+    // same split the real view model and the App screen are tested on.
+    const all = await api.listProviders();
+    const head = all.find((p) => p.id === "m-payg-over");
+    const backup = all.find((p) => p.id === "m-payg-trend");
+    expect(head?.is_current).toBe(false);
+    expect(backup?.fallback_agents).toContain("quota-guard-5b8d");
+    expect(backup?.serving_agents).not.toContain("quota-guard-5b8d");
+  });
 });

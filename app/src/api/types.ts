@@ -320,6 +320,11 @@ export interface Provider {
   /** Agents this provider would serve a request for right now — the per-agent
       slice behind the agent tabs' local "In use" badge */
   serving_agents: AgentRef[];
+  /** Agents for which this provider is the quota strategy's configured first
+      backup while that agent's primary is over its threshold. Badged as
+      "Fallback", not "In use": which backup actually serves depends on the
+      gateway's breakers at request time. */
+  fallback_agents?: AgentRef[];
   /** Collapsed across agents (the All tab badge); agent tabs use serving_agents */
   is_current: boolean;
   /** Badge text: backup #1 / local / … */

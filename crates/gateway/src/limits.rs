@@ -368,6 +368,17 @@ impl LimitState {
         }
     }
 
+    /// A snapshot with nothing blocked, on the user's clock at
+    /// `tz_offset_minutes`. `Default` is UTC; this is how a test states which
+    /// clock the user is on without reaching for the host's zone.
+    #[cfg(test)]
+    pub fn with_offset(tz_offset_minutes: i64) -> Self {
+        LimitState {
+            tz_offset_minutes,
+            ..Default::default()
+        }
+    }
+
     /// A snapshot with exactly these agents over their own ceiling.
     #[cfg(test)]
     pub fn with_agents_over(reasons: impl IntoIterator<Item = (String, BlockReason)>) -> Self {
@@ -545,6 +556,18 @@ pub fn clear_legacy_disables(store: &Store) -> usize {
 /// It is what keeps `evaluate` free of network calls. A provider whose endpoint
 /// is down keeps its previous cached answer (or none), so a flaky endpoint never
 /// fabricates a block.
+///
+/// The queries run concurrently. Each carries its own 15-second client timeout
+/// (`plan_quota::client`), so asking them one at a time put the whole batch —
+/// and therefore `publish`, which waits on all of them — behind `N × 15s` when
+/// N endpoints are unreachable, while requests kept routing on the stale
+/// snapshot. Concurrency is safe here: `Store` is `Send + Sync` and locks per
+/// call, and each provider caches under its own `app_settings` key, so two
+/// queries share nothing.
+///
+/// Unbounded on purpose: N is the number of providers the operator configured,
+/// which is single digits. A deployment with dozens would want
+/// `buffer_unordered` to stop N simultaneous requests from going out at once.
 pub async fn refresh_plan_reports(store: &Store) {
     let providers = match store.list_providers() {
         Ok(p) => p,
@@ -553,14 +576,18 @@ pub async fn refresh_plan_reports(store: &Store) {
             return;
         }
     };
-    for p in providers {
-        if !p.enabled || p.plan_query.is_none() {
-            continue;
-        }
+    let due = providers
+        .iter()
+        .filter(|p| p.enabled && p.plan_query.is_some());
+    // Awaiting the whole batch is the point: `evaluate` below rebuilds the
+    // snapshot from the store, so it has to run after every write has landed,
+    // and `publish` has to be called exactly once per tick.
+    futures_util::future::join_all(due.map(|p| async move {
         if let Err(e) = crate::plan_quota::get_plan_quota_report(store, &p.id, false).await {
             tracing::debug!(provider = %p.id, error = %e, "plan quota refresh failed");
         }
-    }
+    }))
+    .await;
 }
 
 /// How often the limits are re-evaluated. The plan half rides a 5-minute
@@ -1155,5 +1182,130 @@ mod tests {
         );
         let (_, key) = period_start(t, Some("monthly"), 0);
         assert_eq!(key, "2026-09", "the same instant is still September in UTC");
+    }
+
+    /// A local endpoint that answers each request after `delay`, counting the
+    /// ones it served. Each connection gets its own thread, so the stub does not
+    /// serialize what it is being used to prove is concurrent.
+    ///
+    /// Every plan template but `zenmux` builds its URL from a constant, so
+    /// pointing a provider at this instead of the internet is what `zenmux`'s
+    /// configurable `quota_url` is for.
+    struct SlowUpstream {
+        url: String,
+        hits: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl SlowUpstream {
+        fn start(delay: StdDuration) -> SlowUpstream {
+            use std::io::{Read, Write};
+            use std::sync::atomic::Ordering;
+
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub");
+            let port = listener.local_addr().expect("stub addr").port();
+            let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counter = hits.clone();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { continue };
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    std::thread::spawn(move || {
+                        // Drain before answering: a request spanning more than
+                        // one segment otherwise sees the connection reset.
+                        let mut buf = [0u8; 8192];
+                        let _ = stream.read(&mut buf);
+                        std::thread::sleep(delay);
+                        // A body the parser rejects is fine — this stub exists
+                        // to be *slow*, and the round trip is the measurement.
+                        let body = r#"{"success":true,"data":{}}"#;
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                    });
+                }
+            });
+            SlowUpstream {
+                url: format!("http://127.0.0.1:{port}/usage"),
+                hits,
+            }
+        }
+    }
+
+    /// A provider whose plan query runs against `stub`.
+    fn provider_querying(store: &Store, id: &str, stub: &SlowUpstream) {
+        let mut p = test_provider(id);
+        p.api_key = Some("sk-test".into());
+        p.plan_query = Some(format!(
+            r#"{{"template":"zenmux","fields":{{"quota_url":"{}"}}}}"#,
+            stub.url
+        ));
+        store.insert_provider(&p).expect("insert provider");
+    }
+
+    /// The batch is asked concurrently, so N slow endpoints cost roughly one
+    /// round trip rather than N.
+    ///
+    /// Timing is the only way to see this from outside — the queries share no
+    /// other observable side effect — so the margin is deliberately wide: three
+    /// serial rounds are 3.0× the delay and the bar is 1.8×, which leaves the
+    /// measured round trip room to grow on a loaded machine. Verified to fail
+    /// against the serial loop (1.15s) before it was made concurrent.
+    #[tokio::test]
+    async fn plan_quota_queries_do_not_serialize() {
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("kiwano.db")).unwrap();
+        let delay = StdDuration::from_millis(500);
+        let stub = SlowUpstream::start(delay);
+        for id in ["p1", "p2", "p3"] {
+            provider_querying(&store, id, &stub);
+        }
+
+        let started = std::time::Instant::now();
+        refresh_plan_reports(&store).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(
+            stub.hits.load(Ordering::SeqCst),
+            3,
+            "every provider with a query was asked"
+        );
+        assert!(
+            elapsed < delay * 3 * 3 / 5,
+            "three queries took {elapsed:?}; serially they would be {:?} and the \
+             concurrent round trip is {delay:?}",
+            delay * 3
+        );
+    }
+
+    /// The batch skips providers that are parked or have no query to run — the
+    /// concurrency change must not have widened who gets asked.
+    #[tokio::test]
+    async fn plan_quota_refresh_skips_parked_and_queryless_providers() {
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("kiwano.db")).unwrap();
+        let stub = SlowUpstream::start(StdDuration::from_millis(0));
+        provider_querying(&store, "asked", &stub);
+
+        // A queryless provider.
+        store.insert_provider(&test_provider("no-query")).unwrap();
+        // A parked one that does carry a query.
+        provider_querying(&store, "parked", &stub);
+        let mut parked = store.get_provider("parked").unwrap().unwrap();
+        parked.enabled = false;
+        store.update_provider(&parked).unwrap();
+
+        refresh_plan_reports(&store).await;
+
+        assert_eq!(
+            stub.hits.load(Ordering::SeqCst),
+            1,
+            "only the enabled provider with a query was asked"
+        );
     }
 }

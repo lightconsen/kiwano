@@ -1091,10 +1091,12 @@ const agentRoutes: AgentRoute[] = [
     // row reads dimmed with the reason in the Status column. The config's unit
     // is the strategy's own vocabulary (requests | tokens) — the currency
     // ceiling that blocked the row is the *provider's*, a different limit.
+    // The tail is what "volumes are over" shows: the first backup reads as
+    // "Fallback" — first in line, not in use (vm::build_provider_vms).
     agent: "quota-guard-5b8d",
     strategy: "quota",
     config: JSON.stringify({ limit: 500, unit: "requests" }),
-    bindings: [bind("m-payg-over", 0)],
+    bindings: [bind("m-payg-over", 0), bind("m-payg-trend", 1)],
     limits: [],
   },
 ];
@@ -1113,7 +1115,11 @@ function strategyOf(agent: AgentId): AgentRoute {
 
 // Mirror vm::build_provider_vms: the "In use" badge marks the provider(s) that
 // would serve a request issued right now under each agent's strategy. Quota
-// stays on the head here — the mock usage has no per-day totals.
+// mirrors vm::quota_over_threshold too: over the ceiling, the head stops
+// serving and the first backup reads as fallback, not in use — which backup
+// (if any) actually takes a request is the gateway's breakers' runtime call.
+// The mock fixtures carry window totals, not per-day ones, so the fixture's
+// request count stands in for the day's in `quotaOver`.
 function servingNow(): Set<string> {
   const out = new Set<string>();
   const now = new Date();
@@ -1140,12 +1146,63 @@ function servingNow(): Set<string> {
         (b) => b.win_start && b.win_end && inWin(nowMin, b.win_start, b.win_end),
       );
       out.add(`${r.agent}/${hit?.provider_id ?? head}`);
+    } else if (r.strategy === "quota" && quotaOver(r)) {
+      // over the ceiling: nothing serves (the backup is first in line, below)
     } else {
-      // single / failover / quota: the head (breaker state is gateway runtime)
+      // single / failover / quota-under: the head (breaker state is gateway runtime)
       out.add(`${r.agent}/${head}`);
     }
   }
   return out;
+}
+
+/** The quota strategy's configured first backup, while the head is over its
+    threshold — vm::build_provider_vms's `fallback` map, mirrored. */
+function quotaFallbackNow(): Set<string> {
+  const out = new Set<string>();
+  for (const r of routedRoutes()) {
+    if (r.strategy !== "quota") continue;
+    const enabled = r.bindings.filter(
+      (b) => b.enabled && providers.find((p) => p.id === b.provider_id)?.enabled !== false,
+    );
+    if (enabled.length < 2 || !quotaOver(r)) continue;
+    out.add(`${r.agent}/${enabled[1].provider_id}`);
+  }
+  return out;
+}
+
+/** Whether a quota route's head has consumed its config's limit — the mock's
+    stand-in for `vm::quota_over_threshold` (which reads the same-day totals). */
+function quotaOver(r: AgentRoute): boolean {
+  const cfg = r.config ? (JSON.parse(r.config) as { limit: number; unit?: string }) : null;
+  if (!cfg || !Number.isFinite(cfg.limit)) return false;
+  const head = r.bindings.find(
+    (b) => b.enabled && providers.find((p) => p.id === b.provider_id)?.enabled !== false,
+  );
+  if (!head) return false;
+  const p = providers.find((x) => x.id === head.provider_id);
+  const consumed =
+    cfg.unit === "tokens"
+      ? ((p?.usage?.input_tokens ?? 0) + (p?.usage?.output_tokens ?? 0))
+      : (p?.usage?.requests ?? 0);
+  return consumed >= cfg.limit;
+}
+
+/** Recompute every provider's serving/fallback flags from the current routes —
+    what `listProviders` (and the mutation paths that re-derive them) show.
+    Agents come from the routes (`agentsOf`), not the fixtures' static arrays,
+    which drift from `agentRoutes` by design. */
+function applyServingFlags() {
+  const serving = servingNow();
+  const fallback = quotaFallbackNow();
+  for (const p of providers) {
+    const agents = agentsOf(p.id);
+    p.serving_agents = agents.filter((a) => serving.has(`${a}/${p.id}`)) as Provider["serving_agents"];
+    p.is_current = p.serving_agents.length > 0;
+    const fb = agents.filter((a) => fallback.has(`${a}/${p.id}`));
+    if (fb.length > 0) p.fallback_agents = fb;
+    else delete p.fallback_agents;
+  }
 }
 
 // vm::build_provider_vms derives ProviderVm.agents from the bindings; the mock
@@ -1319,6 +1376,7 @@ export const devApi: KiwanoApi = {
   async listProviders(filter: AgentId | "all" = "all"): Promise<Provider[]> {
     await delay();
     const serving = servingNow();
+    const fallback = quotaFallbackNow();
     const { backups } = standbyFlags();
     return providers
       .filter((p) => filter === "all" || p.agents.includes(filter))
@@ -1329,6 +1387,11 @@ export const devApi: KiwanoApi = {
           agents: agents as Provider["agents"],
           serving_agents: agents.filter((a) => serving.has(`${a}/${p.id}`)) as Provider["serving_agents"],
           is_current: agents.some((a) => serving.has(`${a}/${p.id}`)),
+          // First in line behind an over-threshold primary — a separate claim
+          // from "serving", so it gets its own slot on the wire.
+          ...(agents.some((a) => fallback.has(`${a}/${p.id}`))
+            ? { fallback_agents: agents.filter((a) => fallback.has(`${a}/${p.id}`)) }
+            : {}),
           agents_note: backups.has(p.id)
             ? "Failover queue"
             : agents.length
@@ -1400,6 +1463,9 @@ export const devApi: KiwanoApi = {
     if (input.agents !== undefined) t.agents = [...input.agents];
     t.serving_agents = t.agents.filter((a) => servingNow().has(`${a}/${t.id}`));
     t.is_current = t.serving_agents.length > 0;
+    const fb = t.agents.filter((a) => quotaFallbackNow().has(`${a}/${t.id}`));
+    if (fb.length > 0) (t as { fallback_agents?: Provider["fallback_agents"] }).fallback_agents = fb;
+    else delete (t as { fallback_agents?: Provider["fallback_agents"] }).fallback_agents;
     t.agents_note = t.agents.length ? `${t.agents.length} agent(s)` : undefined;
     // Absent `advanced` keeps existing values (mirrors vm::update_provider).
     if (input.advanced !== undefined) t.advanced = input.advanced;
@@ -1439,11 +1505,7 @@ export const devApi: KiwanoApi = {
     const target = providers.find((p) => p.id === id);
     if (!target) throw new Error(`provider not found: ${id}`);
     target.enabled = enabled;
-    const serving = servingNow();
-    for (const p of providers) {
-      p.serving_agents = p.agents.filter((a) => serving.has(`${a}/${p.id}`));
-      p.is_current = p.serving_agents.length > 0;
-    }
+    applyServingFlags();
   },
 
   async testProviderLatency(id: string): Promise<PromptLatency> {

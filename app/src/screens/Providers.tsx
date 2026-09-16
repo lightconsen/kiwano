@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { LoadFailed, errText } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
 import { agentMeta, isBuiltinAgent, rememberCustomAgents } from "../lib/agents";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
@@ -965,12 +966,18 @@ function UsageCellBody({ p, plan }: { p: Provider;
 /** First grid cell: brand mark + name + endpoint subtitle. Shared by the All-tab
     management rows and the agent-tab strategy rows. The All tab badges the
     collapsed is_current; agent tabs pass inUse to badge membership in that
-    agent's serving set only. */
-function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
+    agent's serving set only. A quota-over backup reads as isFallback — first in
+    line, not in use — and gets its own chip, which is a different claim than
+    "In use" and must not share its mark. */
+function IdentityCell({ p, inUse, isFallback }: { p: Provider; inUse?: boolean; isFallback?: boolean }) {
   const t = useT();
   // Brand mark inferred from the endpoint host; unknown hosts keep the letter avatar
   const brandIcon = iconForEndpoint(p.endpoint);
+  // Per agent the two claims are disjoint, but the All tab collapses them, and
+  // a provider can serve one agent while standing first-in-line for another:
+  // "In use" is the stronger claim, so it wins the one badge slot.
   const showInUse = inUse ?? p.is_current;
+  const showFallback = isFallback === true && !showInUse;
   return (
     <div className="flex min-w-0 w-[34%] items-center gap-2.5">
       {brandIcon ? (
@@ -981,7 +988,15 @@ function IdentityCell({ p, inUse }: { p: Provider; inUse?: boolean }) {
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-[13px] font-semibold">{p.name}</span>
-          {showInUse && (
+          {showFallback ? (
+            <span
+              className="rounded px-1.5 py-px text-[10px] font-medium text-mut"
+              style={{ background: "var(--surface2)" }}
+              title={t("providers.quotaFallbackTitle")}
+            >
+              {t("providers.quotaFallback")}
+            </span>
+          ) : showInUse && (
             <span className="rounded px-1.5 py-px text-[10px] font-medium" style={{ background: "var(--kiwi)", color: "oklch(0.18 0.03 132)" }}>
               {t("providers.inUse")}
             </span>
@@ -1145,7 +1160,7 @@ function ProviderRow({
   return (
     <>
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}>
-      <IdentityCell p={p} />
+      <IdentityCell p={p} isFallback={p.fallback_agents && p.fallback_agents.length > 0} />
 
       <div className="flex w-[18%] items-center">
         {p.agents.length === 0 ? (
@@ -1469,13 +1484,16 @@ function BindingRow({
   // Unbinding the last candidate drops the tab back to the onboarding state.
   const unbind = () => api.removeAgentBinding(route.agent, b.provider_id).then(onChanged);
 
-  // Local "In use": serving this agent right now, not merely any agent
+  // Local "In use": serving this agent right now, not merely any agent. A
+  // quota-over first backup reads as fallback instead — first in line, which
+  // only the gateway's breakers can promote to serving.
   const inUse = p.serving_agents.includes(route.agent);
+  const isFallback = p.fallback_agents?.includes(route.agent) === true;
   const state = rowState(p, inUse, blocked);
 
   return (
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}>
-      <IdentityCell p={p} inUse={inUse} />
+      <IdentityCell p={p} inUse={inUse} isFallback={isFallback} />
 
       <RoleCell agent={route.agent} route={route} b={b} idx={idx} onChanged={onChanged} />
 
@@ -1663,6 +1681,13 @@ export default function Providers({
   const [enabling, setEnabling] = useState(false);
   // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
+  // A provider read that failed. Kept apart from everything the rows show: it
+  // is a property of the read, not of the data, and it outlives whichever
+  // follow-up read clears it. Stale rows stay on screen under it (like
+  // RequestLogs) — a failure after a successful load is not a reason to drop
+  // what the reader has — and the initial-load failure is what the screen's
+  // empty state switches on.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   // The header's ⟳: in flight, and finished. Named for the whole of what it does
   // — the provider list, the routes and settings, a forced quota read, and the
   // agent re-probe — rather than for the half that used to own it.
@@ -1700,8 +1725,21 @@ export default function Providers({
   // Returns what it started, so a caller with a spinner can await it — the app's
   // own reload does (`lib/reload.ts`). Nothing else awaits it: the mutations that
   // call this pass it as a plain "something changed" callback.
+  //
+  // Every branch absorbs its own failure — the promise never rejects, so a
+  // mutation that calls `refetch()` fire-and-forget cannot end in an unhandled
+  // rejection, and the button's `await` is always answered. What a branch does
+  // with the failure is its own: providers keep their stale rows under `loadErr`
+  // (or the initial-load empty state), routes fall back to the onboarding null,
+  // and settings are a refresh of things read once at launch.
   const refetch = useCallback(() => {
-    const providers = api.listProviders().then(setProviders);
+    const providers = api
+      .listProviders()
+      .then((r) => {
+        setProviders(r);
+        setLoadErr(null);
+      })
+      .catch((e) => setLoadErr(errText(e)));
     // Per-agent strategy routes drive the agent-tab candidate rows
     const routes = api
       .getAgentRoutes()
@@ -1856,7 +1894,15 @@ export default function Providers({
     }
   };
 
-  if (!providers) return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
+  if (!providers) {
+    // A read that never succeeded gets the failure state, not an endless
+    // "Loading…": the reader is waiting on something that is not coming, and
+    // retrying is the only action that can change that.
+    if (loadErr) {
+      return <LoadFailed detail={loadErr} onRetry={() => refetch()} />;
+    }
+    return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
+  }
 
   const filtered = providers.filter((p) => seg === "all" || p.agents.includes(seg));
   const agentsBound = new Set(providers.flatMap((p) => p.agents)).size;
@@ -1927,6 +1973,16 @@ export default function Providers({
         <span className="ml-1.5 text-[11.5px] text-mut">
           {t("providers.counts", { providers: providers.length, agents: agentsBound })}
         </span>
+        {loadErr && (
+          <span
+            className="ml-1.5 text-[11px]"
+            style={{ color: "var(--red)" }}
+            title={loadErr}
+            role="alert"
+          >
+            {t("common.loadFailed")}
+          </span>
+        )}
         <Button
           variant="ghost"
           size="sm"

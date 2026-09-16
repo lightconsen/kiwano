@@ -3,7 +3,7 @@
 // with status filter, clear-all. Clicking a row opens a dialog with the full
 // record (redacted headers + bodies) and a Copy button that puts the whole
 // log as plain text on the clipboard.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Copy, Download } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "../api/client";
+import { errText } from "../components/LoadFailed";
+import { useReload } from "../lib/reload";
 import type { RequestLogDetail, RequestLogEntry, RequestLogFilter } from "../api/types";
 import {
   localMidnightUtc,
@@ -290,6 +292,14 @@ export default function RequestLogs({
   const [exportBodies, setExportBodies] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Kept apart from `err`, which belongs to the export flow: one channel would
+  // let a page read that succeeded afterwards clear an export warning the
+  // reader has not acted on yet.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  // A page read races another page read: the pager, a filter change and the
+  // app's ⟳ can all be in flight at once, and a slow answer for page 2 landing
+  // after page 3 would put page 2's rows under a pager that says 3.
+  const seq = useRef(0);
 
   // What the table is showing: the status tab plus the page's own filters.
   const buildFilter = (): RequestLogFilter => ({
@@ -321,19 +331,41 @@ export default function RequestLogs({
     setOpenId(null);
   }, [scope]);
 
-  const fetchPage = (p: number) => {
-    api
+  // Returns what it started, so the shell's ⟳ can await it (`lib/reload.ts`) — a
+  // reader that resolves before its rows land would let the spinner stop on a
+  // screen that has not updated. The failures are absorbed here rather than
+  // rethrown: the table says what went wrong, and a rejection would reach the
+  // click handler as an unhandled rejection instead.
+  //
+  // `loaded` is deliberately left false on failure. It used to be set either
+  // way, which dropped a failed read into the "No requests recorded yet" empty
+  // state — the table reported a broken read as an empty one.
+  const fetchPage = (p: number): Promise<void> => {
+    const mine = ++seq.current;
+    return api
       .listRequestLogs(p, PAGE_SIZE, buildFilter())
       .then((r) => {
+        if (mine !== seq.current) return;
         setRows(r.rows);
         setTotal(r.total);
+        setLoadErr(null);
         setLoaded(true);
+        // A row the reader had expanded can be gone after a refresh; without
+        // this the dialog would spring back open if that id ever reappeared.
+        setOpenId((id) => (id != null && !r.rows.some((x) => x.id === id) ? null : id));
       })
-      .catch(() => setLoaded(true));
+      .catch((e) => {
+        if (mine === seq.current) setLoadErr(errText(e));
+      });
   };
 
+  // This table is part of what the Dashboard is showing, so the app's ⟳ has to
+  // reach it too — it is embedded there (`Dashboard.tsx`). `page` is not
+  // captured stale: `useReload` keeps the latest render's closure.
+  useReload(() => fetchPage(page));
+
   useEffect(() => {
-    fetchPage(page);
+    void fetchPage(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, filter, scope]);
 
@@ -412,7 +444,13 @@ export default function RequestLogs({
         </div>
         <span className="ml-auto flex items-center gap-3 text-[11px] text-mut">
           {/* Feedback lives here rather than in a toast: a transient clip that
-              fades, or the error until the next attempt. */}
+              fades, or the error until the next attempt. The read's failure and
+              the export's are separate channels — neither clears the other. */}
+          {loadErr && (
+            <span style={{ color: "var(--red)" }} title={loadErr}>
+              {t("common.loadFailed")}
+            </span>
+          )}
           {err && <span style={{ color: "var(--red)" }}>{err}</span>}
           {notice && <span style={{ color: "var(--kiwi)" }}>{notice}</span>}
           <span>{t("logs.requestCount", { n: total.toLocaleString() })}</span>

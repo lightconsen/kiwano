@@ -419,10 +419,13 @@ fn local_day_start_from(offset_minutes: i64, local_day: i64) -> String {
 //    mirroring the gateway's strategy selection (strategy/mod.rs) minus its
 //    runtime state (circuit breakers, roundrobin sticky sessions) ──
 
-/// Minutes-of-day in the local timezone (timewindow windows are local).
-fn local_minutes_now() -> u32 {
+/// Minutes-of-day on the user's clock (timewindow windows are the user's local
+/// time). Reads the stored `tz_offset_minutes` rather than the host's zone, so
+/// the badge and the gateway — which reads the same field — agree on the hour.
+fn local_minutes_now(tz_offset_minutes: i64) -> u32 {
     use chrono::Timelike;
-    let t = chrono::Local::now().time();
+    let local = chrono::Utc::now() + chrono::Duration::minutes(tz_offset_minutes);
+    let t = local.time();
     t.hour() * 60 + t.minute()
 }
 
@@ -575,6 +578,12 @@ pub struct ProviderVm {
     /// `is_current`; an agent tab badges membership here instead, so a
     /// provider serving another agent does not read as in-use locally.
     pub serving_agents: Vec<String>,
+    /// Agents for which this provider is the quota strategy's configured first
+    /// backup while that agent's primary is over its threshold. Not "in use":
+    /// which backup actually serves depends on the gateway's breakers at
+    /// request time, so the UI badges this as first-in-line instead.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fallback_agents: Vec<String>,
     pub is_current: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_badge: Option<String>,
@@ -1371,6 +1380,12 @@ pub fn build_provider_vms(
         .map(|p| p.id.as_str())
         .collect();
     let mut serving: HashMap<String, HashSet<String>> = HashMap::new();
+    // The quota strategy's configured first backup, while that agent's primary
+    // is over its threshold. Kept apart from `serving`: "first in line" is not
+    // "in use" — which backup actually serves depends on the gateway's breakers
+    // at request time, and the gateway/CLI reader that says "In use" here would
+    // guess wrong. The All tab badges it distinctly; agent tabs likewise.
+    let mut fallback: HashMap<String, HashSet<String>> = HashMap::new();
     for agent in live.iter() {
         let enabled: Vec<Binding> = store
             .bindings_for_agent(agent)
@@ -1394,7 +1409,7 @@ pub fn build_provider_vms(
             StrategyType::Roundrobin => enabled.iter().map(|b| b.provider_id.clone()).collect(),
             // the candidate whose local window matches now; none → the head
             StrategyType::Timewindow => {
-                let now = local_minutes_now();
+                let now = local_minutes_now(tz_offset(aux));
                 let hit = enabled.iter().find(|b| {
                     matches!(
                         (b.win_start.as_deref(), b.win_end.as_deref()),
@@ -1403,17 +1418,21 @@ pub fn build_provider_vms(
                 });
                 HashSet::from([hit.map(|b| b.provider_id.clone()).unwrap_or(head)])
             }
-            // under threshold → primary; over → first backup in line
+            // under threshold → the primary serves; over → the primary does not
+            // serve and the first backup is only *first in line*, so it lands in
+            // `fallback` rather than `serving` — the gateway's breakers decide
+            // which backup (if any) actually takes a request, and the UI must
+            // not claim one it has not observed.
             StrategyType::Quota => {
                 let over = quota_over_threshold(store, aux, strategy.config.as_deref(), &head);
-                HashSet::from([if over {
-                    enabled
-                        .get(1)
-                        .map(|b| b.provider_id.clone())
-                        .unwrap_or(head)
+                if over {
+                    if let Some(backup) = enabled.get(1) {
+                        fallback.insert(agent.clone(), HashSet::from([backup.provider_id.clone()]));
+                    }
+                    HashSet::new()
                 } else {
-                    head
-                }])
+                    HashSet::from([head])
+                }
             }
             // single / failover: the head (failover degradation is breaker runtime)
             _ => HashSet::from([head]),
@@ -1444,6 +1463,7 @@ pub fn build_provider_vms(
         .map(|p| {
             let mut agents: Vec<String> = Vec::new();
             let mut serving_agents: Vec<String> = Vec::new();
+            let mut fallback_agents: Vec<String> = Vec::new();
             let mut backup_for_any = false;
             for agent in primary.keys() {
                 let is_bound = bindings_by_agent
@@ -1455,6 +1475,9 @@ pub fn build_provider_vms(
                 agents.push(agent.clone());
                 if serving.get(agent).is_some_and(|ids| ids.contains(&p.id)) {
                     serving_agents.push(agent.clone());
+                }
+                if fallback.get(agent).is_some_and(|ids| ids.contains(&p.id)) {
+                    fallback_agents.push(agent.clone());
                 }
                 if primary.get(agent).map(String::as_str) == Some(&p.id) {
                     continue;
@@ -1482,6 +1505,7 @@ pub fn build_provider_vms(
             }
             agents.sort();
             serving_agents.sort();
+            fallback_agents.sort();
             let is_current = !serving_agents.is_empty();
 
             let note = if backup_for_any {
@@ -1521,6 +1545,7 @@ pub fn build_provider_vms(
                 enabled: p.enabled,
                 agents,
                 serving_agents,
+                fallback_agents,
                 is_current,
                 status_badge: None,
                 agents_note: note,
@@ -2583,6 +2608,7 @@ pub fn add_provider(
         // Optimistic: strategy serving is only computed by build_provider_vms;
         // the list refetch right after returns the real per-agent state.
         serving_agents: vec![],
+        fallback_agents: vec![],
         is_current: input.agents.as_ref().is_some_and(|a| !a.is_empty()),
         status_badge: None,
         agents_note: input
@@ -7127,23 +7153,26 @@ mod tests {
             .unwrap();
         }
         let home = live_home(&["claude"]);
-        let in_use = |s: &Store| -> (bool, bool) {
+        // (a1 current, b1 current, b1 fallback) — the quota-over case is where
+        // the two badge claims split: the backup is first in line, not in use,
+        // so it reads as fallback and neither provider reads as current.
+        let badges = |s: &Store| -> (bool, bool, Vec<String>) {
             let vms = build_provider_vms(s, &aux, home.path()).unwrap();
-            let cur = |id: &str| vms.iter().find(|p| p.id == id).unwrap().is_current;
-            (cur("a1"), cur("b1"))
+            let p = |id: &str| vms.iter().find(|x| x.id == id).unwrap();
+            (p("a1").is_current, p("b1").is_current, p("b1").fallback_agents.clone())
         };
 
         // single: only the head serves
-        assert_eq!(in_use(&s), (true, false));
+        assert_eq!(badges(&s), (true, false, vec![]));
 
         // roundrobin: every candidate takes rotation turns
         set_agent_strategy(&s, "claude", "roundrobin", None).unwrap();
-        assert_eq!(in_use(&s), (true, true));
+        assert_eq!(badges(&s), (true, true, vec![]));
 
-        // timewindow: a window containing now moves the badge off the head
-        use chrono::Timelike;
-        let t = chrono::Local::now().time();
-        let now = t.hour() * 60 + t.minute();
+        // timewindow: a window containing now moves the badge off the head.
+        // Built from the same clock the view model reads — `Aux` here defaults
+        // to UTC — so the case is stated without depending on the host's zone.
+        let now = local_minutes_now(tz_offset(&aux));
         let hhmm = |min: u32| format!("{:02}:{:02}", min / 60 % 24, min % 60);
         // [now-30, now+30] — wraps midnight safely near the day edges
         s.upsert_binding(&Binding {
@@ -7157,7 +7186,7 @@ mod tests {
         })
         .unwrap();
         set_agent_strategy(&s, "claude", "timewindow", None).unwrap();
-        assert_eq!(in_use(&s), (false, true));
+        assert_eq!(badges(&s), (false, true, vec![]));
 
         // timewindow: no window matching now → the fallback head serves
         s.upsert_binding(&Binding {
@@ -7171,9 +7200,11 @@ mod tests {
             enabled: true,
         })
         .unwrap();
-        assert_eq!(in_use(&s), (true, false));
+        assert_eq!(badges(&s), (true, false, vec![]));
 
-        // quota: head under threshold; over → first backup (windows ignored)
+        // quota: under the threshold the head serves; over it the head stops
+        // serving and the first backup is badged fallback, not in use (windows
+        // ignored).
         set_agent_strategy(
             &s,
             "claude",
@@ -7181,7 +7212,7 @@ mod tests {
             Some(r#"{"limit":5,"unit":"requests"}"#),
         )
         .unwrap();
-        assert_eq!(in_use(&s), (true, false));
+        assert_eq!(badges(&s), (true, false, vec![]));
         for _ in 0..5 {
             s.record_usage(&kiwanod::store::UsageRecord {
                 ts: rfc3339(unix_now()),
@@ -7200,9 +7231,11 @@ mod tests {
             })
             .unwrap();
         }
-        assert_eq!(in_use(&s), (false, true));
+        // Over: neither reads as current (the gateway may still serve the
+        // primary when every backup is down, which is its runtime call), and
+        // b1 — the configured first backup — reads as fallback.
+        assert_eq!(badges(&s), (false, false, vec!["claude".to_string()]));
     }
-
     /// What a latency test's three outcomes become on the row. The middle one is
     /// the whole point of the `error` column: a refusal is the vendor answering,
     /// which reachability alone cannot tell apart from silence.

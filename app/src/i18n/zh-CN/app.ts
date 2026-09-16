@@ -12,6 +12,8 @@ export const app = {
   requests: "次请求",
   tokens: "tokens",
   hubSynced: "Hub 刚刚同步",
+  refreshScreen: "刷新当前屏幕",
+  refreshScreenTitle: "重新读取当前屏幕显示的数据 — 筛选条件、时间窗口与滚动位置保持不变",
 
   usedPlanWindow: "套餐窗口的 {pct}%",
   usedTokens: "{count}k tokens",

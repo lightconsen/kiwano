@@ -12,6 +12,7 @@ export const common = {
   add: "添加",
   refresh: "刷新",
   retry: "重试",
+  loadFailed: "无法读取此屏幕的数据",
   loading: "加载中…",
   none: "—",
   enabled: "已启用",

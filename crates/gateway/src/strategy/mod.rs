@@ -49,9 +49,20 @@ fn hhmm_minutes(s: &str) -> Option<u32> {
     }
 }
 
-/// Local time "HH:MM" (peak/off-peak windows use the local timezone).
-fn local_hhmm() -> String {
-    chrono::Local::now().format("%H:%M").to_string()
+/// Minutes-of-day on the user's clock — the same one the quota day boundary is
+/// read from (`limits::period_start`), so a window and a "today's quota" reset
+/// cannot disagree about what time it is.
+///
+/// The offset is the stored `tz_offset_minutes` (minutes east of UTC), not the
+/// daemon host's timezone. A gateway run on a UTC host for a UTC+8 user used to
+/// peak and go off-peak at the wrong hours; it is fixed, so a session spanning a
+/// DST transition keeps the offset it started with (`ui_tz_offset_minutes` is
+/// rewritten by the app at launch).
+fn local_minutes_of_day(tz_offset_minutes: i64) -> u32 {
+    use chrono::Timelike;
+    let local = chrono::Utc::now() + chrono::Duration::minutes(tz_offset_minutes);
+    let t = local.time();
+    t.hour() * 60 + t.minute()
 }
 
 /// Whether now falls inside [start, end] (start > end means an overnight window).
@@ -304,7 +315,9 @@ impl StrategyEngine {
             StrategyType::Single => Self::primary(usable)?,
             StrategyType::Failover => self.select_failover(usable).await?,
             StrategyType::Roundrobin => self.select_roundrobin(usable, session).await?,
-            StrategyType::Timewindow => self.select_timewindow(usable),
+            StrategyType::Timewindow => {
+                self.select_timewindow(usable, limits.tz_offset_minutes())
+            }
             StrategyType::Quota => self.select_quota(store, usable, limits).await?,
         };
         let mut plan = Vec::with_capacity(usable.candidates.len());
@@ -386,10 +399,14 @@ impl StrategyEngine {
         Ok(0)
     }
 
-    /// timewindow: match local time windows in candidate order (overnight supported); falls back to the primary on no match.
-    fn select_timewindow(&self, route: &AgentRoute) -> crate::router::UpstreamProvider {
-        let now = local_hhmm();
-        let now_min = hhmm_minutes(&now).unwrap_or(0);
+    /// timewindow: match the user's local time windows in candidate order
+    /// (overnight supported); falls back to the primary on no match.
+    fn select_timewindow(
+        &self,
+        route: &AgentRoute,
+        tz_offset_minutes: i64,
+    ) -> crate::router::UpstreamProvider {
+        let now_min = local_minutes_of_day(tz_offset_minutes);
         for c in &route.candidates {
             if let (Some(s), Some(e)) = (&c.win_start, &c.win_end) {
                 if in_window(now_min, s, e) {
@@ -924,11 +941,14 @@ mod tests {
         );
     }
 
-    /// Build an [start,end) window guaranteed not to contain the current local time (now+2 to now+3 minutes).
+    /// Build an [start,end) window guaranteed not to contain the current local
+    /// time (now+2 to now+3 minutes). The offset is the one the callers pass —
+    /// `LimitState::default()`, i.e. UTC — so the window is built from the same
+    /// clock the engine reads and the test does not depend on the host's zone.
     fn narrow_future_window() -> (&'static str, &'static str) {
         // Clock drift does not affect the assertions: the window holds only two marks within
         // the coming minute, so as long as the test finishes within the same minute, now < start always holds.
-        let now_min = hhmm_minutes(&local_hhmm()).unwrap();
+        let now_min = local_minutes_of_day(0);
         let s = now_min + 2;
         let e = now_min + 3;
         // Midnight wraparound remains a valid window; format as static HH:MM strings
@@ -944,12 +964,58 @@ mod tests {
 
     #[tokio::test]
     async fn timewindow_supports_overnight_window() {
-        let now = local_hhmm();
-        let now_min = hhmm_minutes(&now).unwrap();
+        let now_min = local_minutes_of_day(0);
         // Overnight window [23:00, 06:00]: now after 23:00 or before 06:00 must match
         let late = now_min >= 23 * 60;
         let early = now_min <= 6 * 60;
         assert_eq!(in_window(now_min, "23:00", "06:00"), late || early);
+    }
+
+    /// A ±30-minute window around the user's clock at `offset`, leaked to satisfy
+    /// `candidate`'s `&'static str`. Wide enough that the minute ticking over
+    /// mid-test cannot move `now` out of it.
+    fn window_around(offset: i64) -> (&'static str, &'static str) {
+        let now = local_minutes_of_day(offset);
+        let fmt = |m: u32| {
+            let m = m % (24 * 60);
+            format!("{:02}:{:02}", m / 60, m % 60)
+        };
+        (
+            Box::leak(fmt(now + 1440 - 30).into_boxed_str()),
+            Box::leak(fmt(now + 30).into_boxed_str()),
+        )
+    }
+
+    /// The window is matched against the stored offset, not the daemon's host
+    /// zone: one instant, two offsets 12 hours apart, opposite picks. Before the
+    /// offset was threaded through, both halves read `chrono::Local` and this
+    /// could not be stated at all.
+    #[tokio::test]
+    async fn timewindow_reads_the_stored_offset_not_the_host_zone() {
+        let engine = StrategyEngine::new();
+        let s = store();
+        let (start, end) = window_around(480);
+        let r = route(
+            StrategyType::Timewindow,
+            vec![
+                candidate("a", 1, None),
+                candidate("b", 1, Some((start, end))),
+            ],
+        );
+
+        // The window was built on the UTC+8 user's clock → it is the one serving.
+        let at_utc8 = engine
+            .select(&s, &r, None, &crate::limits::LimitState::with_offset(480))
+            .await
+            .unwrap();
+        assert_eq!(at_utc8.id, "b");
+
+        // The same instant read at UTC-4 is 12 hours away from that window.
+        let at_utc_minus4 = engine
+            .select(&s, &r, None, &crate::limits::LimitState::with_offset(-240))
+            .await
+            .unwrap();
+        assert_eq!(at_utc_minus4.id, "a");
     }
 
     /// A state with exactly one provider over an amount limit.

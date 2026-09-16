@@ -22,6 +22,9 @@ export const providers = {
   // ── Provider rows ──
   unbound: "未绑定",
   inUse: "使用中",
+  quotaFallback: "候补",
+  quotaFallbackTitle:
+    "主 Provider 超出配额后第一位接手 —— 实际由哪个候补服务取决于其余 Provider 是否可达",
   editProvider: "编辑 Provider",
   deleteProvider: "删除 Provider",
   clickAgain: "再次点击以确认",

@@ -18,6 +18,13 @@ export const app = {
   requests: "requests",
   tokens: "tokens",
   hubSynced: "Hub just synced",
+  /** The status bar's ⟳. Its scope is the screen in front of you — nothing
+      outside it (see lib/reload.ts), so the label names the screen rather than
+      the app. A screen's own ⟳ keeps `common.refresh`: that one is the screen's
+      control, this one is the shell's. */
+  refreshScreen: "Refresh this screen",
+  refreshScreenTitle:
+    "Re-read what this screen is showing — filters, window and scroll position stay put",
 
   // Cost-alert notification
   /** The three ways a used amount is phrased before it is dropped into a

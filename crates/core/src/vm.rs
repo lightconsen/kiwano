@@ -7159,7 +7159,11 @@ mod tests {
         let badges = |s: &Store| -> (bool, bool, Vec<String>) {
             let vms = build_provider_vms(s, &aux, home.path()).unwrap();
             let p = |id: &str| vms.iter().find(|x| x.id == id).unwrap();
-            (p("a1").is_current, p("b1").is_current, p("b1").fallback_agents.clone())
+            (
+                p("a1").is_current,
+                p("b1").is_current,
+                p("b1").fallback_agents.clone(),
+            )
         };
 
         // single: only the head serves

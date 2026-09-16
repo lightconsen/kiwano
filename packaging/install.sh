@@ -18,6 +18,11 @@
 #                     /usr/local/bin with --system)
 #   --version TAG     install a specific release instead of the latest
 #   --mirror URL      download from somewhere else
+#   --insecure-mirror-checksum
+#                     when github.com is unreachable, accept the mirror's own
+#                     checksum for the download instead of refusing to install.
+#                     That only proves the file is intact, not that it is
+#                     untampered — see "Verifying" below. Off by default.
 #   -h, --help
 
 set -eu
@@ -30,6 +35,7 @@ SYSTEM=0
 SERVICE=1
 PREFIX=""
 VERSION=""
+INSECURE_MIRROR_CHECKSUM=0
 
 say() { printf '%s\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
@@ -54,6 +60,7 @@ while [ $# -gt 0 ]; do
         --version=*) VERSION="${1#*=}" ;;
         --mirror) MIRROR="${2:?--mirror needs a URL}" && shift ;;
         --mirror=*) MIRROR="${1#*=}" ;;
+        --insecure-mirror-checksum) INSECURE_MIRROR_CHECKSUM=1 ;;
         -h | --help)
             usage
             exit 0
@@ -164,8 +171,11 @@ fi
 #      enough to pass this check. This is the one that means something.
 #   2. The mirror's own per-platform checksum file, when GitHub cannot be
 #      reached — which is common on exactly the networks the mirror exists for.
-#      It still catches a truncated or corrupted download; it does not catch a
-#      tampered mirror, and the script says so rather than pretending otherwise.
+#      It catches a truncated or corrupted download, but it cannot catch a
+#      tampered mirror: the digest and the bytes come from the same host, so
+#      whoever controls the mirror controls both. For that reason it is never
+#      used silently — only with the explicit `--insecure-mirror-checksum`
+#      opt-in, and the script names exactly what that proves when it does.
 #
 #      It is per-platform (`kiwano-<triple>.sha256`) because the mirror is
 #      written by four build legs in parallel: one shared SHA256SUMS would be
@@ -194,7 +204,7 @@ if [ -n "$manifest" ]; then
     [ -n "$expected" ] && source_desc="GitHub"
 fi
 
-if [ -z "$expected" ] && [ -z "$VERSION" ]; then
+if [ -z "$expected" ] && [ -z "$VERSION" ] && [ "$INSECURE_MIRROR_CHECKSUM" = 1 ]; then
     manifest=$(fetch "$MIRROR/kiwano-$triple.sha256")
     if [ -n "$manifest" ]; then
         expected=$(digest_for "$manifest")
@@ -203,9 +213,13 @@ if [ -z "$expected" ] && [ -z "$VERSION" ]; then
 fi
 
 [ -n "$expected" ] ||
-    die "no checksum available for $asset (tried GitHub and the mirror).
-Refusing to install an unverified binary. Check your network, or download by
-hand from $GITHUB/latest"
+    die "no checksum for $asset: github.com is unreachable.
+Refusing to install a binary whose digest cannot be checked against GitHub.
+The mirror's own checksum only proves the download arrived intact, not that
+it is the release this project published, so it is not trusted by default.
+  - Fix your network, or download by hand from $GITHUB/latest
+  - Or accept the weaker check explicitly: re-run with
+    --insecure-mirror-checksum (see --help for what that buys and loses)"
 
 actual=$(sha256_of "$tmp/$asset")
 [ -n "$actual" ] ||
@@ -220,9 +234,10 @@ not the file this release published — either way, do not use it."
 fi
 
 if [ "$source_desc" = "mirror" ]; then
-    note "checksum ok — but against the *mirror's* own manifest (GitHub was"
-    note "unreachable). That proves the download is intact, not that it is"
-    note "untampered. Re-run on a network that reaches GitHub to check properly."
+    note "checksum ok — but against the *mirror's* own manifest, because you"
+    note "passed --insecure-mirror-checksum and GitHub was unreachable. That"
+    note "proves the download is intact, not that it is untampered. Re-run on"
+    note "a network that reaches GitHub to check properly."
 else
     note "checksum ok (verified against GitHub)"
 fi

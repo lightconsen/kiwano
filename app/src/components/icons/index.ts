@@ -2,6 +2,15 @@
 // This file is derived from cc-switch (https://github.com/farion1231/cc-switch),
 // src/icons/extracted/index.ts; brand marks belong to their respective vendors.
 // Update entries deliberately; automatic regeneration is intentionally unsupported.
+//
+// Trust boundary (KIW-SEC-001): everything here is a build-time local import —
+// SVG strings or bundled files — and `ProviderLogo` renders only what these
+// registries return. Never add a remote `http(s)://` URL or content fetched
+// from the Hub/catalog: a remote SVG would reach the WebView's innerHTML path
+// with no sanitization. If remote logos are ever allowed, sanitize first
+// (allowlist, no `<script>`/event handlers) and configure the app CSP
+// (`app.security.csp` in tauri.conf.json) before anything remote renders.
+// `index.test.ts` pins this contract.
 
 import _a6api from "./a6-icon.png";
 import _apikeyfun from "./apikeyfun.png";

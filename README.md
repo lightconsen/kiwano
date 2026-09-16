@@ -176,6 +176,12 @@ compiles it before the frontend starts. For a cross build, name the target:
 `KIWANO_SIDECAR_TARGET=x86_64-apple-darwin pnpm tauri build`. At runtime
 `KIWANO_GATEWAY_BIN` overrides which binary the app looks for.
 
+The UI renders no remote content: provider logos come from a local registry
+(`app/src/components/icons/`, pinned by `index.test.ts`), and Hub traffic goes
+through the gateway, never the WebView. If remote content or remote logos are
+ever added, configure the app CSP (`app.security.csp` in `tauri.conf.json`) and
+sanitize icon input first — see the registry header comment.
+
 **Run `pnpm build:sidecar` first on a fresh clone.** The gateway is declared as
 an `externalBin`, and Tauri resolves that in `app/src-tauri/build.rs` — so a
 missing sidecar fails `cargo clippy` and `cargo test` themselves, not just the

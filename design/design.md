@@ -1,7 +1,7 @@
 # Kiwano 桌面端 UI 设计规范 (Design Notes)
 
-- 状态：v0.2 与 `design/index.html` 原型同步 | 更新日期：2026-09-07
-- 原型：`design/index.html`（单文件，Tailwind CDN + lucide，hash 路由）
+- 状态：v0.2 与 `design/index.html` 原型同步；light 主题于 2026-09-16 补入 §3.1 | 更新日期：2026-09-16
+- 原型：`design/index.html`（单文件，Tailwind CDN + lucide，hash 路由；仅 dark）
 
 ## 0. 设计原则（来自用户约束，必须遵守）
 
@@ -58,6 +58,25 @@
 ```
 
 字体层级：行主名 13px/600，正文 12.5px，辅助 11px，数值一律 mono。
+
+### 3.1 Light 主题（2026-09-16 补）
+
+`design/index.html` 原型只有 dark；light 是 `app/src/index.css` 里的镜像实现。本节把它补成规范，token 值以该文件为 SSOT。
+
+| token | light | dark | 用途 |
+| --- | --- | --- | --- |
+| `--bg` | `oklch(0.99 0.003 260)` | `oklch(0.15 0.008 260)` | 窗口底；列表页行直接铺在其上 |
+| `--surface2` | `oklch(0.955 0.004 260)` | `oklch(0.225 0.012 260)` | 次级面：input 底、代码块、hover |
+| `--surface` | `oklch(1 0 0)` | `oklch(0.185 0.01 260)` | 卡片、表格列头、sticky 工具条 |
+
+**层次规则（light 是 dark 的亮度反转）**：dark 里「越亮 = 越浮起」，light 里「越白 = 越浮起」。
+
+- 浮起面（卡片/表头）比底色更白 → `--surface` > `--bg`；
+- 凹陷面（input/代码块）比底色更暗 → `--surface2` < `--bg`。
+
+**列表页 vs 卡片页**：Apps 与 Models 是「表格铺满」的布局——行透明、直接坐在 `--bg` 上，只有列头与 sticky 工具条用 `--surface`。Dashboard 与 Settings 是卡片页，内容装在 `--surface` 卡片里。因此 `--bg` 的取值只显著影响列表页的观感。
+
+本次调整：`--bg` 由 `0.975` 提到 `0.99`（2026-09-16）。0.975 在列表页读起来是可见的灰，与其上纯白的表头形成割裂；0.99 近乎白，同时保住与 `--surface` 的一线之分，卡片页的浮起关系不变。
 
 ## 4. 添加供应商弹窗（参考 cc-switch AddProviderDialog 模式）
 

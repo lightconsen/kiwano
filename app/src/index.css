@@ -16,7 +16,12 @@
 :root {
   color-scheme: light;
 
-  --bg: oklch(0.975 0.003 260);
+  /* Near-white rather than a visible grey: the list screens (Apps, Models)
+     lay rows straight on `--bg` with no card container, so this token is the
+     whole of what the eye reads there. 0.975 came across as grey against the
+     pure-white header/row hover; 0.99 keeps a hair of separation from
+     `--surface` while reading as white. */
+  --bg: oklch(0.99 0.003 260);
   --surface: oklch(1 0 0);
   --surface2: oklch(0.955 0.004 260);
   --line: oklch(0.9 0.006 260);

@@ -315,9 +315,7 @@ impl StrategyEngine {
             StrategyType::Single => Self::primary(usable)?,
             StrategyType::Failover => self.select_failover(usable).await?,
             StrategyType::Roundrobin => self.select_roundrobin(usable, session).await?,
-            StrategyType::Timewindow => {
-                self.select_timewindow(usable, limits.tz_offset_minutes())
-            }
+            StrategyType::Timewindow => self.select_timewindow(usable, limits.tz_offset_minutes()),
             StrategyType::Quota => self.select_quota(store, usable, limits).await?,
         };
         let mut plan = Vec::with_capacity(usable.candidates.len());

@@ -554,7 +554,7 @@ pub struct AddArgs {
     #[arg(long, value_name = "KEY")]
     pub key: Option<String>,
 
-    /// anthropic | openai
+    /// anthropic | openai | gemini
     #[arg(long, default_value = "openai", value_name = "PROTOCOL")]
     pub protocol: String,
 

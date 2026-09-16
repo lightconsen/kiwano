@@ -17,9 +17,10 @@ use kiwanod::store::{
 };
 use serde::{Deserialize, Serialize};
 
-pub const AGENTS: [(&str, &str); 8] = [
+pub const AGENTS: [(&str, &str); 9] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
+    ("gemini", "Gemini CLI"),
     ("grokbuild", "Grok Build"),
     ("claude-desktop", "Claude Desktop"),
     ("opencode", "OpenCode"),
@@ -1913,6 +1914,7 @@ fn protocol_label(p: kiwanod::store::Protocol) -> &'static str {
     match p {
         kiwanod::store::Protocol::OpenAI => "OpenAI-compatible",
         kiwanod::store::Protocol::Anthropic => "Anthropic",
+        kiwanod::store::Protocol::Gemini => "Gemini",
     }
 }
 
@@ -1923,6 +1925,7 @@ fn endpoint_note(p: &Provider) -> String {
         let tag = match e.protocol {
             kiwanod::store::Protocol::OpenAI => "OpenAI",
             kiwanod::store::Protocol::Anthropic => "Anthropic",
+            kiwanod::store::Protocol::Gemini => "Gemini",
         };
         note.push_str(" · +");
         note.push_str(tag);

@@ -475,8 +475,10 @@ fn probe_url(protocol: &str, base: &str) -> Result<String, String> {
     let already_versioned =
         rest.ends_with("/v1") || rest.ends_with("/v1beta") || rest.ends_with("/v1alpha");
     let url = match protocol {
-        "anthropic" | "openai" if already_versioned => format!("{scheme}{rest}/models"),
+        "anthropic" | "openai" | "gemini" if already_versioned => format!("{scheme}{rest}/models"),
         "anthropic" | "openai" => format!("{scheme}{rest}/v1/models"),
+        // The native Gemini API lives under /v1beta.
+        "gemini" => format!("{scheme}{rest}/v1beta/models"),
         other => return Err(format!("unknown protocol: {other}")),
     };
     Ok(url)
@@ -501,6 +503,11 @@ fn apply_auth(
                 req = req.header("x-api-key", k);
             }
             req = req.header("anthropic-version", "2023-06-01");
+        }
+        "gemini" => {
+            if let Some(k) = key {
+                req = req.header("x-goog-api-key", k);
+            }
         }
         other => return Err(format!("unknown protocol: {other}")),
     }
@@ -593,12 +600,26 @@ fn parse_models(body: &str) -> Vec<String> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
     };
-    v.get("data")
+    // OpenAI-compatible (and Anthropic's compatible list): `data[].id`.
+    let openai: Vec<String> = v
+        .get("data")
         .and_then(|d| d.as_array())
         .into_iter()
         .flatten()
         .filter_map(|m| m.get("id").and_then(|x| x.as_str()))
         .map(str::to_string)
+        .collect();
+    if !openai.is_empty() {
+        return openai;
+    }
+    // Native Gemini: `models[].name`, spelled `models/gemini-2.5-pro` — the
+    // prefix is the API's resource path, not part of the model id.
+    v.get("models")
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.get("name").and_then(|x| x.as_str()))
+        .map(|name| name.strip_prefix("models/").unwrap_or(name).to_string())
         .collect()
 }
 
@@ -954,6 +975,19 @@ mod tests {
         );
         assert!(parse_models("<html>").is_empty());
         assert!(parse_models(r#"{"data":[{"object":"model"}]}"#).is_empty());
+    }
+
+    // The native Gemini list spells the id `models/<id>`; the dropdown wants
+    // the id, not the API's resource path.
+    #[test]
+    fn parse_models_reads_gemini_names() {
+        assert_eq!(
+            parse_models(
+                r#"{"models":[{"name":"models/gemini-2.5-pro"},{"name":"models/gemini-2.5-flash"}]}"#
+            ),
+            vec!["gemini-2.5-pro".to_string(), "gemini-2.5-flash".to_string()]
+        );
+        assert!(parse_models(r#"{"models":[]}"#).is_empty());
     }
 
     /// An in-process stand-in for a real admin plane, serving the three routes

@@ -408,9 +408,11 @@ fn read_db(path: &Path) -> Result<(Vec<RawProvider>, Vec<String>), String> {
             "openclaw" => "openclaw",
             "hermes" => "hermes",
             "pi" => "pi",
-            // Gemini CLI went with the gemini protocol; its rows have nowhere
-            // to land, and a silent openai-shaped import would be worse than a
-            // skip line the report can show.
+            // Gemini CLI's cc-switch rows hold its own env-shaped settings
+            // (`GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL`), not a provider
+            // document this importer can read — and a silent openai-shaped
+            // import would be worse than a skip line the report can show.
+            // The agent itself is supported: add a Gemini provider by hand.
             "gemini" => {
                 skips.push(format!(
                     "skip gemini/{cc_id}: the gemini protocol is no longer supported"
@@ -460,7 +462,7 @@ fn read_json(path: &Path) -> Result<(Vec<RawProvider>, Vec<String>), String> {
             "gemini" => {
                 for cc_id in providers.keys() {
                     skips.push(format!(
-                        "skip gemini/{cc_id}: the gemini protocol is no longer supported"
+                        "skip gemini/{cc_id}: its settings are Gemini-CLI-shaped; add the provider by hand"
                     ));
                 }
                 continue;

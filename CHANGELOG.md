@@ -19,6 +19,28 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **Gemini CLI, over its own protocol.** Gemini CLI speaks Google's native
+  Gemini API (`/v1beta/models/{model}:{action}`, `x-goog-api-key` auth), which
+  the gateway now carries as a third protocol. It is passed through, not
+  translated: the request reaches a Gemini provider in the shape it was sent,
+  while Kiwano meters it, logs it and enforces the same limits as any other
+  route. The agent is back in the registry with detection and one-click
+  takeover — Gemini CLI reads its base URL and key from `~/.gemini/.env`, and
+  that is the file takeover rewrites — and a provider can be added with
+  `--protocol gemini` or from the dialog, Test button and model list included.
+
+  What it does not do is convert. A Gemini inbound can only be forwarded to a
+  provider that speaks Gemini, so this routes Gemini CLI at Google's own API; it
+  does not make Gemini CLI reach DeepSeek or Kimi. cc-switch's `gemini` rows are
+  still skipped on import — their settings are Gemini-CLI-shaped rather than a
+  provider document — so a Gemini provider is added by hand.
+
+  Schema v23 widens both protocol CHECK constraints to accept `gemini` again.
+  It deletes nothing: the rows v15 removed stay removed.
+
+
 ## [0.1.13] - 2026-09-16
 
 ### Fixed

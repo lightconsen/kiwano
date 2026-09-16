@@ -96,6 +96,7 @@ export default function AddProviderModal({
   const protocolOptions: { id: Protocol; label: string }[] = [
     { id: "openai", label: t("addProvider.protoOpenai") },
     { id: "anthropic", label: t("addProvider.protoAnthropic") },
+    { id: "gemini", label: t("addProvider.protoGemini") },
   ];
   // Inline probe readout: ok shows the measured latency, every other verdict
   // shows a short word (full detail lives in the span's title). Green/kiwi =

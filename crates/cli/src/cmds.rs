@@ -1468,8 +1468,9 @@ fn parse_protocol(raw: &str) -> Result<&'static str, CliError> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "anthropic" => Ok("anthropic"),
         "openai" => Ok("openai"),
+        "gemini" => Ok("gemini"),
         other => Err(CliError::usage(format!(
-            "invalid --protocol: {other} (anthropic|openai)"
+            "invalid --protocol: {other} (anthropic|openai|gemini)"
         ))),
     }
 }

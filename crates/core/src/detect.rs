@@ -22,6 +22,7 @@ use serde::Serialize;
 const CLI_AGENTS: &[(&str, &str)] = &[
     ("claude", "claude"),
     ("codex", "codex"),
+    ("gemini", "gemini"),
     ("grokbuild", "grok"),
     ("opencode", "opencode"),
     ("openclaw", "openclaw"),

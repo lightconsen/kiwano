@@ -25,6 +25,7 @@ export const addProvider = {
   protocol: "Protocol",
   protoOpenai: "OpenAI-compatible",
   protoAnthropic: "Anthropic",
+  protoGemini: "Gemini",
 
   apiKey: "API Key",
   keyKeep: "Leave blank to keep the current key",

@@ -19,6 +19,7 @@
 //! existing model id and only swap the provider prefix.
 
 use serde_json::{json, Map, Value};
+use toml_edit::{value, DocumentMut};
 
 /// Provider id used in every additive config for the local gateway entry.
 pub const GATEWAY_PROVIDER_ID: &str = "kiwano-gateway";
@@ -330,6 +331,276 @@ pub fn select_pi_gateway(content: &str) -> Result<String, String> {
     serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())
 }
 
+/// The vendor mark on every entry this family of transforms writes. It is how
+/// a second takeover finds the row it wrote the first time, so enabling twice
+/// updates one entry instead of taking over another.
+pub const GATEWAY_VENDOR: &str = "Kiwano";
+
+fn is_our_entry(entry: &Value) -> bool {
+    entry.get("vendor").and_then(Value::as_str) == Some(GATEWAY_VENDOR)
+}
+
+/// The id an entry needs when it is created from nothing. The gateway forwards
+/// model names verbatim, so this is a placeholder the user replaces with a
+/// model their provider serves — only reachable when the agent's config held
+/// no entry to copy from.
+const PLACEHOLDER_MODEL_ID: &str = "kiwano";
+
+/// The entry to take over in a model-list config: ours from a previous
+/// takeover, else the user's first, else none (the list is empty).
+///
+/// The first entry rather than all of them: WorkBuddy and CodeBuddy name their
+/// provider by URL inside each model row and have no provider-prefix dimension
+/// to swap (unlike OpenCode's `provider/model` selector), so *adding* an entry
+/// would leave two rows with one id and an ambiguous pick. Taking over the row
+/// keeps one id, one meaning.
+fn takeover_target_index(entries: &[Value]) -> Option<usize> {
+    entries
+        .iter()
+        .position(is_our_entry)
+        .or(if entries.is_empty() { None } else { Some(0) })
+}
+
+/// Write our URL and key onto an entry, keeping everything else — the id above
+/// all, because that is the model name the request goes upstream with.
+fn point_entry_at_gateway(entry: &mut Value, url: &str, key: &str) -> Result<(), String> {
+    let obj = entry
+        .as_object_mut()
+        .ok_or("model entries must be JSON objects")?;
+    obj.insert("vendor".into(), json!(GATEWAY_VENDOR));
+    obj.insert("url".into(), json!(url));
+    obj.insert("apiKey".into(), json!(key));
+    Ok(())
+}
+
+fn new_entry(model_id: &str, url: &str, key: &str) -> Value {
+    json!({
+        "id": model_id,
+        "name": GATEWAY_LABEL,
+        "vendor": GATEWAY_VENDOR,
+        "url": url,
+        "apiKey": key,
+        "supportsToolCall": true,
+        "supportsImages": false,
+    })
+}
+
+// ── workbuddy (~/.workbuddy/models.json, a bare JSON array) ──
+
+/// Take over WorkBuddy's model list.
+///
+/// The file is a **bare array** — the shape its GUI writes. The published docs
+/// show an object instead, which is what the CLI embedded in the app parses;
+/// the GUI is what reads this file, so the array is the shape to write.
+///
+/// `url` is a full endpoint (WorkBuddy appends nothing), so the caller passes
+/// `…/v1/chat/completions`.
+pub fn upsert_workbuddy_gateway(content: &str, url: &str, key: &str) -> Result<String, String> {
+    let mut entries: Vec<Value> = if content.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str(content)
+            .map_err(|e| format!("models.json is not a JSON array: {e}"))?
+    };
+
+    match takeover_target_index(&entries) {
+        Some(i) => point_entry_at_gateway(&mut entries[i], url, key)?,
+        None => entries.push(new_entry(PLACEHOLDER_MODEL_ID, url, key)),
+    }
+
+    serde_json::to_string_pretty(&Value::Array(entries)).map_err(|e| e.to_string())
+}
+
+// ── codebuddy (~/.codebuddy/models.json, an object with a `models` array) ──
+
+/// Take over CodeBuddy's model list.
+///
+/// Same product family as WorkBuddy, different file shape: an object carrying
+/// `models` plus the `availableModels` list the picker reads, and the same
+/// full-endpoint `url`. The taken-over entry's id joins `availableModels` so
+/// the row is selectable; an id already listed is not duplicated.
+pub fn upsert_codebuddy_models_gateway(
+    content: &str,
+    url: &str,
+    key: &str,
+) -> Result<String, String> {
+    let root = parse_jsonc(content, "models.json")?;
+    let mut obj = require_object(root, "models.json")?;
+    if !obj.get("models").is_some_and(Value::is_array) {
+        obj.insert("models".into(), json!([]));
+    }
+
+    let model_id = {
+        let entries = obj["models"].as_array().expect("inserted above");
+        let index = takeover_target_index(entries);
+        let id = index
+            .and_then(|i| entries[i].get("id"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(PLACEHOLDER_MODEL_ID)
+            .to_string();
+        let entries = obj["models"].as_array_mut().expect("inserted above");
+        match index {
+            Some(i) => point_entry_at_gateway(&mut entries[i], url, key)?,
+            None => entries.push(new_entry(&id, url, key)),
+        }
+        id
+    };
+
+    // The picker reads this list, not `models`: an id the picker does not know
+    // is a row the user cannot choose.
+    if !obj.get("availableModels").is_some_and(Value::is_array) {
+        obj.insert("availableModels".into(), json!([]));
+    }
+    if let Some(list) = obj["availableModels"].as_array_mut() {
+        if !list.iter().any(|m| m.as_str() == Some(model_id.as_str())) {
+            list.push(json!(model_id));
+        }
+    }
+
+    serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())
+}
+
+// ── kimi (~/.kimi/config.toml, and ~/.kimi-code/config.toml for its successor) ──
+
+/// Take over Kimi CLI's config.
+///
+/// Unlike the JSON agents this one *adds* a provider instead of taking over an
+/// existing row: Kimi names its records (`[providers.<name>]`,
+/// `[models.<alias>]`), so a gateway entry and the user's own can coexist with
+/// no ambiguity, and selecting ours is one line (`default_model`).
+///
+/// `provider_type` is the protocol name the installed generation uses —
+/// `openai_legacy` for the Python CLI, `openai` for its successor — and it is
+/// chosen from the config path by the caller, since only the path tells the
+/// generations apart.
+pub fn upsert_kimi_gateway(
+    content: &str,
+    base_url: &str,
+    key: &str,
+    provider_type: &str,
+) -> Result<String, String> {
+    let mut doc: DocumentMut = if content.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        content
+            .parse()
+            .map_err(|e| format!("config.toml is not valid TOML: {e}"))?
+    };
+
+    // The model the user is on: `default_model` is `<provider>/<model>`. Its id
+    // is what goes upstream verbatim, so ours keeps it — a takeover changes
+    // where the request goes, not which model answers it.
+    let model_id = doc
+        .get("default_model")
+        .and_then(|v| v.as_str())
+        .and_then(|m| m.split_once('/').map(|(_, id)| id))
+        .filter(|id| !id.is_empty())
+        .unwrap_or(PLACEHOLDER_MODEL_ID)
+        .to_string();
+    let alias = format!("{GATEWAY_PROVIDER_ID}/{model_id}");
+
+    doc["providers"][GATEWAY_PROVIDER_ID]["type"] = value(provider_type);
+    doc["providers"][GATEWAY_PROVIDER_ID]["base_url"] = value(base_url);
+    doc["providers"][GATEWAY_PROVIDER_ID]["api_key"] = value(key);
+
+    doc["models"][&alias]["provider"] = value(GATEWAY_PROVIDER_ID);
+    doc["models"][&alias]["model"] = value(model_id.as_str());
+    // Capabilities drive which features Kimi offers this model, not whether the
+    // request works; copying the ones the user's own model declared keeps the
+    // toggles they had.
+    if let Some(caps) = doc
+        .get("models")
+        .and_then(|m| m.get(&alias))
+        .and_then(|m| m.get("capabilities"))
+        .and_then(|c| c.as_array())
+        .cloned()
+    {
+        doc["models"][&alias]["capabilities"] = value(caps);
+    }
+
+    doc["default_model"] = value(alias.as_str());
+
+    Ok(doc.to_string())
+}
+
+// ── qwen (~/.qwen/settings.json, JSONC) ──
+
+/// The environment-variable name Qwen Code reads the gateway key from. Qwen
+/// resolves credentials through `envKey` (a *name*, never a value), and its
+/// own `env` block is a plaintext fallback inside settings.json — writing both
+/// is what keeps the key out of the shell environment.
+const QWEN_ENV_KEY: &str = "KIWANO_GATEWAY_KEY";
+
+/// Take over Qwen Code's settings.
+///
+/// Adds a `modelProviders.openai` entry (the key names the protocol), points
+/// `env` at the gateway key, and selects it via `security.auth.selectedType`
+/// plus `model.name` — Qwen picks the protocol by auth type and the model by
+/// name, so both have to move.
+pub fn upsert_qwen_gateway(content: &str, base_url: &str, key: &str) -> Result<String, String> {
+    let root = parse_jsonc(content, "settings.json")?;
+    let mut obj = require_object(root, "settings.json")?;
+
+    let model_id = obj
+        .get("model")
+        .and_then(|m| m.get("name"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(PLACEHOLDER_MODEL_ID)
+        .to_string();
+
+    if !obj.get("modelProviders").is_some_and(Value::is_object) {
+        obj.insert("modelProviders".into(), json!({}));
+    }
+    if !obj["modelProviders"]
+        .get("openai")
+        .is_some_and(Value::is_array)
+    {
+        obj["modelProviders"]["openai"] = json!([]);
+    }
+    let entry = json!({
+        "id": model_id,
+        "name": GATEWAY_LABEL,
+        "envKey": QWEN_ENV_KEY,
+        "baseUrl": base_url,
+    });
+    let providers = obj["modelProviders"]["openai"]
+        .as_array_mut()
+        .expect("inserted above");
+    match providers
+        .iter()
+        .position(|p| p.get("envKey").and_then(Value::as_str) == Some(QWEN_ENV_KEY))
+    {
+        Some(i) => providers[i] = entry,
+        None => providers.push(entry),
+    }
+
+    // The value behind `envKey`. Qwen's own `env` block is the lowest-priority
+    // source it reads, which is exactly what makes it the one to write: a shell
+    // export still wins, and nothing has to touch the user's shell.
+    if !obj.get("env").is_some_and(Value::is_object) {
+        obj.insert("env".into(), json!({}));
+    }
+    obj["env"][QWEN_ENV_KEY] = json!(key);
+
+    // Selection: the protocol by auth type, the model by name.
+    if !obj.get("security").is_some_and(Value::is_object) {
+        obj.insert("security".into(), json!({}));
+    }
+    if !obj["security"].get("auth").is_some_and(Value::is_object) {
+        obj["security"]["auth"] = json!({});
+    }
+    obj["security"]["auth"]["selectedType"] = json!("openai");
+
+    if !obj.get("model").is_some_and(Value::is_object) {
+        obj.insert("model".into(), json!({}));
+    }
+    obj["model"]["name"] = json!(model_id);
+
+    serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,5 +741,213 @@ mod tests {
         assert_eq!(cur.base_url, "https://pi.ai/api");
         assert_eq!(cur.api_key, "sk-pi");
         assert!(read_pi_current(r#"{"providers":{}}"#, r#"{}"#).is_none());
+    }
+
+    // ── workbuddy ──
+
+    /// The shape a real install writes (a bare array — see any
+    /// `~/.workbuddy/models.json`); the published docs' object form is what
+    /// the CLI embedded in the app reads, not what the GUI writes.
+    #[test]
+    fn workbuddy_takes_over_the_first_entry_and_keeps_the_rest() {
+        let original = r#"[
+  { "id": "deepseek-v4-pro", "name": "DeepSeek-V4 Pro", "vendor": "DeepSeek",
+    "url": "https://api.deepseek.com/chat/completions", "apiKey": "sk-old",
+    "supportsToolCall": true, "supportsImages": false },
+  { "id": "kimi-k2", "vendor": "Moonshot",
+    "url": "https://api.moonshot.cn/v1/chat/completions", "apiKey": "sk-kimi" }
+]"#;
+        let out = upsert_workbuddy_gateway(
+            original,
+            "http://127.0.0.1:8317/v1/chat/completions",
+            "kw-ag-workbuddy-abcd",
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let arr = v.as_array().expect("still an array");
+
+        assert_eq!(arr.len(), 2, "the second model is left alone");
+        assert_eq!(
+            arr[0]["id"], "deepseek-v4-pro",
+            "the model id survives — it is what goes upstream"
+        );
+        assert_eq!(arr[0]["vendor"], GATEWAY_VENDOR);
+        assert_eq!(arr[0]["url"], "http://127.0.0.1:8317/v1/chat/completions");
+        assert_eq!(arr[0]["apiKey"], "kw-ag-workbuddy-abcd");
+        assert_eq!(arr[1]["vendor"], "Moonshot", "a later entry is untouched");
+        assert_eq!(arr[1]["apiKey"], "sk-kimi");
+    }
+
+    #[test]
+    fn workbuddy_empty_file_creates_one_entry() {
+        let out =
+            upsert_workbuddy_gateway("", "http://127.0.0.1:8317/v1/chat/completions", "k").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let arr = v.as_array().expect("an array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["id"], PLACEHOLDER_MODEL_ID);
+        assert_eq!(arr[0]["supportsToolCall"], true);
+    }
+
+    /// Enabling twice updates the row the first run wrote instead of taking
+    /// over another one.
+    #[test]
+    fn workbuddy_second_takeover_updates_its_own_entry() {
+        let url = "http://127.0.0.1:8317/v1/chat/completions";
+        let once = upsert_workbuddy_gateway("[]", url, "kw-ag-workbuddy-1").unwrap();
+        let twice = upsert_workbuddy_gateway(&once, url, "kw-ag-workbuddy-2").unwrap();
+        let v: Value = serde_json::from_str(&twice).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 1, "not a second entry");
+        assert_eq!(v[0]["apiKey"], "kw-ag-workbuddy-2");
+    }
+
+    // ── codebuddy ──
+
+    #[test]
+    fn codebuddy_takes_over_the_first_entry_and_lists_it() {
+        let original = r#"{
+  "models": [
+    { "id": "deepseek-v3", "name": "DeepSeek V3", "vendor": "DeepSeek",
+      "apiKey": "sk-old", "url": "https://api.deepseek.com/v1/chat/completions" }
+  ],
+  "availableModels": []
+}"#;
+        let out = upsert_codebuddy_models_gateway(
+            original,
+            "http://127.0.0.1:8317/v1/chat/completions",
+            "kw-ag-codebuddy-abcd",
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["models"][0]["id"], "deepseek-v3");
+        assert_eq!(v["models"][0]["vendor"], GATEWAY_VENDOR);
+        assert_eq!(
+            v["models"][0]["url"],
+            "http://127.0.0.1:8317/v1/chat/completions"
+        );
+        assert_eq!(
+            v["availableModels"][0], "deepseek-v3",
+            "the picker lists availableModels, not models"
+        );
+    }
+
+    #[test]
+    fn codebuddy_empty_config_creates_both_sections() {
+        let out =
+            upsert_codebuddy_models_gateway("", "http://127.0.0.1:8317/v1/chat/completions", "k")
+                .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["models"].as_array().unwrap().len(), 1);
+        assert_eq!(v["models"][0]["id"], PLACEHOLDER_MODEL_ID);
+        assert_eq!(v["availableModels"][0], PLACEHOLDER_MODEL_ID);
+    }
+
+    // ── kimi ──
+
+    #[test]
+    fn kimi_upserts_a_provider_and_selects_it() {
+        let original = r#"default_model = "kimi-code/kimi-for-coding"
+default_thinking = true
+
+[models."kimi-code/kimi-for-coding"]
+provider = "managed:kimi-code"
+model = "kimi-for-coding"
+max_context_size = 262144
+capabilities = ["thinking", "image_in"]
+
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+api_key = "sk-old"
+
+[loop_control]
+max_steps_per_turn = 50
+"#;
+        let out = upsert_kimi_gateway(
+            original,
+            "http://127.0.0.1:8317/v1",
+            "kw-ag-kimi-abcd",
+            "openai_legacy",
+        )
+        .unwrap();
+        let doc: DocumentMut = out.parse().expect("output is valid TOML");
+        let ours = &doc["providers"][GATEWAY_PROVIDER_ID];
+
+        assert_eq!(
+            doc["default_model"].as_str(),
+            Some("kiwano-gateway/kimi-for-coding")
+        );
+        assert_eq!(ours["type"].as_str(), Some("openai_legacy"));
+        assert_eq!(ours["base_url"].as_str(), Some("http://127.0.0.1:8317/v1"));
+        assert_eq!(ours["api_key"].as_str(), Some("kw-ag-kimi-abcd"));
+        assert_eq!(
+            doc["models"]["kiwano-gateway/kimi-for-coding"]["model"].as_str(),
+            Some("kimi-for-coding"),
+            "the model id is what goes upstream"
+        );
+        // The user's own provider and the unrelated section survive.
+        assert_eq!(
+            doc["providers"]["managed:kimi-code"]["api_key"].as_str(),
+            Some("sk-old")
+        );
+        assert_eq!(
+            doc["loop_control"]["max_steps_per_turn"].as_integer(),
+            Some(50)
+        );
+    }
+
+    #[test]
+    fn kimi_empty_config_creates_the_sections() {
+        let out = upsert_kimi_gateway("", "http://127.0.0.1:8317/v1", "k", "openai").unwrap();
+        let doc: DocumentMut = out.parse().unwrap();
+        assert_eq!(
+            doc["providers"][GATEWAY_PROVIDER_ID]["type"].as_str(),
+            Some("openai")
+        );
+        assert_eq!(
+            doc["default_model"].as_str(),
+            Some("kiwano-gateway/kiwano"),
+            "nothing to copy from: the placeholder id"
+        );
+    }
+
+    // ── qwen ──
+
+    #[test]
+    fn qwen_upserts_a_provider_and_selects_it() {
+        let original = r#"{
+  // The user's own settings, comment included.
+  "model": { "name": "qwen3-coder-plus" },
+  "security": { "auth": { "selectedType": "qwen-oauth" } },
+  "themes": "dark"
+}"#;
+        let out =
+            upsert_qwen_gateway(original, "http://127.0.0.1:8317/v1", "kw-ag-qwen-abcd").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["themes"], "dark");
+        assert_eq!(v["security"]["auth"]["selectedType"], "openai");
+        assert_eq!(
+            v["model"]["name"], "qwen3-coder-plus",
+            "the model name is what goes upstream"
+        );
+        let p = &v["modelProviders"]["openai"][0];
+        assert_eq!(p["id"], "qwen3-coder-plus");
+        assert_eq!(p["baseUrl"], "http://127.0.0.1:8317/v1");
+        assert_eq!(p["envKey"], QWEN_ENV_KEY);
+        assert_eq!(
+            v["env"][QWEN_ENV_KEY], "kw-ag-qwen-abcd",
+            "the key goes in Qwen's own env block, never the user's shell"
+        );
+    }
+
+    #[test]
+    fn qwen_empty_config_creates_the_sections() {
+        let out = upsert_qwen_gateway("", "http://127.0.0.1:8317/v1", "k").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["modelProviders"]["openai"][0]["id"], PLACEHOLDER_MODEL_ID);
+        assert_eq!(v["security"]["auth"]["selectedType"], "openai");
+        assert_eq!(v["env"][QWEN_ENV_KEY], "k");
     }
 }

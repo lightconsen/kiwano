@@ -17,7 +17,11 @@ export type AgentId =
   | "opencode"
   | "openclaw"
   | "hermes"
-  | "pi";
+  | "pi"
+  | "workbuddy"
+  | "codebuddy"
+  | "kimi"
+  | "qwen";
 /** An agent id as it travels through routes, bindings, usage and logs: a
     built-in's, or one the user defined. The closed `AgentId` above stays the
     type wherever the thing being named is a *built-in* — the takeover switch,
@@ -56,7 +60,16 @@ export interface AgentMeta {
 
 /** Additive-mode agents: config keeps multiple providers coexisting, takeover
     writes a gateway entry and selects it (vs exclusive-switch mode). */
-export const ADDITIVE_AGENTS: AgentId[] = ["opencode", "openclaw", "hermes", "pi"];
+export const ADDITIVE_AGENTS: AgentId[] = [
+  "opencode",
+  "openclaw",
+  "hermes",
+  "pi",
+  "workbuddy",
+  "codebuddy",
+  "kimi",
+  "qwen",
+];
 
 export const AGENTS: AgentMeta[] = [
   { id: "claude", label: "Claude Code", chip_char: "C", chip_color: "#D97757" },
@@ -68,6 +81,10 @@ export const AGENTS: AgentMeta[] = [
   { id: "openclaw", label: "OpenClaw", chip_char: "L", chip_color: "#EA580C" },
   { id: "hermes", label: "Hermes", chip_char: "H", chip_color: "#8B5CF6" },
   { id: "pi", label: "Pi", chip_char: "P", chip_color: "#DB2777" },
+  { id: "workbuddy", label: "WorkBuddy", chip_char: "W", chip_color: "#0052D9" },
+  { id: "codebuddy", label: "CodeBuddy Code", chip_char: "B", chip_color: "#0EA5E9" },
+  { id: "kimi", label: "Kimi Code CLI", chip_char: "K", chip_color: "#1783FF" },
+  { id: "qwen", label: "Qwen Code", chip_char: "Q", chip_color: "#615CED" },
 ];
 
 export interface ProviderHealth {

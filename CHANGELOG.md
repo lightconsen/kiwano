@@ -21,6 +21,23 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **Four more agents: WorkBuddy, CodeBuddy Code, Kimi Code CLI and Qwen
+  Code.** All four route through the gateway the same way the additive agents
+  do — a `kiwano-gateway` entry written into the config the tool already has,
+  with the user's own providers left in place and the original bytes restored
+  on switch-off. Kimi takes over both generations (`~/.kimi/config.toml` and
+  its successor's `~/.kimi-code/config.toml`, whose protocol name differs);
+  Qwen's key goes in its own `env` block inside `settings.json`, so nothing
+  touches the user's shell; WorkBuddy and CodeBuddy take over the first entry
+  of their model list, keeping its id because that id is the model name the
+  request goes upstream with.
+
+  Not every agent can be routed this way, and the two that cannot are not
+  listed rather than listed-and-broken: Antigravity CLI reads its endpoint
+  from environment variables only (and its OAuth path is closed to third-party
+  gateways), and Trae Agent keeps its config in the project directory it is
+  launched from, which is not a place a per-agent takeover can reach.
+
 - **Gemini CLI, over its own protocol.** Gemini CLI speaks Google's native
   Gemini API (`/v1beta/models/{model}:{action}`, `x-goog-api-key` auth), which
   the gateway now carries as a third protocol. It is passed through, not

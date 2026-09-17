@@ -910,6 +910,7 @@ const settings: AppSettings = {
   takeovers: [
     { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false, config_paths: ["~/.claude/settings.json"] },
     { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false, config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"] },
+    { agent: "gemini", label: "Gemini CLI", placeholder_key: null, enabled: false, additive: false, config_paths: ["~/.gemini/.env"] },
     { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false, config_paths: ["~/.grok/config.toml"] },
     { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false, config_paths: [
       "~/Library/Application Support/Claude/claude_desktop_config.json",
@@ -921,6 +922,10 @@ const settings: AppSettings = {
     { agent: "openclaw", label: "OpenClaw", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.openclaw/openclaw.json"] },
     { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.hermes/config.yaml"] },
     { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.pi/agent/models.json", "~/.pi/agent/settings.json"] },
+    { agent: "workbuddy", label: "WorkBuddy", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.workbuddy/models.json"] },
+    { agent: "codebuddy", label: "CodeBuddy Code", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.codebuddy/models.json"] },
+    { agent: "kimi", label: "Kimi Code CLI", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.kimi/config.toml"] },
+    { agent: "qwen", label: "Qwen Code", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.qwen/settings.json"] },
   ],
   // Two user-defined agents, so `pnpm dev` can show the whole feature: a route
   // with candidates, and one that is still empty (the state the tab's bind slot

@@ -143,8 +143,43 @@ pub(crate) fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::
             home.join(".pi").join("agent").join("models.json"),
             home.join(".pi").join("agent").join("settings.json"),
         ]),
+        // WorkBuddy and CodeBuddy are one product family (the app embeds the
+        // CLI) with separate config roots, each overridable by its own env var.
+        "workbuddy" => Ok(vec![
+            config_dir("WORKBUDDY_CONFIG_DIR", ".workbuddy", home).join("models.json")
+        ]),
+        "codebuddy" => Ok(vec![
+            config_dir("CODEBUDDY_CONFIG_DIR", ".codebuddy", home).join("models.json")
+        ]),
+        "qwen" => Ok(vec![
+            config_dir("QWEN_HOME", ".qwen", home).join("settings.json")
+        ]),
+        // Two generations of the same agent: the Node successor reads
+        // ~/.kimi-code, the Python original (~/.kimi) is being retired. The
+        // one that exists is the one to write; with neither, the successor —
+        // that is what a fresh install is.
+        "kimi" => {
+            let successor = config_dir("KIMI_CODE_HOME", ".kimi-code", home).join("config.toml");
+            if successor.exists() {
+                return Ok(vec![successor]);
+            }
+            let legacy = config_dir("KIMI_SHARE_DIR", ".kimi", home).join("config.toml");
+            Ok(vec![if legacy.exists() { legacy } else { successor }])
+        }
         other => Err(format!("unknown agent: {other}")),
     }
+}
+
+/// The config root an agent resolves for itself: the environment variable that
+/// overrides it, else the default directory under `home`. Matches the existing
+/// `HERMES_HOME` handling — a user who moved their config should not get a
+/// takeover written to the old place.
+fn config_dir(env_var: &str, default_dir: &str, home: &Path) -> std::path::PathBuf {
+    std::env::var_os(env_var)
+        .map(|v| v.to_string_lossy().trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(default_dir))
 }
 
 /// Takeover: read the original files → perform all rewrites in memory
@@ -175,7 +210,15 @@ pub fn enable(
             Err(_)
                 if matches!(
                     agent,
-                    "opencode" | "openclaw" | "hermes" | "pi" | "claude-desktop"
+                    "opencode"
+                        | "openclaw"
+                        | "hermes"
+                        | "pi"
+                        | "claude-desktop"
+                        | "workbuddy"
+                        | "codebuddy"
+                        | "kimi"
+                        | "qwen"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -271,6 +314,11 @@ fn compute_rewrites(
 fn gateway_target(agent: &str, data_port: u16) -> String {
     let suffix = match agent {
         "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
+        // Kimi and Qwen want the version root; their clients append the route.
+        "kimi" | "qwen" => "/v1",
+        // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
+        // append nothing, so the route has to be in the URL we write.
+        "workbuddy" | "codebuddy" => "/v1/chat/completions",
         _ => "",
     };
     format!("{GATEWAY_HOST}:{data_port}{suffix}")
@@ -796,6 +844,33 @@ fn rewrite(
             kiwano_adapters::gateway_takeover::upsert_pi_models_gateway(original, target, key)
         }
         "pi" => kiwano_adapters::gateway_takeover::select_pi_gateway(original),
+        // WorkBuddy's model list is a bare array; CodeBuddy's is an object with
+        // a picker list beside it. Both name their provider by URL per model
+        // row, so the transforms take over one row rather than adding a second
+        // with the same id (see adapters::gateway_takeover).
+        "workbuddy" => {
+            kiwano_adapters::gateway_takeover::upsert_workbuddy_gateway(original, target, key)
+        }
+        "codebuddy" => kiwano_adapters::gateway_takeover::upsert_codebuddy_models_gateway(
+            original, target, key,
+        ),
+        "qwen" => kiwano_adapters::gateway_takeover::upsert_qwen_gateway(original, target, key),
+        // The two Kimi generations spell the same OpenAI shape differently:
+        // the successor calls it `openai`, the Python original `openai_legacy`.
+        // The path is the only thing that tells them apart.
+        "kimi" => {
+            let provider_type = if path.contains(".kimi-code") {
+                "openai"
+            } else {
+                "openai_legacy"
+            };
+            kiwano_adapters::gateway_takeover::upsert_kimi_gateway(
+                original,
+                target,
+                key,
+                provider_type,
+            )
+        }
         _ => Err("unsupported agent".into()),
     }
 }
@@ -1596,6 +1671,182 @@ base_url = "https://relay.example.com/v1"
             original
         );
         assert!(aux.load_takeover_backup("opencode").is_none());
+    }
+
+    // ── workbuddy / codebuddy / kimi / qwen ──
+    //
+    // Their transforms are unit-tested in adapters; these check the pipeline:
+    // the right file is written, the user's own entries survive, and disable
+    // puts the bytes back.
+
+    #[test]
+    fn workbuddy_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".workbuddy");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = r#"[
+  { "id": "deepseek-v4-pro", "vendor": "DeepSeek",
+    "url": "https://api.deepseek.com/chat/completions", "apiKey": "sk-old" }
+]"#;
+        std::fs::write(dir.join("models.json"), original).unwrap();
+
+        enable(&aux, "workbuddy", "kw-ag-workbuddy-abcd", 8317, &home).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("models.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v[0]["url"], "http://127.0.0.1:8317/v1/chat/completions",
+            "the entry points at the gateway's full endpoint"
+        );
+        assert_eq!(v[0]["apiKey"], "kw-ag-workbuddy-abcd");
+        assert_eq!(
+            v[0]["id"], "deepseek-v4-pro",
+            "the model id survives — it is what goes upstream"
+        );
+
+        restore(&aux, "workbuddy", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("models.json")).unwrap(),
+            original
+        );
+        assert!(aux.load_takeover_backup("workbuddy").is_none());
+    }
+
+    #[test]
+    fn codebuddy_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".codebuddy");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = r#"{
+  "models": [
+    { "id": "deepseek-v3", "vendor": "DeepSeek",
+      "url": "https://api.deepseek.com/v1/chat/completions", "apiKey": "sk-old" }
+  ],
+  "availableModels": []
+}"#;
+        std::fs::write(dir.join("models.json"), original).unwrap();
+
+        enable(&aux, "codebuddy", "kw-ag-codebuddy-abcd", 8317, &home).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("models.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["models"][0]["url"],
+            "http://127.0.0.1:8317/v1/chat/completions"
+        );
+        assert_eq!(v["models"][0]["apiKey"], "kw-ag-codebuddy-abcd");
+        assert_eq!(v["availableModels"][0], "deepseek-v3");
+
+        restore(&aux, "codebuddy", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("models.json")).unwrap(),
+            original
+        );
+        assert!(aux.load_takeover_backup("codebuddy").is_none());
+    }
+
+    #[test]
+    fn kimi_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".kimi");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "default_model = \"kimi-code/kimi-for-coding\"\n\n\
+                        [providers.\"managed:kimi-code\"]\n\
+                        type = \"kimi\"\n\
+                        base_url = \"https://api.kimi.com/coding/v1\"\n\
+                        api_key = \"sk-old\"\n";
+        std::fs::write(dir.join("config.toml"), original).unwrap();
+
+        enable(&aux, "kimi", "kw-ag-kimi-abcd", 8317, &home).unwrap();
+        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(
+            text.contains("base_url = \"http://127.0.0.1:8317/v1\""),
+            "{text}"
+        );
+        assert!(text.contains("api_key = \"kw-ag-kimi-abcd\""), "{text}");
+        assert!(
+            text.contains("default_model = \"kiwano-gateway/kimi-for-coding\""),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"openai_legacy\""),
+            "the Python generation's protocol name: {text}"
+        );
+        // The user's own provider is untouched.
+        assert!(text.contains("api_key = \"sk-old\""), "{text}");
+
+        restore(&aux, "kimi", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.toml")).unwrap(),
+            original
+        );
+        assert!(aux.load_takeover_backup("kimi").is_none());
+    }
+
+    #[test]
+    fn qwen_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".qwen");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = r#"{
+  "model": { "name": "qwen3-coder-plus" },
+  "security": { "auth": { "selectedType": "qwen-oauth" } }
+}"#;
+        std::fs::write(dir.join("settings.json"), original).unwrap();
+
+        enable(&aux, "qwen", "kw-ag-qwen-abcd", 8317, &home).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["modelProviders"]["openai"][0]["baseUrl"],
+            "http://127.0.0.1:8317/v1"
+        );
+        assert_eq!(v["env"]["KIWANO_GATEWAY_KEY"], "kw-ag-qwen-abcd");
+        assert_eq!(v["security"]["auth"]["selectedType"], "openai");
+        assert_eq!(v["model"]["name"], "qwen3-coder-plus");
+
+        restore(&aux, "qwen", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+            original
+        );
+        assert!(aux.load_takeover_backup("qwen").is_none());
+    }
+
+    /// A config that does not exist yet is created, and disabling removes it
+    /// rather than leaving a zero-byte file the agent would read as broken.
+    #[test]
+    fn takeovers_of_the_new_agents_create_missing_configs() {
+        for (agent, relative) in [
+            ("workbuddy", ".workbuddy/models.json"),
+            ("codebuddy", ".codebuddy/models.json"),
+            // Neither generation's directory exists on a fresh machine, so the
+            // successor's path is the one written (see `takeover_paths`).
+            ("kimi", ".kimi-code/config.toml"),
+            ("qwen", ".qwen/settings.json"),
+        ] {
+            let (_dir, home) = temp_home();
+            let aux = Aux::open_in_memory().unwrap();
+            let path = home.join(relative);
+
+            enable(&aux, agent, &format!("kw-ag-{agent}-abcd"), 8317, &home).unwrap();
+            assert!(path.exists(), "{agent}: the config is created");
+            assert!(
+                std::fs::read_to_string(&path).unwrap().len() > 2,
+                "{agent}: and it is not empty"
+            );
+
+            restore(&aux, agent, &home).unwrap();
+            assert!(
+                !path.exists(),
+                "{agent}: a file the takeover created must not survive disable"
+            );
+        }
     }
 
     #[test]

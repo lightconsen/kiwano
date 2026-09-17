@@ -17,7 +17,7 @@ use kiwanod::store::{
 };
 use serde::{Deserialize, Serialize};
 
-pub const AGENTS: [(&str, &str); 9] = [
+pub const AGENTS: [(&str, &str); 13] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
     ("gemini", "Gemini CLI"),
@@ -27,6 +27,10 @@ pub const AGENTS: [(&str, &str); 9] = [
     ("openclaw", "OpenClaw"),
     ("hermes", "Hermes"),
     ("pi", "Pi"),
+    ("workbuddy", "WorkBuddy"),
+    ("codebuddy", "CodeBuddy Code"),
+    ("kimi", "Kimi Code CLI"),
+    ("qwen", "Qwen Code"),
 ];
 
 /// Whether `id` names a built-in agent — one whose *config* this app knows how
@@ -255,7 +259,16 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
 /// Additive-mode agents: their native config keeps multiple providers
 /// coexisting, so takeover writes a gateway-pointed provider entry and selects
 /// it, instead of replacing an exclusive provider slot like the other five.
-pub const ADDITIVE_AGENTS: [&str; 4] = ["opencode", "openclaw", "hermes", "pi"];
+pub const ADDITIVE_AGENTS: [&str; 8] = [
+    "opencode",
+    "openclaw",
+    "hermes",
+    "pi",
+    "workbuddy",
+    "codebuddy",
+    "kimi",
+    "qwen",
+];
 
 const PALETTE: [&str; 6] = [
     "#4D6BFE", "#615CED", "#3859FF", "#F55036", "#6467F2", "#0F9D58",

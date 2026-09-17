@@ -70,6 +70,10 @@ const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[] = [
   { id: "openclaw", icon: "openclaw" },
   { id: "hermes", icon: "hermes" },
   { id: "pi", icon: "pi" },
+  { id: "workbuddy", icon: "workbuddy" },
+  { id: "codebuddy", icon: "codebuddy" },
+  { id: "kimi", icon: "kimi" },
+  { id: "qwen", icon: "qwen" },
 ];
 
 // Agent labels are brand names and stay as they are; only the "all" segment

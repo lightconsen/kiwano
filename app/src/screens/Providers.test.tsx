@@ -1164,6 +1164,29 @@ describe("the agent's own limit", () => {
 // above is icons only, so without this row the page has no agent name on it at
 // all — and no way to find the config a takeover rewrites, which is what someone
 // reaches for by hand when the takeover is the problem.
+describe("taking an agent over", () => {
+  it("shows why the backend refused, instead of leaving a spin and no reason", async () => {
+    // The refusal a config-dir variable can produce, and the one codex's gates
+    // already produced: the attempt changes nothing, so the reason is the only
+    // thing the click can tell the user.
+    apiMock.setTakeover.mockRejectedValue(
+      new Error("XDG_CONFIG_HOME is set to `rel` — not an absolute path."),
+    );
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(false, []));
+    render(<Providers onAdd={() => {}} onEdit={() => {}} initialAgent="codex" />);
+
+    await userEvent.setup().click(
+      await screen.findByRole("button", { name: en.providers.enableKiwano }),
+    );
+
+    expect(
+      await screen.findByText("XDG_CONFIG_HOME is set to `rel` — not an absolute path."),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("a built-in agent's own row", () => {
   it("names the agent and the files a takeover would rewrite", async () => {
     renderCodexTab({

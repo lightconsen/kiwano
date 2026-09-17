@@ -118,6 +118,7 @@ function AgentOnboarding({
   onAdd,
   bindSlot,
   copySlot,
+  takeoverError,
 }: {
   /** "takeover": a built-in agent Kiwano has not taken over yet.
       "route": a user-defined agent with no candidates — there is nothing to
@@ -129,6 +130,10 @@ function AgentOnboarding({
   busy: boolean;
   onTakeover: () => void;
   onAdd: () => void;
+  /** Why the last attempt to take this agent over was refused, if it was. The
+      backend refuses for reasons the user has to act on (a config that is not
+      there yet, a variable that points nowhere), so silence here is a dead end. */
+  takeoverError?: string | null;
   /** Extra first-candidate entry (bind an existing provider) for the taken-over branch */
   bindSlot?: ReactNode;
   /** Copy another agent's whole route — available right after Enable, before any binding exists */
@@ -197,6 +202,15 @@ function AgentOnboarding({
               {t("providers.addProviderFirst")}
             </Button>
           </div>
+          {takeoverError && (
+            <div
+              className="max-w-[470px] text-[11px]"
+              style={{ color: "var(--red)" }}
+              role="alert"
+            >
+              {takeoverError}
+            </div>
+          )}
           {installed && (
             <div className="max-w-[470px] text-[11px] text-mut">{t("providers.oauthNote")}</div>
           )}
@@ -2181,6 +2195,8 @@ export default function Providers({
   // Display currency, which is also the unit a money ceiling is written in.
   const [currency, setCurrency] = useState("USD");
   const [enabling, setEnabling] = useState(false);
+  /** Why the last takeover attempt was refused — see `AgentOnboarding`. */
+  const [takeoverError, setTakeoverError] = useState<string | null>(null);
   // Plan-quota reports per provider, auto-refreshed on load
   const [planQuotas, setPlanQuotas] = useState<Record<string, PlanQuotaReport>>({});
   // A provider read that failed. Kept apart from everything the rows show: it
@@ -2421,8 +2437,13 @@ export default function Providers({
   const setAgentTakenOver = async (agent: AgentRef, enabled: boolean) => {
     if (!isBuiltinAgent(agent)) return;
     setEnabling(true);
+    setTakeoverError(null);
     try {
       await api.setTakeover(agent, enabled);
+    } catch (e) {
+      // Kept, not swallowed: a takeover that was refused leaves the agent
+      // exactly as it was, so without this the user sees a spin and no reason.
+      setTakeoverError(e instanceof Error ? e.message : String(e));
     } finally {
       setEnabling(false);
       refetch();
@@ -2673,7 +2694,8 @@ export default function Providers({
           }
           takenOver={false}
           busy={enabling}
-          onTakeover={() => void setAgentTakenOver(seg, true).catch(() => {})}
+          onTakeover={() => void setAgentTakenOver(seg, true)}
+          takeoverError={takeoverError}
           onAdd={onAdd}
         />
       ) : (
@@ -2740,7 +2762,8 @@ export default function Providers({
               }
               takenOver={true}
               busy={enabling}
-              onTakeover={() => void setAgentTakenOver(seg, true).catch(() => {})}
+              onTakeover={() => void setAgentTakenOver(seg, true)}
+              takeoverError={takeoverError}
               onAdd={onAdd}
               bindSlot={
                 <BindProviderSelect

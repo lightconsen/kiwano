@@ -52,6 +52,30 @@ fn require_object(v: Value, label: &str) -> Result<Map<String, Value>, String> {
 
 // ── opencode (~/.config/opencode/opencode.json, JSONC) ──
 
+/// Make sure a field holds an object, replacing whatever else is in it.
+///
+/// The replacing half is destructive — whatever the user had in that field is
+/// gone — and a takeover is supposed to *add* an entry, not to discard a
+/// setting. So it is logged: this is the only place that knows it happened, and
+/// a config the user cannot account for is worse than a takeover that refused.
+/// (The other half, a field that was simply absent, is what a takeover is for
+/// and is silent.)
+fn object_field<'a>(
+    obj: &'a mut serde_json::Map<String, Value>,
+    file: &str,
+    field: &str,
+) -> &'a mut serde_json::Map<String, Value> {
+    if !obj.get(field).is_some_and(Value::is_object) {
+        if obj.get(field).is_some() {
+            log::warn!("{file}: `{field}` is not an object; replaced it with an empty one");
+        }
+        obj.insert(field.to_string(), json!({}));
+    }
+    obj.get_mut(field)
+        .and_then(Value::as_object_mut)
+        .expect("a field made an object just above")
+}
+
 /// Upsert the gateway provider (`npm: @ai-sdk/openai-compatible`) and rewrite
 /// the top-level `model: "<provider>/<model>"` selector to route through the
 /// gateway, keeping the user's model id. A missing or non-slash-form `model`
@@ -61,9 +85,7 @@ pub fn upsert_opencode_gateway(content: &str, base_url: &str, key: &str) -> Resu
     let mut obj = require_object(root, "opencode.json")?;
 
     // provider section: normalize to an object before inserting the entry
-    if !obj.get("provider").is_some_and(Value::is_object) {
-        obj.insert("provider".into(), json!({}));
-    }
+    object_field(&mut obj, "opencode.json", "provider");
     let entry = json!({
         "npm": "@ai-sdk/openai-compatible",
         "name": GATEWAY_LABEL,
@@ -97,12 +119,11 @@ pub fn upsert_openclaw_gateway(content: &str, base_url: &str, key: &str) -> Resu
     let root = parse_jsonc(content, "openclaw.json")?;
     let mut obj = require_object(root, "openclaw.json")?;
 
-    if !obj.get("models").is_some_and(Value::is_object) {
-        obj.insert("models".into(), json!({}));
-    }
-    if !obj["models"].get("providers").is_some_and(Value::is_object) {
-        obj["models"]["providers"] = json!({});
-    }
+    object_field(
+        object_field(&mut obj, "openclaw.json", "models"),
+        "openclaw.json",
+        "models.providers",
+    );
     let entry = json!({
         "baseUrl": base_url,
         "apiKey": key,
@@ -306,9 +327,7 @@ pub fn upsert_pi_models_gateway(
     let root = parse_jsonc(content, "models.json")?;
     let mut obj = require_object(root, "models.json")?;
 
-    if !obj.get("providers").is_some_and(Value::is_object) {
-        obj.insert("providers".into(), json!({}));
-    }
+    object_field(&mut obj, "models.json", "providers");
     obj["providers"][GATEWAY_PROVIDER_ID] = json!({
         "name": GATEWAY_LABEL,
         "baseUrl": base_url,
@@ -550,9 +569,7 @@ pub fn upsert_qwen_gateway(content: &str, base_url: &str, key: &str) -> Result<S
         .unwrap_or(PLACEHOLDER_MODEL_ID)
         .to_string();
 
-    if !obj.get("modelProviders").is_some_and(Value::is_object) {
-        obj.insert("modelProviders".into(), json!({}));
-    }
+    object_field(&mut obj, "settings.json", "modelProviders");
     if !obj["modelProviders"]
         .get("openai")
         .is_some_and(Value::is_array)
@@ -579,23 +596,18 @@ pub fn upsert_qwen_gateway(content: &str, base_url: &str, key: &str) -> Result<S
     // The value behind `envKey`. Qwen's own `env` block is the lowest-priority
     // source it reads, which is exactly what makes it the one to write: a shell
     // export still wins, and nothing has to touch the user's shell.
-    if !obj.get("env").is_some_and(Value::is_object) {
-        obj.insert("env".into(), json!({}));
-    }
+    object_field(&mut obj, "settings.json", "env");
     obj["env"][QWEN_ENV_KEY] = json!(key);
 
     // Selection: the protocol by auth type, the model by name.
-    if !obj.get("security").is_some_and(Value::is_object) {
-        obj.insert("security".into(), json!({}));
-    }
-    if !obj["security"].get("auth").is_some_and(Value::is_object) {
-        obj["security"]["auth"] = json!({});
-    }
+    object_field(
+        object_field(&mut obj, "settings.json", "security"),
+        "settings.json",
+        "security.auth",
+    );
     obj["security"]["auth"]["selectedType"] = json!("openai");
 
-    if !obj.get("model").is_some_and(Value::is_object) {
-        obj.insert("model".into(), json!({}));
-    }
+    object_field(&mut obj, "settings.json", "model");
     obj["model"]["name"] = json!(model_id);
 
     serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())

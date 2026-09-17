@@ -846,7 +846,10 @@ fn decode_windows_command_output(bytes: &[u8]) -> String {
     use windows_sys::Win32::Globalization::{GetACP, GetOEMCP, MultiByteToWideChar};
 
     let mut best = String::from_utf8_lossy(bytes).into_owned();
-    for codepage in [GetOEMCP(), GetACP()] {
+    // SAFETY: neither takes an argument or touches memory — each returns the
+    // number of a code page in this process. The conversion below, which does
+    // the pointer work, has its own block.
+    for codepage in unsafe { [GetOEMCP(), GetACP()] } {
         let wide_len = unsafe {
             MultiByteToWideChar(
                 codepage,

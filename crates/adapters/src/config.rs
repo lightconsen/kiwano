@@ -674,10 +674,15 @@ mod tests {
     fn the_database_path_is_resolved_in_one_place() {
         use std::ffi::OsStr;
 
+        // Built rather than written as a literal: `/srv/kiwano.db` is absolute on
+        // unix and *relative* on Windows, where the rule under test would refuse
+        // it — the test would then be asserting the opposite of what it reads.
+        let absolute = std::env::temp_dir().join("kiwano-db-path-test.db");
+        let absolute_arg = absolute.to_string_lossy().into_owned();
         assert_eq!(
-            kiwano_db_path_from(Some(OsStr::new("/srv/kiwano.db"))),
+            kiwano_db_path_from(Some(OsStr::new(&absolute_arg))),
             DbPath {
-                path: PathBuf::from("/srv/kiwano.db"),
+                path: absolute.clone(),
                 ignored: None
             }
         );

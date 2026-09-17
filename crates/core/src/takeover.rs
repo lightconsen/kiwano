@@ -1188,20 +1188,25 @@ mod tests {
     /// and a default (or a stale value of the app's own) must not outrank it.
     #[test]
     fn the_shells_answer_wins_over_the_process_environment() {
-        let _guard = EnvGuard::set("QWEN_HOME", Some("/tmp/kiwano-from-process"));
-        let home = Path::new("/tmp/kiwano-config-home");
-        let from_shell =
-            ShellVars::from([("QWEN_HOME".to_string(), "/tmp/kiwano-from-shell".into())]);
+        let tmp = tempfile::tempdir().unwrap();
+        let (from_process, from_shell) = (abs_dir(&tmp, "process"), abs_dir(&tmp, "shell"));
+        let home = abs_dir(&tmp, "home");
+        let _guard = EnvGuard::set("QWEN_HOME", Some(&from_process.to_string_lossy()));
+        let shell_vars = ShellVars::from([(
+            "QWEN_HOME".to_string(),
+            from_shell.to_string_lossy().into_owned(),
+        )]);
+        let home = home.as_path();
 
         assert_eq!(
-            takeover_paths("qwen", home, &from_shell).unwrap(),
-            vec![PathBuf::from("/tmp/kiwano-from-shell/settings.json")]
+            takeover_paths("qwen", home, &shell_vars).unwrap(),
+            vec![from_shell.join("settings.json")]
         );
         // Nothing from the shell: the process environment is what is left, and
         // only then the default.
         assert_eq!(
             takeover_paths("qwen", home, &no_vars()).unwrap(),
-            vec![PathBuf::from("/tmp/kiwano-from-process/settings.json")]
+            vec![from_process.join("settings.json")]
         );
         // Bound rather than dropped: the guard puts the variable back when it
         // goes out of scope, so a bare `EnvGuard::set(…)` would undo itself on
@@ -1221,31 +1226,44 @@ mod tests {
             EnvGuard::set("CODEX_HOME", None),
             EnvGuard::set("XDG_CONFIG_HOME", None),
         );
-        let home = Path::new("/tmp/kiwano-config-home");
+        let tmp = tempfile::tempdir().unwrap();
+        let (claude, codex, xdg) = (
+            abs_dir(&tmp, "claude"),
+            abs_dir(&tmp, "codex"),
+            abs_dir(&tmp, "xdg"),
+        );
+        let home = abs_dir(&tmp, "home");
+        let home = home.as_path();
         let vars = ShellVars::from([
-            ("CLAUDE_CONFIG_DIR".to_string(), "/srv/claude".to_string()),
-            ("CODEX_HOME".to_string(), "/srv/codex".to_string()),
-            ("XDG_CONFIG_HOME".to_string(), "/srv/xdg".to_string()),
+            (
+                "CLAUDE_CONFIG_DIR".to_string(),
+                claude.to_string_lossy().into_owned(),
+            ),
+            (
+                "CODEX_HOME".to_string(),
+                codex.to_string_lossy().into_owned(),
+            ),
+            (
+                "XDG_CONFIG_HOME".to_string(),
+                xdg.to_string_lossy().into_owned(),
+            ),
         ]);
 
         // The whole Claude profile moves with the variable, settings included.
         assert_eq!(
             takeover_paths("claude", home, &vars).unwrap(),
-            vec![PathBuf::from("/srv/claude/settings.json")]
+            vec![claude.join("settings.json")]
         );
         // Codex's two files move together — a config pointing at the gateway
         // with the auth left behind is a half-takeover.
         assert_eq!(
             takeover_paths("codex", home, &vars).unwrap(),
-            vec![
-                PathBuf::from("/srv/codex/config.toml"),
-                PathBuf::from("/srv/codex/auth.json")
-            ]
+            vec![codex.join("config.toml"), codex.join("auth.json")]
         );
         // OpenCode reaches its global config through the XDG rules.
         assert_eq!(
             takeover_paths("opencode", home, &vars).unwrap(),
-            vec![PathBuf::from("/srv/xdg/opencode/opencode.json")]
+            vec![xdg.join("opencode").join("opencode.json")]
         );
         // Unset, the XDG location is `~/.config/opencode/opencode.json`: the
         // default's sibling, not a replacement for it.
@@ -1305,11 +1323,24 @@ mod tests {
 
         // Set to an absolute path instead, the same variable is honored — and
         // padded whitespace is not part of the path.
-        let vars = ShellVars::from([("CODEBUDDY_CONFIG_DIR".to_string(), "/srv/buddy ".into())]);
+        let tmp = tempfile::tempdir().unwrap();
+        let buddy = abs_dir(&tmp, "buddy");
+        let padded = format!("{} ", buddy.display());
+        let vars = ShellVars::from([("CODEBUDDY_CONFIG_DIR".to_string(), padded)]);
         assert_eq!(
             takeover_paths("codebuddy", home, &vars).unwrap(),
-            vec![PathBuf::from("/srv/buddy/models.json")]
+            vec![buddy.join("models.json")]
         );
+    }
+
+    /// A directory to name in a variable, under `tmp` so that it is absolute on
+    /// every platform: a literal `/srv/...` is absolute on unix and *relative* on
+    /// Windows, where the rule under test refuses exactly that — the test would
+    /// be asserting the opposite of what it reads.
+    fn abs_dir(tmp: &tempfile::TempDir, name: &str) -> PathBuf {
+        let dir = tmp.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     fn temp_home() -> (tempfile::TempDir, std::path::PathBuf) {

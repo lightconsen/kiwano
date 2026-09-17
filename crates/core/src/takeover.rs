@@ -107,15 +107,19 @@ pub(crate) fn takeover_paths(
     match agent {
         // CLAUDE_CONFIG_DIR moves the whole profile: settings.json, credentials
         // and the MCP file all live under it.
-        "claude" => Ok(vec![
-            config_dir(vars, "CLAUDE_CONFIG_DIR", ".claude", home).join("settings.json")
-        ]),
+        "claude" => Ok(vec![config_dir(
+            vars,
+            "CLAUDE_CONFIG_DIR",
+            ".claude",
+            home,
+        )?
+        .join("settings.json")]),
         // Both files follow CODEX_HOME. Codex refuses to start with the variable
         // pointing at a directory that does not exist, so the root is the user's
         // to create — and a config.toml that is not there yet is refused exactly
         // as it is at the default root (the read step in `enable`).
         "codex" => {
-            let dir = config_dir(vars, "CODEX_HOME", ".codex", home);
+            let dir = config_dir(vars, "CODEX_HOME", ".codex", home)?;
             Ok(vec![dir.join("config.toml"), dir.join("auth.json")])
         }
         "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
@@ -157,13 +161,13 @@ pub(crate) fn takeover_paths(
         // agents, commands and plugins — neither is where the provider list
         // lives, and writing the gateway entry into one would put it where
         // OpenCode merges from rather than where it reads the user's own config.
-        "opencode" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)
+        "opencode" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
             .join("opencode")
             .join("opencode.json")]),
         "openclaw" => Ok(vec![home.join(".openclaw").join("openclaw.json")]),
         "hermes" => {
             // HERMES_HOME resolution matches hermes' own get_hermes_home()
-            let dir = config_dir(vars, "HERMES_HOME", ".hermes", home);
+            let dir = config_dir(vars, "HERMES_HOME", ".hermes", home)?;
             Ok(vec![dir.join("config.yaml")])
         }
         "pi" => Ok(vec![
@@ -177,17 +181,17 @@ pub(crate) fn takeover_paths(
             "WORKBUDDY_CONFIG_DIR",
             ".workbuddy",
             home,
-        )
+        )?
         .join("models.json")]),
         "codebuddy" => Ok(vec![config_dir(
             vars,
             "CODEBUDDY_CONFIG_DIR",
             ".codebuddy",
             home,
-        )
+        )?
         .join("models.json")]),
         "qwen" => Ok(vec![
-            config_dir(vars, "QWEN_HOME", ".qwen", home).join("settings.json")
+            config_dir(vars, "QWEN_HOME", ".qwen", home)?.join("settings.json")
         ]),
         // Two generations of the same agent: the Node successor reads
         // ~/.kimi-code, the Python original (~/.kimi) is being retired. The
@@ -195,11 +199,11 @@ pub(crate) fn takeover_paths(
         // that is what a fresh install is.
         "kimi" => {
             let successor =
-                config_dir(vars, "KIMI_CODE_HOME", ".kimi-code", home).join("config.toml");
+                config_dir(vars, "KIMI_CODE_HOME", ".kimi-code", home)?.join("config.toml");
             if successor.exists() {
                 return Ok(vec![successor]);
             }
-            let legacy = config_dir(vars, "KIMI_SHARE_DIR", ".kimi", home).join("config.toml");
+            let legacy = config_dir(vars, "KIMI_SHARE_DIR", ".kimi", home)?.join("config.toml");
             Ok(vec![if legacy.exists() { legacy } else { successor }])
         }
         other => Err(format!("unknown agent: {other}")),
@@ -231,27 +235,64 @@ pub const CONFIG_DIR_VARS: &[&str] = &[
 /// export, so `vars` is the only copy that can know about a relocated
 /// directory. The process environment stays as the fallback because it is what
 /// a terminal-run CLI and the tests have.
-fn config_dir(vars: &ShellVars, env_var: &str, default_dir: &str, home: &Path) -> PathBuf {
-    var_dir(vars, env_var).unwrap_or_else(|| home.join(default_dir))
-}
-
-/// An absolute directory named by `vars`, else by the process environment.
-fn var_dir(vars: &ShellVars, name: &str) -> Option<PathBuf> {
-    vars.get(name)
-        .and_then(|value| usable_dir(value))
-        .or_else(|| std::env::var_os(name).and_then(|value| usable_dir(&value.to_string_lossy())))
-}
-
-/// A variable's value as a path, or nothing.
 ///
-/// Nothing covers: unset, blank, and *relative*. A relative value would resolve
-/// against this process's working directory, which is not where the user's tool
-/// looks — treating one as an override would be a confident guess at the wrong
-/// answer, and falling through to the default is at least an honest one.
-fn usable_dir(value: &str) -> Option<PathBuf> {
+/// A variable that is *set* to something this cannot use is an error rather than
+/// a fall-through to the default, because the two are not the same situation:
+/// the default is right when nobody said otherwise, and a guess when somebody
+/// did. See [`named_dir`].
+fn config_dir(
+    vars: &ShellVars,
+    env_var: &str,
+    default_dir: &str,
+    home: &Path,
+) -> Result<PathBuf, String> {
+    match named_dir(vars, env_var) {
+        NamedDir::Unset => Ok(home.join(default_dir)),
+        NamedDir::Absolute(path) => Ok(path),
+        NamedDir::Unusable(raw) => Err(format!(
+            "{env_var} is set to `{raw}` — not an absolute path. A tool resolves a relative \
+             one against the directory it happens to be run in, so where its config lives is \
+             not something Kiwano can know. Set {env_var} to an absolute path, or unset it to \
+             use {}.",
+            home.join(default_dir).display()
+        )),
+    }
+}
+
+/// What the environment says about a directory a tool keeps its files in.
+enum NamedDir {
+    /// Nobody said otherwise: the tool's own default is the answer.
+    Unset,
+    Absolute(PathBuf),
+    /// Set, but not to a path that names one place.
+    Unusable(String),
+}
+
+/// Where `name` points, from `vars` if the shell reported it and the process
+/// environment otherwise.
+///
+/// A blank value counts as unset — an accidental `export NAME=` is not an
+/// instruction, and the tools read it the same way. A *relative* one does not:
+/// there is no single directory it names, so it is reported as what it is rather
+/// than resolved against whatever directory this process happens to be in.
+fn named_dir(vars: &ShellVars, name: &str) -> NamedDir {
+    let value = vars
+        .get(name)
+        .cloned()
+        .or_else(|| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned()));
+    let Some(value) = value else {
+        return NamedDir::Unset;
+    };
     let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return NamedDir::Unset;
+    }
     let path = PathBuf::from(trimmed);
-    (!trimmed.is_empty() && path.is_absolute()).then_some(path)
+    if path.is_absolute() {
+        NamedDir::Absolute(path)
+    } else {
+        NamedDir::Unusable(trimmed.to_string())
+    }
 }
 
 /// Takeover: read the original files → perform all rewrites in memory
@@ -1254,20 +1295,13 @@ mod tests {
             takeover_paths("opencode", home, &vars).unwrap(),
             vec![PathBuf::from("/srv/xdg/opencode/opencode.json")]
         );
-        // And the XDG location is the default's sibling, not a replacement for
-        // the default: unset, it is `~/.config/opencode/opencode.json`.
+        // Unset, the XDG location is `~/.config/opencode/opencode.json`: the
+        // default's sibling, not a replacement for it.
+        let unset = ShellVars::from([("XDG_CONFIG_HOME".to_string(), "  ".to_string())]);
         assert_eq!(
-            takeover_paths(
-                "opencode",
-                home,
-                &ShellVars::from([(
-                    "XDG_CONFIG_HOME".to_string(),
-                    // A relative value: not a directory anyone meant.
-                    "relative".to_string()
-                )])
-            )
-            .unwrap(),
-            vec![home.join(".config").join("opencode").join("opencode.json")]
+            takeover_paths("opencode", home, &unset).unwrap(),
+            vec![home.join(".config").join("opencode").join("opencode.json")],
+            "a blank value is nobody saying otherwise"
         );
     }
 
@@ -1296,30 +1330,33 @@ mod tests {
         );
     }
 
-    /// A value that names no usable directory is not an override. Relative is
-    /// the interesting one: it would resolve against *this* process's working
-    /// directory, which is not where the user's tool looks, so the default is
-    /// the more honest answer.
+    /// A variable that is set to something unusable is not the same as one that
+    /// is unset, and the difference is a refusal rather than a guess: the
+    /// default is right when nobody said otherwise, and a guess when somebody
+    /// did. A relative path names no one place — the tool resolves it against
+    /// whatever directory it is run in — so there is no file here to write.
     #[test]
-    fn only_an_absolute_value_moves_a_config_root() {
+    fn a_relative_value_is_refused_rather_than_guessed_at() {
         let _unset = EnvGuard::set("CODEBUDDY_CONFIG_DIR", None);
         let home = Path::new("/tmp/kiwano-config-home");
-        let default = vec![home.join(".codebuddy").join("models.json")];
+        let vars = ShellVars::from([(
+            "CODEBUDDY_CONFIG_DIR".to_string(),
+            "relative/dir".to_string(),
+        )]);
 
-        for value in ["relative/dir", "   ", ""] {
-            let vars = ShellVars::from([("CODEBUDDY_CONFIG_DIR".to_string(), value.to_string())]);
-            assert_eq!(
-                takeover_paths("codebuddy", home, &vars).unwrap(),
-                default,
-                "{value:?}"
-            );
-        }
+        let err = takeover_paths("codebuddy", home, &vars).unwrap_err();
+        // The message names the variable, what is wrong with the value, and
+        // both ways out.
+        assert!(err.contains("CODEBUDDY_CONFIG_DIR"), "{err}");
+        assert!(err.contains("relative/dir"), "{err}");
+        assert!(err.contains("absolute path"), "{err}");
 
+        // Set to an absolute path instead, the same variable is honored — and
+        // padded whitespace is not part of the path.
         let vars = ShellVars::from([("CODEBUDDY_CONFIG_DIR".to_string(), "/srv/buddy ".into())]);
         assert_eq!(
             takeover_paths("codebuddy", home, &vars).unwrap(),
-            vec![PathBuf::from("/srv/buddy/models.json")],
-            "a padded value is the same directory"
+            vec![PathBuf::from("/srv/buddy/models.json")]
         );
     }
 

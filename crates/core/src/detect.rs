@@ -401,10 +401,18 @@ impl SearchEnv {
         }
     }
 
+    /// A variable's value as a directory to search, or nothing.
+    ///
+    /// Nothing covers unset — and *relative*, which is the case worth stating:
+    /// the tool that reads such a variable resolves it against the directory it
+    /// is run from, so there is no one directory it names, and searching our own
+    /// working directory for it could only ever find a file that happens to
+    /// share the name. See `takeover::named_dir` for the same rule where the
+    /// answer feeds a write.
     fn var_str(&self, name: &str) -> Option<PathBuf> {
         (self.var)(name)
             .map(PathBuf::from)
-            .filter(|p| !p.as_os_str().is_empty())
+            .filter(|p| !p.as_os_str().is_empty() && p.is_absolute())
     }
 }
 

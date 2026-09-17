@@ -93,6 +93,43 @@ fn an_env_override_directory_is_searched() {
     );
 }
 
+/// A variable that names a directory is only usable when it names one place: a
+/// relative value would be resolved by the tool against whatever directory it is
+/// run from, so searching our own working directory for it could only find a
+/// file that happens to share the name.
+#[test]
+fn a_relative_variable_directory_is_not_searched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    // Something with the right name, reachable only if a relative path is taken
+    // at face value — and it is not, so it is invisible to the walk.
+    write_bin(&tmp.path().join("relative"), "opencode");
+
+    let env = SearchEnv {
+        home: home.clone(),
+        path: OsString::new(),
+        var: Box::new(|name| (name == "OPENCODE_INSTALL_DIR").then(|| OsString::from("relative"))),
+        manual: Vec::new(),
+    };
+    assert!(search_binary_in("opencode", &env).is_none());
+
+    // The same variable pointing at an absolute directory is honored.
+    let absolute = tmp.path().join("absolute");
+    let expected = write_bin(&absolute, "opencode");
+    let env = SearchEnv {
+        home,
+        path: OsString::new(),
+        var: Box::new(move |name| {
+            (name == "OPENCODE_INSTALL_DIR").then(|| absolute.clone().into_os_string())
+        }),
+        manual: Vec::new(),
+    };
+    assert_eq!(
+        search_binary_in("opencode", &env).as_deref(),
+        Some(expected.as_path())
+    );
+}
+
 /// The process PATH is the walk's last source, and it is read as one.
 #[test]
 fn the_path_environment_is_searched_last() {

@@ -163,7 +163,15 @@ pub fn get_home_dir() -> PathBuf {
     }
 
     dirs::home_dir().unwrap_or_else(|| {
-        log::warn!("无法获取用户主目录，回退到当前目录");
+        // Fires on every call rather than once — nothing here is cached, which
+        // is what gets the warning into the log: the first thing to resolve a
+        // path after logging exists says it, even though the condition was
+        // discovered while resolving the database path, before that.
+        log::warn!(
+            "cannot determine the user's home directory; using the current directory, so \
+             everything Kiwano resolves relative to home lands under whichever directory \
+             this process was started in"
+        );
         PathBuf::from(".")
     })
 }

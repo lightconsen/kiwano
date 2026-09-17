@@ -3839,6 +3839,21 @@ mod tests {
             // name, so a providers table left at the v1 shape fails there
             // rather than here — with a `no such column` that says nothing
             // about agent ceilings. (v20 adds `prices`; that migration runs.)
+            //
+            // `custom_agents` is the same kind of debt for the same reason, and
+            // it is not covered by running V17 alone: the table comes from v16,
+            // and stamping 18 makes the ladder skip it (v16 runs only under
+            // `version < 16`). v24 alters that table, so a database claiming to
+            // be v18 has to have it — a real one would, having been through v16.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS custom_agents (
+                     id         TEXT PRIMARY KEY,
+                     label      TEXT NOT NULL,
+                     note       TEXT,
+                     created_at TEXT NOT NULL
+                 );",
+            )
+            .unwrap();
             conn.execute_batch(
                 "ALTER TABLE providers ADD COLUMN limit_unit TEXT;
                  ALTER TABLE providers ADD COLUMN timeout_secs INTEGER;

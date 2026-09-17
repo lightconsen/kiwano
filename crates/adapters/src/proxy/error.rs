@@ -10,74 +10,74 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
-    #[error("上游响应体超过大小上限: {0} 字节")]
+    #[error("the upstream response body is over the size limit: {0} bytes")]
     ResponseBodyTooLarge(usize),
 
-    #[error("服务器已在运行")]
+    #[error("the server is already running")]
     AlreadyRunning,
 
-    #[error("服务器未运行")]
+    #[error("the server is not running")]
     NotRunning,
 
-    #[error("地址绑定失败: {0}")]
+    #[error("cannot bind the address: {0}")]
     BindFailed(String),
 
-    #[error("停止超时")]
+    #[error("timed out stopping the server")]
     StopTimeout,
 
-    #[error("停止失败: {0}")]
+    #[error("cannot stop the server: {0}")]
     StopFailed(String),
 
-    #[error("请求转发失败: {0}")]
+    #[error("cannot forward the request: {0}")]
     ForwardFailed(String),
 
-    #[error("无可用的Provider")]
+    #[error("no provider available")]
     NoAvailableProvider,
 
-    #[error("所有供应商已熔断，无可用渠道")]
+    #[error("every provider is circuit-broken; no channel is left")]
     AllProvidersCircuitOpen,
 
-    #[error("未配置供应商")]
+    #[error("no provider is configured")]
     NoProvidersConfigured,
 
     #[allow(dead_code)]
-    #[error("Provider不健康: {0}")]
+    #[error("provider is not healthy: {0}")]
     ProviderUnhealthy(String),
 
-    #[error("上游错误 (状态码 {status}): {body:?}")]
+    #[error("upstream error (status {status}): {body:?}")]
     UpstreamError { status: u16, body: Option<String> },
 
-    #[error("超过最大重试次数")]
+    #[error("the retry limit was reached")]
     MaxRetriesExceeded,
 
-    #[error("数据库错误: {0}")]
+    #[error("database error: {0}")]
     DatabaseError(String),
 
-    #[error("配置错误: {0}")]
+    #[error("config error: {0}")]
     ConfigError(String),
 
     #[allow(dead_code)]
-    #[error("格式转换错误: {0}")]
+    #[error("cannot convert between formats: {0}")]
     TransformError(String),
 
     #[allow(dead_code)]
-    #[error("无效的请求: {0}")]
+    #[error("invalid request: {0}")]
     InvalidRequest(String),
 
-    #[error("超时: {0}")]
+    #[error("timed out: {0}")]
     Timeout(String),
 
     /// Streaming response idle timeout
     #[allow(dead_code)]
-    #[error("流式响应空闲超时: {0}秒无数据")]
+    #[error("the stream went idle: no data for {0}s")]
     StreamIdleTimeout(u64),
 
     /// Auth error
-    #[error("认证失败: {0}")]
+    #[error("authentication failed: {0}")]
     AuthError(String),
 
     #[allow(dead_code)]
-    #[error("内部错误: {0}")]
+    #[error("internal error: {0}")]
     Internal(String),
 }
 
@@ -90,4 +90,46 @@ pub enum ErrorCategory {
     NonRetryable, // auth failures, bad parameters, 4xx errors
     #[allow(dead_code)]
     ClientAbort, // client-initiated abort
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same guard as the adapter errors': this enum is ported, its messages reach
+    /// request logs and the UI, and the codebase's rule is English.
+    #[test]
+    fn the_error_messages_are_english() {
+        let errors = [
+            ProxyError::ResponseBodyTooLarge(1),
+            ProxyError::AlreadyRunning,
+            ProxyError::NotRunning,
+            ProxyError::BindFailed("x".into()),
+            ProxyError::StopTimeout,
+            ProxyError::StopFailed("x".into()),
+            ProxyError::ForwardFailed("x".into()),
+            ProxyError::NoAvailableProvider,
+            ProxyError::AllProvidersCircuitOpen,
+            ProxyError::NoProvidersConfigured,
+            ProxyError::ProviderUnhealthy("x".into()),
+            ProxyError::MaxRetriesExceeded,
+            ProxyError::DatabaseError("x".into()),
+            ProxyError::ConfigError("x".into()),
+            ProxyError::TransformError("x".into()),
+            ProxyError::InvalidRequest("x".into()),
+            ProxyError::Timeout("x".into()),
+            ProxyError::StreamIdleTimeout(1),
+            ProxyError::AuthError("x".into()),
+            ProxyError::Internal("x".into()),
+        ];
+        for error in errors {
+            let message = error.to_string();
+            assert!(
+                !message
+                    .chars()
+                    .any(|c| matches!(c, '\u{4e00}'..='\u{9fff}')),
+                "{message:?} is not English"
+            );
+        }
+    }
 }

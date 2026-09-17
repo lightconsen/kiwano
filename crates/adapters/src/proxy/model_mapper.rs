@@ -44,7 +44,7 @@ pub fn strip_one_m_suffix_for_upstream_from_body(mut body: Value) -> Value {
 
     let stripped = strip_one_m_suffix_for_upstream(model);
     if stripped != model {
-        log::debug!("[ModelMapper] 去除本地 1M 标记: {model} → {stripped}");
+        log::debug!("[ModelMapper] stripped the local 1M marker: {model} → {stripped}");
         body["model"] = serde_json::json!(stripped);
     }
     body

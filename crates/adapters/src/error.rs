@@ -11,14 +11,14 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("配置错误: {0}")]
+    #[error("config error: {0}")]
     Config(String),
-    #[error("无效输入: {0}")]
+    #[error("invalid input: {0}")]
     InvalidInput(String),
     /// Native files changed after CC Switch last read them.
-    #[error("并发冲突: {0}")]
+    #[error("conflicting concurrent change: {0}")]
     Conflict(String),
-    #[error("IO 错误: {path}: {source}")]
+    #[error("io error at {path}: {source}")]
     Io {
         path: String,
         #[source]
@@ -30,26 +30,26 @@ pub enum AppError {
         #[source]
         source: std::io::Error,
     },
-    #[error("JSON 解析错误: {path}: {source}")]
+    #[error("cannot parse JSON in {path}: {source}")]
     Json {
         path: String,
         #[source]
         source: serde_json::Error,
     },
-    #[error("JSON 序列化失败: {source}")]
+    #[error("cannot serialize JSON: {source}")]
     JsonSerialize {
         #[source]
         source: serde_json::Error,
     },
-    #[error("TOML 解析错误: {path}: {source}")]
+    #[error("cannot parse TOML in {path}: {source}")]
     Toml {
         path: String,
         #[source]
         source: toml::de::Error,
     },
-    #[error("锁获取失败: {0}")]
+    #[error("cannot take the lock: {0}")]
     Lock(String),
-    #[error("MCP 校验失败: {0}")]
+    #[error("MCP validation failed: {0}")]
     McpValidation(String),
     #[error("{0}")]
     Message(String),
@@ -61,13 +61,13 @@ pub enum AppError {
         zh: String,
         en: String,
     },
-    #[error("数据库错误: {0}")]
+    #[error("database error: {0}")]
     Database(String),
-    #[error("OMO 配置文件不存在")]
+    #[error("the OMO config file does not exist")]
     OmoConfigNotFound,
-    #[error("所有供应商已熔断，无可用渠道")]
+    #[error("every provider is circuit-broken; no channel is left")]
     AllProvidersCircuitOpen,
-    #[error("未配置供应商")]
+    #[error("no provider is configured")]
     NoProvidersConfigured,
 }
 
@@ -120,5 +120,38 @@ impl serde::Serialize for AppError {
         S: serde::Serializer,
     {
         serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The messages are English, and this is a ported crate where they arrived
+    /// in another language: a guard rather than a habit, since every one of these
+    /// is read by a user whose UI is English (and the localized half of the
+    /// dictionary is not where they live).
+    #[test]
+    fn the_error_messages_are_english() {
+        let errors = [
+            AppError::Config("x".into()),
+            AppError::InvalidInput("x".into()),
+            AppError::Conflict("x".into()),
+            AppError::Lock("x".into()),
+            AppError::McpValidation("x".into()),
+            AppError::Database("x".into()),
+            AppError::OmoConfigNotFound,
+            AppError::AllProvidersCircuitOpen,
+            AppError::NoProvidersConfigured,
+        ];
+        for error in errors {
+            let message = error.to_string();
+            assert!(
+                !message
+                    .chars()
+                    .any(|c| matches!(c, '\u{4e00}'..='\u{9fff}')),
+                "{message:?} is not English"
+            );
+        }
     }
 }

@@ -149,7 +149,7 @@ fn read_opencode_config_from_path(path: &Path) -> Result<Value, AppError> {
     // consistent with read_claude_live.
     if !value.is_object() {
         return Err(AppError::Config(format!(
-            "OpenCode 配置文件根节点必须是 JSON 对象: {}",
+            "OpenCode's config must be a JSON object at its root: {}",
             path.display()
         )));
     }
@@ -192,7 +192,7 @@ pub fn set_provider(id: &str, config: Value) -> Result<(), AppError> {
     // touches user-owned top-level config such as model / theme.
     if !full_config.get("provider").is_some_and(Value::is_object) {
         if full_config.get("provider").is_some() {
-            log::warn!("opencode.json 的 provider 不是对象，已重置为空对象");
+            log::warn!("opencode.json's `provider` is not an object; reset to an empty one");
         }
         full_config["provider"] = json!({});
     }
@@ -215,7 +215,9 @@ pub fn remove_provider(id: &str) -> Result<(), AppError> {
     if let Some(providers) = config.get_mut("provider").and_then(|v| v.as_object_mut()) {
         providers.remove(id);
     } else if config.get("provider").is_some() {
-        log::warn!("opencode.json 的 provider 不是对象，无法删除供应商 '{id}'");
+        log::warn!(
+            "opencode.json's `provider` is not an object, so provider '{id}' cannot be removed"
+        );
     }
 
     write_opencode_config_to_path_with_contents(&path, &config).map(|_| ())
@@ -260,7 +262,7 @@ pub fn set_mcp_server(id: &str, config: Value) -> Result<(), AppError> {
 
     if !full_config.get("mcp").is_some_and(Value::is_object) {
         if full_config.get("mcp").is_some() {
-            log::warn!("opencode.json 的 mcp 不是对象，已重置为空对象");
+            log::warn!("opencode.json's `mcp` is not an object; reset to an empty one");
         }
         full_config["mcp"] = json!({});
     }
@@ -280,7 +282,7 @@ pub fn remove_mcp_server(id: &str) -> Result<(), AppError> {
     if let Some(mcp) = config.get_mut("mcp").and_then(|v| v.as_object_mut()) {
         mcp.remove(id);
     } else if config.get("mcp").is_some() {
-        log::warn!("opencode.json 的 mcp 不是对象，无法删除服务器 '{id}'");
+        log::warn!("opencode.json's `mcp` is not an object, so server '{id}' cannot be removed");
     }
 
     write_opencode_config_to_path_with_contents(&path, &config).map(|_| ())

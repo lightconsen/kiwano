@@ -56,7 +56,7 @@ fn required_non_empty_string<'a>(
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.field.missing",
-                format!("Grok Build 配置缺少有效的 {key} 字段"),
+                format!("Grok Build's config has no usable `{key}` field"),
                 format!("Grok Build configuration is missing a valid {key} field"),
             )
         })
@@ -89,7 +89,7 @@ pub fn validate_config_toml_syntax(config_toml: &str) -> Result<(), AppError> {
         .map_err(|error| {
             AppError::localized(
                 "provider.grokbuild.config.invalid_toml",
-                format!("Grok Build config.toml 格式错误: {error}"),
+                format!("Grok Build's config.toml is malformed: {error}"),
                 format!("Invalid Grok Build config.toml: {error}"),
             )
         })
@@ -117,7 +117,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
     let document = config_toml.parse::<toml::Value>().map_err(|error| {
         AppError::localized(
             "provider.grokbuild.config.invalid_toml",
-            format!("Grok Build config.toml 格式错误: {error}"),
+            format!("Grok Build's config.toml is malformed: {error}"),
             format!("Invalid Grok Build config.toml: {error}"),
         )
     })?;
@@ -125,7 +125,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
     let root = document.as_table().ok_or_else(|| {
         AppError::localized(
             "provider.grokbuild.config.not_table",
-            "Grok Build 配置必须是 TOML 表结构",
+            "Grok Build's config must be a TOML table",
             "Grok Build configuration must be a TOML table",
         )
     })?;
@@ -135,7 +135,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.models.missing",
-                "Grok Build 配置缺少 [models]",
+                "Grok Build's config has no [models]",
                 "Grok Build configuration is missing [models]",
             )
         })?;
@@ -146,7 +146,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.model.missing",
-                "Grok Build 配置缺少 [model.<name>]",
+                "Grok Build's config has no [model.<name>]",
                 "Grok Build configuration is missing [model.<name>]",
             )
         })?;
@@ -156,7 +156,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.default_model.missing",
-                format!("Grok Build 配置缺少 [model.\"{default_model}\"]"),
+                format!("Grok Build's config has no [model.\"{default_model}\"]"),
                 format!("Grok Build configuration is missing [model.\"{default_model}\"]"),
             )
         })?;
@@ -169,7 +169,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
     {
         return Err(AppError::localized(
             "provider.grokbuild.credentials.missing",
-            "Grok Build 配置缺少有效的 api_key 或 env_key 字段",
+            "Grok Build's config has neither a usable api_key nor an env_key",
             "Grok Build configuration is missing a valid api_key or env_key field",
         ));
     }
@@ -182,7 +182,7 @@ pub fn validate_config_toml(config_toml: &str) -> Result<(), AppError> {
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.context_window.invalid",
-                "Grok Build context_window 必须是正整数",
+                "Grok Build's context_window must be a positive integer",
                 "Grok Build context_window must be a positive integer",
             )
         })?;
@@ -264,7 +264,7 @@ fn update_selected_model_string(
         .map_err(|error| {
             AppError::localized(
                 "provider.grokbuild.config.invalid_toml",
-                format!("Grok Build config.toml 格式错误: {error}"),
+                format!("Grok Build's config.toml is malformed: {error}"),
                 format!("Invalid Grok Build config.toml: {error}"),
             )
         })?;
@@ -277,7 +277,7 @@ fn update_selected_model_string(
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.default_model.missing",
-                "Grok Build 配置缺少 models.default",
+                "Grok Build's config has no models.default",
                 "Grok Build configuration is missing models.default",
             )
         })?
@@ -290,7 +290,7 @@ fn update_selected_model_string(
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.default_model.missing",
-                format!("Grok Build 配置缺少 [model.\"{default_model}\"]"),
+                format!("Grok Build's config has no [model.\"{default_model}\"]"),
                 format!("Grok Build configuration is missing [model.\"{default_model}\"]"),
             )
         })?;
@@ -371,7 +371,7 @@ pub fn read_grok_live_settings() -> Result<Value, AppError> {
     if !path.exists() {
         return Err(AppError::localized(
             "grokbuild.config.missing",
-            "Grok Build 配置文件不存在",
+            "Grok Build's config file does not exist",
             "Grok Build configuration file not found",
         ));
     }
@@ -385,7 +385,7 @@ pub fn write_grok_provider_live(provider: &Provider) -> Result<(), AppError> {
     let settings = provider.settings_config.as_object().ok_or_else(|| {
         AppError::localized(
             "provider.grokbuild.settings.not_object",
-            "Grok Build 配置必须是 JSON 对象",
+            "Grok Build's config must be a JSON object",
             "Grok Build configuration must be a JSON object",
         )
     })?;
@@ -395,7 +395,7 @@ pub fn write_grok_provider_live(provider: &Provider) -> Result<(), AppError> {
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.config.missing",
-                "Grok Build 配置缺少 config 字段",
+                "Grok Build's config has no `config` field",
                 "Grok Build configuration is missing the config field",
             )
         })?;
@@ -424,7 +424,7 @@ pub fn write_grok_live_settings(settings: &Value) -> Result<(), AppError> {
         .ok_or_else(|| {
             AppError::localized(
                 "provider.grokbuild.config.missing",
-                "Grok Build 配置缺少 config 字段",
+                "Grok Build's config has no `config` field",
                 "Grok Build configuration is missing the config field",
             )
         })?;

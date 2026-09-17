@@ -447,7 +447,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                             }
                                                             if state.consecutive_whitespace >= INFINITE_WHITESPACE_THRESHOLD {
                                                                 log::warn!(
-                                                                    "[Copilot] 检测到无限空白 bug (tool: {}), 中止此 tool call 流",
+                                                                    "[Copilot] the infinite-whitespace bug was hit (tool: {}); aborting this tool-call stream",
                                                                     state.name
                                                                 );
                                                                 state.aborted = true;

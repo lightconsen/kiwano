@@ -279,18 +279,32 @@ fn a_variable_is_read_out_of_the_shells_environment() {
     );
 }
 
-/// A value may contain `=`, and a name that appears twice keeps its first
-/// answer — the rule the tool probe uses for the same reason: the first is the
-/// one the shell's own environment resolved to.
+/// A value may contain `=`, and a name that appears twice keeps its last
+/// answer: an rc file's banner reaches this same stdout ahead of `env`'s own
+/// output, so the later line is the shell's real environment.
 #[cfg(unix)]
 #[test]
 fn a_variable_splits_at_its_first_equals_sign() {
     let vars = parse_vars(
-        "A=1=2\nQWEN_HOME=first\nQWEN_HOME=second\n",
+        "welcome back\nPATH=/usr/bin\nA=1=2\nQWEN_HOME=noise\nQWEN_HOME=real\n",
         &["A", "QWEN_HOME"],
     );
     assert_eq!(vars.get("A").map(String::as_str), Some("1=2"));
-    assert_eq!(vars.get("QWEN_HOME").map(String::as_str), Some("first"));
+    assert_eq!(vars.get("QWEN_HOME").map(String::as_str), Some("real"));
+}
+
+/// The same rule for the PATH the tools are resolved against: a rc file that
+/// prints something PATH-shaped must not be able to redirect the walk.
+#[cfg(unix)]
+#[test]
+fn the_last_path_line_wins() {
+    let tmp = tempfile::tempdir().unwrap();
+    let decoy = tmp.path().join("decoy");
+    write_bin(&decoy, "gemini");
+    let env = format!("PATH={}\nHOME=/root\nPATH=/nonexistent\n", decoy.display());
+
+    // The decoy's PATH came *before* `env`'s own line, so it is the one ignored.
+    assert!(tool_paths_from_shell_env(&env).is_empty());
 }
 
 // ── executable candidates ──
@@ -347,71 +361,49 @@ fn version_output_takes_first_non_empty_line() {
 
 // ── the login-shell probe (unix) ──
 
+/// The tools the shell's PATH holds, resolved here: one hit per tool, the first
+/// PATH entry that has it — the same first-hit rule the walk uses.
 #[cfg(unix)]
 #[test]
-fn the_probe_script_lists_every_cli_and_ends_with_true() {
-    let s = probe_script();
-    for (_, cli) in CLI_AGENTS {
-        assert!(s.contains(cli), "script misses {cli}");
-    }
-    assert!(
-        s.ends_with("; true"),
-        "a missing last tool must not fail the whole probe: {s}"
-    );
-}
+fn tools_are_resolved_against_the_shells_own_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let first = tmp.path().join("first");
+    let second = tmp.path().join("second");
+    let codex = write_bin(&first, "codex");
+    write_bin(&second, "codex");
+    let pi = write_bin(&second, "pi");
 
-/// The script must succeed even though some — or, on a fresh machine, all — of
-/// the tools it looks for are absent. It runs the real generator rather than a
-/// copy, because the failure it guards against was in the script's last line.
-#[cfg(unix)]
-#[test]
-fn the_probe_script_succeeds_when_tools_are_missing() {
-    let out = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(probe_script())
-        .output()
-        .expect("sh runs");
-    assert!(
-        out.status.success(),
-        "a missing tool must not fail the probe — that is how every installed \
-         agent reads as absent"
+    let env = format!(
+        "HOME=/root\nPATH={}:{}\nSHELL=/bin/zsh\n",
+        first.display(),
+        second.display()
     );
-}
+    let found = tool_paths_from_shell_env(&env);
 
-/// Absolute, not `starts_with('/')`: a Windows path is absolute too, and the
-/// POSIX spelling of that test discarded every hit there.
-#[cfg(unix)]
-#[test]
-fn probe_output_parses_tools_and_ignores_noise() {
-    let out = concat!(
-        "\u{1f680} welcome back\n",
-        "claude /opt/homebrew/bin/claude\n",
-        "codex /usr/local/bin/codex\n",
-        "grok /Users/x/.local/bin/grok\n",
-        "some random rc line\n",
-        "pi /usr/bin/pi\n",
-        "gemini relative/gemini\n",
-    );
-    let m = parse_probe_output(out);
+    assert_eq!(found.get("codex").unwrap(), &codex, "first PATH entry wins");
     assert_eq!(
-        m.get("claude").unwrap(),
-        Path::new("/opt/homebrew/bin/claude")
+        found.get("pi").unwrap(),
+        &pi,
+        "the second entry is still read"
     );
-    assert_eq!(
-        m.get("grok").unwrap(),
-        Path::new("/Users/x/.local/bin/grok")
-    );
-    assert_eq!(m.get("pi").unwrap(), Path::new("/usr/bin/pi"));
-    // A relative path is not a resolved binary.
-    assert!(!m.contains_key("gemini"));
-    assert_eq!(m.len(), 4);
+    // Tools nobody has are simply absent — the shell's silence is an answer.
+    assert!(!found.contains_key("gemini"));
+    assert_eq!(found.len(), 2);
 }
 
+/// A PATH entry that is not a directory anyone meant is skipped, and a shell
+/// with no PATH to report resolves nothing rather than everything.
 #[cfg(unix)]
 #[test]
-fn probe_output_keeps_first_hit_on_duplicates() {
-    let m = parse_probe_output("codex /a/codex\ncodex /b/codex\n");
-    assert_eq!(m.get("codex").unwrap(), Path::new("/a/codex"));
+fn a_relative_path_entry_resolves_nothing() {
+    // A relative entry, even one that points at a directory holding the tool.
+    let tmp = tempfile::tempdir().unwrap();
+    write_bin(&tmp.path().join("cwd"), "gemini");
+    let found = tool_paths_from_shell_env("PATH=cwd/../cwd\n");
+    assert!(found.is_empty(), "{found:?}");
+
+    // And a shell that reports no PATH at all resolves nothing.
+    assert!(tool_paths_from_shell_env("HOME=/root\n").is_empty());
 }
 
 #[cfg(unix)]

@@ -9,9 +9,12 @@
 //!    is the only way to see an install that lives where the user put it. The
 //!    vendored approach below cannot reach those: it walks a fixed list of
 //!    directories, and a user's custom directory is by definition not on it.
-//!    Windows is skipped here: a GUI process gets the full user environment
-//!    there, and [`effective_path`] merges the registry's user and machine PATH
-//!    on top, so the walk below already sees everything the user would.
+//!    The shell is asked for its environment rather than for a `command -v` per
+//!    tool, because a shell *script* has to be written in that shell's syntax —
+//!    see [`tool_paths_from_shell_env`]. Windows is skipped here: a GUI process
+//!    gets the full user environment there, and [`effective_path`] merges the
+//!    registry's user and machine PATH on top, so the walk below already sees
+//!    everything the user would.
 //! 2. **The well-known install locations** (every platform). Node version
 //!    managers, Homebrew, npm prefixes, and the standalone installers' own
 //!    directories — the places a tool lands when the user never put it on PATH
@@ -171,14 +174,15 @@ fn find_agent_binaries(
 
 // ── source 1: the user's login shell (unix) ────────────────────────────────
 
-/// `command -v` for every tool, through the user's interactive login shell.
+/// Every tool the user's own shell can resolve, through the environment it
+/// reports (`env` — see [`tool_paths_from_shell_env`] for why not `command -v`).
 ///
 /// Failure is not fatal: an empty map means "the shell had nothing to say", and
 /// the directory walk still runs on top of it.
 #[cfg(unix)]
 fn shell_probe_all() -> BTreeMap<String, PathBuf> {
-    match run_login_shell(&probe_script()) {
-        Some(out) => parse_probe_output(&out),
+    match run_login_shell("env") {
+        Some(out) => tool_paths_from_shell_env(&out),
         None => BTreeMap::new(),
     }
 }
@@ -266,7 +270,10 @@ pub fn login_shell_vars(_names: &[&str]) -> ShellVars {
 /// `NAME=value` lines from `env` output, keeping only the names asked for.
 ///
 /// Split at the first `=`, since a value may contain one. A name that appears
-/// twice keeps the first, matching the tool probe's rule.
+/// twice keeps the *last* occurrence, and that is the one rule this shares with
+/// the tool probe: an interactive rc file's own output — a banner, a version
+/// notice — lands on the same stdout ahead of the command's, so anything that
+/// looks like the line we want is more likely noise the earlier it appears.
 #[cfg(unix)]
 fn parse_vars(out: &str, names: &[&str]) -> ShellVars {
     let mut vars = ShellVars::new();
@@ -275,8 +282,7 @@ fn parse_vars(out: &str, names: &[&str]) -> ShellVars {
             continue;
         };
         if names.contains(&name) {
-            vars.entry(name.to_string())
-                .or_insert_with(|| value.to_string());
+            vars.insert(name.to_string(), value.to_string());
         }
     }
     vars
@@ -314,45 +320,49 @@ fn is_known_shell(path: &str) -> bool {
     )
 }
 
-/// `for t in …; do command -v … && printf 'tool path'; done; true` — one shell,
-/// all tools.
+/// Every agent's binary, resolved against the PATH the user's own shell reports.
 ///
-/// The trailing `true` is load-bearing, not decoration: a shell exits with the
-/// status of its last command, the loop's status is its last iteration's, and
-/// the last iteration is a `command -v` for whichever tool happens to be last
-/// in `CLI_AGENTS` — when that one is not installed the loop fails, the script
-/// fails, and the caller (which reads a non-zero exit as "probe unavailable")
-/// discards a table it had already filled. Every installed agent would read as
-/// missing because of one that is not installed.
+/// The tools are resolved here rather than by `command -v` inside the shell, and
+/// the reason is syntax: a loop is the one construct these shells do not share —
+/// fish ends a block with `end`, POSIX shells with `done` — so a script written
+/// for one silently reports nothing under the other. (It did: a fish user never
+/// got this source at all, and the directory walk below was their only one.)
+/// `env` is one word that means the same thing in every shell, and the PATH it
+/// prints is the whole of what the shell had to say.
+///
+/// Nothing is lost by resolving it here. `command -v` also answers with aliases
+/// and functions, but that answer is not a path — the old probe required an
+/// absolute one — so those were discarded before they reached the walk.
+///
+/// A PATH entry that is not absolute is skipped, the rule the walk applies for
+/// the same reason: it would resolve against whatever directory the process
+/// happened to be in.
+///
+/// The last `PATH=` line wins rather than the first, for the same reason
+/// [`parse_vars`] does: an interactive rc file's output reaches this same stdout
+/// ahead of the command's, and `env` prints each variable once.
 #[cfg(unix)]
-fn probe_script() -> String {
-    let names: Vec<&str> = CLI_AGENTS.iter().map(|(_, cli)| *cli).collect();
-    format!(
-        "for t in {}; do p=$(command -v \"$t\" 2>/dev/null) && printf '%s %s\\n' \"$t\" \"$p\"; done; true",
-        names.join(" ")
-    )
-}
+fn tool_paths_from_shell_env(env: &str) -> BTreeMap<String, PathBuf> {
+    let path = env
+        .lines()
+        .filter_map(|line| line.strip_prefix("PATH="))
+        .next_back()
+        .unwrap_or_default();
+    let dirs: Vec<PathBuf> = std::env::split_paths(OsStr::new(path))
+        .filter(|dir| dir.is_absolute())
+        .collect();
 
-/// Parse `"<tool> <path>"` lines; rc-file noise (welcome banners etc.) and
-/// non-absolute paths are ignored. Later duplicates keep the first hit.
-///
-/// "Absolute" is `Path::is_absolute`, not `starts_with('/')`: on Windows a
-/// resolved tool is `C:\…\claude.cmd`, and the POSIX spelling of that test
-/// silently discarded every hit there.
-#[cfg(unix)]
-fn parse_probe_output(out: &str) -> BTreeMap<String, PathBuf> {
     let mut found = BTreeMap::new();
-    for line in out.lines() {
-        let mut it = line.split_whitespace();
-        let (Some(tool), Some(path)) = (it.next(), it.next()) else {
-            continue;
-        };
-        if !CLI_AGENTS.iter().any(|(_, cli)| *cli == tool) || !Path::new(path).is_absolute() {
-            continue;
+    for (_, cli) in CLI_AGENTS {
+        for dir in &dirs {
+            if let Some(hit) = executable_candidates(cli, dir)
+                .into_iter()
+                .find(|candidate| candidate.is_file())
+            {
+                found.insert((*cli).to_string(), hit);
+                break;
+            }
         }
-        found
-            .entry(tool.to_string())
-            .or_insert_with(|| PathBuf::from(path));
     }
     found
 }

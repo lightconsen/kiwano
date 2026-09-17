@@ -421,11 +421,15 @@ impl RequestCapture {
     /// recorded whether or not the text is stored, and `truncated` reports the
     /// cap. Credentials are redacted by [`redact_body`] before the text is
     /// stored.
-    pub fn set_body(&mut self, body: &[u8], max_body_bytes: usize) {
+    pub fn set_body(&mut self, body: &[u8], max_body_bytes: Option<usize>) {
         self.request_size = body.len() as i64;
-        self.truncated = body.len() > max_body_bytes;
-        let capped = &body[..body.len().min(max_body_bytes)];
-        self.request_body = Some(redact_body(&String::from_utf8_lossy(capped)));
+        // The same cap-then-redact the response side uses, rather than a
+        // second copy of it: the two halves of one exchange should cut and
+        // scrub at the same place, and a rule stated twice is a rule that can
+        // come apart.
+        let (text, truncated) = cap_body(body, max_body_bytes);
+        self.truncated = truncated;
+        self.request_body = Some(text);
     }
 }
 
@@ -443,9 +447,15 @@ impl RequestCapture {
 /// applied first, so a credential straddling the cut is not scanned — the text
 /// is already lossy there — and the cap is what bounds this work, which runs
 /// once per response on the data plane.
-pub fn cap_body(bytes: &[u8], max_body_bytes: usize) -> (String, bool) {
-    let truncated = bytes.len() > max_body_bytes;
-    let capped = &bytes[..bytes.len().min(max_body_bytes)];
+pub fn cap_body(bytes: &[u8], max_body_bytes: Option<usize>) -> (String, bool) {
+    let Some(max) = max_body_bytes else {
+        // No cap configured: every byte is stored, and `truncated` stays false
+        // because nothing was cut — a reader that saw `true` here would go
+        // looking for a limit that does not exist.
+        return (redact_body(&String::from_utf8_lossy(bytes)), false);
+    };
+    let truncated = bytes.len() > max;
+    let capped = &bytes[..bytes.len().min(max)];
     (redact_body(&String::from_utf8_lossy(capped)), truncated)
 }
 
@@ -641,7 +651,7 @@ mod tests {
     fn set_body_respects_cap_and_records_size() {
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(b"hello", 3);
+        c.set_body(b"hello", Some(3));
         assert_eq!(c.request_body.as_deref(), Some("hel"));
         assert!(c.truncated);
         assert_eq!(c.request_size, 5);
@@ -649,7 +659,7 @@ mod tests {
         // A body under the cap is stored whole and not marked truncated.
         let mut c =
             RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new()).unwrap();
-        c.set_body(b"hello", 1024);
+        c.set_body(b"hello", Some(1024));
         assert_eq!(c.request_body.as_deref(), Some("hello"));
         assert!(!c.truncated);
         assert_eq!(c.request_size, 5);
@@ -663,7 +673,7 @@ mod tests {
     fn capture_with_body(body: &str) -> RequestCapture {
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(body.as_bytes(), 1024 * 1024);
+        c.set_body(body.as_bytes(), Some(1024 * 1024));
         c
     }
 
@@ -758,7 +768,7 @@ mod tests {
             r#"{"api_key":"sk-live-abcdefghijklmnopqrstuvwxyz","content":"tail is dropped"}"#;
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(body.as_bytes(), 60);
+        c.set_body(body.as_bytes(), Some(60));
         assert_eq!(c.request_size, body.len() as i64);
         assert!(c.truncated);
         let stored = c.request_body.unwrap();
@@ -780,7 +790,7 @@ mod tests {
     #[test]
     fn cap_body_scrubs_credentials_out_of_a_response() {
         let response = r#"{"error":{"message":"Incorrect API key provided: sk-live-abcdefghijklmnopqrstuvwxyz"}}"#;
-        let (capped, truncated) = cap_body(response.as_bytes(), 4096);
+        let (capped, truncated) = cap_body(response.as_bytes(), Some(4096));
         assert!(!truncated);
         assert!(
             !capped.contains("sk-live-abcdefghijklmnopqrstuvwxyz"),
@@ -789,17 +799,17 @@ mod tests {
         assert!(capped.contains("Incorrect API key provided"), "{capped}");
 
         // Under a secret-shaped key name, with no recognisable shape at all.
-        let (capped, _) = cap_body(br#"{"api_key":"hunter2","model":"gpt-5"}"#, 4096);
+        let (capped, _) = cap_body(br#"{"api_key":"hunter2","model":"gpt-5"}"#, Some(4096));
         assert!(capped.contains("\"api_key\":\"[REDACTED]\""), "{capped}");
         assert!(capped.contains("gpt-5"), "{capped}");
 
         // An ordinary response is returned untouched, byte for byte — the
         // filter only rewrites what it recognises.
         let plain = r#"{"content":[{"type":"text","text":"hello, world"}]}"#;
-        assert_eq!(cap_body(plain.as_bytes(), 4096).0, plain);
+        assert_eq!(cap_body(plain.as_bytes(), Some(4096)).0, plain);
 
         // And the cap still applies, and is still reported.
-        let (capped, truncated) = cap_body(plain.as_bytes(), 10);
+        let (capped, truncated) = cap_body(plain.as_bytes(), Some(10));
         assert!(truncated);
         assert_eq!(capped.len(), 10);
     }

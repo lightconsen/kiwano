@@ -1103,8 +1103,8 @@ async fn request_log_disabled_records_nothing() {
     store
         .save_log_config(&LogConfig {
             enabled: false,
-            retain_days: 30,
-            max_body_bytes: 4 * 1024 * 1024,
+            retain_days: Some(30),
+            max_body_bytes: Some(4 * 1024 * 1024),
         })
         .unwrap();
 

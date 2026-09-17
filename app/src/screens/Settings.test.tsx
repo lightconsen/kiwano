@@ -55,6 +55,7 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
     auto_failover: true,
     request_logs: true,
     log_retention_days: 30,
+    log_max_body_bytes: 0,
     stream_first_byte_secs: 120,
     stream_idle_secs: 120,
     cost_alert: true,
@@ -120,6 +121,49 @@ describe("the takeover switch", () => {
     expect(await screen.findByText(/codex: Error: restore failed/)).toBeInTheDocument();
     // The switch is still on, because it still is: nothing was restored.
     expect(screen.getByRole("switch", { name: "Codex" })).toBeChecked();
+  });
+});
+
+// What the log keeps. Both rows have a "no limit" state that is the default,
+// and both have to render it as itself: a row reading "0 days" or "0 MB" while
+// nothing is being pruned or truncated is a row that says the opposite of what
+// the gateway is doing.
+describe("the request-log limits", () => {
+  it("says keep all rather than showing a zero-day retention", async () => {
+    apiMock.getSettings.mockResolvedValue({ ...settingsWith(true), log_retention_days: 0 });
+    render(<Settings />);
+
+    expect(await screen.findByText(en.settings.logRetention)).toBeInTheDocument();
+    expect(screen.getByText(en.settings.keepAll)).toBeInTheDocument();
+    // …and the body cap beside it, which is unlimited for the same reason.
+    expect(screen.getByText(en.settings.noLimit)).toBeInTheDocument();
+  });
+
+  it("shows a stored retention the list does not carry", async () => {
+    // Set from the CLI, or by an older build: it must read as itself rather
+    // than silently as the default.
+    apiMock.getSettings.mockResolvedValue({ ...settingsWith(true), log_retention_days: 14 });
+    render(<Settings />);
+
+    expect(await screen.findByText(en.settings.days.replace("{count}", "14"))).toBeInTheDocument();
+  });
+
+  it("patches the body cap the row owns, in bytes", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.updateSettings.mockResolvedValue({ ...settingsWith(true), log_max_body_bytes: 4194304 });
+    const user = userEvent.setup();
+    render(<Settings />);
+
+    await user.click(await screen.findByRole("combobox", { name: en.settings.logBodyCap }));
+    await user.click(
+      await screen.findByRole("option", { name: en.settings.mb.replace("{count}", "4") }),
+    );
+
+    // The label is megabytes and the setting is bytes: the conversion is this
+    // control's job, and a row that sent "4" would cap every body at 4 bytes.
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith({ log_max_body_bytes: 4 * 1024 * 1024 }),
+    );
   });
 });
 

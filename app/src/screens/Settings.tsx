@@ -42,6 +42,92 @@ function Row({ label, note, children }: { label: React.ReactNode; note?: string;
     matters more than the precision. */
 const TIMEOUT_CHOICES = [0, 30, 60, 120, 300];
 
+/// Retention choices, in days. 0 keeps every row, spelled the way the stream
+/// timeouts below spell "off", and it is what an install gets by default: a
+/// log someone asked to keep is not one to trim on their behalf.
+const RETENTION_CHOICES = [0, 7, 30, 90];
+
+/// Body-cap choices, in bytes. 0 stores every byte, and the sizes are round
+/// megabytes because that is the unit the choice is made in — the setting is
+/// bytes because that is the unit the cap is applied in.
+const BODY_CAP_CHOICES = [0, 1, 4, 16, 64].map((mb) => mb * 1024 * 1024);
+
+/** The same select again, over a body size. Its own control rather than a
+    third copy of the pattern: the unit, the list and the wording of "off" all
+    differ, and only the shape is shared. */
+function BodyCapSelect({
+  label,
+  bytes,
+  onChange,
+}: {
+  label: string;
+  bytes: number;
+  onChange: (v: number) => void;
+}) {
+  const t = useT();
+  const choices = BODY_CAP_CHOICES.includes(bytes)
+    ? BODY_CAP_CHOICES
+    : [...BODY_CAP_CHOICES, bytes].sort((a, b) => a - b);
+  const name = (b: number) =>
+    b === 0 ? t("settings.noLimit") : t("settings.mb", { count: Math.round(b / (1024 * 1024)) });
+  return (
+    <Select value={String(bytes)} onValueChange={(v) => onChange(Number(v))}>
+      <SelectTrigger
+        size="sm"
+        aria-label={label}
+        className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2"
+      >
+        <SelectValue>{(v) => name(Number(v ?? bytes))}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {choices.map((c) => (
+          <SelectItem key={c} value={String(c)}>
+            {name(c)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** The same select as [`TimeoutSelect`], over days rather than seconds — and
+    the same guard for a stored value the list does not carry, which must show
+    as itself rather than silently reading as "keep all". */
+function RetentionSelect({
+  label,
+  days,
+  onChange,
+}: {
+  label: string;
+  days: number;
+  onChange: (v: number) => void;
+}) {
+  const t = useT();
+  const choices = RETENTION_CHOICES.includes(days)
+    ? RETENTION_CHOICES
+    : [...RETENTION_CHOICES, days].sort((a, b) => a - b);
+  const name = (d: number) =>
+    d === 0 ? t("settings.keepAll") : t("settings.days", { count: d });
+  return (
+    <Select value={String(days)} onValueChange={(v) => onChange(Number(v))}>
+      <SelectTrigger
+        size="sm"
+        aria-label={label}
+        className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2"
+      >
+        <SelectValue>{(v) => name(Number(v ?? days))}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {choices.map((c) => (
+          <SelectItem key={c} value={String(c)}>
+            {name(c)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function TimeoutSelect({
   label,
   seconds,
@@ -370,20 +456,18 @@ export default function Settings() {
             <Switch checked={s.request_logs} onCheckedChange={(v) => patch({ request_logs: v })} />
           </Row>
           <Row label={t("settings.logRetention")} note={t("settings.logRetentionNote")}>
-            <Select
-              value={String(s.log_retention_days ?? 30)}
-              onValueChange={(v) => patch({ log_retention_days: Number(v) })}
-            >
-              <SelectTrigger size="sm" className="h-7 w-[130px] bg-surface2 text-[11.5px] dark:bg-surface2">
-                {/* Would otherwise read "30" rather than "30 days". */}
-                <SelectValue>{(v) => t("settings.days", { count: v ?? "" })}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">{t("settings.days", { count: 7 })}</SelectItem>
-                <SelectItem value="30">{t("settings.days", { count: 30 })}</SelectItem>
-                <SelectItem value="90">{t("settings.days", { count: 90 })}</SelectItem>
-              </SelectContent>
-            </Select>
+            <RetentionSelect
+              label={t("settings.logRetention")}
+              days={s.log_retention_days ?? 0}
+              onChange={(v) => patch({ log_retention_days: v })}
+            />
+          </Row>
+          <Row label={t("settings.logBodyCap")} note={t("settings.logBodyCapNote")}>
+            <BodyCapSelect
+              label={t("settings.logBodyCap")}
+              bytes={s.log_max_body_bytes ?? 0}
+              onChange={(v) => patch({ log_max_body_bytes: v })}
+            />
           </Row>
           {/* The two waits a stream can die in. `provider.timeout_secs` bounds
               only the wait for headers, so without these an upstream that

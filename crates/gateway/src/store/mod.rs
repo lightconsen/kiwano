@@ -1279,30 +1279,32 @@ pub struct LogConfig {
     /// and the CSV export is where a body can be left out of a file.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Rows older than this many days are pruned.
-    #[serde(default = "default_retain_days")]
-    pub retain_days: u32,
+    /// Rows older than this many days are pruned. `None` keeps every row:
+    /// capture is the point of the feature, and a retention nobody chose is a
+    /// silent cap on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retain_days: Option<u32>,
     /// Per-body capture cap in bytes; larger bodies are stored truncated.
-    #[serde(default = "default_max_body_bytes")]
-    pub max_body_bytes: usize,
+    /// `None` stores every byte that arrives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_body_bytes: Option<usize>,
 }
 
 fn default_true() -> bool {
     true
-}
-fn default_retain_days() -> u32 {
-    30
-}
-fn default_max_body_bytes() -> usize {
-    4 * 1024 * 1024
 }
 
 impl Default for LogConfig {
     fn default() -> Self {
         LogConfig {
             enabled: true,
-            retain_days: default_retain_days(),
-            max_body_bytes: default_max_body_bytes(),
+            // Both limits are the user's to impose, not ours to guess: the
+            // reason to capture a request is to be able to look at it later,
+            // and a body cut at four megabytes or a row deleted after thirty
+            // days is that look failing. A stored configuration still wins —
+            // this is what an install without one gets.
+            retain_days: None,
+            max_body_bytes: None,
         }
     }
 }
@@ -2870,8 +2872,17 @@ impl Store {
     }
 
     /// Delete rows older than `retain_days`; bodies cascade. Returns removed count.
-    pub fn prune_request_logs(&self, retain_days: u32) -> Result<usize> {
-        let cutoff = (Utc::now() - chrono::Duration::days(retain_days as i64)).to_rfc3339();
+    /// `None` prunes nothing, which is what an install that never set a
+    /// retention gets — and, before this took an `Option`, what a *failed read*
+    /// of the config silently turned into the opposite of: the caller's
+    /// `unwrap_or_default()` produced a zero, and zero days keeps nothing at
+    /// all (`DELETE … WHERE ts < now`). A transient error at startup deleted
+    /// the log.
+    pub fn prune_request_logs(&self, retain_days: Option<u32>) -> Result<usize> {
+        let Some(days) = retain_days else {
+            return Ok(0);
+        };
+        let cutoff = (Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n = conn.execute("DELETE FROM request_logs WHERE ts < ?1", params![cutoff])?;
         Ok(n)
@@ -5373,8 +5384,8 @@ mod tests {
             store.load_log_config().unwrap(),
             LogConfig {
                 enabled: false,
-                retain_days: 7,
-                max_body_bytes: 1024,
+                retain_days: Some(7),
+                max_body_bytes: Some(1024),
             }
         );
     }
@@ -5528,7 +5539,7 @@ mod tests {
             .unwrap();
 
         // Old row (plus its bodies) goes; fresh row stays.
-        assert_eq!(store.prune_request_logs(30).unwrap(), 1);
+        assert_eq!(store.prune_request_logs(Some(30)).unwrap(), 1);
         let (rows, total) = store
             .list_request_logs(1, 10, RequestLogFilter::default())
             .unwrap();
@@ -5594,16 +5605,16 @@ mod tests {
         store
             .save_log_config(&LogConfig {
                 enabled: false,
-                retain_days: 7,
-                max_body_bytes: 1024,
+                retain_days: Some(7),
+                max_body_bytes: Some(1024),
             })
             .unwrap();
         assert_eq!(
             store.load_log_config().unwrap(),
             LogConfig {
                 enabled: false,
-                retain_days: 7,
-                max_body_bytes: 1024
+                retain_days: Some(7),
+                max_body_bytes: Some(1024)
             }
         );
 

@@ -815,10 +815,11 @@ pub async fn forward(
         // sample is persisted by a side task when the stream finishes.
         let (tx, rx) = mpsc::channel::<UsageSample>(1);
         tokio::spawn(record_pending_usage(state.clone(), rx));
-        let max_body_bytes = log
-            .as_ref()
-            .map(|_| state.log_config().max_body_bytes)
-            .unwrap_or(0);
+        // `None` here is both "logging is off" and "no cap configured", and
+        // the two are the same answer for the buffer this bounds: with logging
+        // off nothing is persisted, and with no cap configured the whole
+        // response is kept. Neither is a cap of zero.
+        let max_body_bytes = log.as_ref().and_then(|_| state.log_config().max_body_bytes);
         let stream = SseUsageStream::new(
             Box::pin(upstream.bytes_stream().map(|r| r.map_err(BoxError::from))),
             tx,
@@ -1405,7 +1406,7 @@ struct SseUsageStream {
     capture_buf: Vec<u8>,
     capture_truncated: bool,
     streamed_bytes: u64,
-    capture_cap: usize,
+    capture_cap: Option<usize>,
     first_chunk: Option<Instant>,
     /// Who the client is, so a timeout can be reported in a shape it parses.
     inbound: Option<Protocol>,
@@ -1422,7 +1423,7 @@ impl SseUsageStream {
         tx: mpsc::Sender<UsageSample>,
         sample: UsageSample,
         started: Instant,
-        capture_cap: usize,
+        capture_cap: Option<usize>,
         inbound: Option<Protocol>,
         timeouts: crate::store::StreamTimeouts,
     ) -> Self {
@@ -1512,10 +1513,18 @@ impl SseUsageStream {
     /// Tee a passthrough chunk into the capture buffer (capped).
     fn capture_chunk(&mut self, chunk: &[u8]) {
         self.streamed_bytes += chunk.len() as u64;
-        if self.sample.log.is_none() || self.capture_cap == 0 {
+        if self.sample.log.is_none() {
             return;
         }
-        let remaining = self.capture_cap.saturating_sub(self.capture_buf.len());
+        let Some(cap) = self.capture_cap else {
+            // No cap configured: the whole response is kept. This buffer is
+            // the reason a cap exists at all — it holds a response in memory
+            // until the stream ends — so an install that sets none is trading
+            // disk growth for one in-flight response per stream.
+            self.capture_buf.extend_from_slice(chunk);
+            return;
+        };
+        let remaining = cap.saturating_sub(self.capture_buf.len());
         if remaining == 0 {
             self.capture_truncated = true;
             return;
@@ -2583,7 +2592,7 @@ mod tests {
                 log: None,
             },
             Instant::now(),
-            0,
+            Some(0),
             Some(Protocol::Anthropic),
             crate::store::StreamTimeouts {
                 // The first byte arrived; only the gap is limited.
@@ -2660,7 +2669,7 @@ mod tests {
                 log: None,
             },
             Instant::now(),
-            0,
+            Some(0),
             Some(Protocol::Anthropic),
             crate::store::StreamTimeouts::default(),
         );

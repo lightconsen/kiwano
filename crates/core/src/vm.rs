@@ -1064,9 +1064,19 @@ pub struct SettingsVm {
     pub custom_agents: Vec<CustomAgentVm>,
     pub auto_failover: bool,
     pub request_logs: bool,
-    /// Request-log retention in days (mirrored into gateway_settings for the sidecar).
-    #[serde(default = "default_retain_days")]
+    /// Request-log retention in days (mirrored into gateway_settings for the
+    /// sidecar); 0 keeps every row, which is the default — capture is the
+    /// point of the feature, and a retention nobody chose is a silent cap on
+    /// it. Same spelling as the stream timeouts below.
+    #[serde(default)]
     pub log_retention_days: u32,
+    /// Per-body capture cap in bytes (mirrored into gateway_settings); 0
+    /// stores every byte, which is the default. The cap exists to bound two
+    /// things at once — the row on disk and the buffer a streaming response is
+    /// held in until it ends — so an install that sets none should know it is
+    /// buying completeness with memory.
+    #[serde(default)]
+    pub log_max_body_bytes: u32,
     /// How long an upstream stream may take to its first byte before the
     /// gateway abandons it (mirrored into gateway_settings; 0 disables).
     #[serde(default = "default_stream_first_byte_secs")]
@@ -1146,7 +1156,8 @@ impl Default for SettingsVm {
             custom_agents: Vec::new(),
             auto_failover: true,
             request_logs: true,
-            log_retention_days: default_retain_days(),
+            log_retention_days: 0,
+            log_max_body_bytes: 0,
             stream_first_byte_secs: default_stream_first_byte_secs(),
             stream_idle_secs: default_stream_idle_secs(),
             cost_alert: true,
@@ -1164,10 +1175,6 @@ impl Default for SettingsVm {
 
 pub fn default_true() -> bool {
     true
-}
-
-pub fn default_retain_days() -> u32 {
-    30
 }
 
 /// Mirrors `kiwanod::store::StreamTimeouts::default`, which is what the gateway
@@ -3141,14 +3148,27 @@ pub fn update_settings(
     // Request-log capture config lives in the shared gateway_settings table:
     // the sidecar reads it at startup and on /reload, so keep both copies in
     // sync whenever the UI patches one of these keys.
-    if patch.get("request_logs").is_some() || patch.get("log_retention_days").is_some() {
+    if patch.get("request_logs").is_some()
+        || patch.get("log_retention_days").is_some()
+        || patch.get("log_max_body_bytes").is_some()
+    {
         let mut cfg = store.load_log_config().unwrap_or_default();
         if let Some(v) = patch.get("request_logs").and_then(|v| v.as_bool()) {
             cfg.enabled = v;
         }
+        // Zero is how the patch says "keep every row": the field is a count of
+        // days, and the only count that means *no* retention is none of them.
+        // Inside the config the two states stay distinct — `None` is a
+        // decision, zero would be a bug — but a JSON patch has one number to
+        // say it with, and `0` is the number every other time limit here uses.
         if let Some(v) = patch.get("log_retention_days").and_then(|v| v.as_u64()) {
             if let Ok(days) = u32::try_from(v) {
-                cfg.retain_days = days;
+                cfg.retain_days = (days > 0).then_some(days);
+            }
+        }
+        if let Some(v) = patch.get("log_max_body_bytes").and_then(|v| v.as_u64()) {
+            if let Ok(bytes) = usize::try_from(v) {
+                cfg.max_body_bytes = (bytes > 0).then_some(bytes);
             }
         }
         store.save_log_config(&cfg).map_err(e2s)?;

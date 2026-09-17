@@ -568,6 +568,7 @@ fn update_settings(
     // request-log settings changed so the toggle applies without a restart.
     if patch.get("request_logs").is_some()
         || patch.get("log_retention_days").is_some()
+        || patch.get("log_max_body_bytes").is_some()
         || patch.get("stream_first_byte_secs").is_some()
         || patch.get("stream_idle_secs").is_some()
     {

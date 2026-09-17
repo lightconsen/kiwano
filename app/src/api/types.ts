@@ -576,6 +576,8 @@ export interface AppSettings {
   request_logs: boolean;
   /** Request-log retention in days (gateway prunes older rows every 6h) */
   log_retention_days: number;
+  /** Per-body capture cap in bytes; 0 stores every byte. */
+  log_max_body_bytes: number;
   /** Abandon a stream whose first byte never arrives (0 = off) */
   stream_first_byte_secs: number;
   /** Abandon a stream that goes quiet mid-answer (0 = off) */

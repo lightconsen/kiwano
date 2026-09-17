@@ -149,10 +149,10 @@ async fn main() {
         let store = state.store.clone();
         tokio::spawn(async move {
             loop {
-                let retain = store
-                    .load_log_config()
-                    .map(|c| c.retain_days)
-                    .unwrap_or_default();
+                // A config that cannot be read prunes nothing: `None` is both
+                // the "no retention set" answer and the "could not find out"
+                // one, and neither is a reason to delete anything.
+                let retain = store.load_log_config().ok().and_then(|c| c.retain_days);
                 match store.prune_request_logs(retain) {
                     Ok(n) if n > 0 => {
                         tracing::info!(pruned = n, retain_days = retain, "request logs pruned")

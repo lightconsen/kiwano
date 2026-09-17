@@ -1292,7 +1292,9 @@ fn settings_read_and_write_round_trip() {
     let (code, out, err) = run(&db, &["--home", &home_arg, "--json", "settings", "get"]);
     assert_eq!(code, 0, "{err}");
     let before: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(before["log_retention_days"], 30, "the default");
+    // 0 is "keep every row", and it is the default: capture is the point of
+    // the feature, so nothing prunes the log until someone asks it to.
+    assert_eq!(before["log_retention_days"], 0, "the default");
 
     // Values are parsed as JSON, so `false` lands as a boolean and `7` as a
     // number — that is what makes one flag serve every setting.
@@ -1308,12 +1310,15 @@ fn settings_read_and_write_round_trip() {
             "cost_alert=false",
             "--key",
             "log_retention_days=7",
+            "--key",
+            "log_max_body_bytes=1048576",
         ],
     );
     assert_eq!(code, 0, "{err}");
     let after: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(after["cost_alert"], false);
     assert_eq!(after["log_retention_days"], 7);
+    assert_eq!(after["log_max_body_bytes"], 1048576);
 
     // It persists, rather than only being echoed.
     let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "settings", "get"]);

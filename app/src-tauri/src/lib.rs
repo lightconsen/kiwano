@@ -557,12 +557,12 @@ fn update_settings(
 
 #[tauri::command(async)]
 fn detect_agents() -> Vec<detect::AgentDetectVm> {
-    detect::detect_agents()
+    detect::detect_agents(&home_dir())
 }
 
 #[tauri::command(async)]
 fn probe_agent_versions() -> Vec<detect::AgentVersionVm> {
-    detect::probe_agent_versions()
+    detect::probe_agent_versions(&home_dir())
 }
 
 #[tauri::command]

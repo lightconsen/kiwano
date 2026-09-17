@@ -421,8 +421,9 @@ pub enum AgentsCmd {
 
     /// Version strings for the installed CLI agents
     ///
-    /// Slow by construction: one `--version` subprocess per agent, each through
-    /// the login shell.
+    /// Slow by construction: one `--version` subprocess per agent. The agents
+    /// themselves are found the same way `detect` finds them — through the
+    /// user's shell on unix, and the well-known install locations everywhere.
     Versions,
 
     /// Route an agent through the local gateway, backing up its config first

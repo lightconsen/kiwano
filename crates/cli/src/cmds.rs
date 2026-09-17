@@ -660,13 +660,13 @@ pub fn agents(cmd: &AgentsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         AgentsCmd::Add { name, note } => agents_add(ctx, name, note.as_deref()),
         AgentsCmd::Remove { id } => agents_remove(ctx, id),
         AgentsCmd::Detect => {
-            let found = detect::detect_agents();
+            let found = detect::detect_agents(&ctx.home);
             let text = render_agents(&found);
             ctx.out.emit(&found, || text);
             Ok(())
         }
         AgentsCmd::Versions => {
-            let versions = detect::probe_agent_versions();
+            let versions = detect::probe_agent_versions(&ctx.home);
             let text = render_versions(&versions);
             ctx.out.emit(&versions, || text);
             Ok(())

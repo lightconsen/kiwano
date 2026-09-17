@@ -23,6 +23,17 @@ chrono = "0.4"
 tokio = { version = "1", features = ["rt", "time"] }
 tracing = "0.1"
 
+# Agent detection (detect.rs) reaches outside the process on both platforms:
+# a session of its own so a wedged probe can be killed as a group, and — on
+# Windows — the registry's PATH plus the console's code page.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+dirs = "5.0"
+winreg = "0.52"
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
+
 [dev-dependencies]
 tempfile = "3"
 serde_yaml = "0.9"

@@ -346,6 +346,37 @@ fn the_last_path_line_wins() {
     assert!(tool_paths_from_shell_env(&env).is_empty());
 }
 
+/// The shell's answer absorbs this process's environment without being
+/// overwritten by it: the shell is a supplement — a GUI misses what an rc file
+/// exports, which is why it is asked at all — and what this process has is what
+/// is left when the shell says nothing.
+#[test]
+fn a_missing_answer_comes_from_the_process_environment() {
+    const NAME: &str = "KIWANO_DETECT_TEST_VAR";
+    let _guard = EnvGuard::set(NAME, Some("/from/process"));
+
+    let mut vars = ShellVars::from([(NAME.to_string(), "/from/shell".to_string())]);
+    fill_from_process_env(&mut vars, &[NAME]);
+    assert_eq!(
+        vars.get(NAME).map(String::as_str),
+        Some("/from/shell"),
+        "the shell's answer stands"
+    );
+
+    let mut vars = ShellVars::new();
+    fill_from_process_env(&mut vars, &[NAME]);
+    assert_eq!(
+        vars.get(NAME).map(String::as_str),
+        Some("/from/process"),
+        "and the process is what answers when the shell does not"
+    );
+
+    // A name nobody set is simply absent — the callers' defaults apply.
+    let mut vars = ShellVars::new();
+    fill_from_process_env(&mut vars, &["KIWANO_DETECT_TEST_NOT_SET"]);
+    assert!(vars.is_empty());
+}
+
 // ── executable candidates ──
 
 #[cfg(not(windows))]

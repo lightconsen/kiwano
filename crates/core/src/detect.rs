@@ -61,9 +61,11 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("qwen", "qwen"),
 ];
 
-/// One pass over every tool: a single login-shell loop (unix) or a walk of the
-/// well-known directories. Long enough for a slow interactive rc file, short
-/// enough that a wedged shell cannot stall the first render.
+/// One pass over every tool, through the login shell — whose only reader is the
+/// unix half of this module, hence the cfg: the walk needs no timeout of its own.
+/// Long enough for a slow interactive rc file, short enough that a wedged shell
+/// cannot stall the first render.
+#[cfg(unix)]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Environment values as the user's own login shell has them — see
@@ -253,9 +255,28 @@ pub fn login_shell_vars(names: &[&str]) -> ShellVars {
     if names.is_empty() {
         return ShellVars::new();
     }
-    match run_login_shell("env") {
+    let mut vars = match run_login_shell("env") {
         Some(out) => parse_vars(&out, names),
         None => ShellVars::new(),
+    };
+    fill_from_process_env(&mut vars, names);
+    vars
+}
+
+/// Fill in what the shell did not answer, from this process's own environment.
+///
+/// The shell's answer is a *supplement* to it rather than a replacement: a GUI
+/// misses what an rc file exports (which is why the shell is asked at all), and a
+/// shell that cannot be spawned has nothing to say — in both cases what this
+/// process has is the answer. Doing it here, once, is what lets every reader
+/// downstream take the map as the whole environment and read no ambient state.
+fn fill_from_process_env(vars: &mut ShellVars, names: &[&str]) {
+    for name in names {
+        if !vars.contains_key(*name) {
+            if let Ok(value) = std::env::var(name) {
+                vars.insert((*name).to_string(), value);
+            }
+        }
     }
 }
 
@@ -263,8 +284,12 @@ pub fn login_shell_vars(names: &[&str]) -> ShellVars {
 /// there, so the process environment already is the user's — see
 /// [`effective_path`] for the same reasoning on PATH.
 #[cfg(not(unix))]
-pub fn login_shell_vars(_names: &[&str]) -> ShellVars {
-    ShellVars::new()
+pub fn login_shell_vars(names: &[&str]) -> ShellVars {
+    // No shell to ask, and none needed: this process's environment is the
+    // user's — the same reason [`shell_probe_all`] does not run here.
+    let mut vars = ShellVars::new();
+    fill_from_process_env(&mut vars, names);
+    vars
 }
 
 /// `NAME=value` lines from `env` output, keeping only the names asked for.
@@ -832,7 +857,7 @@ fn decode_command_output(bytes: &[u8]) -> String {
         if let Ok(text) = std::str::from_utf8(bytes) {
             return text.to_string();
         }
-        return decode_windows_command_output(bytes);
+        decode_windows_command_output(bytes)
     }
 
     #[cfg(not(windows))]

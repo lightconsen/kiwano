@@ -262,17 +262,17 @@ fn config_dir(
     }
 }
 
-/// Where `name` points, from `vars` if the shell reported it and the process
-/// environment otherwise — [`EnvDir`] is the rule itself, shared with every
-/// other reader of these values.
+/// Where `name` points, in the environment the caller handed in — [`EnvDir`] is
+/// the rule itself, shared with every other reader of these values.
+///
+/// The map is the *whole* environment here rather than a supplement to this
+/// process's: one place decides what the user's environment is
+/// ([`detect::login_shell_vars`], which folds the process's own into the shell's
+/// answer), and this module then reads no ambient state at all. That is what
+/// makes a takeover reproducible — and what keeps a runner's exported
+/// `XDG_CONFIG_HOME` from moving the paths a test is asserting on.
 fn named_dir(vars: &ShellVars, name: &str) -> EnvDir {
-    let from_shell = kiwano_adapters::config::classify_dir(vars.get(name).map(OsStr::new));
-    match from_shell {
-        // Only an unset one defers to the next source: a blank shell answer is
-        // the same as no answer, and a relative one is an answer we cannot use.
-        EnvDir::Unset => kiwano_adapters::config::env_dir(name),
-        decided => decided,
-    }
+    kiwano_adapters::config::classify_dir(vars.get(name).map(OsStr::new))
 }
 
 /// Takeover: read the original files → perform all rewrites in memory
@@ -1182,39 +1182,35 @@ mod tests {
 
     // ── where an agent keeps its files ──
 
-    /// The shell's answer beats the process environment, which is the whole
-    /// reason the variables are passed in: a GUI process inherits launchd's
-    /// environment, so it is the shell that knows about a relocated directory,
-    /// and a default (or a stale value of the app's own) must not outrank it.
+    /// The map the caller passes *is* the environment: nothing in this module
+    /// reads this process's own, so a variable exported outside the map cannot
+    /// move a path — which is what keeps a takeover reproducible, and what kept a
+    /// CI runner's exported `XDG_CONFIG_HOME` from moving the paths these tests
+    /// assert on.
     #[test]
-    fn the_shells_answer_wins_over_the_process_environment() {
+    fn only_the_environment_it_is_handed_moves_a_config_root() {
         let tmp = tempfile::tempdir().unwrap();
-        let (from_process, from_shell) = (abs_dir(&tmp, "process"), abs_dir(&tmp, "shell"));
         let home = abs_dir(&tmp, "home");
-        let _guard = EnvGuard::set("QWEN_HOME", Some(&from_process.to_string_lossy()));
-        let shell_vars = ShellVars::from([(
-            "QWEN_HOME".to_string(),
-            from_shell.to_string_lossy().into_owned(),
-        )]);
         let home = home.as_path();
+        let exported = abs_dir(&tmp, "exported");
 
-        assert_eq!(
-            takeover_paths("qwen", home, &shell_vars).unwrap(),
-            vec![from_shell.join("settings.json")]
-        );
-        // Nothing from the shell: the process environment is what is left, and
-        // only then the default.
+        // Exported by this process, absent from the map: not consulted.
+        let _guard = EnvGuard::set("QWEN_HOME", Some(&exported.to_string_lossy()));
         assert_eq!(
             takeover_paths("qwen", home, &no_vars()).unwrap(),
-            vec![from_process.join("settings.json")]
+            vec![home.join(".qwen").join("settings.json")],
+            "the ambient environment is not a second source"
         );
-        // Bound rather than dropped: the guard puts the variable back when it
-        // goes out of scope, so a bare `EnvGuard::set(…)` would undo itself on
-        // the spot.
-        let _unset = EnvGuard::set("QWEN_HOME", None);
+
+        // In the map: that is the answer.
+        let from_map = abs_dir(&tmp, "from-map");
+        let vars = ShellVars::from([(
+            "QWEN_HOME".to_string(),
+            from_map.to_string_lossy().into_owned(),
+        )]);
         assert_eq!(
-            takeover_paths("qwen", home, &no_vars()).unwrap(),
-            vec![home.join(".qwen").join("settings.json")]
+            takeover_paths("qwen", home, &vars).unwrap(),
+            vec![from_map.join("settings.json")]
         );
     }
 

@@ -16,7 +16,8 @@
 //! - [`grok_config`]: Grok TOML live-config management
 //! - [`opencode_config`]: OpenCode opencode.json management
 //! - [`gateway_takeover`]: content→content gateway-entry upserts for the
-//!   additive-mode agents (opencode/openclaw/hermes/pi) used by takeover
+//!   additive-mode agents (opencode, openclaw, hermes, pi, workbuddy,
+//!   codebuddy, kimi, qwen, cline) used by takeover
 //! - [`codex_config`]: Codex config write core (Tier C, function-level port)
 //! - [`proxy`]: protocol conversion sublayer (Tier B) — Anthropic ↔ OpenAI
 //!   request/response/SSE conversion extracted from cc-switch's proxy

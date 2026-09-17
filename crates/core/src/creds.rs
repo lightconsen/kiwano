@@ -69,6 +69,21 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
                 kiwano_adapters::gateway_takeover::read_pi_current(&models, &settings)?,
             ))
         }
+        "cline" => {
+            let content = std::fs::read_to_string(cline_providers_path(home)?).ok()?;
+            let p = kiwano_adapters::gateway_takeover::read_cline_current(&content)?;
+            // Deliberately no `name`, unlike the other additive readers: what
+            // precedes the entry is a provider *type* (`openai-compatible`),
+            // which on a row would read as a name and is not one. Leaving it
+            // out is what puts the host inference (`brand_name_for_host`) in
+            // charge of naming the import.
+            Some(CurrentCreds {
+                base_url: p.base_url,
+                api_key: p.api_key,
+                name: None,
+                protocol: "openai",
+            })
+        }
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;
@@ -186,6 +201,35 @@ fn read_additive_one(
     Some(from_additive(read(&content)?))
 }
 
+/// cline: `~/.cline/data/settings/providers.json`, under the same three levels
+/// `takeover_paths` resolves (its own `sdk/…/storage/paths.ts`): an exact file,
+/// else a data directory, else a base directory whose `data/` is the data
+/// directory.
+///
+/// The process environment is the copy a reader can see — a takeover asks the
+/// login shell instead, because a GUI process does not inherit what an rc file
+/// exports. Where the two disagree the takeover is the one that writes, so this
+/// can only under-report, never point somewhere else. None means "not
+/// determinable": a relative value is refused rather than fallen through to the
+/// default, which would be a claim about a file that is not the one in use.
+fn cline_providers_path(home: &Path) -> Option<std::path::PathBuf> {
+    use kiwano_adapters::config::{env_dir, EnvDir};
+    let data_dir = match env_dir("CLINE_PROVIDER_SETTINGS_PATH") {
+        EnvDir::Absolute(path) => return Some(path),
+        EnvDir::Relative(_) => return None,
+        EnvDir::Unset => match env_dir("CLINE_DATA_DIR") {
+            EnvDir::Absolute(dir) => dir,
+            EnvDir::Relative(_) => return None,
+            EnvDir::Unset => match env_dir("CLINE_DIR") {
+                EnvDir::Absolute(base) => base.join("data"),
+                EnvDir::Relative(_) => return None,
+                EnvDir::Unset => home.join(".cline").join("data"),
+            },
+        },
+    };
+    Some(data_dir.join("settings").join("providers.json"))
+}
+
 /// claude: settings.json env.ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN (or
 /// ANTHROPIC_API_KEY). Absent/official → None.
 fn read_claude(home: &Path) -> Option<CurrentCreds> {
@@ -286,6 +330,86 @@ mod tests {
         // Set to a relative path: no.
         let _relative = EnvGuard::set("HERMES_HOME", Some("relative/hermes"));
         assert!(read_current_creds("hermes", &home).is_none());
+    }
+
+    /// Cline's provider settings follow three variables, and a reader aimed at
+    /// the default while the config lives elsewhere reports a provider the user
+    /// is not using — the same trap the takeover's path resolution avoids.
+    #[test]
+    fn cline_reads_the_file_its_variables_point_at() {
+        use crate::test_env::EnvGuard;
+
+        let write = |dir: &Path| {
+            let path = dir.join("settings").join("providers.json");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &path,
+                r#"{"lastUsedProvider": "openai-compatible", "providers": {"openai-compatible":
+                   {"settings": {"provider": "openai-compatible", "apiKey": "sk-theirs",
+                                 "baseUrl": "https://api.deepseek.com/v1"}}}}"#,
+            )
+            .unwrap();
+        };
+
+        let home = temp_home("cline");
+        write(&home.join(".cline").join("data"));
+        let _cleared = (
+            EnvGuard::set("CLINE_PROVIDER_SETTINGS_PATH", None),
+            EnvGuard::set("CLINE_DATA_DIR", None),
+            EnvGuard::set("CLINE_DIR", None),
+        );
+
+        let creds = read_current_creds("cline", &home).expect("the default file");
+        // Cline's `baseUrl` carries the version root; a stored provider does not,
+        // because the gateway appends the protocol path itself. Importing it
+        // verbatim is what put `/v1/v1/chat/completions` on the wire.
+        assert_eq!(creds.base_url, "https://api.deepseek.com");
+        assert_eq!(creds.api_key, "sk-theirs");
+        assert_eq!(creds.protocol, "openai");
+        // The slot is named after a provider *type*, which is not a name —
+        // leaving it out is what puts the host inference in charge instead.
+        assert_eq!(creds.name, None);
+
+        // A moved data directory is where the file now is.
+        let moved = temp_home("cline-moved");
+        write(&moved);
+        {
+            let _data = EnvGuard::set("CLINE_DATA_DIR", Some(moved.to_str().unwrap()));
+            assert!(read_current_creds("cline", &home).is_some());
+        }
+        // …and a relative one names no place a reader can be sure of.
+        let _relative = EnvGuard::set("CLINE_DATA_DIR", Some("relative/cline"));
+        assert!(read_current_creds("cline", &home).is_none());
+    }
+
+    /// What a takeover leaves in the file is the gateway's own loopback
+    /// address, and importing that as an upstream would point the agent at
+    /// itself. This matters more here than for the other additive agents: the
+    /// takeover replaces the very entry the selector names, so there is no
+    /// second entry to hide behind.
+    #[test]
+    fn a_taken_over_cline_config_is_not_imported() {
+        let home = temp_home("cline-loopback");
+        let path = home
+            .join(".cline")
+            .join("data")
+            .join("settings")
+            .join("providers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"lastUsedProvider": "openai-compatible", "providers": {"openai-compatible":
+               {"settings": {"provider": "openai-compatible", "apiKey": "kw-ag-cline-abcd",
+                             "baseUrl": "http://127.0.0.1:8317/v1"}}}}"#,
+        )
+        .unwrap();
+
+        let _cleared = (
+            crate::test_env::EnvGuard::set("CLINE_PROVIDER_SETTINGS_PATH", None),
+            crate::test_env::EnvGuard::set("CLINE_DATA_DIR", None),
+            crate::test_env::EnvGuard::set("CLINE_DIR", None),
+        );
+        assert!(read_current_creds("cline", &home).is_none());
     }
 
     #[test]

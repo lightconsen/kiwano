@@ -91,6 +91,7 @@ const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[] = [
   { id: "codebuddy", icon: "codebuddy" },
   { id: "kimi", icon: "kimi" },
   { id: "qwen", icon: "qwen" },
+  { id: "cline", icon: "cline" },
 ];
 
 // Agent labels are brand names and stay as they are; only the "all" segment
@@ -2651,9 +2652,12 @@ export default function Providers({
               >
                 {s.icon ? (
                   <ProviderLogo icon={s.icon} name={label} size={15} />
-                ) : s.id !== "all" && !AGENTS.some((a) => a.id === s.id) ? (
-                  // A user-defined agent has no brand mark to port: its own
-                  // letter, in the colour the resolver derived for it.
+                ) : s.id !== "all" ? (
+                  // Any agent with no mark to port — a user-defined route, or a
+                  // built-in whose logo has not been supplied — reads as its own
+                  // letter, in the colour the resolver derived for it. The rule
+                  // used to be "a built-in always has a mark", which stopped
+                  // being true the moment one arrived without.
                   <ProviderLogo
                     char={agentMeta(s.id).chip_char}
                     color={agentMeta(s.id).chip_color}

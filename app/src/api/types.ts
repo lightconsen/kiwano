@@ -21,7 +21,8 @@ export type AgentId =
   | "workbuddy"
   | "codebuddy"
   | "kimi"
-  | "qwen";
+  | "qwen"
+  | "cline";
 /** An agent id as it travels through routes, bindings, usage and logs: a
     built-in's, or one the user defined. The closed `AgentId` above stays the
     type wherever the thing being named is a *built-in* — the takeover switch,
@@ -89,6 +90,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "codebuddy", label: "CodeBuddy Code", chip_char: "B", chip_color: "#0EA5E9" },
   { id: "kimi", label: "Kimi Code CLI", chip_char: "K", chip_color: "#1783FF" },
   { id: "qwen", label: "Qwen Code", chip_char: "Q", chip_color: "#615CED" },
+  { id: "cline", label: "Cline", chip_char: "C", chip_color: "#1C1C24", chip_border: true },
 ];
 
 export interface ProviderHealth {

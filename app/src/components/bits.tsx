@@ -18,6 +18,7 @@ export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   codebuddy: "codebuddy",
   kimi: "kimi",
   qwen: "qwen",
+  cline: "cline",
 };
 
 export function Logo({

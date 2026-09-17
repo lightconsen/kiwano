@@ -36,6 +36,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   claudecode: { name: "claudecode", displayName: "Claude Code", defaultColor: "#D97757" },
   "cherryin": { name: "cherryin", displayName: "CherryIN", defaultColor: "#FB6354" },
   "claudeapi": { name: "claudeapi", displayName: "ClaudeAPI", defaultColor: "#F38020" },
+  "cline": { name: "cline", displayName: "Cline", defaultColor: "currentColor" },
   "code0": { name: "code0", displayName: "Code0", defaultColor: "#20C050" },
   "cohere": { name: "cohere", displayName: "Cohere", defaultColor: "#39594D" },
   "copilot": { name: "copilot", displayName: "copilot", defaultColor: "currentColor" },

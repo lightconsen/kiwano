@@ -926,6 +926,7 @@ const settings: AppSettings = {
     { agent: "codebuddy", label: "CodeBuddy Code", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.codebuddy/models.json"] },
     { agent: "kimi", label: "Kimi Code CLI", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.kimi/config.toml"] },
     { agent: "qwen", label: "Qwen Code", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.qwen/settings.json"] },
+    { agent: "cline", label: "Cline", placeholder_key: null, enabled: false, additive: false, protocols: ["openai"], config_paths: ["~/.cline/data/settings/providers.json"] },
   ],
   // Two user-defined agents, so `pnpm dev` can show the whole feature: a route
   // with candidates, and one that is still empty (the state the tab's bind slot
@@ -2167,6 +2168,7 @@ export const devApi: KiwanoApi = {
       { agent: "openclaw", version: "0.23.1" },
       { agent: "hermes", version: "0.8.2" },
       { agent: "pi", version: "0.5.12" },
+      { agent: "cline", version: "3.0.62" },
       ...declared,
     ];
   },

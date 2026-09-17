@@ -209,6 +209,45 @@ pub(crate) fn takeover_paths(
             let legacy = config_dir(vars, "KIMI_SHARE_DIR", ".kimi", home)?.join("config.toml");
             Ok(vec![if legacy.exists() { legacy } else { successor }])
         }
+        // Cline resolves this one file through a three-level chain (read from
+        // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
+        // not spell out): an exact file path, else a data directory, else a base
+        // directory whose `data/` is the data directory. Each level is honored
+        // because each one moves the file a takeover has to write.
+        //
+        // The first level names a *file*, so `config_dir` (a directory by
+        // construction) cannot express it — and it is resolved here rather than
+        // with a bespoke directory lookup for that reason.
+        "cline" => match named_dir(vars, "CLINE_PROVIDER_SETTINGS_PATH") {
+            EnvDir::Absolute(path) => Ok(vec![path]),
+            EnvDir::Relative(raw) => Err(relative_env_refusal(
+                "CLINE_PROVIDER_SETTINGS_PATH",
+                &raw,
+                &home
+                    .join(".cline")
+                    .join("data")
+                    .join("settings")
+                    .join("providers.json"),
+            )),
+            EnvDir::Unset => {
+                // CLINE_DATA_DIR names the data directory itself and beats
+                // CLINE_DIR; only when it is unset does the base come into it,
+                // with `data` under it — which is also what the base defaults
+                // to, so an empty environment lands on `~/.cline/data`.
+                let data = match named_dir(vars, "CLINE_DATA_DIR") {
+                    EnvDir::Absolute(dir) => dir,
+                    EnvDir::Relative(raw) => {
+                        return Err(relative_env_refusal(
+                            "CLINE_DATA_DIR",
+                            &raw,
+                            &home.join(".cline").join("data"),
+                        ))
+                    }
+                    EnvDir::Unset => config_dir(vars, "CLINE_DIR", ".cline", home)?.join("data"),
+                };
+                Ok(vec![data.join("settings").join("providers.json")])
+            }
+        },
         other => Err(format!("unknown agent: {other}")),
     }
 }
@@ -227,6 +266,9 @@ pub const CONFIG_DIR_VARS: &[&str] = &[
     "QWEN_HOME",
     "KIMI_CODE_HOME",
     "KIMI_SHARE_DIR",
+    "CLINE_PROVIDER_SETTINGS_PATH",
+    "CLINE_DATA_DIR",
+    "CLINE_DIR",
 ];
 
 /// The config root an agent resolves for itself: the environment variable that
@@ -252,14 +294,22 @@ fn config_dir(
     match named_dir(vars, env_var) {
         EnvDir::Unset => Ok(home.join(default_dir)),
         EnvDir::Absolute(path) => Ok(path),
-        EnvDir::Relative(raw) => Err(format!(
-            "{env_var} is set to `{raw}` — not an absolute path. A tool resolves a relative \
-             one against the directory it happens to be run in, so where its config lives is \
-             not something Kiwano can know. Set {env_var} to an absolute path, or unset it to \
-             use {}.",
-            home.join(default_dir).display()
-        )),
+        EnvDir::Relative(raw) => Err(relative_env_refusal(env_var, &raw, &home.join(default_dir))),
     }
+}
+
+/// Why a *set* variable that cannot be used is refused rather than ignored, and
+/// the same sentence [`config_dir`] and the readers that name a file instead of
+/// a directory ([`takeover_paths`]'s Cline arm) both give. `default` is what
+/// unsetting the variable would have meant, so the message can name it.
+fn relative_env_refusal(env_var: &str, raw: &str, default: &Path) -> String {
+    format!(
+        "{env_var} is set to `{raw}` — not an absolute path. A tool resolves a relative \
+         one against the directory it happens to be run in, so where its config lives is \
+         not something Kiwano can know. Set {env_var} to an absolute path, or unset it to \
+         use {}.",
+        default.display()
+    )
 }
 
 /// Where `name` points, in the environment the caller handed in — [`EnvDir`] is
@@ -385,6 +435,10 @@ fn compute_rewrites(
         return codex_rewrites(originals, placeholder_key, data_port);
     }
     let target = gateway_target(agent, data_port);
+    // One timestamp for the whole run: Cline's provider settings carry an
+    // `updatedAt` the file's schema requires, and two files of one takeover
+    // disagreeing about when it happened would be a detail with no meaning.
+    let now = crate::vm::rfc3339(crate::vm::unix_now());
     originals
         .iter()
         .map(|original| {
@@ -396,6 +450,7 @@ fn compute_rewrites(
                     &original.content,
                     &target,
                     placeholder_key,
+                    &now,
                 )?,
             ))
         })
@@ -410,6 +465,10 @@ fn gateway_target(agent: &str, data_port: u16) -> String {
         "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
         // Kimi and Qwen want the version root; their clients append the route.
         "kimi" | "qwen" => "/v1",
+        // Cline's `openai-compatible` provider is handed to the OpenAI client
+        // as-is — `/v1` included, trailing slashes trimmed, nothing appended —
+        // so the version root is what its `baseUrl` holds.
+        "cline" => "/v1",
         // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
         // append nothing, so the route has to be in the URL we write.
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
@@ -741,6 +800,7 @@ fn rebuild_from_provider(
                 &current,
                 &route.base_url,
                 &route.api_key,
+                &crate::vm::rfc3339(crate::vm::unix_now()),
             )?
         };
         atomic_write_private(&path, content.as_bytes())?;
@@ -904,15 +964,18 @@ fn value_is_ours(value: &str, agent: &str) -> bool {
 
 /// One file's rewritten content. `target` is the full URL the agent's base_url
 /// should hold — the gateway (with the agent's own path suffix) during a
-/// takeover, or a provider's own endpoint during a rebuild. Codex never comes
-/// through here: its two files are transformed together by
-/// [`codex_rewrites`] onto the ported gate module.
+/// takeover, or a provider's own endpoint during a rebuild. `now` is only read
+/// by the agents whose config records when it was written (Cline's
+/// `updatedAt`); the rest ignore it. Codex never comes through here: its two
+/// files are transformed together by [`codex_rewrites`] onto the ported gate
+/// module.
 fn rewrite(
     agent: &str,
     path: &str,
     original: &str,
     target: &str,
     key: &str,
+    now: &str,
 ) -> Result<String, String> {
     match agent {
         "claude" => rewrite_claude(original, target, key),
@@ -970,6 +1033,12 @@ fn rewrite(
                 key,
                 provider_type,
             )
+        }
+        // Cline keeps one entry per provider slot and selects by provider id,
+        // so the takeover replaces the slot its own custom-endpoint option
+        // writes to rather than adding one beside it (see the adapter).
+        "cline" => {
+            kiwano_adapters::gateway_takeover::upsert_cline_gateway(original, target, key, now)
         }
         _ => Err("unsupported agent".into()),
     }
@@ -2179,6 +2248,147 @@ base_url = "https://relay.example.com/v1"
                 "{agent}: a file the takeover created must not survive disable"
             );
         }
+    }
+
+    /// Cline resolves its provider settings through three levels (its own
+    /// `sdk/…/storage/paths.ts`), and each one has to be honored: a level this
+    /// ignored is a takeover written where the tool does not read.
+    #[test]
+    fn cline_paths_follow_its_three_level_chain() {
+        let _guards = (
+            EnvGuard::set("CLINE_PROVIDER_SETTINGS_PATH", None),
+            EnvGuard::set("CLINE_DATA_DIR", None),
+            EnvGuard::set("CLINE_DIR", None),
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let home = abs_dir(&tmp, "home");
+        let home = home.as_path();
+        let suffix = Path::new("settings").join("providers.json");
+
+        // Nobody said otherwise: the base is `~/.cline`, and the data directory
+        // is the `data` under it.
+        assert_eq!(
+            takeover_paths("cline", home, &no_vars()).unwrap(),
+            vec![home.join(".cline").join("data").join(&suffix)]
+        );
+
+        let base = abs_dir(&tmp, "base");
+        let vars =
+            ShellVars::from([("CLINE_DIR".to_string(), base.to_string_lossy().into_owned())]);
+        assert_eq!(
+            takeover_paths("cline", home, &vars).unwrap(),
+            vec![base.join("data").join(&suffix)]
+        );
+
+        // CLINE_DATA_DIR moves the data directory itself and beats the base
+        // when both are set — the order Cline resolves them in.
+        let data = abs_dir(&tmp, "data");
+        let vars = ShellVars::from([
+            ("CLINE_DIR".to_string(), base.to_string_lossy().into_owned()),
+            (
+                "CLINE_DATA_DIR".to_string(),
+                data.to_string_lossy().into_owned(),
+            ),
+        ]);
+        assert_eq!(
+            takeover_paths("cline", home, &vars).unwrap(),
+            vec![data.join(&suffix)]
+        );
+
+        // The exact file wins over both, and it is a *file* rather than a
+        // directory — the one level `config_dir` cannot express.
+        let file = abs_dir(&tmp, "elsewhere").join("providers.json");
+        let vars = ShellVars::from([
+            (
+                "CLINE_DATA_DIR".to_string(),
+                data.to_string_lossy().into_owned(),
+            ),
+            (
+                "CLINE_PROVIDER_SETTINGS_PATH".to_string(),
+                file.to_string_lossy().into_owned(),
+            ),
+        ]);
+        assert_eq!(takeover_paths("cline", home, &vars).unwrap(), vec![file]);
+
+        // A relative value is refused rather than fallen through to the
+        // default: the default is right when nobody said otherwise, and a guess
+        // when somebody did.
+        let vars = ShellVars::from([(
+            "CLINE_PROVIDER_SETTINGS_PATH".to_string(),
+            "rel/providers.json".to_string(),
+        )]);
+        let err = takeover_paths("cline", home, &vars).unwrap_err();
+        assert!(
+            err.contains("CLINE_PROVIDER_SETTINGS_PATH is set to `rel/providers.json`"),
+            "{err}"
+        );
+    }
+
+    /// Cline selects a provider slot by provider id, so a takeover replaces the
+    /// slot its selector names — the user's other slots stay — and disabling
+    /// puts the original bytes back.
+    #[test]
+    fn cline_takeover_roundtrip_replaces_the_selected_slot() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let path = home
+            .join(".cline")
+            .join("data")
+            .join("settings")
+            .join("providers.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = r#"{
+  "version": 1,
+  "lastUsedProvider": "openai-compatible",
+  "modes": {},
+  "providers": {
+    "openai-compatible": {
+      "settings": { "provider": "openai-compatible", "apiKey": "sk-theirs",
+                    "baseUrl": "https://api.deepseek.com/v1", "model": "deepseek-v3" },
+      "updatedAt": "2026-09-01T00:00:00Z",
+      "tokenSource": "manual"
+    }
+  }
+}"#;
+        std::fs::write(&path, original).unwrap();
+
+        enable(&aux, "cline", "kw-ag-cline-abcd", 8317, &home, &no_vars()).unwrap();
+
+        let settings = &serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap())
+            .unwrap()["providers"]["openai-compatible"]["settings"];
+        assert_eq!(settings["baseUrl"], "http://127.0.0.1:8317/v1");
+        assert_eq!(settings["apiKey"], "kw-ag-cline-abcd");
+        assert_eq!(
+            settings["model"], "deepseek-v3",
+            "the model id goes upstream verbatim, so the takeover keeps it"
+        );
+        // The live file is what tells a second enable not to record this as the
+        // user's original.
+        assert_eq!(
+            live_placeholder_key("cline", &home, &no_vars()).as_deref(),
+            Some("kw-ag-cline-abcd")
+        );
+
+        restore(&aux, "cline", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(aux.load_takeover_backup("cline").is_none());
+    }
+
+    /// Unlike the additive agents, a missing config is refused: there is no
+    /// slot to replace, and the file is where the user's own endpoint lives.
+    #[test]
+    fn cline_takeover_refuses_a_missing_config() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+
+        let err = enable(&aux, "cline", "kw-ag-cline-abcd", 8317, &home, &no_vars()).unwrap_err();
+        assert!(
+            err.contains("not found — run cline at least once before takeover"),
+            "{err}"
+        );
+
+        let report = restore(&aux, "cline", &home).unwrap();
+        assert_eq!(report.outcome, RestoreOutcome::NotTakenOver);
     }
 
     #[test]

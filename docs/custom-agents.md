@@ -280,6 +280,12 @@ agent 级限额、策略模板（预置「coding plan 优先」「夜间便宜�
 | codebuddy | openai | 同上 |
 | kimi | openai | `providers[].type = "openai"` |
 | qwen | openai | `modelProviders.openai` + `security.auth.selectedType = "openai"` |
+| cline | openai | `~/.cline/data/settings/providers.json`：`settings.provider = "openai-compatible"` + 它自己的 `baseUrl` |
+
+**Cline 指的是 Cline CLI，不是 VS Code 扩展。** 扩展的配置在 VS Code 的 globalStorage
+（`saoudrizwan.claude-dev/state.vscdb`）与操作系统 keychain 里，那份状态还在迁移中 —— 不是能安全
+备份、改写、还原的东西，所以扩展只能按 §1 的自定义 agent 手接（Endpoint + key 自己填）。CLI 有
+`~/.cline/` 下的磁盘配置，才落进接管体系。
 
 `pi` 与 `qwen` 两行**按 `openai` 定**（2026-09-17）。它们的依据只有「Kiwano 接管时写什么」这一条，
 没有独立核实过它们除此之外还接受什么 —— 尤其是 `qwen` 是 gemini-cli 的 fork，原生协议很可能

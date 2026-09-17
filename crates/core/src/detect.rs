@@ -59,6 +59,7 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("codebuddy", "codebuddy"),
     ("kimi", "kimi"),
     ("qwen", "qwen"),
+    ("cline", "cline"),
 ];
 
 /// One pass over every tool, through the login shell — whose only reader is the

@@ -48,11 +48,15 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
             kiwano_adapters::gateway_takeover::read_openclaw_current(c)
         }),
         "hermes" => {
-            let dir = std::env::var_os("HERMES_HOME")
-                .map(|v| v.to_string_lossy().trim().to_string())
-                .filter(|v| !v.is_empty())
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| home.join(".hermes"));
+            // A variable that names no one place is not a license to read the
+            // default: that file is not what hermes would read either, and
+            // reporting its provider would be a claim about a configuration
+            // that is not in use. Nothing extractable is the honest answer.
+            let dir = match kiwano_adapters::config::env_dir("HERMES_HOME") {
+                kiwano_adapters::config::EnvDir::Absolute(dir) => dir,
+                kiwano_adapters::config::EnvDir::Unset => home.join(".hermes"),
+                kiwano_adapters::config::EnvDir::Relative(_) => return None,
+            };
             read_additive_one(dir.join("config.yaml"), |c| {
                 kiwano_adapters::gateway_takeover::read_hermes_current(c)
             })
@@ -255,6 +259,33 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// A relative `HERMES_HOME` names no one place, and the default directory is
+    /// not what hermes would read either — so the honest answer is that nothing
+    /// is extractable, rather than a provider read out of a config nobody is
+    /// using.
+    #[test]
+    fn a_relative_hermes_home_extracts_nothing() {
+        use crate::test_env::EnvGuard;
+
+        let home = temp_home("hermes-relative");
+        let config = home.join(".hermes").join("config.yaml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        // `custom_providers` is a *list* whose entries are matched by `name`.
+        std::fs::write(
+            &config,
+            "model:\n  provider: custom\ncustom_providers:\n  - name: custom\n    base_url: https://api.example.com\n    api_key: sk-x\n",
+        )
+        .unwrap();
+
+        // Unset: the default directory is read, and its provider comes back.
+        let _unset = EnvGuard::set("HERMES_HOME", None);
+        assert!(read_current_creds("hermes", &home).is_some());
+
+        // Set to a relative path: no.
+        let _relative = EnvGuard::set("HERMES_HOME", Some("relative/hermes"));
+        assert!(read_current_creds("hermes", &home).is_none());
     }
 
     #[test]

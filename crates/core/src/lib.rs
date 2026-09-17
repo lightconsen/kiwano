@@ -30,6 +30,8 @@ pub mod share;
 pub mod sidecar;
 pub mod sync;
 pub mod takeover;
+#[cfg(test)]
+mod test_env;
 pub mod vm;
 
 /// Run a future to completion, for callers that are not async themselves.

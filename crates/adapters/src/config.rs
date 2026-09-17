@@ -13,6 +13,62 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::error::AppError;
 
+/// A directory named by an environment variable, classified by what it can
+/// mean. One rule, in one place, because the readers of these values are spread
+/// across crates and a second copy of the rule is a second answer.
+///
+/// The distinction that matters is between the first two variants and the third:
+/// unset and blank are the same answer — nobody said otherwise — while a relative
+/// value is somebody saying something we cannot act on. It is resolved by
+/// whoever reads it against *their* working directory, and for a tool that is
+/// wherever the user happened to run it. Resolving one against our own working
+/// directory instead would be a confident guess at a file that, at best,
+/// coincidentally shares a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvDir {
+    /// Not set, or set to blank: the caller's default is the answer.
+    Unset,
+    /// An absolute path. This is the directory.
+    Absolute(PathBuf),
+    /// Set, but not to a path that names one place.
+    Relative(String),
+}
+
+impl EnvDir {
+    /// The directory, when there is one to use. `Unset` is not one — the caller
+    /// has a default to apply first — so this is for the callers whose default
+    /// is "nothing".
+    pub fn absolute(self) -> Option<PathBuf> {
+        match self {
+            EnvDir::Absolute(path) => Some(path),
+            _ => None,
+        }
+    }
+}
+
+/// [`classify_dir`] for a variable of this process.
+pub fn env_dir(name: &str) -> EnvDir {
+    classify_dir(std::env::var_os(name).as_deref())
+}
+
+/// Classify a variable's value as a directory.
+pub fn classify_dir(value: Option<&std::ffi::OsStr>) -> EnvDir {
+    let Some(value) = value else {
+        return EnvDir::Unset;
+    };
+    let trimmed = value.to_string_lossy();
+    let trimmed = trimmed.trim();
+    if trimmed.is_empty() {
+        return EnvDir::Unset;
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        EnvDir::Absolute(path)
+    } else {
+        EnvDir::Relative(trimmed.to_string())
+    }
+}
+
 /// Get the user's home directory, with a fallback and logging.
 ///
 /// ## Windows notes
@@ -523,6 +579,35 @@ fn atomic_write_with_unix_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three answers, and the one that is not a path: unset and blank are
+    /// the caller's default, an absolute value is the directory, and a relative
+    /// one is reported as such rather than joined onto our working directory.
+    #[test]
+    fn a_directory_from_the_environment_is_classified() {
+        use std::ffi::OsStr;
+
+        assert_eq!(classify_dir(None), EnvDir::Unset);
+        assert_eq!(classify_dir(Some(OsStr::new(""))), EnvDir::Unset);
+        assert_eq!(classify_dir(Some(OsStr::new("   "))), EnvDir::Unset);
+        assert_eq!(
+            classify_dir(Some(OsStr::new(" /srv/tools "))),
+            EnvDir::Absolute(PathBuf::from("/srv/tools")),
+            "padding is not part of a path"
+        );
+        assert_eq!(
+            classify_dir(Some(OsStr::new("tools/bin"))),
+            EnvDir::Relative("tools/bin".to_string())
+        );
+
+        // And the same thing with the next source left out of it.
+        assert_eq!(EnvDir::Unset.absolute(), None);
+        assert_eq!(EnvDir::Relative("x".into()).absolute(), None);
+        assert_eq!(
+            EnvDir::Absolute(PathBuf::from("/srv")).absolute(),
+            Some(PathBuf::from("/srv"))
+        );
+    }
 
     fn assert_atomic_write_replaces_existing_file(dir: &Path) {
         let path = dir.join("atomic-write-contract.json");

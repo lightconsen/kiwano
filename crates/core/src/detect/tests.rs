@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::test_env::EnvGuard;
+
 /// A walk that sees only `home` and no environment variables.
 fn bare_env(home: &Path) -> SearchEnv {
     SearchEnv {
@@ -545,4 +547,24 @@ fn workbuddy_is_marked_by_its_config_root() {
     // The app bundle may also be present on this machine, which is why the
     // "before" state is read rather than assumed.
     let _ = installed_before;
+}
+
+/// A relative override names a directory under *our* working directory, not the
+/// app's, so it is not evidence of anything — the default root is what gets
+/// checked instead.
+#[test]
+fn a_relative_workbuddy_override_marks_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    // Something with the right shape, reachable only if the relative value is
+    // taken at face value.
+    std::fs::create_dir_all(tmp.path().join("relative")).unwrap();
+
+    let _guard = EnvGuard::set("WORKBUDDY_CONFIG_DIR", Some("relative"));
+    assert_eq!(
+        workbuddy_installed(&home),
+        std::path::Path::new("/Applications/WorkBuddy.app").exists(),
+        "only the bundle can still speak for it"
+    );
 }

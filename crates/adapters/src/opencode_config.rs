@@ -73,15 +73,23 @@ pub fn get_opencode_config_path() -> PathBuf {
 /// Get the OpenCode SQLite database path.
 /// Priority: OPENCODE_DB env var > XDG_DATA_HOME > ~/.local/share/opencode
 pub fn get_opencode_db_path() -> PathBuf {
-    // Support the OPENCODE_DB env var override (empty string ignored)
-    if let Ok(custom_path) = std::env::var("OPENCODE_DB") {
-        if !custom_path.is_empty() {
-            let path = PathBuf::from(&custom_path);
-            if path.is_absolute() {
-                return path;
+    // Support the OPENCODE_DB env var override. Its own reader is the rule here,
+    // read from the source: `:memory:` and absolute paths are used as they
+    // stand, and a relative one is joined onto the data directory — not onto the
+    // working directory, which is what a bare relative path would mean to us.
+    let override_db = std::env::var("OPENCODE_DB").unwrap_or_default();
+    if override_db == ":memory:" {
+        // No file at all: an in-memory database. The path that would be returned
+        // is never read from disk.
+        return PathBuf::from(override_db);
+    }
+    if !override_db.is_empty() {
+        match crate::config::classify_dir(Some(std::ffi::OsStr::new(&override_db))) {
+            crate::config::EnvDir::Absolute(path) => return path,
+            crate::config::EnvDir::Relative(relative) => {
+                return get_opencode_data_dir().join(relative);
             }
-            // Relative paths resolve against the data directory
-            return get_opencode_data_dir().join(path);
+            crate::config::EnvDir::Unset => {}
         }
     }
 
@@ -89,11 +97,15 @@ pub fn get_opencode_db_path() -> PathBuf {
 }
 
 fn get_opencode_data_dir() -> PathBuf {
-    // Honor XDG_DATA_HOME (per the XDG spec, an empty string counts as unset)
-    if let Ok(xdg_data) = std::env::var("XDG_DATA_HOME") {
-        if !xdg_data.is_empty() {
-            return PathBuf::from(xdg_data).join("opencode");
-        }
+    // Honor XDG_DATA_HOME (per the XDG spec, an empty string counts as unset).
+    // A *relative* one is not honored: OpenCode's own reader takes the value as
+    // it stands, so it would name a directory under whatever directory the tool
+    // was run in — not under this process's, which is the one a bare relative
+    // path would quietly resolve to here.
+    if let crate::config::EnvDir::Absolute(base) =
+        crate::config::classify_dir(std::env::var_os("XDG_DATA_HOME").as_deref())
+    {
+        return base.join("opencode");
     }
 
     // OpenCode uses xdg-basedir and ignores macOS/Windows platform conventions,

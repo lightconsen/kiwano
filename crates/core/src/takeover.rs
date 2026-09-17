@@ -47,11 +47,14 @@
 //! success it did not achieve — a restore that could not give the original
 //! config back says so.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use kiwano_adapters::codex_config;
 use kiwano_adapters::config::atomic_write_private;
 use serde_json::Value;
+
+use kiwano_adapters::config::EnvDir;
 
 use crate::detect::ShellVars;
 use crate::vm::Aux;
@@ -247,9 +250,9 @@ fn config_dir(
     home: &Path,
 ) -> Result<PathBuf, String> {
     match named_dir(vars, env_var) {
-        NamedDir::Unset => Ok(home.join(default_dir)),
-        NamedDir::Absolute(path) => Ok(path),
-        NamedDir::Unusable(raw) => Err(format!(
+        EnvDir::Unset => Ok(home.join(default_dir)),
+        EnvDir::Absolute(path) => Ok(path),
+        EnvDir::Relative(raw) => Err(format!(
             "{env_var} is set to `{raw}` — not an absolute path. A tool resolves a relative \
              one against the directory it happens to be run in, so where its config lives is \
              not something Kiwano can know. Set {env_var} to an absolute path, or unset it to \
@@ -259,39 +262,16 @@ fn config_dir(
     }
 }
 
-/// What the environment says about a directory a tool keeps its files in.
-enum NamedDir {
-    /// Nobody said otherwise: the tool's own default is the answer.
-    Unset,
-    Absolute(PathBuf),
-    /// Set, but not to a path that names one place.
-    Unusable(String),
-}
-
 /// Where `name` points, from `vars` if the shell reported it and the process
-/// environment otherwise.
-///
-/// A blank value counts as unset — an accidental `export NAME=` is not an
-/// instruction, and the tools read it the same way. A *relative* one does not:
-/// there is no single directory it names, so it is reported as what it is rather
-/// than resolved against whatever directory this process happens to be in.
-fn named_dir(vars: &ShellVars, name: &str) -> NamedDir {
-    let value = vars
-        .get(name)
-        .cloned()
-        .or_else(|| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned()));
-    let Some(value) = value else {
-        return NamedDir::Unset;
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return NamedDir::Unset;
-    }
-    let path = PathBuf::from(trimmed);
-    if path.is_absolute() {
-        NamedDir::Absolute(path)
-    } else {
-        NamedDir::Unusable(trimmed.to_string())
+/// environment otherwise — [`EnvDir`] is the rule itself, shared with every
+/// other reader of these values.
+fn named_dir(vars: &ShellVars, name: &str) -> EnvDir {
+    let from_shell = kiwano_adapters::config::classify_dir(vars.get(name).map(OsStr::new));
+    match from_shell {
+        // Only an unset one defers to the next source: a blank shell answer is
+        // the same as no answer, and a relative one is an answer we cannot use.
+        EnvDir::Unset => kiwano_adapters::config::env_dir(name),
+        decided => decided,
     }
 }
 
@@ -1191,41 +1171,13 @@ fn copy_files(agent: &str, home: &Path, files: &[BackupFile]) {
 mod tests {
     use super::*;
 
+    use crate::test_env::EnvGuard;
+
     /// The tests run with no shell environment: a takeover here is rooted at the
     /// temp home the test injected, which is the whole point of injecting it.
     /// The variables are covered on their own in `config_dir`'s tests.
     fn no_vars() -> ShellVars {
         ShellVars::new()
-    }
-
-    /// One variable set for the duration of a test, put back afterwards. The
-    /// process environment is shared by every test in this binary, so tests
-    /// that need it touch one name and restore it — and the directory tests
-    /// below read it on purpose, since it is the fallback the shell's answer
-    /// has to win over.
-    struct EnvGuard {
-        name: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(name: &'static str, value: Option<&str>) -> Self {
-            let previous = std::env::var_os(name);
-            match value {
-                Some(v) => std::env::set_var(name, v),
-                None => std::env::remove_var(name),
-            }
-            EnvGuard { name, previous }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(v) => std::env::set_var(self.name, v),
-                None => std::env::remove_var(self.name),
-            }
-        }
     }
 
     // ── where an agent keeps its files ──

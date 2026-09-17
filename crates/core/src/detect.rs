@@ -403,16 +403,14 @@ impl SearchEnv {
 
     /// A variable's value as a directory to search, or nothing.
     ///
-    /// Nothing covers unset — and *relative*, which is the case worth stating:
-    /// the tool that reads such a variable resolves it against the directory it
-    /// is run from, so there is no one directory it names, and searching our own
-    /// working directory for it could only ever find a file that happens to
-    /// share the name. See `takeover::named_dir` for the same rule where the
-    /// answer feeds a write.
+    /// `Unset` is nothing because there is no default to apply here — the walk
+    /// has its own list of directories — and `Relative` is nothing because
+    /// searching our own working directory for it could only ever find a file
+    /// that happens to share the name. The rule itself is
+    /// `kiwano_adapters::config::classify_dir`, shared with the writes
+    /// (`takeover::named_dir`) so the two cannot disagree about a value.
     fn var_str(&self, name: &str) -> Option<PathBuf> {
-        (self.var)(name)
-            .map(PathBuf::from)
-            .filter(|p| !p.as_os_str().is_empty() && p.is_absolute())
+        kiwano_adapters::config::classify_dir((self.var)(name).as_deref()).absolute()
     }
 }
 
@@ -1045,9 +1043,11 @@ fn claude_desktop_installed(_home: &Path) -> bool {
 /// takeover writes through (`takeover::config_dir`); reading `$HOME` here would
 /// make the two disagree about where the app's files are.
 fn workbuddy_installed(home: &Path) -> bool {
-    let config_dir = std::env::var_os("WORKBUDDY_CONFIG_DIR")
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
+    // A relative override is not resolved: it would name a directory under
+    // *our* working directory, and reporting an installation because of a file
+    // there would be a claim about a place the app never reads.
+    let config_dir = kiwano_adapters::config::env_dir("WORKBUDDY_CONFIG_DIR")
+        .absolute()
         .unwrap_or_else(|| home.join(".workbuddy"));
     if config_dir.is_dir() {
         return true;

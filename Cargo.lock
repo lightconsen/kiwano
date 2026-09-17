@@ -2546,6 +2546,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "kiwano-adapters",
+ "log",
  "reqwest",
  "rusqlite",
  "serde",

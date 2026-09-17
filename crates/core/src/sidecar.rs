@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 
+use kiwano_adapters::config::DbPath;
 use kiwanod::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
 use kiwanod::store::Store;
 use serde::Serialize;
@@ -98,23 +99,21 @@ pub fn spawn() -> std::io::Result<Child> {
     })
 }
 
-/// The SQLite file this app and the gateway share. Resolution matches the
-/// gateway's `db_path_from_env` and the CLI's `--db` default: `KIWANO_DB_PATH`,
-/// else `~/.kiwano/kiwano.db`. The app sets no environment for the child, so
-/// the spawned gateway inherits `KIWANO_DB_PATH` and the two agree by
-/// construction.
-pub fn default_db_path() -> PathBuf {
-    kiwano_adapters::config::kiwano_db_path()
-}
-
-/// [`default_db_path`], unless the caller named one.
+/// The SQLite file this app and the gateway share: the caller's own path when it
+/// named one, else `KIWANO_DB_PATH`, else `~/.kiwano/kiwano.db`.
 ///
 /// The CLI takes `--db`, the app does not; both then agree on the fallback
-/// because it is resolved here rather than in either front end.
-pub fn db_path(explicit: Option<&Path>) -> PathBuf {
+/// because it is resolved here rather than in either front end. An explicit path
+/// is taken as typed — the user wrote it in this invocation, where a relative
+/// path means exactly what it says — while the environment's answer comes back
+/// with whatever it had to ignore (see [`kiwano_adapters::config::DbPath`]).
+pub fn db_path(explicit: Option<&Path>) -> DbPath {
     match explicit {
-        Some(p) => p.to_path_buf(),
-        None => default_db_path(),
+        Some(p) => DbPath {
+            path: p.to_path_buf(),
+            ignored: None,
+        },
+        None => kiwano_adapters::config::kiwano_db_path(),
     }
 }
 
@@ -126,7 +125,7 @@ pub fn db_path(explicit: Option<&Path>) -> PathBuf {
 /// process's environment and derives the same default from the same file
 /// location.
 pub fn admin_endpoint() -> AdminEndpoint {
-    admin_endpoint_for(&default_db_path())
+    admin_endpoint_for(&db_path(None).path)
 }
 
 /// [`admin_endpoint`] for an explicit database path.
@@ -168,7 +167,7 @@ fn admin_token() -> Option<String> {
     if let Some(token) = CACHED.get() {
         return Some(token.clone());
     }
-    let token = admin_token_for(&default_db_path())?;
+    let token = admin_token_for(&db_path(None).path)?;
     let _ = CACHED.set(token.clone());
     Some(token)
 }

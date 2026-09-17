@@ -80,3 +80,34 @@ pub fn init(db_path: &Path) -> Option<PathBuf> {
 
     Some(dir)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `log` facade is what the adapter crate logs through, and a record
+    /// emitted there has to reach the same file as a `tracing` one — otherwise
+    /// "the home directory could not be determined" and the rest of what the
+    /// adapters say are written nowhere at all.
+    #[test]
+    fn a_log_record_reaches_the_shared_file() {
+        let dir = std::env::temp_dir().join(format!("kiwano-log-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let logs = init(&dir.join("kiwano.db")).expect("the log directory is writable");
+        log::warn!("a line from the adapters");
+
+        // The daily appender writes `kiwano.log.<date>`; whichever file it made
+        // is the one to read.
+        let written = std::fs::read_dir(&logs)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+            .collect::<String>();
+        assert!(
+            written.contains("a line from the adapters"),
+            "the adapter's own logging goes nowhere: {written:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

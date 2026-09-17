@@ -30,26 +30,55 @@ pub fn kiwano_data_dir() -> PathBuf {
 /// `KIWANO_DB_PATH` is honored when it is absolute, and ignored when it is not:
 /// a relative one names a *different* file to each of the three processes, since
 /// each has its own working directory — the one place the value cannot mean what
-/// it says. The `log::warn!` below is best-effort and currently inert (nothing
-/// in Kiwano installs a `log` logger), so in practice the fallback is silent;
-/// the CLI prints the location it resolved in `status`, which is where it shows.
-
-pub fn kiwano_db_path() -> PathBuf {
+/// it says. What it ignored comes back in the return value for the caller to say
+/// out loud at a point where somebody can hear it ([`DbPath::ignored_note`]).
+pub fn kiwano_db_path() -> DbPath {
     kiwano_db_path_from(std::env::var_os("KIWANO_DB_PATH").as_deref())
 }
 
-fn kiwano_db_path_from(value: Option<&std::ffi::OsStr>) -> PathBuf {
+/// The database path, and what had to be ignored to get it.
+///
+/// The ignored value is *returned* rather than logged, because this is resolved
+/// before the logging it would be logged to exists: the log directory is beside
+/// the database (see `kiwanod::logging::log_dir`), so anything said here would be
+/// said to nobody. Callers report it once their logging is up — the gateway and
+/// the app through `tracing`, the CLI to stderr — which is the one ordering that
+/// makes it visible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbPath {
+    pub path: PathBuf,
+    /// Set when `KIWANO_DB_PATH` named something unusable — the value itself,
+    /// trimmed, for the message.
+    pub ignored: Option<String>,
+}
+
+impl DbPath {
+    /// What to tell the user, in one wording for the three front ends.
+    pub fn ignored_note(&self) -> Option<String> {
+        let ignored = self.ignored.as_ref()?;
+        Some(format!(
+            "KIWANO_DB_PATH={ignored} is not an absolute path, so it would name a different \
+             file to each process; using {} instead",
+            self.path.display()
+        ))
+    }
+}
+
+fn kiwano_db_path_from(value: Option<&std::ffi::OsStr>) -> DbPath {
+    let default = || kiwano_data_dir().join("kiwano.db");
     match classify_dir(value) {
-        EnvDir::Absolute(path) => path,
-        EnvDir::Unset => kiwano_data_dir().join("kiwano.db"),
-        EnvDir::Relative(relative) => {
-            log::warn!(
-                "KIWANO_DB_PATH={relative} is not an absolute path; each process would \
-                 resolve it against its own working directory. Using {} instead.",
-                kiwano_data_dir().join("kiwano.db").display()
-            );
-            kiwano_data_dir().join("kiwano.db")
-        }
+        EnvDir::Absolute(path) => DbPath {
+            path,
+            ignored: None,
+        },
+        EnvDir::Unset => DbPath {
+            path: default(),
+            ignored: None,
+        },
+        EnvDir::Relative(relative) => DbPath {
+            path: default(),
+            ignored: Some(relative),
+        },
     }
 }
 
@@ -628,18 +657,32 @@ mod tests {
 
         assert_eq!(
             kiwano_db_path_from(Some(OsStr::new("/srv/kiwano.db"))),
-            PathBuf::from("/srv/kiwano.db")
+            DbPath {
+                path: PathBuf::from("/srv/kiwano.db"),
+                ignored: None
+            }
         );
         // Unset, blank, and relative all land on the same default — the last
         // one because a relative path names a different file per process.
         for value in [None, Some(OsStr::new("")), Some(OsStr::new("./kiwano.db"))] {
             let resolved = kiwano_db_path_from(value);
             assert!(
-                resolved.ends_with(".kiwano/kiwano.db"),
+                resolved.path.ends_with(".kiwano/kiwano.db"),
                 "{value:?} resolved to {}",
-                resolved.display()
+                resolved.path.display()
             );
         }
+
+        // The ignored value comes back for the caller to report — this is
+        // resolved before any logger exists, so saying it here would say it to
+        // nobody.
+        let relative = kiwano_db_path_from(Some(OsStr::new("./kiwano.db")));
+        assert_eq!(relative.ignored.as_deref(), Some("./kiwano.db"));
+        let note = relative
+            .ignored_note()
+            .expect("a note for the ignored value");
+        assert!(note.contains("./kiwano.db"), "{note}");
+        assert!(kiwano_db_path_from(None).ignored_note().is_none());
     }
 
     /// The three answers, and the one that is not a path: unset and blank are

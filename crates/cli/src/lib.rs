@@ -193,20 +193,29 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         .filter(|v| !v.is_empty())
     {
         Some(value) => AdminEndpoint::parse(value),
-        None => AdminEndpoint::from_env(&db),
+        None => AdminEndpoint::from_env(&db.path),
     };
-    let token = sidecar::admin_token_for(&db);
+    let token = sidecar::admin_token_for(&db.path);
     // Same resolution the rest of the codebase uses, so a container with no
     // HOME set behaves the way the gateway does rather than failing.
     let home = cli.home.clone().unwrap_or_else(default_home);
 
+    // Built before the context so the one thing that has to be said about how
+    // *it* was resolved can be said: a `KIWANO_DB_PATH` that names no absolute
+    // path is ignored, and silence about that is a user wondering where their
+    // data went. stderr, and `--quiet` still silences it.
+    let mut out = Out::new(stdout, stderr, cli.json, cli.quiet);
+    if let Some(note) = db.ignored_note() {
+        out.note(note);
+    }
+
     let mut ctx = Ctx {
-        db,
+        db: db.path,
         admin,
         token,
         data_port: cli.data_port,
         home,
-        out: Out::new(stdout, stderr, cli.json, cli.quiet),
+        out,
         reload: !cli.no_reload,
         store: OnceCell::new(),
         aux: OnceCell::new(),

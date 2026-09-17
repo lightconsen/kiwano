@@ -73,7 +73,13 @@ fn home_dir() -> std::path::PathBuf {
 /// The database the app, the CLI and the gateway all open. Resolved by the same
 /// function in all three, which is what keeps them from finding different files.
 fn db_path() -> std::path::PathBuf {
-    kiwano_core::sidecar::default_db_path()
+    resolved_db().path
+}
+
+/// [`db_path`] with what the resolver had to ignore — read at startup, once,
+/// where there is a log to write it to.
+fn resolved_db() -> kiwano_core::paths::DbPath {
+    kiwano_core::sidecar::db_path(None)
 }
 
 fn after_mutation(state: &State<AppState>) {
@@ -1070,7 +1076,13 @@ pub fn run() {
     // Before anything that can fail, and before the webview: a packaged app is
     // started by launchd, where stdout goes to /dev/null, so without this the
     // only way to read what happened is to run it from a terminal.
-    kiwanod::logging::init(&db_path());
+    let db = resolved_db();
+    kiwanod::logging::init(&db.path);
+    // After logging, not before: the resolver runs to find the log directory, so
+    // anything it had to ignore would have been said too early to be written.
+    if let Some(note) = db.ignored_note() {
+        tracing::warn!("{note}");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())

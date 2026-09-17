@@ -9,6 +9,10 @@
 
 use std::path::PathBuf;
 
+/// The database path and whatever had to be ignored to resolve it, so a front
+/// end can name the type without depending on the adapter crate directly.
+pub use kiwano_adapters::config::DbPath;
+
 /// The user's home directory.
 pub fn home_dir() -> PathBuf {
     kiwano_adapters::config::get_home_dir()

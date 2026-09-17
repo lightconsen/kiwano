@@ -41,5 +41,8 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+# The `log` facade itself, so the test can emit a record the way the adapters
+# crate does and read it back out of the log file.
+log = "0.4"
 tempfile = "3.27.0"
 tower = { version = "0.5", features = ["util"] }

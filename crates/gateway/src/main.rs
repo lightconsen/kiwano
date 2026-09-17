@@ -39,7 +39,8 @@ async fn main() {
     let data_port = env_port("KIWANO_DATA_PORT", DEFAULT_DATA_PORT);
     // One resolver for all three processes that open this file — the app, this
     // daemon and the CLI — see `kiwano_adapters::config::kiwano_db_path`.
-    let db_path = kiwano_adapters::config::kiwano_db_path();
+    let db = kiwano_adapters::config::kiwano_db_path();
+    let db_path = db.path.clone();
     // The admin plane is not a port: a socket beside the database, or a
     // per-user named pipe on Windows. `KIWANO_ADMIN_SOCKET` overrides it, and
     // the GUI inherits nothing, so both sides resolve the same default from the
@@ -50,6 +51,12 @@ async fn main() {
     // Logging first, and beside the database: everything below can fail, and a
     // packaged app has no stdout to fail onto.
     kiwanod::logging::init(&db_path);
+
+    // Now that there is somewhere to say it: the resolver runs before this, and
+    // anything it had to ignore would have been said too early to be written.
+    if let Some(note) = db.ignored_note() {
+        tracing::warn!("{note}");
+    }
 
     if let Some(dir) = db_path.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {

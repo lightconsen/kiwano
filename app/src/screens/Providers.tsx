@@ -1812,15 +1812,24 @@ export default function Providers({
     return () => clearTimeout(timer);
   }, [refreshed]);
 
-  // Built-ins (in the registry's order), then the agents the user defined —
-  // which are never "not installed": there is nothing to install.
-  const segments = useMemo(
-    () => [
-      ...SEGMENTS,
-      ...customAgents.map((a) => ({ id: a.id as AgentRef, label: a.label, icon: undefined })),
-    ],
-    [customAgents],
-  );
+  // The strip reads in three groups: the agents already routed through the
+  // gateway, then the ones merely installed, then the user's own — which are
+  // never "not installed", since there is nothing to install. Within a group
+  // the registry order stands (the sort is stable), and "all" stays first.
+  const segments = useMemo(() => {
+    const [all, ...builtins] = SEGMENTS;
+    const custom = customAgents.map((a) => ({
+      id: a.id as AgentRef,
+      label: a.label,
+      icon: undefined,
+    }));
+    const group = (id: AgentRef | "all") => {
+      if (takenOver?.has(id)) return 0;
+      if (customAgents.some((a) => a.id === id)) return 2;
+      return 1;
+    };
+    return [all, ...[...builtins, ...custom].sort((a, b) => group(a.id) - group(b.id))];
+  }, [customAgents, takenOver]);
 
   // Only agents that phase 1 detected as installed get a segment; a failed
   // probe (null) keeps every agent visible — and a user-defined agent always

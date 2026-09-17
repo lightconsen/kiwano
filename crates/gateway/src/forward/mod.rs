@@ -490,6 +490,9 @@ async fn send_upstream(
             );
             return Err(resp);
         }
+        // Timed per attempt, not per request: what a retry cost in wall-clock
+        // terms is the number that makes a flaky upstream visible.
+        let attempt_started = Instant::now();
         let send = state
             .http
             .request(method.clone(), url)
@@ -503,6 +506,7 @@ async fn send_upstream(
             },
             None => send.await.map_err(SendFailure::transport),
         };
+        let attempt_ms = Some(attempt_started.elapsed().as_millis() as i64);
 
         match outcome {
             Ok(upstream) => {
@@ -517,6 +521,21 @@ async fn send_upstream(
                     )
                     .await;
                 if !last && is_retryable_status(status) {
+                    // Its own row: the client never sees this status (the retry
+                    // hides it), and the request-level row will carry the last
+                    // attempt's outcome instead. Without this the retry count and
+                    // the time each one burned exist only in the daemon log.
+                    crate::log_capture::persist_attempt_failure(
+                        &state.store,
+                        capture,
+                        Some(agent.to_string()),
+                        Some(attribution.to_string()),
+                        Some(provider.id.clone()),
+                        status,
+                        "attempt_retryable_status",
+                        format!("attempt {attempt}/{attempts}: upstream answered {status}"),
+                        attempt_ms,
+                    );
                     tracing::warn!(
                         attempt,
                         status = status.as_u16(),
@@ -536,6 +555,17 @@ async fn send_upstream(
                     .record(agent, &provider.id, false, admission.used_half_open_permit)
                     .await;
                 if !last {
+                    crate::log_capture::persist_attempt_failure(
+                        &state.store,
+                        capture,
+                        Some(agent.to_string()),
+                        Some(attribution.to_string()),
+                        Some(provider.id.clone()),
+                        StatusCode::BAD_GATEWAY,
+                        "attempt_failed",
+                        format!("attempt {attempt}/{attempts}: {message}"),
+                        attempt_ms,
+                    );
                     tracing::warn!(
                         attempt,
                         provider = %provider.id,
@@ -1426,6 +1456,9 @@ struct SseUsageStream {
     tx: mpsc::Sender<UsageSample>,
     started: Instant,
     inner_ended: bool,
+    /// `finish` has run, so neither the normal end nor `Drop` may run it again:
+    /// it sends the sample, and a request must not be metered twice.
+    finished: bool,
     // Response capture (request logging):
     capture_buf: Vec<u8>,
     capture_truncated: bool,
@@ -1471,6 +1504,7 @@ impl SseUsageStream {
             tx,
             started,
             inner_ended: false,
+            finished: false,
             capture_buf: Vec::new(),
             capture_truncated: false,
             streamed_bytes: 0,
@@ -1594,9 +1628,39 @@ impl SseUsageStream {
             log.response_size = self.streamed_bytes as i64;
             log.truncated = log.truncated || self.capture_truncated;
         }
+        self.finished = true;
         if let Err(e) = self.tx.try_send(self.sample.clone()) {
             tracing::warn!(error = %e, "usage channel unavailable; stream usage not persisted");
         }
+    }
+}
+
+impl Drop for SseUsageStream {
+    /// A stream the client walked away from still happened.
+    ///
+    /// Dropping this future — the client hung up, or the response was
+    /// discarded — used to take the sample with it: no usage row, no request
+    /// row, nothing anywhere to say the request was ever made. The upstream had
+    /// already been asked, and may already have billed for what it generated.
+    ///
+    /// So the record is closed out with what is known: the tokens the scanner
+    /// read, and the part of the body that had arrived. That body is not the
+    /// whole response, which is what `truncated` says — the same flag a capture
+    /// cap sets, read by the same column.
+    ///
+    /// The status is left as it was: it describes what the *upstream* did, and
+    /// the upstream was fine. A client hanging up is not an upstream error, and
+    /// writing one would put a failure in the logs that the provider never had.
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        // No scan of the leftover buffer here: it holds at most a partial line
+        // (the last drain took everything up to the last newline), and a partial
+        // line is not a usage event. What did arrive in full was scanned on the
+        // way out, and that is what this row reports.
+        self.capture_truncated = true;
+        self.finish();
     }
 }
 

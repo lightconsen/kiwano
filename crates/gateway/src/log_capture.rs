@@ -550,6 +550,77 @@ pub fn cap_body(bytes: &[u8], max_body_bytes: Option<usize>, secrets: &Redactor)
     )
 }
 
+/// One *attempt* that failed and was retried, as its own row.
+///
+/// The request-level row records what the client got, which is the outcome of
+/// the last attempt. That leaves the earlier ones invisible — and an attempt
+/// that failed after the upstream had already done work cost real money that
+/// appeared nowhere.
+///
+/// Three things this row states differently from a request-level failure:
+///
+/// * no bodies. The request they belong to already stored them, and copying
+///   one body per attempt multiplies the log by the retry count for no reader's
+///   benefit. The byte size is kept: it is a fact about the attempt.
+/// * `usage_missing`, because an attempt that failed before its response was
+///   read cannot know what it spent, and zero is not that answer.
+/// * its own status code — what the *upstream* said, which the client never
+///   saw. `error_kind` is what tells a reader this row is an attempt.
+#[allow(clippy::too_many_arguments)] // the same fields the request row carries
+pub fn persist_attempt_failure(
+    store: &Store,
+    capture: Option<&RequestCapture>,
+    agent: Option<String>,
+    attribution: Option<String>,
+    provider_id: Option<String>,
+    status: StatusCode,
+    error_kind: &str,
+    error_message: String,
+    latency_ms: Option<i64>,
+) {
+    let Some(c) = capture else {
+        return;
+    };
+    let record = RequestLogNew {
+        ts: now_rfc3339(),
+        // The request's own method and path, but a fresh timestamp: this
+        // attempt happened when it happened, not when the request began.
+        method: c.method.clone(),
+        path: c.path.clone(),
+        query: c.query.clone(),
+        agent,
+        attribution,
+        provider_id,
+        model: None,
+        status_code: status.as_u16() as i64,
+        error_kind: Some(error_kind.to_string()),
+        error_message: Some(error_message),
+        session_id: c.session_id.clone(),
+        is_streaming: false,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        reasoning_tokens: 0,
+        usage_missing: true,
+        latency_ms,
+        first_token_ms: None,
+        request_headers: c.request_headers.clone(),
+        response_headers: None,
+        request_body: None,
+        response_body: None,
+        request_size: c.request_size,
+        response_size: 0,
+        truncated: false,
+        cost: None,
+        cost_currency: None,
+        cost_off_peak: None,
+    };
+    if let Err(e) = store.insert_request_log(&record) {
+        tracing::warn!(error = %e, "failed to persist attempt log");
+    }
+}
+
 /// Persist a request that failed before/inside the forward leg (no usage).
 /// Best-effort: logging problems never change the client response.
 #[allow(clippy::too_many_arguments)]

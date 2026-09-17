@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use futures_core::Stream;
+use futures_util::StreamExt as _;
 use kiwanod::server::{
     admin_plane_router, data_plane_router, GatewayState, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY,
 };
@@ -402,6 +403,140 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     assert_eq!(totals.output_tokens, 171); // cumulative from message_delta
     assert_eq!(totals.cache_read_tokens, 11);
     assert_eq!(totals.cache_creation_tokens, 3);
+}
+
+/// A client that hangs up mid-stream still leaves a record.
+///
+/// Dropping the response used to drop the sample with it — no usage row, no
+/// request row — so a request the upstream had already been paid for appeared
+/// nowhere. What was received is kept, and marked as not the whole response.
+#[tokio::test]
+async fn a_client_that_hangs_up_still_leaves_a_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // One event, then silence: the client leaves while the upstream still owes
+    // the rest, which is when a stream is abandoned in practice.
+    let (upstream_url, _captured) = mock_anthropic(MockReply::SseThenStall(vec![
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n",
+    ]))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the first event, then walk away.
+    let mut body = response.into_body().into_data_stream();
+    let first = body.next().await.expect("the first event").unwrap();
+    assert!(!first.is_empty());
+    drop(body);
+
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(
+        rows[0].status_code, 200,
+        "the upstream answered; it is not a failure"
+    );
+    assert!(rows[0].is_streaming);
+    assert!(
+        rows[0].truncated,
+        "the stored body is not the whole response"
+    );
+
+    let detail = state.store.get_request_log(rows[0].id).unwrap().unwrap();
+    let stored = detail.response_body.expect("what arrived is kept");
+    assert!(stored.contains("message_start"), "{stored}");
+
+    // The second event — the one carrying the token counts — had not been sent
+    // when the client left, so the row says it does not know rather than saying
+    // zero. That distinction is the whole reason `usage_missing` exists.
+    assert!(
+        rows[0].usage_missing,
+        "it cannot claim a number it never saw"
+    );
+    assert_eq!(rows[0].input_tokens, 0, "the columns stay zero with it");
+}
+
+/// A retry leaves a row behind. The request-level row records what the client
+/// finally got, so without this an attempt that failed — and that may have cost
+/// the upstream real work — exists only in the daemon's text log.
+#[tokio::test]
+async fn a_retried_attempt_gets_its_own_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, captured) =
+        mock_anthropic(MockReply::Status(StatusCode::TOO_MANY_REQUESTS)).await;
+    // One retry: two attempts against the same provider.
+    let mut p = provider("p-ant", Protocol::Anthropic, upstream_url);
+    p.retries = Some(1);
+    store.insert_provider(&p).unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(captured.lock().unwrap().len(), 2, "both attempts were sent");
+
+    let rows = wait_for_log(&state, 2).await;
+    let attempt = rows
+        .iter()
+        .find(|r| r.error_kind.as_deref() == Some("attempt_retryable_status"))
+        .expect("the first attempt has a row of its own");
+    assert_eq!(
+        attempt.status_code, 429,
+        "what the upstream said, not the client"
+    );
+    assert_eq!(attempt.provider_id.as_deref(), Some("p-ant"));
+    assert!(
+        attempt.usage_missing,
+        "an attempt that failed reports no usage"
+    );
+    assert!(attempt.latency_ms.is_some(), "and how long it took to fail");
+
+    // No second copy of the body: the request row below already carries it, and
+    // one body per attempt would multiply the log by the retry count.
+    let detail = state.store.get_request_log(attempt.id).unwrap().unwrap();
+    assert!(detail.request_body.is_none(), "{:?}", detail.request_body);
+    assert_eq!(
+        detail.entry.request_size, attempt.request_size,
+        "the size stays"
+    );
+
+    // The request-level row is the other one, and it carries the body.
+    let request = rows
+        .iter()
+        .find(|r| r.error_kind.as_deref() != Some("attempt_retryable_status"))
+        .expect("the request row");
+    let detail = state.store.get_request_log(request.id).unwrap().unwrap();
+    assert!(detail.request_body.is_some());
 }
 
 /// A streamed response reaches the client byte for byte and reaches the log

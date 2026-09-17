@@ -176,11 +176,14 @@ export default function App() {
   // is one `--version` subprocess per agent (seconds, not milliseconds), which
   // is why it stays fire-and-forget — it fills tooltips, it is never a reason
   // to make anyone wait.
-  // Returns what it started so the caller that asked can show a spinner while the
-  // probe runs — the Apps screen's own refresh does. It is the slowest part of
-  // that click by far: a login shell plus one subprocess per agent.
+  // Returns what it found, resolved once the probe is done, so the caller that
+  // asked can both show a spinner and read the answer — the Apps screen's own
+  // refresh does the first, the declare dialog's "check again" the second. It is
+  // the slowest part of that click by far: a login shell plus one subprocess per
+  // agent. `null` is "the probe did not run", which is not the same answer as an
+  // empty list and must not be read as "nothing is installed".
   const detectAgents = useCallback(() => {
-    const detected = api
+    return api
       .detectAgents()
       .then((list) => {
         setAgentDetect(list);
@@ -191,10 +194,13 @@ export default function App() {
               Object.fromEntries(vs.map((v) => [v.agent, v.version ?? ""])) as Partial<Record<AgentId, string>>,
             ),
           )
-          .catch(() => {});
+          .catch(() => {})
+          .then(() => list);
       })
-      .catch(() => setAgentDetect(null));
-    return detected;
+      .catch(() => {
+        setAgentDetect(null);
+        return null;
+      });
   }, []);
   useEffect(() => {
     void detectAgents();

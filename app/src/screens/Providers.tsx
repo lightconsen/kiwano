@@ -764,6 +764,10 @@ function NewAgentDialog({
   );
 }
 
+/** Re-probe the machine, resolving with what it found — `null` when the probe
+ * itself did not run, which is not the same answer as an empty list. */
+type Redetect = () => void | Promise<AgentDetect[] | null | void>;
+
 /** The directory a resolved binary sits in. A declared directory comes back
  * only as the binary the walk found *in* it, and the dialog has to open on
  * something the user can correct rather than a blank field. */
@@ -798,7 +802,7 @@ function DeclareAgentDirDialog({
   onClose: () => void;
   onSaved: () => void;
   onCleared: () => void;
-  onRedetect?: () => void | Promise<unknown>;
+  onRedetect?: Redetect;
 }) {
   const t = useT();
   const [dir, setDir] = useState("");
@@ -809,6 +813,10 @@ function DeclareAgentDirDialog({
   const [checking, setChecking] = useState(false);
   const [checkingDir, setCheckingDir] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // What the last "check again" came back with: the machine's own answer, as
+  // opposed to the verdict about one directory below. Without it a re-probe that
+  // finds nothing leaves no trace at all — the click would look ignored.
+  const [recheck, setRecheck] = useState<"missing" | "no-answer" | null>(null);
   // What a picked directory turned out to hold. Set when the picker returns,
   // rather than when the user finally presses Add: the picker is where they are
   // asked to name a directory, so it is where a wrong one should be answered.
@@ -827,6 +835,7 @@ function DeclareAgentDirDialog({
     setDir(agent.dir ?? "");
     setErr(null);
     setChecked(null);
+    setRecheck(null);
     setSearched([]);
     if (agent.declared) return;
     let live = true;
@@ -839,7 +848,12 @@ function DeclareAgentDirDialog({
     return () => {
       live = false;
     };
-  }, [agent]);
+    // Keyed on the agent's identity, not on the `agent` object: the parent
+    // rebuilds that object on every render (it carries the live probe result),
+    // and depending on it would run this reset — clearing the field, the picked
+    // directory's verdict and the re-probe's — every time anything upstream
+    // re-rendered.
+  }, [agent?.id, agent?.declared]);
   const save = async () => {
     if (!agent || !dir.trim() || busy) return;
     setBusy(true);
@@ -905,8 +919,20 @@ function DeclareAgentDirDialog({
     if (checking) return;
     setChecking(true);
     setErr(null);
+    setRecheck(null);
     try {
-      await onRedetect?.();
+      const found = await onRedetect?.();
+      // The answer is read off what the probe returned, never off the
+      // `agentDetect` prop: reading the prop here would race the very update
+      // this call is waiting for, and a probe that *did* find the agent would
+      // flash "still not found" for a frame before the prop landed.
+      setRecheck(
+        Array.isArray(found)
+          ? found.some((d) => d.agent === agent?.id && d.installed)
+            ? null // Found: the dialog switches to its found state instead.
+            : "missing"
+          : "no-answer",
+      );
     } finally {
       setChecking(false);
     }
@@ -1028,6 +1054,13 @@ function DeclareAgentDirDialog({
                 ))}
               </ul>
               </div>
+            )}
+            {recheck && (
+              <p className="text-[11px] text-mut">
+                {recheck === "missing"
+                  ? t("providers.recheckMissing")
+                  : t("providers.recheckNoAnswer")}
+              </p>
             )}
             <p className="text-[11px] leading-relaxed text-mut">
               {agent?.declared ? t("providers.declaredAgentNote") : t("providers.addAgentNote")}
@@ -2116,7 +2149,7 @@ export default function Providers({
   /** Phase 2 versions by agent id (arrive async, tooltip only) */
   agentVersions?: Partial<Record<AgentRef, string>>;
   /** Re-run agent detection (App owns the result). The refresh button's third job */
-  onRedetect?: () => void | Promise<unknown>;
+  onRedetect?: Redetect;
   /** Deep-linked agent segment (#providers/<agent>, e.g. from Settings takeover rows) */
   initialAgent?: AgentRef | null;
 }) {

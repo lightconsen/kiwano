@@ -123,6 +123,8 @@ export const providers = {
   checkingDir: "正在检查该目录…",
   dirOk: "找到可运行的执行文件 — {version}",
   checkAgain: "重新探测",
+  recheckMissing: "刚刚又问了一次 —— 仍然没有找到。",
+  recheckNoAnswer: "刚刚又问了一次,但这次探测没有给出结果。",
   checkAgainTitle: "现在再在这台机器上找一次",
   foundTitle: "找到了",
   foundBody:

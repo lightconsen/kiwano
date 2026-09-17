@@ -529,6 +529,73 @@ describe("a built-in the walk could not find", () => {
     expect(screen.queryByText("no `gemini` in /opt/nowhere")).toBeNull();
   });
 
+  it("keeps what the user typed when the screen re-renders around it", async () => {
+    // The parent rebuilds the dialog's `agent` prop on every render — it carries
+    // the live probe result — so a reset keyed on that object would clear the
+    // field every time anything upstream moved. Clicking Check again is exactly
+    // such a move, and it is the click a user makes with a path already typed.
+    const onRedetect = vi
+      .fn()
+      .mockResolvedValue([{ agent: "gemini", installed: false, path: null }]);
+    const { user, view } = await openMenu(missing, onRedetect);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+
+    const field = await screen.findByRole("textbox", { name: en.providers.installDir });
+    await user.type(field, "/opt/gemini/bin");
+
+    // A re-render, which is what the screen does the moment a probe answers —
+    // it holds the detection list, and the dialog's `agent` prop is rebuilt from
+    // it every time.
+    view.rerender(
+      <Providers
+        onAdd={() => {}}
+        onEdit={() => {}}
+        agentDetect={[...missing]}
+        onRedetect={onRedetect}
+      />,
+    );
+
+    expect(field).toHaveValue("/opt/gemini/bin");
+
+    // And a re-probe answers on top of that without clearing it either.
+    await user.click(screen.getByRole("button", { name: en.providers.checkAgain }));
+    await waitFor(() =>
+      expect(screen.getByText(en.providers.recheckMissing)).toBeInTheDocument(),
+    );
+    expect(field).toHaveValue("/opt/gemini/bin");
+  });
+
+  it("reports a re-probe that comes back empty, instead of looking ignored", async () => {
+    // The answer rides the return value, so the test hands it back the way App
+    // does: the list the probe produced.
+    const onRedetect = vi
+      .fn()
+      .mockResolvedValue([{ agent: "gemini", installed: false, path: null }]);
+    const { user } = await openMenu(missing, onRedetect);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+
+    await user.click(await screen.findByRole("button", { name: en.providers.checkAgain }));
+
+    await waitFor(() =>
+      expect(screen.getByText(en.providers.recheckMissing)).toBeInTheDocument(),
+    );
+    // Still asking, then: the field and the list stay where they were.
+    expect(screen.getByRole("textbox", { name: en.providers.installDir })).toBeInTheDocument();
+  });
+
+  it("says so when the probe did not run, rather than claiming it found nothing", async () => {
+    const onRedetect = vi.fn().mockResolvedValue(null);
+    const { user } = await openMenu(missing, onRedetect);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+
+    await user.click(await screen.findByRole("button", { name: en.providers.checkAgain }));
+
+    await waitFor(() =>
+      expect(screen.getByText(en.providers.recheckNoAnswer)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(en.providers.recheckMissing)).toBeNull();
+  });
+
   it("asks the machine again, and says so when the agent turns up", async () => {
     const { user, onRedetect, view } = await openMenu(missing);
     await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));

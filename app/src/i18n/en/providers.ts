@@ -158,6 +158,9 @@ export const providers = {
   checkingDir: "Checking that directory…",
   dirOk: "Found a working executable — {version}",
   checkAgain: "Check again",
+  /** The re-probe's own answer, shown under the list it just confirmed. */
+  recheckMissing: "Asked again just now — still not found.",
+  recheckNoAnswer: "Asked again, but the probe did not answer this time.",
   checkAgainTitle: "Look for this agent again on this machine",
   /** The probe found it after all: nothing to point at. */
   foundTitle: "Kiwano found it",

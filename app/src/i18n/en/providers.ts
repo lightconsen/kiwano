@@ -153,6 +153,13 @@ export const providers = {
   /** Heading over the directories the detector tried. The count is there
       because the list scrolls: it is how the user knows there is more of it. */
   searchedDirs: "Looked in {count} directories, and not found",
+  /** Asks the machine again — for the tool the user just installed. */
+  checkAgain: "Check again",
+  checkAgainTitle: "Look for this agent again on this machine",
+  /** The probe found it after all: nothing to point at. */
+  foundTitle: "Kiwano found it",
+  foundBody:
+    "The agent is installed here, so there is nothing to point at — its tab is already in the strip, on the Apps screen behind this dialog.",
   addAgentNote:
     "Point it at the directory holding this agent's command and Kiwano will confirm that command runs — not that it is this agent's, since version output has no shared shape to check.",
   declaredAgentNote:

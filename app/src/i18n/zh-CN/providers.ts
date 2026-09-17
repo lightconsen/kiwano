@@ -120,6 +120,11 @@ export const providers = {
   installDirPlaceholder: "/opt/custom/bin",
   browse: "浏览…",
   searchedDirs: "已查找 {count} 个目录,均未找到",
+  checkAgain: "重新探测",
+  checkAgainTitle: "现在再在这台机器上找一次",
+  foundTitle: "找到了",
+  foundBody:
+    "它已经装在这台机器上,不需要再指定目录 —— 工具条里已经有它的标签页(就在这个弹窗后面的 Apps 页)。",
   addAgentNote:
     "指向存放它命令的目录即可 —— Kiwano 只能确认那个命令可以运行,不能确认它就是该 Agent(各家的版本输出格式不同,没有可依赖的形状)。",
   declaredAgentNote:

@@ -783,16 +783,32 @@ function DeclareAgentDirDialog({
   onClose,
   onSaved,
   onCleared,
+  onRedetect,
 }: {
-  agent: { id: AgentId; label: string; icon?: string; dir?: string; declared?: boolean } | null;
+  agent: {
+    id: AgentId;
+    label: string;
+    icon?: string;
+    dir?: string;
+    declared?: boolean;
+    installed?: boolean;
+    path?: string | null;
+  } | null;
   onClose: () => void;
   onSaved: () => void;
   onCleared: () => void;
+  onRedetect?: () => void | Promise<unknown>;
 }) {
   const t = useT();
   const [dir, setDir] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The probe found it after all — the user installed it, fixed a PATH, or
+  // pointed Kiwano at it from somewhere else. Then there is nothing to declare:
+  // the field and the list go away and the dialog says so, rather than leaving
+  // the user to work out that the tab behind it is the answer.
+  const found = !agent?.declared && agent?.installed === true;
   // Where the detector looked, for the agents it did not find: "we cannot find
   // it" is only worth believing next to the list it is measured against — and
   // a stale shell PATH is exactly the kind of thing the list makes visible.
@@ -851,6 +867,18 @@ function DeclareAgentDirDialog({
       // path is the fallback, so a picker that will not open is not an error.
     }
   };
+  /** Ask the machine again — the whole point being that the user may have just
+   * installed the tool, which is not something Kiwano can notice on its own. */
+  const checkAgain = async () => {
+    if (checking) return;
+    setChecking(true);
+    setErr(null);
+    try {
+      await onRedetect?.();
+    } finally {
+      setChecking(false);
+    }
+  };
   return (
     <Dialog open={agent != null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[420px]">
@@ -863,11 +891,31 @@ function DeclareAgentDirDialog({
                 <ProviderLogo icon={agent.icon} name={agent.label} size={16} />
               </span>
             )}
-            {agent?.declared
-              ? t("providers.declaredAgentTitle", { agent: agent.label })
-              : t("providers.addAgentTitle", { agent: agent?.label ?? "" })}
+            {found
+              ? t("providers.foundTitle")
+              : agent?.declared
+                ? t("providers.declaredAgentTitle", { agent: agent.label })
+                : t("providers.addAgentTitle", { agent: agent?.label ?? "" })}
           </DialogTitle>
         </DialogHeader>
+        {found ? (
+          // Found after all: nothing to point at, and nothing left to ask.
+          <div className="min-w-0 space-y-3 px-5 pb-4 pt-1">
+            <p className="text-[11px] leading-relaxed text-mut">{t("providers.foundBody")}</p>
+            {agent?.path && <FoundPath path={agent.path} />}
+            <div className="flex justify-end pt-1">
+              <Button
+                size="sm"
+                className="h-7 px-3 text-[12px] font-semibold"
+                onClick={onClose}
+              >
+                {t("common.close")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+        // The dialog this control exists for: Kiwano cannot find it, so the
+        // user points at the directory.
         <div className="min-w-0 space-y-3 px-5 pb-4 pt-1">
           <div>
             <Label className="text-[11px] font-medium text-mut">{t("providers.installDir")}</Label>
@@ -915,43 +963,73 @@ function DeclareAgentDirDialog({
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
-          <p className="text-[11px] leading-relaxed text-mut">
-            {agent?.declared ? t("providers.declaredAgentNote") : t("providers.addAgentNote")}
-          </p>
-          {err && (
-            <p className="text-[11px]" style={{ color: "var(--red)" }}>
-              {err}
-            </p>
-          )}
-          <div className="flex items-center justify-end gap-2 pt-1">
-            {agent?.declared && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mr-auto h-7 px-3 text-[12px] text-mut"
-                disabled={busy}
-                onClick={() => void forget()}
-              >
-                {t("common.remove")}
-              </Button>
+              </div>
             )}
-            <Button variant="ghost" size="sm" className="h-7 px-3 text-[12px]" onClick={onClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              size="sm"
-              className="h-7 px-3 text-[12px] font-semibold"
-              disabled={!dir.trim() || busy}
-              onClick={() => void save()}
-            >
-              {t("providers.addAgent")}
-            </Button>
+            <p className="text-[11px] leading-relaxed text-mut">
+              {agent?.declared ? t("providers.declaredAgentNote") : t("providers.addAgentNote")}
+            </p>
+            {err && (
+              <p className="text-[11px]" style={{ color: "var(--red)" }}>
+                {err}
+              </p>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-1">
+              {/* One secondary slot, two meanings: drop the declaration, or ask
+                  the machine again for an agent Kiwano never found. */}
+              {agent?.declared ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mr-auto h-7 px-3 text-[12px] text-mut"
+                  disabled={busy}
+                  onClick={() => void forget()}
+                >
+                  {t("common.remove")}
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mr-auto h-7 px-3 text-[12px] text-mut"
+                  aria-label={t("providers.checkAgain")}
+                  title={t("providers.checkAgainTitle")}
+                  disabled={checking}
+                  onClick={() => void checkAgain()}
+                >
+                  <RefreshCw className={`h-3 w-3${checking ? " animate-spin" : ""}`} />
+                  {t("providers.checkAgain")}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" className="h-7 px-3 text-[12px]" onClick={onClose}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 px-3 text-[12px] font-semibold"
+                disabled={!dir.trim() || busy}
+                onClick={() => void save()}
+              >
+                {t("providers.addAgent")}
+              </Button>
           </div>
         </div>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The binary the probe just resolved, as a path the user can compare against
+    where they think they put it. Truncated in the middle of the dialog, full
+    value on hover — the same treatment the searched-directories list gets. */
+function FoundPath({ path }: { path: string }) {
+  return (
+    <p
+      title={path}
+      className="truncate rounded-md bg-surface2 px-1.5 py-1 font-mono text-[10.5px] text-mut"
+    >
+      {path}
+    </p>
   );
 }
 
@@ -2608,7 +2686,18 @@ export default function Providers({
       />
 
       <DeclareAgentDirDialog
-        agent={declaring}
+        // Live, not as it was when the menu was clicked: the whole point of the
+        // dialog's own "check again" is that the answer can change under it.
+        agent={
+          declaring
+            ? {
+                ...declaring,
+                installed: agentDetect?.find((d) => d.agent === declaring.id)?.installed,
+                path: agentDetect?.find((d) => d.agent === declaring.id)?.path,
+              }
+            : null
+        }
+        onRedetect={onRedetect}
         onClose={() => setDeclaring(null)}
         onSaved={() => {
           setDeclaring(null);

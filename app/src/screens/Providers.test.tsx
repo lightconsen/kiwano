@@ -382,9 +382,11 @@ describe("a built-in the walk could not find", () => {
     apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
     apiMock.agentSearchDirs.mockResolvedValue(["~/.local/bin", "/opt/homebrew/bin"]);
     const user = userEvent.setup();
-    render(<Providers onAdd={() => {}} onEdit={() => {}} agentDetect={agentDetect} onRedetect={onRedetect} />);
+    const view = render(
+      <Providers onAdd={() => {}} onEdit={() => {}} agentDetect={agentDetect} onRedetect={onRedetect} />,
+    );
     await user.click(await screen.findByRole("button", { name: en.providers.addAgentMenu }));
-    return { user, onRedetect };
+    return { user, onRedetect, view };
   }
 
   it("is offered by name, and a directory for it is stored", async () => {
@@ -475,6 +477,35 @@ describe("a built-in the walk could not find", () => {
 
     await waitFor(() => expect(apiMock.clearAgentDir).toHaveBeenCalledWith("gemini"));
     await waitFor(() => expect(onRedetect).toHaveBeenCalledTimes(1));
+  });
+
+  it("asks the machine again, and says so when the agent turns up", async () => {
+    const { user, onRedetect, view } = await openMenu(missing);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+
+    // The dialog offers the machine another chance — a tool installed since
+    // launch is not something Kiwano can notice on its own.
+    await user.click(await screen.findByRole("button", { name: en.providers.checkAgain }));
+    await waitFor(() => expect(onRedetect).toHaveBeenCalledTimes(1));
+
+    // What the probe answered arrives back as a prop (App owns the result): the
+    // agent is installed, so there is nothing to point at. `rerender` is the
+    // prop arriving.
+    view.rerender(
+      <Providers
+        onAdd={() => {}}
+        onEdit={() => {}}
+        agentDetect={[{ agent: "gemini", installed: true, path: "/opt/gemini/bin/gemini" }]}
+        onRedetect={onRedetect}
+      />,
+    );
+
+    expect(await screen.findByText(en.providers.foundTitle)).toBeInTheDocument();
+    // Where it turned up, in full — that is the question the user came with.
+    expect(screen.getByText("/opt/gemini/bin/gemini")).toBeInTheDocument();
+    // And the question is over: no directory to type, no declaration to make.
+    expect(screen.queryByRole("textbox", { name: en.providers.installDir })).toBeNull();
+    expect(screen.queryByText(en.providers.addAgentNote)).toBeNull();
   });
 });
 

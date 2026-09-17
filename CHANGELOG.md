@@ -17,7 +17,7 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
-## [Unreleased]
+## [0.1.14] - 2026-09-17
 
 ### Added
 
@@ -56,6 +56,80 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
   Schema v23 widens both protocol CHECK constraints to accept `gemini` again.
   It deletes nothing: the rows v15 removed stay removed.
+
+- **Pointing Kiwano at an agent it cannot find.** A built-in agent's tab appears
+  only when the detector finds its command, and there are installs it has no way
+  to find: a packaged app inherits a narrower `PATH` than your shell, a tool can
+  live outside every well-known prefix, and Windows ships `.cmd` shims. The `+`
+  at the end of the agent strip opens a menu now — defining your own agent is
+  still its first item — and under it are the built-ins the walk could not find.
+  Picking one asks for the directory holding its command, which the detector
+  then searches after the locations it is sure of and before `PATH`.
+
+  The dialog shows the directories it looked in (the walk's own list, rather
+  than a second copy that could drift), carries a **Check again** button for the
+  case where you have just installed the tool, and checks a directory the moment
+  you pick one — naming the file it found and the version that file printed.
+  What it confirms is that the command runs; it cannot confirm that it is that
+  agent's, since `--version` output has no shape shared across tools, and the
+  dialog says so rather than implying a verification it cannot make.
+
+- **An agent's config directory is read from your own shell.** A takeover writes
+  into the file the agent actually reads, and several of these tools let an
+  environment variable move it: Claude's `CLAUDE_CONFIG_DIR`, Codex's
+  `CODEX_HOME`, OpenCode's `XDG_CONFIG_HOME`, plus the five the registry already
+  named. Those five did nothing in the app — they were read from the app's own
+  environment, which is launchd's and not the one your shell configures — so a
+  relocated config was written to the default path instead, and the agent went
+  on reading its own. Kiwano now asks your login shell what it exports, which is
+  the only place that knows.
+
+- **The agent strip reads in the order you would.** Agents already routed
+  through the gateway, then the ones merely installed, then your own — and
+  OpenCode wears its supplied mark rather than the registry's placeholder.
+  A user-defined agent's name can be edited where its settings are, instead of
+  deleting it and defining another (which lost its route, its key and its
+  history).
+
+### Fixed
+
+- **The Windows home directory.** Kiwano read `HOME`, which Git/Cygwin/MSYS
+  inject and which need not be the user profile — so on some Windows setups
+  every agent config, and the database itself, were resolved from the wrong
+  root. It asks the OS now, as the config readers always did, and the app, the
+  CLI and the gateway share one resolver rather than three that had begun to
+  differ.
+
+- **A refusal says why.** Both places that enable a takeover discarded the
+  backend's answer: the agent stayed exactly as it was and the user watched a
+  spinner stop. Codex's own refusal — configure a custom provider before
+  takeover — had been invisible for the same reason.
+
+- **A takeover that replaces a config field says so.** Nine places in the
+  rewriters replaced a field that was present but not the shape they needed. A
+  user with `"provider": "anthropic"` in `opencode.json` — a plausible thing to
+  have written — would find it replaced by an object holding the gateway entry,
+  and nothing anywhere would have said so.
+
+- **A variable that names no one place is refused rather than guessed at.** A
+  relative `CODEX_HOME` is resolved by the tool against whatever directory it is
+  run in, so it names not another location but one location per invocation, and
+  writing the default instead was a takeover that read as done while the agent
+  read something else. A probe that finds nothing also says so now, rather than
+  leaving the click looking ignored.
+
+- **The login-shell probe no longer needs the shell's syntax.** It asked the
+  shell to run a `for` loop, and a loop is the one construct these shells do not
+  write the same way — fish ends a block with `end`, not `done` — so for a fish
+  user the probe failed silently and only the well-known directories were ever
+  searched. It asks for the shell's environment instead, one word every shell
+  runs the same way, and resolves the tools here.
+
+- **The ported adapter messages are English.** They reached dialogs, request
+  logs and the log file untranslated — the localized half of the dictionary is
+  not where they live — so an English-speaking user read Chinese exactly where a
+  failure was being explained. The adapter crate's warnings also reach the CLI's
+  terminal now instead of being discarded.
 
 
 ## [0.1.13] - 2026-09-16

@@ -11,6 +11,20 @@
 //!   `prompt_tokens_details.cached_tokens`; chat chunks only attach `usage`
 //!   on the final chunk (with `stream_options.include_usage`), Responses API
 //!   reports on the `response.completed` event.
+//!
+//! The cache bucket is the one field with three spellings, and reading only
+//! one of them reports a provider's prefix cache as never earning its keep:
+//!
+//! * `prompt_cache_hit_tokens` — DeepSeek's own, top-level in `usage`.
+//! * `input_tokens_details.cached_tokens` — the Responses API (Codex).
+//! * `prompt_tokens_details.cached_tokens` — chat completions.
+//!
+//! `cache_creation_tokens` is a different matter, and a zero there means
+//! something else: only Anthropic has an explicit cache *write* — you mark the
+//! blocks to keep and it bills for storing them. The others cache implicitly,
+//! with no such concept and no such field, so their rows will always read zero.
+//! A reader must not take that for "nothing is being cached"; on those
+//! providers the *read* side is the only side that exists.
 
 use serde_json::Value;
 
@@ -156,6 +170,32 @@ impl UsageScanner {
         }
         if let Some(n) = get("completion_tokens") {
             self.usage.output_tokens = n;
+        }
+        // The cache bucket, in the three spellings that reach this scanner.
+        // Each read can only fill in a number still absent, so an upstream
+        // reporting more than one cannot have its value displaced — and the
+        // chat-completions key is last because it is the one that was already
+        // being read, which keeps every body that worked before working
+        // identically.
+        //
+        // * `prompt_cache_hit_tokens` — DeepSeek's own, a top-level sibling of
+        //   `prompt_tokens` (with `prompt_cache_miss_tokens` for the rest)
+        //   rather than a nested object.
+        // * `input_tokens_details.cached_tokens` — the Responses API, which is
+        //   what Codex sends. Its absence was invisible for longer than the
+        //   others: `input_tokens`/`output_tokens` are spelled the same way in
+        //   the Responses shape and the Anthropic one above, so those two
+        //   numbers were read correctly all along and only the cache half of
+        //   the object was dropped.
+        // * `prompt_tokens_details.cached_tokens` — OpenAI chat completions.
+        if let Some(n) = get("prompt_cache_hit_tokens") {
+            self.usage.cache_read_tokens = n;
+        }
+        if let Some(n) = u
+            .pointer("/input_tokens_details/cached_tokens")
+            .and_then(Value::as_i64)
+        {
+            self.usage.cache_read_tokens = n;
         }
         if let Some(n) = u
             .pointer("/prompt_tokens_details/cached_tokens")
@@ -350,6 +390,54 @@ mod tests {
         assert_eq!(s.model(), Some("claude-sonnet-4-5"));
     }
 
+    /// DeepSeek reports its cache bucket as a top-level sibling of
+    /// `prompt_tokens` rather than nested inside `prompt_tokens_details`, so a
+    /// reader that only knows the OpenAI key sees every cache hit as a miss —
+    /// and `prompt_tokens` there is hit + miss, which is what makes the
+    /// omission invisible rather than obviously wrong.
+    #[test]
+    fn parses_deepseek_native_cache_field() {
+        let body = br#"{"id":"c1","object":"chat.completion","model":"deepseek-v4-flash",
+            "usage":{"prompt_tokens":15302,"completion_tokens":102,
+                     "prompt_cache_hit_tokens":14000,"prompt_cache_miss_tokens":1302,
+                     "total_tokens":15404}}"#;
+        let (usage, model) = parse_response_usage(Protocol::OpenAI, body);
+        let u = usage.unwrap();
+        assert_eq!(u.input_tokens, 15302);
+        assert_eq!(u.output_tokens, 102);
+        assert_eq!(
+            u.cache_read_tokens, 14000,
+            "the provider's own account of its cache is the only one on offer"
+        );
+        assert_eq!(model.as_deref(), Some("deepseek-v4-flash"));
+    }
+
+    /// Streaming arrives as the final chunk, like the OpenAI flavor it
+    /// otherwise is.
+    #[test]
+    fn scans_deepseek_sse_stream() {
+        let mut s = UsageScanner::new();
+        s.feed_line(r#"data: {"id":"1","object":"chat.completion.chunk","choices":[{"delta":{"content":"he"}}]}"#);
+        s.feed_line(r#"data: {"id":"1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":900,"completion_tokens":12,"prompt_cache_hit_tokens":896}}"#);
+        s.feed_line("data: [DONE]");
+
+        let u = s.usage();
+        assert_eq!(u.input_tokens, 900);
+        assert_eq!(u.cache_read_tokens, 896);
+    }
+
+    /// An upstream that reports both shapes is not counted twice, and the
+    /// nested OpenAI key keeps the last word — the new read can only add a
+    /// number that was absent, never displace one that arrived another way.
+    #[test]
+    fn the_openai_cache_shape_wins_when_both_are_present() {
+        let body = br#"{"usage":{"prompt_tokens":100,"completion_tokens":5,
+            "prompt_cache_hit_tokens":90,
+            "prompt_tokens_details":{"cached_tokens":60}}}"#;
+        let (usage, _) = parse_response_usage(Protocol::OpenAI, body);
+        assert_eq!(usage.unwrap().cache_read_tokens, 60);
+    }
+
     #[test]
     fn scans_openai_chat_sse_stream() {
         let mut s = UsageScanner::new();
@@ -367,11 +455,18 @@ mod tests {
     fn scans_openai_responses_sse_stream() {
         let mut s = UsageScanner::new();
         s.feed_line(r#"data: {"type":"response.in_progress","response":{"id":"r1"}}"#);
-        s.feed_line(r#"data: {"type":"response.completed","response":{"model":"gpt-5.1","usage":{"input_tokens":100,"output_tokens":12}}}"#);
+        // The usage object as a real Responses-shaped upstream reports it —
+        // Codex through a DeepSeek endpoint, taken from the gateway's own
+        // request log. Its cache bucket is `input_tokens_details`, which
+        // nothing read until this test had a reason to look: the other two
+        // numbers arrive under keys the Anthropic branch already handles, so
+        // only the cache half went missing, and it went missing quietly.
+        s.feed_line(r#"data: {"type":"response.completed","response":{"model":"gpt-5.1","usage":{"input_tokens":15302,"input_tokens_details":{"cached_tokens":15232},"output_tokens":102,"output_tokens_details":{"reasoning_tokens":71},"total_tokens":15404}}}"#);
 
         let u = s.usage();
-        assert_eq!(u.input_tokens, 100);
-        assert_eq!(u.output_tokens, 12);
+        assert_eq!(u.input_tokens, 15302);
+        assert_eq!(u.output_tokens, 102);
+        assert_eq!(u.cache_read_tokens, 15232);
         assert_eq!(s.model(), Some("gpt-5.1"));
     }
 

@@ -44,6 +44,11 @@ pub struct GatewayState {
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Request-log capture config, refreshed alongside the route table.
     log_cfg: RwLock<LogConfig>,
+    /// The credentials this install holds, for scrubbing captured bodies by
+    /// value. Refreshed with the rest of the cached configuration, so a key
+    /// added in the UI applies to the next request rather than the next
+    /// restart — and so no request pays for a store read to be scrubbed.
+    redactor: RwLock<Arc<crate::log_capture::Redactor>>,
     /// Streaming timeouts, same contract as `log_cfg`: read at startup, re-read
     /// on `/reload` so a change lands without restarting the daemon.
     stream_cfg: RwLock<StreamTimeouts>,
@@ -125,6 +130,7 @@ impl GatewayState {
         // Resolve before `store` moves into the Arc below. The limits are
         // seeded here so the very first request already respects them, rather
         // than being served in the window before the task's first tick.
+        let redactor = crate::log_capture::Redactor::from_store(&store);
         let pricing = resolve_pricing(&store);
         let declared = resolve_declared_pricing(&store);
         let limits = crate::limits::evaluate(&store);
@@ -141,6 +147,7 @@ impl GatewayState {
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             log_cfg: RwLock::new(log_config),
+            redactor: RwLock::new(Arc::new(redactor)),
             stream_cfg: RwLock::new(stream_cfg),
             pricing: RwLock::new(pricing),
             declared: RwLock::new(declared),
@@ -208,6 +215,14 @@ impl GatewayState {
             .clone()
     }
 
+    /// The credential scrubber for captured bodies (cheap clone of an Arc).
+    pub fn redactor(&self) -> Arc<crate::log_capture::Redactor> {
+        self.redactor
+            .read()
+            .expect("redactor lock poisoned")
+            .clone()
+    }
+
     /// Current streaming timeouts (Copy, so free).
     pub fn stream_timeouts(&self) -> StreamTimeouts {
         *self.stream_cfg.read().expect("stream config lock poisoned")
@@ -236,6 +251,12 @@ impl GatewayState {
         if let Ok(cfg) = self.store.load_log_config() {
             *self.log_cfg.write().expect("log config lock poisoned") = cfg;
         }
+        // Rebuilt rather than patched, and on every reload: a provider whose key
+        // the user just replaced must not be scrubbed by the old value only.
+        // Bodies captured earlier keep their [REDACTED] — that is what scrubbing
+        // them at capture time is for.
+        *self.redactor.write().expect("redactor lock poisoned") =
+            Arc::new(crate::log_capture::Redactor::from_store(&self.store));
         if let Ok(cfg) = self.store.load_stream_timeouts() {
             *self
                 .stream_cfg

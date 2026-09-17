@@ -849,6 +849,7 @@ pub async fn forward(
             },
             started,
             max_body_bytes,
+            state.redactor(),
             inbound,
             state.stream_timeouts(),
         );
@@ -879,7 +880,7 @@ pub async fn forward(
         let (usage, upstream_model) = parse_response_usage(provider.protocol, &bytes);
         let log = log.map(|mut l| {
             let max_body_bytes = state.log_config().max_body_bytes;
-            let (response_body, truncated) = cap_body(&bytes, max_body_bytes);
+            let (response_body, truncated) = cap_body(&bytes, max_body_bytes, &state.redactor());
             l.response_body = Some(response_body);
             l.response_size = bytes.len() as i64;
             l.truncated = truncated;
@@ -1128,6 +1129,7 @@ async fn forward_anthropic_via_openai(
             },
             started,
             max_body_bytes,
+            state.redactor(),
             inbound,
             state.stream_timeouts(),
         );
@@ -1162,7 +1164,8 @@ async fn forward_anthropic_via_openai(
             // are not chat.completion objects; converting would corrupt them).
             let log = log.map(|mut l| {
                 let max_body_bytes = state.log_config().max_body_bytes;
-                let (response_body, truncated) = cap_body(&bytes, max_body_bytes);
+                let (response_body, truncated) =
+                    cap_body(&bytes, max_body_bytes, &state.redactor());
                 l.response_body = Some(response_body);
                 l.response_size = bytes.len() as i64;
                 l.truncated = truncated;
@@ -1236,7 +1239,7 @@ async fn forward_anthropic_via_openai(
 
         let log = log.map(|mut l| {
             let max_body_bytes = state.log_config().max_body_bytes;
-            let (response_body, truncated) = cap_body(&out, max_body_bytes);
+            let (response_body, truncated) = cap_body(&out, max_body_bytes, &state.redactor());
             l.response_body = Some(response_body);
             l.response_size = out.len() as i64;
             l.truncated = truncated;
@@ -1407,6 +1410,13 @@ struct SseUsageStream {
     capture_truncated: bool,
     streamed_bytes: u64,
     capture_cap: Option<usize>,
+    /// The credential scrubber, so a streamed response body goes through the
+    /// same pass as every other body. It did not, for as long as this feature
+    /// has existed: the one-shot paths called `cap_body` and this one copied
+    /// its buffer straight into the row, so every streamed response was stored
+    /// unredacted — on the side where an upstream may echo back the key it
+    /// rejected.
+    redactor: std::sync::Arc<crate::log_capture::Redactor>,
     first_chunk: Option<Instant>,
     /// Who the client is, so a timeout can be reported in a shape it parses.
     inbound: Option<Protocol>,
@@ -1418,12 +1428,17 @@ struct SseUsageStream {
 }
 
 impl SseUsageStream {
+    // Eight arguments until the next change groups the stream's treatment into
+    // one value; spelled out here rather than as a struct that would exist only
+    // to satisfy this lint.
+    #[allow(clippy::too_many_arguments)]
     fn new(
         inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>,
         tx: mpsc::Sender<UsageSample>,
         sample: UsageSample,
         started: Instant,
         capture_cap: Option<usize>,
+        redactor: std::sync::Arc<crate::log_capture::Redactor>,
         inbound: Option<Protocol>,
         timeouts: crate::store::StreamTimeouts,
     ) -> Self {
@@ -1439,6 +1454,7 @@ impl SseUsageStream {
             capture_truncated: false,
             streamed_bytes: 0,
             capture_cap,
+            redactor,
             first_chunk: None,
             inbound,
             timeouts,
@@ -1547,7 +1563,12 @@ impl SseUsageStream {
             log.first_token_ms = self
                 .first_chunk
                 .map(|t| (t - self.started).as_millis() as i64);
-            log.response_body = Some(String::from_utf8_lossy(&self.capture_buf).into_owned());
+            // Through the same cap-and-scrub every other body gets. The buffer
+            // is already capped at capture time, so the cap here is a no-op and
+            // the credentials are not.
+            let (body, _) =
+                crate::log_capture::cap_body(&self.capture_buf, self.capture_cap, &self.redactor);
+            log.response_body = Some(body);
             log.response_size = self.streamed_bytes as i64;
             log.truncated = log.truncated || self.capture_truncated;
         }
@@ -2593,6 +2614,7 @@ mod tests {
             },
             Instant::now(),
             Some(0),
+            std::sync::Arc::new(crate::log_capture::Redactor::default()),
             Some(Protocol::Anthropic),
             crate::store::StreamTimeouts {
                 // The first byte arrived; only the gap is limited.
@@ -2670,6 +2692,7 @@ mod tests {
             },
             Instant::now(),
             Some(0),
+            std::sync::Arc::new(crate::log_capture::Redactor::default()),
             Some(Protocol::Anthropic),
             crate::store::StreamTimeouts::default(),
         );

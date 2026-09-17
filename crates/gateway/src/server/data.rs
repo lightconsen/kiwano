@@ -195,7 +195,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         }
     };
     if let Some(c) = capture.as_mut() {
-        c.set_body(&body_bytes, log_cfg.max_body_bytes);
+        c.set_body(&body_bytes, log_cfg.max_body_bytes, &state.redactor());
     }
 
     // Attribution + strategy-engine provider selection (tech.md §4.7).

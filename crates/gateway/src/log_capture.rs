@@ -329,7 +329,95 @@ fn scrub_line(line: &str) -> String {
 ///   actually redacted, so a clean body keeps its exact bytes. A rewritten
 ///   one is compacted (key order survives: `serde_json` is built with
 ///   `preserve_order` via `kiwano-adapters`).
-fn redact_body(text: &str) -> String {
+///
+/// The credentials this install knows about, so a body can be scrubbed by
+/// *value* and not only by name or shape.
+///
+/// The name allowlist and the token shapes are guesses about what a credential
+/// looks like. This is not a guess: these are the exact strings the user's
+/// providers are configured with, and they cover the case neither of the other
+/// two can — a real key the agent read out of a config file and pasted into a
+/// prompt, under no recognizable name.
+///
+/// Built from the store (`providers.api_key` and the rotating `api_keys`) and
+/// refreshed with the rest of the gateway's cached configuration, so a key
+/// added in the UI is scrubbed by the next request rather than the next
+/// restart.
+#[derive(Debug, Default, Clone)]
+pub struct Redactor {
+    secrets: Vec<String>,
+}
+
+/// Shortest value worth matching. A key shorter than this would be a string
+/// that occurs in ordinary prose — and redacting those would gut the log to
+/// protect nothing. Every real provider credential is far longer.
+const MIN_SECRET_LEN: usize = 12;
+
+impl Redactor {
+    /// From raw credential values, keeping the ones long enough to be
+    /// credentials and ordering them so a shorter key inside a longer one
+    /// cannot leave the longer one's tail visible.
+    pub fn from_values<I: IntoIterator<Item = String>>(values: I) -> Self {
+        let mut secrets: Vec<String> = values
+            .into_iter()
+            .filter(|s| s.len() >= MIN_SECRET_LEN)
+            .collect();
+        secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        secrets.dedup();
+        Redactor { secrets }
+    }
+
+    /// The credentials a store currently holds. Errors are not the caller's
+    /// problem: a redactor that cannot be built scrubs by name and shape alone,
+    /// which is what every request got before this existed.
+    pub fn from_store(store: &Store) -> Self {
+        let mut secrets: Vec<String> = Vec::new();
+        let providers = store.list_providers().unwrap_or_default();
+        for p in &providers {
+            if let Some(k) = p.api_key.as_deref() {
+                secrets.push(k.to_string());
+            }
+            // The rotating pool is credentials too: a request may have gone
+            // upstream with any of them.
+            for k in store.list_api_keys(&p.id).unwrap_or_default() {
+                secrets.push(k.api_key);
+            }
+        }
+        Redactor::from_values(secrets)
+    }
+
+    /// Replace every occurrence of a known credential. Literal matching, not a
+    /// pattern: the point is that these exact strings cannot survive, and a
+    /// heuristic that nearly matches would be the thing this exists to stop
+    /// relying on.
+    fn scrub(&self, text: &str) -> String {
+        let mut out = text.to_string();
+        for secret in &self.secrets {
+            if out.contains(secret.as_str()) {
+                out = out.replace(secret.as_str(), REDACTED);
+            }
+        }
+        out
+    }
+
+    /// How many credentials it holds — for tests and for a caller that wants to
+    /// report whether value matching is in play at all.
+    pub fn len(&self) -> usize {
+        self.secrets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.secrets.is_empty()
+    }
+}
+
+fn redact_body(text: &str, secrets: &Redactor) -> String {
+    // By value first: it is the only pass that is a guarantee rather than a
+    // rule, and running it last would mean re-serializing a body it had just
+    // changed. What it catches is a credential sitting in free text, where the
+    // name pass has nothing to match on and the shape pass only recognizes
+    // prefixes someone thought to list.
+    let text = &secrets.scrub(text);
     if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(text) {
         if scrub_json(&mut value) {
             if let Ok(json) = serde_json::to_string(&value) {
@@ -421,13 +509,13 @@ impl RequestCapture {
     /// recorded whether or not the text is stored, and `truncated` reports the
     /// cap. Credentials are redacted by [`redact_body`] before the text is
     /// stored.
-    pub fn set_body(&mut self, body: &[u8], max_body_bytes: Option<usize>) {
+    pub fn set_body(&mut self, body: &[u8], max_body_bytes: Option<usize>, secrets: &Redactor) {
         self.request_size = body.len() as i64;
         // The same cap-then-redact the response side uses, rather than a
         // second copy of it: the two halves of one exchange should cut and
         // scrub at the same place, and a rule stated twice is a rule that can
         // come apart.
-        let (text, truncated) = cap_body(body, max_body_bytes);
+        let (text, truncated) = cap_body(body, max_body_bytes, secrets);
         self.truncated = truncated;
         self.request_body = Some(text);
     }
@@ -447,16 +535,19 @@ impl RequestCapture {
 /// applied first, so a credential straddling the cut is not scanned — the text
 /// is already lossy there — and the cap is what bounds this work, which runs
 /// once per response on the data plane.
-pub fn cap_body(bytes: &[u8], max_body_bytes: Option<usize>) -> (String, bool) {
+pub fn cap_body(bytes: &[u8], max_body_bytes: Option<usize>, secrets: &Redactor) -> (String, bool) {
     let Some(max) = max_body_bytes else {
         // No cap configured: every byte is stored, and `truncated` stays false
         // because nothing was cut — a reader that saw `true` here would go
         // looking for a limit that does not exist.
-        return (redact_body(&String::from_utf8_lossy(bytes)), false);
+        return (redact_body(&String::from_utf8_lossy(bytes), secrets), false);
     };
     let truncated = bytes.len() > max;
     let capped = &bytes[..bytes.len().min(max)];
-    (redact_body(&String::from_utf8_lossy(capped)), truncated)
+    (
+        redact_body(&String::from_utf8_lossy(capped), secrets),
+        truncated,
+    )
 }
 
 /// Persist a request that failed before/inside the forward leg (no usage).
@@ -515,6 +606,59 @@ pub fn persist_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pass that is a guarantee rather than a rule: a credential the store
+    /// knows about, sitting in free text under no recognizable name.
+    ///
+    /// The key here has a shape no prefix list covers, which is the case the
+    /// name pass and the shape pass both miss — and the one an agent pasting a
+    /// config file into a prompt produces.
+    #[test]
+    fn a_stored_credential_is_scrubbed_by_value() {
+        let secrets = Redactor {
+            secrets: vec!["zq_live_9f4c2a7b81de".to_string()],
+        };
+        let body = r#"{"messages":[{"role":"user","content":"my key is zq_live_9f4c2a7b81de, why 401?"}]}"#;
+        let (text, _) = cap_body(body.as_bytes(), None, &secrets);
+        assert!(!text.contains("zq_live_9f4c2a7b81de"), "{text}");
+        assert!(text.contains(REDACTED), "{text}");
+
+        // With nothing to match, the body is stored byte for byte.
+        let (clean, _) = cap_body(body.as_bytes(), None, &Redactor::default());
+        assert_eq!(clean, body);
+    }
+
+    /// What goes into the list and what does not: a value short enough to occur
+    /// in ordinary prose is not a credential, and redacting those would gut the
+    /// log to protect nothing.
+    #[test]
+    fn only_values_long_enough_to_be_credentials_are_loaded() {
+        let redactor = Redactor::from_values([
+            "abc123".to_string(),
+            "zq_live_9f4c2a7b81de".to_string(),
+            "zq_live_9f4c2a7b81de".to_string(), // a repeat is one entry
+        ]);
+        assert_eq!(redactor.len(), 1, "the short one never makes the list");
+
+        let (text, _) = cap_body(b"key=abc123 and key=zq_live_9f4c2a7b81de", None, &redactor);
+        assert!(
+            text.contains("abc123"),
+            "too short to be a credential: {text}"
+        );
+        assert!(!text.contains("zq_live_9f4c2a7b81de"), "{text}");
+    }
+
+    /// A key that contains another as a substring must not leave the longer
+    /// one's tail behind.
+    #[test]
+    fn the_longest_matching_value_wins() {
+        let redactor = Redactor::from_values([
+            "zq_live_9f4c2a7b81de".to_string(),
+            "zq_live_9f4c2a7b81de_extra".to_string(),
+        ]);
+        let (text, _) = cap_body(b"k=zq_live_9f4c2a7b81de_extra", None, &redactor);
+        assert_eq!(text, format!("k={REDACTED}"), "{text}");
+    }
 
     #[test]
     fn redact_headers_redacts_credential_values() {
@@ -651,7 +795,7 @@ mod tests {
     fn set_body_respects_cap_and_records_size() {
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(b"hello", Some(3));
+        c.set_body(b"hello", Some(3), &Redactor::default());
         assert_eq!(c.request_body.as_deref(), Some("hel"));
         assert!(c.truncated);
         assert_eq!(c.request_size, 5);
@@ -659,7 +803,7 @@ mod tests {
         // A body under the cap is stored whole and not marked truncated.
         let mut c =
             RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new()).unwrap();
-        c.set_body(b"hello", Some(1024));
+        c.set_body(b"hello", Some(1024), &Redactor::default());
         assert_eq!(c.request_body.as_deref(), Some("hello"));
         assert!(!c.truncated);
         assert_eq!(c.request_size, 5);
@@ -673,7 +817,7 @@ mod tests {
     fn capture_with_body(body: &str) -> RequestCapture {
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(body.as_bytes(), Some(1024 * 1024));
+        c.set_body(body.as_bytes(), Some(1024 * 1024), &Redactor::default());
         c
     }
 
@@ -768,7 +912,7 @@ mod tests {
             r#"{"api_key":"sk-live-abcdefghijklmnopqrstuvwxyz","content":"tail is dropped"}"#;
         let mut c = RequestCapture::start(true, "POST", "/v1/messages", None, &HeaderMap::new())
             .expect("capture");
-        c.set_body(body.as_bytes(), Some(60));
+        c.set_body(body.as_bytes(), Some(60), &Redactor::default());
         assert_eq!(c.request_size, body.len() as i64);
         assert!(c.truncated);
         let stored = c.request_body.unwrap();
@@ -790,7 +934,7 @@ mod tests {
     #[test]
     fn cap_body_scrubs_credentials_out_of_a_response() {
         let response = r#"{"error":{"message":"Incorrect API key provided: sk-live-abcdefghijklmnopqrstuvwxyz"}}"#;
-        let (capped, truncated) = cap_body(response.as_bytes(), Some(4096));
+        let (capped, truncated) = cap_body(response.as_bytes(), Some(4096), &Redactor::default());
         assert!(!truncated);
         assert!(
             !capped.contains("sk-live-abcdefghijklmnopqrstuvwxyz"),
@@ -799,17 +943,24 @@ mod tests {
         assert!(capped.contains("Incorrect API key provided"), "{capped}");
 
         // Under a secret-shaped key name, with no recognisable shape at all.
-        let (capped, _) = cap_body(br#"{"api_key":"hunter2","model":"gpt-5"}"#, Some(4096));
+        let (capped, _) = cap_body(
+            br#"{"api_key":"hunter2","model":"gpt-5"}"#,
+            Some(4096),
+            &Redactor::default(),
+        );
         assert!(capped.contains("\"api_key\":\"[REDACTED]\""), "{capped}");
         assert!(capped.contains("gpt-5"), "{capped}");
 
         // An ordinary response is returned untouched, byte for byte — the
         // filter only rewrites what it recognises.
         let plain = r#"{"content":[{"type":"text","text":"hello, world"}]}"#;
-        assert_eq!(cap_body(plain.as_bytes(), Some(4096)).0, plain);
+        assert_eq!(
+            cap_body(plain.as_bytes(), Some(4096), &Redactor::default()).0,
+            plain
+        );
 
         // And the cap still applies, and is still reported.
-        let (capped, truncated) = cap_body(plain.as_bytes(), Some(10));
+        let (capped, truncated) = cap_body(plain.as_bytes(), Some(10), &Redactor::default());
         assert!(truncated);
         assert_eq!(capped.len(), 10);
     }

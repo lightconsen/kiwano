@@ -404,6 +404,72 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     assert_eq!(totals.cache_creation_tokens, 3);
 }
 
+/// A streamed response reaches the client byte for byte and reaches the log
+/// scrubbed. The two halves are one exchange, and this is the side where a
+/// credential can arrive *from the upstream*: a provider that names the key it
+/// rejected puts the user's real key in the response, not in the request.
+///
+/// The stored body used to be the raw capture buffer — every one-shot path went
+/// through the scrubber and this one did not — so the log held whatever the
+/// upstream chose to echo.
+#[tokio::test]
+async fn a_streamed_response_is_intact_for_the_client_and_scrubbed_in_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    // The upstream naming the key it rejected — the shape of an auth error from
+    // a provider that echoes back what it was sent. Written as a literal
+    // because the mock's chunks are `&'static str`; the assertion below keeps
+    // the literal and the constant from drifting apart.
+    const ECHOED: &str = "data: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":1},\"note\":\"rejected sk-real-provider-key\"}\n\n";
+    assert!(
+        ECHOED.contains(REAL_KEY),
+        "the fixture has to echo the key this test is about"
+    );
+    let chunks = vec![
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+        ECHOED,
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    ];
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Sse(chunks.clone())).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":true,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+    let expected: String = chunks.concat();
+
+    // The client gets exactly what the upstream sent: scrubbing is a property
+    // of the log, not of the proxy, and a body mangled in transit would be a
+    // far worse bug than the one being fixed.
+    assert_eq!(String::from_utf8(body.to_vec()).unwrap(), expected);
+
+    let rows = wait_for_log(&state, 1).await;
+    let detail = state.store.get_request_log(rows[0].id).unwrap().unwrap();
+    let stored = detail.response_body.expect("the stream was captured");
+    assert!(
+        !stored.contains(REAL_KEY),
+        "the log kept the key the upstream echoed: {stored}"
+    );
+    assert!(stored.contains("[REDACTED]"), "{stored}");
+}
+
 /// The OpenAI-shaped path with no key at all: this is the request that used to
 /// be attributed to Codex by path protocol and forwarded upstream on the
 /// operator's real key. It is refused now, and the upstream is never called.

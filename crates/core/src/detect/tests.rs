@@ -12,6 +12,7 @@ fn bare_env(home: &Path) -> SearchEnv {
         home: home.to_path_buf(),
         path: OsString::new(),
         var: Box::new(|_| None),
+        manual: Vec::new(),
     }
 }
 
@@ -84,6 +85,7 @@ fn an_env_override_directory_is_searched() {
         var: Box::new(move |name| {
             (name == "OPENCODE_INSTALL_DIR").then(|| override_dir.clone().into_os_string())
         }),
+        manual: Vec::new(),
     };
     assert_eq!(
         search_binary_in("opencode", &env).as_deref(),
@@ -102,11 +104,134 @@ fn the_path_environment_is_searched_last() {
         home: tmp.path().join("empty-home"),
         path: on_path.clone().into_os_string(),
         var: Box::new(|_| None),
+        manual: Vec::new(),
     };
     assert_eq!(
         search_binary_in("qwen", &env).as_deref(),
         Some(expected.as_path())
     );
+}
+
+/// A PATH entry that is not absolute does not name a place tools live, so the
+/// walk does not open it: `.` is wherever the app was launched from, and a
+/// literal `~` is expanded by nobody.
+#[test]
+fn only_absolute_path_entries_are_searched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let absolute = tmp.path().join("on-path");
+    let mut env = bare_env(tmp.path());
+    env.path = std::env::join_paths([
+        OsString::from("."),
+        OsString::from("~/.dotnet/tools"),
+        absolute.clone().into_os_string(),
+    ])
+    .unwrap();
+
+    let dirs = search_paths("gemini", &env);
+    assert!(!dirs.contains(&PathBuf::from(".")), "{dirs:?}");
+    assert!(
+        !dirs.iter().any(|d| d.to_string_lossy().contains('~')),
+        "{dirs:?}"
+    );
+    assert!(dirs.contains(&absolute), "{dirs:?}");
+}
+
+// ── a directory the user declared ──
+
+/// The ordering the whole design rests on: a well-known location wins over a
+/// declaration, and a declaration wins over PATH. (Nothing else expresses that
+/// order — it is one `push_unique` loop's position.)
+#[test]
+fn a_declaration_sits_between_the_known_locations_and_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let known = write_bin(&home.join(".local/bin"), "kimi");
+    let declared = write_bin(&home.join("declared"), "kimi");
+
+    let mut env = bare_env(home);
+    env.manual = vec![home.join("declared")];
+    assert_eq!(
+        search_binary_in("kimi", &env).as_deref(),
+        Some(known.as_path()),
+        "the location the module is sure of beats the user's word"
+    );
+
+    // Only the declared directory has it — the case this feature exists for.
+    std::fs::remove_file(&known).unwrap();
+    assert_eq!(
+        search_binary_in("kimi", &env).as_deref(),
+        Some(declared.as_path())
+    );
+
+    // And it still beats PATH, which is the walk's last resort.
+    write_bin(&home.join("on-path"), "kimi");
+    env.path = home.join("on-path").into_os_string();
+    assert_eq!(
+        search_binary_in("kimi", &env).as_deref(),
+        Some(declared.as_path()),
+        "a declaration is a statement, not a fallback"
+    );
+}
+
+/// A declaration only speaks for its own agent.
+#[test]
+fn a_declaration_does_not_answer_for_another_tool() {
+    let tmp = tempfile::tempdir().unwrap();
+    let declared = write_bin(&tmp.path().join("declared"), "kimi");
+
+    let mut env = bare_env(tmp.path());
+    env.manual = vec![declared.parent().unwrap().to_path_buf()];
+    assert!(search_binary_in("gemini", &env).is_none());
+}
+
+/// The list the dialog shows under "we looked and did not find it" is the
+/// walk's own, so it cannot claim a directory the walk never opens — or miss
+/// one it does.
+#[test]
+fn the_directories_the_dialog_shows_are_the_walks_own() {
+    let home = Path::new("/tmp/kiwano-search-dirs-home");
+
+    let dirs = agent_search_dirs("gemini", home, &[]);
+    // The per-user prefixes the walk leads with, in its order.
+    assert!(dirs.contains(&home.join(".local").join("bin")), "{dirs:?}");
+    assert!(dirs.contains(&home.join(".volta").join("bin")), "{dirs:?}");
+
+    // A declaration is a place the walk consults, so it belongs in the list.
+    let declared = vec![PathBuf::from("/opt/gemini/bin")];
+    assert!(
+        agent_search_dirs("gemini", home, &declared).contains(&PathBuf::from("/opt/gemini/bin"))
+    );
+
+    // An agent with no command line has nowhere to point at, and no list.
+    assert!(agent_search_dirs("workbuddy", home, &[]).is_empty());
+}
+
+/// The check a declaration has to pass before it is stored: a directory with
+/// the right executable that runs. Its three outcomes are the three things
+/// that can go wrong.
+#[test]
+fn verifying_a_declared_directory_checks_the_tool_itself() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Nothing by that name in the directory.
+    let empty = tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let err = verify_manual_dir("gemini", &empty).unwrap_err();
+    assert!(err.contains("no `gemini`"), "{err}");
+
+    // Found, but it is not something that runs.
+    let broken = tmp.path().join("broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("gemini"), b"not a program").unwrap();
+    let err = verify_manual_dir("gemini", &broken).unwrap_err();
+    assert!(err.contains("would not run"), "{err}");
+
+    // A directory that does not exist at all reads as empty, not as an error.
+    assert!(verify_manual_dir("gemini", &tmp.path().join("nowhere")).is_err());
+
+    // An id with no command-line tool behind it cannot be declared.
+    let err = verify_manual_dir("workbuddy", &tmp.path().join("nowhere")).unwrap_err();
+    assert!(err.contains("no command-line tool"), "{err}");
 }
 
 // ── executable candidates ──

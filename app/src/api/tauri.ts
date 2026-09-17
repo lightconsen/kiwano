@@ -83,6 +83,12 @@ export const tauriApi: KiwanoApi = {
   updateCustomAgent: (id: string, label: string, note?: string | null) =>
     invoke<CustomAgent>("update_custom_agent", { id, label, note: note ?? null }),
 
+  setAgentDir: (agent: AgentId, dir: string) =>
+    invoke<string>("set_agent_dir", { agent, dir }),
+
+  agentSearchDirs: (agent: AgentId) => invoke<string[]>("agent_search_dirs", { agent }),
+
+  clearAgentDir: (agent: AgentId) => invoke<void>("clear_agent_dir", { agent }),
 
   removeCustomAgent: (id: string) => invoke<void>("remove_custom_agent", { id }),
 

@@ -80,8 +80,14 @@ pub struct AgentVersionVm {
 }
 
 /// Phase 1: which agents are installed, and where.
-pub fn detect_agents(home: &Path) -> Vec<AgentDetectVm> {
-    let cli = find_agent_binaries(home);
+///
+/// `manual` carries the directories the user declared for agents the walk
+/// cannot find by itself, keyed by agent id — see [`verify_manual_dir`] for the
+/// check a declaration has to pass before it gets here. It is an argument
+/// rather than a store read because this module knows nothing about the
+/// database, and that is what keeps it testable.
+pub fn detect_agents(home: &Path, manual: &BTreeMap<String, PathBuf>) -> Vec<AgentDetectVm> {
+    let cli = find_agent_binaries(home, manual);
     let mut vms: Vec<AgentDetectVm> = CLI_AGENTS
         .iter()
         .map(|(agent, cli_name)| {
@@ -111,8 +117,11 @@ pub fn detect_agents(home: &Path) -> Vec<AgentDetectVm> {
 /// Slow by construction — one `--version` subprocess per agent — which is why
 /// it is a separate call from [`detect_agents`] and why a caller should make it
 /// opt-in.
-pub fn probe_agent_versions(home: &Path) -> Vec<AgentVersionVm> {
-    let cli = find_agent_binaries(home);
+pub fn probe_agent_versions(
+    home: &Path,
+    manual: &BTreeMap<String, PathBuf>,
+) -> Vec<AgentVersionVm> {
+    let cli = find_agent_binaries(home, manual);
     let mut vms: Vec<AgentVersionVm> = CLI_AGENTS
         .iter()
         .map(|(agent, cli_name)| AgentVersionVm {
@@ -135,13 +144,20 @@ pub fn probe_agent_versions(home: &Path) -> Vec<AgentVersionVm> {
 /// Every agent's binary: the shell's answer first (it is the PATH the user
 /// actually has), the well-known directories second (for what the shell cannot
 /// see). Keyed by executable name, the form both sources produce.
-fn find_agent_binaries(home: &Path) -> BTreeMap<String, PathBuf> {
+fn find_agent_binaries(
+    home: &Path,
+    manual: &BTreeMap<String, PathBuf>,
+) -> BTreeMap<String, PathBuf> {
     let mut found = shell_probe_all();
-    for (_, cli) in CLI_AGENTS {
-        if !found.contains_key(*cli) {
-            if let Some(path) = search_well_known_dirs(cli, home) {
-                found.insert((*cli).to_string(), path);
-            }
+    for (agent, cli) in CLI_AGENTS {
+        if found.contains_key(*cli) {
+            continue;
+        }
+        // Declarations arrive keyed by agent id; the walk is by executable
+        // name, so this is where the two vocabularies meet.
+        let declared: Vec<PathBuf> = manual.get(*agent).into_iter().cloned().collect();
+        if let Some(path) = search_well_known_dirs(cli, home, &declared) {
+            found.insert((*cli).to_string(), path);
         }
     }
     found
@@ -285,15 +301,22 @@ pub(crate) struct SearchEnv {
     /// Env-var lookups the location list needs (`$PNPM_HOME`, `$XDG_BIN_DIR`,
     /// …). Injected so tests do not depend on the ambient environment.
     pub(crate) var: VarLookup,
+    /// Directories the user declared for the agent being looked for
+    /// (`Store::manual_agent_dirs`). Searched after the well-known locations
+    /// and before PATH: a declaration is the user's word, but the well-known
+    /// locations are what this module is sure of, and the sure thing goes
+    /// first.
+    pub(crate) manual: Vec<PathBuf>,
 }
 
 impl SearchEnv {
     /// The real environment of this process.
-    fn from_process(home: &Path) -> SearchEnv {
+    fn from_process(home: &Path, manual: &[PathBuf]) -> SearchEnv {
         SearchEnv {
             home: home.to_path_buf(),
             path: effective_path(),
             var: Box::new(|name| std::env::var_os(name)),
+            manual: manual.to_vec(),
         }
     }
 
@@ -305,8 +328,8 @@ impl SearchEnv {
 }
 
 /// First hit across the well-known directories, in priority order.
-fn search_well_known_dirs(name: &str, home: &Path) -> Option<PathBuf> {
-    search_binary_in(name, &SearchEnv::from_process(home))
+fn search_well_known_dirs(name: &str, home: &Path, manual: &[PathBuf]) -> Option<PathBuf> {
+    search_binary_in(name, &SearchEnv::from_process(home, manual))
 }
 
 /// The walk itself, against a caller-supplied environment — which is what lets
@@ -435,11 +458,25 @@ fn search_paths(name: &str, env: &SearchEnv) -> Vec<PathBuf> {
         push_unique(&mut paths, PathBuf::from("C:\\Program Files\\nodejs"));
     }
 
+    // The directory the user declared for this tool, if the locations above
+    // missed it — the case this whole path exists for.
+    for dir in &env.manual {
+        push_unique(&mut paths, dir.clone());
+    }
+
     // Last: whatever PATH says. On unix this is narrow (the GUI's inherited
     // PATH, not the user's) — that is what source 1 is for — and on Windows it
     // is the merged user+machine PATH, which is a real answer.
+    //
+    // Only the absolute entries: a relative one means "the current directory",
+    // and the current directory of a GUI app is wherever it was launched from,
+    // which is not a place the user's tools live. A literal `~` is not expanded
+    // by anyone, so it is dead weight too — it never names a directory that
+    // exists. Both come from someone's dotfile and both are skipped here.
     for entry in std::env::split_paths(&env.path) {
-        push_unique(&mut paths, entry);
+        if entry.is_absolute() {
+            push_unique(&mut paths, entry);
+        }
     }
 
     paths
@@ -833,6 +870,52 @@ fn terminate_child_tree(child: &mut std::process::Child) {
         let _ = child.kill();
     }
     let _ = child.wait();
+}
+
+// ── a directory the user declared ───────────────────────────────────────────
+
+/// Every directory the walk tries for `agent`, in the order it tries them.
+///
+/// This is the walk's own list ([`search_paths`]) rather than a description of
+/// it, which is the point: a dialog that says "we looked and it was not there"
+/// should be showing what the detector did, not a hand-kept second copy that
+/// drifts from it. For an agent the walk *did* find, the list is still every
+/// place it looked — so it answers "where did you look", not "where was it".
+///
+/// A declaration is passed the same way the walk takes it, so a declared
+/// directory is in the list too: it is a place the walk consults.
+pub fn agent_search_dirs(agent: &str, home: &Path, manual: &[PathBuf]) -> Vec<PathBuf> {
+    let Some((_, cli)) = CLI_AGENTS.iter().find(|(id, _)| *id == agent) else {
+        return Vec::new();
+    };
+    search_paths(cli, &SearchEnv::from_process(home, manual))
+}
+
+/// Check a directory the user pointed at for `agent`, using the same search
+/// and the same version probe the walk uses — there is no second opinion about
+/// what counts as this tool's executable.
+///
+/// What it can confirm: the directory holds a file with the agent's expected
+/// name, and that file runs (so the returned string is its version). What it
+/// cannot: that the file *is* that agent's CLI. `--version` output has no
+/// shape to match across tools — `codex-cli 0.42.0`, `gemini, version 1.2.3`,
+/// and bare numbers all occur — so any name check would reject real tools more
+/// often than it caught impostors. The UI says as much rather than claiming a
+/// verification this cannot make.
+pub fn verify_manual_dir(agent: &str, dir: &Path) -> Result<String, String> {
+    let Some((_, cli)) = CLI_AGENTS.iter().find(|(id, _)| *id == agent) else {
+        return Err(format!("{agent} has no command-line tool to point at"));
+    };
+    let found = executable_candidates(cli, dir)
+        .into_iter()
+        .find(|candidate| candidate.is_file());
+    let Some(bin) = found else {
+        return Err(format!("no `{cli}` in {}", dir.display()));
+    };
+    match probe_version(&bin) {
+        Some(version) => Ok(version),
+        None => Err(format!("found {}, but it would not run", bin.display())),
+    }
 }
 
 // ── the GUI-only agents ─────────────────────────────────────────────────────

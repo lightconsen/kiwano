@@ -42,6 +42,9 @@ const { apiMock } = vi.hoisted(() => ({
     deleteProvider: vi.fn(),
     addCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
+    agentSearchDirs: vi.fn(),
+    setAgentDir: vi.fn(),
+    clearAgentDir: vi.fn(),
     testProviderLatency: vi.fn(),
     setProviderEnabled: vi.fn(),
   },
@@ -257,7 +260,9 @@ describe("a user-defined agent", () => {
     apiMock.addCustomAgent.mockResolvedValue(created);
     render(<Providers onAdd={() => {}} onEdit={() => {}} />);
 
-    await user.click(await screen.findByRole("button", { name: en.providers.newAgent }));
+    // The + opens a menu now; creating a custom agent is its first item.
+    await user.click(await screen.findByRole("button", { name: en.providers.addAgentMenu }));
+    await user.click(await screen.findByRole("menuitem", { name: en.providers.newAgent }));
     // The next settings read is the one the creation triggers.
     apiMock.getSettings.mockResolvedValue(settingsWith(true, [created]));
     await user.type(screen.getByRole("textbox", { name: en.providers.agentName }), created.label);
@@ -358,6 +363,118 @@ describe("a user-defined agent", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: longTasks.label })).toBeNull(),
     );
+  });
+});
+
+describe("a built-in the walk could not find", () => {
+  /** Gemini lives somewhere the walk has no reason to look, and WorkBuddy is a
+      GUI app: one of the two can be pointed at, and the menu has to know the
+      difference. */
+  const missing: AgentDetect[] = [
+    { agent: "gemini", installed: false, path: null },
+    { agent: "workbuddy", installed: false, path: null },
+  ];
+
+  /** Open the strip's + menu with `agentDetect` in hand, the API answering. */
+  async function openMenu(agentDetect: AgentDetect[], onRedetect = vi.fn()) {
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, []));
+    apiMock.agentSearchDirs.mockResolvedValue(["~/.local/bin", "/opt/homebrew/bin"]);
+    const user = userEvent.setup();
+    render(<Providers onAdd={() => {}} onEdit={() => {}} agentDetect={agentDetect} onRedetect={onRedetect} />);
+    await user.click(await screen.findByRole("button", { name: en.providers.addAgentMenu }));
+    return { user, onRedetect };
+  }
+
+  it("is offered by name, and a directory for it is stored", async () => {
+    const { user, onRedetect } = await openMenu(missing);
+    const gemini = await screen.findByRole("menuitem", { name: "Gemini CLI" });
+    // Only the agents with a command to point at: a GUI app cannot be helped
+    // by a directory, so offering it would be a dead end.
+    expect(screen.queryByRole("menuitem", { name: /WorkBuddy/ })).toBeNull();
+
+    await user.click(gemini);
+
+    // The dialog says what the check can and cannot establish — the whole
+    // reason it is worded that way is that identity is not checkable.
+    expect(
+      await screen.findByText(en.providers.addAgentTitle.replace("{agent}", "Gemini CLI")),
+    ).toBeInTheDocument();
+    expect(screen.getByText(en.providers.addAgentNote)).toBeInTheDocument();
+
+    // And it shows where the detector looked, so "we could not find it" is
+    // something the user can check rather than take on faith — the stale
+    // shell PATH this whole feature exists for is visible in that list.
+    expect(apiMock.agentSearchDirs).toHaveBeenCalledWith("gemini");
+    expect(
+      await screen.findByText(en.providers.searchedDirs.replace("{count}", "2")),
+    ).toBeInTheDocument();
+    expect(screen.getByText("~/.local/bin")).toBeInTheDocument();
+    expect(screen.getByText("/opt/homebrew/bin")).toBeInTheDocument();
+
+    apiMock.setAgentDir.mockResolvedValue("1.2.3");
+    await user.type(
+      screen.getByRole("textbox", { name: en.providers.installDir }),
+      "/opt/gemini/bin",
+    );
+    await user.click(screen.getByRole("button", { name: en.providers.addAgent }));
+
+    await waitFor(() =>
+      expect(apiMock.setAgentDir).toHaveBeenCalledWith("gemini", "/opt/gemini/bin"),
+    );
+    // What the user is waiting for is the tab, which only a re-probe produces.
+    await waitFor(() => expect(onRedetect).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(en.providers.addAgentNote)).toBeNull();
+  });
+
+  it("keeps the dialog open when the directory does not check out", async () => {
+    const { user, onRedetect } = await openMenu(missing);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+    apiMock.setAgentDir.mockRejectedValue(new Error("no `gemini` in /nowhere"));
+
+    await user.type(screen.getByRole("textbox", { name: en.providers.installDir }), "/nowhere");
+    await user.click(screen.getByRole("button", { name: en.providers.addAgent }));
+
+    // The reason, in the dialog, where the field it is about still is.
+    expect(await screen.findByText("no `gemini` in /nowhere")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: en.providers.installDir })).toBeInTheDocument();
+    expect(onRedetect).not.toHaveBeenCalled();
+  });
+
+  it("shows a declared one as added, and can drop the declaration", async () => {
+    const declared: AgentDetect[] = [
+      { agent: "gemini", installed: true, path: "/opt/gemini/bin/gemini", manual: true },
+    ];
+    const { user, onRedetect } = await openMenu(declared);
+
+    // It has a tab — a declaration is what the detector was missing — and the
+    // menu still lists it, because the path can be wrong or the tool can move.
+    expect(await screen.findByRole("button", { name: "Gemini CLI" })).toBeInTheDocument();
+    const item = await screen.findByRole("menuitem", { name: /Gemini CLI/ });
+    expect(within(item).getByText(en.providers.alreadyDeclared)).toBeInTheDocument();
+
+    await user.click(item);
+    // The dialog opens on the directory it was declared with — the binary is
+    // what comes back, its parent is what the user named.
+    expect(await screen.findByRole("textbox", { name: en.providers.installDir })).toHaveValue(
+      "/opt/gemini/bin",
+    );
+    // And it does not repeat the sentence for an agent Kiwano *cannot* find,
+    // which would be false here: this one it found, because it was told where.
+    expect(screen.getByText(en.providers.declaredAgentNote)).toBeInTheDocument();
+    expect(screen.queryByText(en.providers.addAgentNote)).toBeNull();
+    // Nor a list of places it looked and did not find it — it did find it.
+    expect(
+      screen.queryByText(en.providers.searchedDirs.replace("{count}", "2")),
+    ).toBeNull();
+    expect(apiMock.agentSearchDirs).not.toHaveBeenCalled();
+
+    apiMock.clearAgentDir.mockResolvedValue(undefined);
+    await user.click(await screen.findByRole("button", { name: en.common.remove }));
+
+    await waitFor(() => expect(apiMock.clearAgentDir).toHaveBeenCalledWith("gemini"));
+    await waitFor(() => expect(onRedetect).toHaveBeenCalledTimes(1));
   });
 });
 

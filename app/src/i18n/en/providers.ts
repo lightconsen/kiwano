@@ -135,10 +135,31 @@ export const providers = {
   testLatencyFailed: "failed",
 
   // ── User-defined agents (migration v16) ──
+  // The + in the strip opens a menu rather than creating outright, so it needs
+  // its own wording: the menu is "add an agent", and creating one is the first
+  // thing it offers.
   /** The + at the end of the agent strip. */
-  newAgent: "New agent",
+  addAgentMenu: "Add an agent",
+  addAgentMenuTitle: "Define your own, or point Kiwano at one it cannot find",
+  /** First item in that menu. */
+  newAgent: "Create a custom agent",
+  // ── Pointing Kiwano at a built-in it could not find ──
+  notDetected: "Not found on this machine",
+  addAgentTitle: "Add {agent}",
+  declaredAgentTitle: "{agent}'s install directory",
+  installDir: "Install directory",
+  installDirPlaceholder: "/opt/custom/bin",
+  browse: "Browse…",
+  /** Heading over the directories the detector tried. The count is there
+      because the list scrolls: it is how the user knows there is more of it. */
+  searchedDirs: "Looked in {count} directories, and not found",
+  addAgentNote:
+    "Point it at the directory holding this agent's command and Kiwano will confirm that command runs — not that it is this agent's, since version output has no shared shape to check.",
+  declaredAgentNote:
+    "You pointed Kiwano here, and this is where it found the agent. Saving checks the command still runs — not that it is this agent's, since version output has no shared shape to check.",
+  addAgent: "Add agent",
+  alreadyDeclared: "Added",
   editAgentName: "Edit agent name",
-  newAgentTitle: "Define your own agent: a named route with its own key",
   agentName: "Name",
   agentNamePlaceholder: "Long tasks",
   agentNote: "Note",

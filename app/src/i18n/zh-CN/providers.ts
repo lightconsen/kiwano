@@ -107,9 +107,26 @@ export const providers = {
   testLatencyFailed: "失败",
 
   // ── 自定义 Agent（迁移 v16）──
-  newAgent: "新建 Agent",
+  // 工具条上的 + 现在打开菜单而不是直接新建,所以它要有自己的措辞:
+  // 菜单是「添加 Agent」,新建自定义 Agent 是它给出的第一项。
+  addAgentMenu: "添加 Agent",
+  addAgentMenuTitle: "新建自定义 Agent,或手动指定 Kiwano 找不到的内置 Agent",
+  newAgent: "新建自定义 Agent",
+  // ── 手动指定 Kiwano 找不到的内置 Agent ──
+  notDetected: "本机未检测到",
+  addAgentTitle: "添加 {agent}",
+  declaredAgentTitle: "{agent} 的安装目录",
+  installDir: "安装目录",
+  installDirPlaceholder: "/opt/custom/bin",
+  browse: "浏览…",
+  searchedDirs: "已查找 {count} 个目录,均未找到",
+  addAgentNote:
+    "指向存放它命令的目录即可 —— Kiwano 只能确认那个命令可以运行,不能确认它就是该 Agent(各家的版本输出格式不同,没有可依赖的形状)。",
+  declaredAgentNote:
+    "Kiwano 是按你指定的目录找到它的。保存时只会确认那个命令仍然可以运行 —— 不能确认它就是该 Agent(各家的版本输出格式不同,没有可依赖的形状)。",
+  addAgent: "添加",
+  alreadyDeclared: "已添加",
   editAgentName: "编辑 Agent 名称",
-  newAgentTitle: "自定义 Agent：一条有名字、有自己 key 的路由",
   agentName: "名称",
   agentNamePlaceholder: "长任务",
   agentNote: "备注",

@@ -556,13 +556,68 @@ fn update_settings(
 // the command names it invokes.
 
 #[tauri::command(async)]
-fn detect_agents() -> Vec<detect::AgentDetectVm> {
-    detect::detect_agents(&home_dir())
+fn detect_agents(state: State<'_, AppState>) -> Vec<detect::AgentDetectVm> {
+    let declared = state.store.manual_agent_dirs();
+    detect::detect_agents(&home_dir(), &declared)
 }
 
 #[tauri::command(async)]
-fn probe_agent_versions() -> Vec<detect::AgentVersionVm> {
-    detect::probe_agent_versions(&home_dir())
+fn probe_agent_versions(state: State<'_, AppState>) -> Vec<detect::AgentVersionVm> {
+    let declared = state.store.manual_agent_dirs();
+    detect::probe_agent_versions(&home_dir(), &declared)
+}
+
+/// Point the detector at a directory for a built-in agent it cannot find by
+/// itself — the escape hatch for an install the walk has no way to know about.
+///
+/// The directory is checked before it is stored: it has to hold a runnable
+/// executable with the agent's own name, and the version it printed comes back.
+/// What that check cannot establish is identity — see `detect::verify_manual_dir`
+/// — so the caller is told what was found, not that it was verified.
+#[tauri::command]
+fn set_agent_dir(state: State<AppState>, agent: String, dir: String) -> Result<String, String> {
+    let path = std::path::Path::new(&dir);
+    let version = detect::verify_manual_dir(&agent, path)?;
+    state
+        .store
+        .set_manual_agent_dir(&agent, path)
+        .map_err(|e| e.to_string())?;
+    Ok(version)
+}
+
+/// Everywhere the detector looks for `agent`, for the dialog that has to say
+/// *where* it looked before asking the user to point at it.
+///
+/// The list comes from the walk itself rather than a copy of it, and each
+/// directory is written the way the user would (`~` for their home), because
+/// these are being read rather than resolved.
+#[tauri::command(async)]
+fn agent_search_dirs(state: State<'_, AppState>, agent: String) -> Vec<String> {
+    let home = home_dir();
+    let declared: Vec<std::path::PathBuf> = state
+        .store
+        .manual_agent_dirs()
+        .remove(&agent)
+        .into_iter()
+        .collect();
+    detect::agent_search_dirs(&agent, &home, &declared)
+        .iter()
+        .map(|dir| match dir.strip_prefix(&home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => dir.display().to_string(),
+        })
+        .collect()
+}
+
+/// Forget a declaration: the agent goes back to whatever the detector finds for
+/// itself.
+#[tauri::command]
+fn clear_agent_dir(state: State<AppState>, agent: String) -> Result<(), String> {
+    state
+        .store
+        .clear_manual_agent_dir(&agent)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1164,6 +1219,9 @@ pub fn run() {
             export_config,
             import_config,
             detect_agents,
+            set_agent_dir,
+            agent_search_dirs,
+            clear_agent_dir,
             probe_agent_versions,
             check_app_update,
             update::download_and_install_app_update,

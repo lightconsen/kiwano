@@ -677,6 +677,9 @@ export interface AgentDetect {
   installed: boolean;
   /** Resolved CLI binary path; null for claude-desktop */
   path: string | null;
+  /** True when the hit came from a directory the user declared, not from the
+      walk itself — the agent the detector could not find on its own. */
+  manual?: boolean;
 }
 
 /** Agent version probe (phase 2: async `--version`; null when the probe failed) */
@@ -874,6 +877,14 @@ export interface KiwanoApi {
   addCustomAgent(label: string, note?: string | null): Promise<CustomAgent>;
   /** Rename one. Its id, route and key are untouched — only the label moves */
   updateCustomAgent(id: string, label: string, note?: string | null): Promise<CustomAgent>;
+  /** Every directory the detector looks in for a built-in agent — what "we
+      could not find it" is measured against, from the walk itself. */
+  agentSearchDirs(agent: AgentId): Promise<string[]>;
+  /** Declare where a built-in agent lives, for one the detector cannot find.
+      Resolves with the version that directory's executable reported. */
+  setAgentDir(agent: AgentId, dir: string): Promise<string>;
+  /** Drop the declaration; the agent goes back to what the detector finds. */
+  clearAgentDir(agent: AgentId): Promise<void>;
   /** Delete a user-defined agent, its route and its key (usage history stays) */
   removeCustomAgent(id: string): Promise<void>;
 

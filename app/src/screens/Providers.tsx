@@ -27,12 +27,21 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+} from "@/components/ui/menu";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api/client";
 import { LoadFailed, errText } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
@@ -40,6 +49,7 @@ import { agentMeta, isBuiltinAgent, rememberCustomAgents } from "../lib/agents";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import {
   AGENTS,
+  type AgentId,
   PLAN_TIER_LABEL_KEYS,
   type AgentDetect,
   type AgentLimit,
@@ -50,12 +60,17 @@ import {
   type Provider,
   type StrategyBinding,
 } from "../api/types";
-import { AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
+import { AGENT_ICON, AgentChip, BillTag, Dot, Logo, Ring, Sparkline } from "../components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { iconForEndpoint } from "@/components/icons/infer";
 import StrategyPanel, { CopyRouteRow } from "../components/StrategyPanel";
 import { LimitSection } from "../components/AgentLimit";
 import { fmtLatency, fmtMoney, fmtTokens } from "../lib/format";
+
+// Built-ins with no command-line tool to point at: a directory declaration
+// cannot make either of them appear, so they are left out of that menu. The
+// same two are the ones missing from `CLI_AGENTS` on the Rust side.
+const NO_CLI_AGENTS: AgentId[] = ["claude-desktop", "workbuddy"];
 
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
@@ -740,6 +755,198 @@ function NewAgentDialog({
               onClick={create}
             >
               {t("providers.createAgent")}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The directory a resolved binary sits in. A declared directory comes back
+ * only as the binary the walk found *in* it, and the dialog has to open on
+ * something the user can correct rather than a blank field. */
+function dirOf(binaryPath: string): string {
+  const cut = Math.max(binaryPath.lastIndexOf("/"), binaryPath.lastIndexOf("\\"));
+  return cut > 0 ? binaryPath.slice(0, cut) : "";
+}
+
+/** Point the detector at a built-in agent it could not find.
+ *
+ * The backend checks the directory before storing anything — it has to hold a
+ * runnable executable with the agent's own name — and the note in the dialog
+ * says what that check can and cannot establish, rather than implying a
+ * verification that has no way to exist.
+ */
+function DeclareAgentDirDialog({
+  agent,
+  onClose,
+  onSaved,
+  onCleared,
+}: {
+  agent: { id: AgentId; label: string; icon?: string; dir?: string; declared?: boolean } | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onCleared: () => void;
+}) {
+  const t = useT();
+  const [dir, setDir] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Where the detector looked, for the agents it did not find: "we cannot find
+  // it" is only worth believing next to the list it is measured against — and
+  // a stale shell PATH is exactly the kind of thing the list makes visible.
+  const [searched, setSearched] = useState<string[]>([]);
+  useEffect(() => {
+    if (!agent) return;
+    setDir(agent.dir ?? "");
+    setErr(null);
+    setSearched([]);
+    if (agent.declared) return;
+    let live = true;
+    void api.agentSearchDirs(agent.id).then(
+      (dirs) => live && setSearched(dirs),
+      // A list that could not be read is no list: the dialog says what it can
+      // and offers the field, which is the part that matters.
+      () => live && setSearched([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [agent]);
+  const save = async () => {
+    if (!agent || !dir.trim() || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.setAgentDir(agent.id, dir.trim());
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  /** Drop the declaration. The dialog stays open on a failure, the same way a
+   * failed save does — the agent still has the directory it had. */
+  const forget = async () => {
+    if (!agent || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.clearAgentDir(agent.id);
+      onCleared();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const browse = async () => {
+    try {
+      const picked = await open({ directory: true, multiple: false });
+      if (typeof picked === "string") setDir(picked);
+    } catch {
+      // A desktop-only affordance, and absent under `pnpm dev`. Typing the
+      // path is the fallback, so a picker that will not open is not an error.
+    }
+  };
+  return (
+    <Dialog open={agent != null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-[13px]">
+            {/* The mark is decoration here — the title already names the agent,
+                and the logo would read its name a second time. */}
+            {agent?.icon && (
+              <span aria-hidden className="inline-flex shrink-0">
+                <ProviderLogo icon={agent.icon} name={agent.label} size={16} />
+              </span>
+            )}
+            {agent?.declared
+              ? t("providers.declaredAgentTitle", { agent: agent.label })
+              : t("providers.addAgentTitle", { agent: agent?.label ?? "" })}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="min-w-0 space-y-3 px-5 pb-4 pt-1">
+          <div>
+            <Label className="text-[11px] font-medium text-mut">{t("providers.installDir")}</Label>
+            <div className="mt-1 flex items-center gap-1.5">
+              <Input
+                autoFocus
+                aria-label={t("providers.installDir")}
+                className="h-8 text-[12px]"
+                value={dir}
+                placeholder={t("providers.installDirPlaceholder")}
+                onChange={(e) => setDir(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void save()}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 text-[12px]"
+                onClick={() => void browse()}
+              >
+                {t("providers.browse")}
+              </Button>
+            </div>
+          </div>
+          {searched.length > 0 && (
+            // The list scrolls at a whole number of rows: a half-row at the
+            // edge reads as a clipped list rather than a scrollable one.
+            //
+            // `min-w-0` all the way down is what makes the truncation below
+            // work: the dialog is a grid, and a grid item will not shrink
+            // below its content unless it is told it may — so a PATH entry
+            // long enough (Apple's cryptex ones are) would push the list, and
+            // with it the dialog, wider than the dialog itself.
+            <div className="min-w-0 pl-1.5">
+              <p className="text-[11px] font-medium text-mut">
+                {t("providers.searchedDirs", { count: searched.length })}
+              </p>
+              <ul className="mt-1 max-h-32 w-full min-w-0 overflow-x-hidden overflow-y-auto rounded-md bg-surface2 px-1.5 py-1">
+                {searched.map((d) => (
+                  <li
+                    key={d}
+                    title={d}
+                    className="truncate font-mono text-[10.5px] leading-5 text-mut"
+                  >
+                    {d}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-[11px] leading-relaxed text-mut">
+            {agent?.declared ? t("providers.declaredAgentNote") : t("providers.addAgentNote")}
+          </p>
+          {err && (
+            <p className="text-[11px]" style={{ color: "var(--red)" }}>
+              {err}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            {agent?.declared && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mr-auto h-7 px-3 text-[12px] text-mut"
+                disabled={busy}
+                onClick={() => void forget()}
+              >
+                {t("common.remove")}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" className="h-7 px-3 text-[12px]" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 px-3 text-[12px] font-semibold"
+              disabled={!dir.trim() || busy}
+              onClick={() => void save()}
+            >
+              {t("providers.addAgent")}
             </Button>
           </div>
         </div>
@@ -1778,6 +1985,14 @@ export default function Providers({
   const [takenOver, setTakenOver] = useState<Set<AgentRef> | null>(null);
   const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
   const [newAgent, setNewAgent] = useState(false);
+  // The built-in agent whose install directory is being declared, if any.
+  const [declaring, setDeclaring] = useState<{
+    id: AgentId;
+    label: string;
+    icon?: string;
+    dir?: string;
+    declared?: boolean;
+  } | null>(null);
   // The credentials dialog, opened from the icon beside a user-defined agent's
   // name (there is no card on the tab itself).
   const [accessOpen, setAccessOpen] = useState(false);
@@ -1918,6 +2133,30 @@ export default function Providers({
     const timer = setTimeout(() => setRefreshed(false), 1600);
     return () => clearTimeout(timer);
   }, [refreshed]);
+
+  // What the "+" menu offers besides a custom agent: the built-ins the
+  // detector could not find, plus any already declared (so a declaration can be
+  // corrected or dropped). Null detection means "no idea" — offering guesses
+  // then would be noise, so the menu keeps its first item only.
+  const declarable = useMemo(() => {
+    if (!agentDetect) return [];
+    return AGENTS.filter((a) => !NO_CLI_AGENTS.includes(a.id as AgentId))
+      .map((a) => {
+        const hit = agentDetect.find((d) => d.agent === a.id);
+        const declared = hit?.manual ?? false;
+        return {
+          id: a.id as AgentId,
+          label: a.label,
+          icon: AGENT_ICON[a.id],
+          declared,
+          // A declaration comes back as the binary it resolved to, so the
+          // dialog opens on the directory the user named last time.
+          dir: declared && hit?.path ? dirOf(hit.path) : "",
+          missing: !hit?.installed,
+        };
+      })
+      .filter((a) => a.declared || a.missing);
+  }, [agentDetect]);
 
   // The strip reads in three groups: the agents already routed through the
   // gateway, then the ones merely installed, then the user's own — which are
@@ -2080,16 +2319,50 @@ export default function Providers({
           })}
           {/* Its own button rather than part of the strip: the strip is a
               switch between agents that exist, and this is how one comes to. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 shrink-0 px-0 text-mut hover:text-ink"
-            aria-label={t("providers.newAgent")}
-            title={t("providers.newAgentTitle")}
-            onClick={() => setNewAgent(true)}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 shrink-0 px-0 text-mut hover:text-ink"
+                  aria-label={t("providers.addAgentMenu")}
+                  title={t("providers.addAgentMenuTitle")}
+                />
+              }
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </MenuTrigger>
+            <MenuContent>
+              <MenuItem onClick={() => setNewAgent(true)}>
+                <Plus className="h-3.5 w-3.5 text-mut" />
+                {t("providers.newAgent")}
+              </MenuItem>
+              {declarable.length > 0 && (
+                <>
+                  <MenuSeparator />
+                  <MenuLabel>{t("providers.notDetected")}</MenuLabel>
+                  {declarable.map((a) => (
+                    <MenuItem key={a.id} onClick={() => setDeclaring(a)}>
+                      {a.icon ? (
+                        <span aria-hidden className="inline-flex shrink-0">
+                          <ProviderLogo icon={a.icon} name={a.label} size={14} />
+                        </span>
+                      ) : (
+                        <span className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span className="min-w-0 truncate">{a.label}</span>
+                      {a.declared && (
+                        <span className="ml-auto shrink-0 text-[10.5px] text-mut">
+                          {t("providers.alreadyDeclared")}
+                        </span>
+                      )}
+                    </MenuItem>
+                  ))}
+                </>
+              )}
+            </MenuContent>
+          </Menu>
         </div>
         <span className="ml-1.5 text-[11.5px] text-mut">
           {t("providers.counts", { providers: providers.length, agents: agentsBound })}
@@ -2332,6 +2605,21 @@ export default function Providers({
         open={newAgent}
         onClose={() => setNewAgent(false)}
         onSaved={onAgentCreated}
+      />
+
+      <DeclareAgentDirDialog
+        agent={declaring}
+        onClose={() => setDeclaring(null)}
+        onSaved={() => {
+          setDeclaring(null);
+          // Re-probe: the tab the declaration was about is what the user is
+          // waiting for.
+          void onRedetect?.();
+        }}
+        onCleared={() => {
+          setDeclaring(null);
+          void onRedetect?.();
+        }}
       />
 
       {!custom && seg !== "all" && (takenOver?.has(seg) ?? false) && (

@@ -167,11 +167,16 @@ fn only_absolute_path_entries_are_searched() {
     .unwrap();
 
     let dirs = search_paths("gemini", &env);
-    assert!(!dirs.contains(&PathBuf::from(".")), "{dirs:?}");
-    assert!(
-        !dirs.iter().any(|d| d.to_string_lossy().contains('~')),
-        "{dirs:?}"
-    );
+    // Each entry by name rather than "nothing here contains a tilde": the temp
+    // directory a test runs in can hold one legitimately — Windows short names
+    // are `C:\Users\RUNNER~1\…` — which would fail a test about what the walk
+    // *skips*.
+    for entry in [".", "~/.dotnet/tools"] {
+        assert!(
+            !dirs.contains(&PathBuf::from(entry)),
+            "{entry:?} was searched: {dirs:?}"
+        );
+    }
     assert!(dirs.contains(&absolute), "{dirs:?}");
 }
 

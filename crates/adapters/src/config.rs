@@ -719,9 +719,14 @@ mod tests {
         assert_eq!(classify_dir(None), EnvDir::Unset);
         assert_eq!(classify_dir(Some(OsStr::new(""))), EnvDir::Unset);
         assert_eq!(classify_dir(Some(OsStr::new("   "))), EnvDir::Unset);
+        // Built, not written as a literal: `/srv/tools` is absolute on unix and
+        // *relative* on Windows, where this test would be asserting the opposite
+        // of what it reads.
+        let absolute = std::env::temp_dir().join("kiwano-classify-test");
+        let padded = format!(" {} ", absolute.display());
         assert_eq!(
-            classify_dir(Some(OsStr::new(" /srv/tools "))),
-            EnvDir::Absolute(PathBuf::from("/srv/tools")),
+            classify_dir(Some(OsStr::new(&padded))),
+            EnvDir::Absolute(absolute),
             "padding is not part of a path"
         );
         assert_eq!(

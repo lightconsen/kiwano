@@ -58,6 +58,7 @@ import {
   type CustomAgent,
   type AgentRoute,
   type PlanQuotaReport,
+  type Protocol,
   type Provider,
   type StrategyBinding,
 } from "../api/types";
@@ -220,8 +221,68 @@ function AgentOnboarding({
   );
 }
 
+/** A protocol's name in the reader's language — the three words the add-provider
+    dialog already uses for a provider's own protocol. */
+function protocolName(t: Translate, p: Protocol): string {
+  if (p === "openai") return t("addProvider.protoOpenai");
+  if (p === "anthropic") return t("addProvider.protoAnthropic");
+  return t("addProvider.protoGemini");
+}
+
+/** `null` travels as this through the picker: Radix reserves the empty string
+    for "no value at all", and "not said" is a value here — the state of a row
+    defined before the field existed, which must survive a save untouched. */
+const PROTOCOL_UNSET = "__unset__";
+
+/** Which wire format an agent's own clients speak.
+ *
+ * A **label**, in both directions: nothing routes, validates or filters by it
+ * (the gateway reads an inbound's protocol from the path it was called on), and
+ * the picker offers no protocol that Kiwano cannot serve. So the only mistake
+ * on offer here is leaving it unsaid; a wrong one is a note that misleads, not
+ * a request that fails. */
+function AgentProtocolSelect({
+  value,
+  onChange,
+  allowUnset,
+  className,
+}: {
+  value: Protocol | null;
+  onChange: (p: Protocol | null) => void;
+  /** Offer "not specified" as a destination. A new agent is asked the question
+      outright and answers it; an existing one may already be in that state and
+      has to be able to stay there. */
+  allowUnset?: boolean;
+  className?: string;
+}) {
+  const t = useT();
+  const label = (v: string) =>
+    v === PROTOCOL_UNSET ? t("providers.agentProtocolUnset") : protocolName(t, v as Protocol);
+  return (
+    <Select
+      value={value ?? PROTOCOL_UNSET}
+      onValueChange={(v) => v && onChange(v === PROTOCOL_UNSET ? null : (v as Protocol))}
+    >
+      <SelectTrigger className={className} aria-label={t("providers.agentProtocol")}>
+        <SelectValue>{(v) => label(String(v ?? value ?? PROTOCOL_UNSET))}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {allowUnset && (
+          <SelectItem value={PROTOCOL_UNSET}>{t("providers.agentProtocolUnset")}</SelectItem>
+        )}
+        {(["openai", "anthropic", "gemini"] as Protocol[]).map((p) => (
+          <SelectItem key={p} value={p}>
+            {protocolName(t, p)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /** One user-defined agent's settings: the two values a client is configured with
-    (where the gateway is, and this agent's key) and how much it may spend.
+    (where the gateway is, and this agent's key), what it speaks, and how much it
+    may spend.
  *
  * Opened from the icon beside the agent's name — a tab that is a route does not
  * need a permanent card of credentials on top of it. Deleting it stays outside the
@@ -230,6 +291,7 @@ function AccessDialog({
   agent,
   label,
   keyName,
+  protocol,
   listen,
   limits,
   currency,
@@ -238,10 +300,12 @@ function AccessDialog({
   onDelete,
   onChanged,
   onRenamed,
+  onProtocolChanged,
 }: {
   agent: AgentRef;
   label: string;
   keyName: string | null;
+  protocol: Protocol | null;
   listen: string;
   limits: AgentLimit[];
   currency: string;
@@ -253,6 +317,9 @@ function AccessDialog({
       brand, and the id is what everything else points at. Without this the
       name is shown as text rather than an editable field. */
   onRenamed?: (label: string) => Promise<unknown> | void;
+  /** Only a user-defined agent declares a protocol; a built-in's is a fact
+      about its clients, which its own dialog states rather than edits. */
+  onProtocolChanged?: (protocol: Protocol | null) => Promise<unknown> | void;
 }) {
   const t = useT();
   const [tab, setTab] = useState<"access" | "limit">("access");
@@ -262,10 +329,15 @@ function AccessDialog({
   const [name, setName] = useState(label);
   const [nameErr, setNameErr] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
+  // The protocol saves on pick rather than behind a pencil: a Select is already
+  // a deliberate act, and there is nothing to retype if it fails — the error is
+  // reported under the row.
+  const [protoErr, setProtoErr] = useState<string | null>(null);
   useEffect(() => {
     setName(label);
     setNameErr(null);
     setEditingName(false);
+    setProtoErr(null);
   }, [label, open]);
   const commitName = async () => {
     const next = name.trim();
@@ -287,6 +359,15 @@ function AccessDialog({
     setName(label);
     setNameErr(null);
     setEditingName(false);
+  };
+  const pickProtocol = async (next: Protocol | null) => {
+    if (!onProtocolChanged || next === protocol) return;
+    try {
+      await onProtocolChanged(next);
+      setProtoErr(null);
+    } catch (e) {
+      setProtoErr(e instanceof Error ? e.message : String(e));
+    }
   };
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -367,6 +448,29 @@ function AccessDialog({
                     {nameErr && (
                       <p className="mt-1 text-[11px]" style={{ color: "var(--red)" }}>
                         {nameErr}
+                      </p>
+                    )}
+                  </>
+                )}
+                {onProtocolChanged && (
+                  <>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="w-[68px] shrink-0 text-[10.5px] text-mut">
+                        {t("providers.agentProtocol")}
+                      </span>
+                      <AgentProtocolSelect
+                        value={protocol}
+                        allowUnset
+                        onChange={(p) => void pickProtocol(p)}
+                        className="h-7 min-w-0 flex-1 bg-bg text-[12px] dark:bg-bg"
+                      />
+                    </div>
+                    <p className="mt-1 text-[10.5px] leading-relaxed text-mut">
+                      {t("providers.agentProtocolNote")}
+                    </p>
+                    {protoErr && (
+                      <p className="mt-1 text-[11px]" style={{ color: "var(--red)" }}>
+                        {protoErr}
                       </p>
                     )}
                   </>
@@ -454,6 +558,7 @@ function AgentSettingsDialog({
   agent,
   label,
   paths,
+  protocols,
   limits,
   currency,
   open,
@@ -463,6 +568,10 @@ function AgentSettingsDialog({
   agent: AgentRef;
   label: string;
   paths: string[];
+  /** What this agent's own clients speak ([`AGENT_PROTOCOLS`]). Stated, not
+      asked: it is read off the wire format Kiwano already writes into the
+      agent's config, and a user editing it here would be editing a fact. */
+  protocols: Protocol[];
   limits: AgentLimit[];
   /** Display currency, for a money ceiling's unit. */
   currency: string;
@@ -486,6 +595,16 @@ function AgentSettingsDialog({
           <div className="mt-2.5">
             {tab === "general" && (
               <>
+                {protocols.length > 0 && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="w-[68px] shrink-0 text-[10.5px] text-mut">
+                      {t("providers.agentProtocol")}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12px]">
+                      {protocols.map((p) => protocolName(t, p)).join(" · ")}
+                    </span>
+                  </div>
+                )}
                 {paths.map((p) => (
                   <div key={p} className="mt-1 flex items-center gap-2">
                     <CopyValue value={p} />
@@ -691,9 +810,9 @@ function DeleteAgentButton({ label, onConfirm }: { label: string; onConfirm: () 
   );
 }
 
-/** Make a user-defined agent: a name, an optional note, and that is all the
-    form asks for — the id is derived, and the candidates are bound in the tab
-    it opens. */
+/** Make a user-defined agent: a name, an optional note, the protocol its
+    clients speak, and that is all the form asks for — the id is derived, and
+    the candidates are bound in the tab it opens. */
 function NewAgentDialog({
   open,
   onClose,
@@ -707,6 +826,10 @@ function NewAgentDialog({
   const t = useT();
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
+  // Asked rather than defaulted silently: the answer is what a client author
+  // will read here, so the common case (an OpenAI-compatible client) is the
+  // opening value and the field is on screen to be corrected.
+  const [protocol, setProtocol] = useState<Protocol>("openai");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const create = async () => {
@@ -714,9 +837,10 @@ function NewAgentDialog({
     setBusy(true);
     setErr(null);
     try {
-      const created = await api.addCustomAgent(name, note);
+      const created = await api.addCustomAgent(name, note, protocol);
       setName("");
       setNote("");
+      setProtocol("openai");
       onSaved(created.id);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -752,6 +876,19 @@ function NewAgentDialog({
               placeholder={t("providers.agentNotePlaceholder")}
               onChange={(e) => setNote(e.target.value)}
             />
+          </div>
+          <div>
+            <Label className="text-[11px] font-medium text-mut">
+              {t("providers.agentProtocol")}
+            </Label>
+            <AgentProtocolSelect
+              value={protocol}
+              onChange={(p) => setProtocol(p ?? "openai")}
+              className="mt-1 h-8 w-full bg-bg text-[12px] dark:bg-bg"
+            />
+            <p className="mt-1 text-[10.5px] leading-relaxed text-mut">
+              {t("providers.agentProtocolNote")}
+            </p>
           </div>
           <p className="text-[11px] leading-relaxed text-mut">{t("providers.agentIdNote")}</p>
           {err && (
@@ -2196,6 +2333,10 @@ export default function Providers({
   // The files behind each built-in agent, for the row above the table. Its own
   // state because the takeover *set* below throws the rest of that read away.
   const [configPathsByAgent, setConfigPathsByAgent] = useState<Record<string, string[]>>({});
+  // The protocols each built-in agent's clients speak. The same read, and the
+  // same kind of fact: what the agent *is*, carried on the takeover row that
+  // exists per agent rather than in a table of its own.
+  const [protocolsByAgent, setProtocolsByAgent] = useState<Record<string, Protocol[]>>({});
   // What a client is pointed at: the gateway's own listen address from settings.
   const [listen, setListen] = useState("127.0.0.1:8317");
   // Display currency, which is also the unit a money ceiling is written in.
@@ -2277,6 +2418,9 @@ export default function Providers({
         setTakenOver(new Set(s.takeovers.filter((t) => t.enabled).map((t) => t.agent)));
         setConfigPathsByAgent(
           Object.fromEntries(s.takeovers.map((k) => [k.agent, k.config_paths ?? []])),
+        );
+        setProtocolsByAgent(
+          Object.fromEntries(s.takeovers.map((k) => [k.agent, k.protocols ?? []])),
         );
         setCustomAgents(s.custom_agents);
         rememberCustomAgents(s.custom_agents);
@@ -2472,6 +2616,9 @@ export default function Providers({
   // settings read this screen already makes. Empty while that read is in flight
   // or for an id the registry does not know.
   const configPaths = seg === "all" ? [] : (configPathsByAgent[seg] ?? []);
+  // What the same tab's agent speaks, from the same read. Only its own dialog
+  // shows it: the tab itself is about the providers behind it.
+  const agentProtocols = seg === "all" ? [] : (protocolsByAgent[seg] ?? []);
   // Inside an agent tab with bindings the list IS the strategy candidate queue
   const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
   const byId = new Map(providers.map((p) => [p.id, p]));
@@ -2842,6 +2989,7 @@ export default function Providers({
           agent={seg}
           label={agentMeta(seg).label}
           paths={configPaths}
+          protocols={agentProtocols}
           limits={route?.limits ?? []}
           currency={currency}
           onChanged={refetch}
@@ -2855,15 +3003,22 @@ export default function Providers({
           agent={custom.id}
           label={custom.label}
           keyName={custom.placeholder_key}
+          protocol={custom.protocol}
           listen={listen}
           limits={route?.limits ?? []}
           currency={currency}
           open={accessOpen}
           onClose={() => setAccessOpen(false)}
           onDelete={() => onDeleteAgent(custom.id)}
+          // The update replaces all three of the agent's own fields, so each
+          // control below sends the two it is not changing back unchanged —
+          // the note and the protocol here, the name and the note there.
           onRenamed={async (label) => {
-            // The note travels back unchanged: this field edits the name only.
-            await api.updateCustomAgent(custom.id, label, custom.note);
+            await api.updateCustomAgent(custom.id, label, custom.note, custom.protocol);
+            refetch();
+          }}
+          onProtocolChanged={async (protocol) => {
+            await api.updateCustomAgent(custom.id, custom.label, custom.note, protocol);
             refetch();
           }}
           onChanged={refetch}

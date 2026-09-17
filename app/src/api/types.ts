@@ -35,6 +35,10 @@ export interface CustomAgent {
   id: string;
   label: string;
   note: string | null;
+  /** What this agent's clients speak, chosen when it was defined; null for one
+      defined before the field existed, which is "not said" rather than a
+      default. A *label*: nothing routes or validates by it. */
+  protocol: Protocol | null;
   placeholder_key: string | null;
 }
 
@@ -550,6 +554,10 @@ export interface TakeoverState {
   /** Additive-mode agent (config keeps multiple providers; takeover writes a
       gateway entry and selects it) rather than exclusive-switch mode */
   additive: boolean;
+  /** The protocols this agent's clients speak. On this row because it is *the*
+      per-agent row the screen reads, the same way `additive` is a fact about
+      the agent rather than about takeover state. A label: nothing routes by it. */
+  protocols: Protocol[];
 }
 
 export interface AppSettings {
@@ -882,9 +890,18 @@ export interface KiwanoApi {
   addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry>;
   deleteApiKey(id: number): Promise<void>;
   /** Define a user-defined agent: a named route with its own placeholder key */
-  addCustomAgent(label: string, note?: string | null): Promise<CustomAgent>;
+  addCustomAgent(
+    label: string,
+    note?: string | null,
+    protocol?: Protocol | null,
+  ): Promise<CustomAgent>;
   /** Rename one. Its id, route and key are untouched — only the label moves */
-  updateCustomAgent(id: string, label: string, note?: string | null): Promise<CustomAgent>;
+  updateCustomAgent(
+    id: string,
+    label: string,
+    note?: string | null,
+    protocol?: Protocol | null,
+  ): Promise<CustomAgent>;
   /** Every directory the detector looks in for a built-in agent — what "we
       could not find it" is measured against, from the walk itself. */
   agentSearchDirs(agent: AgentId): Promise<string[]>;

@@ -47,6 +47,7 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
         placeholder_key: codexTakenOver ? "kw-ag-codex-test" : null,
         enabled: codexTakenOver,
         additive: false,
+        protocols: ["openai"],
         config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"],
       },
     ],

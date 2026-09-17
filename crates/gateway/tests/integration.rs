@@ -760,6 +760,9 @@ async fn a_user_defined_agents_key_routes_and_meters() {
             id: agent.to_string(),
             label: "Long tasks".to_string(),
             note: None,
+            // The gateway routes by key and never looks at this (v24) — the
+            // column exists for the UI to say what the agent speaks.
+            protocol: Some("openai".to_string()),
             created_at: kiwanod::store::now_rfc3339(),
         })
         .unwrap();

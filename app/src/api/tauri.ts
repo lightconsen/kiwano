@@ -77,11 +77,15 @@ export const tauriApi: KiwanoApi = {
   setTakeover: (agent: AgentId, enabled: boolean) =>
     invoke<void>("set_agent_takeover", { agent, enabled }),
 
-  addCustomAgent: (label: string, note?: string | null) =>
-    invoke<CustomAgent>("add_custom_agent", { label, note: note ?? null }),
+  addCustomAgent: (label: string, note?: string | null, protocol?: Protocol | null) =>
+    invoke<CustomAgent>("add_custom_agent", { label, note: note ?? null, protocol: protocol ?? null }),
 
-  updateCustomAgent: (id: string, label: string, note?: string | null) =>
-    invoke<CustomAgent>("update_custom_agent", { id, label, note: note ?? null }),
+  updateCustomAgent: (
+    id: string,
+    label: string,
+    note?: string | null,
+    protocol?: Protocol | null,
+  ) => invoke<CustomAgent>("update_custom_agent", { id, label, note: note ?? null, protocol: protocol ?? null }),
 
   verifyAgentDir: (agent: AgentId, dir: string) =>
     invoke<AgentDirHit>("verify_agent_dir", { agent, dir }),

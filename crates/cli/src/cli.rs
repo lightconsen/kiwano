@@ -409,6 +409,12 @@ pub enum AgentsCmd {
         /// What this route is for, e.g. "cheap by day, batch at night"
         #[arg(long, value_name = "TEXT")]
         note: Option<String>,
+        /// What this agent's clients speak: anthropic, openai or gemini
+        ///
+        /// A label: nothing routes or validates by it yet. Omitting it means
+        /// the agent does not say, which is not the same as picking one.
+        #[arg(long, value_name = "PROTOCOL")]
+        protocol: Option<String>,
     },
 
     /// Delete a custom agent, its route and its key

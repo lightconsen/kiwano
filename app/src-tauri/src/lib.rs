@@ -913,8 +913,9 @@ fn add_custom_agent(
     state: State<AppState>,
     label: String,
     note: Option<String>,
+    protocol: Option<String>,
 ) -> Result<vm::CustomAgentVm, String> {
-    let created = vm::add_custom_agent(&state.store, &label, note.as_deref())?;
+    let created = vm::add_custom_agent(&state.store, &label, note.as_deref(), protocol.as_deref())?;
     after_mutation(&state);
     Ok(created)
 }
@@ -927,8 +928,15 @@ fn update_custom_agent(
     id: String,
     label: String,
     note: Option<String>,
+    protocol: Option<String>,
 ) -> Result<vm::CustomAgentVm, String> {
-    let updated = vm::update_custom_agent(&state.store, &id, &label, note.as_deref())?;
+    let updated = vm::update_custom_agent(
+        &state.store,
+        &id,
+        &label,
+        note.as_deref(),
+        protocol.as_deref(),
+    )?;
     after_mutation(&state);
     Ok(updated)
 }

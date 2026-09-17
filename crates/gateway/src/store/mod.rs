@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 23;
+pub const SCHEMA_VERSION: i32 = 24;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -647,6 +647,18 @@ ALTER TABLE provider_health ADD COLUMN error TEXT;
 /// Unlike v15 this deletes nothing: no row is retired here, and the column list
 /// is v15's plus `prices` (added by v20 — the only column change since), or the
 /// rebuild would silently drop it.
+/// v24: a user-defined agent can say which protocol it speaks.
+///
+/// Additive, and deliberately unconstrained: the vocabulary is three words
+/// today and may grow, and v19 already paid for the lesson — a constraint that
+/// has to be dropped to extend it is a constraint that only ever costs a
+/// migration (`provider_health.period` has none for the same reason). NULL is
+/// "the user did not say", which is every row that existed before this ran, and
+/// it is a different statement from any of the three words.
+const MIGRATION_V24: &str = r#"
+ALTER TABLE custom_agents ADD COLUMN protocol TEXT;
+"#;
+
 const MIGRATION_V23: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE providers_new (
@@ -967,6 +979,11 @@ pub struct CustomAgent {
     pub label: String,
     /// Free text: what this route is for. None when the user said nothing.
     pub note: Option<String>,
+    /// The protocol this agent's clients speak (`"openai"`, `"anthropic"`,
+    /// `"gemini"`), or None when the user said nothing — which is every agent
+    /// defined before the column existed, and a different statement from any of
+    /// the three words. A *label*: nothing routes by it yet (migration v24).
+    pub protocol: Option<String>,
     pub created_at: String,
 }
 
@@ -1803,6 +1820,9 @@ impl Store {
         if version < 23 {
             conn.execute_batch(MIGRATION_V23)?;
         }
+        if version < 24 {
+            conn.execute_batch(MIGRATION_V24)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -2185,14 +2205,15 @@ impl Store {
     pub fn list_custom_agents(&self) -> Result<Vec<CustomAgent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, label, note, created_at FROM custom_agents ORDER BY created_at ASC, id ASC",
+            "SELECT id, label, note, protocol, created_at FROM custom_agents ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(CustomAgent {
                 id: row.get(0)?,
                 label: row.get(1)?,
                 note: row.get(2)?,
-                created_at: row.get(3)?,
+                protocol: row.get(3)?,
+                created_at: row.get(4)?,
             })
         })?;
         let mut out = Vec::new();
@@ -2206,14 +2227,15 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let found = conn
             .query_row(
-                "SELECT id, label, note, created_at FROM custom_agents WHERE id = ?1",
+                "SELECT id, label, note, protocol, created_at FROM custom_agents WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(CustomAgent {
                         id: row.get(0)?,
                         label: row.get(1)?,
                         note: row.get(2)?,
-                        created_at: row.get(3)?,
+                        protocol: row.get(3)?,
+                        created_at: row.get(4)?,
                     })
                 },
             )
@@ -2224,24 +2246,28 @@ impl Store {
     pub fn insert_custom_agent(&self, a: &CustomAgent) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO custom_agents (id, label, note, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![a.id, a.label, a.note, a.created_at],
+            "INSERT INTO custom_agents (id, label, note, protocol, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![a.id, a.label, a.note, a.protocol, a.created_at],
         )?;
         Ok(())
     }
 
-    /// Rename: only the label moves. The id is referenced by bindings,
-    /// strategies, keys and usage rows, so it is not a thing a rename touches.
+    /// Rename: only the label and the note move. The id is referenced by
+    /// bindings, strategies, keys and usage rows, so it is not a thing a rename
+    /// touches, and the protocol travels back unchanged for the same reason the
+    /// note does — this call was not about it.
     pub fn update_custom_agent_label(
         &self,
         id: &str,
         label: &str,
         note: Option<&str>,
+        protocol: Option<&str>,
     ) -> Result<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n = conn.execute(
-            "UPDATE custom_agents SET label = ?2, note = ?3 WHERE id = ?1",
-            params![id, label, note],
+            "UPDATE custom_agents SET label = ?2, note = ?3, protocol = ?4 WHERE id = ?1",
+            params![id, label, note, protocol],
         )?;
         Ok(n > 0)
     }
@@ -3639,6 +3665,7 @@ mod tests {
             "request_bodies",
             "gateway_settings",
             "provider_endpoints",
+            "custom_agents",
         ] {
             assert!(tables.iter().any(|t| t == expected), "missing {expected}");
         }
@@ -4202,6 +4229,85 @@ mod tests {
             .is_ok(),
             "v23 accepts the gemini tag"
         );
+    }
+
+    /// v24 adds the column without disturbing what was already there: an agent
+    /// defined before it says nothing about its protocol, and saying nothing is
+    /// not one of the three words.
+    #[test]
+    fn migration_v24_lets_a_custom_agent_name_its_protocol() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v23 database holding an agent defined before the column.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+                MIGRATION_V21,
+                MIGRATION_V22,
+                MIGRATION_V23,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO custom_agents (id, label, note, created_at)
+                 VALUES ('long-tasks-3f9a', 'Long tasks', 'batch at night', 't0');
+                 PRAGMA user_version = 23;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let agents = store.list_custom_agents().unwrap();
+        assert_eq!(agents.len(), 1, "the migration keeps the row");
+        assert_eq!(agents[0].label, "Long tasks");
+        assert_eq!(agents[0].note.as_deref(), Some("batch at night"));
+        assert_eq!(agents[0].protocol, None, "it never said");
+
+        // A new agent can say it at creation…
+        store
+            .insert_custom_agent(&CustomAgent {
+                id: "nightly-7c21".to_string(),
+                label: "Nightly".to_string(),
+                note: None,
+                protocol: Some("gemini".to_string()),
+                created_at: "t1".to_string(),
+            })
+            .unwrap();
+        let created = store.get_custom_agent("nightly-7c21").unwrap().unwrap();
+        assert_eq!(created.protocol.as_deref(), Some("gemini"));
+
+        // …and an existing one can change its mind, or leave it alone: the
+        // rename call is not about the protocol, so it travels back unchanged.
+        store
+            .update_custom_agent_label(
+                "long-tasks-3f9a",
+                "Long tasks",
+                Some("batch at night"),
+                Some("anthropic"),
+            )
+            .unwrap();
+        let reread = store.get_custom_agent("long-tasks-3f9a").unwrap().unwrap();
+        assert_eq!(reread.protocol.as_deref(), Some("anthropic"));
     }
 
     #[test]

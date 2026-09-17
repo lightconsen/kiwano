@@ -173,6 +173,10 @@ kiwano agents detect                    which agents are installed
 kiwano agents versions                  version strings (slow: one subprocess each)
 kiwano agents takeover <AGENT>          route it through the gateway, backing up its config
 kiwano agents restore <AGENT>           put the original config back
+kiwano agents list                      built-in and user-defined agents, with keys
+kiwano agents add --name NAME [--note TEXT] [--protocol P]
+                                        define your own agent: a named route with its own key
+kiwano agents remove <ID>               delete it and its key (its usage history stays)
 ```
 
 `takeover` is the command that makes a server usable. It imports the provider
@@ -186,6 +190,18 @@ is invisible from outside.
 
 `takeover` writes under `--home`, so run it as the user whose config you mean —
 or pass `--home` explicitly for a service account.
+
+`agents add` is the other way to get a route: an agent Kiwano cannot detect and
+does not rewrite anything for. You get a name, an id, a key and a strategy to
+bind providers to — nothing on disk changes, so point a client at the gateway
+with the printed key. `agents list` prints `-` for the key of an agent that has
+none yet, and `--json` carries every field on the row.
+
+`--protocol` records what that agent's clients speak: `anthropic`, `openai` or
+`gemini`. Omitting it means the agent does not say, which is a different answer
+from any of the three and is what `agents list` shows as `-`. It is a **label** —
+nothing routes, converts or validates by it; the wire format of a request is
+decided by the path it arrives on.
 
 ### Routes
 
@@ -320,6 +336,7 @@ self-update).
 | Copy a route between agents | `routes apply` |
 | Agent detection and versions | `agents detect`, `agents versions` |
 | Takeover / restore | `agents takeover`, `agents restore` |
+| Your own agents (named routes) | `agents list\|add\|remove` |
 | Usage totals | `usage` |
 | Dashboard trends | `dashboard` |
 | Usage alerts | `alerts` |

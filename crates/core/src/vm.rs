@@ -58,6 +58,10 @@ pub struct CustomAgentVm {
     /// stale — the row *is* the truth here, and it is the same row the gateway
     /// attributes by.
     pub placeholder_key: Option<String>,
+    /// What this agent's clients speak, chosen when it was defined. `None` for
+    /// one defined before the field existed — "not said", which is why the UI
+    /// reads it as such rather than showing a protocol nobody picked.
+    pub protocol: Option<String>,
 }
 
 /// Every agent the UI should offer, built-ins first (registry order), then the
@@ -199,11 +203,13 @@ pub fn add_custom_agent(
     store: &Store,
     label: &str,
     note: Option<&str>,
+    protocol: Option<&str>,
 ) -> Result<CustomAgentVm, String> {
     let label = label.trim();
     if label.is_empty() {
         return Err("an agent needs a name".to_string());
     }
+    let protocol = normalize_agent_protocol(protocol)?;
     let id = format!(
         "{}-{}",
         agent_id_stem(label),
@@ -215,6 +221,7 @@ pub fn add_custom_agent(
             id: id.clone(),
             label: label.to_string(),
             note: note.map(str::to_string),
+            protocol: protocol.clone(),
             created_at: rfc3339(unix_now()),
         })
         .map_err(e2s)?;
@@ -233,6 +240,7 @@ pub fn add_custom_agent(
         id,
         label: label.to_string(),
         note: note.map(str::to_string),
+        protocol,
         placeholder_key: Some(key),
     })
 }
@@ -247,14 +255,16 @@ pub fn update_custom_agent(
     id: &str,
     label: &str,
     note: Option<&str>,
+    protocol: Option<&str>,
 ) -> Result<CustomAgentVm, String> {
     let label = label.trim();
     if label.is_empty() {
         return Err("an agent needs a name".to_string());
     }
     let note = note.map(str::trim).filter(|n| !n.is_empty());
+    let protocol = normalize_agent_protocol(protocol)?;
     if !store
-        .update_custom_agent_label(id, label, note)
+        .update_custom_agent_label(id, label, note, protocol.as_deref())
         .map_err(e2s)?
     {
         return Err(format!("no such custom agent: {id}"));
@@ -271,8 +281,27 @@ pub fn update_custom_agent(
         id: id.to_string(),
         label: label.to_string(),
         note: note.map(str::to_string),
+        protocol,
         placeholder_key,
     })
+}
+
+/// A protocol as it is stored: one of the three words, or None for "not said".
+///
+/// An unknown word is a refusal rather than a row — the field is a label the UI
+/// renders and the CLI prints, so a typo in the database would be a word no
+/// reader recognises. Empty trims to None: clearing the choice is how a user
+/// says they would rather not say.
+fn normalize_agent_protocol(protocol: Option<&str>) -> Result<Option<String>, String> {
+    match protocol.map(str::trim).filter(|p| !p.is_empty()) {
+        None => Ok(None),
+        Some(p) => match kiwanod::store::Protocol::parse_str(p) {
+            Some(parsed) => Ok(Some(parsed.as_str().to_string())),
+            None => Err(format!(
+                "unknown protocol: {p} — one of anthropic, openai, gemini"
+            )),
+        },
+    }
 }
 
 /// Delete a user-defined agent, and everything that was only about it: its
@@ -293,6 +322,50 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
     }
     store.delete_custom_agent(id).map_err(e2s)?;
     Ok(())
+}
+
+/// The protocols each built-in agent's own clients speak, in the vocabulary
+/// `kiwanod::store::Protocol` uses (`"anthropic"`, `"openai"`, `"gemini"`).
+///
+/// Read off what this app already writes into each tool's config — that is the
+/// wire format the tool then reads (`wire_api = "responses"` for Codex, `api:
+/// "openai-completions"` for OpenClaw and WorkBuddy, `providers[].type =
+/// "openai"` for Kimi, and so on through the rewriters), so it is evidence
+/// rather than a catalogue of what each vendor also offers.
+///
+/// A parallel table keyed by the ids in [`AGENTS`] rather than a third field on
+/// it: that registry is destructured as `(agent, label)` in a dozen places, and
+/// its neighbours here (`ADDITIVE_AGENTS`, `REBUILDABLE_AGENTS`, `CLI_AGENTS`)
+/// are the same shape for the same reason.
+///
+/// **A label.** Nothing routes, validates or filters by it: the gateway learns
+/// an inbound's protocol from the path it was called on
+/// (`gateway::protocol::classify_path`), and that is unchanged.
+pub const AGENT_PROTOCOLS: [(&str, &[&str]); 13] = [
+    ("claude", &["anthropic"]),
+    ("codex", &["openai"]),
+    ("gemini", &["gemini"]),
+    ("grokbuild", &["openai"]),
+    ("claude-desktop", &["anthropic"]),
+    ("opencode", &["openai"]),
+    ("openclaw", &["openai"]),
+    ("hermes", &["openai"]),
+    ("pi", &["openai"]),
+    ("workbuddy", &["openai"]),
+    ("codebuddy", &["openai"]),
+    ("kimi", &["openai"]),
+    ("qwen", &["openai"]),
+];
+
+/// The protocols `agent` speaks, or an empty slice for an id nobody knows — a
+/// user-defined agent is not in that table, and "we have no idea" is the honest
+/// answer for one.
+pub fn agent_protocols(agent: &str) -> &'static [&'static str] {
+    AGENT_PROTOCOLS
+        .iter()
+        .find(|(id, _)| *id == agent)
+        .map(|(_, protocols)| *protocols)
+        .unwrap_or(&[])
 }
 
 /// Additive-mode agents: their native config keeps multiple providers
@@ -966,6 +1039,12 @@ pub struct TakeoverVm {
     /// gateway entry and selects it) rather than exclusive-switch mode.
     #[serde(default)]
     pub additive: bool,
+    /// The protocols this agent's clients speak ([`AGENT_PROTOCOLS`]). On this
+    /// row because it is *the* per-agent row the screen already reads — `additive`
+    /// above is a fact about the agent rather than about takeover state, and this
+    /// is the same kind of thing. A **label**: nothing routes or validates by it.
+    #[serde(default)]
+    pub protocols: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2996,6 +3075,10 @@ pub fn build_settings_with_home(
                 enabled: key.is_some(),
                 placeholder_key: key,
                 additive: ADDITIVE_AGENTS.contains(agent),
+                protocols: agent_protocols(agent)
+                    .iter()
+                    .map(|p| (*p).to_string())
+                    .collect(),
                 config_paths: crate::takeover::takeover_paths(agent, home, vars)
                     .unwrap_or_default()
                     .iter()
@@ -3018,6 +3101,7 @@ pub fn build_settings_with_home(
             id: a.id,
             label: a.label,
             note: a.note,
+            protocol: a.protocol,
         })
         .collect();
     Ok(s)
@@ -6448,9 +6532,14 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         s.insert_provider(&provider("p1", "Alpha", Billing::Metered))
             .unwrap();
-        let a = add_custom_agent(&s, "Long Tasks", Some("night batch")).unwrap();
+        let a = add_custom_agent(&s, "Long Tasks", Some("night batch"), Some("gemini")).unwrap();
 
         assert!(a.id.starts_with("long-tasks-"), "{}", a.id);
+        assert_eq!(
+            a.protocol.as_deref(),
+            Some("gemini"),
+            "the protocol it was created with travels back"
+        );
         assert!(!is_builtin_agent(&a.id));
         let key = a.placeholder_key.clone().expect("a key is minted with it");
         assert!(key.starts_with(&format!("kw-ag-{}", a.id)), "{key}");
@@ -6473,6 +6562,10 @@ mod tests {
         let settings = build_settings_with_home(&s, &aux, home.path(), &no_vars()).unwrap();
         assert_eq!(settings.custom_agents.len(), 1);
         assert_eq!(settings.custom_agents[0].label, "Long Tasks");
+        assert_eq!(
+            settings.custom_agents[0].protocol.as_deref(),
+            Some("gemini")
+        );
         assert_eq!(
             settings.custom_agents[0].placeholder_key.as_deref(),
             Some(key.as_str())
@@ -6498,7 +6591,7 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         s.insert_provider(&provider("p1", "Alpha", Billing::Metered))
             .unwrap();
-        let a = add_custom_agent(&s, "Long Tasks", None).unwrap();
+        let a = add_custom_agent(&s, "Long Tasks", None, None).unwrap();
         add_agent_binding(&s, &a.id, "p1").unwrap();
         let mut row = usage_row("p1");
         row.agent = a.id.clone();
@@ -6544,13 +6637,13 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         s.insert_provider(&provider("p1", "Alpha", Billing::Metered))
             .unwrap();
-        let a = add_custom_agent(&s, "Long Tasks", Some("at night")).unwrap();
+        let a = add_custom_agent(&s, "Long Tasks", Some("at night"), None).unwrap();
         add_agent_binding(&s, &a.id, "p1").unwrap();
         let mut row = usage_row("p1");
         row.agent = a.id.clone();
         s.record_usage(&row).unwrap();
 
-        let renamed = update_custom_agent(&s, &a.id, "Nightly batch", Some("moved")).unwrap();
+        let renamed = update_custom_agent(&s, &a.id, "Nightly batch", Some("moved"), None).unwrap();
 
         assert_eq!(renamed.id, a.id, "the id is what everything points at");
         assert_eq!(renamed.label, "Nightly batch");
@@ -6574,13 +6667,13 @@ mod tests {
             "Nightly batch"
         );
         // A blank note clears it rather than storing whitespace.
-        let cleared = update_custom_agent(&s, &a.id, "Nightly batch", Some("  ")).unwrap();
+        let cleared = update_custom_agent(&s, &a.id, "Nightly batch", Some("  "), None).unwrap();
         assert_eq!(cleared.note, None);
 
         // Refusals: a blank name, and an id no agent has — and neither changes
         // what is on file.
-        assert!(update_custom_agent(&s, &a.id, "   ", None).is_err());
-        assert!(update_custom_agent(&s, "no-such-agent", "X", None).is_err());
+        assert!(update_custom_agent(&s, &a.id, "   ", None, None).is_err());
+        assert!(update_custom_agent(&s, "no-such-agent", "X", None, None).is_err());
         let stored = s.get_custom_agent(&a.id).unwrap().expect("still there");
         assert_eq!(stored.label, "Nightly batch");
         assert_eq!(stored.id, a.id);
@@ -6624,11 +6717,60 @@ mod tests {
 
     /// The id is derived from the name, is unique per agent even when the name
     /// repeats, and has a word for it even when the name has no ASCII in it.
+    /// The two tables that describe a built-in agent have to agree about which
+    /// agents exist: a registry entry with no protocols would render as "speaks
+    /// nothing", and a protocol row for an id nobody knows is dead weight. Five
+    /// parallel tables already drift silently in this codebase (the frontend's
+    /// `AGENTS`, `AGENT_ICON` and `SEGMENTS`, plus `CLI_AGENTS` here) — this one
+    /// is pinned to its neighbour.
+    #[test]
+    fn every_built_in_agent_has_at_least_one_protocol() {
+        for (agent, label) in AGENTS {
+            let protocols = agent_protocols(agent);
+            assert!(
+                !protocols.is_empty(),
+                "{agent} ({label}) is in the registry with no protocol"
+            );
+            for p in protocols {
+                assert!(
+                    kiwanod::store::Protocol::parse_str(p).is_some(),
+                    "{agent} names a protocol nobody knows: {p}"
+                );
+            }
+        }
+        assert_eq!(
+            AGENT_PROTOCOLS.len(),
+            AGENTS.len(),
+            "the two tables describe different numbers of agents"
+        );
+        // And an id that is not a built-in gets nothing, rather than a guess.
+        assert!(agent_protocols("long-tasks-3f9a").is_empty());
+    }
+
+    /// The protocol is a word three readers recognise, so a typo is refused
+    /// rather than stored — and clearing it is how a user says they would
+    /// rather not say.
+    #[test]
+    fn a_protocol_that_is_not_a_protocol_is_refused() {
+        let s = store();
+        let err = match add_custom_agent(&s, "Typo", None, Some("opemai")) {
+            Ok(vm) => panic!("a typo was accepted: {}", vm.id),
+            Err(e) => e,
+        };
+        assert!(err.contains("unknown protocol"), "{err}");
+
+        let a = add_custom_agent(&s, "Fine", None, Some("  anthropic ")).unwrap();
+        assert_eq!(a.protocol.as_deref(), Some("anthropic"), "trimmed");
+
+        let cleared = update_custom_agent(&s, &a.id, "Fine", None, Some("")).unwrap();
+        assert_eq!(cleared.protocol, None, "an empty choice is no choice");
+    }
+
     #[test]
     fn custom_agent_ids_are_derived_and_unique() {
         let s = store();
-        let first = add_custom_agent(&s, "Long Tasks", None).unwrap();
-        let second = add_custom_agent(&s, "Long Tasks", None).unwrap();
+        let first = add_custom_agent(&s, "Long Tasks", None, None).unwrap();
+        let second = add_custom_agent(&s, "Long Tasks", None, None).unwrap();
         assert!(first.id.starts_with("long-tasks-"));
         assert!(second.id.starts_with("long-tasks-"));
         assert_ne!(first.id, second.id, "same name, two agents");
@@ -6636,13 +6778,13 @@ mod tests {
 
         // A name with nothing slug-able in it still gets a usable id — and not
         // `slug`'s own fallback word, which belongs to providers.
-        let cjk = add_custom_agent(&s, "长任务批处理", None).unwrap();
+        let cjk = add_custom_agent(&s, "长任务批处理", None, None).unwrap();
         assert!(cjk.id.starts_with("custom-"), "{}", cjk.id);
 
         // A name is required; whitespace is not one.
-        assert!(add_custom_agent(&s, "   ", None).is_err());
+        assert!(add_custom_agent(&s, "   ", None, None).is_err());
         // …and a blank note is the same as no note.
-        let blank = add_custom_agent(&s, "Bare", Some("  ")).unwrap();
+        let blank = add_custom_agent(&s, "Bare", Some("  "), None).unwrap();
         assert_eq!(blank.note, None);
     }
 

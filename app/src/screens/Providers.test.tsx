@@ -41,6 +41,7 @@ const { apiMock } = vi.hoisted(() => ({
     setAgentLimits: vi.fn(),
     deleteProvider: vi.fn(),
     addCustomAgent: vi.fn(),
+    updateCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
     agentSearchDirs: vi.fn(),
     verifyAgentDir: vi.fn(),
@@ -119,6 +120,8 @@ function settingsWith(codexTakenOver: boolean, custom: CustomAgent[] = []): AppS
         placeholder_key: codexTakenOver ? "kw-ag-codex-test" : null,
         enabled: codexTakenOver,
         additive: false,
+        // What `AGENT_PROTOCOLS` holds for codex: `wire_api = "responses"`.
+        protocols: ["openai"],
         // Two files, as `takeover_paths` gives codex.
         config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"],
       },
@@ -227,6 +230,7 @@ describe("a user-defined agent", () => {
     id: "long-tasks-3f9a",
     label: "Long tasks",
     note: "cheap by day, batch at night",
+    protocol: "openai",
     placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
   };
 
@@ -282,6 +286,7 @@ describe("a user-defined agent", () => {
       id: "nightly-7c21",
       label: "Nightly",
       note: null,
+      protocol: "gemini",
       placeholder_key: "kw-ag-nightly-7c21-11aa",
     };
     apiMock.listProviders.mockResolvedValue([]);
@@ -296,10 +301,14 @@ describe("a user-defined agent", () => {
     // The next settings read is the one the creation triggers.
     apiMock.getSettings.mockResolvedValue(settingsWith(true, [created]));
     await user.type(screen.getByRole("textbox", { name: en.providers.agentName }), created.label);
+    // The protocol opens on the common answer and is answered here, so what the
+    // backend stores is what the user picked rather than the default.
+    await user.click(screen.getByRole("combobox", { name: en.providers.agentProtocol }));
+    await user.click(await screen.findByRole("option", { name: en.addProvider.protoGemini }));
     await user.click(screen.getByRole("button", { name: en.providers.createAgent }));
 
     await waitFor(() =>
-      expect(apiMock.addCustomAgent).toHaveBeenCalledWith(created.label, ""),
+      expect(apiMock.addCustomAgent).toHaveBeenCalledWith(created.label, "", "gemini"),
     );
     // It opens on the new agent's tab, which names it: what the user wants next
     // is to bind a provider, and that is what that tab asks for.
@@ -393,6 +402,67 @@ describe("a user-defined agent", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: longTasks.label })).toBeNull(),
     );
+  });
+
+  it("says what it speaks, and lets that be changed", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    apiMock.updateCustomAgent.mockResolvedValue(longTasks);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+    await user.click(
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", longTasks.label)),
+    );
+    const dialog = screen.getByRole("dialog");
+    // The stored answer is the one on screen, under its own label…
+    expect(within(dialog).getByText(en.providers.agentProtocol)).toBeInTheDocument();
+    const picker = within(dialog).getByRole("combobox", { name: en.providers.agentProtocol });
+    expect(picker).toHaveTextContent(en.addProvider.protoOpenai);
+
+    // …and picking another saves it. The name and the note travel back
+    // unchanged: the update replaces all three of the agent's own fields.
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: en.addProvider.protoAnthropic }));
+    await waitFor(() =>
+      expect(apiMock.updateCustomAgent).toHaveBeenCalledWith(
+        longTasks.id,
+        longTasks.label,
+        longTasks.note,
+        "anthropic",
+      ),
+    );
+  });
+
+  it("reads an answer nobody gave as not specified", async () => {
+    const user = userEvent.setup();
+    // What migration v24 leaves behind: a row that predates the field, so the
+    // question is open rather than answered with a default nobody chose.
+    const scratch: CustomAgent = {
+      id: "scratch-91cd",
+      label: "Scratch",
+      note: null,
+      protocol: null,
+      placeholder_key: "kw-ag-scratch-91cd-40aa",
+    };
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([
+      { ...codexRoute(["deepseek"]), agent: scratch.id },
+    ]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [scratch]));
+    apiMock.updateCustomAgent.mockResolvedValue(scratch);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: scratch.label }));
+    await user.click(
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", scratch.label)),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByRole("combobox", { name: en.providers.agentProtocol }),
+    ).toHaveTextContent(en.providers.agentProtocolUnset);
   });
 });
 
@@ -1156,6 +1226,7 @@ describe("the agent's own limit", () => {
       id: "long-tasks-3f9a",
       label: "Long tasks",
       note: null,
+      protocol: "openai",
       placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
     };
     apiMock.listProviders.mockResolvedValue([deepseek()]);
@@ -1258,6 +1329,12 @@ describe("a built-in agent's own row", () => {
     // Two readings, one showing: the files are what it opens on, and the ceiling
     // is not in the DOM at all until its tab is picked.
     expect(screen.getByText("~/.codex/config.toml")).toBeInTheDocument();
+    // The protocol is one of the facts on this tab, and it is *stated*: codex's
+    // own clients speak `wire_api = "responses"`, so there is no picker here to
+    // contradict them with.
+    expect(screen.getByText(en.providers.agentProtocol)).toBeInTheDocument();
+    expect(screen.getByText(en.addProvider.protoOpenai)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: en.providers.agentProtocol })).toBeNull();
     expect(screen.getByText("~/.codex/auth.json")).toBeInTheDocument();
     expect(screen.getByText(en.providers.agentConfigFilesNote)).toBeInTheDocument();
     expect(screen.queryByText(en.strategy.limitNone)).toBeNull();
@@ -1274,6 +1351,7 @@ describe("a built-in agent's own row", () => {
       id: "long-tasks-3f9a",
       label: "Long tasks",
       note: null,
+      protocol: "openai",
       placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
     };
     apiMock.listProviders.mockResolvedValue([deepseek()]);

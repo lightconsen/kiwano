@@ -908,24 +908,24 @@ const settings: AppSettings = {
   // `config_paths` mirrors `takeover::takeover_paths` for the host platform, so
   // the mock answers what the real backend would for each agent's files.
   takeovers: [
-    { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false, config_paths: ["~/.claude/settings.json"] },
-    { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false, config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"] },
-    { agent: "gemini", label: "Gemini CLI", placeholder_key: null, enabled: false, additive: false, config_paths: ["~/.gemini/.env"] },
-    { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false, config_paths: ["~/.grok/config.toml"] },
-    { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false, config_paths: [
+    { agent: "claude", label: "Claude Code", placeholder_key: "kw-ag-claude-a1b2", enabled: true, additive: false, protocols: ["anthropic"], config_paths: ["~/.claude/settings.json"] },
+    { agent: "codex", label: "Codex", placeholder_key: "kw-ag-codex-c3d4", enabled: true, additive: false, protocols: ["openai"], config_paths: ["~/.codex/config.toml", "~/.codex/auth.json"] },
+    { agent: "gemini", label: "Gemini CLI", placeholder_key: null, enabled: false, additive: false, protocols: ["gemini"], config_paths: ["~/.gemini/.env"] },
+    { agent: "grokbuild", label: "Grok Build", placeholder_key: null, enabled: false, additive: false, protocols: ["openai"], config_paths: ["~/.grok/config.toml"] },
+    { agent: "claude-desktop", label: "Claude Desktop", placeholder_key: null, enabled: false, additive: false, protocols: ["anthropic"], config_paths: [
       "~/Library/Application Support/Claude/claude_desktop_config.json",
       "~/Library/Application Support/Claude-3p/claude_desktop_config.json",
       "~/Library/Application Support/Claude-3p/configLibrary/kiwano.json",
       "~/Library/Application Support/Claude-3p/configLibrary/_meta.json",
     ] },
-    { agent: "opencode", label: "OpenCode", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.config/opencode/opencode.json"] },
-    { agent: "openclaw", label: "OpenClaw", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.openclaw/openclaw.json"] },
-    { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.hermes/config.yaml"] },
-    { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.pi/agent/models.json", "~/.pi/agent/settings.json"] },
-    { agent: "workbuddy", label: "WorkBuddy", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.workbuddy/models.json"] },
-    { agent: "codebuddy", label: "CodeBuddy Code", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.codebuddy/models.json"] },
-    { agent: "kimi", label: "Kimi Code CLI", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.kimi/config.toml"] },
-    { agent: "qwen", label: "Qwen Code", placeholder_key: null, enabled: false, additive: true, config_paths: ["~/.qwen/settings.json"] },
+    { agent: "opencode", label: "OpenCode", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.config/opencode/opencode.json"] },
+    { agent: "openclaw", label: "OpenClaw", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.openclaw/openclaw.json"] },
+    { agent: "hermes", label: "Hermes", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.hermes/config.yaml"] },
+    { agent: "pi", label: "Pi", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.pi/agent/models.json", "~/.pi/agent/settings.json"] },
+    { agent: "workbuddy", label: "WorkBuddy", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.workbuddy/models.json"] },
+    { agent: "codebuddy", label: "CodeBuddy Code", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.codebuddy/models.json"] },
+    { agent: "kimi", label: "Kimi Code CLI", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.kimi/config.toml"] },
+    { agent: "qwen", label: "Qwen Code", placeholder_key: null, enabled: false, additive: true, protocols: ["openai"], config_paths: ["~/.qwen/settings.json"] },
   ],
   // Two user-defined agents, so `pnpm dev` can show the whole feature: a route
   // with candidates, and one that is still empty (the state the tab's bind slot
@@ -935,12 +935,16 @@ const settings: AppSettings = {
       id: "long-tasks-3f9a",
       label: "Long tasks",
       note: "batch work at off-peak rates",
+      protocol: "openai",
       placeholder_key: "kw-ag-long-tasks-3f9a-b7e1",
     },
     {
+      // Null on purpose: this is the row a pre-v24 database has, so `pnpm dev`
+      // shows the "not said" state next to the one that was answered.
       id: "scratch-91cd",
       label: "Scratch",
       note: null,
+      protocol: null,
       placeholder_key: "kw-ag-scratch-91cd-40aa",
     },
     // Three more, so the routing strategies the built-in agents do not exercise
@@ -950,18 +954,21 @@ const settings: AppSettings = {
       id: "rotating-pool-4a1f",
       label: "Rotating pool",
       note: "two providers, weighted rotation",
+      protocol: "openai",
       placeholder_key: "kw-ag-rotating-pool-4a1f-0d31",
     },
     {
       id: "nightly-batch-7c2e",
       label: "Nightly batch",
       note: "one by day, one inside the night window",
+      protocol: "anthropic",
       placeholder_key: "kw-ag-nightly-batch-7c2e-5a90",
     },
     {
       id: "quota-guard-5b8d",
       label: "Quota guard",
       note: "stops routing once its ceiling is reached",
+      protocol: "openai",
       placeholder_key: "kw-ag-quota-guard-5b8d-c41e",
     },
   ],
@@ -1733,17 +1740,21 @@ export const devApi: KiwanoApi = {
     id: string,
     label: string,
     note?: string | null,
+    protocol?: Protocol | null,
   ): Promise<CustomAgent> {
     await delay();
     const list = settings.custom_agents;
     const index = list.findIndex((a) => a.id === id);
     if (index < 0) throw new Error(`no such custom agent: ${id}`);
-    // Only the label and note move — the id is what routes and keys point at,
-    // the same line the backend's rename draws.
+    // The label, the note and the protocol move; the id is what routes and keys
+    // point at. All three are replaced rather than patched — `null` here means
+    // "not said", which is a value the field can hold — so a caller sends the
+    // ones it is not changing back unchanged, the same line the backend draws.
     const updated: CustomAgent = {
       ...list[index],
       label: label.trim(),
       note: note?.trim() ? note.trim() : null,
+      protocol: protocol ?? null,
     };
     settings.custom_agents = [
       ...list.slice(0, index),
@@ -1753,7 +1764,11 @@ export const devApi: KiwanoApi = {
     return structuredClone(updated);
   },
 
-  async addCustomAgent(label: string, note?: string | null): Promise<CustomAgent> {
+  async addCustomAgent(
+    label: string,
+    note?: string | null,
+    protocol?: Protocol | null,
+  ): Promise<CustomAgent> {
     await delay();
     const created: CustomAgent = {
       // The same shape vm::add_custom_agent derives, so a copied id reads the
@@ -1761,6 +1776,7 @@ export const devApi: KiwanoApi = {
       id: `${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom"}-${Math.random().toString(16).slice(2, 8)}`,
       label: label.trim(),
       note: note?.trim() ? note.trim() : null,
+      protocol: protocol ?? null,
       placeholder_key: "",
     };
     created.placeholder_key = `kw-ag-${created.id}-${Math.random().toString(16).slice(2, 6)}`;

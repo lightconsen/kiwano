@@ -177,6 +177,14 @@ export const providers = {
   agentNamePlaceholder: "Long tasks",
   agentNote: "Note",
   agentNotePlaceholder: "Optional — what this route is for",
+  /** The wire format an agent's clients speak: asked when a user-defined one is
+      created, editable in its dialog, stated in a built-in's. */
+  agentProtocol: "Protocol",
+  /** The state of a user-defined agent defined before the field existed. Not a
+      default — the question has not been answered. */
+  agentProtocolUnset: "Not specified",
+  agentProtocolNote:
+    "What the clients you point at this route speak. A label only: nothing is routed, checked or refused by it.",
   /** Under the form: what the user is and is not choosing. */
   agentIdNote:
     "The id is derived from the name and stays fixed. Nothing on disk changes: this agent is a route, so you point a client at the gateway with its key rather than taking over a config file.",

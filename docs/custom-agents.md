@@ -250,3 +250,77 @@ agent 级限额、策略模板（预置「coding plan 优先」「夜间便宜�
 - 所有 `AGENTS.find(...)!` 已替换（它们是「未知 id 就崩」的隐患，而自定义 agent 让未知 id 成为常态）。
 - 测试：Rust 3 条（vm）+ 1 条（gateway 集成：带 key 的请求走通并记账）+ CLI 2 条（add/list/bind/remove
   与空名拒绝）+ 前端 7 条（段条、接入卡、空态、创建、删除、未知 id 兜底、mock 语义）。
+
+## 10. 协议标识（迁移 v24，2026-09-17）
+
+### 10.1 记录的是什么
+
+在这之前，「一个 agent 说什么协议」没有被记在任何地方，只被两处间接表达：
+
+- **内置 agent**：`takeover::gateway_target` 按 agent 决定交给网关的 URL 长什么样（`/v1`、
+  `/v1/chat/completions` 或空），各家 rewriter 各自知道该往配置里写 `wire_api = "responses"`、
+  `api: "openai-completions"`、`type = "openai"`。
+- **自定义 agent**：一条命名路由加一个 key，什么协议都没说。
+
+这一轮把它显式化：**内置 agent 带一份协议列表，自定义 agent 创建时选一个。**
+取值表（依据是各家 rewriter 写进配置的线格式 —— 那是工具真正读的东西）：
+
+| agent | 协议 | 依据 |
+|---|---|---|
+| claude | anthropic | `settings.json` 的 `ANTHROPIC_BASE_URL` |
+| codex | openai | `config.toml`：`wire_api = "responses"` + bearer token |
+| gemini | gemini | `~/.gemini/.env` 的 `GEMINI_API_KEY`；`/v1beta/models/{model}:{action}` |
+| grokbuild | openai | `api_backend = "responses"` |
+| claude-desktop | anthropic | 3p profile：`inferenceGatewayBaseUrl` + `anthropic/claude-*` 路由 |
+| opencode | openai | 条目 `npm: "@ai-sdk/openai-compatible"` |
+| openclaw | openai | 条目 `api: "openai-completions"` |
+| hermes | openai | `custom_providers` 的 base_url/api_key |
+| pi | openai | 条目 `api: "openai-completions"` |
+| workbuddy | openai | 条目 `api: "openai-completions"` |
+| codebuddy | openai | 同上 |
+| kimi | openai | `providers[].type = "openai"` |
+| qwen | openai | `modelProviders.openai` + `security.auth.selectedType = "openai"` |
+
+`pi` 与 `qwen` 两行**按 `openai` 定**（2026-09-17）。它们的依据只有「Kiwano 接管时写什么」这一条，
+没有独立核实过它们除此之外还接受什么 —— 尤其是 `qwen` 是 gemini-cli 的 fork，原生协议很可能
+也吃 `gemini`。记在这里是为了让后来的人知道这两行的证据强度不如其余十一行：将来真要做校验时，
+它们是先要复核的两行，而不是可以直接当地基的两行。
+
+### 10.2 边界：只是标识
+
+**不参与网关的协议判定。** 入站协议仍由路径决定（`gateway::protocol::classify_path`），
+归属仍由 key 决定（`router::route_agent`）。这一条与 §1 的第 4 条同源：它是「关于 agent 的事实」，
+不是「关于路由的配置」。
+
+因此这一轮**明确不做**：
+
+- 不改 `gateway/src/protocol.rs` 的路径判定、`resolve_inbound`、路由表、provider 的 `protocol` 列；
+- **不做校验**：不会因为「agent 声明 anthropic、绑的 provider 是 openai」就警告或拒绝
+  （跨协议转换本来就存在，声明与转换不矛盾）；
+- 不改探测：`CLI_AGENTS`（二进制名）与协议无关。
+
+### 10.3 机制
+
+| 层 | 改动 |
+|---|---|
+| 迁移 | `MIGRATION_V24`：`ALTER TABLE custom_agents ADD COLUMN protocol TEXT`（**不加 CHECK** —— 按 v19 的教训，一个要扩展就得先丢掉的约束只换来一次迁移）；`SCHEMA_VERSION 23 → 24` |
+| store | `CustomAgent.protocol: Option<String>`，两条 SELECT / INSERT / UPDATE 显式带列；`None` = 未指定（迁移前建的行） |
+| core vm | `AGENT_PROTOCOLS: [(&str, &[&str]); 13]` —— 按 id 索引的平行表（`AGENTS` 被 `(agent, label)` 解构十几处，不动它的元数），配 `agent_protocols(id)` 查询与「每个 AGENTS id 都在这张表里且非空」的不变量测试 |
+| core vm | `TakeoverVm.protocols: Vec<String>`（与 `additive` 一样：关于 agent 的事实，借那一行交付）、`CustomAgentVm.protocol: Option<String>` |
+| Tauri / CLI | `add_custom_agent` / `update_custom_agent` 多一个参数；`agents add --protocol <P>`，`agents list` 文本表多一列 PROTOCOL、`--json` 带 `protocols` |
+| 前端 | 创建对话框选协议（默认 openai）；接入页一行可改；内置 agent 的齿轮对话框**陈述**它（只读，那里本来就在陈述它的配置文件路径）；未指定显示「未指定」 |
+
+### 10.4 一次更新的口径
+
+`update_custom_agent` 替换该 agent 自己的全部三个字段（名称、备注、协议），不是打补丁：
+`null` 是协议可以持有的值（「没说」），所以调用方要把**自己不改的字段原样传回**。
+前端接入页的两个控件（改名、选协议）都照此办理 —— 同名同姓的两处调用各传另外两个字段。
+
+### 10.5 验收
+
+- Rust：v24 迁移测试（手工重放 V7..V23、stamp 23、开库，断言旧行还在且 `protocol IS NULL`，再写一行带协议）、
+  `AGENTS ↔ AGENT_PROTOCOLS` 不变量、四个自定义 agent 测试与 gateway 集成的结构体字面量。
+- 前端：创建对话框（选协议 → `addCustomAgent` 收到第三个参数）、接入页显示/改协议、
+  「未指定」的读法、i18n 键集平价。
+- 端到端：`kiwano agents add --name muse --protocol gemini` 后 `agents list --json` 里是 `gemini`；
+  旧的 custom agent 仍在、协议为「未指定」。

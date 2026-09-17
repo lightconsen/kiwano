@@ -1020,6 +1020,8 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
             "Long Tasks",
             "--note",
             "night batch",
+            "--protocol",
+            "gemini",
         ],
     );
     assert_eq!(code, 0, "{err}");
@@ -1028,6 +1030,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     let key = created["placeholder_key"].as_str().unwrap().to_string();
     assert!(id.starts_with("long-tasks-"), "{id}");
     assert!(key.starts_with(&format!("kw-ag-{id}")), "{key}");
+    assert_eq!(created["protocol"], "gemini");
 
     // It lists as an agent, marked custom and routed (there is no config for it
     // to fail to point at the gateway).
@@ -1041,6 +1044,12 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     assert_eq!(mine["routed"], true);
     assert_eq!(mine["label"], "Long Tasks");
     assert_eq!(mine["note"], "night batch");
+    assert_eq!(mine["protocols"], "gemini", "as it was defined");
+
+    // A built-in reports the protocols its clients speak — a list, since some
+    // carry more than one. The gateway routes by key and never reads this.
+    let claude = rows.iter().find(|r| r["id"] == "claude").unwrap();
+    assert_eq!(claude["protocols"], "anthropic");
 
     // Binding is the existing command: a custom agent is an agent id like any
     // other to everything that reads routes.

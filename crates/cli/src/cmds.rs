@@ -664,7 +664,11 @@ struct UsageReport {
 pub fn agents(cmd: &AgentsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         AgentsCmd::List => agents_list(ctx),
-        AgentsCmd::Add { name, note } => agents_add(ctx, name, note.as_deref()),
+        AgentsCmd::Add {
+            name,
+            note,
+            protocol,
+        } => agents_add(ctx, name, note.as_deref(), protocol.as_deref()),
         AgentsCmd::Remove { id } => agents_remove(ctx, id),
         AgentsCmd::Detect => {
             let declared = ctx.store()?.manual_agent_dirs();
@@ -697,6 +701,11 @@ struct AgentRow {
     routed: bool,
     placeholder_key: Option<String>,
     note: Option<String>,
+    /// Built-ins: the protocols their clients speak (a list, since some carry
+    /// more than one). A user-defined agent: the one chosen when it was defined,
+    /// or null for one defined before the field existed. A label — nothing in
+    /// the gateway routes or validates by it.
+    protocols: Option<String>,
 }
 
 fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
@@ -715,6 +724,7 @@ fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
                 routed: t.enabled,
                 placeholder_key: t.placeholder_key,
                 note: None,
+                protocols: Some(t.protocols.join(",")),
             })
             .collect();
         rows.extend(settings.custom_agents.into_iter().map(|a| AgentRow {
@@ -726,6 +736,9 @@ fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
             routed: true,
             placeholder_key: a.placeholder_key,
             note: a.note,
+            // None when the agent never said — which is a different thing from
+            // any of the three words, and reads as `-` in the table.
+            protocols: a.protocol,
         }));
         rows
     };
@@ -734,10 +747,15 @@ fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
     Ok(())
 }
 
-fn agents_add(ctx: &mut Ctx, name: &str, note: Option<&str>) -> Result<(), CliError> {
+fn agents_add(
+    ctx: &mut Ctx,
+    name: &str,
+    note: Option<&str>,
+    protocol: Option<&str>,
+) -> Result<(), CliError> {
     let created = {
         let store = ctx.store()?;
-        vm::add_custom_agent(store, name, note)?
+        vm::add_custom_agent(store, name, note, protocol)?
     };
     // The key is the whole integration surface, so it is printed rather than
     // left to be looked up: this is the credential a client is configured with,
@@ -769,7 +787,7 @@ fn render_agent_rows(rows: &[AgentRow]) -> String {
     if rows.is_empty() {
         return "(no agents)".to_string();
     }
-    let head = ["ID", "LABEL", "KIND", "ROUTED", "KEY"];
+    let head = ["ID", "LABEL", "KIND", "ROUTED", "PROTOCOL", "KEY"];
     let table_rows: Vec<Vec<String>> = rows
         .iter()
         .map(|r| {
@@ -778,6 +796,7 @@ fn render_agent_rows(rows: &[AgentRow]) -> String {
                 ellipsize(&r.label, 20),
                 r.kind.to_string(),
                 if r.routed { "yes" } else { "no" }.to_string(),
+                r.protocols.clone().unwrap_or_else(|| "-".to_string()),
                 r.placeholder_key.clone().unwrap_or_else(|| "-".to_string()),
             ]
         })

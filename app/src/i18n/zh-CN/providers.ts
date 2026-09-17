@@ -140,6 +140,9 @@ export const providers = {
   agentNamePlaceholder: "长任务",
   agentNote: "备注",
   agentNotePlaceholder: "可选 —— 这条路由是干什么的",
+  agentProtocol: "协议",
+  agentProtocolUnset: "未指定",
+  agentProtocolNote: "指向这条路由的客户端所说的协议。仅作标注：路由、校验与拒绝都不看它。",
   agentIdNote:
     "id 由名称派生且固定不变。磁盘上什么都不会改：它是一个路由，所以你把客户端指到网关并带上它的 key，而不是去接管某个配置文件。",
   createAgent: "创建",

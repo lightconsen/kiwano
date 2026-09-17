@@ -305,7 +305,17 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
 
 /// Roundrobin session identity (tech.md §4.7: session-granularity rotation to
 /// preserve the upstream prompt cache): the explicit `x-kw-session` header
-/// wins, then the Anthropic body's `metadata.user_id`, then body top-level `session_id`.
+/// wins, then the Anthropic body's `metadata.user_id`, then the Responses
+/// body's `client_metadata.session_id` (which is what Codex sends), then
+/// `prompt_cache_key`, then body top-level `session_id`.
+///
+/// The last two are not called "session" by the client that sends them, and
+/// they are read anyway: a `prompt_cache_key` is the client stating which
+/// requests share a cache prefix, which is the whole reason to keep a session
+/// on one candidate. Codex sends both and they agree; a client whose
+/// `prompt_cache_key` changes per request gets a fresh session each time,
+/// which is the behaviour it would have had without any hint at all — so
+/// reading it cannot make a client worse off than it is today, only better.
 pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<String> {
     if let Some(v) = headers.get("x-kw-session").and_then(|v| v.to_str().ok()) {
         let v = v.trim();
@@ -315,6 +325,8 @@ pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<Stri
     }
     let v: serde_json::Value = serde_json::from_slice(body).ok()?;
     v.pointer("/metadata/user_id")
+        .or_else(|| v.pointer("/client_metadata/session_id"))
+        .or_else(|| v.get("prompt_cache_key"))
         .or_else(|| v.get("session_id"))
         .and_then(|x| x.as_str())
         .map(str::trim)
@@ -406,6 +418,28 @@ mod tests {
             session_hint(&empty, br#"{"metadata":{"user_id":42}}"#),
             None
         );
+
+        // Codex nests its conversation id in `client_metadata`, and sends the
+        // same value as `prompt_cache_key` at the top level. Neither spelling
+        // was read, so every Codex request was a session of one — the log
+        // columns were null and roundrobin could not keep a conversation on
+        // the candidate whose prompt cache it had warmed.
+        assert_eq!(
+            session_hint(
+                &empty,
+                br#"{"client_metadata":{"session_id":"01a0838a-6ce7","turn_id":"t1"},"prompt_cache_key":"01a0838a-6ce7"}"#
+            )
+            .as_deref(),
+            Some("01a0838a-6ce7")
+        );
+        // …and the cache key alone is enough when that is all a client sends:
+        // it is the client saying which requests share a prefix.
+        assert_eq!(
+            session_hint(&empty, br#"{"prompt_cache_key":"ck-7"}"#).as_deref(),
+            Some("ck-7")
+        );
+        // A client that sends neither is exactly where it was before.
+        assert_eq!(session_hint(&empty, br#"{"model":"gpt-5.1"}"#), None);
     }
 
     #[test]

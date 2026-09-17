@@ -86,26 +86,38 @@ pub struct BackupFile {
 /// The files a takeover rewrites for `agent`, rooted at the caller's `home`.
 ///
 /// Path reconciliation with `kiwano_adapters::codex_config`: that module
-/// resolves `~/.codex` itself as `get_codex_config_dir()` (which honors the
-/// `CC_SWITCH_TEST_HOME` override), while this file takes the home directory as
-/// a parameter because every test injects a temp root and the app passes
-/// `$HOME`. In production the two resolve to the same directory, and the split
-/// is deliberate rather than accidental: the Codex *transforms* the module now
-/// owns are pure text functions with no paths in them, and the one place that
-/// touches `~/.codex` on disk is `enable`/`disable` below, which writes through
-/// the caller's root. A future divergence shows up as a refused write, not a
-/// silent one into the wrong tree.
+/// resolves `~/.codex` itself as `get_codex_config_dir()`, while this file takes
+/// the home directory as a parameter because every test injects a temp root and
+/// the app passes `$HOME`. The split is deliberate rather than accidental: the
+/// Codex *transforms* the module now owns are pure text functions with no paths
+/// in them, and the one place that touches `~/.codex` on disk is
+/// `enable`/`disable` below, which writes through the caller's root. A future
+/// divergence shows up as a refused write, not a silent one into the wrong tree.
+///
+/// `vars` is where a moved directory is honored (see [`config_dir`]) — and it is
+/// this function, not the adapters, that has to honor it: no adapter path
+/// participates in a takeover, so a difference between what `CODEX_HOME` says
+/// here and what `get_codex_config_dir()` would say there cannot strand a
+/// rewrite.
 pub(crate) fn takeover_paths(
     agent: &str,
     home: &Path,
     vars: &ShellVars,
 ) -> Result<Vec<std::path::PathBuf>, String> {
     match agent {
-        "claude" => Ok(vec![home.join(".claude").join("settings.json")]),
-        "codex" => Ok(vec![
-            home.join(".codex").join("config.toml"),
-            home.join(".codex").join("auth.json"),
+        // CLAUDE_CONFIG_DIR moves the whole profile: settings.json, credentials
+        // and the MCP file all live under it.
+        "claude" => Ok(vec![
+            config_dir(vars, "CLAUDE_CONFIG_DIR", ".claude", home).join("settings.json")
         ]),
+        // Both files follow CODEX_HOME. Codex refuses to start with the variable
+        // pointing at a directory that does not exist, so the root is the user's
+        // to create — and a config.toml that is not there yet is refused exactly
+        // as it is at the default root (the read step in `enable`).
+        "codex" => {
+            let dir = config_dir(vars, "CODEX_HOME", ".codex", home);
+            Ok(vec![dir.join("config.toml"), dir.join("auth.json")])
+        }
         "gemini" => Ok(vec![home.join(".gemini").join(".env")]),
         "grokbuild" => Ok(vec![home.join(".grok").join("config.toml")]),
         // claude-desktop: macOS Claude-3p configLibrary (deployment mode in
@@ -130,8 +142,16 @@ pub(crate) fn takeover_paths(
         "claude-desktop" => Err("claude-desktop takeover currently supports macOS only".into()),
         // additive-mode agents: the gateway entry coexists with their native
         // providers, so a missing config is fine (a fresh one gets created)
-        "opencode" => Ok(vec![home
-            .join(".config")
+        //
+        // OpenCode resolves its global config through the XDG rules, so a moved
+        // XDG_CONFIG_HOME moves this file. Its own two config variables are
+        // deliberately *not* honored: `OPENCODE_CONFIG` names an extra file
+        // merged between the global and the project config, and
+        // `OPENCODE_CONFIG_DIR` a directory searched for agents, commands and
+        // plugins — neither is where the provider list lives, and writing the
+        // gateway entry into one would put it where OpenCode merges from rather
+        // than where it reads the user's own config.
+        "opencode" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)
             .join("opencode")
             .join("opencode.json")]),
         "openclaw" => Ok(vec![home.join(".openclaw").join("openclaw.json")]),
@@ -185,6 +205,9 @@ pub(crate) fn takeover_paths(
 /// list here rather than a name at each use below, so the probe and the paths
 /// it feeds cannot disagree about what to ask for.
 pub const CONFIG_DIR_VARS: &[&str] = &[
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
     "HERMES_HOME",
     "WORKBUDDY_CONFIG_DIR",
     "CODEBUDDY_CONFIG_DIR",
@@ -1188,6 +1211,82 @@ mod tests {
         assert_eq!(
             takeover_paths("qwen", home, &no_vars()).unwrap(),
             vec![home.join(".qwen").join("settings.json")]
+        );
+    }
+
+    /// The three agents a variable can move, and what it moves them to.
+    #[test]
+    fn a_config_root_variable_moves_the_files_it_names() {
+        let _guards = (
+            EnvGuard::set("CLAUDE_CONFIG_DIR", None),
+            EnvGuard::set("CODEX_HOME", None),
+            EnvGuard::set("XDG_CONFIG_HOME", None),
+        );
+        let home = Path::new("/tmp/kiwano-config-home");
+        let vars = ShellVars::from([
+            ("CLAUDE_CONFIG_DIR".to_string(), "/srv/claude".to_string()),
+            ("CODEX_HOME".to_string(), "/srv/codex".to_string()),
+            ("XDG_CONFIG_HOME".to_string(), "/srv/xdg".to_string()),
+        ]);
+
+        // The whole Claude profile moves with the variable, settings included.
+        assert_eq!(
+            takeover_paths("claude", home, &vars).unwrap(),
+            vec![PathBuf::from("/srv/claude/settings.json")]
+        );
+        // Codex's two files move together — a config pointing at the gateway
+        // with the auth left behind is a half-takeover.
+        assert_eq!(
+            takeover_paths("codex", home, &vars).unwrap(),
+            vec![
+                PathBuf::from("/srv/codex/config.toml"),
+                PathBuf::from("/srv/codex/auth.json")
+            ]
+        );
+        // OpenCode reaches its global config through the XDG rules.
+        assert_eq!(
+            takeover_paths("opencode", home, &vars).unwrap(),
+            vec![PathBuf::from("/srv/xdg/opencode/opencode.json")]
+        );
+        // And the XDG location is the default's sibling, not a replacement for
+        // the default: unset, it is `~/.config/opencode/opencode.json`.
+        assert_eq!(
+            takeover_paths(
+                "opencode",
+                home,
+                &ShellVars::from([(
+                    "XDG_CONFIG_HOME".to_string(),
+                    // A relative value: not a directory anyone meant.
+                    "relative".to_string()
+                )])
+            )
+            .unwrap(),
+            vec![home.join(".config").join("opencode").join("opencode.json")]
+        );
+    }
+
+    /// OpenCode's own config variables are not relocations, and honoring them as
+    /// if they were would write the gateway entry somewhere OpenCode only merges
+    /// from — or searches for agents — rather than the user's global config.
+    #[test]
+    fn opencodes_custom_config_is_not_its_global_config() {
+        let _guards = (
+            EnvGuard::set("XDG_CONFIG_HOME", None),
+            EnvGuard::set("OPENCODE_CONFIG", None),
+            EnvGuard::set("OPENCODE_CONFIG_DIR", None),
+        );
+        let home = Path::new("/tmp/kiwano-config-home");
+        let vars = ShellVars::from([
+            (
+                "OPENCODE_CONFIG".to_string(),
+                "/srv/extra/opencode.json".to_string(),
+            ),
+            ("OPENCODE_CONFIG_DIR".to_string(), "/srv/extra".to_string()),
+        ]);
+
+        assert_eq!(
+            takeover_paths("opencode", home, &vars).unwrap(),
+            vec![home.join(".config").join("opencode").join("opencode.json")]
         );
     }
 

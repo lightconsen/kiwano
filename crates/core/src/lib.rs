@@ -25,6 +25,7 @@ pub mod creds;
 pub mod csv;
 pub mod detect;
 pub mod import;
+pub mod paths;
 pub mod pricing;
 pub mod share;
 pub mod sidecar;

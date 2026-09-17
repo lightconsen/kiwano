@@ -281,10 +281,8 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
     }
 }
 
-/// `$HOME`, or `.` when there is none — matching the gateway's own fallback so
-/// a container without HOME set does not fail differently in each process.
+/// The user's home, as the OS reports it — one resolver shared with the app, so
+/// the two cannot disagree about which tree an agent's config lives in.
 fn default_home() -> PathBuf {
-    std::env::var("HOME")
-        .unwrap_or_else(|_| ".".to_string())
-        .into()
+    kiwano_core::paths::home_dir()
 }

@@ -60,23 +60,20 @@ fn env_port(name: &str, default: u16) -> u16 {
 
 /// Root the agent config files live under: the tree a takeover rewrites, and
 /// the one the provider list reads the live-route evidence back from. One
-/// helper so the write and the read cannot end up looking at different trees.
+/// helper so the write and the read cannot end up looking at different trees —
+/// and the same one the CLI uses, so the two front ends agree.
+///
+/// It asks the OS rather than reading `HOME`, which on Windows can be injected
+/// by Git/Cygwin/MSYS and point somewhere that is not the user profile. See
+/// `kiwano_adapters::config::get_home_dir`.
 fn home_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+    kiwano_core::paths::home_dir()
 }
 
-fn default_db_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home)
-        .join(".kiwano")
-        .join("kiwano.db")
-}
-
+/// The database the app, the CLI and the gateway all open. Resolved by the same
+/// function in all three, which is what keeps them from finding different files.
 fn db_path() -> std::path::PathBuf {
-    match std::env::var("KIWANO_DB_PATH") {
-        Ok(v) if !v.is_empty() => v.into(),
-        _ => default_db_path(),
-    }
+    kiwano_core::sidecar::default_db_path()
 }
 
 fn after_mutation(state: &State<AppState>) {
@@ -1037,8 +1034,10 @@ fn import_config(state: State<AppState>, path: String) -> Result<share::ImportRe
 
 #[tauri::command]
 fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let home = std::path::PathBuf::from(home).join(".cc-switch");
+    // The same home every other read uses: cc-switch's files are the user's,
+    // and a `HOME` that is not the profile directory would look for them in a
+    // place that does not have them.
+    let home = home_dir().join(".cc-switch");
     let report = import::run_import(
         &state.store,
         Some(&home.join("cc-switch.db")),

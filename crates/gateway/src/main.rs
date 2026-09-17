@@ -3,15 +3,12 @@
 //! Tauri sidecar; configuration comes from environment variables so the GUI can
 //! pass explicit ports and paths.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use kiwanod::server::{admin_plane_router, data_plane_router, AdminEndpoint, GatewayState};
 use kiwanod::store::Store;
 
 const DEFAULT_DATA_PORT: u16 = 8317;
-const DEFAULT_DB_SUBDIR: &str = ".kiwano";
-const DEFAULT_DB_FILE: &str = "kiwano.db";
 
 fn env_port(name: &str, default: u16) -> u16 {
     match std::env::var(name) {
@@ -26,13 +23,6 @@ fn env_port(name: &str, default: u16) -> u16 {
     }
 }
 
-fn default_db_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
-        .join(DEFAULT_DB_SUBDIR)
-        .join(DEFAULT_DB_FILE)
-}
-
 /// Optional bearer token for `/metrics` (KIW-PRIV-001). Non-empty turns the
 /// key gate on; unset keeps the open-but-redacted default so an existing
 /// Prometheus scrape keeps working. The daemon logs `true`/`false` only —
@@ -44,17 +34,12 @@ fn metrics_token_from_env() -> Option<String> {
     }
 }
 
-fn db_path_from_env() -> PathBuf {
-    match std::env::var("KIWANO_DB_PATH") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => default_db_path(),
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let data_port = env_port("KIWANO_DATA_PORT", DEFAULT_DATA_PORT);
-    let db_path = db_path_from_env();
+    // One resolver for all three processes that open this file — the app, this
+    // daemon and the CLI — see `kiwano_adapters::config::kiwano_db_path`.
+    let db_path = kiwano_adapters::config::kiwano_db_path();
     // The admin plane is not a port: a socket beside the database, or a
     // per-user named pipe on Windows. `KIWANO_ADMIN_SOCKET` overrides it, and
     // the GUI inherits nothing, so both sides resolve the same default from the

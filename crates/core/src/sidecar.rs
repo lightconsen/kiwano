@@ -104,13 +104,7 @@ pub fn spawn() -> std::io::Result<Child> {
 /// the spawned gateway inherits `KIWANO_DB_PATH` and the two agree by
 /// construction.
 pub fn default_db_path() -> PathBuf {
-    if let Ok(p) = std::env::var("KIWANO_DB_PATH") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".kiwano").join("kiwano.db")
+    kiwano_adapters::config::kiwano_db_path()
 }
 
 /// [`default_db_path`], unless the caller named one.

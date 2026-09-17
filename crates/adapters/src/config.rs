@@ -13,6 +13,46 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::error::AppError;
 
+/// Kiwano's own data directory: `~/.kiwano`, beside the gateway's logs and the
+/// database the app, the CLI and the gateway all open.
+pub fn kiwano_data_dir() -> PathBuf {
+    get_home_dir().join(".kiwano")
+}
+
+/// The SQLite file those three share: `KIWANO_DB_PATH`, else
+/// `~/.kiwano/kiwano.db`.
+///
+/// One function because the three processes have to agree; three copies of this
+/// was the shape it was in, and they had already begun to differ (`$HOME` here,
+/// `.` there) — the gateway resolves it from the environment the app hands it,
+/// so a disagreement is a database that exists twice, or one that appears empty.
+///
+/// `KIWANO_DB_PATH` is honored when it is absolute, and ignored when it is not:
+/// a relative one names a *different* file to each of the three processes, since
+/// each has its own working directory — the one place the value cannot mean what
+/// it says. The `log::warn!` below is best-effort and currently inert (nothing
+/// in Kiwano installs a `log` logger), so in practice the fallback is silent;
+/// the CLI prints the location it resolved in `status`, which is where it shows.
+
+pub fn kiwano_db_path() -> PathBuf {
+    kiwano_db_path_from(std::env::var_os("KIWANO_DB_PATH").as_deref())
+}
+
+fn kiwano_db_path_from(value: Option<&std::ffi::OsStr>) -> PathBuf {
+    match classify_dir(value) {
+        EnvDir::Absolute(path) => path,
+        EnvDir::Unset => kiwano_data_dir().join("kiwano.db"),
+        EnvDir::Relative(relative) => {
+            log::warn!(
+                "KIWANO_DB_PATH={relative} is not an absolute path; each process would \
+                 resolve it against its own working directory. Using {} instead.",
+                kiwano_data_dir().join("kiwano.db").display()
+            );
+            kiwano_data_dir().join("kiwano.db")
+        }
+    }
+}
+
 /// A directory named by an environment variable, classified by what it can
 /// mean. One rule, in one place, because the readers of these values are spread
 /// across crates and a second copy of the rule is a second answer.
@@ -579,6 +619,28 @@ fn atomic_write_with_unix_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The database path is one answer for three processes, so a value that
+    /// would mean something different to each of them is not used.
+    #[test]
+    fn the_database_path_is_resolved_in_one_place() {
+        use std::ffi::OsStr;
+
+        assert_eq!(
+            kiwano_db_path_from(Some(OsStr::new("/srv/kiwano.db"))),
+            PathBuf::from("/srv/kiwano.db")
+        );
+        // Unset, blank, and relative all land on the same default — the last
+        // one because a relative path names a different file per process.
+        for value in [None, Some(OsStr::new("")), Some(OsStr::new("./kiwano.db"))] {
+            let resolved = kiwano_db_path_from(value);
+            assert!(
+                resolved.ends_with(".kiwano/kiwano.db"),
+                "{value:?} resolved to {}",
+                resolved.display()
+            );
+        }
+    }
 
     /// The three answers, and the one that is not a path: unset and blank are
     /// the caller's default, an absolute value is the directory, and a relative

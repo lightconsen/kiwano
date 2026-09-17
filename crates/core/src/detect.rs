@@ -63,6 +63,12 @@ const CLI_AGENTS: &[(&str, &str)] = &[
 /// enough that a wedged shell cannot stall the first render.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Environment values as the user's own login shell has them — see
+/// [`login_shell_vars`]. Passed around as a value so the modules that need one
+/// (the takeover's config paths) stay free of the process environment, which is
+/// the thing that cannot see it.
+pub type ShellVars = BTreeMap<String, String>;
+
 /// One `<bin> --version`.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -167,16 +173,30 @@ fn find_agent_binaries(
 
 /// `command -v` for every tool, through the user's interactive login shell.
 ///
-/// Interactive (`-lic`) rather than plain login (`-lc`) because that is what
-/// reads `.zshrc`/`.bashrc` — where a great many installs are actually put on
-/// PATH. It costs an interactive rc file being evaluated, so the child gets a
-/// null stdin (nothing can block on a prompt), its own session (no controlling
-/// terminal to be stopped by), and a deadline.
-///
 /// Failure is not fatal: an empty map means "the shell had nothing to say", and
 /// the directory walk still runs on top of it.
 #[cfg(unix)]
 fn shell_probe_all() -> BTreeMap<String, PathBuf> {
+    match run_login_shell(&probe_script()) {
+        Some(out) => parse_probe_output(&out),
+        None => BTreeMap::new(),
+    }
+}
+
+/// Run one command in the user's interactive login shell and return its stdout.
+///
+/// Interactive (`-lic`) rather than plain login (`-lc`) because that is what
+/// reads `.zshrc`/`.bashrc` — where a great many installs are actually put on
+/// PATH, and where the variables that move an agent's files are usually
+/// exported. It costs an interactive rc file being evaluated, so the child gets
+/// a null stdin (nothing can block on a prompt), its own session (no
+/// controlling terminal to be stopped by), and a deadline.
+///
+/// `None` covers every way of getting no answer — no spawn, a wedged shell, a
+/// non-zero exit — because callers treat them the same: nothing was learned,
+/// so nothing changes.
+#[cfg(unix)]
+fn run_login_shell(script: &str) -> Option<String> {
     use std::os::unix::process::CommandExt;
 
     let shell = std::env::var("SHELL")
@@ -185,7 +205,7 @@ fn shell_probe_all() -> BTreeMap<String, PathBuf> {
         .unwrap_or_else(|| "sh".into());
     let mut cmd = Command::new(&shell);
     cmd.arg(login_probe_flag(&shell))
-        .arg(probe_script())
+        .arg(script)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -199,16 +219,67 @@ fn shell_probe_all() -> BTreeMap<String, PathBuf> {
             Ok(())
         });
     }
-    let Ok(child) = cmd.spawn() else {
-        return BTreeMap::new();
-    };
-    let Some(out) = wait_with_timeout(child, PROBE_TIMEOUT) else {
-        return BTreeMap::new();
-    };
-    if !out.status.success() {
-        return BTreeMap::new();
+    let child = cmd.spawn().ok()?;
+    let out = wait_with_timeout(child, PROBE_TIMEOUT)?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The named variables as the user's own shell has them.
+///
+/// This is source 1's blindness applied to values rather than binaries: the GUI
+/// inherits launchd's environment, so a variable exported from `.zshrc` — which
+/// is where a relocated config directory is declared — is invisible to it, and
+/// a default would be written where the user's tool never looks. The shell is
+/// the only place that knows.
+///
+/// Absence is an answer. A variable the shell does not have is missing from the
+/// map, and a shell that cannot be spawned answers with an empty map; both
+/// leave every default in place, which is what a machine with no overrides
+/// wants. Values come back trimmed and otherwise verbatim — whether one names a
+/// usable directory is the caller's business, not this function's.
+///
+/// The script is `env` rather than a shell loop over `$NAME`, because the loop
+/// syntax differs between the shells this can be pointed at (`for x in …; do`
+/// against fish's `for x in …; end`) and `env` is one word that means the same
+/// thing everywhere.
+#[cfg(unix)]
+pub fn login_shell_vars(names: &[&str]) -> ShellVars {
+    if names.is_empty() {
+        return ShellVars::new();
     }
-    parse_probe_output(&String::from_utf8_lossy(&out.stdout))
+    match run_login_shell("env") {
+        Some(out) => parse_vars(&out, names),
+        None => ShellVars::new(),
+    }
+}
+
+/// Windows: nothing to ask. A GUI process inherits the real user environment
+/// there, so the process environment already is the user's — see
+/// [`effective_path`] for the same reasoning on PATH.
+#[cfg(not(unix))]
+pub fn login_shell_vars(_names: &[&str]) -> ShellVars {
+    ShellVars::new()
+}
+
+/// `NAME=value` lines from `env` output, keeping only the names asked for.
+///
+/// Split at the first `=`, since a value may contain one. A name that appears
+/// twice keeps the first, matching the tool probe's rule.
+#[cfg(unix)]
+fn parse_vars(out: &str, names: &[&str]) -> ShellVars {
+    let mut vars = ShellVars::new();
+    for line in out.lines() {
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if names.contains(&name) {
+            vars.entry(name.to_string())
+                .or_insert_with(|| value.to_string());
+        }
+    }
+    vars
 }
 
 /// Windows: nothing to ask. A GUI process inherits the real user environment

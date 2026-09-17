@@ -47,12 +47,13 @@
 //! success it did not achieve — a restore that could not give the original
 //! config back says so.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use kiwano_adapters::codex_config;
 use kiwano_adapters::config::atomic_write_private;
 use serde_json::Value;
 
+use crate::detect::ShellVars;
 use crate::vm::Aux;
 
 /// The set of backed-up files: `(absolute path, original content)`.
@@ -94,7 +95,11 @@ pub struct BackupFile {
 /// touches `~/.codex` on disk is `enable`/`disable` below, which writes through
 /// the caller's root. A future divergence shows up as a refused write, not a
 /// silent one into the wrong tree.
-pub(crate) fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+pub(crate) fn takeover_paths(
+    agent: &str,
+    home: &Path,
+    vars: &ShellVars,
+) -> Result<Vec<std::path::PathBuf>, String> {
     match agent {
         "claude" => Ok(vec![home.join(".claude").join("settings.json")]),
         "codex" => Ok(vec![
@@ -132,11 +137,7 @@ pub(crate) fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::
         "openclaw" => Ok(vec![home.join(".openclaw").join("openclaw.json")]),
         "hermes" => {
             // HERMES_HOME resolution matches hermes' own get_hermes_home()
-            let dir = std::env::var_os("HERMES_HOME")
-                .map(|v| v.to_string_lossy().trim().to_string())
-                .filter(|v| !v.is_empty())
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| home.join(".hermes"));
+            let dir = config_dir(vars, "HERMES_HOME", ".hermes", home);
             Ok(vec![dir.join("config.yaml")])
         }
         "pi" => Ok(vec![
@@ -145,41 +146,83 @@ pub(crate) fn takeover_paths(agent: &str, home: &Path) -> Result<Vec<std::path::
         ]),
         // WorkBuddy and CodeBuddy are one product family (the app embeds the
         // CLI) with separate config roots, each overridable by its own env var.
-        "workbuddy" => Ok(vec![
-            config_dir("WORKBUDDY_CONFIG_DIR", ".workbuddy", home).join("models.json")
-        ]),
-        "codebuddy" => Ok(vec![
-            config_dir("CODEBUDDY_CONFIG_DIR", ".codebuddy", home).join("models.json")
-        ]),
+        "workbuddy" => Ok(vec![config_dir(
+            vars,
+            "WORKBUDDY_CONFIG_DIR",
+            ".workbuddy",
+            home,
+        )
+        .join("models.json")]),
+        "codebuddy" => Ok(vec![config_dir(
+            vars,
+            "CODEBUDDY_CONFIG_DIR",
+            ".codebuddy",
+            home,
+        )
+        .join("models.json")]),
         "qwen" => Ok(vec![
-            config_dir("QWEN_HOME", ".qwen", home).join("settings.json")
+            config_dir(vars, "QWEN_HOME", ".qwen", home).join("settings.json")
         ]),
         // Two generations of the same agent: the Node successor reads
         // ~/.kimi-code, the Python original (~/.kimi) is being retired. The
         // one that exists is the one to write; with neither, the successor —
         // that is what a fresh install is.
         "kimi" => {
-            let successor = config_dir("KIMI_CODE_HOME", ".kimi-code", home).join("config.toml");
+            let successor =
+                config_dir(vars, "KIMI_CODE_HOME", ".kimi-code", home).join("config.toml");
             if successor.exists() {
                 return Ok(vec![successor]);
             }
-            let legacy = config_dir("KIMI_SHARE_DIR", ".kimi", home).join("config.toml");
+            let legacy = config_dir(vars, "KIMI_SHARE_DIR", ".kimi", home).join("config.toml");
             Ok(vec![if legacy.exists() { legacy } else { successor }])
         }
         other => Err(format!("unknown agent: {other}")),
     }
 }
 
+/// The variables that move where an agent keeps its files, for the caller that
+/// has to go and ask for them ([`kiwano_core::detect::login_shell_vars`]). One
+/// list here rather than a name at each use below, so the probe and the paths
+/// it feeds cannot disagree about what to ask for.
+pub const CONFIG_DIR_VARS: &[&str] = &[
+    "HERMES_HOME",
+    "WORKBUDDY_CONFIG_DIR",
+    "CODEBUDDY_CONFIG_DIR",
+    "QWEN_HOME",
+    "KIMI_CODE_HOME",
+    "KIMI_SHARE_DIR",
+];
+
 /// The config root an agent resolves for itself: the environment variable that
-/// overrides it, else the default directory under `home`. Matches the existing
-/// `HERMES_HOME` handling — a user who moved their config should not get a
-/// takeover written to the old place.
-fn config_dir(env_var: &str, default_dir: &str, home: &Path) -> std::path::PathBuf {
-    std::env::var_os(env_var)
-        .map(|v| v.to_string_lossy().trim().to_string())
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| home.join(default_dir))
+/// overrides it, else the default directory under `home` — a user who moved
+/// their config should not get a takeover written to the old place.
+///
+/// The shell's answer comes first and the process environment second, and that
+/// order is the point: a GUI process does not inherit what the user's rc files
+/// export, so `vars` is the only copy that can know about a relocated
+/// directory. The process environment stays as the fallback because it is what
+/// a terminal-run CLI and the tests have.
+fn config_dir(vars: &ShellVars, env_var: &str, default_dir: &str, home: &Path) -> PathBuf {
+    var_dir(vars, env_var).unwrap_or_else(|| home.join(default_dir))
+}
+
+/// An absolute directory named by `vars`, else by the process environment.
+fn var_dir(vars: &ShellVars, name: &str) -> Option<PathBuf> {
+    vars.get(name)
+        .and_then(|value| usable_dir(value))
+        .or_else(|| std::env::var_os(name).and_then(|value| usable_dir(&value.to_string_lossy())))
+}
+
+/// A variable's value as a path, or nothing.
+///
+/// Nothing covers: unset, blank, and *relative*. A relative value would resolve
+/// against this process's working directory, which is not where the user's tool
+/// looks — treating one as an override would be a confident guess at the wrong
+/// answer, and falling through to the default is at least an honest one.
+fn usable_dir(value: &str) -> Option<PathBuf> {
+    let trimmed = value.trim();
+    let path = PathBuf::from(trimmed);
+    (!trimmed.is_empty() && path.is_absolute()).then_some(path)
 }
 
 /// Takeover: read the original files → perform all rewrites in memory
@@ -196,8 +239,9 @@ pub fn enable(
     placeholder_key: &str,
     data_port: u16,
     home: &Path,
+    vars: &ShellVars,
 ) -> Result<(), String> {
-    let paths = takeover_paths(agent, home)?;
+    let paths = takeover_paths(agent, home, vars)?;
     let mut originals: Vec<BackupFile> = Vec::new();
     for p in &paths {
         // codex's auth.json, every additive agent's config, and
@@ -247,7 +291,7 @@ pub fn enable(
     // be a leftover from a takeover whose rewrite is gone (the agent's config
     // was put back by hand or by another tool), and skipping the backup then
     // would leave restore aimed at a config this takeover is not replacing.
-    let first_time = live_placeholder_key(agent, home).is_none();
+    let first_time = live_placeholder_key(agent, home, vars).is_none();
     if first_time {
         aux.save_takeover_backup(agent, &originals)
             .map_err(|e| e.to_string())?;
@@ -447,8 +491,8 @@ pub fn restorable_backup(aux: &Aux, agent: &str) -> bool {
 /// `kw-ag-<agent>-<rand>` shape (or, for a Codex config, the parsed token
 /// slots), never by a lookup in the `placeholder_keys` table, which can be
 /// rolled back while the files stay rewritten.
-pub fn live_placeholder_key(agent: &str, home: &Path) -> Option<String> {
-    let paths = takeover_paths(agent, home).ok()?;
+pub fn live_placeholder_key(agent: &str, home: &Path, vars: &ShellVars) -> Option<String> {
+    let paths = takeover_paths(agent, home, vars).ok()?;
     for path in &paths {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
@@ -512,10 +556,11 @@ pub fn disable(
     agent: &str,
     home: &Path,
     fallback: Option<&ProviderRoute>,
+    vars: &ShellVars,
 ) -> Result<RestoreReport, String> {
     // Validate the agent name before anything else; the file paths themselves
-    // are resolved by the helpers below (each of which needs the same home).
-    takeover_paths(agent, home)?;
+    // are resolved by the helpers below (each of which needs the same roots).
+    takeover_paths(agent, home, vars)?;
 
     // An unusable backup row is dropped rather than kept: it can never be
     // written back, and its presence is what would keep claiming a takeover.
@@ -568,7 +613,7 @@ pub fn disable(
 
     // No usable backup. Only the live files can say whether anything is there
     // to undo.
-    if live_placeholder_key(agent, home).is_none() {
+    if live_placeholder_key(agent, home, vars).is_none() {
         return Ok(RestoreReport {
             outcome: RestoreOutcome::NotTakenOver,
             warning,
@@ -577,7 +622,7 @@ pub fn disable(
 
     if REBUILDABLE_AGENTS.contains(&agent) {
         if let Some(route) = fallback {
-            if rebuild_from_provider(agent, home, route).is_ok() {
+            if rebuild_from_provider(agent, home, route, vars).is_ok() {
                 if let Err(e) = aux.delete_takeover_backup(agent) {
                     warning = Some(format!(
                         "the {agent} config was rebuilt but its backup row could not be dropped: {e}"
@@ -594,12 +639,12 @@ pub fn disable(
     // Last resort: take our route out of the live config, then report the loss
     // honestly. This must not fail silently — the user's upstream credentials
     // are gone even though their agent is no longer pointed at the gateway.
-    strip_gateway_route(agent, home).map_err(|e| {
+    strip_gateway_route(agent, home, vars).map_err(|e| {
         format!(
             "the {agent} takeover backup is gone and its gateway route could not be removed: {e}"
         )
     })?;
-    if live_placeholder_key(agent, home).is_some() {
+    if live_placeholder_key(agent, home, vars).is_some() {
         return Err(format!(
             "the {agent} gateway route could not be removed from its live config — remove the {} route by hand before using {agent}",
             codex_config::GATEWAY_PLACEHOLDER_PREFIX
@@ -613,8 +658,13 @@ pub fn disable(
 /// Rebuild an agent's live config from the provider the gateway serves it:
 /// the same rewrite a takeover performs, aimed at the provider's own endpoint
 /// and key instead of the gateway and a placeholder.
-fn rebuild_from_provider(agent: &str, home: &Path, route: &ProviderRoute) -> Result<(), String> {
-    for path in takeover_paths(agent, home)? {
+fn rebuild_from_provider(
+    agent: &str,
+    home: &Path,
+    route: &ProviderRoute,
+    vars: &ShellVars,
+) -> Result<(), String> {
+    for path in takeover_paths(agent, home, vars)? {
         let Ok(current) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -652,8 +702,8 @@ fn rebuild_from_provider(agent: &str, home: &Path, route: &ProviderRoute) -> Res
 /// on its own defaults. Reached only when there is no backup and no provider to
 /// rebuild from, so it cannot restore credentials — it exists so the agent is
 /// not left pointed at a loopback port nothing is listening on.
-fn strip_gateway_route(agent: &str, home: &Path) -> Result<(), String> {
-    for path in takeover_paths(agent, home)? {
+fn strip_gateway_route(agent: &str, home: &Path, vars: &ShellVars) -> Result<(), String> {
+    for path in takeover_paths(agent, home, vars)? {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -1071,6 +1121,103 @@ fn copy_files(agent: &str, home: &Path, files: &[BackupFile]) {
 mod tests {
     use super::*;
 
+    /// The tests run with no shell environment: a takeover here is rooted at the
+    /// temp home the test injected, which is the whole point of injecting it.
+    /// The variables are covered on their own in `config_dir`'s tests.
+    fn no_vars() -> ShellVars {
+        ShellVars::new()
+    }
+
+    /// One variable set for the duration of a test, put back afterwards. The
+    /// process environment is shared by every test in this binary, so tests
+    /// that need it touch one name and restore it — and the directory tests
+    /// below read it on purpose, since it is the fallback the shell's answer
+    /// has to win over.
+    struct EnvGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(name: &'static str, value: Option<&str>) -> Self {
+            let previous = std::env::var_os(name);
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+            EnvGuard { name, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(v) => std::env::set_var(self.name, v),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+
+    // ── where an agent keeps its files ──
+
+    /// The shell's answer beats the process environment, which is the whole
+    /// reason the variables are passed in: a GUI process inherits launchd's
+    /// environment, so it is the shell that knows about a relocated directory,
+    /// and a default (or a stale value of the app's own) must not outrank it.
+    #[test]
+    fn the_shells_answer_wins_over_the_process_environment() {
+        let _guard = EnvGuard::set("QWEN_HOME", Some("/tmp/kiwano-from-process"));
+        let home = Path::new("/tmp/kiwano-config-home");
+        let from_shell =
+            ShellVars::from([("QWEN_HOME".to_string(), "/tmp/kiwano-from-shell".into())]);
+
+        assert_eq!(
+            takeover_paths("qwen", home, &from_shell).unwrap(),
+            vec![PathBuf::from("/tmp/kiwano-from-shell/settings.json")]
+        );
+        // Nothing from the shell: the process environment is what is left, and
+        // only then the default.
+        assert_eq!(
+            takeover_paths("qwen", home, &no_vars()).unwrap(),
+            vec![PathBuf::from("/tmp/kiwano-from-process/settings.json")]
+        );
+        // Bound rather than dropped: the guard puts the variable back when it
+        // goes out of scope, so a bare `EnvGuard::set(…)` would undo itself on
+        // the spot.
+        let _unset = EnvGuard::set("QWEN_HOME", None);
+        assert_eq!(
+            takeover_paths("qwen", home, &no_vars()).unwrap(),
+            vec![home.join(".qwen").join("settings.json")]
+        );
+    }
+
+    /// A value that names no usable directory is not an override. Relative is
+    /// the interesting one: it would resolve against *this* process's working
+    /// directory, which is not where the user's tool looks, so the default is
+    /// the more honest answer.
+    #[test]
+    fn only_an_absolute_value_moves_a_config_root() {
+        let _unset = EnvGuard::set("CODEBUDDY_CONFIG_DIR", None);
+        let home = Path::new("/tmp/kiwano-config-home");
+        let default = vec![home.join(".codebuddy").join("models.json")];
+
+        for value in ["relative/dir", "   ", ""] {
+            let vars = ShellVars::from([("CODEBUDDY_CONFIG_DIR".to_string(), value.to_string())]);
+            assert_eq!(
+                takeover_paths("codebuddy", home, &vars).unwrap(),
+                default,
+                "{value:?}"
+            );
+        }
+
+        let vars = ShellVars::from([("CODEBUDDY_CONFIG_DIR".to_string(), "/srv/buddy ".into())]);
+        assert_eq!(
+            takeover_paths("codebuddy", home, &vars).unwrap(),
+            vec![PathBuf::from("/srv/buddy/models.json")],
+            "a padded value is the same directory"
+        );
+    }
+
     fn temp_home() -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_path_buf();
@@ -1081,7 +1228,7 @@ mod tests {
     /// config back" call; the degradation chain's middle tier is exercised by
     /// the tests that pass a [`ProviderRoute`] explicitly.
     fn restore(aux: &Aux, agent: &str, home: &Path) -> Result<RestoreReport, String> {
-        disable(aux, agent, home, None)
+        disable(aux, agent, home, None, &no_vars())
     }
 
     #[test]
@@ -1096,7 +1243,7 @@ mod tests {
         )
         .unwrap();
 
-        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home).unwrap();
+        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home, &no_vars()).unwrap();
         let rewritten = std::fs::read_to_string(&settings).unwrap();
         let v: Value = serde_json::from_str(&rewritten).unwrap();
         assert_eq!(v["model"], "opus"); // other fields preserved
@@ -1121,8 +1268,8 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, r#"{"original":true}"#).unwrap();
 
-        enable(&aux, "claude", "kw-ag-claude-1111", 8317, &home).unwrap();
-        enable(&aux, "claude", "kw-ag-claude-2222", 8317, &home).unwrap();
+        enable(&aux, "claude", "kw-ag-claude-1111", 8317, &home, &no_vars()).unwrap();
+        enable(&aux, "claude", "kw-ag-claude-2222", 8317, &home, &no_vars()).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "kw-ag-claude-2222");
 
@@ -1162,7 +1309,7 @@ wire_api = "responses"
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, CODEX_ORIGINAL, r#"{"OPENAI_API_KEY":"sk-old"}"#);
 
-        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap();
+        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap();
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
         assert!(toml.contains("wire_api = \"responses\"")); // other lines untouched
@@ -1197,7 +1344,7 @@ wire_api = "responses"
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, "model = \"m\"\n", "{}");
-        let err = enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap_err();
+        let err = enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap_err();
         assert!(err.contains("custom"), "{err}");
         // The switch did not happen: no backup row, and the live config is the
         // one the user wrote (the gates run before any write).
@@ -1223,7 +1370,7 @@ wire_api = "responses"
         std::fs::remove_file(codex_dir.join("auth.json")).unwrap();
         std::fs::create_dir(codex_dir.join("auth.json")).unwrap();
 
-        let err = enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap_err();
+        let err = enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap_err();
         assert!(err.contains("the takeover was not applied"), "{err}");
         assert!(aux.load_takeover_backup("codex").is_none());
         assert_eq!(
@@ -1238,14 +1385,14 @@ wire_api = "responses"
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, CODEX_ORIGINAL, r#"{"OPENAI_API_KEY":"sk-old"}"#);
-        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap();
+        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap();
         // The SQLite row is the backup restore reads; losing it is the case
         // that used to be reported as a successful "Not taken over".
         aux.delete_takeover_backup("codex").unwrap();
         assert!(!restorable_backup(&aux, "codex"));
 
         // No provider to rebuild from: strip, and never claim success.
-        let err = disable(&aux, "codex", &home, None).unwrap_err();
+        let err = disable(&aux, "codex", &home, None, &no_vars()).unwrap_err();
         assert!(err.contains("backup is gone"), "{err}");
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(
@@ -1264,14 +1411,14 @@ wire_api = "responses"
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, CODEX_ORIGINAL, r#"{"OPENAI_API_KEY":"sk-old"}"#);
-        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home).unwrap();
+        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap();
         aux.delete_takeover_backup("codex").unwrap();
 
         let route = ProviderRoute {
             base_url: "https://api.deepseek.com/v1".into(),
             api_key: "sk-real".into(),
         };
-        let report = disable(&aux, "codex", &home, Some(&route)).unwrap();
+        let report = disable(&aux, "codex", &home, Some(&route), &no_vars()).unwrap();
         assert_eq!(report.outcome, RestoreOutcome::RebuiltFromProvider);
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(
@@ -1304,13 +1451,13 @@ wire_api = "responses"
             "model = \"m\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"DeepSeek\"\nbase_url = \"http://127.0.0.1:8317/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"kw-ag-codex-old\"\n",
             r#"{"OPENAI_API_KEY":"kw-ag-codex-old"}"#,
         );
-        enable(&aux, "codex", "kw-ag-codex-new", 8317, &home).unwrap();
+        enable(&aux, "codex", "kw-ag-codex-new", 8317, &home, &no_vars()).unwrap();
         assert!(
             aux.load_takeover_backup("codex").is_none(),
             "what is on disk is our own route, so there is nothing to capture"
         );
         assert_eq!(
-            live_placeholder_key("codex", &home).as_deref(),
+            live_placeholder_key("codex", &home, &no_vars()).as_deref(),
             Some("kw-ag-codex-new")
         );
 
@@ -1318,7 +1465,7 @@ wire_api = "responses"
             base_url: "https://api.deepseek.com/v1".into(),
             api_key: "sk-real".into(),
         };
-        let report = disable(&aux, "codex", &home, Some(&route)).unwrap();
+        let report = disable(&aux, "codex", &home, Some(&route), &no_vars()).unwrap();
         assert_eq!(report.outcome, RestoreOutcome::RebuiltFromProvider);
         assert!(report.warning.is_none(), "{:?}", report.warning);
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
@@ -1356,7 +1503,7 @@ wire_api = "responses"
             base_url: "https://api.deepseek.com/v1".into(),
             api_key: "sk-real".into(),
         };
-        let report = disable(&aux, "codex", &home, Some(&route)).unwrap();
+        let report = disable(&aux, "codex", &home, Some(&route), &no_vars()).unwrap();
         assert_eq!(report.outcome, RestoreOutcome::RebuiltFromProvider);
         assert!(
             report.warning.unwrap().contains("not the original config"),
@@ -1379,14 +1526,14 @@ wire_api = "responses"
             r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","SOMETHING":"kept"}}"#,
         )
         .unwrap();
-        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home).unwrap();
+        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home, &no_vars()).unwrap();
         aux.delete_takeover_backup("claude").unwrap();
 
         let route = ProviderRoute {
             base_url: "https://relay.example.com".into(),
             api_key: "sk-real".into(),
         };
-        let report = disable(&aux, "claude", &home, Some(&route)).unwrap();
+        let report = disable(&aux, "claude", &home, Some(&route), &no_vars()).unwrap();
         assert_eq!(report.outcome, RestoreOutcome::RebuiltFromProvider);
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "https://relay.example.com");
@@ -1406,10 +1553,10 @@ wire_api = "responses"
             r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","SOMETHING":"kept"}}"#,
         )
         .unwrap();
-        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home).unwrap();
+        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home, &no_vars()).unwrap();
         aux.delete_takeover_backup("claude").unwrap();
 
-        let err = disable(&aux, "claude", &home, None).unwrap_err();
+        let err = disable(&aux, "claude", &home, None, &no_vars()).unwrap_err();
         assert!(err.contains("backup is gone"), "{err}");
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert!(v["env"].get("ANTHROPIC_AUTH_TOKEN").is_none(), "{v}");
@@ -1429,13 +1576,21 @@ wire_api = "responses"
             r#"{"provider":{"deepseek":{"options":{"apiKey":"sk-old"}}}}"#,
         )
         .unwrap();
-        enable(&aux, "opencode", "kw-ag-opencode-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "opencode",
+            "kw-ag-opencode-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         aux.delete_takeover_backup("opencode").unwrap();
 
         // No faithful rebuild exists for the additive agents' kiwano-authored
         // entry, and stripping one would need to know which provider the user
         // selected before: the honest answer is a failure, not a silent success.
-        let err = disable(&aux, "opencode", &home, None).unwrap_err();
+        let err = disable(&aux, "opencode", &home, None, &no_vars()).unwrap_err();
         assert!(err.contains("no fallback route"), "{err}");
     }
 
@@ -1446,7 +1601,7 @@ wire_api = "responses"
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
 
         // Nothing written yet: no evidence of a takeover.
-        assert!(live_placeholder_key("claude", &home).is_none());
+        assert!(live_placeholder_key("claude", &home, &no_vars()).is_none());
 
         std::fs::write(
             &settings,
@@ -1454,7 +1609,7 @@ wire_api = "responses"
         )
         .unwrap();
         assert_eq!(
-            live_placeholder_key("claude", &home).as_deref(),
+            live_placeholder_key("claude", &home, &no_vars()).as_deref(),
             Some("kw-ag-claude-abcd")
         );
 
@@ -1465,7 +1620,7 @@ wire_api = "responses"
             r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-kw-ag-claude-notours"}}"#,
         )
         .unwrap();
-        assert!(live_placeholder_key("claude", &home).is_none());
+        assert!(live_placeholder_key("claude", &home, &no_vars()).is_none());
 
         // Another agent's key is not this agent's evidence either.
         std::fs::write(
@@ -1473,14 +1628,14 @@ wire_api = "responses"
             r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"kw-ag-codex-abcd"}}"#,
         )
         .unwrap();
-        assert!(live_placeholder_key("claude", &home).is_none());
+        assert!(live_placeholder_key("claude", &home, &no_vars()).is_none());
     }
 
     #[test]
     fn missing_claude_config_errors() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
-        assert!(enable(&aux, "claude", "k", 8317, &home).is_err());
+        assert!(enable(&aux, "claude", "k", 8317, &home, &no_vars()).is_err());
         // disable before any takeover succeeds idempotently, and reports that
         // there was nothing of ours to undo rather than a restore it did not do
         let report = restore(&aux, "claude", &home).unwrap();
@@ -1500,7 +1655,7 @@ wire_api = "responses"
         )
         .unwrap();
 
-        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
+        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home, &no_vars()).unwrap();
         let env = std::fs::read_to_string(gemini_dir.join(".env")).unwrap();
         assert!(env.contains("GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\n"));
         assert!(env.contains("GEMINI_API_KEY=kw-ag-gemini-abcd\n"));
@@ -1522,7 +1677,7 @@ wire_api = "responses"
         let aux = Aux::open_in_memory().unwrap();
         let env_path = home.join(".gemini").join(".env");
         // takeover works even when ~/.gemini/.env is missing entirely (dir + file are created automatically)
-        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home).unwrap();
+        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home, &no_vars()).unwrap();
         let env = std::fs::read_to_string(&env_path).unwrap();
         assert_eq!(
             env,
@@ -1568,7 +1723,15 @@ base_url = "https://relay.example.com/v1"
         )
         .unwrap();
 
-        enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "grokbuild",
+            "kw-ag-grokbuild-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let toml = std::fs::read_to_string(grok_dir.join("config.toml")).unwrap();
         // selected model points at the gateway; backend pinned to responses
         assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
@@ -1615,7 +1778,15 @@ base_url = "https://relay.example.com/v1"
         )
         .unwrap();
 
-        enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "grokbuild",
+            "kw-ag-grokbuild-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let toml = std::fs::read_to_string(grok_dir.join("config.toml")).unwrap();
         assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
         assert!(toml.contains("api_key = \"kw-ag-grokbuild-abcd\""));
@@ -1631,7 +1802,15 @@ base_url = "https://relay.example.com/v1"
         std::fs::create_dir_all(&grok_dir).unwrap();
         // official xAI login: no [models]/[model.*] tables at all
         std::fs::write(grok_dir.join("config.toml"), "theme = \"dark\"\n").unwrap();
-        assert!(enable(&aux, "grokbuild", "kw-ag-grokbuild-abcd", 8317, &home).is_err());
+        assert!(enable(
+            &aux,
+            "grokbuild",
+            "kw-ag-grokbuild-abcd",
+            8317,
+            &home,
+            &no_vars()
+        )
+        .is_err());
         // no backup left behind on failure (escape hatch stays clean)
         assert!(aux.load_takeover_backup("grokbuild").is_none());
     }
@@ -1649,7 +1828,15 @@ base_url = "https://relay.example.com/v1"
 }"#;
         std::fs::write(dir.join("opencode.json"), original).unwrap();
 
-        enable(&aux, "opencode", "kw-ag-opencode-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "opencode",
+            "kw-ag-opencode-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("opencode.json")).unwrap())
                 .unwrap();
@@ -1691,7 +1878,15 @@ base_url = "https://relay.example.com/v1"
 ]"#;
         std::fs::write(dir.join("models.json"), original).unwrap();
 
-        enable(&aux, "workbuddy", "kw-ag-workbuddy-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "workbuddy",
+            "kw-ag-workbuddy-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("models.json")).unwrap())
                 .unwrap();
@@ -1728,7 +1923,15 @@ base_url = "https://relay.example.com/v1"
 }"#;
         std::fs::write(dir.join("models.json"), original).unwrap();
 
-        enable(&aux, "codebuddy", "kw-ag-codebuddy-abcd", 8317, &home).unwrap();
+        enable(
+            &aux,
+            "codebuddy",
+            "kw-ag-codebuddy-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("models.json")).unwrap())
                 .unwrap();
@@ -1760,7 +1963,7 @@ base_url = "https://relay.example.com/v1"
                         api_key = \"sk-old\"\n";
         std::fs::write(dir.join("config.toml"), original).unwrap();
 
-        enable(&aux, "kimi", "kw-ag-kimi-abcd", 8317, &home).unwrap();
+        enable(&aux, "kimi", "kw-ag-kimi-abcd", 8317, &home, &no_vars()).unwrap();
         let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(
             text.contains("base_url = \"http://127.0.0.1:8317/v1\""),
@@ -1798,7 +2001,7 @@ base_url = "https://relay.example.com/v1"
 }"#;
         std::fs::write(dir.join("settings.json"), original).unwrap();
 
-        enable(&aux, "qwen", "kw-ag-qwen-abcd", 8317, &home).unwrap();
+        enable(&aux, "qwen", "kw-ag-qwen-abcd", 8317, &home, &no_vars()).unwrap();
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
                 .unwrap();
@@ -1834,7 +2037,15 @@ base_url = "https://relay.example.com/v1"
             let aux = Aux::open_in_memory().unwrap();
             let path = home.join(relative);
 
-            enable(&aux, agent, &format!("kw-ag-{agent}-abcd"), 8317, &home).unwrap();
+            enable(
+                &aux,
+                agent,
+                &format!("kw-ag-{agent}-abcd"),
+                8317,
+                &home,
+                &no_vars(),
+            )
+            .unwrap();
             assert!(path.exists(), "{agent}: the config is created");
             assert!(
                 std::fs::read_to_string(&path).unwrap().len() > 2,
@@ -1854,7 +2065,7 @@ base_url = "https://relay.example.com/v1"
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         // pi's files may not exist yet (agent dir is created on takeover)
-        enable(&aux, "pi", "kw-ag-pi-abcd", 8317, &home).unwrap();
+        enable(&aux, "pi", "kw-ag-pi-abcd", 8317, &home, &no_vars()).unwrap();
         let agent = home.join(".pi").join("agent");
         let models: Value =
             serde_json::from_str(&std::fs::read_to_string(agent.join("models.json")).unwrap())
@@ -1890,7 +2101,7 @@ base_url = "https://relay.example.com/v1"
         let original = "agent:\n  max_turns: 50\ncustom_providers:\n  - name: openrouter\n    base_url: https://openrouter.ai/api/v1\n";
         std::fs::write(dir.join("config.yaml"), original).unwrap();
 
-        enable(&aux, "hermes", "kw-ag-hermes-abcd", 8317, &home).unwrap();
+        enable(&aux, "hermes", "kw-ag-hermes-abcd", 8317, &home, &no_vars()).unwrap();
         let out = std::fs::read_to_string(dir.join("config.yaml")).unwrap();
         let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(v["model"]["provider"], "kiwano-gateway");
@@ -1927,6 +2138,7 @@ base_url = "https://relay.example.com/v1"
             "kw-ag-claude-desktop-abcd",
             8317,
             &home,
+            &no_vars(),
         )
         .unwrap();
 

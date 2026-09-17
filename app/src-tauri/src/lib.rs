@@ -7,7 +7,7 @@
 
 mod update;
 
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use kiwanod::store::{RequestLogFilter, Store};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -32,6 +32,23 @@ struct AppState {
     /// Update found by the silent startup check, so the UI can show it without
     /// the user running a check by hand (see `get_pending_update`).
     pending_update: Mutex<Option<update::UpdateInfoVm>>,
+    /// The variables that move where an agent keeps its files, as the user's own
+    /// login shell has them — asked for on first use rather than at startup, so
+    /// a slow interactive rc file is paid for by the first screen that needs it
+    /// rather than by the window opening.
+    ///
+    /// It has to come from the shell: the app's environment is launchd's, and a
+    /// `CLAUDE_CONFIG_DIR` exported in `.zshrc` is not in it. See
+    /// `detect::login_shell_vars`.
+    shell_vars: OnceLock<detect::ShellVars>,
+}
+
+impl AppState {
+    /// The shell's answer, resolved once per run.
+    fn shell_vars(&self) -> &detect::ShellVars {
+        self.shell_vars
+            .get_or_init(|| detect::login_shell_vars(kiwano_core::takeover::CONFIG_DIR_VARS))
+    }
 }
 
 fn env_port(name: &str, default: u16) -> u16 {
@@ -370,7 +387,7 @@ fn get_gateway_status(state: State<AppState>) -> vm::GatewayStatusVm {
 
 #[tauri::command]
 fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, String> {
-    vm::build_provider_vms(&state.store, &state.aux, &home_dir())
+    vm::build_provider_vms(&state.store, &state.aux, &home_dir(), state.shell_vars())
 }
 
 #[tauri::command]
@@ -396,7 +413,14 @@ fn update_provider(
     id: String,
     input: vm::NewProviderInput,
 ) -> Result<vm::ProviderVm, String> {
-    let vm = vm::update_provider(&state.store, &state.aux, &home_dir(), &id, &input)?;
+    let vm = vm::update_provider(
+        &state.store,
+        &state.aux,
+        &home_dir(),
+        &id,
+        &input,
+        state.shell_vars(),
+    )?;
     after_mutation(&state);
     Ok(vm)
 }
@@ -523,7 +547,7 @@ fn get_dashboard(
 
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> Result<vm::SettingsVm, String> {
-    vm::build_settings(&state.store, &state.aux)
+    vm::build_settings(&state.store, &state.aux, state.shell_vars())
 }
 
 #[tauri::command]
@@ -532,7 +556,7 @@ fn update_settings(
     state: State<AppState>,
     patch: serde_json::Value,
 ) -> Result<vm::SettingsVm, String> {
-    let vm = vm::update_settings(&state.store, &state.aux, &patch)?;
+    let vm = vm::update_settings(&state.store, &state.aux, &patch, state.shell_vars())?;
     // apply autostart changes to the OS login items immediately
     if let Some(v) = patch.get("autostart").and_then(|v| v.as_bool()) {
         sync_autostart(&app, v);
@@ -722,6 +746,7 @@ fn set_agent_takeover(state: State<AppState>, agent: String, enabled: bool) -> R
         enabled,
         data_port,
         &home_dir(),
+        state.shell_vars(),
     )?;
     // enabling may import a provider and bind it → the route table changed
     after_mutation(&state);
@@ -1132,6 +1157,7 @@ pub fn run() {
                 admin,
                 data_port,
                 pending_update: Mutex::new(None),
+                shell_vars: OnceLock::new(),
             });
             spawn_watchdog(app.handle().clone());
             // Hub catalog: one-shot conditional sync (skips the download when

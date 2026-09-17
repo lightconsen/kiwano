@@ -163,7 +163,7 @@ fn providers_list(ctx: &mut Ctx, agent: Option<&str>) -> Result<(), CliError> {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
         // `--home` decides which agent configs count as routed here, the same
         // way it decides it for `settings get`.
-        vm::build_provider_vms(store, aux, &ctx.home)?
+        vm::build_provider_vms(store, aux, &ctx.home, ctx.config_vars())?
     };
     if let Some(agent) = agent {
         vms.retain(|p| p.agents.iter().any(|a| a == agent));
@@ -246,7 +246,14 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     };
     let updated = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::update_provider(store, aux, &ctx.home, &args.provider_id, &input)?
+        vm::update_provider(
+            store,
+            aux,
+            &ctx.home,
+            &args.provider_id,
+            &input,
+            ctx.config_vars(),
+        )?
     };
     let text = format!("updated {} ({})", updated.id, updated.name);
     ctx.out.emit(&updated, || text);
@@ -695,7 +702,7 @@ struct AgentRow {
 fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
     let rows = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        let settings = vm::build_settings_with_home(store, aux, &ctx.home)?;
+        let settings = vm::build_settings_with_home(store, aux, &ctx.home, ctx.config_vars())?;
         let mut rows: Vec<AgentRow> = settings
             .takeovers
             .into_iter()
@@ -784,7 +791,7 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
     let (home, port) = (ctx.home.clone(), ctx.data_port);
     {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::set_agent_takeover(store, aux, agent, enabled, port, &home)?;
+        vm::set_agent_takeover(store, aux, agent, enabled, port, &home, ctx.config_vars())?;
     }
 
     if enabled {
@@ -1017,7 +1024,7 @@ pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
                 let (store, aux) = (ctx.store()?, ctx.aux()?);
                 // The home-taking form: `build_settings` would resolve $HOME
                 // itself, ignoring --home and reporting on the wrong tree.
-                vm::build_settings_with_home(store, aux, &ctx.home)?
+                vm::build_settings_with_home(store, aux, &ctx.home, ctx.config_vars())?
             };
             let text = render_settings(&settings);
             ctx.out.emit(&settings, || text);
@@ -1027,7 +1034,7 @@ pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             let patch = settings_patch(keys, patch.as_deref())?;
             let settings = {
                 let (store, aux) = (ctx.store()?, ctx.aux()?);
-                vm::update_settings(store, aux, &patch)?
+                vm::update_settings(store, aux, &patch, ctx.config_vars())?
             };
             // Only some settings change routing; reloading for the rest would
             // be noise on every `settings set`.

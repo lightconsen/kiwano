@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use kiwano_core::auxiliary::Aux;
+use kiwano_core::detect::{self, ShellVars};
 use kiwano_core::sidecar::{self, AdminEndpoint};
 use kiwanod::store::Store;
 
@@ -84,9 +85,27 @@ pub struct Ctx<'a> {
     reload: bool,
     store: OnceCell<Store>,
     aux: OnceCell<Aux>,
+    /// The variables that move where an agent keeps its files, as the user's own
+    /// login shell has them. Asked for at most once per invocation, and only by
+    /// the commands that resolve an agent's config path — a `status` against a
+    /// running gateway has no reason to spawn a shell.
+    config_vars: OnceCell<ShellVars>,
 }
 
 impl Ctx<'_> {
+    /// The variables that move where an agent keeps its files, as the user's
+    /// own login shell has them.
+    ///
+    /// A terminal process already has the user's environment, so this looks
+    /// redundant — and it is, for the values that are exported in the rc file
+    /// the shell running this command read. It is here for the other case:
+    /// `kiwano` invoked from something that did not, and to answer exactly what
+    /// the app answers, so a config path cannot differ between the two.
+    pub fn config_vars(&self) -> &ShellVars {
+        self.config_vars
+            .get_or_init(|| detect::login_shell_vars(kiwano_core::takeover::CONFIG_DIR_VARS))
+    }
+
     pub fn store(&self) -> Result<&Store, CliError> {
         if self.store.get().is_none() {
             if let Some(dir) = self.db.parent() {
@@ -191,6 +210,7 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         reload: !cli.no_reload,
         store: OnceCell::new(),
         aux: OnceCell::new(),
+        config_vars: OnceCell::new(),
     };
 
     match dispatch(&cli.command, &mut ctx) {

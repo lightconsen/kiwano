@@ -6,6 +6,7 @@
 //! the gateway store does not expose (average latency, per-provider daily
 //! sparkline) plus a GUI-scoped `app_settings` table.
 
+use crate::detect::ShellVars;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1351,7 +1352,7 @@ fn normalize_spark(values: &[i64]) -> Option<Vec<f64>> {
 /// *more* agents than this on purpose — it also accepts a restorable backup,
 /// which is a claim about being able to undo a takeover, not about traffic
 /// arriving here.
-fn live_bound_agents(store: &Store, home: &Path) -> Result<Vec<String>, String> {
+fn live_bound_agents(store: &Store, home: &Path, vars: &ShellVars) -> Result<Vec<String>, String> {
     let custom: Vec<String> = store
         .list_custom_agents()
         .map_err(e2s)?
@@ -1366,7 +1367,8 @@ fn live_bound_agents(store: &Store, home: &Path) -> Result<Vec<String>, String> 
         // report its providers as unbound — the falsehood this whole helper was
         // added to remove, wearing a new hat.
         .filter(|agent| {
-            custom.contains(agent) || crate::takeover::live_placeholder_key(agent, home).is_some()
+            custom.contains(agent)
+                || crate::takeover::live_placeholder_key(agent, home, vars).is_some()
         })
         .collect())
 }
@@ -1378,6 +1380,7 @@ pub fn build_provider_vms(
     store: &Store,
     aux: &Aux,
     home: &Path,
+    vars: &ShellVars,
 ) -> Result<Vec<ProviderVm>, String> {
     let providers = store.list_providers().map_err(e2s)?;
     if providers.is_empty() {
@@ -1395,7 +1398,7 @@ pub fn build_provider_vms(
     // Only agents that route through this gateway have a say in the badges:
     // everything below — the agent column, "In use", the agent-count note —
     // is a claim about live traffic, and a dormant route carries none.
-    let live: Vec<String> = live_bound_agents(store, home)?;
+    let live: Vec<String> = live_bound_agents(store, home, vars)?;
 
     // agent → primary provider id (single strategy)
     let mut primary: HashMap<String, String> = HashMap::new();
@@ -2758,6 +2761,7 @@ pub fn update_provider(
     home: &Path,
     id: &str,
     input: &NewProviderInput,
+    vars: &ShellVars,
 ) -> Result<ProviderVm, String> {
     let mut p = store
         .get_provider(id)
@@ -2875,7 +2879,7 @@ pub fn update_provider(
         }
     }
 
-    let vms = build_provider_vms(store, aux, home)?;
+    let vms = build_provider_vms(store, aux, home, vars)?;
     vms.into_iter()
         .find(|v| v.id == id)
         .ok_or_else(|| "provider vanished after update".to_string())
@@ -2955,8 +2959,8 @@ pub fn ui_settings(aux: &Aux) -> SettingsVm {
     s
 }
 
-pub fn build_settings(store: &Store, aux: &Aux) -> Result<SettingsVm, String> {
-    build_settings_with_home(store, aux, &kiwano_adapters::config::get_home_dir())
+pub fn build_settings(store: &Store, aux: &Aux, vars: &ShellVars) -> Result<SettingsVm, String> {
+    build_settings_with_home(store, aux, &kiwano_adapters::config::get_home_dir(), vars)
 }
 
 /// [`build_settings`] against an explicit home directory.
@@ -2969,6 +2973,7 @@ pub fn build_settings_with_home(
     store: &Store,
     aux: &Aux,
     home: &std::path::Path,
+    vars: &ShellVars,
 ) -> Result<SettingsVm, String> {
     let mut s: SettingsVm = ui_settings(aux);
     // A takeover *is* its rewrite: the agent's own config carries our
@@ -2982,7 +2987,7 @@ pub fn build_settings_with_home(
     s.takeovers = AGENTS
         .iter()
         .map(|(agent, label)| {
-            let key = crate::takeover::live_placeholder_key(agent, home);
+            let key = crate::takeover::live_placeholder_key(agent, home, vars);
             TakeoverVm {
                 agent: agent.to_string(),
                 label: label.to_string(),
@@ -2991,7 +2996,7 @@ pub fn build_settings_with_home(
                 enabled: key.is_some(),
                 placeholder_key: key,
                 additive: ADDITIVE_AGENTS.contains(agent),
-                config_paths: crate::takeover::takeover_paths(agent, home)
+                config_paths: crate::takeover::takeover_paths(agent, home, vars)
                     .unwrap_or_default()
                     .iter()
                     .map(|p| display_path(p, home))
@@ -3022,6 +3027,7 @@ pub fn update_settings(
     store: &Store,
     aux: &Aux,
     patch: &serde_json::Value,
+    vars: &ShellVars,
 ) -> Result<SettingsVm, String> {
     let mut merged = aux
         .load_settings_json()
@@ -3073,7 +3079,7 @@ pub fn update_settings(
         }
         store.save_stream_timeouts(&cfg).map_err(e2s)?;
     }
-    build_settings(store, aux)
+    build_settings(store, aux, vars)
 }
 
 // ── Request logs (request_logs + request_bodies, migration V5) ──
@@ -3163,6 +3169,7 @@ pub fn set_agent_takeover(
     enabled: bool,
     data_port: u16,
     home: &std::path::Path,
+    vars: &ShellVars,
 ) -> Result<(), String> {
     if !AGENTS.iter().any(|(a, _)| *a == agent) {
         return Err(format!("unknown agent: {agent}"));
@@ -3206,7 +3213,7 @@ pub fn set_agent_takeover(
         store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
         // Rewrite the Agent config (backup → base_url → placeholder key); on
         // failure roll back the key registration to stay consistent
-        if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, home) {
+        if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, home, vars) {
             let _ = store.delete_placeholder_key(&key);
             return Err(e);
         }
@@ -3215,7 +3222,7 @@ pub fn set_agent_takeover(
         // the rebuild tier: losing the backup must not strand the agent at
         // loopback if there is a provider to point it back at.
         let fallback = rebuild_route(store, agent)?;
-        let report = crate::takeover::disable(aux, agent, home, fallback.as_ref())?;
+        let report = crate::takeover::disable(aux, agent, home, fallback.as_ref(), vars)?;
         // A restore that could not hand the original config back changed the
         // agent's config in a way the user did not ask for: it is not an error
         // (the agent is whole and no longer points at loopback), but it must be
@@ -4112,6 +4119,12 @@ mod tests {
     use super::*;
     use kiwanod::store::UsageRecord;
 
+    /// No shell environment: these tests root every agent file at the temp home
+    /// they injected, and the variables have their own tests in `takeover`.
+    fn no_vars() -> ShellVars {
+        ShellVars::new()
+    }
+
     fn store() -> Store {
         Store::open_in_memory().expect("in-memory store")
     }
@@ -4351,7 +4364,7 @@ mod tests {
         .unwrap();
         let aux = Aux::open_in_memory().unwrap();
         let home = live_home(&["claude"]);
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         assert_eq!(vms.len(), 1);
         let vm = &vms[0];
         let json = serde_json::to_value(vm).unwrap();
@@ -4389,7 +4402,7 @@ mod tests {
 
         // claude is routed through the gateway, codex is not.
         let home = live_home(&["claude"]);
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         let vm = &vms[0];
         assert_eq!(vm.agents, ["claude"]);
         assert_eq!(vm.serving_agents, ["claude"]);
@@ -4399,7 +4412,7 @@ mod tests {
         // Nothing taken over at all: the provider reads as unbound rather than
         // as serving an agent that has its own config back.
         let none = live_home(&[]);
-        let vms = build_provider_vms(&s, &aux, none.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, none.path(), &no_vars()).unwrap();
         let vm = &vms[0];
         assert!(vm.agents.is_empty());
         assert!(vm.serving_agents.is_empty());
@@ -4436,7 +4449,7 @@ mod tests {
         .unwrap();
         let aux = Aux::open_in_memory().unwrap();
         let home = live_home(&["claude"]);
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         let alpha = vms.iter().find(|v| v.id == "a1").unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(alpha.is_current);
@@ -4487,7 +4500,7 @@ mod tests {
         s.upsert_binding(&bind("hermes", "d1", 1, None)).unwrap();
         let aux = Aux::open_in_memory().unwrap();
         let home = live_home(&["codex", "opencode", "hermes"]);
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         let beta = vms.iter().find(|v| v.id == "b1").unwrap();
         assert!(beta.is_current); // roundrobin serves every candidate
         assert_eq!(beta.serving_agents, ["codex"]);
@@ -4763,7 +4776,15 @@ mod tests {
 
         // …and the edit the dialog sends back is the same stripped form, which
         // is what used to strip the scheme off an already-correct row.
-        let vm = update_provider(&s, &aux, std::path::Path::new("/tmp"), &vm.id, &bare).unwrap();
+        let vm = update_provider(
+            &s,
+            &aux,
+            std::path::Path::new("/tmp"),
+            &vm.id,
+            &bare,
+            &no_vars(),
+        )
+        .unwrap();
         assert_eq!(stored_base(&s, &vm.id), "https://api.deepseek.com");
 
         // A local server is plain HTTP: guessing https there fails at the
@@ -4950,14 +4971,30 @@ mod tests {
         // An edit that says nothing about prices keeps them.
         let mut edit = catalog_input("Manual", "https://api.manual.example");
         edit.prices = None;
-        let vm = update_provider(&s, &aux, std::path::Path::new("/tmp"), &vm.id, &edit).unwrap();
+        let vm = update_provider(
+            &s,
+            &aux,
+            std::path::Path::new("/tmp"),
+            &vm.id,
+            &edit,
+            &no_vars(),
+        )
+        .unwrap();
         assert!(vm.prices.is_some(), "absent means keep");
 
         // An edit with an empty bundle clears them: that is the form's state when
         // the provider leaves pay-as-you-go.
         let mut cleared = catalog_input("Manual", "https://api.manual.example");
         cleared.prices = Some(prices("CNY", vec![]));
-        let vm = update_provider(&s, &aux, std::path::Path::new("/tmp"), &vm.id, &cleared).unwrap();
+        let vm = update_provider(
+            &s,
+            &aux,
+            std::path::Path::new("/tmp"),
+            &vm.id,
+            &cleared,
+            &no_vars(),
+        )
+        .unwrap();
         assert!(vm.prices.is_none());
         assert!(s.load_declared_prices().unwrap().is_empty());
     }
@@ -5170,7 +5207,7 @@ mod tests {
         // emptying the endpoint list rewrites it.
         let mut edit = catalog_input("DeepSeek", "https://api.deepseek.com");
         edit.model_default = String::new();
-        update_provider(&s, &aux, live_home(&[]).path(), &vm.id, &edit).unwrap();
+        update_provider(&s, &aux, live_home(&[]).path(), &vm.id, &edit, &no_vars()).unwrap();
         assert_eq!(s.get_provider(&vm.id).unwrap().unwrap().model_default, None);
     }
 
@@ -5205,7 +5242,7 @@ mod tests {
         let home = live_home(&["claude"]);
         let mut edit = catalog_input("A", "https://a.example.com/v1");
         edit.agents = None;
-        update_provider(&s, &aux, home.path(), &a.id, &edit).unwrap();
+        update_provider(&s, &aux, home.path(), &a.id, &edit, &no_vars()).unwrap();
         assert_eq!(
             s.primary_provider_id("claude").unwrap().as_deref(),
             Some(b.id.as_str()),
@@ -5220,7 +5257,7 @@ mod tests {
         // Naming agents still rebinds — that is the one path that may, and the
         // reason the field is an Option rather than a Vec.
         edit.agents = Some(vec!["claude".into()]);
-        update_provider(&s, &aux, home.path(), &a.id, &edit).unwrap();
+        update_provider(&s, &aux, home.path(), &a.id, &edit, &no_vars()).unwrap();
         assert_eq!(
             s.primary_provider_id("claude").unwrap().as_deref(),
             Some(a.id.as_str())
@@ -5501,7 +5538,7 @@ mod tests {
         // The row reads as disabled rather than as healthy, and its agents fall
         // through to whoever is next (nobody, here — the route is empty).
         let home = live_home(&["claude"]);
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         assert_eq!(vms.len(), 1);
         assert!(!vms[0].enabled);
         assert!(
@@ -5512,7 +5549,7 @@ mod tests {
 
         // Back on, and the same route applies again.
         set_provider_enabled(&s, "a1", true).unwrap();
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         assert!(vms[0].enabled);
         assert_eq!(vms[0].serving_agents, ["claude"]);
 
@@ -5659,7 +5696,7 @@ mod tests {
         assert_eq!(vm.endpoint_note, "OpenAI-compatible · +Anthropic");
         // endpoints survive a fresh VM build from the store
         let aux = Aux::open_in_memory().unwrap();
-        let vms = build_provider_vms(&s, &aux, live_home(&[]).path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, live_home(&[]).path(), &no_vars()).unwrap();
         let loaded = vms.iter().find(|v| v.id == vm.id).unwrap();
         assert_eq!(loaded.endpoints.len(), 1);
         assert_eq!(loaded.endpoint_note, "OpenAI-compatible · +Anthropic");
@@ -5717,7 +5754,15 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        let vm = update_provider(&s, &aux, live_home(&["codex"]).path(), "p1", &input).unwrap();
+        let vm = update_provider(
+            &s,
+            &aux,
+            live_home(&["codex"]).path(),
+            "p1",
+            &input,
+            &no_vars(),
+        )
+        .unwrap();
         assert_eq!(vm.name, "P One Renamed");
         assert_eq!(vm.billing, "unl");
 
@@ -5928,7 +5973,13 @@ mod tests {
     fn footer_today_counts_from_local_midnight() {
         let s = store();
         let aux = Aux::open_in_memory().unwrap();
-        update_settings(&s, &aux, &serde_json::json!({ "tz_offset_minutes": 480 })).unwrap();
+        update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "tz_offset_minutes": 480 }),
+            &no_vars(),
+        )
+        .unwrap();
         // One row a second after *local* midnight at UTC+8 — 16:00:01Z the day
         // before. It is the first moment of the user's day and the stretch a
         // UTC-midnight boundary silently dropped.
@@ -5975,7 +6026,13 @@ mod tests {
             in_utc
         );
 
-        update_settings(&s, &aux, &serde_json::json!({ "tz_offset_minutes": 480 })).unwrap();
+        update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "tz_offset_minutes": 480 }),
+            &no_vars(),
+        )
+        .unwrap();
         let shifted = build_dashboard(&s, &aux, "today", None, None).unwrap();
         assert_eq!(shifted.requests, in_local, "the two clocks disagree");
         assert_eq!(shifted.trend.len(), 24);
@@ -6084,7 +6141,13 @@ mod tests {
             "the app's defaults and the gateway's must be the same numbers"
         );
 
-        let vm = update_settings(&s, &aux, &serde_json::json!({ "stream_idle_secs": 45 })).unwrap();
+        let vm = update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "stream_idle_secs": 45 }),
+            &no_vars(),
+        )
+        .unwrap();
         assert_eq!(vm.stream_idle_secs, 45);
 
         let cfg = s.load_stream_timeouts().unwrap();
@@ -6096,7 +6159,7 @@ mod tests {
         );
 
         // And the screen reads back what it wrote.
-        let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let reread = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert_eq!(reread.stream_idle_secs, 45);
     }
 
@@ -6111,7 +6174,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
 
-        let vm = build_settings_with_home(&s, &aux, home).unwrap();
+        let vm = build_settings_with_home(&s, &aux, home, &no_vars()).unwrap();
         let paths = |agent: &str| {
             vm.takeovers
                 .iter()
@@ -6257,7 +6320,7 @@ mod tests {
 
         // A screen that was never asked about limits still builds.
         assert_eq!(
-            build_settings_with_home(&s, &aux, tmp.path())
+            build_settings_with_home(&s, &aux, tmp.path(), &no_vars())
                 .unwrap()
                 .language,
             "system"
@@ -6272,7 +6335,7 @@ mod tests {
         // takeover state comes from the live files, so `$HOME` would otherwise
         // decide what these assertions see.
         let tmp = tempfile::tempdir().unwrap();
-        let v0 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v0 = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert_eq!(v0.language, "system");
         assert!(v0.takeovers.iter().all(|t| !t.enabled));
 
@@ -6280,21 +6343,21 @@ mod tests {
             serde_json::json!({ "language": "en", "telemetry": true, "takeovers": "ignored" });
         // The patch still carries `telemetry`, a key older blobs hold and
         // nothing reads any more: it must be ignored, not choke the merge.
-        let v1 = update_settings(&s, &aux, &patch).unwrap();
+        let v1 = update_settings(&s, &aux, &patch, &no_vars()).unwrap();
         assert_eq!(v1.language, "en");
         // The stored blob now holds a key the struct no longer declares. It has
         // to parse anyway: a failed parse falls back to every default at once,
         // which would silently reset the reader's whole settings page.
-        let reread = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let reread = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert_eq!(reread.language, "en", "an old key is ignored, not fatal");
         // takeovers untouched by patch (read against the temp home, like every
         // other assertion here — `update_settings` builds its answer against
         // the process home, which this test must not depend on)
-        let after_patch = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let after_patch = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert!(after_patch.takeovers.iter().all(|t| !t.enabled));
 
         // no ~/.claude/settings.json → rejected and no key left behind
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap_err();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap_err();
         assert!(s
             .list_placeholder_keys()
             .unwrap()
@@ -6304,8 +6367,8 @@ mod tests {
         let settings = tmp.path().join(".claude").join("settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
-        let v2 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        let v2 = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         let claude = v2.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(claude.enabled);
         assert!(claude
@@ -6317,9 +6380,9 @@ mod tests {
         let env: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
-        let v3 = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v3 = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert!(
             !v3.takeovers
                 .iter()
@@ -6337,7 +6400,7 @@ mod tests {
         let settings = tmp.path().join(".claude").join("settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
 
         // The registration disappears (a rolled-back key row) while the config
         // stays rewritten: the reader must still report the takeover, because
@@ -6347,7 +6410,7 @@ mod tests {
                 s.delete_placeholder_key(&k.key).unwrap();
             }
         }
-        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(
             claude.enabled,
@@ -6366,7 +6429,7 @@ mod tests {
         aux.delete_takeover_backup("claude").unwrap();
         s.upsert_placeholder_key("kw-ag-claude-orphan", "claude")
             .unwrap();
-        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(
             !claude.enabled,
@@ -6395,7 +6458,7 @@ mod tests {
         add_agent_binding(&s, &a.id, "p1").unwrap();
         add_agent_binding(&s, "claude", "p1").unwrap(); // the control: dormant here
         let home = live_home(&[]); // nothing taken over on this machine
-        let vms = build_provider_vms(&s, &aux, home.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, home.path(), &no_vars()).unwrap();
         let vm = &vms[0];
         assert_eq!(vm.agents, [a.id.as_str()], "the custom agent is bound");
         assert_eq!(
@@ -6407,7 +6470,7 @@ mod tests {
 
         // The UI gets it, with the key it is configured by, and the takeover
         // list is unmoved: there is no config here to take over.
-        let settings = build_settings_with_home(&s, &aux, home.path()).unwrap();
+        let settings = build_settings_with_home(&s, &aux, home.path(), &no_vars()).unwrap();
         assert_eq!(settings.custom_agents.len(), 1);
         assert_eq!(settings.custom_agents[0].label, "Long Tasks");
         assert_eq!(
@@ -6420,7 +6483,7 @@ mod tests {
         );
         assert!(settings.takeovers.iter().all(|t| !t.enabled));
         assert!(
-            set_agent_takeover(&s, &aux, &a.id, true, 8317, home.path()).is_err(),
+            set_agent_takeover(&s, &aux, &a.id, true, 8317, home.path(), &no_vars()).is_err(),
             "takeover is for agents with a config"
         );
     }
@@ -6617,9 +6680,9 @@ mod tests {
             .unwrap();
         }
 
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
         assert_eq!(s.bindings_for_agent("claude").unwrap().len(), 2);
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
 
         assert!(
             s.bindings_for_agent("claude").unwrap().is_empty(),
@@ -6630,7 +6693,7 @@ mod tests {
             "…including the strategy it routed by"
         );
         // The rows survive, and read as unbound rather than as served.
-        let vms = build_provider_vms(&s, &aux, tmp.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, tmp.path(), &no_vars()).unwrap();
         for id in ["p1", "p2"] {
             let vm = vms
                 .iter()
@@ -6673,8 +6736,8 @@ mod tests {
             enabled: true,
         })
         .unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
-        assert!(crate::takeover::live_placeholder_key("claude", tmp.path()).is_some());
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        assert!(crate::takeover::live_placeholder_key("claude", tmp.path(), &no_vars()).is_some());
 
         // Another tool puts the agent's own config back. The backup row and the
         // key row stay — Kiwano has no way to know it was not us, and nothing
@@ -6688,20 +6751,20 @@ mod tests {
             .iter()
             .any(|k| k.agent == "claude"));
 
-        let v = build_settings_with_home(&s, &aux, tmp.path()).unwrap();
+        let v = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(!claude.enabled, "the file no longer routes through us");
         assert!(claude.placeholder_key.is_none());
         // …and the provider list agrees: the binding is still in the store, but
         // nothing of ours is serving it.
-        let vms = build_provider_vms(&s, &aux, tmp.path()).unwrap();
+        let vms = build_provider_vms(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert!(vms.iter().all(|p| p.agents.is_empty() && !p.is_current));
 
         // Taking it over again captures what is there *now*: the stale backup
         // would otherwise be what restore writes back, over a config this
         // takeover is not replacing.
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), reverted);
     }
 
@@ -6737,11 +6800,11 @@ mod tests {
         })
         .unwrap();
 
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
         // Lose the backup: the escape hatch is gone, so restore has to fall
         // back to the provider instead of reporting a success it did not have.
         aux.delete_takeover_backup("claude").unwrap();
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path()).unwrap();
+        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
 
         let env: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
@@ -7262,7 +7325,7 @@ mod tests {
         // the two badge claims split: the backup is first in line, not in use,
         // so it reads as fallback and neither provider reads as current.
         let badges = |s: &Store| -> (bool, bool, Vec<String>) {
-            let vms = build_provider_vms(s, &aux, home.path()).unwrap();
+            let vms = build_provider_vms(s, &aux, home.path(), &no_vars()).unwrap();
             let p = |id: &str| vms.iter().find(|x| x.id == id).unwrap();
             (
                 p("a1").is_current,
@@ -7434,7 +7497,7 @@ mod tests {
             s.record_usage(&row).unwrap();
         }
 
-        let vms = build_provider_vms(&s, &aux, std::path::Path::new("/tmp")).unwrap();
+        let vms = build_provider_vms(&s, &aux, std::path::Path::new("/tmp"), &no_vars()).unwrap();
         let health = |id: &str| &vms.iter().find(|v| v.id == id).unwrap().health;
 
         let busy = health("busy");
@@ -7542,7 +7605,7 @@ mod tests {
 
         // toggle off → silent
         let patch = serde_json::json!({ "cost_alert": false });
-        update_settings(&s, &aux, &patch).unwrap();
+        update_settings(&s, &aux, &patch, &no_vars()).unwrap();
         assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
     }
 

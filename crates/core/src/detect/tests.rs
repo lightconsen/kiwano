@@ -234,6 +234,40 @@ fn verifying_a_declared_directory_checks_the_tool_itself() {
     assert!(err.contains("no command-line tool"), "{err}");
 }
 
+// ── what the user's shell says about its own environment ──
+
+/// `env` output, cut down to the names asked for.
+#[cfg(unix)]
+#[test]
+fn a_variable_is_read_out_of_the_shells_environment() {
+    let out = "PATH=/usr/bin\nQWEN_HOME=/opt/qwen\nSOMETHING_ELSE=x\n";
+
+    let vars = parse_vars(out, &["QWEN_HOME", "KIMI_SHARE_DIR"]);
+    assert_eq!(vars.get("QWEN_HOME").map(String::as_str), Some("/opt/qwen"));
+    assert!(
+        !vars.contains_key("SOMETHING_ELSE"),
+        "a name nobody asked for is not kept"
+    );
+    assert!(
+        !vars.contains_key("KIMI_SHARE_DIR"),
+        "nor is a variable the shell does not have"
+    );
+}
+
+/// A value may contain `=`, and a name that appears twice keeps its first
+/// answer — the rule the tool probe uses for the same reason: the first is the
+/// one the shell's own environment resolved to.
+#[cfg(unix)]
+#[test]
+fn a_variable_splits_at_its_first_equals_sign() {
+    let vars = parse_vars(
+        "A=1=2\nQWEN_HOME=first\nQWEN_HOME=second\n",
+        &["A", "QWEN_HOME"],
+    );
+    assert_eq!(vars.get("A").map(String::as_str), Some("1=2"));
+    assert_eq!(vars.get("QWEN_HOME").map(String::as_str), Some("first"));
+}
+
 // ── executable candidates ──
 
 #[cfg(not(windows))]

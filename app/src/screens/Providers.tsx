@@ -2016,9 +2016,27 @@ function BindingRow({
           cannot end up disagreeing about what it found, and parking the provider
           (which is a global act, and would drop it from every agent's route) is
           deliberately not offered from a view scoped to one agent. Actions reveal
-          on hover; the Pin slot renders on every row (invisible for the primary)
-          so resting rows keep identical column alignment. */}
+          on hover.
+
+          The Pin slot renders on every row — invisible on the primary, which is
+          already primary — so the rows of one route keep identical column
+          alignment. It leads the group for that reason: the group is packed to
+          the right, so an empty slot at its start costs nothing, while the same
+          slot further in sits *between* two visible buttons and reads as a gap
+          one button wide. */}
       <div className="flex flex-1 items-center justify-end gap-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        {route.strategy !== "roundrobin" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`h-7 border border-line px-1.5 text-mut${idx === 0 ? " invisible" : ""}`}
+            aria-label={t("providers.makePrimary")}
+            title={t("providers.makePrimaryTitle")}
+            onClick={makePrimary}
+          >
+            <Pin className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <TestLatencyButton provider={p} onTested={onChanged} />
         {route.bindings.length > 1 && (
           <span className="flex flex-col">
@@ -2039,18 +2057,6 @@ function BindingRow({
               <ArrowDown className="h-3 w-3" />
             </button>
           </span>
-        )}
-        {route.strategy !== "roundrobin" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`h-7 border border-line px-1.5 text-mut${idx === 0 ? " invisible" : ""}`}
-            aria-label={t("providers.makePrimary")}
-            title={t("providers.makePrimaryTitle")}
-            onClick={makePrimary}
-          >
-            <Pin className="h-3.5 w-3.5" />
-          </Button>
         )}
         <Button
           variant="ghost"

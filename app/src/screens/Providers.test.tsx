@@ -198,6 +198,30 @@ describe("an agent tab", () => {
   });
 });
 
+describe("an agent tab's row actions", () => {
+  it("leaves no hole between the two buttons a primary row shows", async () => {
+    // The row's Pin is hidden on the primary (it is already primary) but keeps
+    // its slot so the rows of one route stay aligned. Where that slot sits is
+    // the whole question: between two visible buttons it is a gap a button
+    // wide, which is what this row showed.
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    const remove = await screen.findByLabelText(en.providers.removeFromRouteAria);
+    expect(remove.previousElementSibling?.getAttribute("aria-label")).toBe(
+      en.providers.testLatency,
+    );
+    // And the slot is still reserved, at the front: the pin renders on a
+    // candidate that is not primary, which is what keeps the columns aligned.
+    const pin = screen.getByLabelText(en.providers.makePrimary);
+    expect(pin.className).toContain("invisible");
+    expect(pin.nextElementSibling?.getAttribute("aria-label")).toBe(en.providers.testLatency);
+  });
+});
+
 describe("a user-defined agent", () => {
   const longTasks: CustomAgent = {
     id: "long-tasks-3f9a",

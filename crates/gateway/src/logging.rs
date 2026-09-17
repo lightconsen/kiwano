@@ -17,6 +17,38 @@ use tracing_subscriber::prelude::*;
 /// needing anyone to think about it.
 const KEEP_DAYS: usize = 7;
 
+/// Warnings to stderr, for a process with no log file of its own: the CLI.
+///
+/// `warn` by default, so an ordinary run stays quiet, and `RUST_LOG` raises it
+/// when someone is debugging — the same variable the gateway honours. What this
+/// is for is the adapter crate's warnings, which fire while a command is
+/// *changing* something (a config normalized, a field replaced) and which the
+/// CLI would otherwise discard: a mutation the user is told nothing about is the
+/// one kind of quiet output that is not acceptable.
+///
+/// Nothing is installed when the run is quiet — a `log` record with no logger is
+/// dropped, which is exactly what `--quiet` asks for.
+pub fn init_stderr_warnings(quiet: bool) {
+    if quiet {
+        return;
+    }
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    // `try_init` rather than `init`: this is the CLI's process, where a second
+    // call (a test driving the binary, an embedded invocation) should not panic
+    // over a subscriber that is already doing the job.
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                // A terminal line does not need the date, and the module path is
+                // what says where it came from.
+                .without_time(),
+        )
+        .try_init();
+}
+
 /// A `logs/` directory beside the database, so a scratch database takes its
 /// logs with it and nothing has to be found twice.
 pub fn log_dir(db_path: &Path) -> PathBuf {

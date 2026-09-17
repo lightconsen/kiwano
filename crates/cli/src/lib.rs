@@ -163,6 +163,17 @@ impl Ctx<'_> {
 }
 
 /// Parse `argv` (without the program name) and run it, returning the exit code.
+/// Route the adapter crate's warnings to stderr, unless the run is quiet.
+///
+/// Called by the binary's `main` before [`run_with`], which is why it is a
+/// separate function: `run_with` takes its writers as arguments and installs no
+/// process-global state, so that the tests can drive the whole command tree
+/// in-process. A logger is global by nature — capturing `log` records means
+/// being the process's logger — so it belongs at the edge, not in the library.
+pub fn install_warnings(enable: bool) {
+    kiwanod::logging::init_stderr_warnings(!enable);
+}
+
 pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     // argv[0] is what clap prints in usage lines, so this has to be the real
     // binary name rather than the crate's.

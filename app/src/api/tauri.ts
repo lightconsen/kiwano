@@ -2,7 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -83,8 +83,11 @@ export const tauriApi: KiwanoApi = {
   updateCustomAgent: (id: string, label: string, note?: string | null) =>
     invoke<CustomAgent>("update_custom_agent", { id, label, note: note ?? null }),
 
+  verifyAgentDir: (agent: AgentId, dir: string) =>
+    invoke<AgentDirHit>("verify_agent_dir", { agent, dir }),
+
   setAgentDir: (agent: AgentId, dir: string) =>
-    invoke<string>("set_agent_dir", { agent, dir }),
+    invoke<AgentDirHit>("set_agent_dir", { agent, dir }),
 
   agentSearchDirs: (agent: AgentId) => invoke<string[]>("agent_search_dirs", { agent }),
 

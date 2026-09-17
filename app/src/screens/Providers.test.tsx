@@ -43,6 +43,7 @@ const { apiMock } = vi.hoisted(() => ({
     addCustomAgent: vi.fn(),
     removeCustomAgent: vi.fn(),
     agentSearchDirs: vi.fn(),
+    verifyAgentDir: vi.fn(),
     setAgentDir: vi.fn(),
     clearAgentDir: vi.fn(),
     testProviderLatency: vi.fn(),
@@ -51,6 +52,11 @@ const { apiMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/client", () => ({ api: apiMock }));
+
+// Browse is the only path that runs the pick-time check, so the picker has to
+// be driven: the plugin is a no-op under jsdom (no Tauri IPC to call).
+const { openMock } = vi.hoisted(() => ({ openMock: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openMock }));
 
 /** A provider row as the screen receives it. `agents`/`serving_agents`/`is_current`
     are the fields the unbind has to change, so they are the ones parameterized. */
@@ -477,6 +483,50 @@ describe("a built-in the walk could not find", () => {
 
     await waitFor(() => expect(apiMock.clearAgentDir).toHaveBeenCalledWith("gemini"));
     await waitFor(() => expect(onRedetect).toHaveBeenCalledTimes(1));
+  });
+
+  it("checks a picked directory at once, before anything is stored", async () => {
+    const { user } = await openMenu(missing);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+
+    // The picker hands back a directory: the check runs there and then, so a
+    // wrong one is answered while the user is still looking at the field.
+    openMock.mockResolvedValue("/opt/gemini/bin");
+    apiMock.verifyAgentDir.mockResolvedValue({
+      path: "/opt/gemini/bin/gemini",
+      version: "1.2.3",
+    });
+
+    await user.click(await screen.findByRole("button", { name: en.providers.browse }));
+
+    await waitFor(() =>
+      expect(apiMock.verifyAgentDir).toHaveBeenCalledWith("gemini", "/opt/gemini/bin"),
+    );
+    // What it found, named: the file, not just the version.
+    expect(
+      await screen.findByText(en.providers.dirOk.replace("{version}", "1.2.3")),
+    ).toBeInTheDocument();
+    expect(screen.getByText("/opt/gemini/bin/gemini")).toBeInTheDocument();
+    // Nothing was written on the strength of a check: that is still Add.
+    expect(apiMock.setAgentDir).not.toHaveBeenCalled();
+    // And the "looked in N directories, and not found" list is gone: it was the
+    // explanation for asking, and this answers it.
+    expect(screen.queryByText(en.providers.searchedDirs.replace("{count}", "2"))).toBeNull();
+  });
+
+  it("says why a picked directory is no good, and forgets it when edited", async () => {
+    const { user } = await openMenu(missing);
+    await user.click(await screen.findByRole("menuitem", { name: "Gemini CLI" }));
+
+    openMock.mockResolvedValue("/opt/nowhere");
+    apiMock.verifyAgentDir.mockRejectedValue(new Error("no `gemini` in /opt/nowhere"));
+    await user.click(await screen.findByRole("button", { name: en.providers.browse }));
+
+    expect(await screen.findByText("no `gemini` in /opt/nowhere")).toBeInTheDocument();
+
+    // Typing makes the verdict about the path that came before it, so it goes.
+    await user.type(screen.getByRole("textbox", { name: en.providers.installDir }), "/bin");
+    expect(screen.queryByText("no `gemini` in /opt/nowhere")).toBeNull();
   });
 
   it("asks the machine again, and says so when the agent turns up", async () => {

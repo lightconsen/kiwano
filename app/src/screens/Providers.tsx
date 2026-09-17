@@ -49,6 +49,7 @@ import { agentMeta, isBuiltinAgent, rememberCustomAgents } from "../lib/agents";
 import { useT, type KeyPath, type Messages, type Translate } from "../i18n";
 import {
   AGENTS,
+  type AgentDirHit,
   type AgentId,
   PLAN_TIER_LABEL_KEYS,
   type AgentDetect,
@@ -802,8 +803,16 @@ function DeclareAgentDirDialog({
   const t = useT();
   const [dir, setDir] = useState("");
   const [busy, setBusy] = useState(false);
+  // Two different waits, two flags: "check again" re-probes the machine, and
+  // the verdict below is about one directory. Sharing one would put "checking
+  // that directory" on screen for a probe that is not looking at it.
   const [checking, setChecking] = useState(false);
+  const [checkingDir, setCheckingDir] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // What a picked directory turned out to hold. Set when the picker returns,
+  // rather than when the user finally presses Add: the picker is where they are
+  // asked to name a directory, so it is where a wrong one should be answered.
+  const [checked, setChecked] = useState<{ hit?: AgentDirHit; reason?: string } | null>(null);
   // The probe found it after all — the user installed it, fixed a PATH, or
   // pointed Kiwano at it from somewhere else. Then there is nothing to declare:
   // the field and the list go away and the dialog says so, rather than leaving
@@ -817,6 +826,7 @@ function DeclareAgentDirDialog({
     if (!agent) return;
     setDir(agent.dir ?? "");
     setErr(null);
+    setChecked(null);
     setSearched([]);
     if (agent.declared) return;
     let live = true;
@@ -834,6 +844,10 @@ function DeclareAgentDirDialog({
     if (!agent || !dir.trim() || busy) return;
     setBusy(true);
     setErr(null);
+    // The stored check is this attempt's business: if the binary went away
+    // between the pick and this click, a green line would be vouching for a
+    // path the write is about to refuse.
+    setChecked(null);
     try {
       await api.setAgentDir(agent.id, dir.trim());
       onSaved();
@@ -858,10 +872,28 @@ function DeclareAgentDirDialog({
       setBusy(false);
     }
   };
+  /** Check one directory without storing it. The backend runs whatever it finds
+   * there — that is what "does this command work" means — so this is a side
+   * effect, and it is run for a directory the user picked, never per keystroke. */
+  const check = async (candidate: string) => {
+    if (!agent || !candidate.trim()) return;
+    setCheckingDir(true);
+    setChecked(null);
+    try {
+      setChecked({ hit: await api.verifyAgentDir(agent.id, candidate.trim()) });
+    } catch (e) {
+      setChecked({ reason: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setCheckingDir(false);
+    }
+  };
   const browse = async () => {
     try {
       const picked = await open({ directory: true, multiple: false });
-      if (typeof picked === "string") setDir(picked);
+      if (typeof picked === "string") {
+        setDir(picked);
+        void check(picked);
+      }
     } catch {
       // A desktop-only affordance, and absent under `pnpm dev`. Typing the
       // path is the fallback, so a picker that will not open is not an error.
@@ -926,7 +958,12 @@ function DeclareAgentDirDialog({
                 className="h-8 text-[12px]"
                 value={dir}
                 placeholder={t("providers.installDirPlaceholder")}
-                onChange={(e) => setDir(e.target.value)}
+                onChange={(e) => {
+                  setDir(e.target.value);
+                  // The verdict was about the path that was there a keystroke
+                  // ago, and leaving it up would vouch for this one.
+                  setChecked(null);
+                }}
                 onKeyDown={(e) => e.key === "Enter" && void save()}
               />
               <Button
@@ -939,9 +976,36 @@ function DeclareAgentDirDialog({
               </Button>
             </div>
           </div>
-          {searched.length > 0 && (
+          {(checkingDir || checked) && (
+            <div className="min-w-0">
+              {checkingDir ? (
+                <p className="flex items-center gap-1.5 text-[11px] text-mut">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  {t("providers.checkingDir")}
+                </p>
+              ) : checked?.hit ? (
+                <>
+                  <p className="text-[11px]" style={{ color: "var(--kiwi)" }}>
+                    {t("providers.dirOk", { version: checked.hit.version })}
+                  </p>
+                  <div className="mt-1">
+                    <FoundPath path={checked.hit.path} />
+                  </div>
+                </>
+              ) : (
+                <p className="text-[11px]" style={{ color: "var(--red)" }}>
+                  {checked?.reason}
+                </p>
+              )}
+            </div>
+          )}
+          {searched.length > 0 && !checked?.hit && (
             // The list scrolls at a whole number of rows: a half-row at the
             // edge reads as a clipped list rather than a scrollable one.
+            //
+            // It goes once a directory checks out: the question has been
+            // answered, and "looked in N directories, and not found" sitting
+            // under "found a working executable" reads as a contradiction.
             //
             // `min-w-0` all the way down is what makes the truncation below
             // work: the dialog is a grid, and a grid item will not shrink

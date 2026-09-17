@@ -973,7 +973,7 @@ pub fn agent_search_dirs(agent: &str, home: &Path, manual: &[PathBuf]) -> Vec<Pa
 /// and bare numbers all occur — so any name check would reject real tools more
 /// often than it caught impostors. The UI says as much rather than claiming a
 /// verification this cannot make.
-pub fn verify_manual_dir(agent: &str, dir: &Path) -> Result<String, String> {
+pub fn verify_manual_dir(agent: &str, dir: &Path) -> Result<ManualHit, String> {
     let Some((_, cli)) = CLI_AGENTS.iter().find(|(id, _)| *id == agent) else {
         return Err(format!("{agent} has no command-line tool to point at"));
     };
@@ -984,9 +984,23 @@ pub fn verify_manual_dir(agent: &str, dir: &Path) -> Result<String, String> {
         return Err(format!("no `{cli}` in {}", dir.display()));
     };
     match probe_version(&bin) {
-        Some(version) => Ok(version),
+        Some(version) => Ok(ManualHit {
+            path: bin.display().to_string(),
+            version,
+        }),
         None => Err(format!("found {}, but it would not run", bin.display())),
     }
+}
+
+/// What [`verify_manual_dir`] found: the file, and the version it printed.
+///
+/// The file is half the answer for a user who is looking at a directory and
+/// wondering which of its files Kiwano picked — the version alone would leave
+/// them comparing paths by eye.
+#[derive(Debug, Serialize)]
+pub struct ManualHit {
+    pub path: String,
+    pub version: String,
 }
 
 // ── the GUI-only agents ─────────────────────────────────────────────────────

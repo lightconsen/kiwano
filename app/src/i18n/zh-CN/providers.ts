@@ -120,6 +120,8 @@ export const providers = {
   installDirPlaceholder: "/opt/custom/bin",
   browse: "浏览…",
   searchedDirs: "已查找 {count} 个目录,均未找到",
+  checkingDir: "正在检查该目录…",
+  dirOk: "找到可运行的执行文件 — {version}",
   checkAgain: "重新探测",
   checkAgainTitle: "现在再在这台机器上找一次",
   foundTitle: "找到了",

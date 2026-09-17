@@ -206,6 +206,31 @@ fn the_directories_the_dialog_shows_are_the_walks_own() {
     assert!(agent_search_dirs("workbuddy", home, &[]).is_empty());
 }
 
+/// The answer a successful check gives: which file it picked, and the version
+/// that file printed. The path is half the answer — the user is looking at a
+/// directory and wondering which of its files this is about.
+#[cfg(unix)]
+#[test]
+fn a_verified_directory_names_the_file_it_ran() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("gemini");
+    std::fs::write(
+        &bin,
+        "#!/bin/sh
+echo '1.2.3'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let hit = verify_manual_dir("gemini", &dir).unwrap();
+    assert_eq!(hit.path, bin.display().to_string());
+    assert!(hit.version.contains("1.2.3"), "{}", hit.version);
+}
+
 /// The check a declaration has to pass before it is stored: a directory with
 /// the right executable that runs. Its three outcomes are the three things
 /// that can go wrong.

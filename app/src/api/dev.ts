@@ -1,6 +1,6 @@
 // Browser-dev data source — numbers match the design/index.html prototype verbatim.
 // During integration src/api/client.ts switches to the Tauri invoke implementation and this file is retired.
-import type { AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, Billing, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanLimits, PlanQuotaReport, PlanQuery, ProbeReport, Protocol, Provider, ProviderHealth, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, UsageSummary, CustomAgent, PromptLatency } from "./types";
+import type { AgentDirHit, AgentId, AgentLimit, AgentRoute, ApiKeyEntry, AppSettings, Billing, CatalogEntry, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanLimits, PlanQuotaReport, PlanQuery, ProbeReport, Protocol, Provider, ProviderHealth, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, StrategyBinding, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, UsageSummary, CustomAgent, PromptLatency } from "./types";
 import { AGENTS } from "./types";
 // The same formatter the screens print with: a fixture that formats its own
 // tokens is a fixture that can disagree with the page about how they read.
@@ -2109,12 +2109,23 @@ export const devApi: KiwanoApi = {
     ];
   },
 
-  async setAgentDir(agent: AgentId, dir: string): Promise<string> {
+  async verifyAgentDir(agent: AgentId, dir: string): Promise<AgentDirHit> {
+    await delay();
+    // The real backend runs the executable it finds and reports what it printed.
+    // The fixture has no filesystem to look in, so every absolute directory
+    // "works" — which leaves the failure branch reachable only by typing a
+    // relative path, and the rest of it to the real app.
+    const trimmed = dir.trim();
+    if (!trimmed.startsWith("/")) throw new Error(`no \`${binaryFor(agent)}\` in ${trimmed}`);
+    return { path: `${trimmed}/${binaryFor(agent)}`, version: DEV_DECLARED_VERSION };
+  },
+
+  async setAgentDir(agent: AgentId, dir: string): Promise<AgentDirHit> {
     await delay();
     const trimmed = dir.trim();
-    if (!trimmed) throw new Error("a directory is required");
+    if (!trimmed.startsWith("/")) throw new Error(`no \`${binaryFor(agent)}\` in ${trimmed}`);
     declaredDirs[agent] = trimmed;
-    return DEV_DECLARED_VERSION;
+    return { path: `${trimmed}/${binaryFor(agent)}`, version: DEV_DECLARED_VERSION };
   },
 
   async clearAgentDir(agent: AgentId): Promise<void> {

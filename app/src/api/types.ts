@@ -682,6 +682,14 @@ export interface AgentDetect {
   manual?: boolean;
 }
 
+/// What a directory check found: the file it picked, and the version that file
+/// printed. The file is half the answer — the user is looking at a directory and
+/// wondering which of its files Kiwano means.
+export interface AgentDirHit {
+  path: string;
+  version: string;
+}
+
 /** Agent version probe (phase 2: async `--version`; null when the probe failed) */
 export interface AgentVersionEntry {
   agent: AgentId;
@@ -880,9 +888,12 @@ export interface KiwanoApi {
   /** Every directory the detector looks in for a built-in agent — what "we
       could not find it" is measured against, from the walk itself. */
   agentSearchDirs(agent: AgentId): Promise<string[]>;
+  /** Check a directory for a built-in agent's command without storing
+      anything — what the dialog runs when one is picked. */
+  verifyAgentDir(agent: AgentId, dir: string): Promise<AgentDirHit>;
   /** Declare where a built-in agent lives, for one the detector cannot find.
-      Resolves with the version that directory's executable reported. */
-  setAgentDir(agent: AgentId, dir: string): Promise<string>;
+      Resolves with what that directory's executable turned out to be. */
+  setAgentDir(agent: AgentId, dir: string): Promise<AgentDirHit>;
   /** Drop the declaration; the agent goes back to what the detector finds. */
   clearAgentDir(agent: AgentId): Promise<void>;
   /** Delete a user-defined agent, its route and its key (usage history stays) */

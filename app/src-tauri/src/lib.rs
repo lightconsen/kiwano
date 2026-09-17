@@ -595,18 +595,31 @@ fn probe_agent_versions(state: State<'_, AppState>) -> Vec<detect::AgentVersionV
 /// itself — the escape hatch for an install the walk has no way to know about.
 ///
 /// The directory is checked before it is stored: it has to hold a runnable
-/// executable with the agent's own name, and the version it printed comes back.
-/// What that check cannot establish is identity — see `detect::verify_manual_dir`
-/// — so the caller is told what was found, not that it was verified.
+/// executable with the agent's own name, and what was found comes back. What
+/// that check cannot establish is identity — see `detect::verify_manual_dir` —
+/// so the caller is told what ran, not that it was verified.
 #[tauri::command]
-fn set_agent_dir(state: State<AppState>, agent: String, dir: String) -> Result<String, String> {
+fn set_agent_dir(
+    state: State<AppState>,
+    agent: String,
+    dir: String,
+) -> Result<detect::ManualHit, String> {
     let path = std::path::Path::new(&dir);
-    let version = detect::verify_manual_dir(&agent, path)?;
+    let hit = detect::verify_manual_dir(&agent, path)?;
     state
         .store
         .set_manual_agent_dir(&agent, path)
         .map_err(|e| e.to_string())?;
-    Ok(version)
+    Ok(hit)
+}
+
+/// The same check without storing anything — what the dialog runs the moment a
+/// directory is picked, so a wrong one is answered before the user commits to
+/// it. The write path checks again rather than trusting this: the two are one
+/// call apart now, but a client is not a reason to store an unverified path.
+#[tauri::command(async)]
+fn verify_agent_dir(agent: String, dir: String) -> Result<detect::ManualHit, String> {
+    detect::verify_manual_dir(&agent, std::path::Path::new(&dir))
 }
 
 /// Everywhere the detector looks for `agent`, for the dialog that has to say
@@ -1246,6 +1259,7 @@ pub fn run() {
             import_config,
             detect_agents,
             set_agent_dir,
+            verify_agent_dir,
             agent_search_dirs,
             clear_agent_dir,
             probe_agent_versions,

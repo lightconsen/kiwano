@@ -154,6 +154,9 @@ export const providers = {
       because the list scrolls: it is how the user knows there is more of it. */
   searchedDirs: "Looked in {count} directories, and not found",
   /** Asks the machine again — for the tool the user just installed. */
+  /** Under the directory field, while the picked directory is being checked. */
+  checkingDir: "Checking that directory…",
+  dirOk: "Found a working executable — {version}",
   checkAgain: "Check again",
   checkAgainTitle: "Look for this agent again on this machine",
   /** The probe found it after all: nothing to point at. */

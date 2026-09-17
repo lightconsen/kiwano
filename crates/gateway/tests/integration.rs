@@ -473,6 +473,113 @@ async fn a_client_that_hangs_up_still_leaves_a_record() {
     assert_eq!(rows[0].input_tokens, 0, "the columns stay zero with it");
 }
 
+/// The OpenAI chat chunks a native chat client sees, ending in the usage-only
+/// chunk the gateway asked the upstream for.
+const CHAT_STREAM: [&str; 4] = [
+    "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"}}]}\n\n",
+    "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":4}}\n\n",
+    "data: [DONE]\n\n",
+];
+
+/// A chat-completions client that never asked for usage still gets metered:
+/// the gateway asks on its behalf, and takes the extra chunk back out again.
+///
+/// Two things have to hold at once, and they pull in opposite directions — the
+/// meter needs the upstream to say what the request cost, and the client must
+/// not receive a chunk it never requested.
+#[tokio::test]
+async fn a_chat_client_that_does_not_ask_for_usage_is_metered_and_sees_no_extra_chunk() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, _captured, bodies) =
+        mock_openai_capturing_body(MockReply::Sse(CHAT_STREAM.to_vec())).await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    // No `stream_options` of its own.
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+
+    // The upstream was asked to report usage on our behalf…
+    assert_eq!(
+        bodies.lock().unwrap()[0]["stream_options"]["include_usage"],
+        serde_json::json!(true)
+    );
+
+    // …the client never sees the chunk that request produced…
+    assert!(
+        !body.contains("\"choices\":[]"),
+        "leaked the usage chunk: {body}"
+    );
+    assert!(body.contains("hel"), "the content survived: {body}");
+    assert!(body.contains("[DONE]"), "and the stream still ends: {body}");
+
+    // …and the numbers landed anyway, which is the whole point.
+    let totals = wait_for_usage(&state, "codex", 1).await;
+    assert_eq!(totals.input_tokens, 11);
+    assert_eq!(totals.output_tokens, 4);
+}
+
+/// A client that asked for usage itself gets exactly what the upstream sent —
+/// the gateway has no reason to touch the bytes, and a proxy that quietly
+/// edits a stream is worse than one that never did.
+#[tokio::test]
+async fn a_chat_client_that_asks_for_usage_gets_its_bytes_verbatim() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, _captured, bodies) =
+        mock_openai_capturing_body(MockReply::Sse(CHAT_STREAM.to_vec())).await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"gpt-4o","stream":true,"stream_options":{"include_usage":true},
+            "messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+    assert_eq!(
+        String::from_utf8(body.to_vec()).unwrap(),
+        CHAT_STREAM.concat(),
+        "the client asked, so not one byte moves"
+    );
+    // And nothing was rewritten on the way out either.
+    assert!(
+        bodies.lock().unwrap()[0].get("stream_options").is_some(),
+        "its own stream_options were left as they were"
+    );
+}
+
 /// A retry leaves a row behind. The request-level row records what the client
 /// finally got, so without this an attempt that failed — and that may have cost
 /// the upstream real work — exists only in the daemon's text log.

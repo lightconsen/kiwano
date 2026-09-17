@@ -607,6 +607,76 @@ fn copy_response_headers(src: &HeaderMap) -> HeaderMap {
     out
 }
 
+/// Add `stream_options.include_usage` to a streaming OpenAI chat request that
+/// did not ask for it, so the meter has numbers to read.
+///
+/// `None` means "leave the bytes alone" — not streaming, already asked for, or
+/// not JSON at all. The caller keeps that answer rather than re-parsing: what
+/// it decides is whether the usage-only chunk coming back has to be taken out
+/// again, and a body this function did not touch cannot produce one.
+fn ensure_openai_stream_usage(body: &Bytes) -> Option<Bytes> {
+    let mut v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    if v.get("stream").and_then(serde_json::Value::as_bool) != Some(true) {
+        return None;
+    }
+    let asked = v
+        .pointer("/stream_options/include_usage")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    if asked {
+        return None;
+    }
+    kiwano_adapters::proxy::providers::transform::inject_openai_stream_include_usage(&mut v);
+    Some(Bytes::from(serde_json::to_vec(&v).ok()?))
+}
+
+/// Whether an SSE line is the usage-only chunk: an empty `choices` array beside
+/// a `usage` object. That is the shape `include_usage` produces, and the shape
+/// a client that did not ask for the option has no reason to expect.
+fn is_usage_only_event(line: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return false;
+    };
+    let Some(payload) = text.trim_end().strip_prefix("data:") else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(payload.trim()) else {
+        return false;
+    };
+    v.get("choices")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty)
+        && v.get("usage").is_some_and(|u| u.is_object())
+}
+
+/// The same bytes with any usage-only event removed.
+///
+/// Line-aligned by construction: the caller drains complete lines. The blank
+/// line after a dropped event is left where it is, because a blank line with no
+/// event before it is not an event — an SSE reader dispatches nothing and
+/// carries on.
+fn drop_usage_only_events(block: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(block.len());
+    // The blank line after a dropped event goes with it: an event is its data
+    // line *and* its terminator, and leaving the terminator behind would make
+    // this function report a block it had emptied as still worth sending.
+    let mut dropping_terminator = false;
+    for line in block.split_inclusive(|&b| b == b'\n') {
+        if is_usage_only_event(line) {
+            dropping_terminator = true;
+            continue;
+        }
+        if dropping_terminator {
+            dropping_terminator = false;
+            if line.iter().all(|&b| b == b'\n' || b == b'\r') {
+                continue;
+            }
+        }
+        out.extend_from_slice(line);
+    }
+    out
+}
+
 /// How the agent was attributed, as stored in `request_logs.attribution`.
 fn attribution_str(a: crate::router::Attribution) -> String {
     match a {
@@ -799,6 +869,28 @@ pub async fn forward(
         }
     };
 
+    // Read the model from the client's own body, before the send consumes it —
+    // the body states the model for the JSON-API protocols; the native Gemini
+    // API names it in the path instead, so that shape is read from there.
+    let model = request_model(&body).or_else(|| model_from_path(&path));
+
+    // Ask the upstream to report usage when the client did not, and remember
+    // that we did: the extra chunk it sends back is ours to take out again.
+    //
+    // Native OpenAI chat is the one path where this is needed. A converted
+    // request (Anthropic → OpenAI) already gets the field injected by the
+    // converter, and the Responses API reports usage without being asked — so
+    // what is left is a chat-completions client that never set the option, and
+    // whose spend the meter could not see at all.
+    let (body, strip_usage_chunk) = if provider.protocol == crate::store::Protocol::OpenAI {
+        match ensure_openai_stream_usage(&body) {
+            Some(patched) => (patched, true),
+            None => (body.clone(), false),
+        }
+    } else {
+        (body.clone(), false)
+    };
+
     let mut upstream = match send_upstream(
         &state,
         provider,
@@ -807,7 +899,7 @@ pub async fn forward(
         method,
         &url,
         headers,
-        body.clone(),
+        body,
         inbound,
         log.as_ref().map(|l| &l.capture),
     )
@@ -832,10 +924,6 @@ pub async fn forward(
         sse = is_sse,
         "upstream responded"
     );
-
-    // The body states the model for the JSON-API protocols; the native Gemini
-    // API names it in the path instead, so that shape is read from there.
-    let model = request_model(&body).or_else(|| model_from_path(&path));
 
     // reqwest consumes the Response on bytes()/bytes_stream(), so snapshot
     // the client-facing headers first.
@@ -884,8 +972,11 @@ pub async fn forward(
                 }),
             },
             started,
-            max_body_bytes,
-            state.redactor(),
+            StreamPolicy {
+                capture_cap: max_body_bytes,
+                redactor: state.redactor(),
+                strip_usage_chunk,
+            },
             inbound,
             state.stream_timeouts(),
         );
@@ -1168,8 +1259,11 @@ async fn forward_anthropic_via_openai(
                 }),
             },
             started,
-            max_body_bytes,
-            state.redactor(),
+            StreamPolicy {
+                capture_cap: max_body_bytes,
+                redactor: state.redactor(),
+                strip_usage_chunk: false,
+            },
             inbound,
             state.stream_timeouts(),
         );
@@ -1448,6 +1542,27 @@ fn stream_error_event(inbound: Option<Protocol>, message: &str) -> Option<Vec<u8
 /// as they arrive, the trailing partial line is flushed at stream end. While
 /// request logging is on, the same chunks tee into a capture buffer (capped)
 /// that lands in `request_bodies` at stream end.
+/// What a stream does to the bytes it forwards, and to the copy it keeps.
+///
+/// One value rather than a parameter each: they are decisions made together at
+/// the request, and a constructor that took them separately grew past the point
+/// where the argument list says what it is for.
+struct StreamPolicy {
+    /// Per-body capture cap; `None` stores every byte.
+    capture_cap: Option<usize>,
+    /// The credential scrubber, so a streamed response body goes through the
+    /// same pass as every other body. It did not, for as long as this feature
+    /// has existed: the one-shot paths called `cap_body` and this one copied its
+    /// buffer straight into the row, so every streamed response was stored
+    /// unredacted — on the side where an upstream may echo back the key it
+    /// rejected.
+    redactor: std::sync::Arc<crate::log_capture::Redactor>,
+    /// Drop the usage-only chunk from what the client receives. True only when
+    /// the gateway asked for that chunk itself — a client that never requested
+    /// usage must not have one appear in its stream.
+    strip_usage_chunk: bool,
+}
+
 struct SseUsageStream {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>,
     buffer: Vec<u8>,
@@ -1463,14 +1578,8 @@ struct SseUsageStream {
     capture_buf: Vec<u8>,
     capture_truncated: bool,
     streamed_bytes: u64,
-    capture_cap: Option<usize>,
-    /// The credential scrubber, so a streamed response body goes through the
-    /// same pass as every other body. It did not, for as long as this feature
-    /// has existed: the one-shot paths called `cap_body` and this one copied
-    /// its buffer straight into the row, so every streamed response was stored
-    /// unredacted — on the side where an upstream may echo back the key it
-    /// rejected.
-    redactor: std::sync::Arc<crate::log_capture::Redactor>,
+    /// How the forwarded bytes and the kept copy are treated.
+    policy: StreamPolicy,
     first_chunk: Option<Instant>,
     /// Who the client is, so a timeout can be reported in a shape it parses.
     inbound: Option<Protocol>,
@@ -1482,17 +1591,12 @@ struct SseUsageStream {
 }
 
 impl SseUsageStream {
-    // Eight arguments until the next change groups the stream's treatment into
-    // one value; spelled out here rather than as a struct that would exist only
-    // to satisfy this lint.
-    #[allow(clippy::too_many_arguments)]
     fn new(
         inner: Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>,
         tx: mpsc::Sender<UsageSample>,
         sample: UsageSample,
         started: Instant,
-        capture_cap: Option<usize>,
-        redactor: std::sync::Arc<crate::log_capture::Redactor>,
+        policy: StreamPolicy,
         inbound: Option<Protocol>,
         timeouts: crate::store::StreamTimeouts,
     ) -> Self {
@@ -1508,8 +1612,7 @@ impl SseUsageStream {
             capture_buf: Vec::new(),
             capture_truncated: false,
             streamed_bytes: 0,
-            capture_cap,
-            redactor,
+            policy,
             first_chunk: None,
             inbound,
             timeouts,
@@ -1587,7 +1690,7 @@ impl SseUsageStream {
         if self.sample.log.is_none() {
             return;
         }
-        let Some(cap) = self.capture_cap else {
+        let Some(cap) = self.policy.capture_cap else {
             // No cap configured: the whole response is kept. This buffer is
             // the reason a cap exists at all — it holds a response in memory
             // until the stream ends — so an install that sets none is trading
@@ -1622,8 +1725,11 @@ impl SseUsageStream {
             // Through the same cap-and-scrub every other body gets. The buffer
             // is already capped at capture time, so the cap here is a no-op and
             // the credentials are not.
-            let (body, _) =
-                crate::log_capture::cap_body(&self.capture_buf, self.capture_cap, &self.redactor);
+            let (body, _) = crate::log_capture::cap_body(
+                &self.capture_buf,
+                self.policy.capture_cap,
+                &self.policy.redactor,
+            );
             log.response_body = Some(body);
             log.response_size = self.streamed_bytes as i64;
             log.truncated = log.truncated || self.capture_truncated;
@@ -1697,6 +1803,17 @@ impl Stream for SseUsageStream {
                     {
                         let complete: Vec<u8> = self.buffer.drain(..split).collect();
                         self.scan_lines(&complete);
+                        if self.policy.strip_usage_chunk {
+                            // Scanned first, dropped after: the numbers are
+                            // ours to keep, the chunk is not the client's to
+                            // receive. A block that was nothing but that chunk
+                            // emits nothing at all, so this loops for more.
+                            let filtered = drop_usage_only_events(&complete);
+                            if filtered.is_empty() {
+                                continue;
+                            }
+                            return Poll::Ready(Some(Ok(Bytes::from(filtered))));
+                        }
                         return Poll::Ready(Some(Ok(Bytes::from(complete))));
                     }
                     // No newline yet: keep buffering (inner will wake us).
@@ -1714,6 +1831,15 @@ impl Stream for SseUsageStream {
                     }
                     let rest = std::mem::take(&mut self.buffer);
                     self.scan_lines(&rest);
+                    let rest = if self.policy.strip_usage_chunk {
+                        drop_usage_only_events(&rest)
+                    } else {
+                        rest
+                    };
+                    if rest.is_empty() {
+                        self.finish();
+                        return Poll::Ready(None);
+                    }
                     return Poll::Ready(Some(Ok(Bytes::from(rest))));
                     // finish() runs on the next poll (inner_ended branch).
                 }
@@ -1727,6 +1853,49 @@ impl Stream for SseUsageStream {
 mod tests {
     use super::*;
     use std::vec;
+
+    /// What the stripper recognizes, and what it must leave alone: a content
+    /// chunk that happens to carry a `usage` key is not this chunk, and a
+    /// `[DONE]` sentinel is not JSON at all.
+    #[test]
+    fn only_the_usage_only_chunk_is_recognized() {
+        let usage_only = br#"data: {"id":"c1","choices":[],"usage":{"prompt_tokens":11}}"#;
+        assert!(is_usage_only_event(usage_only));
+
+        let content = br#"data: {"id":"c1","choices":[{"delta":{"content":"hi"}}],"usage":{"prompt_tokens":11}}"#;
+        assert!(
+            !is_usage_only_event(content),
+            "a chunk with content is not it"
+        );
+
+        assert!(!is_usage_only_event(b"data: [DONE]"));
+        assert!(!is_usage_only_event(b"event: message_stop"));
+        assert!(!is_usage_only_event(b"data: not json"));
+        assert!(!is_usage_only_event(b""));
+    }
+
+    /// The whole rewrite: the usage event goes, everything else arrives in the
+    /// order it was sent, and an empty block stays empty so the caller can skip
+    /// emitting it.
+    #[test]
+    fn dropping_the_usage_event_keeps_every_other_byte() {
+        let block = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n",
+            "\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11}}\n",
+            "\n",
+            "data: [DONE]\n",
+            "\n",
+        );
+        let out = String::from_utf8(drop_usage_only_events(block.as_bytes())).unwrap();
+        assert!(!out.contains("prompt_tokens"), "{out}");
+        assert!(out.contains("\"content\":\"hi\""), "{out}");
+        assert!(out.contains("[DONE]"), "{out}");
+
+        // A block that was only the usage event has nothing left to send.
+        let only = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11}}\n\n";
+        assert!(drop_usage_only_events(only.as_bytes()).is_empty());
+    }
 
     /// A fixed instant — Wed 2026-09-09 10:00 Beijing, inside the peak window
     /// the published DeepSeek schedule names — so that a fixture which gains
@@ -2712,8 +2881,11 @@ mod tests {
                 log: None,
             },
             Instant::now(),
-            Some(0),
-            std::sync::Arc::new(crate::log_capture::Redactor::default()),
+            StreamPolicy {
+                capture_cap: Some(0),
+                redactor: std::sync::Arc::new(crate::log_capture::Redactor::default()),
+                strip_usage_chunk: false,
+            },
             Some(Protocol::Anthropic),
             crate::store::StreamTimeouts {
                 // The first byte arrived; only the gap is limited.
@@ -2791,8 +2963,11 @@ mod tests {
                 log: None,
             },
             Instant::now(),
-            Some(0),
-            std::sync::Arc::new(crate::log_capture::Redactor::default()),
+            StreamPolicy {
+                capture_cap: Some(0),
+                redactor: std::sync::Arc::new(crate::log_capture::Redactor::default()),
+                strip_usage_chunk: false,
+            },
             Some(Protocol::Anthropic),
             crate::store::StreamTimeouts::default(),
         );

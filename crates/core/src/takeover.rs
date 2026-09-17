@@ -144,13 +144,19 @@ pub(crate) fn takeover_paths(
         // providers, so a missing config is fine (a fresh one gets created)
         //
         // OpenCode resolves its global config through the XDG rules, so a moved
-        // XDG_CONFIG_HOME moves this file. Its own two config variables are
-        // deliberately *not* honored: `OPENCODE_CONFIG` names an extra file
-        // merged between the global and the project config, and
-        // `OPENCODE_CONFIG_DIR` a directory searched for agents, commands and
-        // plugins — neither is where the provider list lives, and writing the
-        // gateway entry into one would put it where OpenCode merges from rather
-        // than where it reads the user's own config.
+        // XDG_CONFIG_HOME moves this file. Read from its source rather than from
+        // the docs, which do not mention the variable: it composes
+        // `path.join(xdgConfig, "opencode")` from the `xdg-basedir` package, and
+        // that package is `env.XDG_CONFIG_HOME || path.join(os.homedir(),
+        // ".config")` with no platform branch — so this one path is the same on
+        // Windows, where a third-party note claims `%APPDATA%`. It is not.
+        //
+        // Its own two config variables are deliberately *not* honored:
+        // `OPENCODE_CONFIG` names an extra file merged between the global and
+        // the project config, and `OPENCODE_CONFIG_DIR` a directory searched for
+        // agents, commands and plugins — neither is where the provider list
+        // lives, and writing the gateway entry into one would put it where
+        // OpenCode merges from rather than where it reads the user's own config.
         "opencode" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)
             .join("opencode")
             .join("opencode.json")]),

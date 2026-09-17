@@ -207,6 +207,7 @@ function AccessDialog({
   onClose,
   onDelete,
   onChanged,
+  onRenamed,
 }: {
   agent: AgentRef;
   label: string;
@@ -218,9 +219,45 @@ function AccessDialog({
   onClose: () => void;
   onDelete: () => void;
   onChanged?: () => void;
+  /** Only a user-defined agent can be renamed — a built-in's name is its
+      brand, and the id is what everything else points at. Without this the
+      name is shown as text rather than an editable field. */
+  onRenamed?: (label: string) => Promise<unknown> | void;
 }) {
   const t = useT();
   const [tab, setTab] = useState<"access" | "limit">("access");
+  // Read-only until the pencil is pressed, then saved on blur or Enter. One
+  // text field does not need a dialog, and a name that is always an input is a
+  // name that gets changed by accident.
+  const [name, setName] = useState(label);
+  const [nameErr, setNameErr] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  useEffect(() => {
+    setName(label);
+    setNameErr(null);
+    setEditingName(false);
+  }, [label, open]);
+  const commitName = async () => {
+    const next = name.trim();
+    if (!onRenamed || !next || next === label) {
+      setName(label);
+      setEditingName(false);
+      return;
+    }
+    try {
+      await onRenamed(next);
+      setNameErr(null);
+      setEditingName(false);
+    } catch (e) {
+      // Stay in the field so the name can be fixed without reopening it.
+      setNameErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const cancelEdit = () => {
+    setName(label);
+    setNameErr(null);
+    setEditingName(false);
+  };
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[460px]">
@@ -235,6 +272,75 @@ function AccessDialog({
           <div className="mt-2.5">
             {tab === "access" && (
               <>
+                {onRenamed && (
+                  <>
+                    {/* One row, with the same 68px label column the endpoint
+                        and key rows below it use, so the name lines up with
+                        them rather than floating above its own label. */}
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="w-[68px] shrink-0 text-[10.5px] text-mut">
+                        {t("providers.agentName")}
+                      </span>
+                      {editingName ? (
+                        <>
+                          <Input
+                            autoFocus
+                            aria-label={t("providers.agentName")}
+                            className="h-7 flex-1 text-[12px]"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void commitName();
+                              if (e.key === "Escape") cancelEdit();
+                            }}
+                          />
+                          {/* Explicit, not on blur: leaving the field to look
+                              something up is not a decision to save. */}
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="shrink-0 text-mut"
+                            aria-label={t("common.save")}
+                            title={t("common.save")}
+                            disabled={!name.trim()}
+                            onClick={() => void commitName()}
+                          >
+                            <Check className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="shrink-0 text-mut"
+                            aria-label={t("common.cancel")}
+                            title={t("common.cancel")}
+                            onClick={cancelEdit}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="min-w-0 flex-1 truncate text-[12px]">{label}</span>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="shrink-0 text-mut"
+                            aria-label={t("providers.editAgentName")}
+                            title={t("providers.editAgentName")}
+                            onClick={() => setEditingName(true)}
+                          >
+                            <SquarePen className="h-3 w-3" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    {nameErr && (
+                      <p className="mt-1 text-[11px]" style={{ color: "var(--red)" }}>
+                        {nameErr}
+                      </p>
+                    )}
+                  </>
+                )}
                 <CopyRow label={t("providers.accessEndpoint")} value={`http://${listen}`} />
                 <CopyRow label={t("providers.accessKey")} value={keyName ?? "—"} />
                 <p className="mt-2 text-[11px] leading-relaxed text-mut">
@@ -561,11 +667,12 @@ function DeleteAgentButton({ label, onConfirm }: { label: string; onConfirm: () 
 function NewAgentDialog({
   open,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   open: boolean;
   onClose: () => void;
-  onCreated: (id: string) => void;
+  /** The agent that was created — the caller opens its tab. */
+  onSaved: (id: string) => void;
 }) {
   const t = useT();
   const [name, setName] = useState("");
@@ -580,7 +687,7 @@ function NewAgentDialog({
       const created = await api.addCustomAgent(name, note);
       setName("");
       setNote("");
-      onCreated(created.id);
+      onSaved(created.id);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -2224,7 +2331,7 @@ export default function Providers({
       <NewAgentDialog
         open={newAgent}
         onClose={() => setNewAgent(false)}
-        onCreated={onAgentCreated}
+        onSaved={onAgentCreated}
       />
 
       {!custom && seg !== "all" && (takenOver?.has(seg) ?? false) && (
@@ -2251,6 +2358,11 @@ export default function Providers({
           open={accessOpen}
           onClose={() => setAccessOpen(false)}
           onDelete={() => onDeleteAgent(custom.id)}
+          onRenamed={async (label) => {
+            // The note travels back unchanged: this field edits the name only.
+            await api.updateCustomAgent(custom.id, label, custom.note);
+            refetch();
+          }}
           onChanged={refetch}
         />
       )}

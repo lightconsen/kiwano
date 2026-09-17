@@ -137,6 +137,7 @@ export const providers = {
   // ── User-defined agents (migration v16) ──
   /** The + at the end of the agent strip. */
   newAgent: "New agent",
+  editAgentName: "Edit agent name",
   newAgentTitle: "Define your own agent: a named route with its own key",
   agentName: "Name",
   agentNamePlaceholder: "Long tasks",

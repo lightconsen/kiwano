@@ -823,6 +823,20 @@ fn add_custom_agent(
     Ok(created)
 }
 
+/// Rename a user-defined agent. Its id, route and key are untouched — only the
+/// name its user reads changes.
+#[tauri::command]
+fn update_custom_agent(
+    state: State<AppState>,
+    id: String,
+    label: String,
+    note: Option<String>,
+) -> Result<vm::CustomAgentVm, String> {
+    let updated = vm::update_custom_agent(&state.store, &id, &label, note.as_deref())?;
+    after_mutation(&state);
+    Ok(updated)
+}
+
 /// Delete a user-defined agent along with its route and its key. Its usage and
 /// request logs stay, so the Dashboard keeps accounting for what ran.
 #[tauri::command]
@@ -1144,6 +1158,7 @@ pub fn run() {
             add_agent_binding,
             remove_agent_binding,
             add_custom_agent,
+            update_custom_agent,
             remove_custom_agent,
             apply_agent_route,
             export_config,

@@ -1711,6 +1711,30 @@ export const devApi: KiwanoApi = {
     return settings;
   },
 
+  async updateCustomAgent(
+    id: string,
+    label: string,
+    note?: string | null,
+  ): Promise<CustomAgent> {
+    await delay();
+    const list = settings.custom_agents;
+    const index = list.findIndex((a) => a.id === id);
+    if (index < 0) throw new Error(`no such custom agent: ${id}`);
+    // Only the label and note move — the id is what routes and keys point at,
+    // the same line the backend's rename draws.
+    const updated: CustomAgent = {
+      ...list[index],
+      label: label.trim(),
+      note: note?.trim() ? note.trim() : null,
+    };
+    settings.custom_agents = [
+      ...list.slice(0, index),
+      updated,
+      ...list.slice(index + 1),
+    ];
+    return structuredClone(updated);
+  },
+
   async addCustomAgent(label: string, note?: string | null): Promise<CustomAgent> {
     await delay();
     const created: CustomAgent = {

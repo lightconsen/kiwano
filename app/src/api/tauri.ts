@@ -80,6 +80,10 @@ export const tauriApi: KiwanoApi = {
   addCustomAgent: (label: string, note?: string | null) =>
     invoke<CustomAgent>("add_custom_agent", { label, note: note ?? null }),
 
+  updateCustomAgent: (id: string, label: string, note?: string | null) =>
+    invoke<CustomAgent>("update_custom_agent", { id, label, note: note ?? null }),
+
+
   removeCustomAgent: (id: string) => invoke<void>("remove_custom_agent", { id }),
 
   importCcSwitch: () => invoke<ImportReport>("import_cc_switch"),

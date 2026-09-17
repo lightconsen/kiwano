@@ -236,6 +236,44 @@ pub fn add_custom_agent(
     })
 }
 
+/// Rename a user-defined agent.
+///
+/// Only its label and note move: the id is what bindings, routes, keys and
+/// usage rows point at, so a rename must not touch it — the agent keeps its
+/// route and its history, and only the name its user reads changes.
+pub fn update_custom_agent(
+    store: &Store,
+    id: &str,
+    label: &str,
+    note: Option<&str>,
+) -> Result<CustomAgentVm, String> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("an agent needs a name".to_string());
+    }
+    let note = note.map(str::trim).filter(|n| !n.is_empty());
+    if !store
+        .update_custom_agent_label(id, label, note)
+        .map_err(e2s)?
+    {
+        return Err(format!("no such custom agent: {id}"));
+    }
+    // The same shape `add_custom_agent` returns, key included: the dialog that
+    // shows an agent's settings reads it from here too.
+    let placeholder_key = store
+        .list_placeholder_keys()
+        .map_err(e2s)?
+        .into_iter()
+        .find(|k| k.agent == id)
+        .map(|k| k.key);
+    Ok(CustomAgentVm {
+        id: id.to_string(),
+        label: label.to_string(),
+        note: note.map(str::to_string),
+        placeholder_key,
+    })
+}
+
 /// Delete a user-defined agent, and everything that was only about it: its
 /// bindings, its strategy, its key, its row. `usage` and `request_logs` are
 /// history and stay — the same line the provider deletion draws.
@@ -6432,6 +6470,57 @@ mod tests {
 
         // And it is gone as an agent: a second removal has nothing to remove.
         assert!(remove_custom_agent(&s, &a.id).is_err());
+    }
+
+    /// A rename moves the label — and the note — and nothing else. The id is
+    /// what bindings, keys and usage rows point at, so a rename that touched it
+    /// would orphan the agent's route and its history.
+    #[test]
+    fn renaming_a_custom_agent_keeps_its_id_route_and_history() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        s.insert_provider(&provider("p1", "Alpha", Billing::Metered))
+            .unwrap();
+        let a = add_custom_agent(&s, "Long Tasks", Some("at night")).unwrap();
+        add_agent_binding(&s, &a.id, "p1").unwrap();
+        let mut row = usage_row("p1");
+        row.agent = a.id.clone();
+        s.record_usage(&row).unwrap();
+
+        let renamed = update_custom_agent(&s, &a.id, "Nightly batch", Some("moved")).unwrap();
+
+        assert_eq!(renamed.id, a.id, "the id is what everything points at");
+        assert_eq!(renamed.label, "Nightly batch");
+        assert_eq!(renamed.note.as_deref(), Some("moved"));
+        assert_eq!(
+            renamed.placeholder_key, a.placeholder_key,
+            "the key belongs to the agent, not to the name its user gave it"
+        );
+        // The route and the history are still this agent's.
+        assert_eq!(s.bindings_for_agent(&a.id).unwrap().len(), 1);
+        assert!(s.get_strategy(&a.id).unwrap().is_some());
+        assert_eq!(s.usage_totals(Some(&a.id), None, None).unwrap().requests, 1);
+        // And the new name is what the dashboard reads for it now.
+        let d = build_dashboard(&s, &aux, "7d", None, None).unwrap();
+        assert_eq!(
+            d.by_agent
+                .iter()
+                .find(|r| r.agent == a.id)
+                .expect("still accounted for")
+                .label,
+            "Nightly batch"
+        );
+        // A blank note clears it rather than storing whitespace.
+        let cleared = update_custom_agent(&s, &a.id, "Nightly batch", Some("  ")).unwrap();
+        assert_eq!(cleared.note, None);
+
+        // Refusals: a blank name, and an id no agent has — and neither changes
+        // what is on file.
+        assert!(update_custom_agent(&s, &a.id, "   ", None).is_err());
+        assert!(update_custom_agent(&s, "no-such-agent", "X", None).is_err());
+        let stored = s.get_custom_agent(&a.id).unwrap().expect("still there");
+        assert_eq!(stored.label, "Nightly batch");
+        assert_eq!(stored.id, a.id);
     }
 
     /// The model a latency ping uses: the provider's own default, else the model

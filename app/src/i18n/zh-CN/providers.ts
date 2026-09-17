@@ -108,6 +108,7 @@ export const providers = {
 
   // ── 自定义 Agent（迁移 v16）──
   newAgent: "新建 Agent",
+  editAgentName: "编辑 Agent 名称",
   newAgentTitle: "自定义 Agent：一条有名字、有自己 key 的路由",
   agentName: "名称",
   agentNamePlaceholder: "长任务",

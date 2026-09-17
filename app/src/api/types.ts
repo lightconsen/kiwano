@@ -872,6 +872,8 @@ export interface KiwanoApi {
   deleteApiKey(id: number): Promise<void>;
   /** Define a user-defined agent: a named route with its own placeholder key */
   addCustomAgent(label: string, note?: string | null): Promise<CustomAgent>;
+  /** Rename one. Its id, route and key are untouched — only the label moves */
+  updateCustomAgent(id: string, label: string, note?: string | null): Promise<CustomAgent>;
   /** Delete a user-defined agent, its route and its key (usage history stays) */
   removeCustomAgent(id: string): Promise<void>;
 

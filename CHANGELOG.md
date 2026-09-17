@@ -17,6 +17,46 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.1.15] - 2026-09-17
+
+### Added
+
+- **An agent can say which protocol it speaks.** A built-in agent carries the
+  list of protocols its own clients use; a user-defined one is asked when it is
+  created, and can change its answer in its dialog afterwards. The values are
+  read off the wire format this app already writes into each tool's config —
+  `wire_api = "responses"` for Codex, `api: "openai-completions"` for OpenClaw
+  and WorkBuddy, `providers[].type = "openai"` for Kimi — so they are evidence
+  rather than a catalogue of what each vendor also offers. It is a label:
+  nothing routes, converts or refuses by it, the gateway still reads an
+  inbound's protocol from the path it was called on, and an agent defined
+  before the field existed reads "not specified" rather than a default nobody
+  chose. `kiwano agents add --protocol` and a PROTOCOL column in `agents list`
+  carry the same answer on the command line.
+
+- **Cline CLI**, the fourteenth agent, over its own config file
+  (`~/.cline/data/settings/providers.json`, moved by `CLINE_DIR`,
+  `CLINE_DATA_DIR` or `CLINE_PROVIDER_SETTINGS_PATH`). It is the first agent
+  that is neither additive nor an exclusive switch: Cline selects a provider
+  slot by provider *id*, so there is no entry of ours to add and select. The
+  takeover replaces the slot its own custom-endpoint option writes to, keeping
+  that entry's model id and leaving the user's other slots alone, and imports
+  the provider the agent was already using — named from its endpoint — so the
+  first request after switching works without retyping anything.
+
+  This is the Cline **CLI**. The VS Code extension keeps its state in VS Code's
+  globalStorage and the OS keychain, which is not a file Kiwano can back up or
+  restore, so that one is a user-defined agent — which is what that feature is
+  for, and what `docs/custom-agents.md` now says.
+
+### Fixed
+
+- **A candidate row's two controls are 6px apart, not 40.** On the row that
+  *is* the primary, the Pin renders invisible — it keeps its slot so the rows
+  of one route stay aligned, which is deliberate — but it sat between the
+  latency test and the remove button, so the row showed a button-wide hole
+  between them.
+
 ## [0.1.14] - 2026-09-17
 
 ### Added

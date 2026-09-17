@@ -584,6 +584,10 @@ pub fn persist_failure(
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_creation_tokens: 0,
+        reasoning_tokens: 0,
+        // Nothing was sent, so there is no usage to be missing: the zeros on
+        // this row are the answer, not a stand-in for one.
+        usage_missing: false,
         latency_ms: None,
         first_token_ms: None,
         request_headers: c.request_headers.clone(),

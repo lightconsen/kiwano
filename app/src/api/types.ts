@@ -765,6 +765,11 @@ export interface RequestLogEntry {
   output_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  /** Thinking tokens, a **slice of** `output_tokens` — never added to it. */
+  reasoning_tokens: number;
+  /** The upstream reported no usage at all, so every token number on this row
+   *  is a zero that means "unknown" rather than "none". */
+  usage_missing: boolean;
   latency_ms: number | null;
   first_token_ms: number | null;
   /** Redacted header JSON (auth headers stripped at capture time) */

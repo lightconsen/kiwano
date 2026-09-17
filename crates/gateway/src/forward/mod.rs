@@ -112,6 +112,10 @@ struct UsageSample {
     /// already contain the cache buckets (deducted before billing); anthropic
     /// reports fresh input only.
     cache_inclusive: bool,
+    /// The upstream reported no usage object. Filled by the parse for a
+    /// one-shot response, and by the scanner's own memory for a stream — the
+    /// zeros are the same either way, and only this says which they are.
+    usage_missing: bool,
     /// Full-log payload; None while request logging is disabled.
     log: Option<CompletedLog>,
 }
@@ -833,6 +837,8 @@ pub async fn forward(
                 latency_ms: 0,
                 status: "ok",
                 cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
+                // The stream fills this in at `finish`, from what the scanner saw.
+                usage_missing: false,
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -893,6 +899,7 @@ pub async fn forward(
             catalog_id: provider.catalog_id.clone(),
             started_unix,
             model: model.or(upstream_model),
+            usage_missing: usage.is_none(),
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: if status.is_success() { "ok" } else { "error" },
@@ -1112,7 +1119,10 @@ async fn forward_anthropic_via_openai(
                 latency_ms: 0,
                 status: "ok",
                 // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
+                // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
                 cache_inclusive: true,
+                // Filled at `finish`, from what the scanner saw.
+                usage_missing: false,
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
                     status_code: status.as_u16(),
@@ -1179,6 +1189,7 @@ async fn forward_anthropic_via_openai(
                 catalog_id: provider.catalog_id.clone(),
                 started_unix,
                 model: model.or(upstream_model),
+                usage_missing: usage.is_none(),
                 usage: usage.unwrap_or_default(),
                 latency_ms,
                 status: "error",
@@ -1253,6 +1264,7 @@ async fn forward_anthropic_via_openai(
             catalog_id: provider.catalog_id.clone(),
             started_unix,
             model: model.or(upstream_model),
+            usage_missing: usage.is_none(),
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: "ok",
@@ -1301,6 +1313,11 @@ async fn record_pending_usage(state: Arc<GatewayState>, mut rx: mpsc::Receiver<U
 fn record_sample(state: &GatewayState, sample: UsageSample) {
     let mut sample = sample;
     let log = sample.log.take();
+    // The two things the `usage` table has no column for: they describe this
+    // request's own log row rather than the metered totals, and `into_record`
+    // consumes the sample below.
+    let reasoning_tokens = sample.usage.reasoning_tokens;
+    let usage_missing = sample.usage_missing;
     let (cost, cost_off_peak, cost_currency) = compute_sample_cost(state, &sample);
     let record = sample.into_record(cost, cost_off_peak, cost_currency);
     tracing::info!(
@@ -1310,6 +1327,8 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
         output = record.output_tokens,
         cache_read = record.cache_read_tokens,
         cache_creation = record.cache_creation_tokens,
+        reasoning = reasoning_tokens,
+        usage_missing = usage_missing,
         latency_ms = record.latency_ms,
         status = %record.status,
         cost = record.cost,
@@ -1337,6 +1356,8 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
             output_tokens: record.output_tokens,
             cache_read_tokens: record.cache_read_tokens,
             cache_creation_tokens: record.cache_creation_tokens,
+            reasoning_tokens,
+            usage_missing,
             latency_ms: record.latency_ms,
             first_token_ms: log.first_token_ms,
             request_headers: log.capture.request_headers,
@@ -1555,6 +1576,7 @@ impl SseUsageStream {
     /// Submit the metered sample (best-effort) once the stream is exhausted.
     fn finish(&mut self) {
         self.sample.usage = self.scanner.usage();
+        self.sample.usage_missing = !self.scanner.saw_usage();
         if self.sample.model.is_none() {
             self.sample.model = self.scanner.model().map(String::from);
         }
@@ -1906,6 +1928,7 @@ mod tests {
             started_unix: TEST_AT,
             model: model.map(str::to_string),
             usage: Usage {
+                reasoning_tokens: 0,
                 input_tokens: 1_000_000,
                 output_tokens: 0,
                 cache_read_tokens: 0,
@@ -1914,6 +1937,7 @@ mod tests {
             latency_ms: 10,
             status: "ok",
             cache_inclusive: false,
+            usage_missing: false,
             log: None,
         };
         record_sample(&state, sample(Some("claude-opus-4-8")));
@@ -1999,6 +2023,7 @@ mod tests {
             started_unix: TEST_AT,
             model: Some("m1".into()),
             usage: Usage {
+                reasoning_tokens: 0,
                 input_tokens: 1_000_000,
                 output_tokens: 0,
                 cache_read_tokens: 0,
@@ -2007,6 +2032,7 @@ mod tests {
             latency_ms: 10,
             status: "ok",
             cache_inclusive: false,
+            usage_missing: false,
             log: None,
         };
         record_sample(&state, sample("p-kimi", Some("kimi")));
@@ -2129,6 +2155,7 @@ mod tests {
             started_unix: TEST_AT,
             model: Some(model.into()),
             usage: Usage {
+                reasoning_tokens: 0,
                 input_tokens: 1_000_000,
                 output_tokens: 0,
                 cache_read_tokens: 0,
@@ -2137,6 +2164,7 @@ mod tests {
             latency_ms: 10,
             status: "ok",
             cache_inclusive: false,
+            usage_missing: false,
             log: None,
         };
         record_sample(&state, sample("p-manual", None, "m1"));
@@ -2226,6 +2254,7 @@ mod tests {
             started_unix: TEST_AT,
             model: Some("m1".into()),
             usage: Usage {
+                reasoning_tokens: 0,
                 input_tokens: 1_000_000,
                 output_tokens: 0,
                 cache_read_tokens: 0,
@@ -2234,6 +2263,7 @@ mod tests {
             latency_ms: 10,
             status: "ok",
             cache_inclusive: false,
+            usage_missing: false,
             log: None,
         };
         // Before anything is declared: the Hub's general rate.
@@ -2362,6 +2392,7 @@ mod tests {
             started_unix,
             model: Some("m1".into()),
             usage: Usage {
+                reasoning_tokens: 0,
                 input_tokens: 1_000_000,
                 output_tokens: 0,
                 cache_read_tokens: 0,
@@ -2370,6 +2401,7 @@ mod tests {
             latency_ms: 10,
             status: "ok",
             cache_inclusive: false,
+            usage_missing: false,
             log: None,
         };
         record_sample(&state, sample("p-peak", PEAK_AT));
@@ -2470,10 +2502,12 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                reasoning_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
             cache_inclusive: false,
+            usage_missing: false,
             log: None,
         };
         record_sample(&state, sample("p-long", 600_000));
@@ -2610,6 +2644,7 @@ mod tests {
                 latency_ms: 0,
                 status: "ok",
                 cache_inclusive: false,
+                usage_missing: false,
                 log: None,
             },
             Instant::now(),
@@ -2688,6 +2723,7 @@ mod tests {
                 latency_ms: 0,
                 status: "ok",
                 cache_inclusive: false,
+                usage_missing: false,
                 log: None,
             },
             Instant::now(),

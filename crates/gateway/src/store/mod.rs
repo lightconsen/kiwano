@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 24;
+pub const SCHEMA_VERSION: i32 = 25;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -659,6 +659,26 @@ const MIGRATION_V24: &str = r#"
 ALTER TABLE custom_agents ADD COLUMN protocol TEXT;
 "#;
 
+/// v25: two more things a request can say about itself.
+///
+/// `reasoning_tokens` is a slice of `output_tokens`, not an addition to it —
+/// the providers that report it bill it as output, and the ones that do not
+/// report nothing. Stored because it is the one number that separates "this
+/// model thought for a long time" from "this model wrote a lot", and a tuning
+/// question about latency or spend cannot tell those apart without it.
+///
+/// `usage_missing` marks the rows where the upstream said nothing about usage
+/// at all. Those rows have always been written with zeros, which is
+/// indistinguishable from a request that genuinely used nothing — and the
+/// difference matters to anyone adding them up. It defaults to 0 because every
+/// row written before this column existed was written by code that had no way
+/// to say otherwise, and guessing now would put a claim in the data that
+/// nothing supports.
+const MIGRATION_V25: &str = r#"
+ALTER TABLE request_logs ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE request_logs ADD COLUMN usage_missing INTEGER NOT NULL DEFAULT 0;
+"#;
+
 const MIGRATION_V23: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE providers_new (
@@ -1140,6 +1160,10 @@ pub struct RequestLogNew {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// A slice of `output_tokens`; 0 when the provider does not report it.
+    pub reasoning_tokens: i64,
+    /// True when no usage object arrived at all — see `RequestLogEntry`.
+    pub usage_missing: bool,
     pub latency_ms: Option<i64>,
     pub first_token_ms: Option<i64>,
     /// Header maps serialized as JSON with credential headers redacted.
@@ -1180,6 +1204,12 @@ pub struct RequestLogEntry {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// A slice of `output_tokens`, never an addition to them; 0 when the
+    /// provider does not break its thinking out.
+    pub reasoning_tokens: i64,
+    /// The upstream reported no usage object at all, so every token column on
+    /// this row is a zero that means "unknown" rather than "none".
+    pub usage_missing: bool,
     pub latency_ms: Option<i64>,
     pub first_token_ms: Option<i64>,
     pub request_headers: Option<String>,
@@ -1257,13 +1287,14 @@ const REQUEST_LOG_COLUMNS: &str = "id, ts, method, path, query, agent, attributi
                                    is_streaming, input_tokens, output_tokens, cache_read_tokens,
                                    cache_creation_tokens, latency_ms, first_token_ms,
                                    request_headers, response_headers, request_size, response_size,
-                                   truncated, cost, cost_currency, cost_off_peak";
+                                   truncated, cost, cost_currency, cost_off_peak,
+                                   reasoning_tokens, usage_missing";
 
 /// How many columns [`REQUEST_LOG_COLUMNS`] names. The body join appends two
 /// more, and the only way to read them by index without counting commas is to
 /// count them here — an off-by-one silently reads the wrong field into
 /// `request_body` (the CSV export test caught exactly that when v13 added one).
-const REQUEST_LOG_COLUMN_COUNT: usize = 28;
+const REQUEST_LOG_COLUMN_COUNT: usize = 30;
 
 /// Ceiling on one export. A local log can be large, and the CSV is built in
 /// memory before it is written, so the read is capped rather than unbounded;
@@ -1824,6 +1855,9 @@ impl Store {
         }
         if version < 24 {
             conn.execute_batch(MIGRATION_V24)?;
+        }
+        if version < 25 {
+            conn.execute_batch(MIGRATION_V25)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -2662,9 +2696,11 @@ impl Store {
                                        cache_creation_tokens, latency_ms, first_token_ms,
                                        request_headers, response_headers,
                                        request_size, response_size, truncated,
-                                       cost, cost_currency, cost_off_peak)
+                                       cost, cost_currency, cost_off_peak,
+                                       reasoning_tokens, usage_missing)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
+                     ?28, ?29)",
             params![
                 r.ts,
                 r.method,
@@ -2693,6 +2729,8 @@ impl Store {
                 r.cost,
                 r.cost_currency,
                 r.cost_off_peak,
+                r.reasoning_tokens,
+                r.usage_missing as i64,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -3365,6 +3403,8 @@ fn request_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogE
         cost: row.get(25)?,
         cost_currency: row.get(26)?,
         cost_off_peak: row.get(27)?,
+        reasoning_tokens: row.get(28)?,
+        usage_missing: row.get::<_, i64>(29)? != 0,
     })
 }
 
@@ -3856,6 +3896,42 @@ mod tests {
             // and stamping 18 makes the ladder skip it (v16 runs only under
             // `version < 16`). v24 alters that table, so a database claiming to
             // be v18 has to have it — a real one would, having been through v16.
+            //
+            // `request_logs` is the third of these, and the one that shows why
+            // the pattern is worth naming: v5 creates it, v25 alters it, and a
+            // fixture that stamps 18 having skipped v5 fails at the second.
+            // Anything a later migration touches has to exist here, in the shape
+            // the migrations up to this version would have left it.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS request_logs (
+                     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                     ts                    TEXT NOT NULL,
+                     method                TEXT NOT NULL,
+                     path                  TEXT NOT NULL,
+                     query                 TEXT,
+                     agent                 TEXT,
+                     attribution           TEXT,
+                     provider_id           TEXT,
+                     model                 TEXT,
+                     status_code           INTEGER NOT NULL,
+                     error_kind            TEXT,
+                     error_message         TEXT,
+                     session_id            TEXT,
+                     is_streaming          INTEGER NOT NULL DEFAULT 0,
+                     input_tokens          INTEGER NOT NULL DEFAULT 0,
+                     output_tokens         INTEGER NOT NULL DEFAULT 0,
+                     cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+                     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                     latency_ms            INTEGER,
+                     first_token_ms        INTEGER,
+                     request_headers       TEXT,
+                     response_headers      TEXT,
+                     request_size          INTEGER NOT NULL DEFAULT 0,
+                     response_size         INTEGER NOT NULL DEFAULT 0,
+                     truncated             INTEGER NOT NULL DEFAULT 0
+                 );",
+            )
+            .unwrap();
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS custom_agents (
                      id         TEXT PRIMARY KEY,
@@ -4257,10 +4333,88 @@ mod tests {
         );
     }
 
+    /// v25 adds two columns to a table older builds already filled. The rows
+    /// that were there have to come back with the column defaults rather than
+    /// with a claim: nothing can now know whether a row written before the
+    /// column existed had unknown usage, so the migration says "reported".
+    #[test]
+    fn migration_v25_adds_reasoning_and_the_usage_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v24 database holding one request, logged by a build that
+        // knew nothing about either column.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+                MIGRATION_V21,
+                MIGRATION_V22,
+                MIGRATION_V23,
+                MIGRATION_V24,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO request_logs (ts, method, path, status_code, input_tokens,
+                                           output_tokens, cache_read_tokens,
+                                           cache_creation_tokens, request_size, response_size)
+                 VALUES ('2026-09-07T10:00:00+00:00', 'POST', '/v1/messages', 200, 15302,
+                         102, 15232, 0, 10, 20);
+                 PRAGMA user_version = 24;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let (rows, _) = store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
+        assert_eq!(rows.len(), 1, "the row an older build wrote is still there");
+        assert_eq!(rows[0].input_tokens, 15302);
+        assert_eq!(
+            rows[0].reasoning_tokens, 0,
+            "the new column reads its default on a row that predates it"
+        );
+        assert!(
+            !rows[0].usage_missing,
+            "and the mark says reported, because nothing can say otherwise"
+        );
+
+        // The columns are writable: a row written now carries both.
+        let mut log = sample_log("2026-09-07T11:00:00+00:00", Some("codex"), 200);
+        log.reasoning_tokens = 71;
+        log.usage_missing = true;
+        store.insert_request_log(&log).unwrap();
+        let (rows, _) = store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
+        assert_eq!(rows[0].reasoning_tokens, 71);
+        assert!(rows[0].usage_missing);
+    }
+
+    #[test]
     /// v24 adds the column without disturbing what was already there: an agent
     /// defined before it says nothing about its protocol, and saying nothing is
     /// not one of the three words.
-    #[test]
     fn migration_v24_lets_a_custom_agent_name_its_protocol() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("kiwano.db");
@@ -5179,6 +5333,8 @@ mod tests {
             output_tokens: 20,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
             latency_ms: Some(88),
             first_token_ms: None,
             request_headers: Some(r#"{"content-type":"application/json"}"#.into()),

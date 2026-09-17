@@ -23,7 +23,7 @@ const BOM: &str = "\u{feff}";
 /// Column order is the contract for whoever parses the file — append, never
 /// reorder. Appending [`BODY_HEADERS`] behind these is exactly that: an
 /// existing position keeps its meaning.
-const HEADERS: [&str; 27] = [
+const HEADERS: [&str; 29] = [
     "id",
     "ts",
     "method",
@@ -42,6 +42,8 @@ const HEADERS: [&str; 27] = [
     "output_tokens",
     "cache_read_tokens",
     "cache_creation_tokens",
+    "reasoning_tokens",
+    "usage_missing",
     "latency_ms",
     "first_token_ms",
     "request_size",
@@ -97,6 +99,8 @@ fn row(row: &RequestLogExportRow, include_bodies: bool) -> String {
         entry.output_tokens.to_string(),
         entry.cache_read_tokens.to_string(),
         entry.cache_creation_tokens.to_string(),
+        entry.reasoning_tokens.to_string(),
+        entry.usage_missing.to_string(),
         opt_num(entry.latency_ms),
         opt_num(entry.first_token_ms),
         entry.request_size.to_string(),
@@ -178,6 +182,8 @@ mod tests {
             output_tokens: 200,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
             latency_ms: Some(214),
             first_token_ms: None,
             request_headers: None,

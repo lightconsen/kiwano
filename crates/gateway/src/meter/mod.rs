@@ -79,6 +79,11 @@ pub struct Usage {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// Thinking tokens, where the provider breaks them out. A **slice** of
+    /// `output_tokens`, never an addition to it: every provider that reports
+    /// this bills it as output, so costs are unaffected — what it buys is the
+    /// one number that separates "thought for a while" from "wrote a lot".
+    pub reasoning_tokens: i64,
 }
 
 /// Incremental scanner fed with complete SSE lines; merges usage events.
@@ -86,6 +91,10 @@ pub struct Usage {
 pub struct UsageScanner {
     usage: Usage,
     model: Option<String>,
+    /// Whether a usage object was seen at all. A stream that never reports one
+    /// ends with the same zeros as a request that genuinely used nothing, and
+    /// the two are only distinguishable by remembering which happened.
+    saw_usage: bool,
 }
 
 impl UsageScanner {
@@ -150,6 +159,7 @@ impl UsageScanner {
 
     /// Merge a usage object (either flavor; last write wins per key).
     fn merge_usage(&mut self, u: &Value) {
+        self.saw_usage = true;
         let get = |key: &str| u.get(key).and_then(Value::as_i64);
         // Anthropic flavor (input/output_tokens are also the Responses API keys).
         if let Some(n) = get("input_tokens") {
@@ -203,6 +213,17 @@ impl UsageScanner {
         {
             self.usage.cache_read_tokens = n;
         }
+        // Thinking tokens, under the three names the flavours give them. A
+        // provider that reports none leaves this at zero, which is the same
+        // statement it makes about a request that did not think: nothing here
+        // can tell those apart, and nothing downstream tries to.
+        if let Some(n) = get("reasoning_tokens").or_else(|| {
+            u.pointer("/output_tokens_details/reasoning_tokens")
+                .or_else(|| u.pointer("/completion_tokens_details/reasoning_tokens"))
+                .and_then(Value::as_i64)
+        }) {
+            self.usage.reasoning_tokens = n;
+        }
         // Gemini flavor (`usageMetadata` on generateContent /
         // streamGenerateContent). Its `promptTokenCount` includes the cached
         // bucket, which is why the provider's `cache_inclusive` is set.
@@ -215,6 +236,9 @@ impl UsageScanner {
         if let Some(n) = get("cachedContentTokenCount") {
             self.usage.cache_read_tokens = n;
         }
+        if let Some(n) = get("thoughtsTokenCount") {
+            self.usage.reasoning_tokens = n;
+        }
     }
 
     /// Model seen in the stream (message_start / response.completed).
@@ -225,6 +249,12 @@ impl UsageScanner {
     /// Final accumulated usage.
     pub fn usage(&self) -> Usage {
         self.usage.clone()
+    }
+
+    /// Whether the stream ever reported usage. False at the end means every
+    /// zero in `usage` is "the upstream did not say".
+    pub fn saw_usage(&self) -> bool {
+        self.saw_usage
     }
 }
 
@@ -366,6 +396,59 @@ mod tests {
         assert!(usage.is_none());
         let (usage, _) = parse_response_usage(Protocol::OpenAI, b"");
         assert!(usage.is_none());
+    }
+
+    /// Thinking tokens, under the three names the providers give them. A
+    /// **slice** of `output_tokens`, which is why nothing downstream adds it to
+    /// anything — what it is for is telling "thought for a while" apart from
+    /// "wrote a lot", and no other number in the row can.
+    #[test]
+    fn parses_reasoning_tokens_in_every_spelling() {
+        // Responses API (what Codex sends).
+        let body = br#"{"id":"r1","model":"deepseek-v4-flash",
+            "usage":{"input_tokens":15302,"output_tokens":102,
+                     "output_tokens_details":{"reasoning_tokens":71},"total_tokens":15404}}"#;
+        let (usage, _) = parse_response_usage(Protocol::OpenAI, body);
+        assert_eq!(usage.unwrap().reasoning_tokens, 71);
+
+        // Chat completions.
+        let body = br#"{"usage":{"prompt_tokens":10,"completion_tokens":90,
+            "completion_tokens_details":{"reasoning_tokens":64}}}"#;
+        let (usage, _) = parse_response_usage(Protocol::OpenAI, body);
+        assert_eq!(usage.unwrap().reasoning_tokens, 64);
+
+        // Gemini calls it a thought.
+        let body = br#"{"modelVersion":"gemini-3-pro","usageMetadata":{"promptTokenCount":5,
+            "candidatesTokenCount":7,"thoughtsTokenCount":33}}"#;
+        let (usage, _) = parse_response_usage(Protocol::Gemini, body);
+        assert_eq!(usage.unwrap().reasoning_tokens, 33);
+
+        // A provider that reports none leaves it at zero, and a request that
+        // did not think looks the same — which is what the provider said.
+        let body = br#"{"usage":{"prompt_tokens":10,"completion_tokens":5}}"#;
+        let (usage, _) = parse_response_usage(Protocol::OpenAI, body);
+        assert_eq!(usage.unwrap().reasoning_tokens, 0);
+    }
+
+    /// The distinction v25 exists for: a stream that reports no usage ends with
+    /// the same zeros as one that reports zeroes, and only the scanner knows
+    /// which happened.
+    #[test]
+    fn a_stream_that_never_reports_usage_is_remembered_as_such() {
+        let mut quiet = UsageScanner::new();
+        quiet.feed_line(r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#);
+        quiet.feed_line("data: [DONE]");
+        assert!(!quiet.saw_usage(), "nothing was ever reported");
+        assert_eq!(quiet.usage().input_tokens, 0);
+
+        let mut reported = UsageScanner::new();
+        reported
+            .feed_line(r#"data: {"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}"#);
+        assert!(
+            reported.saw_usage(),
+            "zeroes were reported, which is not nothing"
+        );
+        assert_eq!(reported.usage().input_tokens, 0);
     }
 
     #[test]

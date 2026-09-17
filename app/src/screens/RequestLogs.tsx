@@ -96,6 +96,10 @@ function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
     `${r.method} ${r.path}${r.query ? `?${r.query}` : ""}`,
     `agent: ${r.agent ?? "—"} · provider: ${r.provider_id ?? "—"} · model: ${r.model ?? "—"} · status: ${r.status_code}`,
     `latency: ${r.latency_ms ?? "—"}ms · tokens: in ${r.input_tokens} / out ${r.output_tokens}`,
+    // Only when the upstream broke it out: a provider that does not report
+    // thinking is not saying the model did none.
+    ...(r.reasoning_tokens > 0 ? [`reasoning: ${r.reasoning_tokens} (of the output)`] : []),
+    ...(r.usage_missing ? ["usage: not reported by the upstream"] : []),
   ];
   if (r.error_kind) lines.push(`error: ${r.error_kind} ${r.error_message ?? ""}`);
   if (d?.session_id) lines.push(`session: ${d.session_id}`);

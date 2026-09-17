@@ -1132,6 +1132,8 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
             output_tokens: 20,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
             latency_ms: Some(42),
             first_token_ms: None,
             request_headers: None,

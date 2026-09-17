@@ -50,6 +50,8 @@ function entry(id: number): RequestLogEntry {
     output_tokens: 200,
     cache_read_tokens: 0,
     cache_creation_tokens: 0,
+    reasoning_tokens: 0,
+    usage_missing: false,
     latency_ms: 900,
     first_token_ms: 300,
     request_headers: null,

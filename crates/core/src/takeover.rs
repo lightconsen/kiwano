@@ -2506,19 +2506,17 @@ base_url = "https://relay.example.com/v1"
             home.join("oc-agent").join("models.json")
         );
 
-        // …and `$VAR`/`${VAR}` against the environment Kiwano was handed.
+        // …and `$VAR`/`${VAR}` against the environment Kiwano was handed. The
+        // value sits under `home` so it is absolute on every platform — a
+        // literal `/tmp/...` is relative on Windows, where the rule under
+        // test refuses exactly that (see `abs_dir`).
+        let oc_root = home.join("oc-root");
         let mut vars = no_vars();
-        vars.insert("OC_ROOT".into(), "/tmp/oc-root".into());
+        vars.insert("OC_ROOT".into(), oc_root.to_string_lossy().into_owned());
         write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"${OC_ROOT}/agent"}]}}"#);
-        assert_eq!(
-            catalog_of(&vars),
-            PathBuf::from("/tmp/oc-root/agent/models.json")
-        );
+        assert_eq!(catalog_of(&vars), oc_root.join("agent").join("models.json"));
         write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"$OC_ROOT/agent"}]}}"#);
-        assert_eq!(
-            catalog_of(&vars),
-            PathBuf::from("/tmp/oc-root/agent/models.json")
-        );
+        assert_eq!(catalog_of(&vars), oc_root.join("agent").join("models.json"));
 
         // A relative override or an unknown variable is refused rather than
         // guessed at — both would write the catalogue where the runtime never

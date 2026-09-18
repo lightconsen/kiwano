@@ -80,6 +80,9 @@ pub enum Command {
     /// Usage totals
     Usage(UsageArgs),
 
+    /// How the agents spend their tokens: cache, context growth, retries
+    Insights(InsightsArgs),
+
     /// Coding agents: detect them, and route them through the gateway
     #[command(subcommand)]
     Agents(AgentsCmd),
@@ -650,6 +653,19 @@ pub enum KeysCmd {
 
 #[derive(Debug, Args)]
 pub struct UsageArgs {
+    /// Window size in days
+    #[arg(long, default_value_t = 7, value_name = "DAYS")]
+    pub days: i64,
+
+    /// Only this agent
+    #[arg(long, value_name = "AGENT")]
+    pub agent: Option<String>,
+}
+
+/// The window flags mirror `usage`: the insights report answers "how are my
+/// agents working", and that question wants the same span `usage` reports on.
+#[derive(Debug, Args)]
+pub struct InsightsArgs {
     /// Window size in days
     #[arg(long, default_value_t = 7, value_name = "DAYS")]
     pub days: i64,

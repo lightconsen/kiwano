@@ -227,6 +227,7 @@ strategy that ignores one is rejected rather than accepted as a no-op.
 ```
 kiwano usage [--days N] [--agent AGENT] [--provider ID]
 kiwano dashboard [--window today|7d|30d] [--provider ID] [--agent AGENT]
+kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
@@ -239,6 +240,16 @@ kiwano logs dir
 
 `--from` is inclusive and `--to` exclusive, matching the store's half-open
 range.
+
+`insights` is the one-page report about *how* the tokens are being spent: a
+per-agent scorecard (cache hit rate, session context growth, reasoning share,
+retries), rule findings tagged `cache` / `bloat` / `retry` / `overhead`, and
+the sessions whose context grew the most. Every finding carries the
+`request_logs` ids behind it — reopen one with `kiwano logs show <ID>` — and
+everything is computed locally from the log: bodies are sampled to measure
+the fixed tools/system payload, but they never leave this machine, and no
+amounts appear anywhere (cost is the dashboard's job). The global `--json`
+flag yields the same report for machine consumption.
 
 `alerts` is **read-only by default**. The dedup key it would otherwise write is
 the same one the desktop app consults before raising a notification, so a

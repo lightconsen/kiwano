@@ -1540,3 +1540,162 @@ fn json_stdout_stays_parseable_while_notes_go_to_stderr() {
         "the reload note belongs on stderr: {err}"
     );
 }
+
+// ── insights ────────────────────────────────────────────────────────────────
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+/// Seed one request-log row with the fields the insights rules read. The
+/// generic `seed_log` above pins "now" and one shape; the rules need control
+/// over time (retry windows), sessions (growth) and tokens (cache rate).
+#[allow(clippy::too_many_arguments)]
+fn seed_insight_row(
+    db: &Path,
+    ts_unix: i64,
+    agent: Option<&str>,
+    session: Option<&str>,
+    status: i64,
+    error_kind: Option<&str>,
+    input: i64,
+    cache_read: i64,
+) -> i64 {
+    let store = Store::open(db).unwrap();
+    store
+        .insert_request_log(&kiwanod::store::RequestLogNew {
+            ts: kiwanod::store::rfc3339_from_unix(ts_unix),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: agent.map(str::to_string),
+            attribution: Some("key".into()),
+            provider_id: Some("p1".into()),
+            model: Some("m1".into()),
+            status_code: status,
+            error_kind: error_kind.map(str::to_string),
+            error_message: None,
+            session_id: session.map(str::to_string),
+            is_streaming: false,
+            input_tokens: input,
+            output_tokens: 10,
+            cache_read_tokens: cache_read,
+            cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
+            latency_ms: Some(42),
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: None,
+            response_body: None,
+            request_size: 10,
+            response_size: 20,
+            truncated: false,
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn insights_reports_a_retry_storm_with_evidence() {
+    let (_dir, db) = temp_db();
+    // The shape the real log showed on 2026-09-09: one errored request, then
+    // resends every few seconds inside the same minute.
+    let base = now_unix() - 3600;
+    for i in 0..4 {
+        seed_insight_row(
+            &db,
+            base + i * 5,
+            Some("codex"),
+            None,
+            500,
+            Some("protocol_mismatch"),
+            100,
+            0,
+        );
+    }
+
+    let (code, out, err) = run(&db, &["insights", "--days", "7"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Kiwano insights"), "{out}");
+    assert!(out.contains("Scorecard"), "{out}");
+    assert!(
+        out.contains("4 requests · 0 sessions · 1 agents · 4 errors (100.0%)"),
+        "{out}"
+    );
+    assert!(out.contains("3 retries in 15s"), "{out}");
+    assert!(out.contains("protocol_mismatch"), "{out}");
+    assert!(out.contains("evidence #1 #2 #3 #4"), "{out}");
+    assert!(out.contains("never leave this machine"), "{out}");
+
+    let (code, out, err) = run(&db, &["--json", "insights", "--days", "7"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["totals"]["requests"], 4);
+    assert_eq!(v["totals"]["errors"], 4);
+    assert_eq!(v["days"], 7);
+    assert_eq!(v["scorecard"][0]["agent"], "codex");
+    assert_eq!(v["scorecard"][0]["retries"], 3);
+    assert_eq!(v["findings"][0]["tag"], "retry");
+    assert_eq!(
+        v["findings"][0]["evidence"],
+        serde_json::json!([1, 2, 3, 4])
+    );
+}
+
+#[test]
+fn insights_flags_a_session_that_never_compacted() {
+    let (_dir, db) = temp_db();
+    let base = now_unix() - 3600;
+    for i in 0..5 {
+        seed_insight_row(
+            &db,
+            base + i * 120,
+            Some("cline"),
+            Some("s-77"),
+            200,
+            None,
+            10_000 * (1 << i),
+            0,
+        );
+    }
+
+    let (code, out, err) = run(&db, &["insights"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Top sessions by context growth"), "{out}");
+    assert!(out.contains("s-77"), "{out}");
+    assert!(out.contains("16.0×"), "{out}");
+    assert!(out.contains("never compacted"), "{out}");
+    // The bloat finding names the ends of the session, not all five rows.
+    assert!(out.contains("evidence #1 … #5"), "{out}");
+}
+
+#[test]
+fn insights_honors_the_agent_filter_and_rejects_a_bad_window() {
+    let (_dir, db) = temp_db();
+    let base = now_unix() - 3600;
+    seed_insight_row(&db, base, Some("codex"), None, 200, None, 1000, 0);
+    seed_insight_row(&db, base + 1, Some("claude"), None, 200, None, 1000, 500);
+
+    let (code, out, err) = run(&db, &["insights", "--agent", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("claude"), "{out}");
+    assert!(!out.contains("codex"), "{out}");
+    // claude read 500 of 1500 input-side tokens from cache.
+    assert!(out.contains("33%"), "{out}");
+
+    // An empty window says so instead of printing empty tables.
+    let (code, out, err) = run(&db, &["insights", "--agent", "nobody"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("(no requests in window)"), "{out}");
+
+    let (code, _, err) = run(&db, &["insights", "--days", "0"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--days"), "{err}");
+}

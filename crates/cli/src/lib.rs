@@ -258,6 +258,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::usage(args, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Insights(args) => {
+            cmds::insights(args, ctx)?;
+            Ok(EXIT_OK)
+        }
         Command::Agents(cmd) => {
             cmds::agents(cmd, ctx)?;
             Ok(EXIT_OK)

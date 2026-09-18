@@ -16,6 +16,7 @@
 //! - [`sync`]: the Hub catalog and pricing sync.
 //! - [`pricing`]: the GUI-readable price table and currency conversion.
 //! - [`csv`]: request-log export.
+//! - [`insights`]: the metrics and rules behind `kiwano insights`.
 //!
 //! Nothing here depends on Tauri, and nothing here may: the CLI links this crate
 //! without a display server anywhere in sight.
@@ -25,6 +26,7 @@ pub mod creds;
 pub mod csv;
 pub mod detect;
 pub mod import;
+pub mod insights;
 pub mod paths;
 pub mod pricing;
 pub mod share;

@@ -7,16 +7,19 @@
 use std::collections::BTreeMap;
 
 use kiwano_core::detect;
+use kiwano_core::insights;
 use kiwano_core::sidecar;
 use kiwano_core::vm;
 use kiwano_core::{import, pricing, share, sync};
-use kiwanod::store::{Provider, RequestLogFilter, StrategyType, UsageTotals};
+use kiwanod::store::{
+    Provider, RequestLogEntry, RequestLogFilter, Store, StrategyType, UsageTotals,
+};
 use kiwanod::strategy::QuotaConfig;
 
 use crate::cli::{
     AddArgs, AgentsCmd, BindingCmd, CatalogCmd, ConfigCmd, DashboardArgs, EditArgs, ForwardArgs,
-    GatewayCmd, ImportCmd, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd, RoutesCmd,
-    SettingsCmd, UsageArgs,
+    GatewayCmd, ImportCmd, InsightsArgs, KeysCmd, LogFilterArgs, LogsCmd, ProbeCmd, ProvidersCmd,
+    RoutesCmd, SettingsCmd, UsageArgs,
 };
 use crate::output::{ellipsize, fmt_amount, render_table};
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
@@ -657,6 +660,101 @@ struct UsageReport {
     agent: Option<String>,
     totals: UsageTotals,
     by_provider: Vec<(String, String, UsageTotals)>,
+}
+
+// ── insights ────────────────────────────────────────────────────────────────
+
+pub fn insights(args: &InsightsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
+    if args.days <= 0 {
+        return Err(CliError::usage("--days must be a positive number"));
+    }
+    let now = vm::unix_now();
+    let window = insights::Window {
+        from: vm::rfc3339(now - args.days * 86_400),
+        to: vm::rfc3339(now),
+    };
+    let report = {
+        let store = ctx.store()?;
+        // The export read is the one uncapped-by-page path over request_logs;
+        // insights wants every row in the window, newest-first order included
+        // (the core builder sorts for itself). At the cap the report covers
+        // the newest EXPORT_ROW_CAP rows — the same honest ceiling the CSV
+        // export has.
+        let entries = store
+            .export_request_logs(
+                RequestLogFilter {
+                    agent: args.agent.as_deref(),
+                    from: Some(&window.from),
+                    to: Some(&window.to),
+                    ..Default::default()
+                },
+                kiwanod::store::EXPORT_ROW_CAP,
+            )
+            .map_err(runtime)?;
+        let bodies = sample_insight_bodies(store, &entries)?;
+        let rows: Vec<insights::InsightRow> = entries.iter().map(insight_row_of).collect();
+        insights::build_insights(args.days, args.agent.clone(), window, &rows, &bodies)
+    };
+    let text = render_insights(&report);
+    ctx.out.emit(&report, || text);
+    Ok(())
+}
+
+fn insight_row_of(e: &RequestLogEntry) -> insights::InsightRow {
+    insights::InsightRow {
+        id: e.id,
+        ts: e.ts.clone(),
+        agent: e.agent.clone(),
+        provider_id: e.provider_id.clone(),
+        model: e.model.clone(),
+        session_id: e.session_id.clone(),
+        status_code: e.status_code,
+        error_kind: e.error_kind.clone(),
+        input_tokens: e.input_tokens,
+        output_tokens: e.output_tokens,
+        cache_read_tokens: e.cache_read_tokens,
+        cache_creation_tokens: e.cache_creation_tokens,
+        reasoning_tokens: e.reasoning_tokens,
+        request_size: e.request_size,
+    }
+}
+
+/// The newest untruncated body per agent, for the busiest four agents. The
+/// overhead rule parses JSON, so a truncated capture is skipped: it would not
+/// parse, and its ratios would be meaningless even if it did. Bodies stay
+/// inside this process — only the measurement reaches the report.
+fn sample_insight_bodies(
+    store: &Store,
+    entries: &[RequestLogEntry],
+) -> Result<Vec<insights::BodySample>, CliError> {
+    // `entries` arrive newest-first, so the first sighting of an agent is
+    // already its most recent row.
+    let mut per_agent: BTreeMap<Option<String>, (i64, i64)> = BTreeMap::new();
+    for e in entries {
+        let slot = per_agent.entry(e.agent.clone()).or_insert((0, e.id));
+        slot.0 += 1;
+    }
+    let mut agents: Vec<(Option<String>, (i64, i64))> = per_agent.into_iter().collect();
+    agents.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then_with(|| a.0.cmp(&b.0)));
+
+    let mut samples = Vec::new();
+    for (agent, (_, latest_id)) in agents.into_iter().take(4) {
+        let Some(detail) = store.get_request_log(latest_id).map_err(runtime)? else {
+            continue;
+        };
+        if detail.entry.truncated {
+            continue;
+        }
+        let Some(request_body) = detail.request_body else {
+            continue;
+        };
+        samples.push(insights::BodySample {
+            log_id: latest_id,
+            agent,
+            request_body,
+        });
+    }
+    Ok(samples)
 }
 
 // ── agents ──────────────────────────────────────────────────────────────────
@@ -2050,6 +2148,150 @@ fn render_usage(report: &UsageReport) -> String {
         &[1, 2, 3],
     ));
     out
+}
+
+/// The insights report: title line, totals, scorecard with the metric
+/// definitions under it, findings with evidence ids, the sessions whose
+/// context grew the most, and the privacy footer. No amounts anywhere —
+/// money is the dashboard's business, this page is about tokens.
+fn render_insights(report: &insights::InsightsReport) -> String {
+    fn date(ts: &str) -> &str {
+        ts.get(..10).unwrap_or(ts)
+    }
+    let dash = || "–".to_string();
+    let t = &report.totals;
+    let mut out = format!(
+        "Kiwano insights · {} → {} · local only",
+        date(&report.window.from),
+        date(&report.window.to)
+    );
+    out.push_str(&format!(
+        "\n{} requests · {} sessions · {} agents · {} errors ({:.1}%)",
+        t.requests, t.sessions, t.agents, t.errors, t.error_pct
+    ));
+    if t.requests == 0 {
+        out.push_str("\n(no requests in window)");
+        return out;
+    }
+
+    out.push_str("\n\nScorecard");
+    let rows: Vec<Vec<String>> = report
+        .scorecard
+        .iter()
+        .map(|s| {
+            vec![
+                s.agent.clone().unwrap_or_else(dash),
+                s.requests.to_string(),
+                s.sessions.to_string(),
+                s.cache_hit_pct
+                    .map(|p| format!("{p}%"))
+                    .unwrap_or_else(dash),
+                s.ctx_growth
+                    .map(|g| format!("{g:.1}×"))
+                    .unwrap_or_else(dash),
+                s.reasoning_pct
+                    .map(|p| format!("{p}%"))
+                    .unwrap_or_else(dash),
+                s.retries.to_string(),
+            ]
+        })
+        .collect();
+    out.push('\n');
+    out.push_str(&render_table(
+        &[
+            "AGENT",
+            "REQS",
+            "SESS",
+            "CACHE HIT",
+            "CTX GROWTH",
+            "REASONING",
+            "RETRIES",
+        ],
+        &rows,
+        &[1, 2, 3, 4, 5, 6],
+    ));
+    // The denominators are printed rather than left to guesswork: a rate
+    // whose formula the reader has to assume is an invitation to misread it.
+    out.push_str("\n  cache hit  = cache_read / (input + cache_read + cache_creation)");
+    out.push_str("\n  ctx growth = median last-turn / first-turn context across sessions");
+    out.push_str("\n  reasoning  = reasoning / output tokens; – means never reported");
+    out.push_str("\n  retries    = resends within 60s of an errored request, same session + model");
+
+    out.push_str("\n\nFindings");
+    if report.findings.is_empty() {
+        out.push_str("\n(no findings in this window)");
+    } else {
+        for (i, f) in report.findings.iter().enumerate() {
+            let prefix = format!("{}. [{}] ", i + 1, f.tag);
+            let agent = f
+                .agent
+                .as_deref()
+                .map(|a| format!("{a}: "))
+                .unwrap_or_default();
+            out.push_str(&format!("\n{prefix}{agent}{}", f.summary));
+            // Continuation lines align under the sentence, not under the
+            // number: the finding reads as one block per rule.
+            let pad = " ".repeat(prefix.len());
+            if !f.detail.is_empty() {
+                out.push_str(&format!("\n{pad}{}", f.detail));
+            }
+            if !f.evidence.is_empty() {
+                out.push_str(&format!("\n{pad}evidence {}", render_evidence(f)));
+            }
+        }
+    }
+
+    if !report.top_sessions.is_empty() {
+        out.push_str("\n\nTop sessions by context growth");
+        let rows: Vec<Vec<String>> = report
+            .top_sessions
+            .iter()
+            .map(|s| {
+                vec![
+                    s.session_id.clone(),
+                    s.agent.clone().unwrap_or_else(dash),
+                    s.turns.to_string(),
+                    format!(
+                        "{} → {}",
+                        vm::fmt_tokens(s.first_context),
+                        vm::fmt_tokens(s.last_context)
+                    ),
+                    format!("{:.1}×", s.growth),
+                ]
+            })
+            .collect();
+        out.push('\n');
+        out.push_str(&render_table(
+            &[
+                "SESSION",
+                "AGENT",
+                "TURNS",
+                "FIRST → LAST CONTEXT",
+                "GROWTH",
+            ],
+            &rows,
+            &[2, 4],
+        ));
+    }
+
+    out.push_str(
+        "\n\nAll statistics aggregate request_logs locally; bodies and keys never leave this machine.",
+    );
+    out
+}
+
+/// `#a #b #c` — or `#a … #z` when the ids name the ends of a range, or a
+/// trailing `…` when the list was capped. The id is the way back to the row:
+/// `kiwano logs show <id>`.
+fn render_evidence(f: &insights::Finding) -> String {
+    let ids: Vec<String> = f.evidence.iter().map(|id| format!("#{id}")).collect();
+    if f.evidence_span && ids.len() == 2 {
+        format!("{} … {}", ids[0], ids[1])
+    } else if f.evidence_span {
+        format!("{} …", ids.join(" "))
+    } else {
+        ids.join(" ")
+    }
 }
 
 #[cfg(test)]

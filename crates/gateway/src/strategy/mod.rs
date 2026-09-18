@@ -397,8 +397,11 @@ impl StrategyEngine {
             StrategyType::Single => Self::primary(usable)?,
             StrategyType::Failover => self.select_failover(usable).await?,
             StrategyType::Roundrobin => self.select_roundrobin(usable, session).await?,
-            StrategyType::Timewindow => self.select_timewindow(usable, limits.tz_offset_minutes()),
-            StrategyType::Quota => self.select_quota(store, usable, limits).await?,
+            StrategyType::Timewindow => {
+                self.select_timewindow(usable, session, limits.tz_offset_minutes())
+                    .await?
+            }
+            StrategyType::Quota => self.select_quota(store, usable, limits, session).await?,
         };
         let mut plan = Vec::with_capacity(usable.candidates.len());
         plan.push(first.clone());
@@ -443,6 +446,37 @@ impl StrategyEngine {
             return Some(route.candidates[idx].clone());
         }
         None
+    }
+
+    /// [`Self::pinned`] for the strategies that *drain*: pin a conversation, and
+    /// only a conversation.
+    ///
+    /// A request that names no session cannot be drained, because nothing can
+    /// tell a continuing conversation from a new one — and the table's key for
+    /// "no session" is shared by every such request of an agent, so pinning it
+    /// would hold the agent's entire un-named traffic on whichever provider
+    /// answered first and the strategy would never fire again. Those requests
+    /// are chosen afresh every time, which is what they got before.
+    async fn drain(
+        &self,
+        route: &AgentRoute,
+        session: Option<&str>,
+    ) -> Option<crate::router::UpstreamProvider> {
+        let session = session?;
+        self.pinned(route, Some(session)).await
+    }
+
+    /// Record where a session was sent — the other half of [`Self::drain`], and
+    /// silent for a request that named none.
+    fn assign_drained(
+        &self,
+        route: &AgentRoute,
+        session: Option<&str>,
+        provider: &crate::router::UpstreamProvider,
+    ) {
+        if let Some(session) = session {
+            self.assign(route, Some(session), provider);
+        }
     }
 
     /// Record where a session was sent, so its next request can stay there.
@@ -523,35 +557,59 @@ impl StrategyEngine {
 
     /// timewindow: match the user's local time windows in candidate order
     /// (overnight supported); falls back to the primary on no match.
-    fn select_timewindow(
+    async fn select_timewindow(
         &self,
         route: &AgentRoute,
+        session: Option<&str>,
         tz_offset_minutes: i64,
-    ) -> crate::router::UpstreamProvider {
-        let now_min = local_minutes_of_day(tz_offset_minutes);
-        for c in &route.candidates {
-            if let (Some(s), Some(e)) = (&c.win_start, &c.win_end) {
-                if in_window(now_min, s, e) {
-                    return c.clone();
-                }
-            }
+    ) -> Result<crate::router::UpstreamProvider> {
+        // The window decides where a conversation *starts*. One that is already
+        // running keeps its provider when the window closes, rather than being
+        // handed to the other candidate mid-conversation.
+        if let Some(pinned) = self.drain(route, session).await {
+            return Ok(pinned);
         }
-        route.candidates[0].clone()
+        let now_min = local_minutes_of_day(tz_offset_minutes);
+        let chosen = route
+            .candidates
+            .iter()
+            .find(|c| match (&c.win_start, &c.win_end) {
+                (Some(s), Some(e)) => in_window(now_min, s, e),
+                _ => false,
+            })
+            .cloned()
+            .unwrap_or_else(|| route.candidates[0].clone());
+        self.assign_drained(route, session, &chosen);
+        Ok(chosen)
     }
 
-    /// quota: primary's same-day usage over threshold → sink to backups (failover semantics); under → primary.
+    /// quota: the primary's same-day usage decides where a conversation
+    /// **starts** — under the threshold the primary, over it a backup. One that
+    /// is already running stays where it is (see [`Self::pinned`]).
+    ///
+    /// That last part is the difference between draining and turning over. The
+    /// threshold used to move the whole agent at the moment the number was
+    /// crossed, which is mid-conversation for whoever happened to be talking —
+    /// and the conversation paid for it by rebuilding a prompt cache the
+    /// provider had already charged for once.
     async fn select_quota(
         &self,
         store: &Store,
         route: &AgentRoute,
         limits: &crate::limits::LimitState,
+        session: Option<&str>,
     ) -> Result<crate::router::UpstreamProvider> {
+        if let Some(pinned) = self.drain(route, session).await {
+            return Ok(pinned);
+        }
         let Some(cfg) = QuotaConfig::parse(route.config.as_deref()) else {
             tracing::warn!(
                 agent = %route.agent,
                 "quota strategy without valid config; degrading to primary"
             );
-            return Self::primary(route);
+            let primary = Self::primary(route)?;
+            self.assign_drained(route, session, &primary);
+            return Ok(primary);
         };
         let primary = &route.candidates[0];
         // The user's day, from the snapshot — the same boundary the provider
@@ -565,6 +623,7 @@ impl StrategyEngine {
         );
         let totals = store.usage_totals_for_provider(&primary.id, since.as_deref())?;
         if cfg.consumed(&totals) < cfg.limit {
+            self.assign_drained(route, session, primary);
             return Ok(primary.clone());
         }
         tracing::info!(
@@ -572,14 +631,17 @@ impl StrategyEngine {
             provider = %primary.id,
             used = cfg.consumed(&totals),
             limit = cfg.limit,
-            "quota threshold reached; failing over to backup"
+            "quota threshold reached; new sessions go to the backups"
         );
         for i in 1..route.candidates.len() {
             if self.candidate_available(route, i).await {
+                self.assign_drained(route, session, &route.candidates[i]);
                 return Ok(route.candidates[i].clone());
             }
         }
-        Self::primary(route)
+        let primary = Self::primary(route)?;
+        self.assign_drained(route, session, &primary);
+        Ok(primary)
     }
 
     /// Every breaker's current state, keyed `agent:provider_id` — what the
@@ -1431,15 +1493,6 @@ mod tests {
         );
     }
 
-    /// The threshold decides where a conversation *starts*. One that is already
-    /// running finishes where it is — the switch is for the next one.
-    ///
-    /// This is the difference the drain makes: the same usage state used to move
-    /// the whole agent, mid-conversation for whoever was talking, and the
-    /// conversation paid for it by rebuilding a prefix its provider had already
-    /// cached and charged for once.
-    /// The window decides where a conversation starts; closing it does not pull
-    /// a running one across.
     #[tokio::test]
     async fn quota_over_limit_sinks_to_backup() {
         let s = store();
@@ -1498,6 +1551,92 @@ mod tests {
                 .unwrap()
                 .id,
             "b"
+        );
+    }
+
+    /// The threshold decides where a conversation *starts*. One that is already
+    /// running finishes where it is — the switch is for the next one.
+    ///
+    /// This is the difference the drain makes: the same usage state used to move
+    /// the whole agent, mid-conversation for whoever was talking, and the
+    /// conversation paid for it by rebuilding a prefix its provider had already
+    /// cached and charged for once.
+    #[tokio::test]
+    async fn quota_drains_a_running_session_and_moves_the_next() {
+        let s = store();
+        let engine = StrategyEngine::new();
+        let mut r = route(
+            StrategyType::Quota,
+            vec![candidate("a", 1, None), candidate("b", 1, None)],
+        );
+        r.config = Some(r#"{"limit": 5, "unit": "requests"}"#.into());
+        let limits = crate::limits::LimitState::default();
+
+        // A conversation starts while the primary is under its quota.
+        assert_eq!(
+            engine.select(&s, &r, Some("s1"), &limits).await.unwrap().id,
+            "a"
+        );
+
+        // The primary crosses the threshold while that conversation is running.
+        for _ in 0..5 {
+            s.record_usage(&usage_row("a")).unwrap();
+        }
+
+        // It stays: what it has cached on the primary is worth more than the
+        // quota the switch would spread.
+        assert_eq!(
+            engine.select(&s, &r, Some("s1"), &limits).await.unwrap().id,
+            "a",
+            "a running conversation is not moved by a threshold"
+        );
+        // A conversation *starting* now goes to the backup, which is the whole
+        // point of the strategy.
+        assert_eq!(
+            engine.select(&s, &r, Some("s2"), &limits).await.unwrap().id,
+            "b"
+        );
+    }
+
+    /// The window decides where a conversation starts; closing it does not pull
+    /// a running one across.
+    #[tokio::test]
+    async fn timewindow_drains_a_running_session_and_moves_the_next() {
+        let engine = StrategyEngine::new();
+        let s = store();
+        let limits = crate::limits::LimitState::default();
+
+        // A wide-open window on `b`, which wins over `a` while it holds — so the
+        // first conversation starts there, and the primary is what a
+        // out-of-window request falls back to.
+        let mut r = route(
+            StrategyType::Timewindow,
+            vec![
+                candidate("a", 1, None),
+                candidate("b", 1, Some(("00:00", "23:59"))),
+            ],
+        );
+        assert_eq!(
+            engine.select(&s, &r, Some("s1"), &limits).await.unwrap().id,
+            "b"
+        );
+
+        // The window closes — the candidates are what the engine reads, so
+        // replacing `b`'s window with one that is not now is what "the clock
+        // moved on" looks like here.
+        let (start, end) = narrow_future_window();
+        r.candidates[1].win_start = Some(start.into());
+        r.candidates[1].win_end = Some(end.into());
+
+        assert_eq!(
+            engine.select(&s, &r, Some("s1"), &limits).await.unwrap().id,
+            "b",
+            "a running conversation is not moved by a window closing"
+        );
+        assert_eq!(
+            engine.select(&s, &r, Some("s2"), &limits).await.unwrap().id,
+            "a",
+            "a conversation starting now follows the window — and the fallback"
         );
     }
 

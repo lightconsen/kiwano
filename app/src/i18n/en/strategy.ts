@@ -19,8 +19,9 @@ export const strategy = {
   roundrobinHint:
     "New sessions rotate by weight; sticky per session to keep the upstream prompt cache",
   timewindowHint:
-    "Pick by each candidate's local time window; fall back to the primary when no window matches",
-  quotaHint: "Once today's primary reaches the number below, send to standbys",
+    "A candidate's local time window decides where a session starts; one already running keeps its provider, and a request with no window falls back to the primary",
+  quotaHint:
+    "Once today's primary reaches the number below, sessions that start after that go to the standbys — one already running keeps its provider",
 
   // ── Quota-fallback unit select ──
   unitRequestsDay: "requests/day",

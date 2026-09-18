@@ -15,8 +15,9 @@ export const strategy = {
   singleHint: "始终使用主用 Provider",
   failoverHint: "故障时按顺序落到各备用，恢复后切回",
   roundrobinHint: "新会话按权重轮转；同一会话保持粘性，以复用上游提示缓存",
-  timewindowHint: "按各候选的本地时间窗口选择；没有窗口匹配时回退到主用",
-  quotaHint: "当天主用达到下方数值后，改发往备用",
+  timewindowHint:
+    "由候选的本地时间窗口决定会话从哪开始；已在跑的会话保持原 provider，没有窗口匹配时回退到主用",
+  quotaHint: "当天主用达到下方数值后，新会话改发往备用；已在跑的会话保持原 provider",
 
   // ── Quota-fallback unit select ──
   unitRequestsDay: "requests/天",

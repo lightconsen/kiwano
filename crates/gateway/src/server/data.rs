@@ -303,24 +303,63 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     unreachable!("the loop returns on its last iteration")
 }
 
+/// The request headers through which an agent states its session id. Every
+/// value is the client's own — nothing is derived here; an agent that sends
+/// none of these and none of the body markers below simply has no session.
+///
+/// - `x-claude-code-session-id` — Claude Code 2.1.276 and newer. Read ahead
+///   of its `metadata.user_id`, which is a JSON blob around the id rather
+///   than the id itself.
+/// - `x-grok-session-id` — grok-build, unconditionally on every request.
+/// - `x-session-id` — OpenCode, on every request to every provider.
+/// - `session_id`, `x-session-affinity` — OpenClaw, when its model declares
+///   `sendSessionAffinityHeaders` (the takeover writes that declaration);
+///   OpenCode sends `x-session-affinity` too.
+/// - `session-id` — Codex, agreeing with the body markers below.
+const SESSION_HEADERS: [&str; 6] = [
+    "x-claude-code-session-id",
+    "x-grok-session-id",
+    "x-session-id",
+    "x-session-affinity",
+    "session_id",
+    "session-id",
+];
+
 /// Roundrobin session identity (tech.md §4.7: session-granularity rotation to
 /// preserve the upstream prompt cache): the explicit `x-kw-session` header
-/// wins, then the Anthropic body's `metadata.user_id`, then the Responses
-/// body's `client_metadata.session_id` (which is what Codex sends), then
+/// wins, then the agents' own session headers ([`SESSION_HEADERS`]), then the
+/// Anthropic body's `metadata.user_id`, then the Responses body's
+/// `client_metadata.session_id` (which is what Codex sends), then
 /// `prompt_cache_key`, then body top-level `session_id`.
 ///
-/// The last two are not called "session" by the client that sends them, and
-/// they are read anyway: a `prompt_cache_key` is the client stating which
-/// requests share a cache prefix, which is the whole reason to keep a session
-/// on one candidate. Codex sends both and they agree; a client whose
-/// `prompt_cache_key` changes per request gets a fresh session each time,
-/// which is the behaviour it would have had without any hint at all — so
-/// reading it cannot make a client worse off than it is today, only better.
+/// The headers tier exists because three agents state their session nowhere
+/// else: grok-build and OpenCode only put it in headers, and OpenClaw only
+/// when the takeover has declared the model (see
+/// `upsert_openclaw_models_json`). They outrank the body tier for Claude Code
+/// because its body marker is a JSON blob with the id inside it; for every
+/// other agent the two tiers either agree or only one is present.
+///
+/// The last two body markers are not called "session" by the client that
+/// sends them, and they are read anyway: a `prompt_cache_key` is the client
+/// stating which requests share a cache prefix, which is the whole reason to
+/// keep a session on one candidate. Codex sends both and they agree; a client
+/// whose `prompt_cache_key` changes per request gets a fresh session each
+/// time, which is the behaviour it would have had without any hint at all —
+/// so reading it cannot make a client worse off than it is today, only
+/// better.
 pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<String> {
     if let Some(v) = headers.get("x-kw-session").and_then(|v| v.to_str().ok()) {
         let v = v.trim();
         if !v.is_empty() {
             return Some(v.to_string());
+        }
+    }
+    for name in SESSION_HEADERS {
+        if let Some(v) = headers.get(name).and_then(|v| v.to_str().ok()) {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
         }
     }
     let v: serde_json::Value = serde_json::from_slice(body).ok()?;
@@ -440,6 +479,67 @@ mod tests {
         );
         // A client that sends neither is exactly where it was before.
         assert_eq!(session_hint(&empty, br#"{"model":"gpt-5.1"}"#), None);
+    }
+
+    #[test]
+    fn session_hint_reads_the_agents_own_headers() {
+        let mut h = axum::http::HeaderMap::new();
+
+        // grok-build states its session in a header and nowhere else.
+        h.insert("x-grok-session-id", "gs-1".parse().unwrap());
+        assert_eq!(
+            session_hint(&h, br#"{"model":"grok-4"}"#).as_deref(),
+            Some("gs-1")
+        );
+
+        // OpenCode sends two spellings of the same id; the first wins.
+        h.clear();
+        h.insert("x-session-id", "ses_abc123".parse().unwrap());
+        h.insert("x-session-affinity", "ses_abc123".parse().unwrap());
+        assert_eq!(
+            session_hint(&h, br#"{"model":"gpt-5.1"}"#).as_deref(),
+            Some("ses_abc123")
+        );
+
+        // OpenClaw's affinity set, including the underscore spelling.
+        h.clear();
+        h.insert("session_id", "oc-9".parse().unwrap());
+        h.insert("x-client-request-id", "oc-9".parse().unwrap());
+        h.insert("x-session-affinity", "oc-9".parse().unwrap());
+        assert_eq!(session_hint(&h, b"").as_deref(), Some("oc-9"));
+
+        // Codex's header agrees with its body markers; either is the same id.
+        h.clear();
+        h.insert("session-id", "01a0838a-6ce7".parse().unwrap());
+        assert_eq!(
+            session_hint(&h, br#"{"prompt_cache_key":"01a0838a-6ce7"}"#).as_deref(),
+            Some("01a0838a-6ce7")
+        );
+
+        // Claude Code's header outranks its metadata.user_id, which is a JSON
+        // blob around the id rather than the id itself.
+        h.clear();
+        h.insert("x-claude-code-session-id", "uuid-clean".parse().unwrap());
+        assert_eq!(
+            session_hint(
+                &h,
+                br#"{"metadata":{"user_id":"{\"session_id\":\"uuid-clean\"}"}}"#
+            )
+            .as_deref(),
+            Some("uuid-clean")
+        );
+
+        // An explicit x-kw-session still outranks every agent header.
+        h.insert("x-kw-session", "mine".parse().unwrap());
+        assert_eq!(session_hint(&h, b"").as_deref(), Some("mine"));
+
+        // An empty agent header falls through to the body tier.
+        h.clear();
+        h.insert("x-grok-session-id", "  ".parse().unwrap());
+        assert_eq!(
+            session_hint(&h, br#"{"session_id":"body-1"}"#).as_deref(),
+            Some("body-1")
+        );
     }
 
     #[test]

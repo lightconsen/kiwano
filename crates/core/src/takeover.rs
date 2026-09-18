@@ -167,7 +167,34 @@ pub(crate) fn takeover_paths(
         "opencode" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
             .join("opencode")
             .join("opencode.json")]),
-        "openclaw" => Ok(vec![home.join(".openclaw").join("openclaw.json")]),
+        // The second file is OpenClaw's custom model catalogue — the takeover
+        // declares the selected model there because the catalogue's schema is
+        // the only one that accepts the session-affinity compat flag: the main
+        // config's validator rejects it and OpenClaw refuses to start on a
+        // config it cannot validate (see `upsert_openclaw_models_json`).
+        //
+        // Where the *runtime* reads that catalogue is the per-agent directory:
+        // `resolveAgentDir()` (the bundled agent-scope-config module) lands on
+        // `<state>/agents/<id>/agent`, the state root defaulting to
+        // `~/.openclaw`, or on the entry's own `agentDir` when the config sets
+        // one. The `~/.openclaw/agent/models.json` that `OPENCLAW_AGENT_DIR`
+        // and `getAgentDir()` name is what some CLI screens display, but model
+        // resolution never reads it — verified end to end against 2026.6.9: a
+        // catalogue written there leaves requests without the affinity
+        // headers, while the per-agent one delivers them. The agent id and the
+        // override live in the main config's content, so this arm reads it.
+        //
+        // `OPENCLAW_STATE_DIR` and `OPENCLAW_AGENT_DIR` are deliberately not
+        // honored: the main config's own root is not movable either as far as
+        // this code is concerned, and half-honoring a relocation would split
+        // the two files across two trees.
+        "openclaw" => {
+            let root = home.join(".openclaw");
+            Ok(vec![
+                root.join("openclaw.json"),
+                openclaw_catalog_path(&root, vars, home)?,
+            ])
+        }
         "hermes" => {
             // HERMES_HOME resolution matches hermes' own get_hermes_home()
             let dir = config_dir(vars, "HERMES_HOME", ".hermes", home)?;
@@ -325,6 +352,143 @@ fn named_dir(vars: &ShellVars, name: &str) -> EnvDir {
     kiwano_adapters::config::classify_dir(vars.get(name).map(OsStr::new))
 }
 
+/// Where OpenClaw's runtime reads the custom model catalogue:
+/// `<agentDir>/models.json`, the agentDir being the default agent entry's own
+/// `agentDir` when it has one, else `<state>/agents/<id>/agent`. This mirrors
+/// `resolveAgentDir()`/`resolveDefaultAgentId()` in OpenClaw's bundled
+/// agent-scope-config module; the state root defaults to `~/.openclaw`
+/// (`NEW_STATE_DIRNAME`), and the env relocations are deliberately not honored
+/// (see the openclaw arm of [`takeover_paths`]).
+///
+/// A main config that is missing or unparseable falls back to the `main`
+/// agent's default location — what OpenClaw itself does with an empty
+/// `agents.list`. Validating the config is the rewrite step's job, not this
+/// path computation's.
+fn openclaw_catalog_path(root: &Path, vars: &ShellVars, home: &Path) -> Result<PathBuf, String> {
+    let (id, agent_dir) = std::fs::read_to_string(root.join("openclaw.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .map(|cfg| openclaw_default_agent(&cfg))
+        .unwrap_or_else(|| ("main".to_string(), None));
+    match agent_dir {
+        Some(raw) => Ok(openclaw_user_path(&raw, vars, home)?.join("models.json")),
+        None => Ok(root
+            .join("agents")
+            .join(id)
+            .join("agent")
+            .join("models.json")),
+    }
+}
+
+/// OpenClaw's default agent: the first `agents.list` entry marked `default`,
+/// else the first entry, else `"main"` — `resolveDefaultAgentId()`. The second
+/// element is the entry's `agentDir` override, when it carries one.
+fn openclaw_default_agent(cfg: &Value) -> (String, Option<String>) {
+    let entries: Vec<&Value> = cfg["agents"]["list"]
+        .as_array()
+        .map(|list| list.iter().filter(|e| e.is_object()).collect())
+        .unwrap_or_default();
+    let Some(entry) = entries
+        .iter()
+        .find(|e| e["default"].as_bool() == Some(true))
+        .or_else(|| entries.first())
+    else {
+        return ("main".to_string(), None);
+    };
+    let id = openclaw_normalize_agent_id(entry["id"].as_str().unwrap_or(""));
+    let agent_dir = entry["agentDir"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    (id, agent_dir)
+}
+
+/// OpenClaw's `normalizeAgentId()`: trim, lowercase, runs of anything outside
+/// `[a-z0-9_-]` become a single `-`, leading and trailing `-` are stripped,
+/// and an empty result is `main`.
+fn openclaw_normalize_agent_id(raw: &str) -> String {
+    let mut out = String::new();
+    for c in raw.trim().to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "main".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// OpenClaw's `resolveUserPath()` for an `agentDir` from the config: a leading
+/// `~` expands against home, `$VAR` and `${VAR}` against the environment the
+/// caller handed in. What remains relative is refused rather than resolved
+/// against a working directory Kiwano cannot know — the same stance
+/// [`relative_env_refusal`] takes for environment variables.
+fn openclaw_user_path(raw: &str, vars: &ShellVars, home: &Path) -> Result<PathBuf, String> {
+    let mut text = raw.trim().to_string();
+    if text == "~" || text.starts_with("~/") {
+        text = home
+            .join(text.trim_start_matches('~').trim_start_matches('/'))
+            .to_string_lossy()
+            .into_owned();
+    }
+    let mut expanded = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '$' {
+            expanded.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let (name, next) = if chars.get(i + 1) == Some(&'{') {
+            match chars[i + 2..].iter().position(|c| *c == '}') {
+                Some(end) => (
+                    chars[i + 2..i + 2 + end].iter().collect::<String>(),
+                    i + 3 + end,
+                ),
+                None => (String::new(), i + 1),
+            }
+        } else {
+            let mut end = i + 1;
+            while end < chars.len() && (chars[end].is_ascii_alphanumeric() || chars[end] == '_') {
+                end += 1;
+            }
+            (chars[i + 1..end].iter().collect::<String>(), end)
+        };
+        if name.is_empty() {
+            expanded.push('$');
+            i += 1;
+            continue;
+        }
+        match vars.get(&name) {
+            Some(value) => expanded.push_str(value),
+            None => {
+                return Err(format!(
+                    "openclaw's agents.list agentDir `{raw}` references ${name}, which is not set \
+                     in the environment Kiwano can see. Set it, or make agentDir an absolute path."
+                ))
+            }
+        }
+        i = next;
+    }
+    match kiwano_adapters::config::classify_dir(Some(OsStr::new(&expanded))) {
+        EnvDir::Absolute(path) => Ok(path),
+        _ => Err(format!(
+            "openclaw's agents.list agentDir `{raw}` is not an absolute path — OpenClaw resolves a \
+             relative one against the directory it happens to run in, so where the model catalogue \
+             lives is not something Kiwano can know. Make agentDir absolute, or remove it to use \
+             the default location under {}.",
+            home.join(".openclaw").display()
+        )),
+    }
+}
+
 /// Takeover: read the original files → perform all rewrites in memory
 /// (can fail as a whole, zero side effects) → back up → atomic write.
 ///
@@ -439,6 +603,14 @@ fn compute_rewrites(
     // `updatedAt` the file's schema requires, and two files of one takeover
     // disagreeing about when it happened would be a detail with no meaning.
     let now = crate::vm::rfc3339(crate::vm::unix_now());
+    // openclaw's catalogue declares the model the main config selects, so it
+    // is rewritten against the main config's *original* content — the right
+    // side to read, because the main config's own rewrite keeps the model id
+    // and only swaps the provider prefix. `None` for every other agent.
+    let openclaw_config = originals
+        .iter()
+        .find(|f| f.path.ends_with("openclaw.json"))
+        .map(|f| f.content.as_str());
     originals
         .iter()
         .map(|original| {
@@ -451,6 +623,7 @@ fn compute_rewrites(
                     &target,
                     placeholder_key,
                     &now,
+                    openclaw_config,
                 )?,
             ))
         })
@@ -458,8 +631,11 @@ fn compute_rewrites(
 }
 
 /// The URL a takeover writes for `agent`: the gateway origin plus the path
-/// suffix that agent's base_url carries (the Responses-speaking agents append
-/// `/v1`; the Anthropic-shaped ones take the origin bare).
+/// suffix that agent's base_url carries. What the suffix is depends entirely
+/// on what the agent's own client appends: the Anthropic-shaped ones take the
+/// origin bare (their clients add `/v1/messages`), OpenAI-SDK-shaped ones want
+/// the version root (their clients add only `/chat/completions`), and agents
+/// that append nothing at all need the full route in the URL.
 fn gateway_target(agent: &str, data_port: u16) -> String {
     let suffix = match agent {
         "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
@@ -469,6 +645,11 @@ fn gateway_target(agent: &str, data_port: u16) -> String {
         // as-is — `/v1` included, trailing slashes trimmed, nothing appended —
         // so the version root is what its `baseUrl` holds.
         "cline" => "/v1",
+        // OpenClaw and Hermes pass their configured base URL straight to an
+        // OpenAI SDK (JS and Python respectively), which appends only
+        // `/chat/completions` — without the version segment here, every
+        // request lands on an unrouted path and the data plane 404s it.
+        "openclaw" | "hermes" => "/v1",
         // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
         // append nothing, so the route has to be in the URL we write.
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
@@ -773,10 +954,19 @@ fn rebuild_from_provider(
     route: &ProviderRoute,
     vars: &ShellVars,
 ) -> Result<(), String> {
+    // openclaw's catalogue is rewritten against the main config's selector, and
+    // `takeover_paths` puts the main config first, so one pass carries its
+    // content to the second file. Whatever the main config holds here — the
+    // user's original selector or one a previous takeover already repointed —
+    // the model id after the slash is the same.
+    let mut openclaw_config: Option<String> = None;
     for path in takeover_paths(agent, home, vars)? {
         let Ok(current) = std::fs::read_to_string(&path) else {
             continue;
         };
+        if path.ends_with("openclaw.json") {
+            openclaw_config = Some(current.clone());
+        }
         let content = if agent == "codex" && path.ends_with("config.toml") {
             let rebuilt = codex_config::rebuild_codex_live_from_provider(
                 &current,
@@ -801,6 +991,7 @@ fn rebuild_from_provider(
                 &route.base_url,
                 &route.api_key,
                 &crate::vm::rfc3339(crate::vm::unix_now()),
+                openclaw_config.as_deref(),
             )?
         };
         atomic_write_private(&path, content.as_bytes())?;
@@ -969,6 +1160,11 @@ fn value_is_ours(value: &str, agent: &str) -> bool {
 /// `updatedAt`); the rest ignore it. Codex never comes through here: its two
 /// files are transformed together by [`codex_rewrites`] onto the ported gate
 /// module.
+/// `sibling_config` is the content of the agent's primary config file, for
+/// the one secondary file that needs its context: openclaw's catalogue entry
+/// pins the session-affinity flag to the model id the primary config selects,
+/// so the two files have to be rewritten against the same selector. Every
+/// other arm ignores it, and `None` is what an agent with a single file gets.
 fn rewrite(
     agent: &str,
     path: &str,
@@ -976,6 +1172,7 @@ fn rewrite(
     target: &str,
     key: &str,
     now: &str,
+    sibling_config: Option<&str>,
 ) -> Result<String, String> {
     match agent {
         "claude" => rewrite_claude(original, target, key),
@@ -999,6 +1196,14 @@ fn rewrite(
         "opencode" => {
             kiwano_adapters::gateway_takeover::upsert_opencode_gateway(original, target, key)
         }
+        "openclaw" if path.ends_with("models.json") => {
+            kiwano_adapters::gateway_takeover::upsert_openclaw_models_json(
+                original,
+                sibling_config.unwrap_or(""),
+                target,
+                key,
+            )
+        }
         "openclaw" => {
             kiwano_adapters::gateway_takeover::upsert_openclaw_gateway(original, target, key)
         }
@@ -1019,13 +1224,16 @@ fn rewrite(
         ),
         "qwen" => kiwano_adapters::gateway_takeover::upsert_qwen_gateway(original, target, key),
         // The two Kimi generations spell the same OpenAI shape differently:
-        // the successor calls it `openai`, the Python original `openai_legacy`.
-        // The path is the only thing that tells them apart.
+        // the successor calls it `openai`, the Python original `kimi` — the
+        // type whose dispatcher attaches the conversation's prompt_cache_key
+        // (its session marker on the wire; `openai_legacy` would speak the
+        // identical protocol but send no session). The path is the only thing
+        // that tells them apart.
         "kimi" => {
             let provider_type = if path.contains(".kimi-code") {
                 "openai"
             } else {
-                "openai_legacy"
+                "kimi"
             };
             kiwano_adapters::gateway_takeover::upsert_kimi_gateway(
                 original,
@@ -2164,9 +2372,13 @@ base_url = "https://relay.example.com/v1"
             text.contains("default_model = \"kiwano-gateway/kimi-for-coding\""),
             "{text}"
         );
+        // Our entry — not the fixture's managed provider, which is also a
+        // `kimi` but a `[providers."…"]` section — carries the type whose
+        // dispatcher sends the conversation's prompt_cache_key. Ours is
+        // written as an inline table under `[providers]`.
         assert!(
-            text.contains("\"openai_legacy\""),
-            "the Python generation's protocol name: {text}"
+            text.contains("kiwano-gateway = { type = \"kimi\""),
+            "the Python generation's protocol type: {text}"
         );
         // The user's own provider is untouched.
         assert!(text.contains("api_key = \"sk-old\""), "{text}");
@@ -2177,6 +2389,144 @@ base_url = "https://relay.example.com/v1"
             original
         );
         assert!(aux.load_takeover_backup("kimi").is_none());
+    }
+
+    /// The catalogue entry that carries openclaw's session-affinity flag has
+    /// to name the model the main config selects — the two files are written
+    /// in one takeover and have to agree on the id.
+    #[test]
+    fn openclaw_takeover_declares_the_selected_model_for_session_affinity() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".openclaw");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = r#"{
+  "models": { "providers": { "openrouter": { "baseUrl": "https://openrouter.ai/api/v1", "apiKey": "sk-or" } } },
+  "agents": { "defaults": { "model": { "primary": "openrouter/deepseek-chat" } } }
+}"#;
+        std::fs::write(dir.join("openclaw.json"), original).unwrap();
+
+        enable(
+            &aux,
+            "openclaw",
+            "kw-ag-openclaw-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+
+        // The main config repoints the selector, keeping the model id, and
+        // its provider carries the version root — OpenClaw's OpenAI JS client
+        // appends only `/chat/completions` to whatever baseUrl it is given.
+        let main_text = std::fs::read_to_string(dir.join("openclaw.json")).unwrap();
+        assert!(
+            main_text.contains("kiwano-gateway/deepseek-chat"),
+            "{main_text}"
+        );
+        let main: serde_json::Value = serde_json::from_str(&main_text).unwrap();
+        assert_eq!(
+            main["models"]["providers"]["kiwano-gateway"]["baseUrl"],
+            "http://127.0.0.1:8317/v1"
+        );
+
+        // The catalogue declares that same id with the affinity flag — at the
+        // runtime location for the default agent (no `agents.list` here).
+        let catalog = dir
+            .join("agents")
+            .join("main")
+            .join("agent")
+            .join("models.json");
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&catalog).unwrap()).unwrap();
+        let entry = &v["providers"]["kiwano-gateway"];
+        assert_eq!(entry["baseUrl"], "http://127.0.0.1:8317/v1");
+        assert_eq!(entry["apiKey"], "kw-ag-openclaw-abcd");
+        assert_eq!(entry["models"][0]["id"], "deepseek-chat");
+        assert_eq!(
+            entry["models"][0]["compat"]["sendSessionAffinityHeaders"],
+            true
+        );
+
+        restore(&aux, "openclaw", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("openclaw.json")).unwrap(),
+            original
+        );
+        assert!(
+            !catalog.exists(),
+            "a catalogue the takeover created must not survive disable"
+        );
+        assert!(aux.load_takeover_backup("openclaw").is_none());
+    }
+
+    #[test]
+    fn openclaw_catalogue_follows_the_agents_list() {
+        let (_dir, home) = temp_home();
+        let root = home.join(".openclaw");
+        std::fs::create_dir_all(&root).unwrap();
+        let catalog_of =
+            |vars: &ShellVars| takeover_paths("openclaw", &home, vars).unwrap()[1].clone();
+        let write_cfg = |text: &str| std::fs::write(root.join("openclaw.json"), text).unwrap();
+
+        // No config on disk: the default agent's runtime directory.
+        assert_eq!(
+            catalog_of(&no_vars()),
+            root.join("agents")
+                .join("main")
+                .join("agent")
+                .join("models.json")
+        );
+
+        // The entry marked default wins over the first, and its id goes
+        // through OpenClaw's normalization (spaces are not id characters).
+        write_cfg(r#"{"agents":{"list":[{"id":"Work Bot"},{"id":"Second One","default":true}]}}"#);
+        assert_eq!(
+            catalog_of(&no_vars()),
+            root.join("agents")
+                .join("second-one")
+                .join("agent")
+                .join("models.json")
+        );
+
+        // Without a default mark the first entry is the default agent.
+        write_cfg(r#"{"agents":{"list":[{"id":"Work Bot"}]}}"#);
+        assert_eq!(
+            catalog_of(&no_vars()),
+            root.join("agents")
+                .join("work-bot")
+                .join("agent")
+                .join("models.json")
+        );
+
+        // An agentDir override moves the catalogue: `~` expands against home…
+        write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"~/oc-agent"}]}}"#);
+        assert_eq!(
+            catalog_of(&no_vars()),
+            home.join("oc-agent").join("models.json")
+        );
+
+        // …and `$VAR`/`${VAR}` against the environment Kiwano was handed.
+        let mut vars = no_vars();
+        vars.insert("OC_ROOT".into(), "/tmp/oc-root".into());
+        write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"${OC_ROOT}/agent"}]}}"#);
+        assert_eq!(
+            catalog_of(&vars),
+            PathBuf::from("/tmp/oc-root/agent/models.json")
+        );
+        write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"$OC_ROOT/agent"}]}}"#);
+        assert_eq!(
+            catalog_of(&vars),
+            PathBuf::from("/tmp/oc-root/agent/models.json")
+        );
+
+        // A relative override or an unknown variable is refused rather than
+        // guessed at — both would write the catalogue where the runtime never
+        // looks.
+        write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"somewhere"}]}}"#);
+        assert!(takeover_paths("openclaw", &home, &no_vars()).is_err());
+        write_cfg(r#"{"agents":{"list":[{"id":"main","agentDir":"$NOPE/agent"}]}}"#);
+        assert!(takeover_paths("openclaw", &home, &no_vars()).is_err());
     }
 
     #[test]
@@ -2222,6 +2572,10 @@ base_url = "https://relay.example.com/v1"
             // successor's path is the one written (see `takeover_paths`).
             ("kimi", ".kimi-code/config.toml"),
             ("qwen", ".qwen/settings.json"),
+            // Both of openclaw's files: the main config and the per-agent
+            // catalogue the session-affinity declaration lives in.
+            ("openclaw", ".openclaw/openclaw.json"),
+            ("openclaw", ".openclaw/agents/main/agent/models.json"),
         ] {
             let (_dir, home) = temp_home();
             let aux = Aux::open_in_memory().unwrap();
@@ -2439,6 +2793,13 @@ base_url = "https://relay.example.com/v1"
         assert_eq!(v["agent"]["max_turns"], 50);
         let providers = v["custom_providers"].as_sequence().unwrap();
         assert_eq!(providers.len(), 2);
+        // Hermes hands base_url to the OpenAI Python SDK, which appends only
+        // `/chat/completions` — the version root has to be in what we write.
+        let ours = providers
+            .iter()
+            .find(|p| p["name"].as_str() == Some("kiwano-gateway"))
+            .expect("the gateway provider is upserted");
+        assert_eq!(ours["base_url"].as_str(), Some("http://127.0.0.1:8317/v1"));
 
         restore(&aux, "hermes", &home).unwrap();
         assert_eq!(

@@ -650,6 +650,10 @@ pub struct UsageVm {
     pub requests: i64,
     pub input_tokens: i64,
     pub cache_read_tokens: i64,
+    /// Needed for the cache hit rate's denominator: input-side tokens are
+    /// new input plus cache reads plus cache writes, and a rate that forgets
+    /// the writes overstates every hit.
+    pub cache_creation_tokens: i64,
     pub output_tokens: i64,
     pub cost: Option<f64>,
     /// Currency of `cost` — the provider's own, never converted. Absent when
@@ -2476,6 +2480,7 @@ fn usage_vm(
         requests: t.requests,
         input_tokens: t.input_tokens,
         cache_read_tokens: t.cache_read_tokens,
+        cache_creation_tokens: t.cache_creation_tokens,
         output_tokens: t.output_tokens,
         cost: cost.map(|c| (c * 1e6).round() / 1e6),
         cost_currency,

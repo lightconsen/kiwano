@@ -136,6 +136,8 @@ export interface UsageSummary {
   requests: number;
   input_tokens: number;
   cache_read_tokens: number;
+  /** Cache writes; part of the input-side denominator of the hit rate */
+  cache_creation_tokens: number;
   output_tokens: number;
   /** Estimated cost, in the provider's own currency; null for unl (not billed) */
   cost: number | null;

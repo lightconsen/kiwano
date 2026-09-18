@@ -1454,10 +1454,39 @@ function UsageCell({
   const t = useT();
   return (
     <div
-      className={`w-[28%]${blocked ? " opacity-55" : ""}`}
+      className={`w-[26%]${blocked ? " opacity-55" : ""}`}
       title={blocked ? t("providers.notRoutingTitle", { reason: blocked }) : undefined}
     >
       <UsageCellBody p={p} plan={plan} />
+    </div>
+  );
+}
+
+/** Prompt-cache hit rate: the share of input-side tokens (new input + cache
+    reads + cache writes) that came back from cache. "–" when the window holds
+    no input-side tokens at all — a 0% there would read as "the cache never
+    hit" where the truth is "nothing has been cached yet". */
+function CacheCell({ u }: { u: Provider["usage"] }) {
+  const t = useT();
+  const denom = u ? u.input_tokens + u.cache_read_tokens + u.cache_creation_tokens : 0;
+  if (!u || denom === 0) {
+    return (
+      <div className="w-[8%] text-[11px] text-mut" title={t("providers.cacheNoData")}>
+        –
+      </div>
+    );
+  }
+  const pct = Math.round((u.cache_read_tokens / denom) * 100);
+  return (
+    <div
+      className="w-[8%] font-mono text-[11px] text-mut"
+      title={t("providers.cacheHitTitle", {
+        pct: String(pct),
+        read: fmtTokens(u.cache_read_tokens),
+        denom: fmtTokens(denom),
+      })}
+    >
+      {pct}%
     </div>
   );
 }
@@ -1625,7 +1654,7 @@ function IdentityCell({ p, inUse, isFallback }: { p: Provider; inUse?: boolean; 
   const showInUse = inUse ?? p.is_current;
   const showFallback = isFallback === true && !showInUse;
   return (
-    <div className="flex min-w-0 w-[34%] items-center gap-2.5">
+    <div className="flex min-w-0 w-[31%] items-center gap-2.5">
       {brandIcon ? (
         <ProviderLogo icon={brandIcon} name={p.name} size={32} />
       ) : (
@@ -1682,7 +1711,7 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   // is whether Kiwano will use it, which is this column's question.
   if (blocked) {
     return (
-      <div className="w-[14%]" title={t("providers.notRoutingTitle", { reason: blocked })}>
+      <div className="w-[12%]" title={t("providers.notRoutingTitle", { reason: blocked })}>
         <span className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--red)" }}>
           <Dot state="error" />
           {t("providers.blocked")}
@@ -1695,7 +1724,7 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
   // Parked: out of every route, which outranks any reading of the endpoint.
   if (h.note) {
     return (
-      <div className="w-[14%]">
+      <div className="w-[12%]">
         <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
           <Dot state={h.state} />
           {h.note}
@@ -1711,7 +1740,7 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
     const said = h.error;
     return (
       <div
-        className="w-[14%]"
+        className="w-[12%]"
         title={
           said
             ? t("providers.refusedTitle", { error: said, time: fmtClock(h.checked_at) })
@@ -1725,7 +1754,7 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
       </div>
     );
   }
-  if (h.latency_ms == null) return <div className="w-[14%]" />;
+  if (h.latency_ms == null) return <div className="w-[12%]" />;
   // Whose measurement it is, in the tooltip: your own traffic, the gateway's
   // unsigned GET, or the test you ran — each a different amount of proof, and
   // the last one the only one that exercises the key on demand.
@@ -1736,7 +1765,7 @@ function HealthCell({ p, blocked }: { p: Provider; blocked?: string }) {
         ? t("providers.latencyTest", { time: fmtClock(h.checked_at) })
         : t("providers.latencyProbe", { time: fmtClock(h.checked_at) });
   return (
-    <div className="w-[14%]" title={title}>
+    <div className="w-[12%]" title={title}>
       <span className="flex items-center gap-1.5 text-[11.5px] text-mut">
         <Dot state="ok" />
         <span className="font-mono">{fmtLatency(h.latency_ms)}</span>
@@ -1808,7 +1837,7 @@ function ProviderRow({
     <div className={`row group flex h-[58px] items-center border-b border-line px-4${state ? ` ${state}` : ""}`}>
       <IdentityCell p={p} isFallback={p.fallback_agents && p.fallback_agents.length > 0} />
 
-      <div className="flex w-[18%] items-center">
+      <div className="flex w-[16%] items-center">
         {p.agents.length === 0 ? (
           <span className="text-[11px] text-mut">{t("providers.unbound")}</span>
         ) : (
@@ -1831,6 +1860,8 @@ function ProviderRow({
 
       <UsageCell p={p} plan={plan} blocked={blocked} />
 
+      <CacheCell u={p.usage} />
+
       <HealthCell p={p} blocked={blocked} />
 
       {/* Actions stay out of the resting row: reveal on hover / keyboard focus,
@@ -1842,7 +1873,7 @@ function ProviderRow({
           provider to primary for every agent it was bound to, which is the agent
           tabs' `makePrimary` now — see `providers use` in the CLI.) */}
       <div
-        className={`flex flex-1 items-center justify-end gap-1.5 transition-opacity${
+        className={`flex min-w-[140px] flex-1 items-center justify-end gap-1.5 transition-opacity${
           confirmDel ? "" : " opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         }`}
       >
@@ -2072,7 +2103,7 @@ function RoleCell({
     </span>
   );
   return (
-    <div className="flex w-[18%] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+    <div className="flex w-[16%] min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
       {route.strategy === "roundrobin" ? (
         <WeightEditor agent={agent} b={b} onChanged={onChanged} />
       ) : route.strategy === "timewindow" ? (
@@ -2147,6 +2178,8 @@ function BindingRow({
 
       <UsageCell p={p} plan={plan} blocked={blocked} />
 
+      <CacheCell u={p.usage} />
+
       <HealthCell p={p} blocked={blocked} />
 
       {/* Candidate ordering / membership, plus the provider's own latency test:
@@ -2164,7 +2197,10 @@ function BindingRow({
           the right, so an empty slot at its start costs nothing, while the same
           slot further in sits *between* two visible buttons and reads as a gap
           one button wide. */}
-      <div className="flex flex-1 items-center justify-end gap-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+      {/* Same min-width as the header's trailing cell and the All tab's action
+          group: the three shrink together, which is what keeps every column
+          header above its own values. */}
+      <div className="flex min-w-[140px] flex-1 items-center justify-end gap-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
         {route.strategy !== "roundrobin" && (
           <Button
             variant="ghost"
@@ -2860,13 +2896,16 @@ export default function Providers({
       ) : (
         <>
           <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-            <span className="w-[32%]">{t("providers.colProvider")}</span>
-            <span className="w-[18%]">
+            <span className="w-[31%]">{t("providers.colProvider")}</span>
+            <span className="w-[16%]">
               {route ? t("providers.colRole") : t("providers.colBoundAgents")}
             </span>
-            <span className="w-[28%]">{t("providers.colUsage")}</span>
-            <span className="w-[14%]">{t("providers.colStatus")}</span>
-            <span className="flex-1 text-right">
+            <span className="w-[26%]">{t("providers.colUsage")}</span>
+            <span className="w-[8%]" title={t("providers.cacheColTitle")}>
+              {t("providers.colCache")}
+            </span>
+            <span className="w-[12%]">{t("providers.colStatus")}</span>
+            <span className="min-w-[140px] flex-1 text-right">
               {route ? t("providers.colPriority") : t("providers.colActions")}
             </span>
           </div>

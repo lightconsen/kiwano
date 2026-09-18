@@ -1471,3 +1471,44 @@ describe("a failed provider read", () => {
     expect(screen.getByText("DeepSeek")).toBeInTheDocument();
   });
 });
+
+describe("the cache column", () => {
+  const usage = (over: Partial<NonNullable<Provider["usage"]>> = {}) => ({
+    requests: 796,
+    input_tokens: 5_400_000,
+    cache_read_tokens: 4_300_000,
+    cache_creation_tokens: 600_000,
+    output_tokens: 900_000,
+    cost: null,
+    latency_ms: 1100,
+    quota: null,
+    spark: null,
+    ...over,
+  });
+
+  it("rates the input-side tokens served from cache", async () => {
+    // 4.3M reads out of 5.4M new + 4.3M read + 0.6M written = 42%: the writes
+    // are in the denominator, so leaving them out would read 44%.
+    renderCodexTab({
+      providers: [deepseek({ usage: usage() })],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    expect(await screen.findByText("42%")).toBeInTheDocument();
+    expect(screen.getByText(en.providers.colCache)).toBeInTheDocument();
+  });
+
+  it("dashes a window with no input-side tokens instead of calling it 0%", async () => {
+    renderCodexTab({
+      providers: [
+        deepseek({
+          usage: usage({ input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 }),
+        }),
+      ],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    expect(await screen.findByTitle(en.providers.cacheNoData)).toBeInTheDocument();
+    expect(screen.queryByText("0%")).toBeNull();
+  });
+});

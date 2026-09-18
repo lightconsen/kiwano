@@ -165,7 +165,12 @@ impl QuotaConfig {
 
 /// One session's assignment: which candidate, and when it was last used.
 struct Sticky {
-    index: usize,
+    /// The candidate's **id**, not its position. The candidate list is pruned
+    /// per request (a provider over a billing limit is dropped before the
+    /// strategy is asked), so a stored index means a different provider the
+    /// moment anything ahead of it is pruned — and a session pinned to the wrong
+    /// provider is exactly the cache loss this table exists to prevent.
+    id: String,
     /// The tick of the last request that used this entry. Ordering by it is what
     /// makes the table least-recently-used rather than oldest-first.
     used: u64,
@@ -200,20 +205,24 @@ impl StickyTable {
     /// The candidate this key is assigned to, if any — and marking that as the
     /// moment it was used. A read that hits is a use: this is what keeps a live
     /// session out of the eviction scan.
-    fn get(&mut self, key: &str) -> Option<usize> {
+    ///
+    /// The id comes back owned rather than borrowed: the caller has to await
+    /// before it can use it, and a guard held across an await makes the future
+    /// non-Send. An id is a few dozen bytes.
+    fn get(&mut self, key: &str) -> Option<String> {
         self.tick += 1;
         let tick = self.tick;
         let entry = self.map.get_mut(key)?;
         entry.used = tick;
-        Some(entry.index)
+        Some(entry.id.clone())
     }
 
-    fn insert(&mut self, key: String, index: usize) {
+    fn insert(&mut self, key: String, id: String) {
         self.tick += 1;
         self.map.insert(
             key,
             Sticky {
-                index,
+                id,
                 used: self.tick,
             },
         );
@@ -401,6 +410,54 @@ impl StrategyEngine {
         Ok(plan)
     }
 
+    /// The candidate this session is already on, if it is still usable.
+    ///
+    /// Session-granularity stickiness is what keeps a conversation's upstream
+    /// prompt cache intact, and it belongs to every strategy whose answer can
+    /// change while a conversation is running: roundrobin's ring, the quota
+    /// threshold, a closing time window, a provider recovering from a failure.
+    ///
+    /// A *new* session asks the strategy and goes wherever it says. A session
+    /// already running stays put, because the alternative is rebuilding a prefix
+    /// the upstream has already cached — and what the switch buys (spreading a
+    /// quota, honouring a window, returning to the preferred provider) can wait
+    /// for the conversation to end. The cost of waiting is bounded by the
+    /// conversation; the cost of switching is paid in this turn's tokens.
+    ///
+    /// What drain does *not* do is spend past a ceiling. The candidate list this
+    /// looks in has already had the providers over a billing limit pruned out of
+    /// it, and a breaker that has opened fails the availability check below —
+    /// so a pin holds only while the provider is genuinely usable, and a hard
+    /// limit still wins over a conversation in flight.
+    async fn pinned(
+        &self,
+        route: &AgentRoute,
+        session: Option<&str>,
+    ) -> Option<crate::router::UpstreamProvider> {
+        let key = sticky_key(&route.agent, session);
+        // The lock only guards the table read (a guard must not be held across
+        // await, or the future is not Send).
+        let id = self.sticky.lock().expect("sticky map poisoned").get(&key)?;
+        let idx = route.candidates.iter().position(|c| c.id == id)?;
+        if self.candidate_available(route, idx).await {
+            return Some(route.candidates[idx].clone());
+        }
+        None
+    }
+
+    /// Record where a session was sent, so its next request can stay there.
+    fn assign(
+        &self,
+        route: &AgentRoute,
+        session: Option<&str>,
+        provider: &crate::router::UpstreamProvider,
+    ) {
+        self.sticky
+            .lock()
+            .expect("sticky map poisoned")
+            .insert(sticky_key(&route.agent, session), provider.id.clone());
+    }
+
     /// failover: take the first breaker-available candidate in priority order; when all are open,
     /// fall back to the primary (the request fails at the real upstream, not gateway-side — cc-switch queue semantics).
     async fn select_failover(&self, route: &AgentRoute) -> Result<crate::router::UpstreamProvider> {
@@ -419,23 +476,17 @@ impl StrategyEngine {
         route: &AgentRoute,
         session: Option<&str>,
     ) -> Result<crate::router::UpstreamProvider> {
-        let key = sticky_key(&route.agent, session);
-        // The lock only guards the table read (a guard must not be held across await, or the future is not Send)
-        let sticky_hit = match self.sticky.lock().expect("sticky map poisoned").get(&key) {
-            Some(idx) if idx < route.candidates.len() => Some(idx),
-            _ => None,
-        };
-        if let Some(idx) = sticky_hit {
-            if self.candidate_available(route, idx).await {
-                return Ok(route.candidates[idx].clone());
-            }
+        if let Some(pinned) = self.pinned(route, session).await {
+            return Ok(pinned);
         }
         let idx = self.weighted_next(route).await?;
-        self.sticky
-            .lock()
-            .expect("sticky map poisoned")
-            .insert(key, idx);
-        Ok(route.candidates[idx].clone())
+        let chosen = route.candidates[idx].clone();
+        // Recorded whether or not the request named a session: a client that
+        // names none shares the table's `agent\0` slot, and pinning it is what
+        // keeps such an agent's traffic on one provider instead of rotating
+        // every request through a cold prefix.
+        self.assign(route, session, &chosen);
+        Ok(chosen)
     }
 
     /// Weighted ring: next available candidate index (weights expanded into a ring by gcd, the lock
@@ -1380,6 +1431,15 @@ mod tests {
         );
     }
 
+    /// The threshold decides where a conversation *starts*. One that is already
+    /// running finishes where it is — the switch is for the next one.
+    ///
+    /// This is the difference the drain makes: the same usage state used to move
+    /// the whole agent, mid-conversation for whoever was talking, and the
+    /// conversation paid for it by rebuilding a prefix its provider had already
+    /// cached and charged for once.
+    /// The window decides where a conversation starts; closing it does not pull
+    /// a running one across.
     #[tokio::test]
     async fn quota_over_limit_sinks_to_backup() {
         let s = store();

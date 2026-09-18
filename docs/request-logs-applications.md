@@ -119,7 +119,7 @@ opt-in 的匿名聚合（错误种类分布、命中率分布）能反哺 catalo
 |---|---|---|
 | 结果标签（任务成没成） | §4.1、所有"效果"归因 | 日志里只有请求没有结果；真要标签得从 agent 侧（hooks）拿，网关自己造不出来 |
 | 流内 token 间隔 | 流式质量的细分析 | 现有 `first_token_ms` 只覆盖首包 |
-| session_id 覆盖率 | §1.1、一切会话级指标 | 列自基础 schema（v5）就有，但网关的捕获（`session_hint`，server/data.rs）是 `528cb74`（2026-09-18）才接上的——之前的历史行（含本机那 24 行）全空。新行有没有值取决于客户端是否发这些标记：`x-kw-session` 头 → Anthropic `metadata.user_id` → Codex `client_metadata.session_id` → `prompt_cache_key` → 顶层 `session_id`。Codex 两样都发（本机 body 实测同一个 UUID）；其余客户端没有统一约定 |
+| session_id 覆盖率 | §1.1、一切会话级指标 | 列自基础 schema（v5）就有，但网关的捕获（`session_hint`，server/data.rs）是 `528cb74`（2026-09-18）才接上的——之前的历史行（含本机那 24 行）全空。新行读取顺序：`x-kw-session` 头 → 各 agent 自己的 session 头 → Anthropic `metadata.user_id` → Codex `client_metadata.session_id` → `prompt_cache_key` → 顶层 `session_id` → 会话开头指纹（`derived:` 前缀，system + 首条 user 消息的 hash，给 Pi 这类线上不带 session 字段的客户端兜底）。Codex 头和 body 两样都发（本机实测同一个 UUID）；`derived:` 行是网关的推测而非客户端的自述，分析时可区分 |
 | body 截断率 | §3.1 的离线实验样本量 | `truncated=1` 的行不能用于前缀分析 |
 
 ## 6. 优先级判断

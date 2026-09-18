@@ -303,9 +303,9 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     unreachable!("the loop returns on its last iteration")
 }
 
-/// The request headers through which an agent states its session id. Every
-/// value is the client's own — nothing is derived here; an agent that sends
-/// none of these and none of the body markers below simply has no session.
+/// The request headers through which an agent states its session id. An agent
+/// that sends none of these and none of the body markers below gets the
+/// derived fallback ([`derived_session_hint`]) rather than no session.
 ///
 /// - `x-claude-code-session-id` — Claude Code 2.1.276 and newer. Read ahead
 ///   of its `metadata.user_id`, which is a JSON blob around the id rather
@@ -330,7 +330,9 @@ const SESSION_HEADERS: [&str; 6] = [
 /// wins, then the agents' own session headers ([`SESSION_HEADERS`]), then the
 /// Anthropic body's `metadata.user_id`, then the Responses body's
 /// `client_metadata.session_id` (which is what Codex sends), then
-/// `prompt_cache_key`, then body top-level `session_id`.
+/// `prompt_cache_key`, then body top-level `session_id`, and finally — for a
+/// client that states nothing at all — the derived opening fingerprint
+/// ([`derived_session_hint`]).
 ///
 /// The headers tier exists because three agents state their session nowhere
 /// else: grok-build and OpenCode only put it in headers, and OpenClaw only
@@ -371,6 +373,48 @@ pub fn session_hint(headers: &axum::http::HeaderMap, body: &[u8]) -> Option<Stri
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(String::from)
+        .or_else(|| derived_session_hint(&v))
+}
+
+/// The last tier of [`session_hint`], for a client that states no session
+/// marker anywhere — Pi's chat-completions builder has no session field at
+/// all, and it covers any future agent in the same position without a
+/// per-agent rule: a fingerprint of the conversation's opening (the
+/// top-level `system`, then the messages up to and including the first
+/// `user` turn). Agents resend the full history on every request, so the
+/// opening is stable for a conversation's whole life.
+///
+/// Two conversations only fingerprint alike when they open identically —
+/// and requests sharing an opening share a prompt-cache prefix, so grouping
+/// them is the behaviour the hint exists for, not a misread. A body whose
+/// messages never reach a `user` turn yields nothing: the system prompt
+/// alone is shared by every conversation in a project, which is a
+/// fingerprint of the project, not of a session.
+///
+/// The `derived:` prefix keeps the guess visibly distinct from an id the
+/// client stated — the log columns and the insights report can tell the two
+/// apart instead of presenting a heuristic as a fact.
+fn derived_session_hint(v: &serde_json::Value) -> Option<String> {
+    use sha2::Digest;
+    let messages = v.get("messages")?.as_array()?;
+    let mut hasher = sha2::Sha256::new();
+    if let Some(system) = v.get("system") {
+        hasher.update(system.to_string().as_bytes());
+    }
+    let mut reached_user = false;
+    for message in messages {
+        hasher.update(message.to_string().as_bytes());
+        if message.get("role").and_then(|r| r.as_str()) == Some("user") {
+            reached_user = true;
+            break;
+        }
+    }
+    if !reached_user {
+        return None;
+    }
+    let digest = hasher.finalize();
+    let short: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("derived:{short}"))
 }
 
 /// Build the upstream URL for a provider and inbound path.
@@ -540,6 +584,47 @@ mod tests {
             session_hint(&h, br#"{"session_id":"body-1"}"#).as_deref(),
             Some("body-1")
         );
+    }
+
+    #[test]
+    fn session_hint_derives_a_fingerprint_from_the_conversation_opening() {
+        let empty = axum::http::HeaderMap::new();
+
+        // Pi's chat-completions shape: no header, no session field — the
+        // opening (system + first user turn) is what identifies it.
+        let turn1 = br#"{"model":"gpt-5.1","messages":[
+            {"role":"system","content":"you are pi"},
+            {"role":"user","content":"hello"}
+        ]}"#;
+        let id1 = session_hint(&empty, turn1).expect("a derived id");
+        assert!(id1.starts_with("derived:"), "{id1}");
+
+        // A later turn of the same conversation resends the same opening:
+        // the fingerprint holds.
+        let turn2 = br#"{"model":"gpt-5.1","messages":[
+            {"role":"system","content":"you are pi"},
+            {"role":"user","content":"hello"},
+            {"role":"assistant","content":"hi there"},
+            {"role":"user","content":"fix the tests"}
+        ]}"#;
+        assert_eq!(session_hint(&empty, turn2).as_deref(), Some(id1.as_str()));
+
+        // A different opening is a different session.
+        let other = br#"{"messages":[
+            {"role":"system","content":"you are pi"},
+            {"role":"user","content":"goodbye"}
+        ]}"#;
+        assert_ne!(session_hint(&empty, other).as_deref(), Some(id1.as_str()));
+
+        // A client-stated marker still outranks the fingerprint.
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("x-session-id", "ses_real".parse().unwrap());
+        assert_eq!(session_hint(&h, turn1).as_deref(), Some("ses_real"));
+
+        // No user turn reached: the system prompt alone fingerprints the
+        // project, not a session, so it yields nothing.
+        let system_only = br#"{"messages":[{"role":"system","content":"you are pi"}]}"#;
+        assert_eq!(session_hint(&empty, system_only), None);
     }
 
     #[test]

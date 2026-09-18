@@ -496,8 +496,10 @@ pub fn upsert_hermes_gateway(content: &str, base_url: &str, key: &str) -> Result
 /// has no session field at all — no `prompt_cache_key`, no `user`, no
 /// metadata, no session header — while the library's responses-flavored
 /// routes do carry `sessionId`. Closing the gap would mean switching the
-/// agent to a protocol its upstreams may not speak, so Pi requests are
-/// honestly sessionless here.
+/// agent to a protocol its upstreams may not speak. The gateway's
+/// `session_hint` therefore falls back to a derived fingerprint of the
+/// conversation's opening for Pi, marked `derived:` so it is not mistaken
+/// for a client-stated id.
 pub fn upsert_pi_models_gateway(
     content: &str,
     base_url: &str,

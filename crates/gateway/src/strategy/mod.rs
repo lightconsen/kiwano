@@ -163,11 +163,84 @@ impl QuotaConfig {
     }
 }
 
+/// One session's assignment: which candidate, and when it was last used.
+struct Sticky {
+    index: usize,
+    /// The tick of the last request that used this entry. Ordering by it is what
+    /// makes the table least-recently-used rather than oldest-first.
+    used: u64,
+}
+
+/// How many sessions keep their assignment. An entry is a session key and an
+/// index — tens of bytes — so this is a few hundred kilobytes at worst, which
+/// is cheaper than the bookkeeping it would take to size it exactly.
+const STICKY_CAPACITY: usize = 4096;
+
+/// roundrobin's session table, with a ceiling.
+///
+/// The ceiling is the point: a session can run for hours and there can be many
+/// of them, so one entry per session, kept for the life of the process, is a map
+/// that only grows. A session that is still talking is touched by every request
+/// it makes, so least-recently-used eviction cannot take the slot out from under
+/// a live conversation — only one that has gone quiet, which is a conversation
+/// that has ended (or one that will pay a single cold prefix if it wakes up).
+struct StickyTable {
+    map: HashMap<String, Sticky>,
+    tick: u64,
+}
+
+impl StickyTable {
+    fn new() -> Self {
+        StickyTable {
+            map: HashMap::new(),
+            tick: 0,
+        }
+    }
+
+    /// The candidate this key is assigned to, if any — and marking that as the
+    /// moment it was used. A read that hits is a use: this is what keeps a live
+    /// session out of the eviction scan.
+    fn get(&mut self, key: &str) -> Option<usize> {
+        self.tick += 1;
+        let tick = self.tick;
+        let entry = self.map.get_mut(key)?;
+        entry.used = tick;
+        Some(entry.index)
+    }
+
+    fn insert(&mut self, key: String, index: usize) {
+        self.tick += 1;
+        self.map.insert(
+            key,
+            Sticky {
+                index,
+                used: self.tick,
+            },
+        );
+        self.evict_if_over();
+    }
+
+    /// Drop the quietest quarter in one pass. A quarter rather than the single
+    /// oldest entry because the scan is the cost and a batch amortizes it, and a
+    /// quarter rather than everything because the survivors are the ones being
+    /// used — among them, almost certainly, the session that just arrived.
+    fn evict_if_over(&mut self) {
+        if self.map.len() <= STICKY_CAPACITY {
+            return;
+        }
+        let mut ages: Vec<u64> = self.map.values().map(|s| s.used).collect();
+        ages.sort_unstable();
+        let cutoff = ages[ages.len() / 4];
+        self.map.retain(|_, s| s.used > cutoff);
+    }
+}
+
 /// Per-Agent strategy runtime: breaker registry + roundrobin sticky table.
 pub struct StrategyEngine {
     breakers: Mutex<HashMap<String, Arc<CircuitBreaker>>>,
-    /// roundrobin: session key → candidate index (sticky to preserve the prompt cache).
-    sticky: Mutex<HashMap<String, usize>>,
+    /// roundrobin: session key → candidate index (sticky to preserve the prompt
+    /// cache), bounded — see [`StickyTable`].
+    sticky: Mutex<StickyTable>,
     /// Cursor advanced on the weighted ring as new sessions join.
     cursor: Mutex<u64>,
 }
@@ -182,7 +255,7 @@ impl StrategyEngine {
     pub fn new() -> Self {
         StrategyEngine {
             breakers: Mutex::new(HashMap::new()),
-            sticky: Mutex::new(HashMap::new()),
+            sticky: Mutex::new(StickyTable::new()),
             cursor: Mutex::new(0),
         }
     }
@@ -349,7 +422,7 @@ impl StrategyEngine {
         let key = sticky_key(&route.agent, session);
         // The lock only guards the table read (a guard must not be held across await, or the future is not Send)
         let sticky_hit = match self.sticky.lock().expect("sticky map poisoned").get(&key) {
-            Some(&idx) if idx < route.candidates.len() => Some(idx),
+            Some(idx) if idx < route.candidates.len() => Some(idx),
             _ => None,
         };
         if let Some(idx) = sticky_hit {
@@ -874,6 +947,62 @@ mod tests {
         }
         assert_eq!(counts.get("a"), Some(&3));
         assert_eq!(counts.get("b"), Some(&1));
+    }
+
+    /// The sticky table is a cache, and a cache with no ceiling is a leak: one
+    /// entry per session, held for the life of the process. It keeps the
+    /// sessions that are still talking and forgets the quiet ones.
+    #[tokio::test]
+    async fn roundrobin_keeps_the_table_bounded_without_dropping_a_live_session() {
+        let engine = StrategyEngine::new();
+        let s = store();
+        let r = route(
+            StrategyType::Roundrobin,
+            vec![candidate("a", 1, None), candidate("b", 1, None)],
+        );
+        let limits = crate::limits::LimitState::default();
+
+        // One conversation that keeps talking…
+        let hot = engine
+            .select(&s, &r, Some("hot"), &limits)
+            .await
+            .unwrap()
+            .id;
+        // …while enough others come and go to push the table past its ceiling.
+        for i in 0..(STICKY_CAPACITY + 512) {
+            engine
+                .select(&s, &r, Some(&format!("cold-{i}")), &limits)
+                .await
+                .unwrap();
+            // Every so often the hot session speaks again, which is what keeps
+            // it recent in the table.
+            if i % 64 == 0 {
+                assert_eq!(
+                    engine
+                        .select(&s, &r, Some("hot"), &limits)
+                        .await
+                        .unwrap()
+                        .id,
+                    hot,
+                    "a session that is still talking keeps its provider"
+                );
+            }
+        }
+
+        let held = engine.sticky.lock().expect("sticky map poisoned").map.len();
+        assert!(
+            held <= STICKY_CAPACITY,
+            "the table grew past its ceiling: {held}"
+        );
+        assert_eq!(
+            engine
+                .select(&s, &r, Some("hot"), &limits)
+                .await
+                .unwrap()
+                .id,
+            hot,
+            "and it survived the eviction of everything around it"
+        );
     }
 
     #[tokio::test]

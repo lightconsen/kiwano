@@ -104,7 +104,7 @@ export const providers = {
   windowStart: "Window start",
   windowEnd: "Window end",
   windowTitle:
-    "Local time window this candidate serves; type digits like 0930 — the end must be later than the start. Clear both to remove the window",
+    "Local time window this candidate serves; type digits like 0930 — an end earlier than the start wraps past midnight. Clear both to remove the window",
   fallback: "Fallback",
   fallbackTitle: "Serves whenever no candidate's window matches",
   noWindow: "No window",

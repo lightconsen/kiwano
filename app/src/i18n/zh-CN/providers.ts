@@ -78,7 +78,7 @@ export const providers = {
   windowStart: "窗口开始",
   windowEnd: "窗口结束",
   windowTitle:
-    "该候选生效的本地时间窗口；直接输入数字，如 0930 —— 结束时间必须晚于开始时间。两者都清空即可移除窗口",
+    "该候选生效的本地时间窗口；直接输入数字，如 0930 —— 结束早于开始即跨午夜窗口。两者都清空即可移除窗口",
   fallback: "兜底",
   fallbackTitle: "当所有候选的窗口都不匹配时使用",
   noWindow: "未设窗口",

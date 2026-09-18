@@ -1949,9 +1949,11 @@ function WeightEditor({
 
 /** Timewindow range editor: one control owning both bounds, committed as a
     pair (a half window would never match — the backend clears them together).
-    Validation: each bound must be a valid HH:MM and the end must be later
-    than the start; invalid fields are highlighted red and the pair is simply
-    not committed. Plain "HH:MM" text fields instead of <input type="time">:
+    Validation: each bound must be a valid HH:MM; invalid fields are
+    highlighted red and the pair is simply not committed. An end earlier than
+    the start is not an error — the engine reads it as a window crossing
+    midnight (`in_window`, start > end). Plain "HH:MM" text fields instead of
+    <input type="time">:
     the native control's click/stepper UI varies per WebView (Tauri's WKWebView
     offers nothing to click), while a masked text field behaves identically
     everywhere. */
@@ -1996,11 +1998,11 @@ function TimeRangeEditor({
   // An incomplete pair only matters once editing is done: while the focus is
   // still inside, a single filled bound is just work in progress
   const half = left && !!cs !== !!ce;
-  // Per-field red highlight: bad text flags its own bound, an end that is not
-  // later than the start flags the end bound, an incomplete pair flags the
-  // missing side
+  // Per-field red highlight: bad text flags its own bound, an incomplete pair
+  // flags the missing side. `ce <= cs` stays valid on purpose: the engine
+  // matches an inverted pair as an overnight window
   const badS = cs === null || (half && !s);
-  const badE = ce === null || (!!cs && !!ce && ce <= cs) || (half && !e);
+  const badE = ce === null || (half && !e);
 
   const commit = () => {
     setLeft(true);

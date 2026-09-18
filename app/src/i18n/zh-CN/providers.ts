@@ -68,7 +68,7 @@ export const providers = {
   colRole: "策略中的角色",
   colBoundAgents: "绑定的 Agent",
   colUsage: "用量 / 配额",
-  colCache: "缓存",
+  colCache: "缓存命中",
   cacheColTitle:
     "近 7 天提示缓存命中率：缓存读取 ÷ 输入侧 tokens（新输入 + 缓存读取 + 缓存写入）",
   cacheHitTitle: "近 7 天 {pct}% 的输入侧 tokens 来自缓存（{read} / {denom}）",

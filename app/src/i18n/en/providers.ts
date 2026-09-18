@@ -94,7 +94,7 @@ export const providers = {
   colRole: "Role in strategy",
   colBoundAgents: "Bound agents",
   colUsage: "Usage / quota",
-  colCache: "Cache",
+  colCache: "Cached",
   cacheColTitle:
     "Prompt-cache hit rate over the last 7 days: cache reads ÷ input-side tokens (new input + cache reads + cache writes)",
   cacheHitTitle:

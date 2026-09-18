@@ -118,12 +118,9 @@ function RouteRow({ route, onChanged }: { route: AgentRoute; onChanged: () => vo
       </div>
 
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[11px] text-mut">
-        {/* A truncated line is still readable in full on hover: the sentence
-            says who a switch moves and who it leaves alone, and half of it is
-            worse than none. */}
-        <span className="truncate" title={hint}>
-          {hint}
-        </span>
+        {/* Wraps rather than truncates: the sentence says who a switch moves
+            and who it leaves alone, and half of it is worse than none. */}
+        <span className="min-w-0">{hint}</span>
         {route.strategy === "quota" && (
           <span className="flex flex-none items-center gap-1">
             <Input

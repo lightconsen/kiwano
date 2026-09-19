@@ -67,6 +67,13 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
     hub_url: "https://hub.example",
     shelf_sort: null,
     shelf_view: null,
+    feat_cost_forecast: false,
+    feat_anomaly_alerts: false,
+    feat_agent_limit_alerts: false,
+    feat_mcp_self_query: false,
+    feat_rule_injection: false,
+    feat_tuning_advice: false,
+    feat_cache_experiment: false,
   };
 }
 

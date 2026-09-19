@@ -1129,6 +1129,36 @@ pub struct SettingsVm {
     /// moment the user added a provider while browsing models.
     #[serde(default)]
     pub shelf_view: Option<String>,
+    // ── Features panel (docs/request-logs-applications.md): every flag is an
+    // opt-in, default off. None of them reach the gateway's forward path, so
+    // none are mirrored into gateway_settings. ──
+    /// Alert when the month's current spend slope projects past a provider's
+    /// currency limit, before the limit is actually hit.
+    #[serde(default)]
+    pub feat_cost_forecast: bool,
+    /// Alert on error-rate spikes, latency outliers and traffic bursts,
+    /// measured against the same hour's trailing-7-day baseline.
+    #[serde(default)]
+    pub feat_anomaly_alerts: bool,
+    /// Alert when an agent hits its own per-period budget (agent_limits) —
+    /// the enforcement is the gateway's, this is the missing notification.
+    #[serde(default)]
+    pub feat_agent_limit_alerts: bool,
+    /// Let agents query their own aggregate stats over MCP (`kiwano mcp`).
+    /// Aggregates only; bodies never leave the machine.
+    #[serde(default)]
+    pub feat_mcp_self_query: bool,
+    /// Allow `kiwano rules apply` to append insights-derived rules to the
+    /// agent's CLAUDE.md/AGENTS.md (backed up, reversible).
+    #[serde(default)]
+    pub feat_rule_injection: bool,
+    /// Add tuning suggestions (retry budgets, route health) to the insights
+    /// report. Advice only — nothing is reconfigured.
+    #[serde(default)]
+    pub feat_tuning_advice: bool,
+    /// Enable the cache-shaping offline experiment (`kiwano cache-experiment`).
+    #[serde(default)]
+    pub feat_cache_experiment: bool,
 }
 
 pub fn default_preferred_currency() -> String {
@@ -1173,6 +1203,13 @@ impl Default for SettingsVm {
             tz_offset_minutes: 0,
             shelf_sort: None,
             shelf_view: None,
+            feat_cost_forecast: false,
+            feat_anomaly_alerts: false,
+            feat_agent_limit_alerts: false,
+            feat_mcp_self_query: false,
+            feat_rule_injection: false,
+            feat_tuning_advice: false,
+            feat_cache_experiment: false,
         }
     }
 }

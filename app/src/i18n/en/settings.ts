@@ -49,6 +49,27 @@ export const settings = {
   costAlert: "Cost alert",
   costAlertNote: "System notification when a period limit is reached",
 
+  // Features panel — the request-logs applications, each an opt-in.
+  features: "Features",
+  featuresNote: "Optional capabilities built on the request log. All off by default.",
+  featGroupAlerts: "Alerts",
+  featCostForecast: "Cost forecast",
+  featCostForecastNote: "warns before the month's slope passes a provider's limit",
+  featAnomalyAlerts: "Anomaly detection",
+  featAnomalyAlertsNote: "error spikes, latency outliers, traffic bursts vs your 7-day baseline",
+  featAgentLimitAlerts: "Agent budget alerts",
+  featAgentLimitAlertsNote: "notify when an agent hits its own per-period budget",
+  featGroupAgent: "Agent feedback",
+  featMcpSelfQuery: "Agent self-query (MCP)",
+  featMcpSelfQueryNote: "agents can read their own aggregate stats via `kiwano mcp`; aggregates only",
+  featRuleInjection: "Rule injection",
+  featRuleInjectionNote: "`kiwano rules apply` writes insights-derived rules to CLAUDE.md/AGENTS.md — changes agent behavior",
+  featGroupExperiments: "Experiments",
+  featTuningAdvice: "Tuning advice",
+  featTuningAdviceNote: "insights suggests retry-budget and route-health changes; advice only",
+  featCacheExperiment: "Cache-shaping experiment",
+  featCacheExperimentNote: "`kiwano cache-experiment` measures whether body normalization would help; read-only",
+
   // Privacy pledge
   privacyTitle: "Privacy (Kiwano pledge)",
   privacyUsage:

@@ -493,6 +493,45 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Features — the request-logs applications (docs/request-logs-applications.md),
+          each an opt-in. Nothing here reaches the gateway's forward path. */}
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-1 text-[12.5px] font-semibold">{t("settings.features")}</h3>
+        <p className="mb-3 text-[10.5px] text-mut">{t("settings.featuresNote")}</p>
+        <div className="space-y-2.5 text-[12.5px]">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-mut">
+            {t("settings.featGroupAlerts")}
+          </div>
+          <Row label={t("settings.featCostForecast")} note={t("settings.featCostForecastNote")}>
+            <Switch checked={s.feat_cost_forecast} onCheckedChange={(v) => patch({ feat_cost_forecast: v })} />
+          </Row>
+          <Row label={t("settings.featAnomalyAlerts")} note={t("settings.featAnomalyAlertsNote")}>
+            <Switch checked={s.feat_anomaly_alerts} onCheckedChange={(v) => patch({ feat_anomaly_alerts: v })} />
+          </Row>
+          <Row label={t("settings.featAgentLimitAlerts")} note={t("settings.featAgentLimitAlertsNote")}>
+            <Switch checked={s.feat_agent_limit_alerts} onCheckedChange={(v) => patch({ feat_agent_limit_alerts: v })} />
+          </Row>
+          <div className="pt-1 text-[10px] font-medium uppercase tracking-wide text-mut">
+            {t("settings.featGroupAgent")}
+          </div>
+          <Row label={t("settings.featMcpSelfQuery")} note={t("settings.featMcpSelfQueryNote")}>
+            <Switch checked={s.feat_mcp_self_query} onCheckedChange={(v) => patch({ feat_mcp_self_query: v })} />
+          </Row>
+          <Row label={t("settings.featRuleInjection")} note={t("settings.featRuleInjectionNote")}>
+            <Switch checked={s.feat_rule_injection} onCheckedChange={(v) => patch({ feat_rule_injection: v })} />
+          </Row>
+          <div className="pt-1 text-[10px] font-medium uppercase tracking-wide text-mut">
+            {t("settings.featGroupExperiments")}
+          </div>
+          <Row label={t("settings.featTuningAdvice")} note={t("settings.featTuningAdviceNote")}>
+            <Switch checked={s.feat_tuning_advice} onCheckedChange={(v) => patch({ feat_tuning_advice: v })} />
+          </Row>
+          <Row label={t("settings.featCacheExperiment")} note={t("settings.featCacheExperimentNote")}>
+            <Switch checked={s.feat_cache_experiment} onCheckedChange={(v) => patch({ feat_cache_experiment: v })} />
+          </Row>
+        </div>
+      </div>
+
       {/* Privacy pledge */}
       <div className="rounded-lg border p-4" style={{ background: "var(--kiwi-soft)", borderColor: "var(--kiwi-dim)" }}>
         <h3 className="mb-3 flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: "var(--kiwi)" }}>

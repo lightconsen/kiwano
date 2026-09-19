@@ -606,6 +606,22 @@ export interface AppSettings {
       (or anything this build does not know) for the provider table. Kept loose
       like `shelf_sort`; `parseView` in the shelf is what narrows it. */
   shelf_view: string | null;
+  // ── Features panel (docs/request-logs-applications.md): all opt-in, all
+  // default off. None reach the gateway's forward path. ──
+  /** Alert when the month's spend slope projects past a provider's limit */
+  feat_cost_forecast: boolean;
+  /** Alert on error-rate / latency / traffic anomalies vs the 7-day baseline */
+  feat_anomaly_alerts: boolean;
+  /** Alert when an agent hits its own per-period budget */
+  feat_agent_limit_alerts: boolean;
+  /** Let agents query their own aggregate stats over MCP (`kiwano mcp`) */
+  feat_mcp_self_query: boolean;
+  /** Allow `kiwano rules apply` to write insights-derived rules to CLAUDE.md/AGENTS.md */
+  feat_rule_injection: boolean;
+  /** Add tuning suggestions (retry budgets, route health) to insights */
+  feat_tuning_advice: boolean;
+  /** Enable the cache-shaping offline experiment (`kiwano cache-experiment`) */
+  feat_cache_experiment: boolean;
 }
 
 /** Hub catalog sync result (tech.md §3 Hub sync protocol) */

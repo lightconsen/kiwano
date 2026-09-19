@@ -1001,6 +1001,15 @@ const settings: AppSettings = {
   hub_url: "https://hub.kiwano.cc/catalog.json",
   shelf_sort: null,
   shelf_view: null,
+  // Features panel: every flag defaults off in the backend; the dev fixture
+  // turns two on so the alerts they shape are reachable in `pnpm dev`.
+  feat_cost_forecast: true,
+  feat_anomaly_alerts: true,
+  feat_agent_limit_alerts: false,
+  feat_mcp_self_query: false,
+  feat_rule_injection: false,
+  feat_tuning_advice: false,
+  feat_cache_experiment: false,
 };
 
 let idSeq = 100;

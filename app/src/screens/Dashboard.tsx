@@ -27,6 +27,9 @@ const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
   { id: "today", labelKey: "dashboard.windowToday" },
   { id: "7d", labelKey: "dashboard.window7d" },
   { id: "30d", labelKey: "dashboard.window30d" },
+  // Everything the store holds: the window for "what has this machine spent in
+  // total", which no counted window answers.
+  { id: "all", labelKey: "dashboard.windowAll" },
 ];
 
 type TrendMetric = "requests" | "tokens";
@@ -389,7 +392,15 @@ function ProviderBreakdown({
   );
 }
 
-function Delta({ pct, invert }: { pct: number; invert?: boolean }) {
+/** How the figure beside it moved against the window before — coloured by
+    whether that direction is the good one (`invert` for latency, where slower
+    is worse).
+ *
+ * `null` draws nothing at all: the window before this one had no traffic to
+ * compare against, or there is no window before it ("all time"). A rendered
+ * "+0%" in that case would be a claim that the two windows matched. */
+function Delta({ pct, invert }: { pct: number | null; invert?: boolean }) {
+  if (pct === null) return null;
   const up = pct >= 0;
   const good = invert ? !up : up;
   return (
@@ -583,7 +594,11 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
               {t("dashboard.statAvgLatency")}
             </div>
             <div className="mt-1 font-mono text-[19px] font-semibold">
-              {(Math.round(data.latency_ms / 100) / 10).toFixed(1)}s <Delta pct={-data.latency_delta_pct} invert />
+              {(Math.round(data.latency_ms / 100) / 10).toFixed(1)}s{" "}
+              {/* Negated because the badge reads "up is more": a slower average
+                  is the bad direction, and `invert` would have to be a second
+                  flag for something this small. */}
+              <Delta pct={data.latency_delta_pct === null ? null : -data.latency_delta_pct} invert />
             </div>
           </div>
         </div>

@@ -226,7 +226,7 @@ strategy that ignores one is rejected rather than accepted as a no-op.
 
 ```
 kiwano usage [--days N] [--agent AGENT] [--provider ID]
-kiwano dashboard [--window today|7d|30d] [--provider ID] [--agent AGENT]
+kiwano dashboard [--window today|7d|30d|all] [--provider ID] [--agent AGENT]
 kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 

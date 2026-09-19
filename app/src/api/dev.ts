@@ -916,6 +916,24 @@ const dashboards: Record<DashboardWindow, DashboardData> = {
     ],
     { failures: 40, deltaPct: 23, latency: 1300, latencyDelta: 5 },
   ),
+  // One bar per week, which is what the backend does once the span outgrows a
+  // bar per day: the demo's history is older than that limit on purpose.
+  all: buildWindow(
+    "all",
+    [
+      { date: "06-30", requests: 940, tokens: 6_900_000 },
+      { date: "07-07", requests: 1120, tokens: 8_100_000 },
+      { date: "07-14", requests: 980, tokens: 7_400_000 },
+      { date: "07-21", requests: 1250, tokens: 9_300_000 },
+      { date: "07-28", requests: 1180, tokens: 8_800_000 },
+      { date: "08-04", requests: 1310, tokens: 9_700_000 },
+      { date: "08-11", requests: 1240, tokens: 9_200_000 },
+      { date: "08-18", requests: 1390, tokens: 10_400_000 },
+      { date: "08-25", requests: 1280, tokens: 9_500_000 },
+      { date: "09-01", requests: 1150, tokens: 8_600_000 },
+    ],
+    { failures: 96, deltaPct: 31, latency: 1250, latencyDelta: 7 },
+  ),
 };
 
 const settings: AppSettings = {

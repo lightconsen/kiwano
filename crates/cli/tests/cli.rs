@@ -1252,6 +1252,10 @@ fn dashboard_rejects_an_unknown_window() {
 
     let (code, _, err) = run(&db, &["dashboard", "--window", "today"]);
     assert_eq!(code, 0, "{err}");
+
+    // "all" is a window like the others, not an omitted `--window`.
+    let (code, _, err) = run(&db, &["dashboard", "--window", "all"]);
+    assert_eq!(code, 0, "{err}");
 }
 
 /// Nothing over budget is the answer to the question, not a failure.

@@ -1214,10 +1214,10 @@ fn log_filter(args: &LogFilterArgs) -> Result<RequestLogFilter<'_>, CliError> {
 
 pub fn dashboard(args: &DashboardArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     let window = match args.window.as_str() {
-        w @ ("today" | "7d" | "30d") => w,
+        w @ ("today" | "7d" | "30d" | "all") => w,
         other => {
             return Err(CliError::usage(format!(
-                "invalid --window: {other} (today|7d|30d)"
+                "invalid --window: {other} (today|7d|30d|all)"
             )))
         }
     };
@@ -2078,11 +2078,17 @@ fn render_log_detail(detail: &kiwanod::store::RequestLogDetail) -> String {
 }
 
 fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
+    // `—` where there is nothing to compare against — the "all" window, or an
+    // earlier window with no traffic. Not "0%", which would read as "unchanged".
+    let delta = |pct: Option<i64>| match pct {
+        Some(p) => format!("{p}%"),
+        None => "—".to_string(),
+    };
     let mut out = format!(
-        "{} · {} requests ({}%) · cost {}",
+        "{} · {} requests ({}) · cost {}",
         window,
         data.requests,
-        data.requests_delta_pct,
+        delta(data.requests_delta_pct),
         fmt_amount(data.cost, 4)
     );
     out.push_str(&format!(
@@ -2102,8 +2108,9 @@ fn render_dashboard(data: &vm::DashboardVm, window: &str) -> String {
         ));
     }
     out.push_str(&format!(
-        "\navg latency {} ms ({}%)",
-        data.latency_ms, data.latency_delta_pct
+        "\navg latency {} ms ({})",
+        data.latency_ms,
+        delta(data.latency_delta_pct)
     ));
     // The two splits, as tables: they are columns of numbers with a name in
     // front, which is what a table is for. The headline lines above stay prose —

@@ -509,6 +509,29 @@ fn mmdd(day: &str) -> String {
     day.get(5..10).unwrap_or(day).to_string()
 }
 
+/// (y, m, d) → days since epoch: Howard Hinnant's `days_from_civil`, the
+/// inverse of [`civil_from_days`].
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m as i64 - 3 } else { m as i64 + 9 };
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The local day index a `YYYY-MM-DD` bucket key names — the inverse of
+/// [`local_day_key`], for a chart whose left edge is wherever the oldest bucket
+/// is rather than a day count back from today.
+fn day_index_of_key(key: &str) -> Option<i64> {
+    Some(days_from_civil(
+        key.get(0..4)?.parse().ok()?,
+        key.get(5..7)?.parse().ok()?,
+        key.get(8..10)?.parse().ok()?,
+    ))
+}
+
 /// `HH:00` label for the dashboard trend axis when it plots hours.
 fn hh00(hour: &str) -> String {
     hour.get(11..13)
@@ -1010,7 +1033,12 @@ pub struct FilterOptionVm {
 pub struct DashboardVm {
     pub window: String,
     pub requests: i64,
-    pub requests_delta_pct: i64,
+    /// How this window's request count compares with the window before it, in
+    /// percent. `None` when there is nothing to compare against — the "all"
+    /// window has no earlier period, and an earlier period with no traffic in it
+    /// has no percentage to give. Absent is not 0: a delta of zero says the two
+    /// windows matched, which is a claim of its own.
+    pub requests_delta_pct: Option<i64>,
     pub input_tokens: i64,
     pub cache_read_tokens: i64,
     pub output_tokens: i64,
@@ -1022,7 +1050,10 @@ pub struct DashboardVm {
     /// tokens at the same rows' other rate.
     pub cost_off_peak: f64,
     pub latency_ms: i64,
-    pub latency_delta_pct: i64,
+    /// The same comparison for the average latency, and absent for the same
+    /// reasons. Positive means slower than the window before it; the screen
+    /// colours it as the bad direction.
+    pub latency_delta_pct: Option<i64>,
     pub trend: Vec<TrendVm>,
     pub by_provider: Vec<ProviderDistVm>,
     pub by_agent: Vec<AgentDistVm>,
@@ -3958,6 +3989,21 @@ fn first_notice(aux: &Aux, key: &str, identity: &str, mark: bool) -> Result<bool
 
 // ── Dashboard ──
 
+/// How many days the trend chart draws one bar per day for. Past it the bars
+/// are summed a week at a time — see the trend branch below for why a limit
+/// rather than always-weekly.
+const TREND_DAILY_LIMIT_DAYS: i64 = 62;
+
+/// How much a figure moved against the same figure measured over the window
+/// before it, as a whole percent.
+///
+/// `None` when the earlier figure is nothing at all: a percentage of zero has no
+/// value, and "+∞%" is not one. Reporting 0 there would be a claim that the two
+/// windows matched, which is a different — and false — statement.
+fn delta_pct(current: f64, previous: f64) -> Option<i64> {
+    (previous > 0.0).then(|| ((current - previous) / previous * 100.0).round() as i64)
+}
+
 /// Dashboard aggregation. `provider_id`/`agent` narrow every stat (headline,
 /// trend, distributions, latency) to that slice; None means all.
 pub fn build_dashboard(
@@ -3974,13 +4020,27 @@ pub fn build_dashboard(
     // (which would count the hours between 6 and 7 days back that the chart's
     // seven daily points cannot show).
     let (window, since, days) = match window {
-        "today" => ("today", local_day_start(tz, now), 1),
-        "30d" => ("30d", local_day_start(tz, now - 29 * 86_400), 30),
-        _ => ("7d", local_day_start(tz, now - 6 * 86_400), 7),
+        "today" => ("today", Some(local_day_start(tz, now)), 1),
+        "30d" => ("30d", Some(local_day_start(tz, now - 29 * 86_400)), 30),
+        // Everything the store holds. No lower bound is invented here: a window
+        // that began whenever this install did is the question being asked, and
+        // the chart finds its own left edge from the oldest bucket below.
+        "all" => ("all", None, 0),
+        _ => ("7d", Some(local_day_start(tz, now - 6 * 86_400)), 7),
     };
+    // The local day index today sits on (the chart's right edge), and the window
+    // before this one: the same length, ending exactly where this one starts.
+    // `None` for "all", which has no earlier period — it *is* every period.
+    let today_days = (now + tz * 60).div_euclid(86_400);
+    let previous: Option<(String, String)> = since.as_ref().map(|start| {
+        (
+            local_day_start_from(tz, today_days - 2 * days + 1),
+            start.clone(),
+        )
+    });
 
     let cur = store
-        .usage_totals(agent, provider_id, Some(&since))
+        .usage_totals(agent, provider_id, since.as_deref())
         .map_err(e2s)?;
     // Headline request count shares the Logs card's source (request_logs):
     // usage rows only cover forwarded requests, so failures before the forward
@@ -3988,8 +4048,16 @@ pub fn build_dashboard(
     // stat while the Logs card below still shows them. Token/cost/latency stay
     // usage-based — failed requests carry none.
     let requests = store
-        .count_request_logs(agent, provider_id, Some(&since))
+        .count_request_logs(agent, provider_id, since.as_deref(), None)
         .map_err(e2s)?;
+    // The same count over the window before, from the same source: two numbers
+    // compared as a percentage have to be measured the same way.
+    let previous_requests = match &previous {
+        Some((from, to)) => store
+            .count_request_logs(agent, provider_id, Some(from), Some(to))
+            .map_err(e2s)?,
+        None => 0,
+    };
     let providers = store.list_providers().map_err(e2s)?;
     let name_by_id: HashMap<String, String> = providers
         .iter()
@@ -4011,7 +4079,7 @@ pub fn build_dashboard(
     // what makes their difference "what running at peak cost you" rather than a
     // comparison of two different populations.
     let headline = store
-        .usage_cost_with_off_peak_by_currency(agent, provider_id, Some(&since))
+        .usage_cost_with_off_peak_by_currency(agent, provider_id, since.as_deref())
         .map_err(e2s)?;
     let pairs = |pick: fn(&kiwanod::store::CostBucket) -> f64| -> Vec<(Option<String>, f64)> {
         headline
@@ -4026,7 +4094,7 @@ pub fn build_dashboard(
     let mut cost_by_pid: HashMap<String, f64> = HashMap::new();
     let mut off_peak_by_pid: HashMap<String, f64> = HashMap::new();
     for b in store
-        .usage_cost_by_provider(agent, Some(&since))
+        .usage_cost_by_provider(agent, since.as_deref())
         .map_err(e2s)?
     {
         let convert = |c: f64| match b.currency.as_deref() {
@@ -4045,13 +4113,12 @@ pub fn build_dashboard(
         // to that stat).
         let mut hourly: HashMap<String, UsageTotals> = HashMap::new();
         for b in store
-            .usage_hourly(agent, provider_id, Some(&since), tz)
+            .usage_hourly(agent, provider_id, since.as_deref(), tz)
             .map_err(e2s)?
         {
             hourly.insert(b.day, b.totals);
         }
         // The local day index, turned back into the 24 hour keys of that day.
-        let today_days = (now + tz * 60).div_euclid(86_400);
         for h in 0..24 {
             let key = hour_key(today_days * 86_400 + h * 3_600);
             let t = hourly.get(&key).cloned().unwrap_or_default();
@@ -4069,29 +4136,63 @@ pub fn build_dashboard(
         // not say.
         let mut daily: HashMap<String, UsageTotals> = HashMap::new();
         for d in store
-            .usage_daily(agent, provider_id, Some(&since), tz)
+            .usage_daily(agent, provider_id, since.as_deref(), tz)
             .map_err(e2s)?
         {
             daily.insert(d.day, d.totals);
         }
         // Local day index: the buckets have to be the same days the window
         // above selected, or the chart and its stat disagree again.
-        let today_days = (now + tz * 60).div_euclid(86_400);
-        for i in (0..days).rev() {
-            let key = local_day_key(tz, (today_days - i) * 86_400);
-            let t = daily.get(&key).cloned().unwrap_or_default();
+        // Where the chart starts. A counted window is a fixed number of days
+        // back from today; "all" is wherever the oldest recorded row is, which
+        // only the buckets themselves can say.
+        let first_days = if window == "all" {
+            daily
+                .keys()
+                .filter_map(|k| day_index_of_key(k))
+                .min()
+                .unwrap_or(today_days)
+        } else {
+            today_days - (days - 1)
+        };
+        let span = (today_days - first_days + 1).max(1);
+        // A day per bar reads while the days fit side by side. Past the point
+        // where they stop fitting, the same rows are summed a week at a time and
+        // a bar says which week it starts — an installation older than that has
+        // stopped asking about individual days, and a hundred hairline columns
+        // answer nothing.
+        let step = if span > TREND_DAILY_LIMIT_DAYS { 7 } else { 1 };
+        let mut start = first_days;
+        while start <= today_days {
+            let mut t = UsageTotals::default();
+            for offset in 0..step {
+                let day = start + offset;
+                if day > today_days {
+                    break;
+                }
+                let key = local_day_key(tz, day * 86_400);
+                if let Some(row) = daily.get(&key) {
+                    t.requests += row.requests;
+                    t.input_tokens += row.input_tokens;
+                    t.output_tokens += row.output_tokens;
+                    t.cache_read_tokens += row.cache_read_tokens;
+                    t.cache_creation_tokens += row.cache_creation_tokens;
+                }
+            }
+            let key = local_day_key(tz, start * 86_400);
             trend.push(TrendVm {
                 date: mmdd(&key),
                 requests: t.requests,
                 tokens: t.input_tokens + t.output_tokens,
             });
+            start += step;
         }
     }
 
     // provider distribution
     let total_req = cur.requests.max(1);
     let mut by_provider: Vec<ProviderDistVm> = store
-        .usage_by_provider(agent, provider_id, Some(&since))
+        .usage_by_provider(agent, provider_id, since.as_deref())
         .map_err(e2s)?
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
@@ -4128,7 +4229,7 @@ pub fn build_dashboard(
     // deleted: its usage rows stay, and its traffic should not disappear from
     // the page just because the name did.
     let mut roster: Vec<(String, String)> = list_agents(store)?;
-    for id in store.usage_agents(Some(&since)).map_err(e2s)? {
+    for id in store.usage_agents(since.as_deref()).map_err(e2s)? {
         if !roster.iter().any(|(a, _)| *a == id) {
             roster.push((id.clone(), id));
         }
@@ -4144,11 +4245,11 @@ pub fn build_dashboard(
             continue;
         }
         let t = store
-            .usage_totals(Some(name), provider_id, Some(&since))
+            .usage_totals(Some(name), provider_id, since.as_deref())
             .map_err(e2s)?;
         if t.requests > 0 {
             let buckets = store
-                .usage_cost_with_off_peak_by_currency(Some(name), provider_id, Some(&since))
+                .usage_cost_with_off_peak_by_currency(Some(name), provider_id, since.as_deref())
                 .unwrap_or_default();
             let off_peak = cost_of(
                 &buckets
@@ -4174,17 +4275,26 @@ pub fn build_dashboard(
         }
     }
 
-    let latency = aux
-        .avg_latency(provider_id, agent, Some(&since), None)
-        .unwrap_or(0);
-    let latency_delta_pct = 0; // prev-window latency comparison lands with cost tables
+    let latency_now = aux.avg_latency(provider_id, agent, since.as_deref(), None);
+    let latency_before = previous
+        .as_ref()
+        .and_then(|(from, to)| aux.avg_latency(provider_id, agent, Some(from), Some(to)));
+    // Both halves have to exist: an average with nothing to compare it against is
+    // not a change, and neither is one measured over no rows. `avg_latency`
+    // already ignores rows with no latency, so "no average" means "nothing was
+    // measured", which is the honest absence this leaves as None.
+    let latency_delta_pct = match (latency_now, latency_before) {
+        (Some(cur), Some(before)) => delta_pct(cur as f64, before as f64),
+        _ => None,
+    };
+    let latency = latency_now.unwrap_or(0);
 
     // Filter select options: who has traffic in the window, independent of
     // the active filter. The provider side reuses the same per-provider
     // aggregation (query already orders by request count DESC); the agent
     // side mirrors the by_agent loop without its provider narrowing.
     let filter_providers: Vec<FilterOptionVm> = store
-        .usage_by_provider(None, None, Some(&since))
+        .usage_by_provider(None, None, since.as_deref())
         .map_err(e2s)?
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
@@ -4199,7 +4309,9 @@ pub fn build_dashboard(
     let filter_agents: Vec<FilterOptionVm> = roster
         .iter()
         .filter_map(|(name, label)| {
-            let t = store.usage_totals(Some(name), None, Some(&since)).ok()?;
+            let t = store
+                .usage_totals(Some(name), None, since.as_deref())
+                .ok()?;
             (t.requests > 0).then(|| FilterOptionVm {
                 id: name.clone(),
                 label: label.clone(),
@@ -4210,7 +4322,7 @@ pub fn build_dashboard(
     Ok(DashboardVm {
         window: window.to_string(),
         requests,
-        requests_delta_pct: 0, // prev-window deltas land with cost tables (P1)
+        requests_delta_pct: delta_pct(requests as f64, previous_requests as f64),
         input_tokens: cur.input_tokens,
         cache_read_tokens: cur.cache_read_tokens,
         output_tokens: cur.output_tokens,
@@ -6312,8 +6424,15 @@ mod tests {
 
     #[test]
     fn dashboard_windows_cover_the_right_days() {
-        let s = store();
-        let aux = Aux::open_in_memory().unwrap();
+        // One file, two handles — as production has it, where the app's `Aux`
+        // and the gateway's `Store` open the same SQLite file. It is also the
+        // only way this test can see a latency average at all: `avg_latency`
+        // reads through the `Aux` connection, which in-memory would be a
+        // database of its own.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kiwano.db");
+        let s = Store::open(&path).unwrap();
+        let aux = Aux::open(&path).unwrap();
         // Display conversion uses the Hub's published rates and there is no
         // compiled snapshot behind them, so the fixture publishes the rate the
         // cost assertion below converts with.
@@ -6333,6 +6452,8 @@ mod tests {
         seed_usage_at(&s, 10, 6, 3_000);
         seed_usage_at(&s, 40, 8, 4_000);
         seed_usage_at(&s, 7, 1, 5_000);
+        // Old enough that "all" has to start saying weeks rather than days.
+        seed_usage_at(&s, 100, 3, 900);
 
         let d = |w: &str| build_dashboard(&s, &aux, w, None, None).unwrap();
 
@@ -6381,6 +6502,42 @@ mod tests {
 
         // Cost is summed in the window and converted for display (default CNY).
         assert!((month.cost - month.requests as f64 * 0.5 * 7.1).abs() < 0.01);
+
+        // All: everything the store holds, including the row no counted window
+        // reaches. Its bars are whole local days like every other window's, and
+        // they add up to the stat above them — which is the point of a chart
+        // whose left edge is "wherever the oldest row is".
+        let all = d("all");
+        assert_eq!((all.requests, all.input_tokens), (24, 67_700));
+        assert_eq!(
+            all.trend.iter().map(|p| p.requests).sum::<i64>(),
+            all.requests,
+            "the bars cover the stat's whole window"
+        );
+        assert_eq!(
+            all.trend[0].requests, 3,
+            "the oldest group is the first bar, not a day count back from today"
+        );
+        // 101 days no longer fit a bar each, so the rows are summed a week at a
+        // time: 15 bars of seven days, the last one clipped at today.
+        assert_eq!(all.trend.len(), 15, "a long history is summed by the week");
+
+        // The deltas compare each window with the one before it, over the same
+        // source: 7d is six requests this week against seven last week.
+        assert_eq!(week.requests_delta_pct, Some(-14));
+        // 30d against the 30 days before it: 13 against the 40-day-old group's
+        // eight.
+        assert_eq!(month.requests_delta_pct, Some(63));
+        // Yesterday had no traffic, so today has nothing to be a percentage of.
+        // Zero would be the claim that the two days matched.
+        assert_eq!(today.requests_delta_pct, None);
+        // And "all" has no earlier window at all — it *is* every window.
+        assert_eq!(all.requests_delta_pct, None);
+
+        // Every seeded row is 100ms, so the two windows really do have the same
+        // average: a flat 0%, which is a finding, not the absence of one.
+        assert_eq!(week.latency_delta_pct, Some(0));
+        assert_eq!(today.latency_delta_pct, None, "nothing ran yesterday");
     }
 
     #[test]

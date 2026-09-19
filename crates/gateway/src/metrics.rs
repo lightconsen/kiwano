@@ -49,7 +49,10 @@ use crate::strategy::circuit_breaker::CircuitState;
 /// restarting does not enrol an agent.
 pub fn health(state: &GatewayState) -> Response {
     let routed_agents = state.route_table().routes.len();
-    let store_ok = state.store.count_request_logs(None, None, None).is_ok();
+    let store_ok = state
+        .store
+        .count_request_logs(None, None, None, None)
+        .is_ok();
     let body = serde_json::json!({
         "status": if store_ok { "ok" } else { "degraded" },
         // Which half is down, so a probe's output is worth reading.
@@ -81,7 +84,10 @@ pub async fn prometheus(state: &GatewayState, redact: bool) -> String {
 
     out.push_str("# HELP kiwano_up 1 while the gateway can read its own store\n");
     out.push_str("# TYPE kiwano_up gauge\n");
-    let store_ok = state.store.count_request_logs(None, None, None).is_ok();
+    let store_ok = state
+        .store
+        .count_request_logs(None, None, None, None)
+        .is_ok();
     out.push_str(&format!("kiwano_up {}\n", u8::from(store_ok)));
 
     out.push_str("# HELP kiwano_build_info The build the gateway is running\n");
@@ -141,7 +147,7 @@ pub async fn prometheus(state: &GatewayState, redact: bool) -> String {
         }
     }
 
-    if let Ok(rows) = state.store.count_request_logs(None, None, None) {
+    if let Ok(rows) = state.store.count_request_logs(None, None, None, None) {
         out.push_str("# HELP kiwano_request_log_rows Request-log rows held\n");
         out.push_str("# TYPE kiwano_request_log_rows gauge\n");
         out.push_str(&format!("kiwano_request_log_rows {rows}\n"));

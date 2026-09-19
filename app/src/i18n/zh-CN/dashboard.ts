@@ -2,6 +2,7 @@ export const dashboard = {
   windowToday: "今天",
   window7d: "最近 7 天",
   window30d: "最近 30 天",
+  windowAll: "全部",
 
   allProviders: "全部 Provider",
   allAgents: "全部 Agent",

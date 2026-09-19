@@ -2411,7 +2411,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<(Option<String>, f64)>> {
-        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT cost_currency, SUM(cost) FROM usage
@@ -2441,7 +2441,7 @@ impl Store {
         agent: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<ProviderCostBucket>> {
-        let (cond, params) = Self::usage_filters(agent, None, since);
+        let (cond, params) = Self::usage_filters(agent, None, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT provider_id, cost_currency, SUM(cost), SUM(cost_off_peak) FROM usage
@@ -2479,7 +2479,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<CostBucket>> {
-        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT cost_currency, SUM(cost), SUM(cost_off_peak) FROM usage
@@ -2512,6 +2512,7 @@ impl Store {
         agent: Option<&str>,
         provider_id: Option<&str>,
         since: Option<&str>,
+        until: Option<&str>,
     ) -> (String, Vec<String>) {
         let mut cond = String::new();
         let mut params: Vec<String> = Vec::new();
@@ -2527,6 +2528,13 @@ impl Store {
             params.push(s.to_string());
             cond.push_str(&format!(" AND ts >= ?{}", params.len()));
         }
+        // Half-open, like every other window in this crate: the dashboard's
+        // previous-period comparison asks for the rows that *were* in the last
+        // period, and a boundary row counted twice would inflate it.
+        if let Some(u) = until {
+            params.push(u.to_string());
+            cond.push_str(&format!(" AND ts < ?{}", params.len()));
+        }
         (cond, params)
     }
 
@@ -2538,7 +2546,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<UsageTotals> {
-        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
@@ -2594,7 +2602,7 @@ impl Store {
         provider_id: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<ProviderUsage>> {
-        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT provider_id, COUNT(*), COALESCE(SUM(input_tokens),0),
@@ -2630,7 +2638,7 @@ impl Store {
     /// later deleted) exists only as the `agent` column of these rows. This is
     /// how its traffic stays on the page after the route is gone.
     pub fn usage_agents(&self, since: Option<&str>) -> Result<Vec<String>> {
-        let (cond, params) = Self::usage_filters(None, None, since);
+        let (cond, params) = Self::usage_filters(None, None, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT agent FROM usage WHERE 1=1{cond}
@@ -2683,7 +2691,7 @@ impl Store {
         tz_offset_minutes: i64,
         fmt: &str,
     ) -> Result<Vec<DailyUsage>> {
-        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, None);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT strftime('{fmt}', ts, '{tz_offset_minutes:+} minutes') AS bucket, COUNT(*),
@@ -2893,18 +2901,20 @@ impl Store {
     }
 
     /// COUNT of data-plane requests (every row: forwarded + pre-forward
-    /// failures), optionally filtered by agent, provider and/or a start
-    /// timestamp. The dashboard headline reads this instead of `usage_totals`:
-    /// usage rows only cover forwarded requests, so pre-forward failures would
-    /// silently vanish from the top stat while the Logs card below still
-    /// shows them.
+    /// failures), optionally filtered by agent, provider and/or a window.
+    /// `since`/`until` are half-open, which is what lets the dashboard ask for
+    /// the *previous* period as one query. The dashboard headline reads this
+    /// instead of `usage_totals`: usage rows only cover forwarded requests, so
+    /// pre-forward failures would silently vanish from the top stat while the
+    /// Logs card below still shows them.
     pub fn count_request_logs(
         &self,
         agent: Option<&str>,
         provider_id: Option<&str>,
         since: Option<&str>,
+        until: Option<&str>,
     ) -> Result<i64> {
-        let (cond, params) = Self::usage_filters(agent, provider_id, since);
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, until);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n = conn.query_row(
             &format!("SELECT COUNT(*) FROM request_logs WHERE 1=1{cond}"),
@@ -5687,17 +5697,17 @@ mod tests {
             .insert_request_log(&sample_log("2026-09-08T10:00:00+00:00", None, 404))
             .unwrap();
 
-        assert_eq!(store.count_request_logs(None, None, None).unwrap(), 3);
+        assert_eq!(store.count_request_logs(None, None, None, None).unwrap(), 3);
         // Failures count too — the dashboard headline uses this.
         assert_eq!(
             store
-                .count_request_logs(None, None, Some("2026-09-07T00:00:00Z"))
+                .count_request_logs(None, None, Some("2026-09-07T00:00:00Z"), None)
                 .unwrap(),
             2
         );
         assert_eq!(
             store
-                .count_request_logs(None, None, Some("2026-09-09T00:00:00Z"))
+                .count_request_logs(None, None, Some("2026-09-09T00:00:00Z"), None)
                 .unwrap(),
             0
         );
@@ -5705,11 +5715,16 @@ mod tests {
         // only counted in the unfiltered totals.
         assert_eq!(
             store
-                .count_request_logs(Some("claude"), None, None)
+                .count_request_logs(Some("claude"), None, None, None)
                 .unwrap(),
             2
         );
-        assert_eq!(store.count_request_logs(None, Some("p1"), None).unwrap(), 2);
+        assert_eq!(
+            store
+                .count_request_logs(None, Some("p1"), None, None)
+                .unwrap(),
+            2
+        );
     }
 
     #[test]

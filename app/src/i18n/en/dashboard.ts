@@ -7,6 +7,8 @@ export const dashboard = {
   windowToday: "Today",
   window7d: "Last 7 days",
   window30d: "Last 30 days",
+  /** Not a counted window: everything the store holds. */
+  windowAll: "All time",
 
   allProviders: "All providers",
   allAgents: "All agents",

@@ -319,7 +319,7 @@ pub struct LogFilterArgs {
 
 #[derive(Debug, Args)]
 pub struct DashboardArgs {
-    /// today | 7d | 30d
+    /// today | 7d | 30d | all
     #[arg(long, default_value = "7d", value_name = "WINDOW")]
     pub window: String,
 

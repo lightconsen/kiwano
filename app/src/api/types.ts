@@ -508,12 +508,14 @@ export interface TrendPoint {
   tokens: number;
 }
 
-export type DashboardWindow = "today" | "7d" | "30d";
+export type DashboardWindow = "today" | "7d" | "30d" | "all";
 
 export interface DashboardData {
   window: DashboardWindow;
   requests: number;
-  requests_delta_pct: number;
+  /** Against the window before this one; null when there is nothing to compare
+      against (the "all" window, or an earlier window with no traffic). */
+  requests_delta_pct: number | null;
   input_tokens: number;
   cache_read_tokens: number;
   output_tokens: number;
@@ -523,7 +525,9 @@ export interface DashboardData {
       (correctly) for traffic that was already off-peak. */
   cost_off_peak: number;
   latency_ms: number;
-  latency_delta_pct: number;
+  /** Same comparison for the average latency. Positive means slower, which the
+      screen colours as the bad direction. */
+  latency_delta_pct: number | null;
   trend: TrendPoint[];
   by_provider: {
     id: string;

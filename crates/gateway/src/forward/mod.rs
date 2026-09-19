@@ -1460,6 +1460,11 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
     );
     if let Err(e) = state.store.record_usage(&record) {
         tracing::warn!(error = %e, "failed to persist usage record");
+    } else {
+        // The numbers on disk just moved, and nothing else would tell the app:
+        // one tick per recorded request is what lets its screens re-read rather
+        // than poll (see `GatewayState::notify_usage`).
+        state.notify_usage();
     }
     if let Some(log) = log {
         let entry = RequestLogNew {
@@ -2173,9 +2178,16 @@ mod tests {
             usage_missing: false,
             log: None,
         };
+        // One recorded request is one tick on the admin plane's event stream,
+        // and that tick is the whole of what keeps the app's numbers live —
+        // nothing else would notice the day it stopped happening.
+        let mut ticks = state.usage_ticks();
         record_sample(&state, sample(Some("claude-opus-4-8")));
+        assert!(ticks.try_recv().is_ok(), "a recorded request ticks");
         record_sample(&state, sample(Some("totally-unpriced-model")));
         record_sample(&state, sample(None));
+        // Unpriced is still metered, and still moves the count the app shows.
+        assert!(ticks.try_recv().is_ok(), "and so does one it cannot price");
 
         let totals = state.store.usage_totals(None, None, None).unwrap();
         assert_eq!(totals.requests, 3);

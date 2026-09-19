@@ -138,6 +138,56 @@ fn watchdog_delay(consecutive_respawns: u32) -> std::time::Duration {
     })
 }
 
+/// How often the app may be told to re-read, at most. A burst of requests lands
+/// within a few hundred milliseconds of itself, and without this every one of
+/// them would have the screen in front of the user re-read the whole provider
+/// list — for numbers that are not going to differ. One re-read a second costs
+/// less and reads the same.
+const USAGE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// How long to wait before following the event stream again after it ends. It
+/// ends because the gateway stopped, because it is not up yet, or because the
+/// watchdog replaced it — all of them "shortly", and none of them the app's to
+/// fix: bringing the gateway back is the watchdog's job.
+const USAGE_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Bridge the gateway's usage ticks to the webview.
+///
+/// The gateway is a separate process and the window cannot hear it directly, so
+/// this thread is the bridge: it holds one subscription to the admin plane's
+/// `/events` stream, reconnecting whenever that ends, and re-emits each tick as
+/// a Tauri event. The frontend's half is only to re-read what it is showing —
+/// see `lib/updateEvents.ts`.
+///
+/// The tick carries nothing, and this adds nothing to it: the numbers have one
+/// source (the store read the frontend makes in response), and a copy in the
+/// event would be a second truth to disagree with it.
+fn spawn_usage_watch(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        // Kept across reconnects: a tick arriving moments after the last one is
+        // the same news whether or not the stream was re-established in between.
+        let mut last: Option<std::time::Instant> = None;
+        loop {
+            let admin = match handle.try_state::<AppState>() {
+                Some(state) => state.admin.clone(),
+                // No state yet, or the app is shutting down.
+                None => return,
+            };
+            sidecar::watch_events(&admin, || {
+                if let Some(prev) = last {
+                    let since = prev.elapsed();
+                    if since < USAGE_TICK_INTERVAL {
+                        std::thread::sleep(USAGE_TICK_INTERVAL - since);
+                    }
+                }
+                last = Some(std::time::Instant::now());
+                let _ = handle.emit("usage-changed", ());
+            });
+            std::thread::sleep(USAGE_RECONNECT_DELAY);
+        }
+    });
+}
+
 fn spawn_watchdog(handle: tauri::AppHandle) {
     let mut respawns = 0u32;
     std::thread::spawn(move || loop {
@@ -1193,6 +1243,9 @@ pub fn run() {
                 shell_vars: OnceLock::new(),
             });
             spawn_watchdog(app.handle().clone());
+            // Live numbers: the gateway says when it has recorded traffic, and
+            // whatever screen is showing re-reads (see `spawn_usage_watch`).
+            spawn_usage_watch(app.handle().clone());
             // Hub catalog: one-shot conditional sync (skips the download when
             // the manifest sha matches the cache). Silent, opt-out-free, and
             // failure-tolerant — a failed sync just leaves the cache as it was.

@@ -80,7 +80,21 @@ pub struct GatewayState {
     /// a gateway left over from another version, and a daemon it adopted is not
     /// its child, so there is no handle to kill.
     shutdown: tokio::sync::watch::Sender<bool>,
+    /// Ticks saying a request has just been metered, which is what the admin
+    /// plane's `/events` streams to the app. The numbers themselves are not in
+    /// here on purpose: they have exactly one source (the store read the app
+    /// makes after a tick), and a copy in the event would be a second truth.
+    ///
+    /// A broadcast rather than a watch: one of these is a moment, not a state,
+    /// and every subscriber has to see every one of them.
+    usage_ticks: tokio::sync::broadcast::Sender<()>,
 }
+
+/// How many ticks a subscriber may fall behind before it is told it lagged
+/// rather than given them one by one. The consumer re-reads a screen per tick,
+/// so what it does with a backlog is the same thing either way; the buffer only
+/// has to be big enough that the ordinary case never sees a gap.
+const USAGE_TICK_BACKLOG: usize = 16;
 
 /// The price table to serve from: the GUI-seeded `model_pricing` mirror, which
 /// is how a Hub price refresh reaches cost recording.
@@ -140,6 +154,7 @@ impl GatewayState {
         // enforce anything — the same class of failure as the route table.
         admin::ensure_admin_token(&store)?;
         let (shutdown, _) = tokio::sync::watch::channel(false);
+        let (usage_ticks, _) = tokio::sync::broadcast::channel(USAGE_TICK_BACKLOG);
         Ok(GatewayState {
             store: Arc::new(store),
             http,
@@ -156,6 +171,7 @@ impl GatewayState {
             version: env!("CARGO_PKG_VERSION"),
             metrics_token: None,
             shutdown,
+            usage_ticks,
         })
     }
 
@@ -178,6 +194,20 @@ impl GatewayState {
     /// since the serve loops may not have dropped their receivers yet.
     pub fn request_shutdown(&self) {
         let _ = self.shutdown.send(true);
+    }
+
+    /// Tell `/events` subscribers that a request has just been metered.
+    ///
+    /// Best-effort by construction: with nobody listening the send is a no-op,
+    /// and a subscriber that fell behind is told by its own `Lagged`, which the
+    /// stream turns into the one tick it would have carried anyway.
+    pub fn notify_usage(&self) {
+        let _ = self.usage_ticks.send(());
+    }
+
+    /// A receiver for those ticks — one per `/events` connection.
+    pub fn usage_ticks(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.usage_ticks.subscribe()
     }
 
     /// Current price-table snapshot (cheap clone; rebuilt from the mirror on

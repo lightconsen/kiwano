@@ -12,7 +12,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { applyTheme } from "./lib/theme";
 import { ReloadRegistryProvider, useReloadRegistry } from "./lib/reload";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
-import { onOpenSettings } from "./lib/updateEvents";
+import { onOpenSettings, onUsageChanged } from "./lib/updateEvents";
 import type { AgentRef } from "./api/types";
 import { rememberCustomAgents } from "./lib/agents";
 import type {
@@ -130,6 +130,22 @@ export default function App() {
         window.location.hash = "#settings";
       }),
     [],
+  );
+
+  // Live numbers. The gateway ticks once per request it records, and both halves
+  // of "what the user is looking at" follow: the screen in front of them, and
+  // the totals in the status bar.
+  //
+  // Deliberately not `refresh` below: that one is the user asking, so it also
+  // re-reads the gateway's state and flips the ⟳ busy. This is the data having
+  // moved on its own, and it says nothing about the gateway being up.
+  useEffect(
+    () =>
+      onUsageChanged(() => {
+        void reloadScreen();
+        api.getFooterStats().then(setFooter).catch(() => {});
+      }),
+    [reloadScreen],
   );
 
   // The whole of the status bar's ⟳: the current screen's data, the gateway's

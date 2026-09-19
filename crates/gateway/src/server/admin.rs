@@ -1,25 +1,31 @@
 //! Admin plane: status chip + route hot reload + shutdown (tech.md §4.6
-//! control channel; §4.3 flow 2).
+//! control channel; §4.3 flow 2), and the event stream the app's live numbers
+//! ride on.
 //!
 //! The Tauri app calls `POST /reload` after writing new bindings to SQLite;
 //! the next request routed by the gateway hits the new provider. `GET
-//! /status` powers the first-screen gateway state chip and sidecar re-connect.
+//! /status` powers the first-screen gateway state chip and sidecar re-connect,
+//! and `GET /events` streams a tick per recorded request, which is what lets a
+//! screen re-read its numbers instead of polling for them.
 //!
 //! # Transport
 //!
-//! These are the same three HTTP routes as ever, served over the local IPC
+//! These are the same HTTP routes as ever, served over the local IPC
 //! endpoint described in [`super::admin_ipc`] — a unix domain socket, or a
 //! per-user named pipe on Windows — instead of a loopback TCP port. No handler
 //! below knows or cares which: the router is transport-independent, which is
 //! why the tests in this module drive it with `oneshot` while
 //! [`super::admin_ipc`]'s drive it through a real socket, and why the app's
 //! hand-written requests did not have to change shape when the plane moved.
+//! (`/events` is the one route whose response does not end, which is why its
+//! test runs over a real listener rather than `oneshot`.)
 //!
 //! # Auth
 //!
 //! `/reload` and `/shutdown` route the operator's traffic and stop the process,
-//! so both require [`ADMIN_TOKEN_HEADER`], carrying the token the gateway minted
-//! for itself on first run.
+//! and `/events` says when there is traffic at all, so all three require
+//! [`ADMIN_TOKEN_HEADER`], carrying the token the gateway minted for itself on
+//! first run.
 //!
 //! **What the token is worth now that the plane is not a port.** Decided
 //! deliberately when the transport changed, because the answer is not the same
@@ -68,6 +74,7 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -86,9 +93,55 @@ pub const ADMIN_TOKEN_KEY: &str = "gateway.admin_token";
 pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
     Router::new()
         .route("/status", get(status))
+        .route("/events", get(events))
         .route("/reload", post(reload))
         .route("/shutdown", post(shutdown))
         .with_state(state)
+}
+
+/// `GET /events` — a stream of "a request was just metered" ticks.
+///
+/// This is what keeps the app's numbers live without polling for them: every
+/// recorded request sends one, and the app re-reads what its screen is showing
+/// when it arrives. It carries no numbers itself — see `GatewayState`'s
+/// `usage_ticks`.
+///
+/// Token-guarded like `/reload`: how busy this machine is and when is the
+/// operator's business, and "every local process may watch" is not a property
+/// the loopback bind ever gave this plane anyway (see `admin_ipc`).
+async fn events(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> Response {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    // `KeepAlive` writes a comment line through an idle stream, which is also
+    // how a dead peer is noticed at all: without it, a stream that says nothing
+    // for an hour looks exactly like one whose other end is gone.
+    Sse::new(usage_ticks(state.usage_ticks()))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+/// The tick stream, as SSE events.
+///
+/// `unfold` over `recv` rather than a `Stream` impl: `poll_recv` is not part of
+/// the broadcast receiver in the tokio this builds against, and this is the same
+/// three cases without the `Pin` ceremony.
+fn usage_ticks(
+    rx: tokio::sync::broadcast::Receiver<()>,
+) -> impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>> {
+    futures_util::stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            // A subscriber that fell behind is told what the ticks would have
+            // told it: there is newer data than it has seen. An error would
+            // close a stream that has nothing wrong with it, and the reader's
+            // answer to either is the same re-read.
+            Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                Some((Ok(Event::default().data("usage")), rx))
+            }
+            // Closed: the gateway is going away.
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
+        }
+    })
 }
 
 /// Read the admin token, minting one on first run.
@@ -519,6 +572,89 @@ mod tests {
         assert_eq!(v["routes"][0]["agent"], "claude");
         assert_eq!(v["routes"][0]["primary_provider"], "p-ant");
         assert_eq!(v["routes"][0]["strategy"], "single");
+    }
+
+    /// `/events` over a real loopback listener: an SSE body does not end, so the
+    /// in-process `oneshot` the rest of this module uses would wait on it
+    /// forever. What has to hold is that the stream opens for a caller holding
+    /// the token, is refused without one, and delivers a recorded request as an
+    /// event.
+    #[tokio::test]
+    async fn the_event_stream_ticks_and_is_token_guarded() {
+        use std::time::Duration;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = state.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, admin_plane_router(served)).await;
+        });
+
+        // Without the token: refused, and there is no stream behind the refusal.
+        let mut refused = tokio::net::TcpStream::connect(addr).await.unwrap();
+        refused
+            .write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(refused).read_line(&mut line).await.unwrap();
+        assert!(
+            line.contains("401"),
+            "an unauthenticated caller gets no stream: {line}"
+        );
+
+        // With it: the response opens as a stream, and one notify comes out of
+        // it as one event.
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        stream
+            .write_all(
+                format!(
+                    "GET /events HTTP/1.1\r\nHost: localhost\r\n{ADMIN_TOKEN_HEADER}: {token}\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut status = String::new();
+        reader.read_line(&mut status).await.unwrap();
+        assert!(status.contains("200"), "expected a stream: {status}");
+        loop {
+            let mut header = String::new();
+            reader.read_line(&mut header).await.unwrap();
+            if header == "\r\n" {
+                break;
+            }
+        }
+
+        // Bounded, because the failure being guarded against is a stream that
+        // never speaks: without the timeout this would hang instead of fail.
+        // Reads skip whatever comes first — the keep-alive comments the handler
+        // writes through an idle stream among them.
+        let event = tokio::time::timeout(Duration::from_secs(5), async {
+            state.notify_usage();
+            loop {
+                let mut line = String::new();
+                assert!(
+                    reader.read_line(&mut line).await.unwrap() > 0,
+                    "stream ended"
+                );
+                if line.starts_with("data:") {
+                    return line;
+                }
+            }
+        })
+        .await
+        .expect("a recorded request shows up as an event");
+
+        assert_eq!(event.trim_end(), "data: usage");
     }
 
     /// `/status` is the liveness probe, so it answers without a token — but

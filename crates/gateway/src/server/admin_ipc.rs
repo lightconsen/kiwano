@@ -250,15 +250,44 @@ impl AdminEndpoint {
     /// wedged gateway hanging a caller that is only ever reading one small
     /// local response.
     pub fn connect(&self, timeout: Duration) -> std::io::Result<AdminStream> {
+        self.connect_with(timeout, Some(timeout))
+    }
+
+    /// A blocking connection for a reader that is following a stream rather than
+    /// waiting on one small response: the connect is still bounded, the reads
+    /// are not.
+    ///
+    /// [`connect`](AdminEndpoint::connect)'s timeout bounds every read, which is
+    /// right for the request/response pairs the app and the CLI send and wrong
+    /// for the admin plane's event stream, whose ordinary state is silence — it
+    /// would be torn down and reconnected on a loop. Writes stay bounded:
+    /// subscribing is one small write.
+    ///
+    /// On Windows this is [`connect`](AdminEndpoint::connect): a named pipe has
+    /// no settable read timeout either way.
+    pub fn connect_streaming(&self, timeout: Duration) -> std::io::Result<AdminStream> {
+        self.connect_with(timeout, None)
+    }
+
+    fn connect_with(
+        &self,
+        timeout: Duration,
+        read_timeout: Option<Duration>,
+    ) -> std::io::Result<AdminStream> {
         #[cfg(unix)]
         {
             let stream = std::os::unix::net::UnixStream::connect(&self.path)?;
-            stream.set_read_timeout(Some(timeout))?;
+            // Left unset for a streaming reader: `None` means "block until there
+            // is something to read".
+            if let Some(read) = read_timeout {
+                stream.set_read_timeout(Some(read))?;
+            }
             stream.set_write_timeout(Some(timeout))?;
             Ok(stream)
         }
         #[cfg(windows)]
         {
+            let _ = read_timeout;
             use std::os::windows::io::FromRawHandle;
             use windows_sys::Win32::Foundation::{
                 GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,

@@ -10,10 +10,10 @@
 //! client dependency is needed, and no other process on the machine can reach
 //! the plane to begin with.
 //!
-//! `/reload` and `/shutdown` need the admin token the gateway minted for
-//! itself ([`ADMIN_TOKEN_KEY`]); it is read from that same SQLite file, so the
-//! two processes agree without any new IPC. The one exception is the liveness
-//! probe — see [`ping_admin`].
+//! `/reload`, `/shutdown` and `/events` need the admin token the gateway minted
+//! for itself ([`ADMIN_TOKEN_KEY`]); it is read from that same SQLite file, so
+//! the two processes agree without any new IPC. The one exception is the
+//! liveness probe — see [`ping_admin`].
 //!
 //! The admin plane was a loopback TCP port before 0.1.8, and this module carried
 //! a fallback that looked for — and stopped — a gateway from before that move.
@@ -183,10 +183,12 @@ fn token_header(token: Option<&str>) -> String {
     }
 }
 
-/// The three admin requests. The framing is raw HTTP written to the endpoint,
-/// which is why these are strings rather than calls on a client: [`IPC_HOST`] is
-/// arbitrary (the router does no `Host` filtering) but required by HTTP/1.1, and
-/// the rest is the same bytes for every call.
+/// The three admin requests that are one exchange each ([`events_request`] is
+/// the fourth, and the only one that is read rather than answered). The framing
+/// is raw HTTP written to the endpoint, which is why these are strings rather
+/// than calls on a client: [`IPC_HOST`] is arbitrary (the router does no `Host`
+/// filtering) but required by HTTP/1.1, and the rest is the same bytes for every
+/// call.
 fn status_request(token: Option<&str>) -> String {
     format!(
         "GET /status HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Connection: close\r\n\r\n",
@@ -206,6 +208,80 @@ fn reload_request(token: Option<&str>) -> String {
         "POST /reload HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
         token_header(token)
     )
+}
+
+/// The fourth admin request: the event stream, which is read rather than
+/// answered (see [`watch_events`]).
+///
+/// No `Connection: close`, unlike its three siblings: this response body is a
+/// stream that runs until the gateway stops, so "close when it is finished" is
+/// a statement about a moment that has not come. `Accept` is what the gateway's
+/// `Sse` answers on, and it is sent because the reader is one.
+fn events_request(token: Option<&str>) -> String {
+    format!(
+        "GET /events HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Accept: text/event-stream\r\n\r\n",
+        token_header(token)
+    )
+}
+
+/// Follow the admin plane's event stream, calling `on_tick` for each tick, until
+/// the stream ends.
+///
+/// Blocking, and deliberately returning nothing: a caller runs it on a thread of
+/// its own and reconnects when it comes back. Every way out of here — no gateway
+/// listening, a refused token, the gateway stopping mid-stream — is the same
+/// "try again shortly" to that caller, and none of them is worth an error type
+/// nobody would branch on.
+///
+/// One tick per recorded request is what lets the app's screens re-read rather
+/// than poll for their numbers (see `kiwanod::server::admin`'s `/events`).
+pub fn watch_events(endpoint: &AdminEndpoint, mut on_tick: impl FnMut()) {
+    let Ok(mut stream) = endpoint.connect_streaming(CONNECT_TIMEOUT) else {
+        return;
+    };
+    if stream
+        .write_all(events_request(admin_token().as_deref()).as_bytes())
+        .is_err()
+    {
+        return;
+    }
+    let mut reader = BufReader::new(stream);
+    // The status line first. A gateway that refused the token answers 401 with a
+    // JSON body, and reading that as a stream of events would be reading an
+    // error message for something it is not.
+    let mut status = String::new();
+    if !reader
+        .read_line(&mut status)
+        .map(|n| n > 0)
+        .unwrap_or(false)
+        || !status.contains("200")
+    {
+        return;
+    }
+    // …then the headers, up to the blank line that ends them. `REPLY` is not
+    // parsed any further: `Sse` sends the one content type this reader expects.
+    loop {
+        let mut header = String::new();
+        match reader.read_line(&mut header) {
+            Ok(0) | Err(_) => return,
+            Ok(_) if header == "\r\n" || header == "\n" => break,
+            Ok(_) => {}
+        }
+    }
+    // …then the body, one event per tick. Keep-alive comments (a line starting
+    // with `:`) are not events, and neither is any other field.
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            // The stream ended: the gateway stopped, or was replaced.
+            Ok(0) | Err(_) => return,
+            Ok(_) => {
+                if line.starts_with("data:") {
+                    on_tick();
+                }
+            }
+        }
+    }
 }
 
 /// One raw HTTP request over the admin endpoint, read to EOF.
@@ -757,7 +833,7 @@ mod tests {
     }
 
     /// The admin plane refuses `/reload` and `/shutdown` without the token, so
-    /// these three requests have to carry it — and must still be well-formed
+    /// these four requests have to carry it — and must still be well-formed
     /// when the app has none (a fresh install, before the gateway has written
     /// its row), rather than dropping the header line and the blank line with it.
     #[test]
@@ -778,17 +854,98 @@ mod tests {
         assert!(reload.starts_with("POST /reload HTTP/1.1\r\n"));
         assert!(reload.contains(&header));
 
+        let events = events_request(Some("tok-123"));
+        assert!(events.starts_with("GET /events HTTP/1.1\r\n"));
+        assert!(events.contains(&header));
+        assert!(events.contains("Accept: text/event-stream\r\n"));
+        assert!(events.ends_with("\r\n\r\n"));
+        // No `Connection: close`, unlike its three siblings: this body runs
+        // until the gateway stops, so there is no "when it is finished" to
+        // state.
+        assert!(!events.contains("Connection:"));
+
         // No token: same requests, no header — a caller with no token to send is
         // answered as one that needs none, so a missing header is not an error.
         for request in [
             status_request(None),
             shutdown_request(None),
             reload_request(None),
+            events_request(None),
         ] {
             assert!(!request.contains(ADMIN_TOKEN_HEADER));
             assert!(request.contains(&format!("Host: {IPC_HOST}\r\n")));
             assert!(request.ends_with("\r\n\r\n"));
         }
+    }
+
+    /// A stub admin endpoint for `/events`: it answers a `GET /events` with the
+    /// status and frames given, then closes — which is what ends a subscription.
+    ///
+    /// Unix-only for the reason [`LiveGateway`] is: a Windows named pipe cannot
+    /// be created from `std`.
+    #[cfg(unix)]
+    fn events_stub(dir: &Path, status: &str, frames: &str) -> AdminEndpoint {
+        use std::os::unix::net::UnixListener;
+
+        let endpoint = AdminEndpoint::parse(&dir.join("events.sock").to_string_lossy());
+        let listener = UnixListener::bind(endpoint.path()).expect("bind the stub endpoint");
+        let (status, frames) = (status.to_string(), frames.to_string());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                if request.starts_with("GET /events") {
+                    let head =
+                        format!("HTTP/1.1 {status}\r\nContent-Type: text/event-stream\r\n\r\n");
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(frames.as_bytes());
+                } else {
+                    let body = r#"{"ok":false}"#;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+            }
+        });
+        endpoint
+    }
+
+    /// The subscription the app lives on: one call per `data:` frame, the
+    /// keep-alive comments ignored, and a return — rather than a hang — when the
+    /// stream ends, which is when the caller reconnects.
+    #[cfg(unix)]
+    #[test]
+    fn watch_events_reports_ticks_and_returns_when_the_stream_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = events_stub(
+            dir.path(),
+            "200 OK",
+            ": keep-alive\n\ndata: usage\n\ndata: usage\n\n",
+        );
+
+        let mut ticks = 0;
+        watch_events(&endpoint, || ticks += 1);
+
+        assert_eq!(ticks, 2, "one call per event, and none for the comment");
+    }
+
+    /// A gateway that refuses the token answers 401 with a JSON body. Reading
+    /// that as a stream of events would be reading an error message for
+    /// something it is not, so the subscription ends without a tick.
+    #[cfg(unix)]
+    #[test]
+    fn watch_events_reports_nothing_when_the_token_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = events_stub(dir.path(), "401 Unauthorized", r#"{"ok":false}"#);
+
+        let mut ticks = 0;
+        watch_events(&endpoint, || ticks += 1);
+
+        assert_eq!(ticks, 0);
     }
 
     /// The token comes out of the row the gateway writes, in the database the

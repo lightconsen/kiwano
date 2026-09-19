@@ -17,6 +17,166 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.1.16] - 2026-09-20
+
+### Added
+
+- **A Features panel**, and the capabilities behind it. Seven switches on a new
+  Settings card, all off by default: cost forecast, anomaly alerts, agent-budget
+  alerts, MCP self-query, rule injection, tuning advice and the cache-shaping
+  experiment. They are the applications mapped in
+  `docs/request-logs-applications.md` that have landed, and each is gated by its
+  own flag — the ones that write are reversible, and the way out of any of them
+  works whether or not its flag is on.
+
+- **Three more alerts.** The cost alert gains a **forecast** that warns before
+  the month's spend slope passes a limit rather than after; an **anomaly** check
+  that measures the last completed hour's error rate, mean latency and request
+  volume against the trailing 7-day baseline (a storm shows up in the requests
+  that never reached a provider); and **agent budgets**, so an agent that has
+  spent its ceiling notifies instead of only being refused in silence. All three
+  dedup through the same store the cost alert uses, so a restart does not
+  re-notify.
+
+- **`kiwano insights`** — how the agents spend their tokens, read back out of
+  the request log. A per-agent scorecard (cache hit rate with writes in the
+  denominator, median session context growth, reasoning share, retries), the
+  definitions printed under the table, and four rules that turn the numbers into
+  findings tagged `cache` / `bloat` / `retry` / `overhead` — each carrying the
+  `request_logs` ids behind it, reopenable with `kiwano logs show`. Two honesty
+  rules the first real run taught: an agent whose window is mostly errors earns
+  no cache finding, and reasoning reads `–` rather than 0% when a provider never
+  reports it. No amounts anywhere; cost stays the dashboard's job.
+
+- **`kiwano mcp`** — a stdio MCP server so an agent can query its own stats:
+  `get_usage_summary`, `get_insights` and `get_session_growth`, aggregates only.
+  Request bodies never cross stdout.
+
+- **`kiwano rules apply|remove|status`** — the insights findings that can be
+  taught become instructions, appended to an agent's own `CLAUDE.md` /
+  `AGENTS.md` inside a marker block. `remove` strips the block and restores the
+  file from a backup byte for byte, the same machinery a takeover uses and under
+  its own key, so injection is never part of the takeover state machine whose
+  disable means "give the agent its whole config back".
+
+- **Tuning advice**, two more findings in the same report: a provider whose
+  error rate dwarfs the agent's other candidates, and a provider whose retries
+  almost never rescue the request. Advice only — a finding never changes a
+  route, and these carry no `rule`: they advise the user, not the agent.
+
+- **`kiwano cache-experiment`** — the cache-shaping measurement from
+  `docs/request-logs-applications.md` §3.1: the window's captured bodies grouped
+  by session, and for each adjacent turn pair the shared-prefix ratio of the raw
+  bodies against their canonicalized and whitelist-stripped forms. It closes
+  with a verdict line so the read is a decision rather than a histogram.
+
+- **The app's numbers move on their own.** A request that finished while someone
+  was looking at Apps landed in the database and sat there until the next read.
+  The gateway now ticks once per recorded request and streams those ticks to the
+  app, which re-reads what is on screen — no polling. Cells whose numbers moved
+  tint briefly (the tint holds while a burst is still moving, rather than
+  strobing per request), and the tint is judged on the numbers themselves: one
+  request re-reads every provider on screen, and a row that did not move stays
+  quiet.
+
+- **A dashboard "All" window, and deltas that are real.** The window picker
+  gains **All** — everything the store holds — with the chart finding its own
+  left edge and summing a week per bar once the span outgrows 62 days. The two
+  percentages beside Requests and Avg Latency were hardcoded zeros, which
+  rendered as a permanent "↑ 0%": an unimplemented figure wearing the clothes of
+  a finished one. Both now compare the window with the one before it, of the
+  same length, and the three cases are kept apart — a real 0%, and no comparable
+  window at all (All, an empty earlier window, a latency nothing measured, which
+  now draws nothing).
+
+- **A money ceiling is written in the currency being spent.** The agent limit's
+  unit picker offered the *display* currency, a preference about how numbers
+  read, so an agent whose providers bill in CNY offered the one unit that is not
+  its own. It now offers the currencies the agent's providers actually bill in.
+  A new window starts in the agent's own currency when they agree on one, and
+  the panel says what the gateway does when comparing: usage is converted into
+  the ceiling's unit at the Hub's rates, the ceiling itself never converted.
+
+- **Agent takeover moved to where the agent is.** Settings listed every built-in
+  agent with its key and a switch — a list that grew with the registry, and
+  whose rows mostly carried something that page could not do. What is left there
+  is one summary line. The per-agent controls live in the agent's own settings
+  in Apps, beside the config files they rewrite, and turning a takeover off is
+  now a two-step control (the first click arms it) since it restores the agent's
+  configuration.
+
+- **A running conversation keeps its provider.** Quota and time-window used to
+  move the whole agent the moment their condition flipped — mid-conversation,
+  for whoever was talking — and that conversation paid for the switch by
+  rebuilding a prompt cache its provider had already charged for once. Their
+  condition now decides where a conversation *starts*; one already running
+  finishes where it is. A candidate list pruned of providers over a limit still
+  wins over a conversation in flight, and requests that name no session cannot
+  be held (nothing distinguishes them from a new one).
+
+- **A cache hit rate column** on the provider tables: the share of input-side
+  tokens served from cache, over the same 7-day window as the usage cell. A
+  window with no input-side tokens dashes rather than reading 0% — "nothing
+  cached yet" is not "the cache never hit".
+
+- **Two columns the request log was missing.** `reasoning_tokens` is a slice of
+  `output_tokens`, never added to it: what it buys is the one number that
+  separates "thought for a while" from "wrote a lot". `usage_missing` marks rows
+  where the upstream reported no usage at all — written as zeros since the
+  beginning, and indistinguishable from a request that genuinely used nothing.
+  Both ride through the CSV export and the copied row.
+
+- **An attempt that was retried, and a stream a client walked away from, both
+  leave rows.** An attempt that failed after the upstream did work cost real
+  money that appeared nowhere, and a client hanging up mid-stream produced no
+  row at all. Each retry now writes its own row (the status the client never
+  saw, and `usage_missing` when it cannot know), and an abandoned stream closes
+  out with what the scanner read, marked `truncated`.
+
+- **A chat client that never asked for usage gets metered anyway.** OpenAI chat
+  completions only reports token counts when the request asked for them, so such
+  a client's spend could not be seen. The gateway asks on its behalf and takes
+  the extra chunk back out of the stream, line by line; the bytes a client that
+  *did* ask for are untouched, byte for byte.
+
+- **The log keeps everything until you say otherwise.** Retention and body-cap
+  are now opt-in limits rather than defaults.
+
+### Fixed
+
+- **Session affinity read almost none of what the agents state.** Claude Code's
+  `x-claude-code-session-id`, grok-build's, OpenCode's, and Codex's header and
+  two body spellings were all ignored, so every conversation was a session of
+  one — which is the cache loss the sticky table exists to prevent. An agent
+  that states nothing at all now gets a fingerprint derived from its opening
+  (system + first user turn), prefixed `derived:` so a guess is never mistaken
+  for an id the client stated. Two takeovers needed work before their agents
+  could send anything: OpenClaw and Hermes hand their base URL to an SDK that
+  appends `/chat/completions`, so both now get the `/v1` suffix they were
+  written without.
+
+- **The sticky table remembered a position, not a provider**, so pruning one
+  provider shifted every session pinned behind it onto a different one — the
+  exact cache loss it exists to prevent. It holds provider ids now. And
+  `roundrobin`'s table had no ceiling: one entry per session, kept for the life
+  of the process, which stopped being free the moment Codex's own session id
+  began to be read. It holds 4096, dropping the quietest quarter in one pass —
+  least recently used, so eviction cannot take the slot out from under a live
+  conversation.
+
+- **The cache bucket has three spellings and only one was read**, so cache hits
+  reported by two of the three flavours were counted as new input — which is
+  what the cache hit rate column and every insights rule read.
+
+- **The log's redaction covered one side of the exchange.** A credential echoed
+  back in a response body was stored as it came.
+
+- **UI**: the Cache column's header said "Cache" while its cell showed a rate
+  (it reads "Cached" now); the strategy hint truncated exactly at the clause
+  saying a running session keeps its provider, and wraps instead; and the window
+  editor flagged a 22:00–06:00 window as invalid and silently dropped it, though
+  the engine and the CLI both read start > end as crossing midnight.
+
 ## [0.1.15] - 2026-09-17
 
 ### Added

@@ -160,14 +160,18 @@ fn call_tool(ctx: &mut Ctx, params: &Value) -> (String, bool) {
         Ok(s) => s,
         Err(e) => return (e.message, true),
     };
+    let tuning = ctx
+        .aux()
+        .map(|aux| vm::ui_settings(aux).feat_tuning_advice)
+        .unwrap_or(false);
 
     let result: Result<Value, CliError> = match name {
         "get_usage_summary" => usage_summary(store, days),
         "get_insights" => {
             let agent = args.get("agent").and_then(Value::as_str).map(String::from);
-            build_insights_report(store, days, agent).map(|r| json!(r))
+            build_insights_report(store, days, agent, tuning).map(|r| json!(r))
         }
-        "get_session_growth" => build_insights_report(store, days, None)
+        "get_session_growth" => build_insights_report(store, days, None, tuning)
             .map(|r| json!({ "days": r.days, "top_sessions": r.top_sessions })),
         _ => return (format!("unknown tool: {name}"), true),
     };

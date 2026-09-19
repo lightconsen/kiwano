@@ -1749,7 +1749,10 @@ fn cache_experiment_is_gated_and_reports_empty_windows() {
     assert_eq!(code, 2);
     assert!(err.contains("Features"), "{err}");
 
-    let (code, _out, err) = run(&db, &["settings", "set", "--key", "feat_cache_experiment=true"]);
+    let (code, _out, err) = run(
+        &db,
+        &["settings", "set", "--key", "feat_cache_experiment=true"],
+    );
     assert_eq!(code, 0, "{err}");
     let (code, out, err) = run(&db, &["cache-experiment", "--days", "7"]);
     assert_eq!(code, 0, "{err}");

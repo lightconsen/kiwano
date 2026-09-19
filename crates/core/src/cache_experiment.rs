@@ -57,11 +57,7 @@ pub struct ExperimentReport {
 /// The shared-prefix ratio of two strings: common prefix bytes over the
 /// shorter length. 1.0 when one is a prefix of the other (or they are equal).
 pub fn prefix_ratio(a: &str, b: &str) -> f64 {
-    let common = a
-        .bytes()
-        .zip(b.bytes())
-        .take_while(|(x, y)| x == y)
-        .count();
+    let common = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     common as f64 / a.len().min(b.len()).max(1) as f64
 }
 
@@ -82,9 +78,11 @@ fn canonical_stripped(body: &str) -> Option<String> {
             });
         }
     }
-    Some(kiwano_adapters::proxy::json_canonical::canonical_json_string(
-        &kiwano_adapters::proxy::json_canonical::canonicalize_value(value),
-    ))
+    Some(
+        kiwano_adapters::proxy::json_canonical::canonical_json_string(
+            &kiwano_adapters::proxy::json_canonical::canonicalize_value(value),
+        ),
+    )
 }
 
 fn mean(xs: &[f64]) -> f64 {
@@ -150,9 +148,13 @@ pub fn run(days: i64, rows: &[RequestLogExportRow]) -> ExperimentReport {
                 continue;
             };
             let canon_a =
-                kiwano_adapters::proxy::json_canonical::canonicalize_json_string_if_parseable(raw_a);
+                kiwano_adapters::proxy::json_canonical::canonicalize_json_string_if_parseable(
+                    raw_a,
+                );
             let canon_b =
-                kiwano_adapters::proxy::json_canonical::canonicalize_json_string_if_parseable(raw_b);
+                kiwano_adapters::proxy::json_canonical::canonicalize_json_string_if_parseable(
+                    raw_b,
+                );
             samples.push(PairSample {
                 raw: prefix_ratio(raw_a, raw_b),
                 canonical: prefix_ratio(&canon_a, &canon_b),

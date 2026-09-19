@@ -136,7 +136,8 @@ pub struct AgentScore {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Finding {
-    /// One of `cache` / `bloat` / `retry` / `overhead`.
+    /// One of `cache` / `bloat` / `retry` / `overhead` / `tuning` — the last
+    /// only when the caller opted into tuning advice (Features panel).
     pub tag: String,
     pub agent: Option<String>,
     /// The conclusion, one sentence, no agent prefix (the renderer adds it).
@@ -191,6 +192,7 @@ pub fn build_insights(
     window: Window,
     rows: &[InsightRow],
     bodies: &[BodySample],
+    tuning_advice: bool,
 ) -> InsightsReport {
     // Every scan below wants chronological order, whatever the store returned.
     let mut sorted: Vec<&InsightRow> = rows.iter().collect();
@@ -198,13 +200,17 @@ pub fn build_insights(
 
     let totals = build_totals(&sorted);
     let stats = session_stats(&sorted);
-    let (retry_counts, retry_findings) = retry_scan(&sorted);
+    let (retry_counts, retry_findings, bursts) = retry_scan(&sorted);
     let scorecard = build_scorecard(&sorted, &stats, &retry_counts);
 
     let mut findings = cache_findings(&sorted, &scorecard);
     findings.extend(bloat_findings(&stats, &scorecard));
     findings.extend(retry_findings);
     findings.extend(overhead_findings(bodies));
+    if tuning_advice {
+        findings.extend(route_health_findings(&sorted));
+        findings.extend(retry_budget_findings(&bursts));
+    }
 
     let mut top_sessions: Vec<SessionGrowth> = stats
         .iter()
@@ -488,7 +494,11 @@ struct Burst<'a> {
 }
 
 /// Counts every agent's retries and collects the bursts big enough to report.
-fn retry_scan(rows: &[&InsightRow]) -> (BTreeMap<Option<String>, i64>, Vec<Finding>) {
+/// The full burst list goes along too: the tuning advice's retry-budget rule
+/// reads every chain, not just the ones worth a finding.
+fn retry_scan<'a>(
+    rows: &[&'a InsightRow],
+) -> (BTreeMap<Option<String>, i64>, Vec<Finding>, Vec<Burst<'a>>) {
     let mut by_group: BTreeMap<String, Vec<&InsightRow>> = BTreeMap::new();
     for r in rows {
         by_group.entry(retry_group_key(r)).or_default().push(r);
@@ -533,7 +543,7 @@ fn retry_scan(rows: &[&InsightRow]) -> (BTreeMap<Option<String>, i64>, Vec<Findi
         .take(3)
         .map(burst_finding)
         .collect();
-    (counts, findings)
+    (counts, findings, bursts)
 }
 
 fn burst_finding(b: &Burst<'_>) -> Finding {
@@ -682,6 +692,128 @@ fn cache_findings(rows: &[&InsightRow], scorecard: &[AgentScore]) -> Vec<Finding
         .collect()
 }
 
+// ── tuning advice (Features panel; advice only, nothing is reconfigured) ────
+
+/// A provider joins the comparison at this many requests in the window.
+const ROUTE_HEALTH_MIN_REQS: i64 = 20;
+/// The absolute floor under the relative one: a sibling at 0% does not make
+/// 3% a finding.
+const ROUTE_HEALTH_MIN_PCT: f64 = 15.0;
+/// Retry-budget advice needs this many retried errors to mean anything.
+const RETRY_ADVICE_MIN_CHAINS: usize = 5;
+/// …and fires when at most this share of them was rescued.
+const RETRY_ADVICE_MAX_RESCUE: f64 = 0.2;
+
+/// Route health: a provider whose error rate dwarfs the agent's other
+/// candidates'. The route is the user's to change; this says where to look.
+fn route_health_findings(rows: &[&InsightRow]) -> Vec<Finding> {
+    // Per (agent, provider): (requests, errors, failing row ids).
+    let mut by_pair: BTreeMap<(String, String), (i64, i64, Vec<i64>)> = BTreeMap::new();
+    for r in rows {
+        let (Some(agent), Some(provider)) = (&r.agent, &r.provider_id) else {
+            continue;
+        };
+        let e = by_pair
+            .entry((agent.clone(), provider.clone()))
+            .or_default();
+        e.0 += 1;
+        if r.status_code >= 400 {
+            e.1 += 1;
+            if e.2.len() < MAX_EVIDENCE {
+                e.2.push(r.id);
+            }
+        }
+    }
+
+    let mut by_agent: BTreeMap<String, Vec<(String, i64, i64, Vec<i64>)>> = BTreeMap::new();
+    for ((agent, provider), (reqs, errs, ids)) in by_pair {
+        if reqs >= ROUTE_HEALTH_MIN_REQS {
+            by_agent
+                .entry(agent)
+                .or_default()
+                .push((provider, reqs, errs, ids));
+        }
+    }
+
+    let mut out = Vec::new();
+    for (agent, providers) in by_agent {
+        if providers.len() < 2 {
+            continue;
+        }
+        let best = providers
+            .iter()
+            .map(|(_, reqs, errs, _)| *errs as f64 / *reqs as f64)
+            .fold(f64::INFINITY, f64::min);
+        for (provider, reqs, errs, ids) in providers {
+            let rate = errs as f64 / reqs as f64;
+            if rate > f64::max(3.0 * best, ROUTE_HEALTH_MIN_PCT / 100.0) && errs >= 5 {
+                out.push(Finding {
+                    summary: format!(
+                        "provider `{provider}` errors at {:.0}% for this agent (best sibling: {:.0}%)",
+                        rate * 100.0,
+                        best * 100.0
+                    ),
+                    detail: format!(
+                        "{errs} of {reqs} requests failed in the window — consider lowering its priority or checking its key"
+                    ),
+                    tag: "tuning".to_string(),
+                    agent: Some(agent.clone()),
+                    evidence: ids,
+                    evidence_span: false,
+                    rule: None,
+                });
+            }
+        }
+    }
+    out.truncate(3);
+    out
+}
+
+/// Retry budget: providers whose retries almost never rescue the request.
+/// A chain counts when an errored request was retried at all; it was rescued
+/// when the chain's last row succeeded (a success ends the chain, because a
+/// retry is defined as following an *error*).
+fn retry_budget_findings(bursts: &[Burst<'_>]) -> Vec<Finding> {
+    // Per provider: (chains, rescued, anchor ids).
+    let mut by_provider: BTreeMap<String, (usize, usize, Vec<i64>)> = BTreeMap::new();
+    for b in bursts {
+        if b.chain.len() < 2 {
+            continue; // never retried: no budget was spent
+        }
+        let Some(provider) = b.anchor.provider_id.clone() else {
+            continue;
+        };
+        let e = by_provider.entry(provider).or_default();
+        e.0 += 1;
+        let last = b.chain.last().expect("chain holds the anchor");
+        if last.status_code < 400 {
+            e.1 += 1;
+        }
+        if e.2.len() < MAX_EVIDENCE {
+            e.2.push(b.anchor.id);
+        }
+    }
+
+    by_provider
+        .into_iter()
+        .filter(|(_, (chains, rescued, _))| {
+            *chains >= RETRY_ADVICE_MIN_CHAINS
+                && (*rescued as f64 / *chains as f64) <= RETRY_ADVICE_MAX_RESCUE
+        })
+        .map(|(provider, (chains, rescued, ids))| Finding {
+            summary: format!(
+                "provider `{provider}`: retries rescued {rescued} of {chains} failed requests"
+            ),
+            detail: "when the retries fail too, the retry budget is spend without return — lower it, or fix the error kind at the root".to_string(),
+            tag: "tuning".to_string(),
+            agent: None,
+            evidence: ids,
+            evidence_span: false,
+            rule: None,
+        })
+        .collect()
+}
+
 // ── the fixed-overhead rule ─────────────────────────────────────────────────
 
 fn overhead_findings(bodies: &[BodySample]) -> Vec<Finding> {
@@ -782,7 +914,69 @@ mod tests {
     }
 
     fn build(rows: &[InsightRow], bodies: &[BodySample]) -> InsightsReport {
-        build_insights(7, None, window(), rows, bodies)
+        build_insights(7, None, window(), rows, bodies, false)
+    }
+
+    #[test]
+    fn tuning_advice_flags_a_failing_route_and_a_wasted_retry_budget() {
+        let mut rows = vec![];
+        let mut id = 0;
+        let mut next = || {
+            id += 1;
+            id
+        };
+
+        // Route health: codex splits across p1 (clean) and p2 (8 of 20 fail —
+        // over both the 3× relative and the 15% absolute bars). p2's failures
+        // stand five minutes apart, so none of them reads as a retry.
+        for i in 0..20 {
+            let mut ok = row(next(), &format!("10:{i:02}:00"), "codex");
+            ok.provider_id = Some("p1".into());
+            rows.push(ok);
+            let mut r = row(next(), &format!("10:{i:02}:30"), "codex");
+            r.provider_id = Some("p2".into());
+            if i % 5 == 4 || i % 5 == 3 {
+                r.status_code = 500;
+            }
+            rows.push(r);
+        }
+
+        // Retry budget: five chains on p3 — an error, a retry ten seconds
+        // later, the retry fails too. None rescued. (Two minutes apart: the
+        // 60s retry window must lapse between chains or they merge into one.)
+        for c in 0..5 {
+            let mut a = row(next(), &format!("12:{:02}:00", c * 2), "codex");
+            a.provider_id = Some("p3".into());
+            a.status_code = 500;
+            a.error_kind = Some("upstream_error".into());
+            rows.push(a);
+            let mut b = row(next(), &format!("12:{:02}:10", c * 2), "codex");
+            b.provider_id = Some("p3".into());
+            b.status_code = 500;
+            b.error_kind = Some("upstream_error".into());
+            rows.push(b);
+        }
+
+        // Flag off: no tuning findings, whatever the data says.
+        let quiet = build(&rows, &[]);
+        assert!(quiet.findings.iter().all(|f| f.tag != "tuning"));
+
+        let rep = build_insights(7, None, window(), &rows, &[], true);
+        let tuning: Vec<&Finding> = rep.findings.iter().filter(|f| f.tag == "tuning").collect();
+        assert!(
+            tuning
+                .iter()
+                .any(|f| f.summary.contains("provider `p2` errors")),
+            "{tuning:?}"
+        );
+        assert!(
+            tuning.iter().any(
+                |f| f.summary.contains("provider `p3`") && f.summary.contains("rescued 0 of 5")
+            ),
+            "{tuning:?}"
+        );
+        // Tuning findings advise the user; they are not instruction-file rules.
+        assert!(tuning.iter().all(|f| f.rule.is_none()));
     }
 
     #[test]

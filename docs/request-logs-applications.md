@@ -13,7 +13,7 @@
 |---|---|---|
 | 请求元数据 | `request_logs`（30 列） | `ts / agent / attribution / provider_id / model / status_code / error_kind / session_id / is_streaming / input / output / cache_read / cache_creation / reasoning_tokens / usage_missing / latency_ms / first_token_ms / request_size / cost*` |
 | 完整报文 | `request_bodies` | `request_body / response_body`（capture 开关下全量存，超限截断标 `truncated`） |
-| 聚合 | `usage` / `usage_hourly` | 按 provider×agent×小时的钱与 tokens，Dashboard 的现成数据源 |
+| 聚合 | `usage`（`usage_bucketed` 按小时/天现场分桶） | 按 provider×agent×时间的钱与 tokens，Dashboard 的现成数据源 |
 | 控制权 | router / strategy / takeover | 路由选择、候选队列、配置文件改写通道——分析结论有能力变成动作 |
 
 ## 1. 被动分析（数据已在库里，纯读取）
@@ -34,11 +34,18 @@ Apps 页状态列已经用了"最近 24h 自己请求的平均延迟"，这是�
 
 ### 1.3 成本预测
 
+> 2026-09-19 已落地（Features `feat_cost_forecast`）：货币型周期限额的
+> 消费斜率外推，超限前通知；周期前 10% 的噪声段不报。
+
 `usage_hourly` 有按小时聚合，外推"照这个速度月底花多少"，在超预算前告警。
 alerts 基础设施已有（配额阈值 + 桌面通知 + dedup），只是判据从"配额已超"
 变成"按当前斜率配额将超"。
 
 ### 1.4 异常检测
+
+> 2026-09-19 已落地（Features `feat_anomaly_alerts`）：最近一小时 vs 过去
+> 7 天基线（新增 store::traffic_stats），错误率/延迟/流量三条规则，
+> 每条每天最多通知一次。
 
 错误率突增、延迟离群、某 agent 半夜流量暴涨 → 桌面通知。
 真实案例：库里 2026-09-09 那场 14 秒 19 连发的 `protocol_mismatch`
@@ -52,19 +59,32 @@ insights 设计时按侵入性排过序（人读报告 → agent 自查询 → �
 
 ### 2.1 MCP tool / skill 自查询
 
+> 2026-09-19 已落地（Features `feat_mcp_self_query`）：`kiwano mcp` stdio
+> server（手写换行 JSON-RPC，无协议依赖），tools = get_usage_summary /
+> get_insights / get_session_growth，全部只读聚合。
+
 把**聚合数**（不是原文）包成 MCP tool：agent 问"我这周命中率多少、哪个会话在膨胀"。
 Claude Code 这类 agent 看到"你的上下文已 38×"会自己 compact。
 中等侵入，但它消费的是统计值，body 不出网关。
 
 ### 2.2 接管通道注入规则
 
-takeover 已经会写 CLAUDE.md/AGENTS.md（有备份、可还原）。
-把 insights 发现的规律（如"保持 system 前缀稳定"）写成一条规则，一次性注入。
-侵入但可逆，且归因清晰——注入前后各跑一周 insights 就能对比。
+> 2026-09-19 已落地（Features 面板 `feat_rule_injection`）：`kiwano rules
+> apply <agent>` 把 insights finding 的 `rule` 文本写进 CLAUDE.md/AGENTS.md
+> 的 marker 块，`remove` 剥离、`status` 查看。注意它不在 takeover 状态机里
+> （takeover 只改 agent 配置文件，从不写 CLAUDE.md——本段此前的说法与代码
+> 不符）；备份复用 takeover_backups 表（key 前缀 `rules:`），归因靠
+> `rules_applied:<agent>` 时间戳，注入前后各跑一周 insights 即可对比。
 
 ### 2.3 自动调参
 
-日志知道哪些 `error_kind` 重试能成、几次能成 → 每个 provider 的重试预算自动收敛；
+> 2026-09-19 落地的是**建议形态**（Features 面板 `feat_tuning_advice`）：
+> insights 新增两条 `tuning` finding——路由健康（某 provider 错误率显著高于
+> 同 agent 候选）与重试预算（重试几乎从不救回请求）。闭环改配置未做：
+> 权重/重试预算是静态 DB 配置，运行时唯一的自适应是熔断器（二值），
+> 连续调权需要先回答"改错了怎么归因"。
+
+原设想：日志知道哪些 `error_kind` 重试能成、几次能成 → 每个 provider 的重试预算自动收敛；
 哪条路由错误率高 → 策略权重自动降。把 strategy 的静态配置变成闭环控制。
 
 ### 2.4 请求侧注入：维持"不建议"
@@ -75,6 +95,11 @@ takeover 已经会写 CLAUDE.md/AGENTS.md（有备份、可还原）。
 ## 3. 主动介入（网关不只是记录，而是改变流量）
 
 ### 3.1 缓存整形代理 ⭐ 价值最大的一条
+
+> 2026-09-19 落地了第一步（Features `feat_cache_experiment`）：
+> `kiwano cache-experiment` 按 session 对比相邻 turn 的公共前缀重合度
+> （原始 vs key 排序 vs 白名单剔除），纯只读。转发路径未动。
+> 本机首跑结论：too little data——session 捕获自 v0.1.15 才有，攒几天再跑。
 
 命中率低的原因是"前缀在抖"（tools 重排、易变字段混进 system）。
 网关可以**在转发前把 body 规范化**——JSON key 排序、剔除白名单内的易变字段——
@@ -91,6 +116,11 @@ takeover 已经会写 CLAUDE.md/AGENTS.md（有备份、可还原）。
 切换前的一次预检（provider 编辑对话框里加一个"用最近一条真实请求试打"）。
 
 ### 3.3 按 token 预算限额
+
+> 2026-09-19 核对：**已实现**（agent_limits 表 + limits::evaluate 30s 求值 +
+> 策略引擎强制拦截，支持 requests/wan_tokens/货币 × day/weekly/monthly/yearly）。
+> 当时唯一的缺口——agent 被限额拦截时没有通知——已由 Features 面板的
+> `feat_agent_limit_alerts` 补上。
 
 每条自定义 agent 路由设"每天 1M tokens"，网关按日志/usage 累计强制执行。
 核心卖点 limiting 的自然延伸：现在的限额是 provider 配额维度的，这是 agent 维度的。

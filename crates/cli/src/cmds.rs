@@ -668,7 +668,8 @@ pub fn insights(args: &InsightsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     if args.days <= 0 {
         return Err(CliError::usage("--days must be a positive number"));
     }
-    let report = build_insights_report(ctx.store()?, args.days, args.agent.clone())?;
+    let tuning = vm::ui_settings(ctx.aux()?).feat_tuning_advice;
+    let report = build_insights_report(ctx.store()?, args.days, args.agent.clone(), tuning)?;
     let text = render_insights(&report);
     ctx.out.emit(&report, || text);
     Ok(())
@@ -683,6 +684,7 @@ pub(crate) fn build_insights_report(
     store: &Store,
     days: i64,
     agent: Option<String>,
+    tuning_advice: bool,
 ) -> Result<insights::InsightsReport, CliError> {
     let now = vm::unix_now();
     let window = insights::Window {
@@ -703,7 +705,12 @@ pub(crate) fn build_insights_report(
     let bodies = sample_insight_bodies(store, &entries)?;
     let rows: Vec<insights::InsightRow> = entries.iter().map(insight_row_of).collect();
     Ok(insights::build_insights(
-        days, agent, window, &rows, &bodies,
+        days,
+        agent,
+        window,
+        &rows,
+        &bodies,
+        tuning_advice,
     ))
 }
 
@@ -879,7 +886,12 @@ fn rules_apply(agent: &str, days: i64, ctx: &mut Ctx) -> Result<(), CliError> {
     if days <= 0 {
         return Err(CliError::usage("--days must be a positive number"));
     }
-    let report = build_insights_report(ctx.store()?, days, Some(agent.to_string()))?;
+    let report = build_insights_report(
+        ctx.store()?,
+        days,
+        Some(agent.to_string()),
+        vm::ui_settings(ctx.aux()?).feat_tuning_advice,
+    )?;
     let mut rules: Vec<String> = Vec::new();
     for f in &report.findings {
         let Some(rule) = &f.rule else { continue };

@@ -32,6 +32,10 @@
   --kiwi: oklch(0.62 0.16 132);
   --kiwi-soft: oklch(0.62 0.16 132 / 0.1);
   --kiwi-dim: oklch(0.72 0.13 132);
+  /* The tint a usage cell takes while its numbers are moving. Stronger than
+     `--kiwi-soft`, which is the row hover: a change has to stay legible on a row
+     the pointer happens to be resting on. */
+  --kiwi-flash: oklch(0.62 0.16 132 / 0.22);
   /* status colors (design.md §5) */
   --blue: oklch(0.55 0.15 245);
   --amber: oklch(0.64 0.13 80);
@@ -85,6 +89,7 @@
   --kiwi: oklch(0.8 0.19 132);
   --kiwi-soft: oklch(0.8 0.19 132 / 0.13);
   --kiwi-dim: oklch(0.55 0.14 132);
+  --kiwi-flash: oklch(0.8 0.19 132 / 0.28);
   --blue: oklch(0.72 0.13 245);
   --amber: oklch(0.78 0.15 80);
   --red: oklch(0.65 0.2 25);
@@ -244,6 +249,35 @@ textarea,
 /* Refused by the gateway: over a spending limit or a plan ceiling. */
 .row.blocked {
   box-shadow: inset 2px 0 0 var(--red);
+}
+
+/* Usage numbers that just moved. The cell tints while they are still changing
+   and fades once they settle.
+
+   A transition on the base class rather than a keyframe animation on the added
+   one, because the interesting case is a burst: the gateway ticks once per
+   recorded request, and an animation would restart on every one — a cell that
+   is simply busy would stutter. This holds the tint until the numbers stop
+   moving, which is also what the tint then means.
+
+   Scoped to the numbers rather than the row: a row's identity, status and
+   controls did not change because a total under them did. */
+.usage-cell {
+  transition: background 900ms ease-out;
+  border-radius: 4px;
+  /* The tint hugs the numbers rather than the column they sit in: that column is
+     a quarter of the row wide, and a highlight that wide reads as "this row
+     changed" where the claim is only about a number in it. The negative margin
+     keeps the numbers where they were — the padding is there to hold the tint
+     off the text, not to move the text. */
+  padding: 1px 6px;
+  margin-left: -6px;
+}
+.usage-cell.changed {
+  background: var(--kiwi-flash);
+  /* Fast in, slow out: the tint is set the moment the number lands and is given
+     away gradually, so a change is noticed without the cell staying loud. */
+  transition: background 110ms ease-out;
 }
 
 .chip {

@@ -1,5 +1,13 @@
 // Home screen: Apps (local provider list, design/index.html #s-providers)
-import { useCallback, useEffect, useMemo, useState, type FocusEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
 
 import {
   ArrowDown,
@@ -1507,6 +1515,59 @@ function planPercentCell(
   );
 }
 
+/** How long a usage cell keeps its tint after its numbers last moved. */
+const USAGE_FLASH_MS = 1200;
+
+/** Everything a usage cell shows, as one string: what "these numbers changed"
+    is judged on. Built from the same fields the cell renders, so a value that
+    moves on screen is a value that moves here — and empty when there is nothing
+    to show yet, which the flash reads as "not a number" rather than as one. */
+function usageFingerprint(p: Provider, plan?: PlanQuotaReport): string {
+  const u = p.usage;
+  // The plan line's own numbers, which move without the totals above moving.
+  const tiers = plan?.success
+    ? plan.tiers.map((tier) => Math.round(tier.utilization)).join(",")
+    : "";
+  if (!u && !tiers) return "";
+  return [
+    u?.requests ?? "",
+    u?.input_tokens ?? "",
+    u?.output_tokens ?? "",
+    u?.cache_read_tokens ?? "",
+    u?.cache_creation_tokens ?? "",
+    u?.quota ? `${u.quota.used}/${u.quota.limit}/${u.quota.unit}` : "",
+    tiers,
+  ].join("|");
+}
+
+/** Whether the numbers behind `fingerprint` have moved since the last render.
+ *
+ * Judged on the values rather than on a re-render, because re-reads are not
+ * news: the gateway ticks once per recorded request, and a screen showing a
+ * dozen providers re-reads all of them for one row that changed. A cell that
+ * flashed on every re-read would be flashing all the time, which is the same as
+ * never.
+ *
+ * The tint is re-armed rather than restarted while it is up, so a run of
+ * requests holds it: the cell then reads as "still moving", which is what it
+ * is. */
+function useChangeFlash(fingerprint: string): boolean {
+  const [changed, setChanged] = useState(false);
+  const last = useRef(fingerprint);
+  useEffect(() => {
+    const previous = last.current;
+    last.current = fingerprint;
+    if (previous === fingerprint) return;
+    // A cell that was empty and now is not is a first read landing, not a number
+    // that moved: the row showed nothing because there was nothing to show.
+    if (previous === "") return;
+    setChanged(true);
+    const timer = window.setTimeout(() => setChanged(false), USAGE_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [fingerprint]);
+  return changed;
+}
+
 /** Sits in the Usage/quota column.
  *
  * A provider the gateway is refusing to route keeps its numbers here, dimmed:
@@ -1524,12 +1585,17 @@ function UsageCell({
   blocked?: string;
 }) {
   const t = useT();
+  const changed = useChangeFlash(usageFingerprint(p, plan));
   return (
     <div
       className={`w-[26%]${blocked ? " opacity-55" : ""}`}
       title={blocked ? t("providers.notRoutingTitle", { reason: blocked }) : undefined}
     >
-      <UsageCellBody p={p} plan={plan} />
+      {/* The tint goes on the numbers, not on the column: `w-fit` is what keeps
+          it to them (see `.usage-cell`). */}
+      <div className={`usage-cell w-fit max-w-full${changed ? " changed" : ""}`}>
+        <UsageCellBody p={p} plan={plan} />
+      </div>
     </div>
   );
 }

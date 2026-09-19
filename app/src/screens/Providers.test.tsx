@@ -20,6 +20,7 @@ import type {
   AppSettings,
   CustomAgent,
   Provider,
+  UsageSummary,
 } from "@/api/types";
 
 import Providers from "./Providers";
@@ -1487,6 +1488,74 @@ describe("a built-in agent's own row", () => {
     );
     expect(screen.getByText(en.providers.accessEndpoint)).toBeInTheDocument();
     expect(screen.queryByText(en.providers.agentConfigFilesNote)).toBeNull();
+  });
+});
+
+// The usage column's own change signal. The gateway pushes a tick per recorded
+// request and the screen re-reads, so a re-read is not itself news — this is
+// what says *which* row moved, judged on the numbers rather than on the read.
+describe("a usage cell whose numbers moved", () => {
+  /** Enough of a summary for the cell to draw its numbers. */
+  const usage = (requests: number): UsageSummary => ({
+    requests,
+    input_tokens: 1000,
+    output_tokens: 100,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    cost: 1,
+    cost_currency: "USD",
+    latency_ms: null,
+    quota: null,
+    spark: null,
+  });
+
+  const cells = (root: HTMLElement) => [...root.querySelectorAll(".usage-cell")];
+
+  it("tints the row whose numbers moved, and leaves the rest alone", async () => {
+    const user = userEvent.setup();
+    apiMock.testProviderLatency.mockResolvedValue(undefined);
+    const { container } = renderCodexTab({
+      providers: [
+        deepseek({ usage: usage(10) }),
+        deepseek({ id: "kimi", name: "Kimi", usage: usage(20) }),
+      ],
+      routes: [codexRoute(["deepseek", "kimi"])],
+      codexTakenOver: true,
+    });
+    await screen.findByText("Kimi");
+    expect(cells(container)).toHaveLength(2);
+
+    // One re-read, in which one provider's numbers moved and the other's did
+    // not. The latency test is the trigger because it re-reads everything
+    // without changing which rows are on screen.
+    apiMock.listProviders.mockResolvedValue([
+      deepseek({ usage: usage(10) }),
+      deepseek({ id: "kimi", name: "Kimi", usage: usage(21) }),
+    ]);
+    await user.click((await screen.findAllByLabelText(en.providers.testLatency))[1]);
+
+    await waitFor(() => expect(cells(container)[1].className).toContain("changed"));
+    expect(cells(container)[0].className).not.toContain("changed");
+  });
+
+  it("leaves a cell that was simply empty alone when its first read lands", async () => {
+    const user = userEvent.setup();
+    apiMock.testProviderLatency.mockResolvedValue(undefined);
+    const { container } = renderCodexTab({
+      providers: [deepseek()], // no usage at all: the cell draws nothing
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await screen.findByText("DeepSeek");
+
+    // The numbers arriving is not a number that moved — the cell was empty
+    // because there was nothing to show, and a tint there would fire on every
+    // screen the moment its data landed.
+    apiMock.listProviders.mockResolvedValue([deepseek({ usage: usage(3) })]);
+    await user.click(await screen.findByLabelText(en.providers.testLatency));
+
+    await waitFor(() => expect(apiMock.listProviders).toHaveBeenCalledTimes(2));
+    expect(cells(container)[0].className).not.toContain("changed");
   });
 });
 

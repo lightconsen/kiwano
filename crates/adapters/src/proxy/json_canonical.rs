@@ -9,7 +9,7 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub(crate) fn canonicalize_value(value: Value) -> Value {
+pub fn canonicalize_value(value: Value) -> Value {
     match value {
         Value::Array(values) => Value::Array(values.into_iter().map(canonicalize_value).collect()),
         Value::Object(map) => {
@@ -26,7 +26,7 @@ pub(crate) fn canonicalize_value(value: Value) -> Value {
     }
 }
 
-pub(crate) fn canonical_json_string(value: &Value) -> String {
+pub fn canonical_json_string(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
         Value::Bool(value) => value.to_string(),
@@ -54,7 +54,7 @@ pub(crate) fn canonical_json_string(value: &Value) -> String {
     }
 }
 
-pub(crate) fn canonicalize_json_string_if_parseable(value: &str) -> String {
+pub fn canonicalize_json_string_if_parseable(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return value.to_string();

@@ -22,6 +22,7 @@
 //! without a display server anywhere in sight.
 
 pub mod auxiliary;
+pub mod cache_experiment;
 pub mod creds;
 pub mod csv;
 pub mod detect;

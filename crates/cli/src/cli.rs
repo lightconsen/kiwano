@@ -88,6 +88,10 @@ pub enum Command {
     /// with {"command": "kiwano", "args": ["mcp"]} in its MCP config.
     Mcp,
 
+    /// Cache-shaping offline experiment: would body normalization lengthen
+    /// the prefix adjacent turns share? Read-only (Features)
+    CacheExperiment(CacheExperimentArgs),
+
     /// Coding agents: detect them, and route them through the gateway
     #[command(subcommand)]
     Agents(AgentsCmd),
@@ -199,6 +203,17 @@ pub enum CatalogCmd {
 pub enum ImportCmd {
     /// Read `~/.cc-switch` and migrate its providers in
     CcSwitch,
+}
+
+#[derive(Debug, Args)]
+pub struct CacheExperimentArgs {
+    /// Window length in days
+    #[arg(long, default_value_t = 7)]
+    pub days: i64,
+
+    /// Restrict to one agent
+    #[arg(long)]
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

@@ -267,6 +267,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             mcp::mcp(ctx)?;
             Ok(EXIT_OK)
         }
+        Command::CacheExperiment(args) => {
+            cmds::cache_experiment(args, ctx)?;
+            Ok(EXIT_OK)
+        }
         Command::Agents(cmd) => {
             cmds::agents(cmd, ctx)?;
             Ok(EXIT_OK)

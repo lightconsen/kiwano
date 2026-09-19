@@ -1739,3 +1739,20 @@ fn rules_apply_is_gated_and_honest_about_empty_windows() {
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("no rules applied"), "{out}");
 }
+
+/// The cache experiment is an opt-in feature: gated off it refuses, and on it
+/// prints its report skeleton even over an empty window.
+#[test]
+fn cache_experiment_is_gated_and_reports_empty_windows() {
+    let (_dir, db) = temp_db();
+    let (code, _out, err) = run(&db, &["cache-experiment"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("Features"), "{err}");
+
+    let (code, _out, err) = run(&db, &["settings", "set", "--key", "feat_cache_experiment=true"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, out, err) = run(&db, &["cache-experiment", "--days", "7"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("pairs 0"), "{out}");
+    assert!(out.contains("too little data"), "{out}");
+}

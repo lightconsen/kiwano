@@ -668,36 +668,43 @@ pub fn insights(args: &InsightsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     if args.days <= 0 {
         return Err(CliError::usage("--days must be a positive number"));
     }
-    let now = vm::unix_now();
-    let window = insights::Window {
-        from: vm::rfc3339(now - args.days * 86_400),
-        to: vm::rfc3339(now),
-    };
-    let report = {
-        let store = ctx.store()?;
-        // The export read is the one uncapped-by-page path over request_logs;
-        // insights wants every row in the window, newest-first order included
-        // (the core builder sorts for itself). At the cap the report covers
-        // the newest EXPORT_ROW_CAP rows — the same honest ceiling the CSV
-        // export has.
-        let entries = store
-            .export_request_logs(
-                RequestLogFilter {
-                    agent: args.agent.as_deref(),
-                    from: Some(&window.from),
-                    to: Some(&window.to),
-                    ..Default::default()
-                },
-                kiwanod::store::EXPORT_ROW_CAP,
-            )
-            .map_err(runtime)?;
-        let bodies = sample_insight_bodies(store, &entries)?;
-        let rows: Vec<insights::InsightRow> = entries.iter().map(insight_row_of).collect();
-        insights::build_insights(args.days, args.agent.clone(), window, &rows, &bodies)
-    };
+    let report = build_insights_report(ctx.store()?, args.days, args.agent.clone())?;
     let text = render_insights(&report);
     ctx.out.emit(&report, || text);
     Ok(())
+}
+
+/// The report both `insights` and the MCP server answer from. The export read
+/// is the one uncapped-by-page path over request_logs; insights wants every
+/// row in the window, newest-first order included (the core builder sorts for
+/// itself). At the cap the report covers the newest EXPORT_ROW_CAP rows — the
+/// same honest ceiling the CSV export has.
+pub(crate) fn build_insights_report(
+    store: &Store,
+    days: i64,
+    agent: Option<String>,
+) -> Result<insights::InsightsReport, CliError> {
+    let now = vm::unix_now();
+    let window = insights::Window {
+        from: vm::rfc3339(now - days * 86_400),
+        to: vm::rfc3339(now),
+    };
+    let entries = store
+        .export_request_logs(
+            RequestLogFilter {
+                agent: agent.as_deref(),
+                from: Some(&window.from),
+                to: Some(&window.to),
+                ..Default::default()
+            },
+            kiwanod::store::EXPORT_ROW_CAP,
+        )
+        .map_err(runtime)?;
+    let bodies = sample_insight_bodies(store, &entries)?;
+    let rows: Vec<insights::InsightRow> = entries.iter().map(insight_row_of).collect();
+    Ok(insights::build_insights(
+        days, agent, window, &rows, &bodies,
+    ))
 }
 
 fn insight_row_of(e: &RequestLogEntry) -> insights::InsightRow {

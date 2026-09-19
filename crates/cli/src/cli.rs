@@ -83,6 +83,11 @@ pub enum Command {
     /// How the agents spend their tokens: cache, context growth, retries
     Insights(InsightsArgs),
 
+    /// MCP stdio server: let agents query their own aggregate stats.
+    /// Off until enabled under Settings → Features; wire it into an agent
+    /// with {"command": "kiwano", "args": ["mcp"]} in its MCP config.
+    Mcp,
+
     /// Coding agents: detect them, and route them through the gateway
     #[command(subcommand)]
     Agents(AgentsCmd),

@@ -1699,3 +1699,13 @@ fn insights_honors_the_agent_filter_and_rejects_a_bad_window() {
     assert_eq!(code, 2);
     assert!(err.contains("--days"), "{err}");
 }
+
+/// The MCP server is an opt-in feature: with the flag off (the default) the
+/// command refuses before ever touching stdin.
+#[test]
+fn mcp_is_gated_by_the_features_flag() {
+    let (_dir, db) = temp_db();
+    let (code, _out, err) = run(&db, &["mcp"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("Features"), "{err}");
+}

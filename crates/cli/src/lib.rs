@@ -12,6 +12,7 @@
 
 pub mod cli;
 mod cmds;
+mod mcp;
 pub mod output;
 
 use std::cell::OnceCell;
@@ -260,6 +261,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
         }
         Command::Insights(args) => {
             cmds::insights(args, ctx)?;
+            Ok(EXIT_OK)
+        }
+        Command::Mcp => {
+            mcp::mcp(ctx)?;
             Ok(EXIT_OK)
         }
         Command::Agents(cmd) => {

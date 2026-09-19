@@ -3628,6 +3628,14 @@ pub struct UsageAlertVm {
     pub limit: f64,
     /// requests | wan_tokens | 3-letter ISO currency code
     pub unit: String,
+    /// Which check raised this: `provider_limit` | `plan_window` |
+    /// `cost_forecast` | `anomaly` | `agent_limit`. The first two are formatted
+    /// by the frontend from the numbers; the rest carry their text in
+    /// `message`.
+    pub kind: String,
+    /// Pre-built notification text for the feature alerts (English, the same
+    /// convention as insights findings); empty for the two legacy kinds.
+    pub message: String,
 }
 
 /// Alerts for providers that have spent their allowance, which the frontend
@@ -3653,7 +3661,25 @@ pub fn check_usage_alerts(
     aux: &Aux,
     mark: bool,
 ) -> Result<Vec<UsageAlertVm>, String> {
-    if !ui_settings(aux).cost_alert {
+    check_usage_alerts_at(store, aux, mark, unix_now())
+}
+
+/// `check_usage_alerts` against a caller-chosen "now" — the tests' way in:
+/// the forecast divides by how much of the period has elapsed, and the
+/// anomaly rules read the last completed hour, so neither can be asserted
+/// against a wall clock that keeps moving.
+fn check_usage_alerts_at(
+    store: &Store,
+    aux: &Aux,
+    mark: bool,
+    now: i64,
+) -> Result<Vec<UsageAlertVm>, String> {
+    let settings = ui_settings(aux);
+    if !settings.cost_alert
+        && !settings.feat_cost_forecast
+        && !settings.feat_anomaly_alerts
+        && !settings.feat_agent_limit_alerts
+    {
         return Ok(Vec::new());
     }
     let mut alerts = Vec::new();
@@ -3664,14 +3690,55 @@ pub fn check_usage_alerts(
         if let Some(pl) = kiwanod::limits::period_limit_usage(store, &p).map_err(e2s)? {
             // Notify at most once per reset period (app_settings KV dedup).
             let key = format!("alert_sent:{}", p.id);
-            if pl.used >= pl.limit && first_notice(aux, &key, &pl.period_key, mark)? {
+            if settings.cost_alert
+                && pl.used >= pl.limit
+                && first_notice(aux, &key, &pl.period_key, mark)?
+            {
                 alerts.push(UsageAlertVm {
                     provider_id: p.id.clone(),
                     provider_name: p.name.clone(),
                     used: (pl.used * 100.0).round() / 100.0,
                     limit: pl.limit,
-                    unit: pl.unit,
+                    unit: pl.unit.clone(),
+                    kind: "provider_limit".into(),
+                    message: String::new(),
                 });
+            }
+            // Cost forecast (Features panel): the month's spend slope projects
+            // past the limit — said *before* the limit is hit, which is the
+            // whole point. Currency limits with a reset period only: requests
+            // do not slope the same way, and a no-reset limit has no end to
+            // project toward.
+            if settings.feat_cost_forecast && pl.used < pl.limit && pl.unit.len() == 3 {
+                if let Some((start, end)) = kiwanod::limits::period_span_secs(
+                    now,
+                    p.reset_period.as_deref(),
+                    store.ui_tz_offset_minutes(),
+                ) {
+                    let elapsed = (now - start) as f64 / (end - start) as f64;
+                    // The first tenth of a period is noise; the 5% margin keeps
+                    // a projection that lands exactly on the limit quiet.
+                    if elapsed >= 0.1 {
+                        let projected = pl.used / elapsed;
+                        if projected > pl.limit * 1.05 {
+                            let key = format!("alert_sent:forecast:{}", p.id);
+                            if first_notice(aux, &key, &pl.period_key, mark)? {
+                                alerts.push(UsageAlertVm {
+                                    provider_id: p.id.clone(),
+                                    provider_name: p.name.clone(),
+                                    used: (pl.used * 100.0).round() / 100.0,
+                                    limit: pl.limit,
+                                    unit: pl.unit.clone(),
+                                    kind: "cost_forecast".into(),
+                                    message: format!(
+                                        "{}: on pace for {:.0} {} this period — past the {:.0} limit",
+                                        p.name, projected, pl.unit, pl.limit
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
         // The percent half — a plan window whose live utilization has reached the
@@ -3680,7 +3747,7 @@ pub fn check_usage_alerts(
         // the same `window_over`, so the notice and the block agree. Until now
         // nothing raised it: the UI had the branch and the strings, and no
         // producer, so a plan ceiling took the provider out of service silently.
-        if p.billing == Billing::Subscription {
+        if settings.cost_alert && p.billing == Billing::Subscription {
             // Bound to locals rather than chained: the hit borrows the report,
             // so the report has to outlive it in this scope.
             let limits = kiwanod::limits::PlanLimits::parse(p.plan_limits.as_deref());
@@ -3715,7 +3782,119 @@ pub fn check_usage_alerts(
                         used: (hit.util * 100.0).round() / 100.0,
                         limit: hit.pct,
                         unit: "plan_pct".into(),
+                        kind: "plan_window".into(),
+                        message: String::new(),
                     });
+                }
+            }
+        }
+    }
+
+    // Anomaly detection (Features panel): the last completed hour against the
+    // trailing-7-day baseline. All three rules fire at most once a day each.
+    if settings.feat_anomaly_alerts {
+        let hour_start = now - now.rem_euclid(3600);
+        let recent = store
+            .traffic_stats(&rfc3339(hour_start - 3600), &rfc3339(hour_start))
+            .map_err(e2s)?;
+        let base = store
+            .traffic_stats(&rfc3339(now - 7 * 86_400), &rfc3339(hour_start - 3600))
+            .map_err(e2s)?;
+        let base_hours = 167.0_f64; // 7 days minus the recent hour
+        let day_key =
+            kiwanod::limits::period_start(now, Some("day"), store.ui_tz_offset_minutes()).1;
+        let mut anomaly =
+            |aux: &Aux, rule: &str, message: String, mark: bool| -> Result<(), String> {
+                let key = format!("alert_sent:anomaly:{rule}");
+                if first_notice(aux, &key, &day_key, mark)? {
+                    alerts.push(UsageAlertVm {
+                        provider_id: String::new(),
+                        provider_name: String::new(),
+                        used: 0.0,
+                        limit: 0.0,
+                        unit: String::new(),
+                        kind: "anomaly".into(),
+                        message,
+                    });
+                }
+                Ok(())
+            };
+        // Error-rate spike. The 5-error floor keeps a quiet machine from
+        // "spiking" on a single failure; the 10% floor does the same for a
+        // zero baseline.
+        let recent_err_rate = recent.errors as f64 / recent.requests.max(1) as f64;
+        let base_err_rate = base.errors as f64 / base.requests.max(1) as f64;
+        if recent.errors >= 5 && recent_err_rate > f64::max(3.0 * base_err_rate, 0.10) {
+            anomaly(
+                aux,
+                "errors",
+                format!(
+                    "Error spike: {} of the last hour's {} requests failed ({:.0}% — 7-day baseline {:.0}%)",
+                    recent.errors,
+                    recent.requests,
+                    recent_err_rate * 100.0,
+                    base_err_rate * 100.0
+                ),
+                mark,
+            )?;
+        }
+        // Latency outlier: the hour's mean is 3× the baseline's. Needs traffic
+        // on both sides — a baseline of no measurements is not a baseline.
+        if let (Some(recent_avg), Some(base_avg)) = (recent.avg_latency_ms, base.avg_latency_ms) {
+            if recent.requests >= 10 && base_avg > 0.0 && recent_avg > 3.0 * base_avg {
+                anomaly(
+                    aux,
+                    "latency",
+                    format!(
+                        "Latency outlier: {:.1}s average in the last hour, vs a {:.1}s 7-day baseline",
+                        recent_avg / 1000.0,
+                        base_avg / 1000.0
+                    ),
+                    mark,
+                )?;
+            }
+        }
+        // Traffic burst: the hour tripled the baseline's hourly rate. The
+        // baseline floor (a request every other hour over the week) keeps a
+        // fresh install's first real use from reading as a burst.
+        let base_hourly = base.requests as f64 / base_hours;
+        if recent.requests >= 20
+            && base.requests >= 84
+            && recent.requests as f64 > 3.0 * base_hourly
+        {
+            anomaly(
+                aux,
+                "burst",
+                format!(
+                    "Traffic burst: {} requests in the last hour — 3× the {:.1}/h 7-day baseline",
+                    recent.requests, base_hourly
+                ),
+                mark,
+            )?;
+        }
+    }
+
+    // Agent budgets (Features panel): the gateway already refuses the request;
+    // this is the notification that refusal never produced.
+    if settings.feat_agent_limit_alerts {
+        for l in store.list_agent_limits().map_err(e2s)? {
+            if let Some(pl) = kiwanod::limits::agent_limit_usage(store, &l).map_err(e2s)? {
+                if pl.used >= pl.limit {
+                    let key = format!("alert_sent:agent:{}:{}", l.agent, l.period);
+                    if first_notice(aux, &key, &pl.period_key, mark)? {
+                        alerts.push(UsageAlertVm {
+                            provider_id: String::new(),
+                            provider_name: l.agent.clone(),
+                            used: (pl.used * 100.0).round() / 100.0,
+                            limit: pl.limit,
+                            unit: pl.unit.clone(),
+                            kind: "agent_limit".into(),
+                            message: format!(
+                                "Agent '{}' reached its {} budget: {:.0} of {:.0} {}",
+                                l.agent, l.period, pl.used, pl.limit, pl.unit
+                            ),
+                        });
+                    }
                 }
             }
         }
@@ -7952,6 +8131,234 @@ mod tests {
         assert_eq!(alerts[1].provider_id, "glm-1");
         assert_eq!(alerts[1].unit, "CNY");
         assert!((alerts[1].used - 60.0).abs() < 1e-6);
+    }
+
+    // ── Features-panel alerts (all opt-in; each test also covers the gate) ──
+
+    /// A request-log row at a chosen instant — the anomaly rules read "the last
+    /// completed hour", so the rows' timestamps are the fixture, not now.
+    fn log_row_at(
+        ts: String,
+        status_code: i64,
+        latency_ms: Option<i64>,
+    ) -> kiwanod::store::RequestLogNew {
+        kiwanod::store::RequestLogNew {
+            ts,
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: Some("claude".into()),
+            attribution: Some("key".into()),
+            provider_id: Some("p1".into()),
+            model: None,
+            status_code,
+            error_kind: None,
+            error_message: None,
+            session_id: None,
+            is_streaming: false,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
+            latency_ms,
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: None,
+            response_body: None,
+            request_size: 0,
+            response_size: 0,
+            truncated: false,
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+        }
+    }
+
+    #[test]
+    fn cost_forecast_fires_before_the_limit_is_hit() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let mut p = provider("ds-1", "DeepSeek", Billing::Metered);
+        p.period_limit = Some(100.0);
+        p.limit_unit = Some("CNY".into());
+        p.reset_period = Some("monthly".into());
+        s.insert_provider(&p).unwrap();
+
+        // "Now" pinned to 30% into the current month, so the projection is
+        // exact regardless of the day the suite runs. The usage rows carry the
+        // real clock — they land in the current month either way, which is all
+        // the usage side of the check asks.
+        let real_now = unix_now();
+        let (start, end) = kiwanod::limits::period_span_secs(real_now, Some("monthly"), 0).unwrap();
+        let now = start + ((end - start) as f64 * 0.3) as i64;
+        // ¥40 spent at 30% elapsed → projection ¥133 against a ¥100 limit.
+        for _ in 0..4 {
+            let mut row = usage_row("ds-1");
+            row.cost = Some(10.0);
+            row.cost_currency = Some("CNY".into());
+            s.record_usage(&row).unwrap();
+        }
+
+        // Flag off (the default): silent, and under the limit so the plain
+        // cost alert has nothing to say either.
+        assert!(check_usage_alerts_at(&s, &aux, true, now)
+            .unwrap()
+            .is_empty());
+
+        update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "feat_cost_forecast": true }),
+            &no_vars(),
+        )
+        .unwrap();
+        let alerts = check_usage_alerts_at(&s, &aux, true, now).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, "cost_forecast");
+        assert!(alerts[0].message.contains("on pace"));
+        assert!(alerts[0].message.contains("CNY"));
+        assert!(
+            check_usage_alerts_at(&s, &aux, true, now)
+                .unwrap()
+                .is_empty(),
+            "deduped for the rest of the period"
+        );
+    }
+
+    #[test]
+    fn anomaly_alert_on_an_error_spike() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let real_now = unix_now();
+        let hour_start = real_now - real_now.rem_euclid(3600);
+        let now = hour_start + 1800; // mid-hour: "the last completed hour" is fixed
+                                     // A quiet baseline week: a trickle of successes, no errors.
+        for i in 0..20 {
+            s.insert_request_log(&log_row_at(
+                rfc3339(hour_start - 3600 - (i + 1) * 7200),
+                200,
+                Some(100),
+            ))
+            .unwrap();
+        }
+        // The last completed hour: six failures out of eight — the shape of the
+        // 09-09 protocol_mismatch storm the rule exists to catch.
+        for i in 0..6 {
+            s.insert_request_log(&log_row_at(
+                rfc3339(hour_start - 3600 + i * 60),
+                502,
+                Some(100),
+            ))
+            .unwrap();
+        }
+        for i in 0..2 {
+            s.insert_request_log(&log_row_at(
+                rfc3339(hour_start - 3600 + 300 + i * 60),
+                200,
+                Some(100),
+            ))
+            .unwrap();
+        }
+
+        assert!(check_usage_alerts_at(&s, &aux, true, now)
+            .unwrap()
+            .is_empty());
+        update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "feat_anomaly_alerts": true }),
+            &no_vars(),
+        )
+        .unwrap();
+        let alerts = check_usage_alerts_at(&s, &aux, true, now).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, "anomaly");
+        assert!(alerts[0].message.contains("Error spike"));
+        assert!(
+            check_usage_alerts_at(&s, &aux, true, now)
+                .unwrap()
+                .is_empty(),
+            "once per day per rule"
+        );
+    }
+
+    #[test]
+    fn anomaly_alert_on_a_latency_outlier() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        let real_now = unix_now();
+        let hour_start = real_now - real_now.rem_euclid(3600);
+        let now = hour_start + 1800;
+        for i in 0..10 {
+            s.insert_request_log(&log_row_at(
+                rfc3339(hour_start - 7200 - i * 3600),
+                200,
+                Some(100),
+            ))
+            .unwrap();
+        }
+        // Ten requests at ten times the baseline's latency.
+        for i in 0..10 {
+            s.insert_request_log(&log_row_at(
+                rfc3339(hour_start - 3600 + i * 60),
+                200,
+                Some(1000),
+            ))
+            .unwrap();
+        }
+        update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "feat_anomaly_alerts": true }),
+            &no_vars(),
+        )
+        .unwrap();
+        let alerts = check_usage_alerts_at(&s, &aux, true, now).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert!(alerts[0].message.contains("Latency outlier"));
+    }
+
+    #[test]
+    fn agent_limit_alert_covers_the_gateways_silent_refusal() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        s.insert_provider(&provider("p1", "Prov", Billing::Metered))
+            .unwrap();
+        s.replace_agent_limits(
+            "claude",
+            &[kiwanod::store::AgentLimit {
+                agent: "claude".into(),
+                period: "day".into(),
+                period_limit: 5.0,
+                limit_unit: None, // requests
+                created_at: String::new(),
+                updated_at: String::new(),
+            }],
+        )
+        .unwrap();
+        for _ in 0..6 {
+            s.record_usage(&usage_row("p1")).unwrap();
+        }
+
+        // The gateway is already refusing this agent; with the flag off the
+        // user is never told.
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
+        update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "feat_agent_limit_alerts": true }),
+            &no_vars(),
+        )
+        .unwrap();
+        let alerts = check_usage_alerts(&s, &aux, true).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, "agent_limit");
+        assert_eq!(alerts[0].provider_name, "claude");
+        assert!(alerts[0].message.contains("budget"));
+        assert!(check_usage_alerts(&s, &aux, true).unwrap().is_empty());
     }
 
     /// A store and an aux on **one file**, which is what production has: the

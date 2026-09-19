@@ -217,6 +217,13 @@ export default function App() {
             const st = await requestPermission();
             if (st !== "granted") return;
           }
+          // The feature alerts (forecast / anomaly / agent budget) arrive with
+          // their text ready — the numbers they quote are the gateway's own,
+          // and reformatting them here could only drift from it.
+          if (a.message) {
+            sendNotification({ title: t("app.notifyFeatureTitle"), body: a.message });
+            continue;
+          }
           const used =
             a.unit === "plan_pct"
               ? t("app.usedPlanWindow", { pct: a.used })

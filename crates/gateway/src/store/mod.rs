@@ -1120,6 +1120,16 @@ impl UsageTotals {
     }
 }
 
+/// Request-log traffic over a time window: the anomaly detector's unit of
+/// evidence (`Store::traffic_stats`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TrafficStats {
+    pub requests: u64,
+    pub errors: u64,
+    /// Mean over the rows that recorded one; None when none did.
+    pub avg_latency_ms: Option<f64>,
+}
+
 /// Per-provider aggregation result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderUsage {
@@ -2536,6 +2546,28 @@ impl Store {
              FROM usage WHERE 1=1{cond}",
         ))?;
         Ok(stmt.query_row(rusqlite::params_from_iter(params), UsageTotals::from_row)?)
+    }
+
+    /// Request-log traffic over [since, until): counts and mean latency. The
+    /// anomaly detector's raw material — unlike `usage`, request_logs also
+    /// holds the requests that never reached a provider, which is where a
+    /// misconfiguration storm shows up. Bounds compare lexicographically like
+    /// every other `ts` filter; latency is averaged over the rows that have
+    /// one.
+    pub fn traffic_stats(&self, since: &str, until: &str) -> Result<TrafficStats> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(status_code >= 400),0), AVG(latency_ms)
+             FROM request_logs WHERE ts >= ?1 AND ts < ?2",
+            params![since, until],
+            |row| {
+                Ok(TrafficStats {
+                    requests: row.get::<_, i64>(0)? as u64,
+                    errors: row.get::<_, i64>(1)? as u64,
+                    avg_latency_ms: row.get(2)?,
+                })
+            },
+        )?)
     }
 
     /// Aggregated totals for one provider, optionally since a timestamp.

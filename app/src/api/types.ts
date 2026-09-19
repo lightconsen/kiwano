@@ -685,6 +685,12 @@ export interface UsageAlert {
   limit: number;
   /** requests | wan_tokens */
   unit: string;
+  /** Which check raised this: provider_limit | plan_window | cost_forecast |
+      anomaly | agent_limit. The first two are formatted here from the numbers;
+      the rest arrive with their text in `message`. */
+  kind: string;
+  /** Pre-built notification text for the feature alerts; "" for legacy kinds. */
+  message: string;
 }
 
 export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";

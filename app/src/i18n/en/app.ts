@@ -34,6 +34,8 @@ export const app = {
   usedRequests: "{count} requests",
   notifyPlanTitle: "Kiwano plan limit",
   notifyCostTitle: "Kiwano cost alert",
+  /** Feature alerts (forecast / anomaly / agent budget) carry their own body. */
+  notifyFeatureTitle: "Kiwano alert",
   notifyPlanBody:
     "{provider} is at {used} and has reached its {limit}% limit — it is disabled until usage drops back under",
   notifyCostBody:

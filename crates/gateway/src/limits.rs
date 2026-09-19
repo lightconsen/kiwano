@@ -89,6 +89,47 @@ pub struct PeriodLimit {
     pub period_key: String,
 }
 
+/// Start and end of the current reset period as epoch seconds, on the same
+/// local-calendar boundaries `period_start` draws. `None` for a no-reset
+/// limit — there is no end to project toward. The cost-forecast alert divides
+/// the period's spend so far by the fraction elapsed, so both ends are its
+/// raw material.
+pub fn period_span_secs(
+    epoch_secs: i64,
+    reset_period: Option<&str>,
+    tz_offset_minutes: i64,
+) -> Option<(i64, i64)> {
+    let offset = Duration::minutes(tz_offset_minutes);
+    let local = Utc
+        .timestamp_opt(epoch_secs, 0)
+        .single()
+        .unwrap_or_else(Utc::now)
+        + offset;
+    let day = local.date_naive();
+    let midnight_local = |d: NaiveDate| {
+        let naive = d.and_hms_opt(0, 0, 0).expect("midnight is a valid time");
+        Utc.from_utc_datetime(&(naive - offset)).timestamp()
+    };
+    let first_of = |y: i32, m: u32| NaiveDate::from_ymd_opt(y, m, 1).expect("the 1st exists");
+    let next_month = |y: i32, m: u32| if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+
+    let (start, end) = match reset_period {
+        None => return None,
+        Some("day") => (day, day + Duration::days(1)),
+        Some("weekly") => {
+            let monday = day - Duration::days(day.weekday().num_days_from_monday() as i64);
+            (monday, monday + Duration::days(7))
+        }
+        Some("yearly") => (first_of(day.year(), 1), first_of(day.year() + 1, 1)),
+        // `monthly` and anything unrecognised — the same fallback period_start makes.
+        _ => {
+            let (ny, nm) = next_month(day.year(), day.month());
+            (first_of(day.year(), day.month()), first_of(ny, nm))
+        }
+    };
+    Some((midnight_local(start), midnight_local(end)))
+}
+
 /// Read one provider's period limit and how much of it is spent. `None` when
 /// there is no limit worth measuring (absent, or zero/negative).
 pub fn period_limit_usage(

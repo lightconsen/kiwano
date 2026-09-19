@@ -20,6 +20,7 @@ export const app = {
   usedRequests: "{count} 次请求",
   notifyPlanTitle: "Kiwano 套餐上限",
   notifyCostTitle: "Kiwano 费用提醒",
+  notifyFeatureTitle: "Kiwano 提醒",
   notifyPlanBody:
     "{provider} 的用量为 {used}，已达到 {limit}% 的上限 — 在用量回落至上限以下前将被停用",
   notifyCostBody: "{provider} 本期已用 {used}，达到 {limit} 的上限 — 请注意支出",

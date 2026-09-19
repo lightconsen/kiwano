@@ -1017,6 +1017,9 @@ let idSeq = 100;
 /** Dev-only: flips after the first syncHub() so the conditional path is visible. */
 let devHubSynced = false;
 
+/** Dev-only dedup for the sample feature alerts (see checkUsageAlerts). */
+const devAlerted = new Set<string>();
+
 // Dev storage for rotating keys (spec §4.1 P1 multi-key rotation).
 // Keeps the raw key the way the database does, and masks on the way out — the
 // same contract the Rust side enforces, so the UI cannot come to depend on
@@ -1884,7 +1887,36 @@ export const devApi: KiwanoApi = {
 
   async checkUsageAlerts(): Promise<UsageAlert[]> {
     await delay();
-    return [];
+    // The two feature flags the fixture turns on each get their sample alert,
+    // so the notification path is exercisable in `pnpm dev` — but firing them
+    // on every 60s poll would make the dev session unusable, so they answer
+    // once per page load, the way the backend's per-period dedup reads.
+    const out: UsageAlert[] = [];
+    if (settings.feat_cost_forecast && !devAlerted.has("forecast")) {
+      devAlerted.add("forecast");
+      out.push({
+        provider_id: "deepseek",
+        provider_name: "DeepSeek",
+        used: 31.2,
+        limit: 50,
+        unit: "CNY",
+        kind: "cost_forecast",
+        message: "DeepSeek: on pace for 62 CNY this period — past the 50 limit",
+      });
+    }
+    if (settings.feat_anomaly_alerts && !devAlerted.has("anomaly")) {
+      devAlerted.add("anomaly");
+      out.push({
+        provider_id: "",
+        provider_name: "",
+        used: 0,
+        limit: 0,
+        unit: "",
+        kind: "anomaly",
+        message: "Error spike: 19 of the last hour's 23 requests failed (83% — 7-day baseline 2%)",
+      });
+    }
+    return out;
   },
 
   async getPlanQuota(providerId: string, force?: boolean): Promise<PlanQuotaReport> {

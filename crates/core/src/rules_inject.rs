@@ -248,7 +248,15 @@ mod tests {
         .unwrap();
         assert!(st.applied);
         assert_eq!(st.rules, ["Keep the prompt prefix stable."]);
-        assert!(st.file.ends_with(".claude/CLAUDE.md"), "{}", st.file);
+        // Through `Path`, not `str`: this is a `String`, and comparing it as one
+        // asks for the separator to be `/` — which it is everywhere except
+        // Windows, where the same file is `.claude\CLAUDE.md` and CI's windows
+        // leg is the only place that shows up.
+        assert!(
+            std::path::Path::new(&st.file).ends_with(".claude/CLAUDE.md"),
+            "{}",
+            st.file
+        );
         assert!(st.applied_at.is_some());
 
         let on_disk = std::fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();

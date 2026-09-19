@@ -29,6 +29,7 @@ pub mod import;
 pub mod insights;
 pub mod paths;
 pub mod pricing;
+pub mod rules_inject;
 pub mod share;
 pub mod sidecar;
 pub mod sync;

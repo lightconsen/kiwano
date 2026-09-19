@@ -100,6 +100,10 @@ pub enum Command {
     #[command(subcommand)]
     Logs(LogsCmd),
 
+    /// Insights-derived rules in the agent's instruction file (Features)
+    #[command(subcommand)]
+    Rules(RulesCmd),
+
     /// Requests, tokens, cost and latency over a window
     Dashboard(DashboardArgs),
 
@@ -195,6 +199,33 @@ pub enum CatalogCmd {
 pub enum ImportCmd {
     /// Read `~/.cc-switch` and migrate its providers in
     CcSwitch,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RulesCmd {
+    /// Write the insights report's rules into the agent's instruction file
+    /// (CLAUDE.md / AGENTS.md). Gated by the Features panel's rule injection
+    /// flag.
+    Apply {
+        /// The agent whose instruction file gets the rules (e.g. claude, codex)
+        agent: String,
+        /// Window the insights cover
+        #[arg(long, default_value_t = 7)]
+        days: i64,
+    },
+
+    /// Strip the injected block — a strip while the markers survive, a restore
+    /// from the backup when they do not
+    Remove {
+        /// The agent whose instruction file is cleaned
+        agent: String,
+    },
+
+    /// Whether rules are applied to the agent, and which
+    Status {
+        /// The agent to report on
+        agent: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

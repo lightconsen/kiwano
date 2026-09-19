@@ -1709,3 +1709,33 @@ fn mcp_is_gated_by_the_features_flag() {
     assert_eq!(code, 2);
     assert!(err.contains("Features"), "{err}");
 }
+
+/// Rule injection is an opt-in feature: `apply` refuses with the flag off, and
+/// answers honestly when the window's insights teach nothing.
+#[test]
+fn rules_apply_is_gated_and_honest_about_empty_windows() {
+    let (_dir, db) = temp_db();
+    let home = tempfile::tempdir().unwrap();
+    let home_arg = home.path().display().to_string();
+
+    // Flag off (the default): refused before any file is touched.
+    let (code, _out, err) = run(&db, &["--home", &home_arg, "rules", "apply", "claude"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("Features"), "{err}");
+    assert!(!home.path().join(".claude/CLAUDE.md").exists());
+
+    // Flag on, nothing in the log: no rules, and still no file.
+    let (code, _out, err) = run(
+        &db,
+        &["settings", "set", "--key", "feat_rule_injection=true"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "apply", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("no rules"), "{out}");
+    assert!(!home.path().join(".claude/CLAUDE.md").exists());
+
+    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "status", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("no rules applied"), "{out}");
+}

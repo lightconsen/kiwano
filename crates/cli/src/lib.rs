@@ -279,6 +279,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::logs(cmd, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Rules(cmd) => {
+            cmds::rules(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
         Command::Dashboard(args) => {
             cmds::dashboard(args, ctx)?;
             Ok(EXIT_OK)

@@ -148,6 +148,11 @@ pub struct Finding {
     /// True when the evidence names the ends of a range, or was capped,
     /// rather than listing every row.
     pub evidence_span: bool,
+    /// The rule this finding teaches, when it teaches one — the text
+    /// `kiwano rules apply` writes into the agent's instruction file (Features:
+    /// rule injection). Kept separate from `detail`: the detail quotes the
+    /// numbers, the rule is what to *do* and must read as an instruction.
+    pub rule: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -420,6 +425,10 @@ fn bloat_findings(stats: &[SessionStat], scorecard: &[AgentScore]) -> Vec<Findin
                 agent: s.agent.clone(),
                 evidence: vec![s.first_id, s.last_id],
                 evidence_span: true,
+                rule: Some(
+                    "Compact early: when a task's context has grown several-fold, summarize and start a fresh session instead of pushing every turn into one window."
+                        .to_string(),
+                ),
             }
         })
         .collect()
@@ -568,6 +577,10 @@ fn burst_finding(b: &Burst<'_>) -> Finding {
         // The ellipsis only means "capped" here; a burst lists its rows.
         evidence,
         evidence_span: truncated,
+        rule: Some(
+            "Never retry a failing request in a tight loop: back off, and on a protocol or configuration error stop and report instead of retrying."
+                .to_string(),
+        ),
     }
 }
 
@@ -660,6 +673,10 @@ fn cache_findings(rows: &[&InsightRow], scorecard: &[AgentScore]) -> Vec<Finding
                 agent: s.agent.clone(),
                 evidence,
                 evidence_span: false,
+                rule: Some(
+                    "Keep the prompt prefix stable across turns: do not reorder tool definitions, edit the system prompt, or inject timestamps into it."
+                        .to_string(),
+                ),
             }
         })
         .collect()
@@ -697,6 +714,10 @@ fn overhead_findings(bodies: &[BodySample]) -> Vec<Finding> {
                 agent: s.agent.clone(),
                 evidence: vec![s.log_id],
                 evidence_span: false,
+                rule: Some(
+                    "Trim the fixed payload: drop tools the current task does not use — every request re-sends the tool schemas."
+                        .to_string(),
+                ),
             })
         })
         .take(2)

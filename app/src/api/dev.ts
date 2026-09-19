@@ -52,6 +52,7 @@ const providers: Provider[] = [
     name: "DeepSeek",
     logo_char: "D",
     catalog_id: "deepseek",
+    currency: "CNY",
     model_default: "deepseek-chat (V3)",
     logo_color: "#4D6BFE",
     endpoint: "api.deepseek.com",
@@ -97,6 +98,7 @@ const providers: Provider[] = [
     name: "Kimi (Moonshot)",
     logo_char: "K",
     catalog_id: "kimi",
+    currency: "CNY",
     logo_color: "#111111",
     logo_border: true,
     endpoint: "api.moonshot.cn",
@@ -130,6 +132,7 @@ const providers: Provider[] = [
     name: "GLM (Zhipu)",
     logo_char: "G",
     catalog_id: "zhipu-glm",
+    currency: "CNY",
     logo_color: "#3859FF",
     endpoint: "open.bigmodel.cn",
     endpoint_note: "OpenAI-compatible · +Anthropic",
@@ -158,6 +161,7 @@ const providers: Provider[] = [
     id: "ollama",
     name: "Ollama",
     logo_char: "O",
+    currency: "CNY",
     logo_color: "#1c1c1e",
     logo_border: true,
     endpoint: "localhost:11434",
@@ -481,6 +485,8 @@ for (const m of MATRIX) {
     endpoint: `demo.local/${m.id}`,
     endpoint_note: protocolNote("openai"),
     protocol: "openai",
+    // What its rates would be denominated in; the fixture prices everything in CNY.
+    currency: "CNY",
     billing: m.billing,
     limit_unit: m.limit_unit,
     plan_price: m.plan_price,
@@ -1477,6 +1483,9 @@ export const devApi: KiwanoApi = {
       // edit dialog reaches the entry through it for the endpoints, the currency
       // and the quota query the stored row may be missing.
       catalog_id: input.catalog_id ?? null,
+      // What the entry bills in, or what the user declared — the fixture has no
+      // catalog to ask, so a hand-added provider takes the demo's own currency.
+      currency: input.prices?.currency ?? "CNY",
       logo_char: input.name.charAt(0).toUpperCase(),
       logo_color: "#555555",
       endpoint: input.endpoint.replace(/^https?:\/\//, ""),

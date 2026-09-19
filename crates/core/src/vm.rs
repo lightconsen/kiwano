@@ -687,6 +687,12 @@ pub struct ProviderVm {
     /// bills in, and a stored row can be missing both.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub catalog_id: Option<String>,
+    /// The currency this provider's figures are denominated in — what the user
+    /// declared, else the catalog entry's, else USD. The spending-limit picker
+    /// reads it: a limit is written in one of the currencies its agent's
+    /// providers actually bill in, not in the display currency, which is a
+    /// preference about reading numbers rather than about which money is spent.
+    pub currency: String,
     pub endpoint: String,
     pub protocol: String,
     pub endpoint_note: String,
@@ -1516,6 +1522,9 @@ pub fn build_provider_vms(
         return Ok(Vec::new());
     }
 
+    // What each provider bills in, resolved per row below.
+    let catalog_entries = catalog_snapshot(aux).entries;
+
     let now = unix_now();
     let since7 = rfc3339(now - 7 * 86_400);
     // The window the prober scopes itself by: a provider with a request in it is
@@ -1710,6 +1719,7 @@ pub fn build_provider_vms(
                 logo_color: palette_color(&p.name).to_string(),
                 logo_border: false,
                 catalog_id: p.catalog_id.clone(),
+                currency: provider_currency(&p, &catalog_entries),
                 endpoint: display_endpoint(&p),
                 protocol: p.protocol.as_str().to_string(),
                 endpoint_note: endpoint_note(&p),
@@ -2219,6 +2229,34 @@ fn health_vm(
 /// sides, and a currency without one is **added** to the others at 1:1 — the bug
 /// that once let a `¥50` limit mean nothing in particular.
 ///
+/// The currency a provider's figures are denominated in.
+///
+/// Declared prices win: they are what cost this provider's requests, and a
+/// spending limit is measured against that cost. Then the catalog entry it was
+/// added from — the authority on what a provider bills in, and the field the Hub
+/// added for exactly this (its own default is USD, so a matched entry carries a
+/// currency either way). A provider added by hand, with no entry behind it and
+/// nothing declared, falls back to USD as well: the price table's base, and the
+/// only honest answer when nothing said otherwise.
+fn provider_currency(p: &Provider, entries: &[CatalogEntryVm]) -> String {
+    if let Some(c) = p
+        .prices
+        .as_deref()
+        .and_then(|s| {
+            serde_json::from_str::<kiwano_adapters::model_pricing::DeclaredPrices>(s).ok()
+        })
+        .map(|d| d.currency)
+        .filter(|c| !c.is_empty())
+    {
+        return c;
+    }
+    p.catalog_id
+        .as_deref()
+        .and_then(|id| entries.iter().find(|e| e.id == id))
+        .map(|e| e.currency.clone())
+        .unwrap_or_else(|| "USD".to_string())
+}
+
 /// A machine that has never synced has no table at all, and then it is the two
 /// currencies the Hub publishes rates against. Empty is not "anything goes": the
 /// reason for the rule is that no rate exists, and that is true of every third
@@ -2742,8 +2780,9 @@ pub fn add_provider(
     // from the endpoint where that is unambiguous. Worth doing at all because
     // the row's link is what prices its requests at its own rate rather than at
     // whichever entry sorts first (`link_providers` has the long version).
+    let catalog_entries = catalog_snapshot(aux).entries;
     if provider.catalog_id.is_none() {
-        provider.catalog_id = catalog_id_for(&catalog_snapshot(aux).entries, &provider);
+        provider.catalog_id = catalog_id_for(&catalog_entries, &provider);
     }
     store.insert_provider(&provider).map_err(e2s)?;
 
@@ -2764,6 +2803,7 @@ pub fn add_provider(
         .prices
         .as_deref()
         .and_then(|s| serde_json::from_str(s).ok());
+    let vm_currency = provider_currency(&provider, &catalog_entries);
 
     for agent in input.agents.iter().flatten() {
         // "Save & Enable" → becomes the primary for the chosen agents.
@@ -2779,6 +2819,7 @@ pub fn add_provider(
         logo_color: palette_color(&input.name).to_string(),
         logo_border: false,
         catalog_id: vm_catalog_id,
+        currency: vm_currency,
         endpoint: vm_endpoint,
         protocol: vm_protocol,
         endpoint_note: vm_note,
@@ -5075,6 +5116,50 @@ mod tests {
 
     fn stored_base(s: &Store, id: &str) -> String {
         s.get_provider(id).unwrap().expect("provider row").base_url
+    }
+
+    /// The currency a provider's figures are denominated in — the field the
+    /// agent's spending-limit picker offers as a unit, so it decides which money
+    /// a ceiling can be written in.
+    ///
+    /// Declared prices win over the entry: a user who typed their own rates also
+    /// typed what they are in, and those are the figures costing the requests the
+    /// limit is measured against. Neither source means USD — the price table's
+    /// base, and the only honest answer when nothing named another.
+    #[test]
+    fn a_provider_carries_the_currency_its_figures_are_in() {
+        const CUR: &str = r#"{"total":2,"entries":[
+            {"id":"cn-1","name":"CN One","tag":"third","rating":3,"billing":"payg",
+             "currency":"CNY",
+             "endpoints":[{"protocol":"openai","endpoint":"https://api.cn1.example"}]},
+            {"id":"us-1","name":"US One","tag":"third","rating":3,"billing":"payg",
+             "currency":"USD",
+             "endpoints":[{"protocol":"openai","endpoint":"https://api.us1.example"}]}
+        ]}"#;
+        let aux = Aux::open_in_memory().unwrap();
+        aux.save_hub_cache(CUR, "2026-09-07T00:00:00Z").unwrap();
+        let entries = catalog_snapshot(&aux).entries;
+
+        // Added from an entry: what that entry bills in.
+        let mut cn = provider("cn", "CN One", Billing::Metered);
+        cn.catalog_id = Some("cn-1".into());
+        assert_eq!(provider_currency(&cn, &entries), "CNY");
+
+        // Declared prices, over an entry that says USD.
+        let mut declared = provider("decl", "Declared", Billing::Metered);
+        declared.catalog_id = Some("us-1".into());
+        declared.prices = Some(r#"{"currency":"CNY","models":[]}"#.into());
+        assert_eq!(provider_currency(&declared, &entries), "CNY");
+
+        // Hand-added, and an id the catalog no longer carries: the same answer,
+        // because neither names a currency at all.
+        assert_eq!(
+            provider_currency(&provider("bare", "Bare", Billing::Metered), &entries),
+            "USD"
+        );
+        let mut stale = provider("stale", "Stale", Billing::Metered);
+        stale.catalog_id = Some("gone".into());
+        assert_eq!(provider_currency(&stale, &entries), "USD");
     }
 
     /// A stored endpoint is an absolute URL, whatever the form it was typed in.

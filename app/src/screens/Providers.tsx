@@ -295,7 +295,7 @@ function AccessDialog({
   protocol,
   listen,
   limits,
-  currency,
+  currencies,
   open,
   onClose,
   onDelete,
@@ -309,7 +309,8 @@ function AccessDialog({
   protocol: Protocol | null;
   listen: string;
   limits: AgentLimit[];
-  currency: string;
+  /** The currencies its own providers bill in — see `LimitSection`. */
+  currencies: string[];
   open: boolean;
   onClose: () => void;
   onDelete: () => void;
@@ -487,7 +488,7 @@ function AccessDialog({
               <LimitSection
                 agent={agent}
                 limits={limits}
-                currency={currency}
+                currencies={currencies}
                 onChanged={onChanged}
               />
             )}
@@ -564,7 +565,7 @@ function AgentSettingsDialog({
   placeholderKey,
   additive,
   limits,
-  currency,
+  currencies,
   busy,
   disableError,
   onDisable,
@@ -586,8 +587,8 @@ function AgentSettingsDialog({
   /** Additive agents: the rewrite leaves the agent's other providers in place. */
   additive: boolean;
   limits: AgentLimit[];
-  /** Display currency, for a money ceiling's unit. */
-  currency: string;
+  /** The currencies its own providers bill in — see `LimitSection`. */
+  currencies: string[];
   /** A takeover change is in flight. */
   busy?: boolean;
   /** Why turning the takeover off was refused. */
@@ -691,7 +692,7 @@ function AgentSettingsDialog({
               <LimitSection
                 agent={agent}
                 limits={limits}
-                currency={currency}
+                currencies={currencies}
                 onChanged={onChanged}
               />
             )}
@@ -2456,8 +2457,9 @@ export default function Providers({
   >({});
   // What a client is pointed at: the gateway's own listen address from settings.
   const [listen, setListen] = useState("127.0.0.1:8317");
-  // Display currency, which is also the unit a money ceiling is written in.
-  const [currency, setCurrency] = useState("USD");
+  // Every currency the Hub prices, for a ceiling's unit picker — read only when
+  // the agent's own providers do not name one.
+  const [knownCurrencies, setKnownCurrencies] = useState<string[]>([]);
   const [enabling, setEnabling] = useState(false);
   /** Why the last takeover attempt was refused — see `AgentOnboarding`. */
   const [takeoverError, setTakeoverError] = useState<string | null>(null);
@@ -2550,10 +2552,15 @@ export default function Providers({
         setCustomAgents(s.custom_agents);
         rememberCustomAgents(s.custom_agents);
         if (s.gateway_listen) setListen(s.gateway_listen);
-        if (s.preferred_currency) setCurrency(s.preferred_currency);
       })
       .catch(() => {});
-    return Promise.all([providers, routes, settings]);
+    // The currencies a limit may be denominated in — the Hub's rate table, which
+    // is also what makes a ceiling comparable with the costs behind it.
+    const currencies = api
+      .getCurrencyMeta()
+      .then((m) => setKnownCurrencies(m.currencies))
+      .catch(() => {});
+    return Promise.all([providers, routes, settings, currencies]);
   }, []);
   // Not `useEffect(refetch, …)`: an effect may not return a promise, which is
   // what this now returns.
@@ -2758,6 +2765,25 @@ export default function Providers({
   const agentProtocols = seg === "all" ? [] : (protocolsByAgent[seg] ?? []);
   // Inside an agent tab with bindings the list IS the strategy candidate queue
   const route = seg === "all" ? null : (routes?.find((r) => r.agent === seg) ?? null);
+  // The currencies a ceiling on this agent may be written in: what the providers
+  // it is bound to bill in. An agent whose providers say nothing — none bound
+  // yet, or none of them linked to a catalog entry and none with declared
+  // prices — falls back to every currency the Hub prices, so the picker still
+  // offers money rather than nothing.
+  const limitCurrencies = (agent: AgentRef): string[] => {
+    const own = [
+      ...new Set(
+        providers
+          .filter((p) => p.agents.includes(agent))
+          // `Boolean` guards a gateway older than this screen: the app and the
+          // daemon are two binaries, and a missing currency must not become an
+          // empty option in the picker.
+          .map((p) => p.currency)
+          .filter(Boolean),
+      ),
+    ];
+    return own.length > 0 ? own.sort() : knownCurrencies;
+  };
   const byId = new Map(providers.map((p) => [p.id, p]));
   // The agent this tab belongs to, when the user defined it: routes and a key,
   // and no config file anywhere.
@@ -3136,7 +3162,7 @@ export default function Providers({
           placeholderKey={takeoverInfo[seg]?.key ?? null}
           additive={takeoverInfo[seg]?.additive ?? false}
           limits={route?.limits ?? []}
-          currency={currency}
+          currencies={limitCurrencies(seg)}
           busy={enabling}
           disableError={takeoverError}
           onDisable={() => void disableAgentTakeover(seg)}
@@ -3154,7 +3180,7 @@ export default function Providers({
           protocol={custom.protocol}
           listen={listen}
           limits={route?.limits ?? []}
-          currency={currency}
+          currencies={limitCurrencies(custom.id)}
           open={accessOpen}
           onClose={() => setAccessOpen(false)}
           onDelete={() => onDeleteAgent(custom.id)}

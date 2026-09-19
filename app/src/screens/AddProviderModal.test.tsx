@@ -229,6 +229,7 @@ describe("editing a provider that declares prices", () => {
           endpoint_note: "OpenAI-compatible",
           billing: "payg",
           limit_unit: "CNY",
+          currency: "CNY",
           prices: {
             currency: "CNY",
             models: [

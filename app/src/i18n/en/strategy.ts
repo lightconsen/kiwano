@@ -64,4 +64,6 @@ export const strategy = {
     "Measured across every provider this agent uses, and enforced under every strategy — including single, whose one-provider rule says nothing about how much may be spent. An agent can hold several windows at once, and being over any one of them refuses requests until that window resets.",
   limitMoneyNote:
     "A money limit counts only what the price table can price. A request whose model has no published price is metered but not costed, so it does not count toward the ceiling.",
+  limitCurrencyNote:
+    "A money limit is written in a currency this agent's providers bill in — spending in another is converted at the Hub's rates before it counts. The ceiling itself never converts.",
 };

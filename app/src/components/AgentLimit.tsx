@@ -77,15 +77,18 @@ function toLimit(d: Draft): AgentLimit | null {
 export function LimitSection({
   agent,
   limits,
-  currency,
+  currencies,
   onChanged,
 }: {
   agent: AgentRef;
   limits: AgentLimit[];
-  /** Display currency: the unit a money ceiling is written in. An agent's traffic
-      spans providers that bill in their own, so the ceiling needs one of its own
-      rather than borrowing whichever provider served last. */
-  currency: string;
+  /** The currencies a money ceiling may be written in: what this agent's own
+      providers bill in (or, when none of them says, every currency the Hub
+      prices). An agent's traffic spans providers that bill in their own, so the
+      ceiling needs a currency of its own rather than borrowing whichever
+      provider served last — and never the display currency, which is a
+      preference about reading numbers rather than about money being spent. */
+  currencies: string[];
   onChanged?: () => void;
 }) {
   const t = useT();
@@ -101,6 +104,24 @@ export function LimitSection({
 
   const setRow = (period: string, patch: Partial<Draft>) =>
     setRows((rs) => rs.map((r) => (r.period === period ? { ...r, ...patch } : r)));
+
+  /** A money unit rather than a count: everything the two counting units are
+      not. The gateway reads a stored unit the same way round — a 3-letter code
+      is a currency, anything else is a count (`limits.rs`). */
+  const isMoney = (unit: string) => unit !== "requests" && unit !== "wan_tokens";
+
+  /** The currencies this row may be written in: the agent's, plus the one it is
+      already in. A ceiling stored before its agent's providers changed — or set
+      from the CLI — has to keep reading as itself rather than as blank. */
+  const unitsFor = (r: Draft) =>
+    isMoney(r.unit) && !currencies.includes(r.unit)
+      ? [...currencies, r.unit].sort()
+      : currencies;
+
+  /** What a new ceiling starts in: the agent's currency when its providers
+      agree on one — it is then the only money the ceiling could be in — and a
+      request count when there is a choice to make or nothing to choose from. */
+  const defaultUnit = currencies.length === 1 ? currencies[0] : "requests";
 
   const save = async () => {
     setBusy(true);
@@ -160,7 +181,11 @@ export function LimitSection({
             <SelectContent>
               <SelectItem value="requests">{t("strategy.limitUnitRequests")}</SelectItem>
               <SelectItem value="wan_tokens">{t("strategy.limitUnitWanTokens")}</SelectItem>
-              <SelectItem value={currency}>{currency}</SelectItem>
+              {unitsFor(r).map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={r.period} onValueChange={(v) => v && setRow(r.period, { period: v })}>
@@ -199,7 +224,7 @@ export function LimitSection({
           className="h-7 gap-1 px-2 text-[12px]"
           disabled={unused.length === 0}
           onClick={() =>
-            setRows((rs) => [...rs, { period: unused[0], value: "", unit: "requests" }])
+            setRows((rs) => [...rs, { period: unused[0], value: "", unit: defaultUnit }])
           }
         >
           <Plus className="h-3.5 w-3.5" />
@@ -220,6 +245,9 @@ export function LimitSection({
       </p>
       <p className="mt-1 text-[10.5px] leading-relaxed text-mut">
         {t("strategy.limitMoneyNote")}
+      </p>
+      <p className="mt-1 text-[10.5px] leading-relaxed text-mut">
+        {t("strategy.limitCurrencyNote")}
       </p>
       {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
     </div>

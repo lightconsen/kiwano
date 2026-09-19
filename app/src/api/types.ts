@@ -319,6 +319,11 @@ export interface Provider {
       shelf. The add/edit dialog reaches the entry through it for the endpoints
       and the billing currency the stored row may be missing. */
   catalog_id?: string | null;
+  /** The currency this provider's figures are denominated in — what the user
+      declared, else its catalog entry's, else USD. Read by a spending limit's
+      unit picker, whose options are the currencies the limit's agent actually
+      bills in. */
+  currency: string;
   /** Second half of the endpoint subtitle: OpenAI compatible / qwen3:32b etc. */
   endpoint_note: string;
   /** Additional per-protocol endpoints (one provider serves multiple agent protocols) */

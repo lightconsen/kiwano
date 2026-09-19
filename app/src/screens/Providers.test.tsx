@@ -30,6 +30,7 @@ const { apiMock } = vi.hoisted(() => ({
     listProviders: vi.fn(),
     getAgentRoutes: vi.fn(),
     getSettings: vi.fn(),
+    getCurrencyMeta: vi.fn(),
     getPlanQuota: vi.fn(),
     removeAgentBinding: vi.fn(),
     addAgentBinding: vi.fn(),
@@ -69,6 +70,9 @@ function deepseek(over: Partial<Provider> = {}): Provider {
     logo_color: "#4D6BFE",
     endpoint: "api.deepseek.com",
     protocol: "openai",
+    // What its figures are denominated in — the unit a ceiling on its agent can
+    // be written in.
+    currency: "USD",
     endpoint_note: "OpenAI-compatible",
     billing: "payg",
     enabled: true,
@@ -147,6 +151,11 @@ beforeEach(() => {
   apiMock.getGatewayStatus.mockResolvedValue({ running: true, port: 8317, blocked: [] });
   apiMock.removeAgentBinding.mockResolvedValue(undefined);
   apiMock.setAgentLimits.mockResolvedValue(undefined);
+  apiMock.getCurrencyMeta.mockResolvedValue({
+    preferred: "USD",
+    currencies: ["CNY", "USD"],
+    exchange_rates: {},
+  });
 });
 
 describe("an agent tab", () => {
@@ -1191,9 +1200,59 @@ describe("the agent's own limit", () => {
     await waitFor(() =>
       expect(apiMock.setAgentLimits).toHaveBeenCalledWith("codex", [
         { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+        // Its one provider bills in USD, so that is the only money a new window
+        // could be in — and the display currency (CNY in this fixture) is not
+        // consulted at all.
+        { period: "day", period_limit: 25, limit_unit: "USD" },
+      ]),
+    );
+  });
+
+  /// A ceiling is written in money that is being spent. The unit picker's
+  /// options are therefore the currencies this agent's own providers bill in —
+  /// what the routing actually charges — rather than the display currency,
+  /// which is a preference about how numbers read.
+  it("makes the reader pick a unit when its providers bill in more than one", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      // Two providers, two currencies: nothing here can choose for the reader.
+      providers: [deepseek(), deepseek({ id: "glm", name: "GLM", currency: "CNY" })],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+    await openTab(user, en.strategy.limitLabel);
+
+    await user.click(screen.getByRole("button", { name: en.strategy.limitAdd }));
+    await user.type(amountFor(en.strategy.limitPeriodDay), "25");
+    await user.click(screen.getByRole("button", { name: en.common.save }));
+
+    // A request count, which is what a ceiling starts as when there is a choice
+    // to make.
+    await waitFor(() =>
+      expect(apiMock.setAgentLimits).toHaveBeenCalledWith("codex", [
         { period: "day", period_limit: 25, limit_unit: null },
       ]),
     );
+  });
+
+  it("keeps reading a stored unit its providers no longer name", async () => {
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()], // bills in USD
+      routes: [
+        codexRoute(["deepseek"], [
+          // Set while the agent still had a CNY provider, or from the CLI.
+          { period: "monthly", period_limit: 50, limit_unit: "CNY" },
+        ]),
+      ],
+      codexTakenOver: true,
+    });
+    await openTab(user, en.strategy.limitLabel);
+
+    // The row is in CNY and has to keep saying so: a ceiling that had gone
+    // blank would read as one that is not set, while the gateway goes on
+    // enforcing it.
+    expect(screen.getByText("CNY")).toBeInTheDocument();
   });
 
   it("removes a window, and saving writes what is left", async () => {

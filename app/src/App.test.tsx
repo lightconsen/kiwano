@@ -18,6 +18,7 @@ const { apiMock } = vi.hoisted(() => ({
     getGatewayStatus: vi.fn(),
     getFooterStats: vi.fn(),
     getSettings: vi.fn(),
+    getCurrencyMeta: vi.fn(),
     updateSettings: vi.fn(),
     listProviders: vi.fn(),
     getAgentRoutes: vi.fn(),
@@ -47,6 +48,11 @@ beforeEach(() => {
     takeovers: [],
     tz_offset_minutes: 0,
     hub_url: "https://hub.example",
+  });
+  apiMock.getCurrencyMeta.mockResolvedValue({
+    preferred: "CNY",
+    currencies: ["CNY", "USD"],
+    exchange_rates: {},
   });
   apiMock.updateSettings.mockResolvedValue({});
   apiMock.listProviders.mockResolvedValue([]);

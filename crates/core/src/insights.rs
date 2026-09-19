@@ -704,34 +704,51 @@ const RETRY_ADVICE_MIN_CHAINS: usize = 5;
 /// …and fires when at most this share of them was rescued.
 const RETRY_ADVICE_MAX_RESCUE: f64 = 0.2;
 
+/// One provider's window, as the route-health pass counts it: the traffic it
+/// served for one agent, and what failed.
+#[derive(Default)]
+struct ProviderHealth {
+    /// Filled when the pair is grouped under its agent — the id is the map key
+    /// while the counting happens, and a fact about the row afterwards.
+    provider: String,
+    requests: i64,
+    errors: i64,
+    /// The failing `request_logs` ids behind the count, capped at
+    /// [`MAX_EVIDENCE`]: the report names a few rows to look at, not every one.
+    evidence: Vec<i64>,
+}
+
 /// Route health: a provider whose error rate dwarfs the agent's other
 /// candidates'. The route is the user's to change; this says where to look.
 fn route_health_findings(rows: &[&InsightRow]) -> Vec<Finding> {
-    // Per (agent, provider): (requests, errors, failing row ids).
-    let mut by_pair: BTreeMap<(String, String), (i64, i64, Vec<i64>)> = BTreeMap::new();
+    // Per (agent, provider) while counting, because that is what a row is about.
+    let mut by_pair: BTreeMap<(String, String), ProviderHealth> = BTreeMap::new();
     for r in rows {
         let (Some(agent), Some(provider)) = (&r.agent, &r.provider_id) else {
             continue;
         };
         let e = by_pair
             .entry((agent.clone(), provider.clone()))
-            .or_default();
-        e.0 += 1;
+            .or_insert_with(|| ProviderHealth {
+                provider: provider.clone(),
+                ..ProviderHealth::default()
+            });
+        e.requests += 1;
         if r.status_code >= 400 {
-            e.1 += 1;
-            if e.2.len() < MAX_EVIDENCE {
-                e.2.push(r.id);
+            e.errors += 1;
+            if e.evidence.len() < MAX_EVIDENCE {
+                e.evidence.push(r.id);
             }
         }
     }
 
-    let mut by_agent: BTreeMap<String, Vec<(String, i64, i64, Vec<i64>)>> = BTreeMap::new();
-    for ((agent, provider), (reqs, errs, ids)) in by_pair {
-        if reqs >= ROUTE_HEALTH_MIN_REQS {
-            by_agent
-                .entry(agent)
-                .or_default()
-                .push((provider, reqs, errs, ids));
+    // …then per agent, which is the unit the comparison is made in: a route is
+    // a queue of providers, and "this one is worse than its siblings" is only a
+    // statement about providers in the same queue.
+    let mut by_agent: BTreeMap<String, Vec<ProviderHealth>> = BTreeMap::new();
+    for ((agent, _), health) in by_pair {
+        if health.requests >= ROUTE_HEALTH_MIN_REQS {
+            by_agent.entry(agent).or_default().push(health);
         }
     }
 
@@ -742,23 +759,25 @@ fn route_health_findings(rows: &[&InsightRow]) -> Vec<Finding> {
         }
         let best = providers
             .iter()
-            .map(|(_, reqs, errs, _)| *errs as f64 / *reqs as f64)
+            .map(|p| p.errors as f64 / p.requests as f64)
             .fold(f64::INFINITY, f64::min);
-        for (provider, reqs, errs, ids) in providers {
-            let rate = errs as f64 / reqs as f64;
-            if rate > f64::max(3.0 * best, ROUTE_HEALTH_MIN_PCT / 100.0) && errs >= 5 {
+        for p in providers {
+            let rate = p.errors as f64 / p.requests as f64;
+            if rate > f64::max(3.0 * best, ROUTE_HEALTH_MIN_PCT / 100.0) && p.errors >= 5 {
                 out.push(Finding {
                     summary: format!(
-                        "provider `{provider}` errors at {:.0}% for this agent (best sibling: {:.0}%)",
+                        "provider `{}` errors at {:.0}% for this agent (best sibling: {:.0}%)",
+                        p.provider,
                         rate * 100.0,
                         best * 100.0
                     ),
                     detail: format!(
-                        "{errs} of {reqs} requests failed in the window — consider lowering its priority or checking its key"
+                        "{} of {} requests failed in the window — consider lowering its priority or checking its key",
+                        p.errors, p.requests
                     ),
                     tag: "tuning".to_string(),
                     agent: Some(agent.clone()),
-                    evidence: ids,
+                    evidence: p.evidence,
                     evidence_span: false,
                     rule: None,
                 });

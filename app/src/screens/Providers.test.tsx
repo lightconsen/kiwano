@@ -1345,6 +1345,58 @@ describe("a built-in agent's own row", () => {
     expect(screen.queryByText("~/.codex/auth.json")).toBeNull();
   });
 
+  it("reads out the key a client is pointed at with, and turns the takeover off here", async () => {
+    apiMock.setTakeover.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    await user.click(
+      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    );
+    // The gateway's key for this agent. It was a column in Settings' list of
+    // every agent; it is one fact about this one, and this is where the agent's
+    // own facts are.
+    expect(screen.getByText("kw-ag-codex-test")).toBeInTheDocument();
+
+    // It rewrites the agent's config back, so it takes two clicks: the first
+    // only arms it.
+    await user.click(screen.getByRole("button", { name: en.providers.agentDisable }));
+    expect(apiMock.setTakeover).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: en.providers.agentDisableConfirm }));
+
+    await waitFor(() => expect(apiMock.setTakeover).toHaveBeenCalledWith("codex", false));
+    // The dialog is about a takeover that no longer exists, so it goes with it —
+    // and the tab is back to the onboarding that can turn one on again.
+    await waitFor(() => expect(screen.queryByText(en.providers.agentConfigFilesNote)).toBeNull());
+  });
+
+  it("keeps that dialog open when the restore is refused, and says why", async () => {
+    apiMock.setTakeover.mockRejectedValue(new Error("restore failed"));
+    const user = userEvent.setup();
+    renderCodexTab({
+      providers: [deepseek()],
+      routes: [codexRoute(["deepseek"])],
+      codexTakenOver: true,
+    });
+
+    await user.click(
+      await screen.findByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
+    );
+    await user.click(screen.getByRole("button", { name: en.providers.agentDisable }));
+    await user.click(screen.getByRole("button", { name: en.providers.agentDisableConfirm }));
+
+    // Codex is still taken over — nothing was restored — so the reason has to
+    // land here: with the agent still routed, this dialog is the only place left
+    // that can show one.
+    expect(await screen.findByText("restore failed")).toBeInTheDocument();
+    expect(screen.getByText(en.providers.agentConfigFilesNote)).toBeInTheDocument();
+  });
+
   it("is not on the all-agents tab, and not on a user-defined agent's", async () => {
     const user = userEvent.setup();
     const longTasks: CustomAgent = {

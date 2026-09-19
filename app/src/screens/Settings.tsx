@@ -23,7 +23,7 @@ import {
   useT,
   type LanguagePref,
 } from "../i18n";
-import type { AgentId, AppSettings, UpdateInfo } from "../api/types";
+import type { AppSettings, UpdateInfo } from "../api/types";
 
 function Row({ label, note, children }: { label: React.ReactNode; note?: string; children: React.ReactNode }) {
   return (
@@ -181,8 +181,6 @@ export default function Settings() {
   const install = useUpdateInstall();
   const [checkErr, setCheckErr] = useState<string | null>(null);
   const [upToDate, setUpToDate] = useState(false);
-  const [takeoverBusy, setTakeoverBusy] = useState<string | null>(null);
-  const [takeoverErr, setTakeoverErr] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
@@ -226,19 +224,6 @@ export default function Settings() {
     // by the time this screen mounts.
     return () => offUpdate();
   }, []);
-
-  // Turning a takeover off is one call — the backend restores the agent's own
-  // configuration. Turning one on is not: it walks the Apps onboarding
-  // (enable → route → rewrite), so that direction stays a deep link.
-  const disableTakeover = (agent: AgentId) => {
-    setTakeoverBusy(agent);
-    setTakeoverErr(null);
-    api
-      .setTakeover(agent, false)
-      .then(() => api.getSettings().then(setS))
-      .catch((e) => setTakeoverErr(`${agent}: ${String(e)}`))
-      .finally(() => setTakeoverBusy(null));
-  };
 
   // "Up to date" is a confirmation, not a mode: it clears itself.
   useEffect(() => {
@@ -393,62 +378,31 @@ export default function Settings() {
       <div className="rounded-lg border border-line bg-surface p-4">
         <h3 className="mb-3 text-[12.5px] font-semibold">{t("settings.localGateway")}</h3>
         <div className="space-y-2.5 text-[12.5px]">
-          <div className="pb-0.5 pt-1 text-[11px] font-medium text-mut">
-            {t("settings.agentTakeover")}{" "}
-            <span className="font-normal">{t("settings.agentTakeoverNote")}</span>
-          </div>
-          {/* `tk`, not `t`: the translator is in scope here. */}
-          {s.takeovers.map((tk) => (
-            <div key={tk.agent} className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                {tk.label}{" "}
-                {tk.additive && (
-                  <span className="text-[10px] text-mut">{t("settings.coexist")}</span>
-                )}
-                {tk.placeholder_key ? (
-                  <span
-                    className="text-[10px] font-mono text-mut"
-                    title={t("settings.placeholderKeyTitle")}
-                  >
-                    {tk.placeholder_key}
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-mono text-mut">{t("common.none")}</span>
-                )}
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="text-[10.5px]" style={tk.enabled ? { color: "var(--kiwi)" } : { color: "var(--mut)" }}>
-                  {tk.enabled ? t("settings.takenOver") : t("settings.notTakenOver")}
-                </span>
-                {tk.enabled ? (
-                  // Off is one call, so it lives here as a switch. Turning one
-                  // back on is not (enable → route → rewrite in Apps), which is
-                  // why that direction keeps its own button below.
-                  <Switch
-                    checked
-                    // The visible row is the agent's own label; without this the
-                    // control is announced (and reachable in a test) only as
-                    // "switch", one of six on this page.
-                    aria-label={tk.label}
-                    disabled={takeoverBusy === tk.agent}
-                    onCheckedChange={() => disableTakeover(tk.agent)}
-                  />
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2.5 text-[11px]"
-                    onClick={() => {
-                      window.location.hash = `providers/${tk.agent}`;
-                    }}
-                  >
-                    {t("settings.enableInApps")}
-                  </Button>
-                )}
-              </span>
-            </div>
-          ))}
-          {takeoverErr ? <div className="text-[11px] text-red-400">{takeoverErr}</div> : null}
+          {/* Takeover is state, not a setting: which agents point at the gateway
+              is a property of those agents, and so is the switch that ends one.
+              Both live on the Apps page beside the agents themselves, which is
+              also the only place a takeover can be turned *on* (enable → route →
+              rewrite). A row per agent here made this section grow with the
+              built-in registry, so what is left is the one fact the section is
+              about, and the way over. */}
+          <Row
+            label={t("settings.agentTakeover")}
+            note={t("settings.agentTakeoverSummary", {
+              routed: s.takeovers.filter((tk) => tk.enabled).length,
+              total: s.takeovers.length,
+            })}
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-[11px]"
+              onClick={() => {
+                window.location.hash = "providers";
+              }}
+            >
+              {t("settings.manageInApps")}
+            </Button>
+          </Row>
           <Row label={t("settings.autoFailover")} note={t("settings.autoFailoverNote")}>
             <Switch checked={s.auto_failover} onCheckedChange={(v) => patch({ auto_failover: v })} />
           </Row>

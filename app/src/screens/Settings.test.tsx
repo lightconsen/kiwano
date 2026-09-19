@@ -1,11 +1,10 @@
-// Settings' takeover switch, which is the one place the user turns routing off
-// from this page.
+// Settings' one row about agent takeover.
 //
-// Turning it *off* is a single call — the backend restores the agent's own
-// configuration — and the row has to follow, because that list is where the
-// answer to "did it work" lives. Turning one on deliberately does not happen
-// here (it walks the Apps onboarding: enable → route → rewrite), so this file
-// asserts both directions as they are rather than as symmetry would have them.
+// The per-agent controls used to live here as a list, one row per built-in
+// agent, and the list grew with the registry. They are on the Apps page now,
+// beside the config files they rewrite — which is also the only place a takeover
+// can be turned on (enable → route → rewrite). What this page keeps is the count
+// and the way over, so that is what this file asserts.
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +20,6 @@ const { apiMock } = vi.hoisted(() => ({
     getCurrencyMeta: vi.fn(),
     getFooterStats: vi.fn(),
     getPendingUpdate: vi.fn(),
-    setTakeover: vi.fn(),
     updateSettings: vi.fn(),
     openLogFolder: vi.fn(),
     checkAppUpdate: vi.fn(),
@@ -31,8 +29,15 @@ const { apiMock } = vi.hoisted(() => ({
 
 vi.mock("../api/client", () => ({ api: apiMock }));
 
+/** The takeover row's summary line, filled the way the screen fills it. */
+function takeoverSummary(routed: number, total: number) {
+  return en.settings.agentTakeoverSummary
+    .replace("{routed}", String(routed))
+    .replace("{total}", String(total));
+}
+
 /** A whole settings blob, as the backend hands one over — the takeover list is
-    what this screen's list renders, and the rest keeps the page whole. */
+    what this screen counts, and the rest keeps the page whole. */
 function settingsWith(codexTakenOver: boolean): AppSettings {
   return {
     language: "en",
@@ -91,43 +96,36 @@ beforeEach(() => {
     hub_synced: false,
   });
   apiMock.getPendingUpdate.mockResolvedValue(null);
-  apiMock.setTakeover.mockResolvedValue(undefined);
 });
 
-describe("the takeover switch", () => {
-  it("re-reads the settings after turning one off, so the row follows", async () => {
-    apiMock.getSettings
-      .mockResolvedValueOnce(settingsWith(true)) // mount: codex is taken over
-      .mockResolvedValueOnce(settingsWith(false)); // after the call: it is not
-    const user = userEvent.setup();
-    render(<Settings />);
-
-    const sw = await screen.findByRole("switch", { name: "Codex" });
-    expect(sw).toBeChecked();
-    expect(screen.getByText(en.settings.takenOver)).toBeInTheDocument();
-
-    await user.click(sw);
-
-    await waitFor(() => expect(apiMock.setTakeover).toHaveBeenCalledWith("codex", false));
-    // Re-read, not locally patched: the state the user sees is the one the
-    // backend reports, and the row now offers the Apps route back in.
-    await waitFor(() => expect(apiMock.getSettings).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(en.settings.notTakenOver)).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Codex" })).toBeNull();
-    expect(screen.getByRole("button", { name: en.settings.enableInApps })).toBeInTheDocument();
+describe("the agent takeover row", () => {
+  // The hash is the app's router: a test that sets it leaves it set.
+  beforeEach(() => {
+    window.location.hash = "";
   });
 
-  it("reports a refused takeover instead of leaving the switch on in silence", async () => {
+  it("says how many agents the gateway is serving, and opens the Apps page", async () => {
     apiMock.getSettings.mockResolvedValue(settingsWith(true));
-    apiMock.setTakeover.mockRejectedValue(new Error("restore failed"));
     const user = userEvent.setup();
     render(<Settings />);
 
-    await user.click(await screen.findByRole("switch", { name: "Codex" }));
+    expect(await screen.findByText(takeoverSummary(1, 1))).toBeInTheDocument();
 
-    expect(await screen.findByText(/codex: Error: restore failed/)).toBeInTheDocument();
-    // The switch is still on, because it still is: nothing was restored.
-    expect(screen.getByRole("switch", { name: "Codex" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: en.settings.manageInApps }));
+
+    // The Apps page, not the agent's own tab: which agent to act on is the
+    // choice left to the reader, and the strip there is the list.
+    expect(window.location.hash).toBe("#providers");
+  });
+
+  it("counts only the agents that are actually routed", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(false));
+    render(<Settings />);
+
+    expect(await screen.findByText(takeoverSummary(0, 1))).toBeInTheDocument();
+    // No switch here to turn one off: that control moved to the agent's settings
+    // dialog, and a row per agent is what this page stopped carrying.
+    expect(screen.queryByRole("switch", { name: "Codex" })).toBeNull();
   });
 });
 

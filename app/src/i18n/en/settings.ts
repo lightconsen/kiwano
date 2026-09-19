@@ -16,15 +16,11 @@ export const settings = {
   // Local gateway
   localGateway: "Local gateway",
   agentTakeover: "Agent takeover",
-  /** Sits inline after the "Agent takeover" heading, so it keeps the leading
-      "·" separator the heading relies on. */
-  agentTakeoverNote: "· hot-switching once pointed at the local gateway",
-  coexist: "Coexist · multi-provider",
-  placeholderKeyTitle:
-    "Placeholder key assigned by the gateway, used for request attribution",
-  takenOver: "Taken over",
-  notTakenOver: "Not taken over",
-  enableInApps: "Enable in Apps",
+  /** Sits inline after the "Agent takeover" label, so it keeps the leading "·"
+      separator the label relies on. The count is of the agents pointing at the
+      gateway; the per-agent controls are on the Apps page. */
+  agentTakeoverSummary: "· {routed} of {total} agents routed through the gateway",
+  manageInApps: "Manage in Apps",
   autoFailover: "Auto failover",
   autoFailoverNote: "Switch to a standby when the primary fails",
   requestLogs: "Request logs",

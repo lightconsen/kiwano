@@ -550,8 +550,9 @@ const ACCESS_TABS: { id: "access" | "limit"; labelKey: KeyPath<Messages> }[] = [
   { id: "limit", labelKey: "strategy.limitLabel" },
 ];
 
-/** One built-in agent's settings: the files a takeover rewrites, and how much the
-    agent may spend.
+/** One built-in agent's settings: the files a takeover rewrites, the key its
+    clients are pointed at with, turning the takeover off, and how much the agent
+    may spend.
  *
  * A user-defined agent has a dialog of its own below — there is no file behind it
  * — and the two share this shape: a strip of subjects, and one showing. */
@@ -560,8 +561,13 @@ function AgentSettingsDialog({
   label,
   paths,
   protocols,
+  placeholderKey,
+  additive,
   limits,
   currency,
+  busy,
+  disableError,
+  onDisable,
   open,
   onClose,
   onChanged,
@@ -573,15 +579,35 @@ function AgentSettingsDialog({
       asked: it is read off the wire format Kiwano already writes into the
       agent's config, and a user editing it here would be editing a fact. */
   protocols: Protocol[];
+  /** The key the gateway assigns this agent, which is what its clients are
+      configured with. Null only in the states where there is no takeover to
+      have assigned one yet. */
+  placeholderKey: string | null;
+  /** Additive agents: the rewrite leaves the agent's other providers in place. */
+  additive: boolean;
   limits: AgentLimit[];
   /** Display currency, for a money ceiling's unit. */
   currency: string;
+  /** A takeover change is in flight. */
+  busy?: boolean;
+  /** Why turning the takeover off was refused. */
+  disableError?: string | null;
+  onDisable: () => void;
   open: boolean;
   onClose: () => void;
   onChanged?: () => void;
 }) {
   const t = useT();
   const [tab, setTab] = useState<"general" | "limit">("general");
+  // Turning the takeover off rewrites the agent's config back, so it takes two
+  // clicks: the first arms, the second does it, and arming lapses on its own.
+  // The same two steps a provider row's delete takes, for the same reason.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[460px]">
@@ -606,6 +632,19 @@ function AgentSettingsDialog({
                     </span>
                   </div>
                 )}
+                <div className="mt-1 flex items-center gap-2">
+                  <span
+                    className="w-[68px] shrink-0 text-[10.5px] text-mut"
+                    title={t("providers.agentPlaceholderKeyTitle")}
+                  >
+                    {t("providers.agentPlaceholderKey")}
+                  </span>
+                  {placeholderKey ? (
+                    <CopyValue value={placeholderKey} />
+                  ) : (
+                    <span className="text-[11px] text-mut">{t("common.none")}</span>
+                  )}
+                </div>
                 {paths.map((p) => (
                   <div key={p} className="mt-1 flex items-center gap-2">
                     <CopyValue value={p} />
@@ -614,6 +653,38 @@ function AgentSettingsDialog({
                 <p className="mt-1.5 text-[10.5px] leading-relaxed text-mut">
                   {t("providers.agentConfigFilesNote")}
                 </p>
+                {/* How much the rewrite keeps, right under the files it rewrote:
+                    an additive agent's config holds the other providers it
+                    already had alongside the gateway. */}
+                {additive && (
+                  <p className="mt-1 text-[10.5px] text-mut">{t("providers.agentAdditive")}</p>
+                )}
+                {/* The escape hatch back to the agent's own configuration. It
+                    sits in the agent's settings rather than in a list of every
+                    agent the app knows: this is the one place it is about *this*
+                    agent, and the only one that also says what the takeover
+                    rewrote. Turning one on stays the onboarding's job — it is a
+                    three-step walk, not a toggle. */}
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-2.5">
+                  <span className="text-[10.5px] leading-relaxed text-mut">
+                    {t("providers.agentDisableNote")}
+                  </span>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 shrink-0 px-2.5 text-[11px]"
+                    // Armed, the border joins in: the colour says "careful",
+                    // and the border says "this click is the one that does it".
+                    style={armed ? { borderColor: "var(--red)" } : undefined}
+                    disabled={busy}
+                    onClick={() => (armed ? onDisable() : setArmed(true))}
+                  >
+                    {armed ? t("providers.agentDisableConfirm") : t("providers.agentDisable")}
+                  </Button>
+                </div>
+                {disableError ? (
+                  <div className="mt-1 text-[11px] text-red-400">{disableError}</div>
+                ) : null}
               </>
             )}
             {tab === "limit" && (
@@ -2376,6 +2447,13 @@ export default function Providers({
   // same kind of fact: what the agent *is*, carried on the takeover row that
   // exists per agent rather than in a table of its own.
   const [protocolsByAgent, setProtocolsByAgent] = useState<Record<string, Protocol[]>>({});
+  // The rest of what the takeover row carries per agent: the key a client is
+  // pointed at with, and whether the rewrite keeps the agent's other providers.
+  // Both belong in the agent's own settings dialog — the same read, one more
+  // fact about the agent rather than about the app.
+  const [takeoverInfo, setTakeoverInfo] = useState<
+    Record<string, { key: string | null; additive: boolean }>
+  >({});
   // What a client is pointed at: the gateway's own listen address from settings.
   const [listen, setListen] = useState("127.0.0.1:8317");
   // Display currency, which is also the unit a money ceiling is written in.
@@ -2460,6 +2538,14 @@ export default function Providers({
         );
         setProtocolsByAgent(
           Object.fromEntries(s.takeovers.map((k) => [k.agent, k.protocols ?? []])),
+        );
+        setTakeoverInfo(
+          Object.fromEntries(
+            s.takeovers.map((k) => [
+              k.agent,
+              { key: k.placeholder_key ?? null, additive: k.additive },
+            ]),
+          ),
         );
         setCustomAgents(s.custom_agents);
         rememberCustomAgents(s.custom_agents);
@@ -2620,23 +2706,35 @@ export default function Providers({
    * rather than a comment claiming it.
    *
    * Enabling is what the Apps onboarding offers; disabling is the escape hatch
-   * back to the agent's own configuration, the same call the Settings switch
-   * makes. Either way the screen re-reads afterwards instead of assuming the
-   * outcome, and a refusal is left to the caller to show. */
-  const setAgentTakenOver = async (agent: AgentRef, enabled: boolean) => {
-    if (!isBuiltinAgent(agent)) return;
+   * back to the agent's own configuration, offered by the agent's own settings
+   * dialog. Either way the screen re-reads afterwards instead of assuming the
+   * outcome; a refusal is left to the caller to show, which is why this reports
+   * whether the call landed rather than only having run. */
+  const setAgentTakenOver = async (agent: AgentRef, enabled: boolean): Promise<boolean> => {
+    if (!isBuiltinAgent(agent)) return false;
     setEnabling(true);
     setTakeoverError(null);
     try {
       await api.setTakeover(agent, enabled);
+      return true;
     } catch (e) {
       // Kept, not swallowed: a takeover that was refused leaves the agent
       // exactly as it was, so without this the user sees a spin and no reason.
       setTakeoverError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setEnabling(false);
       refetch();
     }
+  };
+
+  /** Turning a takeover off, from the dialog it is offered in.
+   *
+   * The dialog closes only once the call landed. A refused restore leaves the
+   * agent taken over, so closing on the way out would take the reason with it —
+   * the dialog is the only place that can still show one. */
+  const disableAgentTakeover = async (agent: AgentRef) => {
+    if (await setAgentTakenOver(agent, false)) setAgentSettingsOpen(false);
   };
 
   if (!providers) {
@@ -3035,8 +3133,13 @@ export default function Providers({
           label={agentMeta(seg).label}
           paths={configPaths}
           protocols={agentProtocols}
+          placeholderKey={takeoverInfo[seg]?.key ?? null}
+          additive={takeoverInfo[seg]?.additive ?? false}
           limits={route?.limits ?? []}
           currency={currency}
+          busy={enabling}
+          disableError={takeoverError}
+          onDisable={() => void disableAgentTakeover(seg)}
           onChanged={refetch}
           open={agentSettingsOpen}
           onClose={() => setAgentSettingsOpen(false)}

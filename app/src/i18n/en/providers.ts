@@ -214,6 +214,16 @@ export const providers = {
   agentSettingsFor: "{agent} settings",
   agentGeneralTab: "General",
   agentConfigFilesNote: "Backed up before a takeover, restored when it is turned off.",
+  /** The gateway's key for this agent — what its clients are configured with. */
+  agentPlaceholderKey: "API Key",
+  agentPlaceholderKeyTitle:
+    "Placeholder key assigned by the gateway, used for request attribution",
+  /** Beside the protocol: how much the rewritten config keeps. */
+  agentAdditive: "Coexist · multi-provider",
+  agentDisable: "Turn off takeover",
+  /** The armed state of that button: the second click is the one that does it. */
+  agentDisableConfirm: "Click again to turn off",
+  agentDisableNote: "Restores the agent's own configuration. Routes and keys are kept.",
 
   removeFromRouteAria: "Remove from route",
   removeFromRoute: "Remove from this route (other agents keep their binding)",

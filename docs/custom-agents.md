@@ -166,8 +166,8 @@ API Key   kw-ag-my-route-3f9a
 ### 5.3 连带屏幕
 
 - **Dashboard / Logs**：agent 筛选与 `by_agent` 自然出现它（依赖 §4 的集合修复）。
-- **Settings**：接管列表**不出现**它（那页是配置改写）；自定义 agent 的 key 也不在这里显示，
-  只在其 tab 与 CLI 里给。
+- **Settings**：接管只剩一行汇总（已接管数 / 全部内置）＋「在应用中管理」，逐个体操在 Apps 里；
+  自定义 agent 不在那个计数里，它的 key 只在其 tab 与 CLI 里给。
 - **Apps 的 All 页**：provider 的 Bound-agents 列会出现它的字母头像（内置走品牌图标，自定义走字母头像）。
 
 ## 6. 风险与边界（实现时逐条验证）

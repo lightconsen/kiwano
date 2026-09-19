@@ -7,8 +7,11 @@ export const dashboard = {
   windowToday: "Today",
   window7d: "Last 7 days",
   window30d: "Last 30 days",
-  /** Not a counted window: everything the store holds. */
-  windowAll: "All time",
+  /** Not a counted window: everything the store holds. Reads as the same word
+      the two filters beside it use, which is the point — it is the same kind of
+      "no narrowing" as they are, and the strip is read left to right as one
+      row of choices. */
+  windowAll: "All",
 
   allProviders: "All providers",
   allAgents: "All agents",

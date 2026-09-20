@@ -89,6 +89,59 @@ async function savedPayload(user: ReturnType<typeof userEvent.setup>) {
   return apiMock.addProvider.mock.calls[0][0];
 }
 
+/** The Advanced fold holds timeout/retries/headers behind one button. */
+async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: en.addProvider.advanced }));
+}
+
+/** Each header becomes a name/value pair of inputs; `i` is the row index. */
+function headerInputs(i: number): { name: HTMLElement; value: HTMLElement } {
+  const placeholders = screen.getAllByPlaceholderText(en.addProvider.headerValuePlaceholder);
+  return {
+    name: screen.getAllByPlaceholderText(en.addProvider.headerNamePlaceholder)[i],
+    value: placeholders[i],
+  };
+}
+
+describe("custom headers that name an auth header", () => {
+  it("says when a custom header overrides the injected credential", async () => {
+    const user = await openCustom();
+    await openAdvanced(user);
+
+    // A benign header draws no warning — most rows do not touch credentials.
+    await user.click(screen.getByRole("button", { name: en.addProvider.addHeader }));
+    await user.type(headerInputs(0).name, "X-Custom");
+    await user.type(headerInputs(0).value, "hello");
+    expect(screen.queryByText(en.addProvider.customHeadersAuthWarning.replace("{name}", "X-Custom"))).toBeNull();
+
+    // The nudge appears as soon as an auth header is named, whatever the case:
+    // HTTP header names are case-insensitive, so the check has to be too.
+    await user.clear(headerInputs(0).name);
+    await user.type(headerInputs(0).name, "x-api-key");
+    expect(
+      await screen.findByText(en.addProvider.customHeadersAuthWarning.replace("{name}", "x-api-key")),
+    ).toBeInTheDocument();
+    // …and goes away with the header that earned it.
+    await user.click(screen.getByRole("button", { name: en.addProvider.removeHeader }));
+    expect(
+      screen.queryByText(en.addProvider.customHeadersAuthWarning.replace("{name}", "x-api-key")),
+    ).toBeNull();
+  });
+
+  it("sends the override through when the user keeps it", async () => {
+    const user = await openCustom();
+    await openAdvanced(user);
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.addHeader }));
+    await user.type(headerInputs(0).name, "authorization");
+    await user.type(headerInputs(0).value, "Bearer sk-user");
+    const payload = await savedPayload(user);
+
+    // The headers travel as part of the advanced block, beside timeout/retries.
+    expect(payload.advanced.headers).toEqual({ authorization: "Bearer sk-user" });
+  });
+});
+
 describe("adding a provider by hand", () => {
   it("lets the user pick the protocol", async () => {
     const user = await openCustom();

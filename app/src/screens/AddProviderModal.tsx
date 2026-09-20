@@ -66,6 +66,14 @@ function probeColor(verdict: ProbeReport["verdict"]): string {
   return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
 }
 
+/** The headers the gateway injects as credentials (`x-api-key` / `Authorization`
+    / `x-goog-api-key`, see `gateway::forward`). A custom header with one of
+    these names wins over the injected credential — which is sometimes exactly
+    the point (an Azure-style `api-key` endpoint), and otherwise a silent way to
+    send the wrong key upstream. Warned about, not refused: this dialog cannot
+    know which it is. */
+const AUTH_HEADER_NAMES = ["authorization", "x-api-key", "x-goog-api-key"];
+
 export default function AddProviderModal({
   open,
   preset,
@@ -187,6 +195,10 @@ export default function AddProviderModal({
   const [advTimeout, setAdvTimeout] = useState("");
   const [advRetries, setAdvRetries] = useState("");
   const [advHeaders, setAdvHeaders] = useState<{ name: string; value: string }[]>([]);
+  // Case-insensitive, like HTTP itself.
+  const authHeaderOverride = advHeaders
+    .map((r) => r.name.trim())
+    .find((n) => AUTH_HEADER_NAMES.includes(n.toLowerCase()));
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
   // Plan-mode percent limits: per-window utilization ceilings over the
@@ -1556,6 +1568,17 @@ export default function AddProviderModal({
                         {t("addProvider.customHeadersHint")}
                       </span>
                     </Label>
+                    {/* An auth header here wins over the injected credential —
+                        which can be exactly what an Azure-style endpoint needs,
+                        and is otherwise a silent way to send the wrong key
+                        upstream. Named so the reader can tell which it is. */}
+                    {authHeaderOverride && (
+                      <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
+                        {t("addProvider.customHeadersAuthWarning", {
+                          name: authHeaderOverride,
+                        })}
+                      </p>
+                    )}
                     <div className="mt-1 space-y-1.5">
                       {advHeaders.map((r, i) => (
                         <div key={i} className="flex items-center gap-1.5">

@@ -117,6 +117,8 @@ export const addProvider = {
     "留空使用网关默认值 · 超时仅限制等待响应头的时间，不会中断进行中的流 · 重试在故障转移前对该 Provider 生效",
   customHeaders: "自定义请求头",
   customHeadersHint: "最后合并 · 可覆盖 API Key 请求头",
+  customHeadersAuthWarning:
+    "{name} 会覆盖网关为该 Provider 注入的凭据。仅当该端点确实要求时才保留。",
   headerNamePlaceholder: "Header-Name",
   headerValuePlaceholder: "值",
   removeHeader: "移除请求头",

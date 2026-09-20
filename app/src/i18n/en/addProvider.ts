@@ -134,6 +134,9 @@ export const addProvider = {
     "Blank = gateway default · timeout caps time to response headers, never an in-flight stream · retries apply to this provider before failover",
   customHeaders: "Custom headers",
   customHeadersHint: "merged last · can override the API key header",
+  /** Shown only when a header is actually named one of these. */
+  customHeadersAuthWarning:
+    "{name} overrides the credential the gateway injects for this provider. Keep it only if that is what this endpoint expects.",
   headerNamePlaceholder: "Header-Name",
   headerValuePlaceholder: "value",
   removeHeader: "Remove header",

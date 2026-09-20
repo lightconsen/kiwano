@@ -138,6 +138,43 @@ pub fn classify_dir(value: Option<&std::ffi::OsStr>) -> EnvDir {
     }
 }
 
+/// Whether a process writing this user's home is doing so as a user other than
+/// its owner — the systemd/launchd service shape, where the gateway runs as
+/// root and the takeovers it writes land in an unprivileged user's
+/// `~/.claude`. The user then "sees" the agent taken over and cannot read the
+/// files behind it.
+///
+/// `Some` carries one line for whoever reports it; `None` means either "the
+/// home is the caller's own" or "cannot be told on this platform" (Windows,
+/// where no such account split is defined, and an unstatable home). Fatal
+/// nowhere: the split is sometimes deliberate, and the report's job is to make
+/// the consequence readable.
+pub fn home_owned_by_other_user() -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let home = get_home_dir();
+        let Ok(meta) = std::fs::metadata(&home) else {
+            return None;
+        };
+        let owner = meta.uid();
+        let euid = unsafe { libc::geteuid() };
+        (euid != owner).then(|| {
+            format!(
+                "home directory {} is owned by uid {owner}, and this process runs as uid \
+             {euid}; takeovers it writes there are files this user cannot read",
+                home.display()
+            )
+        })
+    }
+    #[cfg(windows)]
+    {
+        let _ = ();
+        None
+    }
+}
+
 /// Get the user's home directory, with a fallback and logging.
 ///
 /// ## Windows notes
@@ -162,18 +199,22 @@ pub fn get_home_dir() -> PathBuf {
         }
     }
 
-    dirs::home_dir().unwrap_or_else(|| {
-        // Fires on every call rather than once — nothing here is cached, which
-        // is what gets the warning into the log: the first thing to resolve a
-        // path after logging exists says it, even though the condition was
-        // discovered while resolving the database path, before that.
-        log::warn!(
-            "cannot determine the user's home directory; using the current directory, so \
-             everything Kiwano resolves relative to home lands under whichever directory \
-             this process was started in"
+    let home = dirs::home_dir().unwrap_or_else(|| {
+        // Fail closed, on purpose. This environment (no profile, no $HOME) has no
+        // trustworthy *relative* place to write either — falling back to the
+        // current directory was the old behaviour, and it put the shared database
+        // (which holds the provider keys) under whichever directory the process
+        // happened to start in. On a launchd/systemd service that is some
+        // directory `System` owns; a user later looks in `~/.kiwano` and reports
+        // their data as lost, because "the database path moved" and "the data is
+        // gone" look identical to anyone reading the file system. Panicking names
+        // the broken environment instead of manufacturing a plausible one.
+        panic!(
+            "cannot determine the user's home directory; set CC_SWITCH_TEST_HOME (tests only) \
+             or fix the environment — refusing to place Kiwano data in an unpredictable location"
         );
-        PathBuf::from(".")
-    })
+    });
+    home
 }
 
 /// Get the Claude Code config directory path
@@ -768,6 +809,32 @@ mod tests {
     fn atomic_write_replaces_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         assert_atomic_write_replaces_existing_file(dir.path());
+    }
+
+    /// The ownership check answers "is the home some other user's", and the
+    /// ordinary case is that it is not — a false positive would nag on every
+    /// install. A true mismatch needs two uids, which an unprivileged test
+    /// cannot fabricate (chown needs root), so what is pinned here is the side
+    /// that can flip by accident. Windows has no such account split at all, and
+    /// compiles the check to `None` — the carrying `#[cfg(unix)]` is the other
+    /// half of the contract.
+    #[cfg(unix)]
+    #[test]
+    fn a_home_the_process_owns_is_not_reported_as_a_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        // The same hook grok_config uses, and the reason it exists: point the
+        // home resolution at a known directory instead of the real one. The
+        // saved value is restored so a later test sees the environment as it
+        // was — this file's other tests read the real home untouched.
+        let before = std::env::var_os("CC_SWITCH_TEST_HOME");
+        std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+        let note = home_owned_by_other_user();
+        match before {
+            Some(v) => std::env::set_var("CC_SWITCH_TEST_HOME", v),
+            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
+        }
+
+        assert!(note.is_none(), "an own home is not a mismatch: {note:?}");
     }
 
     #[cfg(windows)]

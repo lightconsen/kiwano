@@ -24,6 +24,12 @@ async-stream = "0.3"
 tokio = { version = "1", features = ["macros", "rt"] }
 sha2 = "0.10"
 
+# `geteuid` for the home-ownership check (`config::home_owned_by_other_user`),
+# which warns when a service runs as a user other than the owner of the home it
+# writes takeovers into. No unix-unix split: stat + geteuid are the whole check.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

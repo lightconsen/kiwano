@@ -2481,6 +2481,7 @@ dependencies = [
  "http",
  "indexmap 2.14.2",
  "json5",
+ "libc",
  "log",
  "serde",
  "serde_json",

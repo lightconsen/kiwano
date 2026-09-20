@@ -58,6 +58,13 @@ async fn main() {
         tracing::warn!("{note}");
     }
 
+    // A service running as another user than the owner of the home it writes —
+    // the takeovers it creates land in a `~/.claude` the agent's human cannot
+    // read. Warned, not fatal: the split is sometimes deliberate.
+    if let Some(note) = kiwano_adapters::config::home_owned_by_other_user() {
+        tracing::warn!("{note}");
+    }
+
     if let Some(dir) = db_path.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {
             tracing::error!(path = %dir.display(), error = %e, "cannot create database directory");

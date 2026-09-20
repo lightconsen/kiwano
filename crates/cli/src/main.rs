@@ -19,6 +19,16 @@ fn main() {
     // the flag is: `--quiet`, no short form, no value.
     kiwano_cli::install_warnings(!argv.iter().any(|arg| arg == "--quiet"));
 
+    // The systemd/launchd service shape: this CLI (and the gateway it talks
+    // to) runs as a user other than the owner of the home its takeovers write.
+    // A warning here, where the operator is looking, beats a takeover that
+    // exists on disk and reads as broken.
+    if !argv.iter().any(|arg| arg == "--quiet") {
+        if let Some(note) = kiwano_core::takeover::home_owned_by_other_user() {
+            let _ = writeln!(stderr, "warning: {note}");
+        }
+    }
+
     let code = kiwano_cli::run_with(&argv, &mut stdout, &mut stderr);
     let _ = stdout.flush();
     let _ = stderr.flush();

@@ -59,6 +59,10 @@ use kiwano_adapters::config::EnvDir;
 use crate::detect::ShellVars;
 use crate::vm::Aux;
 
+/// The service/home account-mismatch check, shared with the CLI and the
+/// gateway — see `kiwano_adapters::config::home_owned_by_other_user`.
+pub use kiwano_adapters::config::home_owned_by_other_user;
+
 /// The set of backed-up files: `(absolute path, original content)`.
 /// The rewritten (path, new content) pairs a takeover writes to disk.
 type Files = Vec<(String, String)>;

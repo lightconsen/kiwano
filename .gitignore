@@ -38,3 +38,5 @@ ScreenShot_*.png
 # passwords that unlock them. Never project content, and never publishable: the
 # private key is what lets a build claim to be this developer.
 apple/
+
+docs/media/*.mp4

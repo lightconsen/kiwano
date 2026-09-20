@@ -914,7 +914,19 @@ jobs:
             [ "$name" = "$base" ] || mv "$f" "mirror/$name"
           done
 
-          aws s3 sync mirror s3://kiwano-hub/releases --no-progress
+          # Version-free names mean the object is *reused* across releases —
+          # the same URL serves v0.2.0 today and v0.2.1 tomorrow. That is why
+          # the bytes must never be cached longer than one minute: the edge
+          # once kept serving a previous version's bytes (an updater said
+          # "signature verification failed" because the new manifest's
+          # signature met old bytes), so anything longer than a short window
+          # re-arms the same failure for the next release's window.
+          for f in mirror/*; do
+            aws s3 cp "$f" "s3://kiwano-hub/releases/$(basename "$f")" \
+              --no-progress \
+              --metadata-directive REPLACE \
+              --metadata "cache-control=public, max-age=60"
+          done
 
   # Checksums and provenance for the release as a whole, after every platform
   # has landed. Neither belongs to a build leg: the macOS DMG is replaced once
@@ -1060,7 +1072,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
-        run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress
+        run: >-
+          aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json
+          --no-progress --metadata-directive REPLACE
+          --metadata "cache-control=public, max-age=60"
 
       # `https://hub.kiwano.cc/install.sh` — the one-command server install.
       #
@@ -1083,7 +1098,9 @@ jobs:
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
         run: >-
-          aws s3 cp packaging/install.sh s3://kiwano-hub/install.sh
+          aws s3 cp packaging/install.sh s3://kiwano-hub/install.sh \
+            --no-progress --metadata-directive REPLACE \
+            --metadata "cache-control=public, max-age=60"
           --content-type 'text/x-shellscript; charset=utf-8'
           --cache-control 'public, max-age=300'
           --no-progress

@@ -78,4 +78,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
-        run: aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json --no-progress
+        run: >-
+          aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json
+          --no-progress --metadata-directive REPLACE
+          --metadata "cache-control=public, max-age=60"

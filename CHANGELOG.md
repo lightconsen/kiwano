@@ -17,6 +17,42 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.0] - 2026-09-20
+
+### Added
+
+- **The product speaks for the agents it serves.** The site's hero now reads
+  *"By your agents, for your agents"*, and the feature story on the site and
+  the README carries agent intelligence — `kiwano insights` scorecards and
+  tuning advice, rule injection that writes picked findings back into each
+  agent's own `CLAUDE.md` / `AGENTS.md`, and opt-in MCP self-query — beside
+  the gateway's live numbers, conversation-draining strategies, and money
+  ceilings written in the currency actually spent.
+
+- **Custom headers that name an auth header say what they do.** A
+  `Authorization` / `x-api-key` / `x-goog-api-key` custom header overrides
+  the credential the gateway injects — the feature an Azure-style endpoint
+  needs, and otherwise a silent way to send the wrong key upstream. The form
+  warns the moment such a header is named.
+
+- **Community plumbing.** A security policy, a contributor guide, issue
+  templates, freshly captured UI screenshots, a demo poster, and the promo
+  runbook that ships a cold-start launch.
+
+### Fixed
+
+- **Importing cc-switch reuses, and never overrides.** A provider already
+  here for the same endpoint and protocol is reused rather than grown into a
+  duplicate, and an agent that already has a route is left on it — re-running
+  the migration is now safe against a Kiwano you have been using.
+
+- **No home, no silent fallback.** `get_home_dir` used to fall back to the
+  current directory, placing the shared database wherever the process
+  happened to start; it now fails with an error that names the environment.
+  And a gateway service running as a user other than the home's owner warns
+  at startup, because the takeovers it writes land in files that user cannot
+  read.
+
 ## [0.1.16] - 2026-09-20
 
 ### Added

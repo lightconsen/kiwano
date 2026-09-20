@@ -14,6 +14,8 @@ Kiwano is a desktop app that sits between your coding agents and your AI provide
 
 Your keys stay on your machine, in an owner-only local database. Requests never touch a Kiwano server.
 
+**30-second demo: https://youtu.be/M0pO79Wlx-s**
+
 ![Kiwano's Apps screen: providers with their bound agents, usage and quota for the day](docs/screenshots/apps.png)
 
 > Captured from the development build with its bundled sample data set.

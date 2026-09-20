@@ -85,6 +85,16 @@ fn gateway_bin_path() -> Option<PathBuf> {
     None
 }
 
+/// The OS null device, for a stream nobody is listening to. Windows only —
+/// see `spawn` for why sending a console child's streams here is not a loss.
+#[cfg(windows)]
+fn null_device() -> std::fs::File {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open("NUL")
+        .expect("the Windows null device opens")
+}
+
 /// Spawn the sidecar; the child prints a `ready ...` line on stdout once
 /// both planes are bound. Callers need not wait — status pings handle it.
 pub fn spawn() -> std::io::Result<Child> {
@@ -94,7 +104,18 @@ pub fn spawn() -> std::io::Result<Child> {
              or set KIWANO_GATEWAY_BIN to a kiwanod build",
         ));
     };
-    Command::new(&bin).spawn().inspect_err(|e| {
+    let mut cmd = Command::new(&bin);
+    #[cfg(windows)]
+    {
+        // `kiwanod.exe` is a console program, and a console child whose parent
+        // has none gets a fresh cmd window on Windows to hold its stdio — which
+        // is the window this app's users saw pop up at every launch. Send the
+        // streams to NUL instead: no window is ever created, and the daemon
+        // still logs to its own files beside the database. Unix inherits as
+        // before, where printing to the launching terminal is useful.
+        cmd.stdout(null_device()).stderr(null_device());
+    }
+    cmd.spawn().inspect_err(|e| {
         tracing::error!(binary = %bin.display(), error = %e, "cannot spawn gateway sidecar");
     })
 }

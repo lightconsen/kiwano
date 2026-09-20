@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, ideas and show-and-tell
+    url: https://github.com/lightconsen/kiwano/discussions
+    about: >
+      Ask how to do something, propose an idea, or show the routing setup and the
+      bill you ended up with. Issues are for defects and concrete feature
+      requests.
+  - name: Report a security issue privately
+    url: https://github.com/lightconsen/kiwano/security/advisories/new
+    about: Never in a public issue. See SECURITY.md.
+  - name: Documentation
+    url: https://github.com/lightconsen/kiwano/blob/main/docs/cli.md
+    about: CLI reference, plus the other docs under docs/.

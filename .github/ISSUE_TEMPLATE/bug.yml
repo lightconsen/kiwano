@@ -1,0 +1,98 @@
+name: Bug report
+description: Something is broken, or behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time.
+
+        **Please redact before pasting**: API keys, bearer tokens, request and
+        response bodies. The request log detail view already masks headers —
+        paste that rather than raw traffic.
+
+        Questions about how to do something belong in
+        [Discussions](https://github.com/lightconsen/kiwano/discussions), not here.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The app's version, or `kiwano version` for a server install.
+      placeholder: "0.1.16"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10/11
+        - Linux (desktop app)
+        - Linux (server / headless)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Desktop app UI
+        - Gateway / routing
+        - Agent takeover
+        - Usage and cost
+        - Models shelf / Hub sync
+        - CLI
+        - Server install / systemd
+        - Update
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: Include the error text, or describe what you saw on screen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add provider X with routing strategy Y
+        2. Take over agent Z
+        3. Send one request
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am on the latest release
+        - label: I removed or redacted every key, token and request body
+        - label: It still reproduces with a freshly added provider (not only with an old config)
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Gateway log output or app log excerpt, redacted. Optional but often decisive.
+      render: shell
+    validations:
+      required: false

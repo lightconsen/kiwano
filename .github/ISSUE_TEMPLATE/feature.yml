@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest a capability, an agent, or a provider
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Requests with a concrete use behind them get built; ones that only name a
+        feature usually don't. Tell us what you were trying to do when you hit
+        the gap.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of request is this?
+      options:
+        - Support another coding agent
+        - Support another provider
+        - A new routing or quota strategy
+        - Cost / usage reporting
+        - CLI or server mode
+        - UI change
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation, not the solution. "I want X" is less useful than "I was doing X and got stuck at Y".
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What do you do today instead?
+    validations:
+      required: false
+
+  - type: input
+    id: specifics
+    attributes:
+      label: Agent or provider
+      description: If this is about a specific agent or provider, name it and link its docs or config schema if you have them.
+      placeholder: "e.g. Amp — ~/.amp/config.json"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you build it?
+      options:
+        - label: I would be willing to open a pull request for this
+        - label: I can share the config file / API shape involved

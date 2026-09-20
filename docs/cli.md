@@ -294,6 +294,14 @@ whichever provider was *current* in cc-switch becomes that agent's primary
 binding, so what migrates is the configuration you were actually running rather
 than a list of candidates to pick from again.
 
+It is safe to run again, and safe to run next to a Kiwano you have already
+been using. A provider already here for the same endpoint and protocol — one
+you hand-added, or an earlier run's import — is *reused* rather than added a
+second time, and its name, key and billing are left alone: the import only
+fills in what was never there. An agent that already has a route is left on
+it; only an agent with no route yet is imported onto, so a re-run can never
+move an agent back onto something you have since switched it away from.
+
 Two cases are reported instead of guessed at. cc-switch's `gemini` rows are
 skipped: they target Gemini CLI, their settings are Gemini-shaped, and this
 gateway speaks no protocol to import them as. A provider with no base URL or no

@@ -23,6 +23,7 @@
 //!   unknown app_types surface a skip detail line instead of being dropped
 //!   silently
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use kiwanod::store::{Binding, Protocol, Provider, Store, StrategyType};
@@ -91,6 +92,20 @@ pub fn run_import(
         skipped += 1;
         detail.push(line.clone());
     }
+
+    // provider_id by (protocol, origin): a provider that is already here —
+    // hand-added, or imported in an earlier run — is the same upstream, so an
+    // import reuses it rather than growing a second row beside it.
+    let mut by_endpoint: HashMap<(Protocol, String), String> = HashMap::new();
+    if !raws.is_empty() {
+        for p in store.list_providers().ok().unwrap_or_default() {
+            by_endpoint.insert(
+                (p.protocol, p.base_url.trim_end_matches('/').to_string()),
+                p.id.clone(),
+            );
+        }
+    }
+
     for raw in raws {
         let (name, protocol) = match raw.app {
             "claude" | "claude-desktop" => (raw.name.clone(), Protocol::Anthropic),
@@ -106,6 +121,55 @@ pub fn run_import(
             continue;
         }
         let id = format!("ccs-{}-{}", raw.app, slug(&raw.cc_id));
+        // The deterministic id is *ours*: a row already under it is this
+        // import's earlier run, refreshed in place. Any other provider with the
+        // same origin and protocol — one the user hand-added, or imported from
+        // an earlier manager — is the same upstream, and a fresh row beside it
+        // would be a duplicate that only the id's prefix distinguishes. Neither
+        // is rewritten: the reuse case is somebody else's row, and what it
+        // carries is theirs to keep.
+        let endpoint_key = (protocol, raw.base_url.trim_end_matches('/').to_string());
+        let reused = store
+            .get_provider(&id)
+            .ok()
+            .flatten()
+            .map(|_| None)
+            .unwrap_or_else(|| by_endpoint.get(&endpoint_key).cloned());
+        if let Some(target) = reused {
+            imported += 1;
+            detail.push(format!(
+                "import {id}: {name} ({}) · uses existing provider {target}",
+                protocol.as_str()
+            ));
+            if raw.is_current {
+                let agent = raw.app; // app_type == Kiwano agent id (1:1 for every app)
+                let cur = store.primary_provider_id(agent).ok().flatten();
+                match cur {
+                    // The agent's routing is the user's, and one is already
+                    // theirs — leave the cc-switch choice out of it. Only an
+                    // agent with no route yet is imported onto.
+                    Some(existing) if existing != target => {
+                        skipped += 1;
+                        detail.push(format!(
+                            "leave {agent} routed to {existing} (cc-switch wanted {target})"
+                        ));
+                    }
+                    _ => {
+                        let _ = store.upsert_strategy(agent, StrategyType::Single, None);
+                        let _ = store.upsert_binding(&Binding {
+                            agent: agent.to_string(),
+                            provider_id: target,
+                            priority: 0,
+                            weight: 1,
+                            win_start: None,
+                            win_end: None,
+                            enabled: true,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         let now = crate::vm::rfc3339(crate::vm::unix_now());
         let mut provider = Provider {
             id: id.clone(),
@@ -175,26 +239,37 @@ pub fn run_import(
                 .is_ok()
             {
                 let prev = store.primary_provider_id(agent).ok().flatten();
-                let _ = store.upsert_binding(&Binding {
-                    agent: agent.to_string(),
-                    provider_id: id.clone(),
-                    priority: 0,
-                    weight: 1,
-                    win_start: None,
-                    win_end: None,
-                    enabled: true,
-                });
-                if let Some(prev) = prev {
-                    if prev != id {
+                // Same leave-it-alone rule as the reuse arm: an agent this
+                // import would move off its current route is an agent whose
+                // routing is already the user's answer.
+                match prev {
+                    Some(cur) if cur != id => {
+                        skipped += 1;
+                        detail.push(format!(
+                            "leave {agent} routed to {cur} (cc-switch wanted {id})"
+                        ));
+                    }
+                    _ => {
                         let _ = store.upsert_binding(&Binding {
                             agent: agent.to_string(),
-                            provider_id: prev,
-                            priority: 1,
+                            provider_id: id.clone(),
+                            priority: 0,
                             weight: 1,
                             win_start: None,
                             win_end: None,
                             enabled: true,
                         });
+                        if let Some(prev) = prev {
+                            let _ = store.upsert_binding(&Binding {
+                                agent: agent.to_string(),
+                                provider_id: prev,
+                                priority: 1,
+                                weight: 1,
+                                win_start: None,
+                                win_end: None,
+                                enabled: true,
+                            });
+                        }
                     }
                 }
             }
@@ -488,6 +563,8 @@ fn read_json(path: &Path) -> Result<(Vec<RawProvider>, Vec<String>), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -605,6 +682,154 @@ mod tests {
         let again = run_import(&store, None, Some(&path));
         assert_eq!(again.imported, 2);
         assert!(again.detail.iter().any(|d| d.contains("updated")));
+    }
+
+    /// A provider the user already has, as the app would have added it: a name
+    /// and endpoint of their own, not necessarily anything cc-switch said.
+    fn hand_provider(id: &str, protocol: Protocol, base_url: &str, key: &str) -> Provider {
+        use kiwanod::store::Billing;
+        Provider {
+            id: id.into(),
+            name: format!("{id} (mine)"),
+            catalog_id: None,
+            // No declared prices: the app priced it from the Hub's table.
+            prices: None,
+            protocol,
+            base_url: base_url.into(),
+            api_path: None,
+            endpoints: Vec::new(),
+            api_key: Some(key.into()),
+            model_default: None,
+            billing: Billing::Metered,
+            period_limit: None,
+            limit_unit: None,
+            reset_period: None,
+            plan_query: None,
+            plan_limits: None,
+            timeout_secs: None,
+            retries: None,
+            headers: None,
+            enabled: true,
+            created_at: crate::vm::rfc3339(crate::vm::unix_now()),
+            updated_at: crate::vm::rfc3339(crate::vm::unix_now()),
+        }
+    }
+
+    /// A JSON fixture with one current claude provider at a deepseek endpoint.
+    fn current_claude_fixture(dir: &Path) -> PathBuf {
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"claude": { "current": "p1", "providers": { "p1": { "id": "p1", "name": "DeepSeek", "settingsConfig": { "env": { "ANTHROPIC_AUTH_TOKEN": "sk-import", "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic" } } } } }}"#,
+        )
+        .unwrap();
+        path
+    }
+
+    /// An import reuses a provider that is already here for the same endpoint —
+    /// one the user hand-added — rather than growing a `ccs-*` twin beside it.
+    /// The existing row is left alone: its name, key and billing are the
+    /// user's, and an import is not the moment to overwrite them.
+    #[test]
+    fn an_import_reuses_a_hand_added_provider_with_the_same_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = current_claude_fixture(dir.path());
+        let store = Store::open_in_memory().unwrap();
+        store
+            .insert_provider(&hand_provider(
+                "my-deepseek",
+                Protocol::Anthropic,
+                "https://api.deepseek.com",
+                "sk-keep",
+            ))
+            .unwrap();
+
+        let report = run_import(&store, None, Some(&path));
+
+        assert_eq!(report.imported, 1, "detail={:?}", report.detail);
+        assert!(
+            report
+                .detail
+                .iter()
+                .any(|d| d.contains("uses existing provider my-deepseek")),
+            "detail={:?}",
+            report.detail
+        );
+        assert!(
+            store.get_provider("ccs-claude-p1").unwrap().is_none(),
+            "no second row for an endpoint that is already here"
+        );
+        // The binding lands on the reusable row, and nothing of it changed.
+        assert_eq!(
+            store.primary_provider_id("claude").unwrap().as_deref(),
+            Some("my-deepseek")
+        );
+        assert_eq!(
+            store
+                .get_provider("my-deepseek")
+                .unwrap()
+                .unwrap()
+                .api_key
+                .as_deref(),
+            Some("sk-keep")
+        );
+    }
+
+    /// An agent already routed somewhere else — the user's own choice, or an
+    /// earlier session's — is left there. The import proposes, it does not
+    /// overwrite: the cc-switch `current` flag would otherwise revisit a
+    /// decision the user already moved on from.
+    #[test]
+    fn an_import_leaves_an_already_routed_agent_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = current_claude_fixture(dir.path());
+        let store = Store::open_in_memory().unwrap();
+
+        // First import lands as designed: the fixture's current becomes primary.
+        assert_eq!(run_import(&store, None, Some(&path)).imported, 1);
+        assert_eq!(
+            store.primary_provider_id("claude").unwrap().as_deref(),
+            Some("ccs-claude-p1")
+        );
+
+        // The user then moves the agent to a provider of their own.
+        store
+            .insert_provider(&hand_provider(
+                "own-gateway",
+                Protocol::Anthropic,
+                "https://own.example",
+                "sk-own",
+            ))
+            .unwrap();
+        for (pid, priority) in [("own-gateway", 0), ("ccs-claude-p1", 1)] {
+            store
+                .upsert_binding(&kiwanod::store::Binding {
+                    agent: "claude".into(),
+                    provider_id: pid.into(),
+                    priority,
+                    weight: 1,
+                    win_start: None,
+                    win_end: None,
+                    enabled: true,
+                })
+                .unwrap();
+        }
+
+        // Re-running the import refreshes the provider row but keeps the routing.
+        let report = run_import(&store, None, Some(&path));
+        assert!(
+            report
+                .detail
+                .iter()
+                .any(|d| d.contains("leave claude routed to own-gateway")),
+            "detail={:?}",
+            report.detail
+        );
+        assert_eq!(
+            store.primary_provider_id("claude").unwrap().as_deref(),
+            Some("own-gateway"),
+            "the user's routing is not moved back by a re-import"
+        );
     }
 
     #[test]

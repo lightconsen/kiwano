@@ -746,7 +746,7 @@ UPDATE request_logs SET cost_off_peak = cost WHERE cost IS NOT NULL;
 "#;
 
 /// Inbound provider protocol flavor (drives data-plane dispatch, tech.md §4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Anthropic,

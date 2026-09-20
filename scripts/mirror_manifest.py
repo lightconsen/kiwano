@@ -19,9 +19,13 @@ Usage:
   mirror_manifest.py --manifest latest.json --out latest.r2.json [--bucket kiwano-hub]
 """
 import argparse
+import base64
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -90,6 +94,15 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--bucket", help="verify object existence in this R2 bucket")
+    parser.add_argument(
+        "--no-verify",
+        # The verify pass needs the bucket credentials and a network round trip
+        # per artifact; both exist in CI, neither is guaranteed at a desk. An
+        # unsigned manifest is still the previous behaviour, so the escape
+        # hatch is explicit and loud in the output rather than silent.
+        action="store_true",
+        help="skip Ed25519 verification of every platform's signature",
+    )
     args = parser.parse_args()
 
     with open(args.manifest) as fh:
@@ -111,11 +124,104 @@ def main():
         if warning:
             warnings.append(warning)
 
+    if not args.no_verify:
+        failed = verify_signatures(doc, args.bucket)
+        if failed:
+            for line in failed:
+                print(f"::error::{line}")
+            sys.exit(
+                "updater signature verification failed; refusing to publish a "
+                "manifest the app would refuse"
+            )
+
     with open(args.out, "w") as fh:
         json.dump(doc, fh, indent=2)
     print(f"rewrote {len(doc['platforms'])} platform URLs to {BASE}")
     for warning in warnings:
         print(f"::warning::{warning}")
+
+
+def load_pubkey_text(conf_path="app/src-tauri/tauri.conf.json"):
+    """The app's bundled updater public key, as minisign's two-line text.
+
+    The conf stores the base64 of that text. This is the exact key every
+    installed client verifies against, so a manifest that fails it is a
+    manifest no client would accept."""
+    with open(conf_path, encoding="utf-8") as fh:
+        b64 = json.load(fh)["plugins"]["updater"]["pubkey"]
+    return base64.b64decode(b64).decode("ascii")
+
+
+def minisign_verify(public_key_text, artifact_path, signature_line):
+    """True when `signature_line` verifies the artifact under the app's key.
+
+    Tauri's signature is minisign-shaped — an ed25519 signature with a
+    keyed-hash trusted comment — which the openssl `pkeyutl` path cannot
+    verify (the signed message has a prefix; a 74-byte signature object, not a
+    bare 64-byte one). minisign itself is the authoritative checker, and the
+    one every installed updater behaves like, so this shells out to it. No
+    minisign on PATH is an error returned to the caller: the gate must not
+    silently become a no-op because the tool is missing."""
+    if not shutil.which("minisign"):
+        return "minisign is not installed (apt-get install minisign)"
+    try:
+        block = base64.b64decode(signature_line).decode("ascii")
+    except Exception:
+        return "signature field did not look like base64"
+    with tempfile.TemporaryDirectory() as d:
+        pub = os.path.join(d, "key.pub")
+        with open(pub, "w", encoding="ascii") as fh:
+            fh.write(public_key_text)
+        sig = os.path.join(d, "msg.sig")
+        with open(sig, "w", encoding="ascii") as fh:
+            fh.write(block)
+        proc = subprocess.run(
+            ["minisign", "-V", "-p", pub, "-m", artifact_path, "-x", sig],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0:
+            return None
+        return "minisign said: " + proc.stderr.strip().splitlines()[-1]
+
+
+def verify_signatures(doc, bucket):
+    """Download each artifact once from the bucket and check its manifest
+    signature against the app's bundled pubkey. Returns a list of failure
+    lines (possibly empty); failing is manifest-wide — one bad platform is a
+    broken release.
+
+    Reading from the bucket rather than the public URL is deliberate:
+    Cloudflare answers a CI runner's full GET with 403 (the same bot
+    protection `check_public` documents), while `aws s3 cp` reads the very
+    object the client is pointed at — verifying the mirrored object against
+    the manifest's own signature is the exact contract that matters."""
+    if not bucket:
+        return [f"verify needs --bucket (it reads the mirrored objects themselves)"]
+    pubkey_text = load_pubkey_text()
+    failed = []
+    seen = set()
+    for key, entry in doc["platforms"].items():
+        name = NAMES[key]
+        if name in seen:
+            continue
+        seen.add(name)
+        proc = subprocess.run(
+            ["aws", "s3", "cp", f"s3://{bucket}/releases/{name}", "-", "--no-progress"],
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            failed.append(f"{key} ({name}): s3 fetch failed: {proc.stderr.decode()[:120]}")
+            continue
+        print(f"verifying {key}: {name} ({len(proc.stdout)} bytes)")
+        with tempfile.TemporaryDirectory() as d:
+            artifact = os.path.join(d, "artifact")
+            with open(artifact, "wb") as fh:
+                fh.write(proc.stdout)
+            err = minisign_verify(pubkey_text, artifact, entry["signature"])
+        if err:
+            failed.append(f"{key} ({name}): {err}")
+    return failed
 
 
 if __name__ == "__main__":

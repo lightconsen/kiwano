@@ -49,9 +49,17 @@ jobs:
           -R "${{ github.repository }}"
           --pattern latest.json --dir manifest --clobber
 
+      # The rewrite below verifies every platform signature against the app's
+      # bundled updater key before anything is uploaded; its checker is
+      # minisign, so the tool has to be here (a missing tool fails the job —
+      # fail-closed is the point of the gate).
+      - name: Install minisign (for manifest signature verification)
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
       # Same script the release job runs: rewrite every platform URL to its
-      # version-free R2 path, prove the objects are in the bucket, then check
-      # they are publicly reachable.
+      # version-free R2 path, prove the objects are in the bucket, check they
+      # are publicly reachable, and verify each signature — this is the step
+      # that would have caught v0.2.0/0.2.1's bad windows-x86_64 entry.
       - name: Rewrite it to R2 paths and verify
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

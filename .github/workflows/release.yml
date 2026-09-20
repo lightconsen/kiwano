@@ -1015,6 +1015,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The rewrite step now verifies every platform's signature against the
+      # app's bundled updater key *before* uploading — the gate that stops a
+      # bad signature from ever reaching a client. The verifier is minisign
+      # itself (the updater's checker), so it has to be present; a mirror job
+      # that fails here on a missing tool is exactly as broken as one that
+      # fails on a bad signature.
+      - name: Install minisign (for manifest signature verification)
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
       - name: Download the merged updater manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

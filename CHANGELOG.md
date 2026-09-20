@@ -17,6 +17,33 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [Unreleased]
+
+### Fixed
+
+- **An in-app update could be offered, downloaded, and then refused by its
+  own signature.** v0.2.0 and v0.2.1's update manifest carried a wrong
+  signature for the generic Windows entry — the updater reported "signature
+  verification failed" however many times it retried, because it was handed
+  the same bad pair every time. The manifests were rebuilt with each
+  platform's own `.sig` asset (the bytes every installed copy actually
+  verifies against), and both the GitHub release and the Cloudflare mirror
+  now carry the corrected file.
+
+  Two gates keep the whole class out, not just this instance:
+
+  - **The mirror verifies before it publishes.** Every platform's signature
+    is checked against the app's bundled updater key — minisign itself, the
+    checker the updater behaves like — before anything reaches the mirror;
+    a manifest a client would refuse is never allowed to be offered.
+  - **The version-free mirror objects cache for at most a minute.** A
+    version-free name is *reused* across releases, so the same URL can serve
+    one version's bytes today and another's tomorrow. When the edge held the
+    previous version's bytes longer than the gap between "new manifest
+    published" and "new object fresh", a client was fed old bytes against a
+    new signature. One minute bounds that window instead of the hours the
+    edge was falling back to.
+
 ## [0.2.1] - 2026-09-20
 
 ### Fixed

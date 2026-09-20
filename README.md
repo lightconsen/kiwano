@@ -23,11 +23,26 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 - **Provider management** — add, edit, switch and delete provider configs. Route with `single`, `failover`, `roundrobin`, `timewindow` or `quota` strategies, each with its own candidate weights and windows. Under any strategy but `single`, a request that fails is replayed against the next candidate instead of being handed back as your problem.
 - **Agent takeover** — connect Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes, Pi, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code and Cline to the local gateway in one click. Each agent's original config is backed up and restored when you switch it off.
 - **Local gateway** — one always-on port, and protocol normalization (anthropic / openai) so an OpenAI-compatible provider can serve Claude Code. Gemini CLI's native API is forwarded as a third protocol, passed through rather than translated, so it reaches Google unchanged while the gateway meters it. Hot-reloads on change; the daemon outlives the GUI, and a stream that stalls is abandoned with an error rather than left to hang.
-- **Usage and cost** — trends for requests and tokens over today, 7 or 30 days, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts.
-- **Models shelf** — the Kiwano Hub catalog of 19 providers (official / aggregator / third-party / free), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
+- **Usage and cost** — trends for requests and tokens over today, 7, 30 days or all time, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts. Each stat compares the window with the one before it, and the numbers refresh the moment a request lands — no clicking to see what just happened.
+- **Models shelf** — the Kiwano Hub catalog of 24 providers (23 first-party, plus the OpenRouter aggregator), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
 - **Request logs** — every gateway request with status, latency and token accounting; filter down to errors.
-- **cc-switch import** — `kiwano import cc-switch` reads an existing cc-switch configuration and migrates it in.
+- **cc-switch import** — `kiwano import cc-switch` reads an existing cc-switch configuration and migrates it in. It reuses a provider already here for the same endpoint, and never moves an agent off a route you have since chosen.
+- **Agent intelligence (opt-in)** — `kiwano insights` builds a per-agent scorecard — cache hit rate with writes in the denominator, median session context growth, reasoning share, retries — and flags findings tagged `cache` / `bloat` / `retry` / `overhead`, each carrying the request-log rows behind it. Tuning advice finds a provider whose error rate dwarfs its siblings, and rule injection writes picked findings back into each agent's own `CLAUDE.md` / `AGENTS.md`. Over MCP, an agent can query its own usage. All of it sits behind the Features panel: opt-in, reversible, and none of it changes a route without you.
+- **A conversation keeps its provider** — under quota and timewindow, a switch applies to the *next* conversation; one already running finishes where it is, instead of rebuilding a prompt cache its provider has already charged for. Requests that name no session are chosen afresh, as they were before.
+- **Money ceilings in the currency being spent** — an agent's limit is written in a currency its providers actually bill in, never in your display preference. Spending in another currency is converted at the Hub's rates before it counts; the ceiling itself is never converted.
 - **Self-update** — signed releases (minisign); the app checks at startup and updates in place. 0.1.2 and later update themselves to newer versions.
+
+## How it compares
+
+| | Kiwano | cc-switch | LiteLLM / a hosted gateway |
+| --- | --- | --- | --- |
+| Shape | Desktop app + local gateway + CLI | Switches Claude Code's config | Always-on server |
+| Agents covered | 14, taken over in one click and restored | Mainly the Claude Code ecosystem | Only clients you wired up yourself |
+| Local-first | Everything on your machine, no telemetry | Local | Keys live on the server |
+| Routing | 5 strategies; a failed request replays against the next candidate | Switches, does not route | Depends on the implementation |
+| Cost metering | Per provider × per agent, with quota rings and alerts | No | Usually |
+
+cc-switch answers "which provider am I on"; Kiwano answers "how do I manage every provider and every agent, and what are they costing me". The first is a subset of the second — `kiwano import cc-switch` migrates an existing configuration across, so moving over costs one command.
 
 ## Download
 
@@ -205,6 +220,13 @@ Layout:
 The desktop app is a thin Tauri shell over `kiwano-core`; the CLI is a second
 front end over the same crate. That is deliberate — a provider added from the
 command line is the same row, written the same way, as one added from the UI.
+
+## Contributing
+
+Bug reports with a reproduction and small focused pull requests are the most
+useful things you can send — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev
+setup and the four checks CI runs. Security issues go through
+[SECURITY.md](SECURITY.md), never a public issue.
 
 ## License
 

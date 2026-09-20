@@ -544,6 +544,16 @@ footer { padding: 56px 0 44px; }
           <h3 data-i18n="f6.t">cc-switch import</h3>
           <p data-i18n="f6.d">Already on cc-switch? Import your existing config and migrate seamlessly — providers and bindings come along as-is.</p>
         </div>
+        <div class="feat rv">
+          <div class="fi"><svg class="icon"><use href="#i-chart"/></svg></div>
+          <h3 data-i18n="f7.t">Insights and rules, written back to your agents</h3>
+          <p data-i18n="f7.d"><code>kiwano insights</code> reads how every agent actually works — cache hit rate, session context growth, reasoning share, retries — and picked findings become rules appended into the agent's own <code>CLAUDE.md</code>/<code>AGENTS.md</code>. Advice only: nothing is reconfigured behind your back.</p>
+        </div>
+        <div class="feat rv" style="--d:60ms">
+          <div class="fi"><svg class="icon"><use href="#i-network"/></svg></div>
+          <h3 data-i18n="f8.t">Live numbers, and agents that ask their own questions</h3>
+          <p data-i18n="f8.d">The gateway ticks the moment a request is recorded and the screens re-read on their own — no clicking refresh. Opt-in MCP lets your agents query their own usage directly.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -785,6 +795,10 @@ const I18N = {
     "f5.d": "Hub 目录按官方 / 聚合 / 第三方 / 免费分类收录供应商,价格透明,看中即添加,离线也能翻阅。",
     "f6.t": "cc-switch 导入",
     "f6.d": "已在用 cc-switch?读取其现有配置无缝迁移,供应商与绑定关系原样带过来。",
+    "f7.t": "洞察与规则,写回你的 Agent",
+    "f7.d": "<code>kiwano insights</code> 读出每个 Agent 的真实工作方式——缓存命中率、会话上下文增长、推理占比、重试——挑选出的发现会写回 Agent 自己的 <code>CLAUDE.md</code>/<code>AGENTS.md</code>。只有建议:绝不暗中改动配置。",
+    "f8.t": "实时数字,Agent 自主查询",
+    "f8.d": "请求一旦落库,网关即刻推送 tick,各页面自行重读——无需手动刷新。可选的 MCP 让 Agent 直接查询自己的用量。",
     "scr.h2": "紧凑、克制,为每天用而设计",
     "scr.p": "1000×650 单窗口,首屏就是你的供应商列表——没有仪表盘迷宫,一切一屏直达。",
     "scr.cap": "7 天请求 / token / 费用 / 延迟趋势,按供应商与 Agent 归因,数据全部落在本地 SQLite。",

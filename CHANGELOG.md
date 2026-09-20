@@ -17,6 +17,17 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.1] - 2026-09-20
+
+### Fixed
+
+- **No more cmd window at every launch (Windows).** `kiwanod.exe` is a console
+  program, and a console child whose GUI parent has no console gets a fresh
+  cmd window to carry its streams on Windows — which is what opened every time
+  the app started. The daemon's stdout and stderr now go to NUL: no window is
+  created, and the daemon still logs to its own files beside the database, so
+  only the visible artifact of the streams disappears.
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

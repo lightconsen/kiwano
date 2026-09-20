@@ -31,6 +31,9 @@ models/
 __pycache__/
 *.pyc
 
+# Agent scratch / session state, never project content
+.workbuddy/
+
 # Screenshots dropped in the repo root for review, never project content
 ScreenShot_*.png
 

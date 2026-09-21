@@ -1364,11 +1364,10 @@ jobs:
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
         run: >-
           aws s3 cp packaging/install.sh s3://kiwano-hub/install.sh \
-            --no-progress --metadata-directive REPLACE \
-            --metadata "cache-control=public, max-age=60"
-          --content-type 'text/x-shellscript; charset=utf-8'
-          --cache-control 'public, max-age=300'
-          --no-progress
+            --metadata-directive REPLACE \
+            --content-type 'text/x-shellscript; charset=utf-8' \
+            --cache-control 'public, max-age=300' \
+            --no-progress
 
   # No human in the loop: publishing is a tag push and nothing else.
   #

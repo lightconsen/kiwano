@@ -24,6 +24,8 @@ export const settings = {
   autoFailover: "Auto failover",
   autoFailoverNote: "Switch to a standby when the primary fails",
   requestLogs: "Request logs",
+  compatShim: "Compat shim",
+  compatShimNote: "Fix requests an upstream would refuse (new thinking params, null tool schemas, foreign thinking history); every change is recorded in the request log",
   requestLogsNote: "Record every request with bodies, local only",
   logRetention: "Log retention",
   logRetentionNote: "Rows older than this are pruned every 6h",

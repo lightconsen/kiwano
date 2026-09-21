@@ -59,6 +59,7 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
     custom_agents: [],
     auto_failover: true,
     request_logs: true,
+    compat_shim: true,
     log_retention_days: 30,
     log_max_body_bytes: 0,
     stream_first_byte_secs: 120,

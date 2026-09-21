@@ -100,6 +100,9 @@ function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
     // thinking is not saying the model did none.
     ...(r.reasoning_tokens > 0 ? [`reasoning: ${r.reasoning_tokens} (of the output)`] : []),
     ...(r.usage_missing ? ["usage: not reported by the upstream"] : []),
+    // What the shim changed on the way through — the raw request body alone
+    // does not explain the delta.
+    ...(r.request_notes ? ["sanitizer: " + r.request_notes] : []),
   ];
   if (r.error_kind) lines.push(`error: ${r.error_kind} ${r.error_message ?? ""}`);
   if (d?.session_id) lines.push(`session: ${d.session_id}`);
@@ -187,6 +190,14 @@ function Detail({ d }: { d: RequestLogDetail | null }) {
       {d.error_kind && (
         <div className="rounded border border-line bg-surface2 p-2 text-[11px]" style={{ color: "var(--red)" }}>
           <span className="font-mono font-semibold">{d.error_kind}</span> {d.error_message}
+        </div>
+      )}
+      {/* Not gated on error_kind on purpose: a sanitized request usually
+          answered 200, and its explanation is not an error. */}
+      {d.request_notes && (
+        <div className="whitespace-pre-line rounded border border-line bg-surface2 p-2 text-[11px] text-mut">
+          <span className="font-semibold text-ink">{t("logs.detailSanitizer")}</span>{" "}
+          {d.request_notes}
         </div>
       )}
       <div className="grid grid-cols-2 gap-2">

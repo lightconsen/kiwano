@@ -1012,6 +1012,7 @@ const settings: AppSettings = {
   ],
   auto_failover: true,
   request_logs: true,
+  compat_shim: true,
   log_retention_days: 0,
   log_max_body_bytes: 0,
   stream_first_byte_secs: 120,
@@ -1344,6 +1345,10 @@ const requestLogs: RequestLogDetail[] = [
     request_size: 214,
     response_size: 331,
     truncated: false,
+    // The shim touched this one: history replayed against DeepSeek carried
+    // thinking blocks the upstream refuses (cc-switch discussion #3216).
+    request_notes:
+      "thinking: removed unsupported type \"adaptive\"\nassistant history: removed 2 thinking/redacted_thinking block(s)",
     request_body: '{"model":"claude-sonnet-4-5","stream":false,"messages":[{"role":"user","content":"Refactor the retry loop in forward.rs"}]}',
     response_body: '{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Done — see the diff."}],"usage":{"input_tokens":2095,"output_tokens":503}}',
   },
@@ -1375,6 +1380,7 @@ const requestLogs: RequestLogDetail[] = [
     request_size: 96,
     response_size: 1240,
     truncated: false,
+    request_notes: null,
     request_body: '{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"user","content":"hello"}]}',
     response_body: 'event: message_start\ndata: {"type":"message_start"}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
   },
@@ -1406,6 +1412,7 @@ const requestLogs: RequestLogDetail[] = [
     request_size: 74,
     response_size: 0,
     truncated: false,
+    request_notes: null,
     request_body: '{"model":"gpt-5.2","messages":[]}',
     response_body: null,
   },

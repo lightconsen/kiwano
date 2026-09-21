@@ -59,6 +59,7 @@ function entry(id: number): RequestLogEntry {
     request_size: 0,
     response_size: 0,
     truncated: false,
+    request_notes: null,
   };
 }
 

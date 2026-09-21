@@ -18,6 +18,8 @@ export const settings = {
   autoFailover: "自动故障转移",
   autoFailoverNote: "主提供商失败时切换到备用",
   requestLogs: "请求日志",
+  compatShim: "兼容垫层",
+  compatShimNote: "自动修正上游会拒绝的请求（新的 thinking 参数、null 工具 schema、跨供应商的思考历史）；每次修改都记录在请求日志中",
   requestLogsNote: "记录每个请求及其请求体，仅保存在本地",
   logRetention: "日志保留",
   logRetentionNote: "早于该时长的记录每 6 小时清理一次",

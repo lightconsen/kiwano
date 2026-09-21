@@ -409,6 +409,11 @@ export default function Settings() {
           <Row label={t("settings.requestLogs")} note={t("settings.requestLogsNote")}>
             <Switch checked={s.request_logs} onCheckedChange={(v) => patch({ request_logs: v })} />
           </Row>
+          {/* The shim edits a request the client would not have changed — the
+              switch is how the user takes that job back, 400s and all. */}
+          <Row label={t("settings.compatShim")} note={t("settings.compatShimNote")}>
+            <Switch checked={s.compat_shim} onCheckedChange={(v) => patch({ compat_shim: v })} />
+          </Row>
           <Row label={t("settings.logRetention")} note={t("settings.logRetentionNote")}>
             <RetentionSelect
               label={t("settings.logRetention")}

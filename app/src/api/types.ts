@@ -585,6 +585,10 @@ export interface AppSettings {
   custom_agents: CustomAgent[];
   auto_failover: boolean;
   request_logs: boolean;
+  /** Compat shim: sanitize passthrough request bodies the upstream cannot
+   *  parse (new thinking params, null tool schemas, foreign thinking history).
+   *  Default on; every action is recorded in the request log. */
+  compat_shim: boolean;
   /** Request-log retention in days (gateway prunes older rows every 6h) */
   log_retention_days: number;
   /** Per-body capture cap in bytes; 0 stores every byte. */
@@ -815,6 +819,9 @@ export interface RequestLogEntry {
    *  as it was logged. */
   cost?: number | null;
   cost_currency?: string | null;
+  /** What the compat shim changed about the request, one line per action
+   *  (null when nothing was touched). */
+  request_notes: string | null;
 }
 
 /** Detail view: metadata + the captured request/response bodies */

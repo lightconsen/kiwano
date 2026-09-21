@@ -44,6 +44,7 @@ export const logs = {
   logTitle: "Log #{id}",
 
   detailSession: "Session",
+  detailSanitizer: "Sanitizer:",
   detailRequest: "Request",
   detailResponse: "Response",
   detailBodyTruncated: "(body truncated)",

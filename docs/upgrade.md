@@ -93,7 +93,7 @@ tauri-plugin-process = "2"   # relaunch 用
 新增两个命令并注册进 `generate_handler!`：
 
 - `check_app_update() -> Option<UpdateInfoVm>`：`app.updater_builder()?.check()?`；返回 `None` 即已是最新。
-  `UpdateInfoVm { version, notes, pub_date }`（进 `vm.rs`，与现有 `*Vm` 命名一致）。
+  `UpdateInfoVm { version, notes, pub_date }`（进 `vm` 模块，与现有 `*Vm` 命名一致）。
 - `download_and_install_app_update() -> bool`：下载 + 校验 + 落盘 + `relaunch()`。
   下载进度通过 `app.emit("update://progress", ProgressVm { downloaded, total })` 推送。
 
@@ -112,7 +112,7 @@ tauri-plugin-process = "2"   # relaunch 用
 - 当前版本号（`getVersion()` from `@tauri-apps/api/app`）；
 - 「检查更新」按钮 → 三态：已是最新（inline 提示）/ 有新版（版本号 + 更新日志 + 「下载并安装」）/ 失败（错误行内展示）；
 - 下载中显示进度条（进度事件驱动），完成后自动 relaunch；
-- 「启动时检查更新」开关，落到 `ui_settings`（`vm.rs` 增字段，默认 `true`）；
+- 「启动时检查更新」开关，落到 `ui_settings`（`vm/settings.rs` 增字段，默认 `true`）；
 - UI 字符串保持中文（项目约定）。
 
 启动静默检查放在 `lib.rs` setup 末尾：spawn 异步任务，失败静默，命中新版仅发托盘/系统通知

@@ -13,7 +13,7 @@
 | `crates/gateway/src/router/mod.rs:145` | `RouteTable::load` 从 `placeholder_keys ∪ bound_agents` 建路由 —— **完全不查 agent 注册表**，任意 id 都能有路由 |
 | `crates/gateway/src/router/mod.rs:272` | `route_agent` 只认 key：缺失/未知一律 401（**没有**按路径或协议回退） |
 | `crates/gateway/src/store/mod.rs` | `agent_strategies` / `agent_bindings` / `placeholder_keys` / `usage` / `request_logs` 的 agent 列都是 TEXT，无 CHECK、无外键到注册表 |
-| `crates/core/src/vm.rs`（`build_agent_routes`） | 遍历 `bound_agents()`，任意 id 都能组成标签页的路由 |
+| `crates/core/src/vm/routes.rs`（`build_agent_routes`） | 遍历 `bound_agents()`，任意 id 都能组成标签页的路由 |
 
 结论：**网关与存储层已经能跑自定义 agent**，缺的是「agent 列表」这一层把它当成一等公民。
 
@@ -21,9 +21,9 @@
 
 | 位置 | 事实 |
 |---|---|
-| `crates/core/src/vm.rs:20` | `AGENTS: [(&str,&str); 8]` 是「有哪些 agent」的唯一来源 |
-| `crates/core/src/vm.rs:2880` / `:2941` | Dashboard 的 `by_agent` 与 `filter_agents` **遍历 `AGENTS`** → 自定义 agent 的流量会整个漏掉 |
-| `crates/core/src/vm.rs`（`live_bound_agents`） | 以「活配置文件里的占位 key」判定 agent 是否启用；自定义 agent 没有配置文件，会被判成休眠 |
+| `crates/core/src/vm/agents.rs` | `AGENTS` 是「有哪些 agent」的唯一来源 |
+| `crates/core/src/vm/dashboard.rs`（`agent_distribution` / `filter_options`） | Dashboard 的 `by_agent` 与 `filter_agents` **遍历 `AGENTS`** → 自定义 agent 的流量会整个漏掉 |
+| `crates/core/src/vm/providers.rs`（`live_bound_agents`） | 以「活配置文件里的占位 key」判定 agent 是否启用；自定义 agent 没有配置文件，会被判成休眠 |
 | `crates/core/src/detect.rs:22` | `CLI_AGENTS` 是安装探测的固定表；前端按探测结果隐藏分段 |
 | `app/src/api/types.ts:11` | `AgentId` 是闭集联合类型 |
 | `app/src/screens/Providers.tsx:34` | 分段条（`SEGMENTS`）是写死的 8 项 + 图标 |
@@ -113,10 +113,10 @@ API Key   kw-ag-my-route-3f9a
 |---|---|---|
 | 迁移 | `MIGRATION_V16`、`SCHEMA_VERSION = 16` | `crates/gateway/src/store/mod.rs` |
 | store | `list_custom_agents` / `insert_custom_agent` / `update_custom_agent` / `delete_custom_agent` | 同上 |
-| core vm | `add_custom_agent(store, aux, label, note)`（建行 + 铸 key + 默认 Single 策略）、`remove_custom_agent(store, id)`（级联同上）、`list_agents(store)`（内置 ∪ 自定义） | `crates/core/src/vm.rs` |
-| core vm | `live_bound_agents`：**自定义 agent 恒为 live**（它没有配置文件可读，否则会重现「All 页显示未绑定」的假象） | `crates/core/src/vm.rs` |
-| core vm | Dashboard：`by_agent` 与 `filter_agents` 的行集合改为取自 usage 的 distinct agent，标签查「内置 ∪ 自定义」 | `vm.rs:2880` / `:2941` |
-| core vm | `SettingsVm.custom_agents: Vec<CustomAgentVm { id, label, note, placeholder_key }>` —— **不塞进 `takeovers`**：那里是「我们改写了它的配置」的诚实语义，自定义 agent 没有配置 | `crates/core/src/vm.rs` |
+| core vm | `add_custom_agent(store, aux, label, note)`（建行 + 铸 key + 默认 Single 策略）、`remove_custom_agent(store, id)`（级联同上）、`list_agents(store)`（内置 ∪ 自定义） | `crates/core/src/vm/agents.rs` |
+| core vm | `live_bound_agents`：**自定义 agent 恒为 live**（它没有配置文件可读，否则会重现「All 页显示未绑定」的假象） | `crates/core/src/vm/providers.rs` |
+| core vm | Dashboard：`by_agent` 与 `filter_agents` 的行集合改为取自 usage 的 distinct agent，标签查「内置 ∪ 自定义」 | `crates/core/src/vm/dashboard.rs` |
+| core vm | `SettingsVm.custom_agents: Vec<CustomAgentVm { id, label, note, placeholder_key }>` —— **不塞进 `takeovers`**：那里是「我们改写了它的配置」的诚实语义，自定义 agent 没有配置 | `crates/core/src/vm/settings.rs` |
 | CLI | `kiwano agents add --name <名字> [--note …]`、`agents remove <id>`、`agents list`（标注 custom）；绑定走**已有的** `routes binding add <agent> <provider>` —— `routes` / `strategy` / `binding` 本来就吃任意 agent 字符串，一行都不用改 | `crates/cli/src/cmds.rs`、`cli.rs` |
 | 前端 types | `AgentId` 拆成 `BuiltinAgentId`（闭集：AGENTS、图标、接管用）+ `AgentRef = string`（路由/日志/用量等边界）；新增 `agentMeta(id)` 解析器（内置→registry；否则→派生：名称首字母 + 调色板色） | `app/src/api/types.ts` |
 | 前端 | 分段条尾部 `+`；自定义 tab（无接管态）；接入信息卡；删除；用 `agentMeta` 替换所有 `AGENTS.find(...)!`；深链校验接受自定义 id；AddProviderModal 多选列出并集 | `Providers.tsx`、`StrategyPanel.tsx`、`App.tsx`、`AddProviderModal.tsx` |

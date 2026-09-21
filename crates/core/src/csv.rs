@@ -1,7 +1,7 @@
 //! CSV for the Logs card's export.
 //!
 //! One row per request, every column the list view carries. Kept here rather
-//! than in `vm.rs` so the formatting is a pure function of the rows and can be
+//! than in `vm` so the formatting is a pure function of the rows and can be
 //! unit-tested without touching a file.
 //!
 //! Bodies are the one optional part. The export is the only place a body can be

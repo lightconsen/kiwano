@@ -1052,7 +1052,7 @@ const devAlerted = new Set<string>();
 type DevApiKeyRow = Omit<ApiKeyEntry, "masked"> & { provider_id: string; key: string };
 const devApiKeys: DevApiKeyRow[] = [];
 
-/** Mirrors `mask_key` in src-tauri/src/vm.rs. */
+/** Mirrors `mask_key` in crates/core/src/vm/keys.rs. */
 function maskKey(key: string): string {
   const n = key.length;
   if (n > 12) return `${key.slice(0, 6)}…${key.slice(-4)}`;

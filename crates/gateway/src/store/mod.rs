@@ -5445,7 +5445,8 @@ mod tests {
 
         // tz 0 = UTC: the timestamps below are already UTC dates, so the
         // buckets are unchanged. A non-zero offset is covered by the dashboard
-        // test in vm.rs, where the window and the chart must agree on it.
+        // test in `kiwano-core`'s `vm::dashboard`, where the window and the
+        // chart must agree on it.
         let daily = store.usage_daily(Some("claude"), None, None, 0).unwrap();
         assert_eq!(daily.len(), 2);
         assert_eq!(daily[0].day, "2026-09-06");

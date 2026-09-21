@@ -34,45 +34,13 @@ import {
   type Protocol,
   type Provider,
 } from "../api/types";
-import type { KeyPath, Messages } from "../i18n";
 import { AgentChip } from "@/components/bits";
 import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { hubAssetUrl, useHubUrl } from "../lib/hub";
-
-// These three tables carry user-visible labels, so they are built inside the
-// component where the translator is available rather than at module scope
-// (a module-level `t` is impossible — it is a hook).
-
-/// The ceilings offered as one-click chips. These are the percentages people
-/// actually set: some headroom, a lot of headroom, or "only once the window is
-/// full" — which is a value, not the same as leaving the box blank.
-const PLAN_PRESET_PCTS = [80, 90, 100];
-
-/// The four rates one declared-price row collects, in the price table's own
-/// order: `DeclaredPrice` is read back with exactly these fields, and the order
-/// is the one every price in the app is printed in (input, output, cache read,
-/// cache write).
-const RATE_FIELDS: {
-  key: keyof Omit<DeclaredPrice, "model_id">;
-  labelKey: KeyPath<Messages>;
-}[] = [
-  { key: "input", labelKey: "addProvider.priceIn" },
-  { key: "output", labelKey: "addProvider.priceOut" },
-  { key: "cache_read", labelKey: "addProvider.priceCacheRead" },
-  { key: "cache_creation", labelKey: "addProvider.priceCacheWrite" },
-];
-
-function probeColor(verdict: ProbeReport["verdict"]): string {
-  return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
-}
-
-/** The headers the gateway injects as credentials (`x-api-key` / `Authorization`
-    / `x-goog-api-key`, see `gateway::forward`). A custom header with one of
-    these names wins over the injected credential — which is sometimes exactly
-    the point (an Azure-style `api-key` endpoint), and otherwise a silent way to
-    send the wrong key upstream. Warned about, not refused: this dialog cannot
-    know which it is. */
-const AUTH_HEADER_NAMES = ["authorization", "x-api-key", "x-goog-api-key"];
+import { AUTH_HEADER_NAMES } from "./AddProviderModal/advanced";
+import { probeColor } from "./AddProviderModal/endpoints";
+import { PLAN_PRESET_PCTS } from "./AddProviderModal/limits";
+import { RATE_FIELDS } from "./AddProviderModal/prices";
 
 export default function AddProviderModal({
   open,

@@ -557,7 +557,6 @@ pub(crate) fn render_insights(report: &insights::InsightsReport) -> String {
     fn date(ts: &str) -> &str {
         ts.get(..10).unwrap_or(ts)
     }
-    let dash = || "–".to_string();
     let t = &report.totals;
     let mut out = format!(
         "Kiwano insights · {} → {} · local only",
@@ -572,8 +571,25 @@ pub(crate) fn render_insights(report: &insights::InsightsReport) -> String {
         out.push_str("\n(no requests in window)");
         return out;
     }
+    out.push_str(&scorecard_section(report));
+    out.push_str(&findings_section(report));
+    out.push_str(&top_sessions_section(report));
+    out.push_str(
+        "\n\nAll statistics aggregate request_logs locally; bodies and keys never leave this machine.",
+    );
+    out
+}
 
-    out.push_str("\n\nScorecard");
+/// `–` where a rate was never reported: not `0%`, which would read as a
+/// measurement rather than an absence.
+fn dash() -> String {
+    "–".to_string()
+}
+
+/// The scorecard table and the four denominators behind its rates. The
+/// denominators are printed rather than left to guesswork: a rate whose formula
+/// the reader has to assume is an invitation to misread it.
+fn scorecard_section(report: &insights::InsightsReport) -> String {
     let rows: Vec<Vec<String>> = report
         .scorecard
         .iter()
@@ -595,6 +611,7 @@ pub(crate) fn render_insights(report: &insights::InsightsReport) -> String {
             ]
         })
         .collect();
+    let mut out = String::from("\n\nScorecard");
     out.push('\n');
     out.push_str(&render_table(
         &[
@@ -609,73 +626,76 @@ pub(crate) fn render_insights(report: &insights::InsightsReport) -> String {
         &rows,
         &[1, 2, 3, 4, 5, 6],
     ));
-    // The denominators are printed rather than left to guesswork: a rate
-    // whose formula the reader has to assume is an invitation to misread it.
     out.push_str("\n  cache hit  = cache_read / (input + cache_read + cache_creation)");
     out.push_str("\n  ctx growth = median last-turn / first-turn context across sessions");
     out.push_str("\n  reasoning  = reasoning / output tokens; – means never reported");
     out.push_str("\n  retries    = resends within 60s of an errored request, same session + model");
+    out
+}
 
-    out.push_str("\n\nFindings");
+/// The findings, numbered. Continuation lines align under the sentence, not
+/// under the number: each finding reads as one block per rule.
+fn findings_section(report: &insights::InsightsReport) -> String {
+    let mut out = String::from("\n\nFindings");
     if report.findings.is_empty() {
         out.push_str("\n(no findings in this window)");
-    } else {
-        for (i, f) in report.findings.iter().enumerate() {
-            let prefix = format!("{}. [{}] ", i + 1, f.tag);
-            let agent = f
-                .agent
-                .as_deref()
-                .map(|a| format!("{a}: "))
-                .unwrap_or_default();
-            out.push_str(&format!("\n{prefix}{agent}{}", f.summary));
-            // Continuation lines align under the sentence, not under the
-            // number: the finding reads as one block per rule.
-            let pad = " ".repeat(prefix.len());
-            if !f.detail.is_empty() {
-                out.push_str(&format!("\n{pad}{}", f.detail));
-            }
-            if !f.evidence.is_empty() {
-                out.push_str(&format!("\n{pad}evidence {}", render_evidence(f)));
-            }
+        return out;
+    }
+    for (i, f) in report.findings.iter().enumerate() {
+        let prefix = format!("{}. [{}] ", i + 1, f.tag);
+        let agent = f
+            .agent
+            .as_deref()
+            .map(|a| format!("{a}: "))
+            .unwrap_or_default();
+        out.push_str(&format!("\n{prefix}{agent}{}", f.summary));
+        let pad = " ".repeat(prefix.len());
+        if !f.detail.is_empty() {
+            out.push_str(&format!("\n{pad}{}", f.detail));
+        }
+        if !f.evidence.is_empty() {
+            out.push_str(&format!("\n{pad}evidence {}", render_evidence(f)));
         }
     }
+    out
+}
 
-    if !report.top_sessions.is_empty() {
-        out.push_str("\n\nTop sessions by context growth");
-        let rows: Vec<Vec<String>> = report
-            .top_sessions
-            .iter()
-            .map(|s| {
-                vec![
-                    s.session_id.clone(),
-                    s.agent.clone().unwrap_or_else(dash),
-                    s.turns.to_string(),
-                    format!(
-                        "{} → {}",
-                        vm::fmt_tokens(s.first_context),
-                        vm::fmt_tokens(s.last_context)
-                    ),
-                    format!("{:.1}×", s.growth),
-                ]
-            })
-            .collect();
-        out.push('\n');
-        out.push_str(&render_table(
-            &[
-                "SESSION",
-                "AGENT",
-                "TURNS",
-                "FIRST → LAST CONTEXT",
-                "GROWTH",
-            ],
-            &rows,
-            &[2, 4],
-        ));
+/// The sessions whose context grew the most — nothing at all when the window
+/// held none, so the caller can append it unconditionally.
+fn top_sessions_section(report: &insights::InsightsReport) -> String {
+    if report.top_sessions.is_empty() {
+        return String::new();
     }
-
-    out.push_str(
-        "\n\nAll statistics aggregate request_logs locally; bodies and keys never leave this machine.",
-    );
+    let rows: Vec<Vec<String>> = report
+        .top_sessions
+        .iter()
+        .map(|s| {
+            vec![
+                s.session_id.clone(),
+                s.agent.clone().unwrap_or_else(dash),
+                s.turns.to_string(),
+                format!(
+                    "{} → {}",
+                    vm::fmt_tokens(s.first_context),
+                    vm::fmt_tokens(s.last_context)
+                ),
+                format!("{:.1}×", s.growth),
+            ]
+        })
+        .collect();
+    let mut out = String::from("\n\nTop sessions by context growth");
+    out.push('\n');
+    out.push_str(&render_table(
+        &[
+            "SESSION",
+            "AGENT",
+            "TURNS",
+            "FIRST → LAST CONTEXT",
+            "GROWTH",
+        ],
+        &rows,
+        &[2, 4],
+    ));
     out
 }
 

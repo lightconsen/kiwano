@@ -42,7 +42,11 @@ jobs:
 
       - name: Resolve the release under test
         id: rel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           tag="${{ github.event.release.tag_name || '' }}"
           if [ -z "$tag" ]; then
             tag=$(gh release view --json tagName -q .tagName)
@@ -51,6 +55,7 @@ jobs:
 
       - name: Download the platform artifact
         id: dl
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

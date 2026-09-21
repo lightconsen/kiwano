@@ -1126,6 +1126,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download the platform artifact
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

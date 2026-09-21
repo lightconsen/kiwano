@@ -4,17 +4,6 @@
 // it, and composes the pieces that live in `screens/Providers/`.
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Check, Plus, RefreshCw, Settings2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuLabel,
-  MenuSeparator,
-  MenuTrigger,
-} from "@/components/ui/menu";
-import { ProviderLogo } from "@/components/icons/ProviderLogo";
 import { api } from "../api/client";
 import { LoadFailed, errText } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
@@ -32,20 +21,16 @@ import {
   type Provider,
 } from "../api/types";
 import { AGENT_ICON } from "../components/bits";
-import StrategyPanel, { CopyRouteRow } from "../components/StrategyPanel";
-import {
-  AgentOnboarding,
-  NO_CLI_AGENTS,
-  SEGMENTS,
-  SEGMENT_ICON,
-  segmentLabel,
-} from "./Providers/agents";
+import StrategyPanel from "../components/StrategyPanel";
+import { NO_CLI_AGENTS, SEGMENTS } from "./Providers/agents";
 import { AccessDialog } from "./Providers/AccessDialog";
 import { AgentSettingsDialog } from "./Providers/AgentSettingsDialog";
 import { NewAgentDialog } from "./Providers/NewAgentDialog";
 import { DeclareAgentDirDialog, dirOf, type Redetect } from "./Providers/DeclareAgentDirDialog";
-import { ProviderRow } from "./Providers/rows";
-import { AddBindingRow, BindingRow, BindProviderSelect } from "./Providers/BindingRow";
+import { AgentTabTitle } from "./Providers/AgentTabTitle";
+import { HeaderActions } from "./Providers/HeaderActions";
+import { ProviderTable } from "./Providers/ProviderTable";
+import { SegmentStrip } from "./Providers/SegmentStrip";
 
 export default function Providers({
   onAdd,
@@ -245,6 +230,30 @@ export default function Providers({
     setPlanQuotas((m) => ({ ...m, ...fresh }));
   };
 
+  /** The header's ⟳. All three of the things it does are awaited together, so
+   * the spinner ends when the last one lands rather than when the first one
+   * returns, and the re-probe is a click's rather than a re-read's: it spawns a
+   * login shell plus one subprocess per agent. */
+  const onRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      // All three, awaited together, so the spinner ends when the last one
+      // lands rather than when the first one returns.
+      await Promise.all([
+        refetch(),
+        refreshQuotas(),
+        // Deliberately separate from `refetch`: that one is the generic
+        // "something changed" callback handed to every child, and
+        // re-probing spawns a login shell plus one subprocess per agent,
+        // so only a click should pay for it.
+        onRedetect?.(),
+      ]);
+      setRefreshed(true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
   // `timer`, not `t`: `t` is the translator here.
   useEffect(() => {
     if (!refreshed) return;
@@ -433,97 +442,19 @@ export default function Providers({
   // The agent this tab belongs to, when the user defined it: routes and a key,
   // and no config file anywhere.
   const custom = seg === "all" ? undefined : customAgents.find((a) => a.id === seg);
-  // Disabling a takeover keeps the stored route (re-enabling restores it), but
-  // the agent config no longer points at the gateway — the route is dormant.
-  // An agent tab for an agent that is not taken over shows the (re-)takeover
-  // onboarding instead of the dormant binding rows.
-  //
-  // A user-defined agent has no config to take over, so it is never in that
-  // state: its tab shows its route from the start.
-  const notTakenOver = seg !== "all" && !custom && !(takenOver?.has(seg) ?? false);
 
   return (
     <section className="flex min-h-full flex-col">
       <div className="flex h-11 items-center gap-2 border-b border-line px-4">
-        <div className="flex max-w-full overflow-x-auto rounded-lg border border-line text-[12px]">
-          {visibleSegments.map((s, i) => {
-            const label = segmentLabel(t, s.id);
-            const ver = s.id === "all" ? undefined : agentVersions[s.id];
-            return (
-              <button
-                key={s.id}
-                title={s.id === "all" ? label : ver ? `${label} · v${ver}` : label}
-                aria-label={label}
-                className={`seg flex h-7 shrink-0 items-center justify-center px-2.5${i > 0 ? " border-l border-line" : ""}${seg === s.id ? " active" : ""}`}
-                onClick={() => pickSeg(s.id)}
-              >
-                {s.icon ? (
-                  <ProviderLogo icon={s.icon} name={label} size={15} />
-                ) : s.id !== "all" ? (
-                  // Any agent with no mark to port — a user-defined route, or a
-                  // built-in whose logo has not been supplied — reads as its own
-                  // letter, in the colour the resolver derived for it. The rule
-                  // used to be "a built-in always has a mark", which stopped
-                  // being true the moment one arrived without.
-                  <ProviderLogo
-                    char={agentMeta(s.id).chip_char}
-                    color={agentMeta(s.id).chip_color}
-                    name={label}
-                    size={15}
-                  />
-                ) : (
-                  <span className="text-[12px] text-mut">{label}</span>
-                )}
-              </button>
-            );
-          })}
-          {/* Its own button rather than part of the strip: the strip is a
-              switch between agents that exist, and this is how one comes to. */}
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 shrink-0 px-0 text-mut hover:text-ink"
-                  aria-label={t("providers.addAgentMenu")}
-                  title={t("providers.addAgentMenuTitle")}
-                />
-              }
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </MenuTrigger>
-            <MenuContent>
-              <MenuItem onClick={() => setNewAgent(true)}>
-                <Plus className="h-3.5 w-3.5 text-mut" />
-                {t("providers.newAgent")}
-              </MenuItem>
-              {declarable.length > 0 && (
-                <>
-                  <MenuSeparator />
-                  <MenuLabel>{t("providers.notDetected")}</MenuLabel>
-                  {declarable.map((a) => (
-                    <MenuItem key={a.id} onClick={() => setDeclaring(a)}>
-                      {a.icon ? (
-                        <span aria-hidden className="inline-flex shrink-0">
-                          <ProviderLogo icon={a.icon} name={a.label} size={14} />
-                        </span>
-                      ) : (
-                        <span className="h-3.5 w-3.5 shrink-0" />
-                      )}
-                      <span className="min-w-0 truncate">{a.label}</span>
-                      {a.declared && (
-                        <span className="ml-auto shrink-0 text-[10.5px] text-mut">
-                          {t("providers.alreadyDeclared")}
-                        </span>
-                      )}
-                    </MenuItem>
-                  ))}
-                </>
-              )}
-            </MenuContent>
-          </Menu>
-        </div>
+        <SegmentStrip
+          visibleSegments={visibleSegments}
+          seg={seg}
+          agentVersions={agentVersions}
+          pickSeg={pickSeg}
+          declarable={declarable}
+          setNewAgent={setNewAgent}
+          setDeclaring={setDeclaring}
+        />
         <span className="ml-1.5 text-[11.5px] text-mut">
           {t("providers.counts", { providers: providers.length, agents: agentsBound })}
         </span>
@@ -537,224 +468,44 @@ export default function Providers({
             {t("common.loadFailed")}
           </span>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-7 w-7 px-0 text-mut"
-          aria-label={t("common.refresh")}
-          title={t("providers.refreshTitle")}
-          disabled={refreshing}
-          onClick={async () => {
-            if (refreshing) return;
-            setRefreshing(true);
-            try {
-              // All three, awaited together, so the spinner ends when the last
-              // one lands rather than when the first one returns.
-              await Promise.all([
-                refetch(),
-                refreshQuotas(),
-                // Deliberately separate from `refetch`: that one is the generic
-                // "something changed" callback handed to every child, and
-                // re-probing spawns a login shell plus one subprocess per agent,
-                // so only a click should pay for it.
-                onRedetect?.(),
-              ]);
-              setRefreshed(true);
-            } finally {
-              setRefreshing(false);
-            }
-          }}
-        >
-          {refreshed ? (
-            <Check className="h-3.5 w-3.5" style={{ color: "var(--kiwi)" }} />
-          ) : (
-            <RefreshCw className={`h-3.5 w-3.5${refreshing ? " animate-spin" : ""}`} />
-          )}
-        </Button>
-        <Button
-          size="sm"
-          className="h-7 gap-1 px-2.5 text-[12px] font-semibold"
-          onClick={onAdd}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {t("providers.addProvider")}
-        </Button>
-      </div>
-
-      {/* A user-defined agent's tab starts with the two values a client is
-          configured with — the whole of what it is from the outside. */}
-      {custom && (
-        // The tab names the agent: the strip shows it as a letter avatar, so a
-        // page with no name on it is one you have to identify from the highlight
-        // over there. Everything *about* it — the credentials, and deleting it —
-        // is behind the icon, which also keeps a destructive control out of the
-        // row you click around in.
-        <div className="mx-4 my-0.5 flex items-center gap-1.5">
-          <ProviderLogo
-            char={agentMeta(seg).chip_char}
-            color={agentMeta(seg).chip_color}
-            name={custom.label}
-            size={18}
-          />
-          <span className="text-[13px] font-semibold">{custom.label}</span>
-          {custom.note && (
-            <span className="min-w-0 truncate text-[11px] text-mut">{custom.note}</span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
-            aria-label={t("providers.agentSettingsFor", { agent: custom.label })}
-            title={t("providers.agentSettingsFor", { agent: custom.label })}
-            onClick={() => setAccessOpen(true)}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
-
-      {/* A built-in agent's tab names itself the same way a user-defined one
-          does — the strip shows icons, so a page with no name on it is one you
-          have to identify from the highlight over there. What this one adds is
-          the file behind it: the config a takeover rewrites, which is also what
-          a user has to reach for by hand when something goes wrong. */}
-      {!custom && seg !== "all" && (takenOver?.has(seg) ?? false) && (
-        <div className="mx-4 my-0.5 flex items-center gap-1.5">
-          <ProviderLogo
-            icon={SEGMENT_ICON[seg]}
-            char={agentMeta(seg).chip_char}
-            color={agentMeta(seg).chip_color}
-            name={agentMeta(seg).label}
-            size={18}
-          />
-          <span className="text-[13px] font-semibold">{agentMeta(seg).label}</span>
-          {configPaths.length > 0 && (
-            <span className="min-w-0 truncate font-mono text-[11px] text-mut">
-              {configPaths[0]}
-              {/* The rest are listed in the dialog rather than elided here: codex
-                  keeps two files and claude-desktop four, and a row that showed
-                  only the first would read as if that were the whole of it. */}
-              {configPaths.length > 1 ? ` +${configPaths.length - 1}` : ""}
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 shrink-0 px-0 text-mut hover:text-ink"
-            aria-label={t("providers.agentSettingsFor", { agent: agentMeta(seg).label })}
-            title={t("providers.agentSettingsFor", { agent: agentMeta(seg).label })}
-            onClick={() => setAgentSettingsOpen(true)}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
-
-      {notTakenOver ? (
-        <AgentOnboarding
-          agent={seg}
-          installed={
-            agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
-          }
-          takenOver={false}
-          busy={enabling}
-          onTakeover={() => void setAgentTakenOver(seg, true)}
-          takeoverError={takeoverError}
+        <HeaderActions
+          refreshing={refreshing}
+          refreshed={refreshed}
+          onRefresh={onRefresh}
           onAdd={onAdd}
         />
-      ) : (
-        <>
-          <div className="flex h-7 items-center border-b border-line px-4 text-[10.5px] text-mut" style={{ background: "var(--surface)" }}>
-            <span className="w-[31%]">{t("providers.colProvider")}</span>
-            <span className="w-[16%]">
-              {route ? t("providers.colRole") : t("providers.colBoundAgents")}
-            </span>
-            <span className="w-[26%]">{t("providers.colUsage")}</span>
-            <span className="w-[8%]" title={t("providers.cacheColTitle")}>
-              {t("providers.colCache")}
-            </span>
-            <span className="w-[12%]">{t("providers.colStatus")}</span>
-            <span className="min-w-[140px] flex-1 text-right">
-              {route ? t("providers.colPriority") : t("providers.colActions")}
-            </span>
-          </div>
+      </div>
 
-          {route
-            ? route.bindings.map((b, i) => {
-                const p = byId.get(b.provider_id);
-                // Skip a binding whose provider row vanished (deleted mid-session)
-                return p ? (
-                  <BindingRow
-                    key={b.provider_id}
-                    p={p}
-                    route={route}
-                    b={b}
-                    idx={i}
-                    plan={planQuotas[p.id]}
-                    blocked={blocked[p.id]}
-                    onMove={onMoveBinding}
-                    onChanged={refetch}
-                  />
-                ) : null;
-              })
-            : filtered.map((p) => (
-                <ProviderRow
-                  key={p.id}
-                  p={p}
-                  plan={planQuotas[p.id]}
-                  blocked={blocked[p.id]}
-                  routes={routes}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  onChanged={refetch}
-                />
-              ))}
+      <AgentTabTitle
+        seg={seg}
+        custom={custom}
+        takenOver={takenOver}
+        configPaths={configPaths}
+        setAccessOpen={setAccessOpen}
+        setAgentSettingsOpen={setAgentSettingsOpen}
+      />
 
-          {/* Bind-one-more entry under the candidate queue of an agent tab */}
-          {route && (
-            <AddBindingRow
-              agent={route.agent}
-              providers={providers}
-              boundIds={new Set(route.bindings.map((b) => b.provider_id))}
-              onChanged={refetch}
-            />
-          )}
-
-          {filtered.length === 0 && seg !== "all" && (
-            <AgentOnboarding
-              agent={seg}
-              kind={custom ? "route" : "takeover"}
-              installed={
-                agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
-              }
-              takenOver={true}
-              busy={enabling}
-              onTakeover={() => void setAgentTakenOver(seg, true)}
-              takeoverError={takeoverError}
-              onAdd={onAdd}
-              bindSlot={
-                <BindProviderSelect
-                  providers={providers}
-                  boundIds={new Set(providers.filter((p) => p.agents.includes(seg)).map((p) => p.id))}
-                  onPick={(pid) => api.addAgentBinding(seg, pid).then(refetch)}
-                />
-              }
-              copySlot={
-                <CopyRouteRow agent={seg} routes={routes ?? []} onChanged={refetch} />
-              }
-            />
-          )}
-
-          {filtered.length === 0 && seg === "all" && (
-            <div className="px-4 py-8 text-center text-[12px] text-mut">
-              {t("providers.none")}{" "}
-              <button className="font-semibold" style={{ color: "var(--kiwi)" }} onClick={onAdd}>
-                {t("providers.addProvider")}
-              </button>
-            </div>
-          )}
-        </>
-      )}
+      <ProviderTable
+        seg={seg}
+        custom={custom}
+        takenOver={takenOver}
+        agentDetect={agentDetect}
+        enabling={enabling}
+        setAgentTakenOver={setAgentTakenOver}
+        takeoverError={takeoverError}
+        onAdd={onAdd}
+        route={route}
+        byId={byId}
+        planQuotas={planQuotas}
+        blocked={blocked}
+        onMoveBinding={onMoveBinding}
+        refetch={refetch}
+        filtered={filtered}
+        routes={routes}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        providers={providers}
+      />
 
       {/* Strategy config lives in the agent's own tab. For a built-in that means
           once it is taken over (before that there is no live route to configure);

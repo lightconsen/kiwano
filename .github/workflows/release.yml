@@ -1085,6 +1085,22 @@ jobs:
           --no-progress --metadata-directive REPLACE
           --metadata "cache-control=public, max-age=60"
 
+      # The GitHub endpoint serves tauri-action's own manifest — which has
+      # carried the bad generic windows signature since 0.2.0 (the rewrite
+      # step above repairs it for R2). Both endpoints now serve the same
+      # verified file: content was the thing that forked during the incident,
+      # so the two are deliberately made one file. The manifest's urls point
+      # at the mirror, so a download the GitHub endpoint exists for — "R2 is
+      # down, GitHub is up" — keeps working as long as R2 answers, which is
+      # the same condition the old url shape had.
+      - name: Reconcile the GitHub endpoint
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp manifest/latest.r2.json manifest/latest.json
+          gh release upload "${{ github.ref_name }}" manifest/latest.json \
+            --clobber -R "${{ github.repository }}"
+
       # `https://hub.kiwano.cc/install.sh` — the one-command server install.
       #
       # At the bucket root rather than under releases/, which is where the

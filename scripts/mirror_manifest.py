@@ -219,6 +219,27 @@ def verify_signatures(doc, bucket):
             with open(artifact, "wb") as fh:
                 fh.write(proc.stdout)
             err = minisign_verify(pubkey_text, artifact, entry["signature"])
+            if err and key == "windows-x86_64":
+                # tauri-action has assembled the generic windows-x86_64 entry
+                # with a signature that does not verify in every release since
+                # 0.2.0, while the `-nsis` entry — the same setup.exe, the same
+                # bytes — verifies fine. The two keys point at one artifact, so
+                # adopting the nsis signature for the generic entry is a
+                # correction of an upstream assembly bug rather than a guess:
+                # what this pipeline publishes is only ever a manifest whose
+                # every signature verifies. Spoken in the log, because a
+                # silent self-healing pipeline is indistinguishable from a
+                # broken one.
+                nsis = doc["platforms"].get("windows-x86_64-nsis", {}).get("signature")
+                if nsis and not minisign_verify(pubkey_text, artifact, nsis):
+                    doc["platforms"]["windows-x86_64"]["signature"] = nsis
+                    print(
+                        "::warning::windows-x86_64: tauri-action's generic-entry "
+                        "signature does not verify; adopted the -nsis entry's "
+                        "signature (same setup.exe) — both entries now carry the "
+                        "signature the app accepts"
+                    )
+                    err = None
         if err:
             failed.append(f"{key} ({name}): {err}")
     return failed

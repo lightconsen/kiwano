@@ -19,7 +19,7 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   mirror:
@@ -82,3 +82,14 @@ jobs:
           aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json
           --no-progress --metadata-directive REPLACE
           --metadata "cache-control=public, max-age=60"
+
+      # Both endpoints serve the same verified file — see release.yml's
+      # reconcile step. Needs contents: write, which is why this workflow's
+      # permission is not the read it used to be.
+      - name: Reconcile the GitHub endpoint
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp manifest/latest.r2.json manifest/latest.json
+          gh release upload "${{ steps.tag.outputs.tag }}" manifest/latest.json \
+            --clobber -R "${{ github.repository }}"

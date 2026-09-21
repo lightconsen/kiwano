@@ -182,6 +182,26 @@ section.block { padding: 96px 0 0; }
   font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi);
   background: var(--kiwi-soft); padding: 1px 6px; border-radius: 5px;
 }
+/* A copyable command: the code takes the row and scrolls if narrow, the
+   button sits at its right. Copied feedback is the icon itself — copy swaps
+   to a check for a beat, then back; no layout move, same as the app's. */
+.step p.cmd { display: flex; align-items: center; gap: 6px; }
+.step p.cmd code {
+  flex: 1; min-width: 0; white-space: nowrap; overflow-x: auto;
+  scrollbar-width: none;
+}
+.copy-btn {
+  flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--mut); cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.copy-btn:hover { color: var(--ink); background: var(--kiwi-soft); }
+.copy-btn .icon { width: 14px; height: 14px; }
+.copy-btn .i-check { display: none; }
+.copy-btn.copied { color: var(--kiwi); }
+.copy-btn.copied .i-copy { display: none; }
+.copy-btn.copied .i-check { display: block; }
 
 /* ── 策略示意动画:8s 主循环,节点态与请求点同步;reduced-motion 时停在静态初始态 ── */
 .grid-strat { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -454,6 +474,8 @@ footer { padding: 56px 0 44px; }
   <symbol id="i-store" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/></symbol>
   <symbol id="i-import" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
   <symbol id="i-wifioff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
@@ -714,7 +736,7 @@ footer { padding: 56px 0 44px; }
           <span class="no">01</span>
           <h3 data-i18n="srv.1t">Install in one command</h3>
           <p data-i18n="srv.1d">Downloads and checks the client and the gateway, registers the gateway as a service for your account, and keeps the database in <code>~/.kiwano</code>. No root.</p>
-          <p><code>curl -fsSL https://hub.kiwano.cc/install.sh | sh</code></p>
+          <p class="cmd"><code>curl -fsSL https://hub.kiwano.cc/install.sh | sh</code><button class="copy-btn" type="button" data-copy="curl -fsSL https://hub.kiwano.cc/install.sh | sh" data-i18n-aria="srv.copy" aria-label="Copy command" title="Copy command"><svg class="icon i-copy"><use href="#i-copy"/></svg><svg class="icon i-check"><use href="#i-check"/></svg></button></p>
         </div>
         <div class="step rv" style="--d:80ms">
           <span class="no">02</span>
@@ -833,6 +855,8 @@ const I18N = {
     "srv.p": "客户端与网关就装在发布包里。命令行能做桌面应用能做的每一件事 —— 添供应商、选策略、看用量日志,以及把 Agent 接管到本地网关。",
     "srv.1t": "一条命令装好",
     "srv.1d": "下载并校验客户端与网关,把网关注册成你账户下的服务,数据库放在 <code>~/.kiwano</code>。不需要 root。",
+    "srv.copy": "复制命令",
+    "srv.copied": "已复制",
     "srv.2t": "接管你的 Agent",
     "srv.2d": "改写 Agent 自己的配置指向本地网关,并签给它一把占位 Key —— 网关只路由自己签发的 Key,手动改端口只会得到 401。",
     "srv.3t": "路由、计量、日志",
@@ -852,6 +876,10 @@ const I18N = {
 document.querySelectorAll("[data-i18n]").forEach((el) => {
   el.dataset.en = el.innerHTML;
 });
+// 属性型文案(aria-label/title 同 key):与文本同一字典,同一处切换
+document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+  el.dataset.enAria = el.getAttribute("aria-label");
+});
 function applyLang(lang) {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.title = lang === "zh" ? I18N.zh.title : "Kiwano — Local-first AI Provider Manager";
@@ -861,6 +889,13 @@ function applyLang(lang) {
       if (v !== undefined) el.innerHTML = v;
     } else {
       el.innerHTML = el.dataset.en;
+    }
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    const v = lang === "zh" ? I18N.zh[el.dataset.i18nAria] : el.dataset.enAria;
+    if (v !== undefined) {
+      el.setAttribute("aria-label", v);
+      el.title = v;
     }
   });
   // 按钮显示「可切换到的语言」
@@ -874,6 +909,45 @@ if (saved === "zh") applyLang("zh");
 document.getElementById("langBtn").addEventListener("click", () => {
   applyLang(document.documentElement.lang === "zh-CN" ? "en" : "zh");
 });
+
+// 复制按钮:icon 即状态——平时是 copy,落成 check 一拍半再换回。
+// Clipboard API 需要安全上下文;file:// 与旧 webview 走 execCommand 兜底。
+document.querySelectorAll("[data-copy]").forEach((btn) => {
+  const text = btn.dataset.copy;
+  const label = () =>
+    document.documentElement.lang === "zh-CN" ? I18N.zh["srv.copied"] : "Copied";
+  const restore = () =>
+    document.documentElement.lang === "zh-CN" ? I18N.zh["srv.copy"] : btn.dataset.enAria;
+  btn.addEventListener("click", () => {
+    const done = () => {
+      btn.classList.add("copied");
+      btn.title = label();
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.title = restore();
+      }, 1500);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, () => {
+        if (fallbackCopy(text)) done();
+      });
+    } else if (fallbackCopy(text)) {
+      done();
+    }
+  });
+});
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  return ok;
+}
 
 // 进场动画:IntersectionObserver 一次性加 .in,css 过渡负责动效
 const io = new IntersectionObserver(

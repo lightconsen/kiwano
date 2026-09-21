@@ -82,12 +82,11 @@ jobs:
         run: |
           $installer = Get-ChildItem artifacts -Filter '*.exe' | Select-Object -First 1 -ExpandProperty FullPath
           Start-Process -FilePath $installer -ArgumentList '/S' -Wait
-          $roots = @(Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
+          $roots = @(Join-Path $env:LOCALAPPDATA 'Kiwano'),
+                    (Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
                     (Join-Path ${env:PROGRAMFILES} 'Kiwano')
-          $exe = foreach ($root in $roots) {
-            Get-ChildItem -Path $root -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullPath
-          } | Select-Object -First 1
+          $exe = Get-ChildItem -Path $roots -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullPath
           if (-not $exe) {
             Write-Error "installed Kiwano.exe not found under: $($roots -join ', ')"
           }
@@ -111,13 +110,24 @@ jobs:
           "$img" --appimage-extract
           echo "APP=$(pwd)/squashfs-root/AppRun" >> "$GITHUB_ENV"
 
+      # The system GL libraries webkit needs at load time; the AppImage does
+      # not bundle them (they are host concern), and the runner has none of
+      # them — without these, the app dies before a single log line with
+      # `libEGL.so.1: cannot open shared object file`.
+      - name: Install the GL runtime (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
+
       - name: Launch under a display (Linux)
         if: runner.os == 'Linux'
         run: |
           Xvfb :99 -screen 0 1280x800x24 &
 
           export DISPLAY=:99
-          "$APP" &
+          # Xvfb has no GPU compositing; webkit will not initialize without
+          # this in a headless display — the standard CI requirement.
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          "$APP" > app.stderr 2>&1 &
           echo $! > app.pid
           # Let the webview come up before anyone screenshots it.
           sleep 25

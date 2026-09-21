@@ -1181,6 +1181,14 @@ jobs:
           "$img" --appimage-extract
           echo "APP=$(pwd)/squashfs-root/AppRun" >> "$GITHUB_ENV"
 
+      # The system GL libraries webkit needs at load time; the AppImage does
+      # not bundle them (they are host concern), and the runner has none of
+      # them — without these, the app dies before a single log line with
+      # `libEGL.so.1: cannot open shared object file`.
+      - name: Install the GL runtime (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
+
       - name: Launch under a display (Linux)
         if: runner.os == 'Linux'
         run: |

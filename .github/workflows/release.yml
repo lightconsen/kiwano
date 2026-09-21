@@ -1101,6 +1101,208 @@ jobs:
           gh release upload "${{ github.ref_name }}" manifest/latest.json \
             --clobber -R "${{ github.repository }}"
 
+  # Install the packaged artifact and prove it comes up — on the release this
+  # run just published, automatically. Lives inside this workflow rather than
+  # as its own `on: release: published` workflow because the publish job uses
+  # GITHUB_TOKEN, and GitHub does not deliver events triggered by that token
+  # to other workflows (the anti-recursion rule) — which is why v0.2.2's
+  # release ran no smoke at all. A job here is not an event, so it runs.
+  # Rehearsal tags publish nothing and are skipped like every mirror gate.
+  smoke:
+    name: Release smoke
+    needs: [publish, mirror-manifest]
+    if: ${{ !contains(github.ref_name, '-') }}
+    permissions:
+      # `gh release download` reads; upload-artifact needs actions: write.
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the platform artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pattern='Kiwano_*_x64-setup.exe'
+          else
+            pattern='Kiwano_*_amd64.AppImage'
+          fi
+          if ! gh release download "${{ github.ref_name }}" \
+              --pattern "$pattern" --dir artifacts --clobber; then
+            echo "::error::no artifact matched '$pattern' on ${{ github.ref_name }}"
+            gh release view "${{ github.ref_name }}" --json assets \
+              -q '.assets[].name' || true
+            exit 1
+          fi
+          echo "downloaded: $(ls artifacts)"
+
+      # ── Windows: silent-install, locate, launch ──────────────────────────
+      - name: Install silently (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem artifacts -Filter '*.exe' | Select-Object -First 1 -ExpandProperty FullPath
+          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+          $roots = @(Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
+                    (Join-Path ${env:PROGRAMFILES} 'Kiwano')
+          $exe = foreach ($root in $roots) {
+            Get-ChildItem -Path $root -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullPath
+          } | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "installed Kiwano.exe not found under: $($roots -join ', ')"
+          }
+          echo "APP_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Launch the app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Start-Process -FilePath $env:APP_EXE
+
+      # ── Linux: AppImage is self-contained (a .deb would drag webkit deps) ─
+      - name: Stage the AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          img=$(ls artifacts/*.AppImage)
+          chmod +x "$img"
+          # Runners have no FUSE, so run the extracted payload directly: the
+          # runtime's `--appimage-extract` drops `squashfs-root/` without
+          # mounting anything, and its `AppRun` then runs the real payload.
+          "$img" --appimage-extract
+          echo "APP=$(pwd)/squashfs-root/AppRun" >> "$GITHUB_ENV"
+
+      - name: Launch under a display (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+
+          export DISPLAY=:99
+          "$APP" &
+          echo $! > app.pid
+          # Let the webview come up before anyone screenshots it.
+          sleep 25
+
+      # The shared sign of life: the gateway's data plane is listening. A
+      # request with no placeholder key is answered 401 (`gateway::router`),
+      # and a refused connection would surface as 000 — so anything in
+      # {400..499} means the daemon bound :8317 and is reading the DB.
+      - name: Prove the gateway is listening
+        shell: bash
+        run: |
+          code=000
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+              -X POST http://127.0.0.1:8317/v1/chat/completions \
+              -H 'Content-Type: application/json' -d '{}' || true)
+            if [ "$code" != "000" ]; then break; fi
+            sleep 2
+          done
+          echo "data plane answered $code"
+          case "$code" in
+            4[0-9][0-9]|2[0-9][0-9]) echo "gateway is up" ;;
+            *) echo "::error::data plane never answered; code=$code" ; exit 1 ;;
+          esac
+
+      # The admin plane is the deeper claim: it needs the token out of the
+      # shared SQLite and answers only to it — so a parsed, version-matched
+      # `/status` proves not just "a port is open" but "our daemon, our DB".
+      # Windows' admin plane is a named pipe with a per-user GUID name, which
+      # a step cannot reach, so only Linux does this; Windows relies on the
+      # data-plane probe plus the log line below.
+      - name: Ask the admin plane for its version (Linux)
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - "${{ github.ref_name }}" "$HOME" <<'PY'
+          import json, os, socket, sqlite3, sys
+          tag, home = sys.argv[1], sys.argv[2]
+          db = os.path.join(home, ".kiwano", "kiwano.db")
+          token = sqlite3.connect(db).execute(
+              "SELECT value FROM app_settings WHERE key = 'gateway.admin_token'"
+          ).fetchone()[0]
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          sock.connect(os.path.join(home, ".kiwano", "admin.sock"))
+          sock.sendall(
+              f"GET /status HTTP/1.1\r\nHost: localhost\r\n"
+              f"x-kiwano-admin-token: {token}\r\n\r\n".encode()
+          )
+          data = b""
+          while True:
+              chunk = sock.recv(65536)
+              if not chunk:
+                  break
+              data += chunk
+          body = json.loads(data.split(b"\r\n\r\n", 1)[1])
+          print("admin plane:", {k: body[k] for k in ("name", "version")})
+          assert body["name"] == "kiwanod", body
+          assert body["version"] == tag.lstrip("v"), (body["version"], tag)
+          PY
+
+      # The daemon also writes its own log; a `ready` line is independent
+      # evidence (the data-plane probe could in theory hit a stale listener
+      # from a previous smoke on a shared runner — it cannot).
+      - name: The daemon's log says ready
+        shell: bash
+        run: |
+          ready=0
+          for i in $(seq 1 60); do
+            if grep -rq "kiwanod ready" "$HOME/.kiwano/logs/" 2>/dev/null; then
+              ready=1; break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            echo "::error::no 'kiwanod ready' in ~/.kiwano/logs"
+            ls -la "$HOME/.kiwano/logs/" 2>/dev/null || true
+            exit 1
+          fi
+          echo "daemon log shows ready"
+
+      # Evidence for a human, never a gate: a window that renders is nice to
+      # look at, but a headless runner's capture is exactly as reliable as the
+      # probes above and less definitive. Failing hard on a screenshot nuance
+      # would burn a release.
+      - name: Capture the window (Linux, best-effort)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          command -v import >/dev/null 2>&1 || sudo apt-get install -y imagemagick >/dev/null 2>&1
+          sleep 8
+          import -display :99 -window root window.png
+          echo "captured window.png ($(du -h window.png | cut -f1))"
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux' && !cancelled()
+        with:
+          name: smoke-window-${{ matrix.os }}
+          path: window.png
+          if-no-files-found: ignore
+
+      # Clean up so a shared runner does not leak a daemon between smokes.
+      - name: Stop the app
+        if: always()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            taskkill //F //IM Kiwano.exe 2>/dev/null || true
+            taskkill //F //IM kiwanod.exe 2>/dev/null || true
+          else
+            kill "$(cat app.pid)" 2>/dev/null || true
+            pkill -f 'squashfs-root/AppRun' 2>/dev/null || true
+            pkill -f 'kiwanod' 2>/dev/null || true
+          fi
+
       # `https://hub.kiwano.cc/install.sh` — the one-command server install.
       #
       # At the bucket root rather than under releases/, which is where the

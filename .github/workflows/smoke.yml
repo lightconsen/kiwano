@@ -51,6 +51,8 @@ jobs:
 
       - name: Download the platform artifact
         id: dl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p artifacts

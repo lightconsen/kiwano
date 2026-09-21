@@ -37,6 +37,10 @@ export const CHIPS: {
   { id: "free", labelKey: "shelf.chipFree", icon_color: "var(--amber)" },
 ];
 
+/** Which chip the filter row is on — read off the map above, so a chip cannot
+    be added without the state that holds the choice following it. */
+export type ChipId = (typeof CHIPS)[number]["id"];
+
 export function tagChipStyle(tag: CatalogEntry["tag"]): React.CSSProperties {
   switch (tag) {
     case "official":

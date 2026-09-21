@@ -4,18 +4,19 @@
 // it, and composes the pieces that live in `screens/Shelf/` — the same shape
 // its sibling `screens/Providers.tsx` has.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import { useReload } from "../lib/reload";
 import type { CatalogEntry, ModelPrice } from "../api/types";
 import { useHubUrl } from "../lib/hub";
 import { useT } from "../i18n";
-import { CHIPS, TAG_ICON } from "./Shelf/labels";
-import { COLUMNS, byTagRank, orderRows, type SortKey } from "./Shelf/order";
-import { VIEWS, buildModelGroups, type ModelGroupRow } from "./Shelf/groups";
+import { type ChipId } from "./Shelf/labels";
+import { byTagRank, orderRows, type SortKey } from "./Shelf/order";
+import { buildModelGroups, type ModelGroupRow } from "./Shelf/groups";
 import { type PriceTier } from "./Shelf/prices";
-import { Row } from "./Shelf/Row";
+import { Toolbar } from "./Shelf/Toolbar";
+import { TableHead } from "./Shelf/TableHead";
+import { ProviderBody } from "./Shelf/ProviderBody";
+import { GroupedBody } from "./Shelf/GroupedBody";
 import { DetailDialog } from "./Shelf/DetailDialog";
 import { useShelfPrefs } from "./Shelf/prefs";
 
@@ -25,7 +26,7 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
   const { sort, view, remember, rememberView } = useShelfPrefs();
   const [catalog, setCatalog] = useState<{ total: number; entries: CatalogEntry[] } | null>(null);
   const [prices, setPrices] = useState<ModelPrice[]>([]);
-  const [chip, setChip] = useState<(typeof CHIPS)[number]["id"]>("all");
+  const [chip, setChip] = useState<ChipId>("all");
   const [query, setQuery] = useState("");
   // Catalog row clicked → model detail dialog
   const [detail, setDetail] = useState<{ entry: CatalogEntry; tier: PriceTier } | null>(null);
@@ -153,192 +154,37 @@ export default function Shelf({ onAdd }: { onAdd: (preset: CatalogEntry) => void
 
   return (
     <section>
-      <div className="sticky top-0 z-20 flex h-11 items-center gap-2 border-b border-line bg-bg px-4">
-        {/* No "From Kiwano Hub · N providers" line: the refresh button beside
-            the search already says where the list comes from, and the count was
-            a width the chips and the view toggle can use. */}
-        <div className="flex gap-1.5">
-          {CHIPS.map((c) => {
-            // The chip's glyph is the tag's own, so the filter and the badge in
-            // the column below can never drift apart.
-            const Icon = c.id === "all" ? null : TAG_ICON[c.id];
-            return (
-              <button
-                key={c.id}
-                className={`chip inline-flex h-[26px] items-center gap-1 rounded-full border border-line px-2.5 text-[11.5px]${chip === c.id ? " active" : " text-mut"}`}
-                onClick={() => setChip(c.id)}
-              >
-                {Icon && <Icon className="size-3" style={{ color: c.icon_color }} aria-hidden />}
-                {t(c.labelKey)}
-              </button>
-            );
-          })}
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {/* Two readings of one catalog: rows are providers, or rows are the
-              models those providers serve. A segment group rather than a
-              dropdown: there are exactly two, both fit on the row, and this is
-              the control the screen is flipped with most — so it should cost
-              one click and name the other reading without being opened. Same
-              markup as the Dashboard's window and metric groups. */}
-          <div className="flex flex-none overflow-hidden rounded-lg border border-line text-[12px]">
-            {VIEWS.map((v, i) => (
-              <button
-                key={v.id}
-                className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${view === v.id ? " active" : ""}`}
-                onClick={() => rememberView(v.id)}
-              >
-                {t(v.labelKey)}
-              </button>
-            ))}
-          </div>
-          {/* A failed sync is worth the room it takes; the search box shifts
-              left to make it, which is the point. */}
-          {hubErr && (
-            <span
-              className="max-w-[220px] truncate text-[11px]"
-              style={{ color: "var(--red)" }}
-              title={hubErr}
-            >
-              {hubErr}
-            </span>
-          )}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mut" />
-            <input
-              className="h-7 w-[190px] rounded-md border border-line bg-surface pl-7 pr-2 text-[12px]"
-              placeholder={t("shelf.searchPlaceholder")}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 flex-none px-0 text-mut"
-            aria-label={t("shelf.refreshAria")}
-            title={t("shelf.refreshTitle")}
-            disabled={hub === "busy"}
-            onClick={refreshFromHub}
-          >
-            {hub === "done" ? (
-              <Check className="h-3.5 w-3.5" style={{ color: "var(--kiwi)" }} />
-            ) : (
-              <RefreshCw className={`h-3.5 w-3.5${hub === "busy" ? " animate-spin" : ""}`} />
-            )}
-          </Button>
-        </div>
-      </div>
+      <Toolbar
+        chip={chip}
+        setChip={setChip}
+        view={view}
+        rememberView={rememberView}
+        hubErr={hubErr}
+        query={query}
+        setQuery={setQuery}
+        hub={hub}
+        refreshFromHub={refreshFromHub}
+      />
       <table className="w-full border-collapse">
-        <thead className="sticky top-11 z-10 bg-surface">
-          <tr className="border-b border-line">
-            {COLUMNS.map((c) => (
-              <th
-                key={c.labelKey}
-                className={`px-2 py-1.5 text-left text-[11px] font-medium text-mut ${c.className} ${c.key ? "cursor-pointer select-none hover:text-foreground" : ""} ${c.key === "name" ? "pl-4" : ""} ${c.key === null && c.labelKey === "shelf.colActions" ? "pr-4" : ""}`}
-                onClick={c.key ? () => toggleSort(c.key!) : undefined}
-              >
-                {t(c.labelKey)}
-                {sort?.key === c.key && (
-                  <span className="ml-0.5 text-[9px]">{sort.dir === 1 ? "▲" : "▼"}</span>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
+        <TableHead sort={sort} toggleSort={toggleSort} />
         {view === "provider" ? (
-          <tbody>
-            {filtered.map((e) => (
-              <Row
-                key={e.id}
-                entry={e}
-                hubUrl={hubUrl}
-                onAdd={onAdd}
-                onOpen={(entry, tier) => setDetail({ entry, tier })}
-              />
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
-                  {emptyLabel}
-                </td>
-              </tr>
-            )}
-          </tbody>
+          <ProviderBody
+            rows={filtered}
+            hubUrl={hubUrl}
+            onAdd={onAdd}
+            onOpen={(entry, tier) => setDetail({ entry, tier })}
+            emptyLabel={emptyLabel}
+          />
         ) : (
-          <>
-            {orderedGroups.map((g) => {
-              const range = g.range;
-              const open = !collapsed.has(g.model);
-              return (
-                <tbody key={g.model}>
-                  <tr className="border-t border-line" style={{ background: "var(--surface2)" }}>
-                    {/* colgroup, not a stray cell: this header is what the
-                        providers below it are grouped by. A bare `th` is bold
-                        and centred, hence the explicit left/normal — and the
-                        whole row is the collapse control, so it is a button
-                        inside the header rather than a click on the header
-                        itself (which is not focusable). */}
-                    <th scope="colgroup" colSpan={COLUMNS.length} className="p-0 text-left">
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-[11.5px] font-semibold"
-                        aria-expanded={open}
-                        onClick={() => toggleGroup(g.model)}
-                      >
-                        {open ? (
-                          <ChevronDown className="size-3.5 flex-none text-mut" aria-hidden />
-                        ) : (
-                          <ChevronRight className="size-3.5 flex-none text-mut" aria-hidden />
-                        )}
-                        <span className="truncate">{g.name}</span>
-                        {g.name !== g.model && (
-                          <span className="truncate font-mono text-[10.5px] font-normal text-mut">
-                            {g.model}
-                          </span>
-                        )}
-                        <span className="font-normal text-mut">
-                          {t(g.rows.length === 1 ? "shelf.groupMetaOne" : "shelf.groupMeta", {
-                            n: g.rows.length,
-                            m: g.prices.length,
-                          })}
-                        </span>
-                        {range && (
-                          <span
-                            className="ml-auto flex-none font-mono font-normal"
-                            title={t("shelf.groupPriceTitle")}
-                          >
-                            {range}
-                          </span>
-                        )}
-                      </button>
-                    </th>
-                  </tr>
-                  {open &&
-                    g.rows.map((r) => (
-                      <Row
-                        key={r.entry.id}
-                        entry={r.entry}
-                        hubUrl={hubUrl}
-                        onAdd={onAdd}
-                        onOpen={(entry, tier) => setDetail({ entry, tier })}
-                        modelId={g.model}
-                        indent
-                      />
-                    ))}
-                </tbody>
-              );
-            })}
-            {groups.length === 0 && (
-              <tbody>
-                <tr>
-                  <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-[12px] text-mut">
-                    {emptyLabel}
-                  </td>
-                </tr>
-              </tbody>
-            )}
-          </>
+          <GroupedBody
+            groups={orderedGroups}
+            collapsed={collapsed}
+            toggleGroup={toggleGroup}
+            hubUrl={hubUrl}
+            onAdd={onAdd}
+            onOpen={(entry, tier) => setDetail({ entry, tier })}
+            emptyLabel={emptyLabel}
+          />
         )}
       </table>
       {detail && (

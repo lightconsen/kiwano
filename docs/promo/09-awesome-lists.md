@@ -9,12 +9,15 @@ CONTRIBUTING**。
 
 ---
 
-## 已核实的三个列表(2026-09-20 实查)
+## 已核实的三个列表(2026-09-21 复核)
+
+> 复核结论:**awesome-tauri 出局**(不再收应用),实际只剩两个可投。
+> 规则会变,投稿前再读一次该列表的 `.github/contributing.md` 与 PR 模板。
 
 | 列表 | 提交方式 | 硬门槛 | Kiwano 现状 | 最早可提交 |
 | --- | --- | --- | --- | --- |
 | awesome-claude-code | **网页 issue 表单**,不是 PR | ≥14 天(首个 commit 起)且有持续开发 **或** ≥100 star | 首 commit 2026-09-07,持续开发中,0 star → 走 14 天路线 | **2026-09-21** |
-| awesome-tauri | PR | Apps 类无年龄门槛;README 英文;原创、不"太简单";有性能/安全上的克制 | 全部满足 | 随时 |
+| awesome-tauri | ~~PR~~ | **不再接受应用投稿**(2026-08-24 起) | Kiwano 是桌面应用 → **不投** | — |
 | awesome-selfhosted | PR 到 **`-data` 仓库** | FOSS + 可自托管 + 有许可证 + 持续维护 | GPL-3.0、headless 网关可自托管 | 随时(建议 HN 之后) |
 
 ---
@@ -59,35 +62,44 @@ README 顶部可挂官方徽章(维护者邀请,不是必须):
 
 ---
 
-## B. awesome-tauri
+## B. awesome-tauri —— **不投**(规则已变,2026-09-21 复核修正)
 
-仓库:`tauri-apps/awesome-tauri`
+仓库:`tauri-apps/awesome-tauri`(默认分支是 `dev`,不是 `main`)
 
-### 规则(原文要点)
+> **2026-08-24 起该列表不再接受应用投稿。**
+> `.github/contributing.md` 第一行:**"Application submissions are not accepted
+> anymore!"**;PR 模板第二条是同一句话的勾选项;仓库里还有一条 `remove-apps` 分支在
+> 清理存量应用条目。
+>
+> 本文 9/20 那版写的"分类:Applications → Developer tools / Apps 类无年龄门槛"是
+> **错的**——当时 README 里已经没有 Applications 分类了,规则在一个月前就改了。
+> 照那版去提 PR 会被立刻关闭。**教训:awesome 列表的规则看 `.github/contributing.md`
+> 和 PR 模板,不看 README,也不看二手笔记。**
 
-格式:`[Title](link) - Description.`
+### 剩下的类别与 Kiwano 的关系
 
-- 描述 **≤24 词**、**不出现链接和括号**、**不以 A / An 开头**、
-  不使用"for Tauri / a Tauri plugin / Super-Fast"这类废话;
-  提到包名用反引号。
-- **按字母序**插入最合适的分类;**一个 PR 只提一条**;**commit 必须签名**;
-  行尾不留空格。
-- Apps 类专项要求:原创且不"过于简单";**README 英文**;在快 / 轻 / 安全上有合理克制
-  (Kiwano:Rust + Tauri、本地 SQLite、无遥测、owner-only 权限——正好对上)。
-- Apps 类**没有 30 天年龄要求**(那条是 Plugins / Templates 类的)。
+| 类别 | 门槛 | Kiwano |
+| --- | --- | --- |
+| Guides & Tutorials / Articles | 不适合:是文章,不是项目 | — |
+| Templates | Tauri 2.x + 开源 + **≥30 天** + 英文文档 | 不是模板 |
+| Plugins | 同上 + 是 Tauri 插件 | 不是插件 |
+| Integrations | 同上 + 是 Tauri 集成库 | 不是集成库 |
 
-### 投递
+即使想改投这些类别,30 天门槛也要到 **2026-10-07**(首 commit 9/07)才满足,而且
+Kiwano 本身不属于任何一类。**结论:放弃这个列表,别硬投。**
 
-- 分类:Applications → **Developer tools**。
-- 字母序位置:按 `Kiwano` 排在 D 区(Developer tools)现有条目之间。
+### 将来什么情况下能投
 
-### 建议条目(14 词,无括号、无链接)
+只有当你把 Kiwano 里的某块**抽成独立的 Tauri 插件**(比如托盘 / 单实例 / 自动更新那套)
+并单独开源时,才以插件身份投 Plugins,且需满 30 天。届时格式:
 
 ```markdown
-- [Kiwano](https://github.com/lightconsen/kiwano) - Local-first AI provider manager: one local gateway with provider failover and per-request cost metering.
+- [Name](https://github.com/…) ![v2] - Description.
 ```
 
-> 自查:不以 A/An 开头 ✓;无括号、无链接 ✓;≤24 词 ✓;句末句号 ✓。
+规则(仍适用):描述 **≤24 词**、无链接无括号、不以 A/An 开头、字母序插入、
+一个 PR 一条、行尾不留空格、`backticks` 包名。**commit 签名**:contributing 写
+"You have to",PR 模板标 "(optional)" —— 两处矛盾,按严的做,签。
 
 ---
 

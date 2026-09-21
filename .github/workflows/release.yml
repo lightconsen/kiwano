@@ -1151,7 +1151,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installer = Get-ChildItem artifacts -Filter '*.exe' | Select-Object -First 1 -ExpandProperty FullPath
+          $installer = Get-ChildItem "$env:GITHUB_WORKSPACE\artifacts" -Filter '*.exe' | Select-Object -First 1 -ExpandProperty FullPath
           Start-Process -FilePath $installer -ArgumentList '/S' -Wait
           $roots = @(Join-Path $env:LOCALAPPDATA 'Kiwano'),
                     (Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
@@ -1185,9 +1185,28 @@ jobs:
       # not bundle them (they are host concern), and the runner has none of
       # them — without these, the app dies before a single log line with
       # `libEGL.so.1: cannot open shared object file`.
-      - name: Install the GL runtime (Linux)
+      - name: Install webkit's runtime dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
+        run: |
+          # The AppImage bundles webkit2gtk itself but not the host system
+          # libraries it dlopen's: GL for compositing, and the webkit runtime
+          # set (nss, atk, x-extensions, gbm). Miss any one and the app dies
+          # with a bare abort before its first log line. The ldd below is the
+          # receipt: it names anything still missing.
+          sudo apt-get update && sudo apt-get install -y \
+            libegl1 libgl1 \
+            libnss3 libnspr4 \
+            libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libxkbcommon0 libasound2
+
+
+      - name: Name anything still missing (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bin=$(find squashfs-root -type f -name 'kiwano-app' -o -type f -name 'kiwano' | head -1)
+          echo "checking: $bin"
+          ldd "$bin" 2>/dev/null | grep "not found" || echo "nothing missing from ldd's view"
 
       - name: Launch under a display (Linux)
         if: runner.os == 'Linux'
@@ -1239,7 +1258,7 @@ jobs:
       # a step cannot reach, so only Linux does this; Windows relies on the
       # data-plane probe plus the log line below.
       - name: Ask the admin plane for its version (Linux)
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1272,6 +1291,7 @@ jobs:
       # evidence (the data-plane probe could in theory hit a stale listener
       # from a previous smoke on a shared runner — it cannot).
       - name: The daemon's log says ready
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           ready=0

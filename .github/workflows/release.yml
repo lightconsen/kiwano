@@ -1356,18 +1356,17 @@ jobs:
       # Content type is set explicitly: S3 defaults to binary, and a shell
       # script served as application/octet-stream still pipes into `sh` fine but
       # reads as a download in a browser.
+      # One line on purpose: this step runs on Linux's bash and Windows's
+      # pwsh, and a backslash continuation is a line joiner for the first and
+      # a stray argument for the second — two platforms, one syntax that both
+      # accept is the single-line form.
       - name: Publish the installer
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
-        run: >-
-          aws s3 cp packaging/install.sh s3://kiwano-hub/install.sh \
-            --metadata-directive REPLACE \
-            --content-type 'text/x-shellscript; charset=utf-8' \
-            --cache-control 'public, max-age=300' \
-            --no-progress
+        run: aws s3 cp packaging/install.sh s3://kiwano-hub/install.sh --metadata-directive REPLACE --content-type 'text/x-shellscript; charset=utf-8' --cache-control 'public, max-age=300' --no-progress
 
   # No human in the loop: publishing is a tag push and nothing else.
   #

@@ -89,17 +89,48 @@ pub(crate) fn rewrite(
         // claude-desktop: flip both config copies to 3p mode, write the full
         // gateway profile (Kiwano-owned while takeover is active) and register
         // it as the applied configLibrary profile
-        "claude-desktop" if path.ends_with("claude_desktop_config.json") => {
-            kiwano_adapters::claude_desktop_config::set_deployment_mode(original, "3p")
-        }
-        "claude-desktop" if path.ends_with("_meta.json") => {
-            kiwano_adapters::claude_desktop_config::upsert_meta(original)
-        }
-        "claude-desktop" => {
-            kiwano_adapters::claude_desktop_config::build_gateway_profile(target, key)
-        }
+        "claude-desktop" => claude_desktop_rewrite(path, original, target, key),
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
+        "opencode" | "openclaw" | "hermes" | "pi" | "workbuddy" | "codebuddy" | "qwen" | "kimi"
+        | "cline" => additive_rewrite(agent, path, original, target, key, now, sibling_config),
+        _ => Err("unsupported agent".into()),
+    }
+}
+
+/// claude-desktop's four files, one rewrite each: the deployment mode lives in
+/// both `claude_desktop_config.json` copies, `_meta.json` records which profile
+/// is applied, and the profile document itself carries the target and the key.
+fn claude_desktop_rewrite(
+    path: &str,
+    original: &str,
+    target: &str,
+    key: &str,
+) -> Result<String, String> {
+    if path.ends_with("claude_desktop_config.json") {
+        return kiwano_adapters::claude_desktop_config::set_deployment_mode(original, "3p");
+    }
+    if path.ends_with("_meta.json") {
+        return kiwano_adapters::claude_desktop_config::upsert_meta(original);
+    }
+    kiwano_adapters::claude_desktop_config::build_gateway_profile(target, key)
+}
+
+/// The additive agents, whose gateway entry coexists with their native
+/// providers (so a missing config is fine — a fresh one gets created). Each
+/// delegates to the adapter that knows the agent's own schema; for openclaw,
+/// pi and kimi one secondary file differs from the main config, and the path is
+/// the only thing that tells the two apart.
+fn additive_rewrite(
+    agent: &str,
+    path: &str,
+    original: &str,
+    target: &str,
+    key: &str,
+    now: &str,
+    sibling_config: Option<&str>,
+) -> Result<String, String> {
+    match agent {
         "opencode" => {
             kiwano_adapters::gateway_takeover::upsert_opencode_gateway(original, target, key)
         }

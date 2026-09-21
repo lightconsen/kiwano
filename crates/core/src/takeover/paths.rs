@@ -52,21 +52,7 @@ pub(crate) fn takeover_paths(
         // claude-desktop: macOS Claude-3p configLibrary (deployment mode in
         // both claude_desktop_config.json copies + gateway profile + _meta.json)
         #[cfg(target_os = "macos")]
-        "claude-desktop" => {
-            let app_support = home.join("Library").join("Application Support");
-            let threep = app_support.join("Claude-3p");
-            Ok(vec![
-                app_support
-                    .join("Claude")
-                    .join("claude_desktop_config.json"),
-                threep.join("claude_desktop_config.json"),
-                threep.join("configLibrary").join(format!(
-                    "{}.json",
-                    kiwano_adapters::claude_desktop_config::PROFILE_ID
-                )),
-                threep.join("configLibrary").join("_meta.json"),
-            ])
-        }
+        "claude-desktop" => Ok(claude_desktop_paths(home)),
         #[cfg(not(target_os = "macos"))]
         "claude-desktop" => Err("claude-desktop takeover currently supports macOS only".into()),
         // additive-mode agents: the gateway entry coexists with their native
@@ -110,13 +96,7 @@ pub(crate) fn takeover_paths(
         // honored: the main config's own root is not movable either as far as
         // this code is concerned, and half-honoring a relocation would split
         // the two files across two trees.
-        "openclaw" => {
-            let root = home.join(".openclaw");
-            Ok(vec![
-                root.join("openclaw.json"),
-                openclaw_catalog_path(&root, vars, home)?,
-            ])
-        }
+        "openclaw" => openclaw_paths(home, vars),
         "hermes" => {
             // HERMES_HOME resolution matches hermes' own get_hermes_home()
             let dir = config_dir(vars, "HERMES_HOME", ".hermes", home)?;
@@ -149,15 +129,7 @@ pub(crate) fn takeover_paths(
         // ~/.kimi-code, the Python original (~/.kimi) is being retired. The
         // one that exists is the one to write; with neither, the successor —
         // that is what a fresh install is.
-        "kimi" => {
-            let successor =
-                config_dir(vars, "KIMI_CODE_HOME", ".kimi-code", home)?.join("config.toml");
-            if successor.exists() {
-                return Ok(vec![successor]);
-            }
-            let legacy = config_dir(vars, "KIMI_SHARE_DIR", ".kimi", home)?.join("config.toml");
-            Ok(vec![if legacy.exists() { legacy } else { successor }])
-        }
+        "kimi" => Ok(vec![kimi_config(vars, home)?]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base
@@ -167,37 +139,88 @@ pub(crate) fn takeover_paths(
         // The first level names a *file*, so `config_dir` (a directory by
         // construction) cannot express it — and it is resolved here rather than
         // with a bespoke directory lookup for that reason.
-        "cline" => match named_dir(vars, "CLINE_PROVIDER_SETTINGS_PATH") {
-            EnvDir::Absolute(path) => Ok(vec![path]),
-            EnvDir::Relative(raw) => Err(relative_env_refusal(
-                "CLINE_PROVIDER_SETTINGS_PATH",
-                &raw,
-                &home
-                    .join(".cline")
-                    .join("data")
-                    .join("settings")
-                    .join("providers.json"),
-            )),
-            EnvDir::Unset => {
-                // CLINE_DATA_DIR names the data directory itself and beats
-                // CLINE_DIR; only when it is unset does the base come into it,
-                // with `data` under it — which is also what the base defaults
-                // to, so an empty environment lands on `~/.cline/data`.
-                let data = match named_dir(vars, "CLINE_DATA_DIR") {
-                    EnvDir::Absolute(dir) => dir,
-                    EnvDir::Relative(raw) => {
-                        return Err(relative_env_refusal(
-                            "CLINE_DATA_DIR",
-                            &raw,
-                            &home.join(".cline").join("data"),
-                        ))
-                    }
-                    EnvDir::Unset => config_dir(vars, "CLINE_DIR", ".cline", home)?.join("data"),
-                };
-                Ok(vec![data.join("settings").join("providers.json")])
-            }
-        },
+        "cline" => Ok(vec![cline_provider_settings(vars, home)?]),
         other => Err(format!("unknown agent: {other}")),
+    }
+}
+
+/// claude-desktop's four files under the macOS Claude-3p configLibrary: the two
+/// `claude_desktop_config.json` copies (deployment mode lives in both), and
+/// under the second one the gateway profile plus the `_meta.json` that records
+/// which profile is applied.
+#[cfg(target_os = "macos")]
+fn claude_desktop_paths(home: &Path) -> Vec<PathBuf> {
+    let app_support = home.join("Library").join("Application Support");
+    let threep = app_support.join("Claude-3p");
+    vec![
+        app_support
+            .join("Claude")
+            .join("claude_desktop_config.json"),
+        threep.join("claude_desktop_config.json"),
+        threep.join("configLibrary").join(format!(
+            "{}.json",
+            kiwano_adapters::claude_desktop_config::PROFILE_ID
+        )),
+        threep.join("configLibrary").join("_meta.json"),
+    ]
+}
+
+/// openclaw's files, in the order a takeover has to read them: the main config
+/// first, because the catalogue's entry is rewritten against the selector that
+/// config holds.
+fn openclaw_paths(home: &Path, vars: &ShellVars) -> Result<Vec<PathBuf>, String> {
+    let root = home.join(".openclaw");
+    Ok(vec![
+        root.join("openclaw.json"),
+        openclaw_catalog_path(&root, vars, home)?,
+    ])
+}
+
+/// Which Kimi config to write. The successor wins whenever it exists; with
+/// neither, the successor is where a takeover starts writing, because that is
+/// what a fresh install is.
+fn kimi_config(vars: &ShellVars, home: &Path) -> Result<PathBuf, String> {
+    let successor = config_dir(vars, "KIMI_CODE_HOME", ".kimi-code", home)?.join("config.toml");
+    if successor.exists() {
+        return Ok(successor);
+    }
+    let legacy = config_dir(vars, "KIMI_SHARE_DIR", ".kimi", home)?.join("config.toml");
+    Ok(if legacy.exists() { legacy } else { successor })
+}
+
+/// Cline's provider settings, resolved through its own three-level chain: an
+/// exact file path, else a data directory, else a base directory whose `data/`
+/// is the data directory.
+fn cline_provider_settings(vars: &ShellVars, home: &Path) -> Result<PathBuf, String> {
+    match named_dir(vars, "CLINE_PROVIDER_SETTINGS_PATH") {
+        EnvDir::Absolute(path) => Ok(path),
+        EnvDir::Relative(raw) => Err(relative_env_refusal(
+            "CLINE_PROVIDER_SETTINGS_PATH",
+            &raw,
+            &home
+                .join(".cline")
+                .join("data")
+                .join("settings")
+                .join("providers.json"),
+        )),
+        EnvDir::Unset => {
+            // CLINE_DATA_DIR names the data directory itself and beats
+            // CLINE_DIR; only when it is unset does the base come into it,
+            // with `data` under it — which is also what the base defaults
+            // to, so an empty environment lands on `~/.cline/data`.
+            let data = match named_dir(vars, "CLINE_DATA_DIR") {
+                EnvDir::Absolute(dir) => dir,
+                EnvDir::Relative(raw) => {
+                    return Err(relative_env_refusal(
+                        "CLINE_DATA_DIR",
+                        &raw,
+                        &home.join(".cline").join("data"),
+                    ))
+                }
+                EnvDir::Unset => config_dir(vars, "CLINE_DIR", ".cline", home)?.join("data"),
+            };
+            Ok(data.join("settings").join("providers.json"))
+        }
     }
 }
 

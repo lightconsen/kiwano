@@ -3,6 +3,7 @@
 //! report a restore that did not happen.
 
 use crate::detect::ShellVars;
+use crate::takeover::backup::BackupFile;
 use crate::takeover::paths::takeover_paths;
 use crate::takeover::rewrite::{merge_codex_placeholder_auth, rewrite};
 use crate::takeover::state::{
@@ -44,8 +45,35 @@ pub fn disable(
     // are resolved by the helpers below (each of which needs the same roots).
     takeover_paths(agent, home, vars)?;
 
-    // An unusable backup row is dropped rather than kept: it can never be
-    // written back, and its presence is what would keep claiming a takeover.
+    // Tier one: the backup, if it is usable.
+    let (backup, warning) = usable_backup(aux, agent);
+    if let Some(files) = backup {
+        return restore_backup(aux, agent, &files, warning);
+    }
+
+    // Tier two: no usable backup left a question only the live files can
+    // answer — whether anything of ours is there to undo at all.
+    if live_placeholder_key(agent, home, vars).is_none() {
+        return Ok(RestoreReport {
+            outcome: RestoreOutcome::NotTakenOver,
+            warning,
+        });
+    }
+
+    // Tier three: rebuild the route from the provider the gateway serves.
+    if let Some(report) = rebuild_tier(aux, agent, home, fallback, vars, warning) {
+        return Ok(report);
+    }
+
+    // Tier four: take the route out of the live config and report the loss.
+    Err(strip_tier_error(agent, home, vars))
+}
+
+/// Tier one: the backup row, vetted. A row that is unusable — one holding a
+/// gateway route rather than the original config — is dropped rather than kept:
+/// it can never be written back, and its presence is what would keep claiming a
+/// takeover. Dropping it is reported as a warning, not an error.
+fn usable_backup(aux: &Aux, agent: &str) -> (Option<Vec<BackupFile>>, Option<String>) {
     let mut warning = None;
     let backup = match aux.load_takeover_backup(agent) {
         Some((_, files))
@@ -61,80 +89,96 @@ pub fn disable(
         }
         other => other.map(|(_, files)| files),
     };
+    (backup, warning)
+}
 
-    if let Some(files) = backup {
-        for file in &files {
-            let path = Path::new(&file.path);
-            if file.existed {
-                atomic_write_private(path, file.content.as_bytes())
-                    .map_err(|e| format!("could not restore {}: {e}", file.path))?;
-            } else {
-                match std::fs::remove_file(path) {
-                    Ok(()) => {}
-                    // Already gone: the takeover created it, so this is the same
-                    // end state. Anything else (permissions, a directory in the
-                    // way) is reported rather than swallowed.
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(format!("{}: {e}", file.path)),
-                }
-            }
-        }
-        // The restore is done; a row that will not go away is untidy, not
-        // broken — the next takeover overwrites it and the next restore is
-        // idempotent.
-        if let Err(e) = aux.delete_takeover_backup(agent) {
-            warning = Some(format!(
-                "the {agent} config was restored but its backup row could not be dropped: {e}"
-            ));
-        }
-        return Ok(RestoreReport {
-            outcome: RestoreOutcome::RestoredFromBackup,
-            warning,
-        });
-    }
-
-    // No usable backup. Only the live files can say whether anything is there
-    // to undo.
-    if live_placeholder_key(agent, home, vars).is_none() {
-        return Ok(RestoreReport {
-            outcome: RestoreOutcome::NotTakenOver,
-            warning,
-        });
-    }
-
-    if REBUILDABLE_AGENTS.contains(&agent) {
-        if let Some(route) = fallback {
-            if rebuild_from_provider(agent, home, route, vars).is_ok() {
-                if let Err(e) = aux.delete_takeover_backup(agent) {
-                    warning = Some(format!(
-                        "the {agent} config was rebuilt but its backup row could not be dropped: {e}"
-                    ));
-                }
-                return Ok(RestoreReport {
-                    outcome: RestoreOutcome::RebuiltFromProvider,
-                    warning,
-                });
+/// Tier one continued: write the captured files back — a file that did not
+/// exist before the takeover is removed rather than written empty — then
+/// deregister the backup.
+fn restore_backup(
+    aux: &Aux,
+    agent: &str,
+    files: &[BackupFile],
+    mut warning: Option<String>,
+) -> Result<RestoreReport, String> {
+    for file in files {
+        let path = Path::new(&file.path);
+        if file.existed {
+            atomic_write_private(path, file.content.as_bytes())
+                .map_err(|e| format!("could not restore {}: {e}", file.path))?;
+        } else {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                // Already gone: the takeover created it, so this is the same
+                // end state. Anything else (permissions, a directory in the
+                // way) is reported rather than swallowed.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("{}: {e}", file.path)),
             }
         }
     }
-
-    // Last resort: take our route out of the live config, then report the loss
-    // honestly. This must not fail silently — the user's upstream credentials
-    // are gone even though their agent is no longer pointed at the gateway.
-    strip_gateway_route(agent, home, vars).map_err(|e| {
-        format!(
-            "the {agent} takeover backup is gone and its gateway route could not be removed: {e}"
-        )
-    })?;
-    if live_placeholder_key(agent, home, vars).is_some() {
-        return Err(format!(
-            "the {agent} gateway route could not be removed from its live config — remove the {} route by hand before using {agent}",
-            codex_config::GATEWAY_PLACEHOLDER_PREFIX
+    // The restore is done; a row that will not go away is untidy, not broken —
+    // the next takeover overwrites it and the next restore is idempotent.
+    if let Err(e) = aux.delete_takeover_backup(agent) {
+        warning = Some(format!(
+            "the {agent} config was restored but its backup row could not be dropped: {e}"
         ));
     }
-    Err(format!(
+    Ok(RestoreReport {
+        outcome: RestoreOutcome::RestoredFromBackup,
+        warning,
+    })
+}
+
+/// Tier three: the same rewrite a takeover performs, aimed at the provider's
+/// own endpoint and key. `None` means the tier does not apply — the agent has
+/// no provider-shaped config to rebuild, no provider was handed in, or the
+/// rebuild itself failed — and the caller moves on to stripping. A rebuild that
+/// did land also drops the backup row, which is untidy to keep but not a
+/// failure to report as one.
+fn rebuild_tier(
+    aux: &Aux,
+    agent: &str,
+    home: &Path,
+    fallback: Option<&ProviderRoute>,
+    vars: &ShellVars,
+    mut warning: Option<String>,
+) -> Option<RestoreReport> {
+    if !REBUILDABLE_AGENTS.contains(&agent) {
+        return None;
+    }
+    let route = fallback?;
+    rebuild_from_provider(agent, home, route, vars).ok()?;
+    if let Err(e) = aux.delete_takeover_backup(agent) {
+        warning = Some(format!(
+            "the {agent} config was rebuilt but its backup row could not be dropped: {e}"
+        ));
+    }
+    Some(RestoreReport {
+        outcome: RestoreOutcome::RebuiltFromProvider,
+        warning,
+    })
+}
+
+/// Tier four: take our route out of the live config, then report the loss. The
+/// message is the answer either way, because this must not fail silently — the
+/// user's upstream credentials are gone even though their agent is no longer
+/// pointed at the gateway.
+fn strip_tier_error(agent: &str, home: &Path, vars: &ShellVars) -> String {
+    if let Err(e) = strip_gateway_route(agent, home, vars) {
+        return format!(
+            "the {agent} takeover backup is gone and its gateway route could not be removed: {e}"
+        );
+    }
+    if live_placeholder_key(agent, home, vars).is_some() {
+        return format!(
+            "the {agent} gateway route could not be removed from its live config — remove the {} route by hand before using {agent}",
+            codex_config::GATEWAY_PLACEHOLDER_PREFIX
+        );
+    }
+    format!(
         "the {agent} takeover backup is gone: the gateway route was removed so {agent} no longer points at the local gateway, but the original configuration could not be recovered — re-enter {agent}'s provider settings"
-    ))
+    )
 }
 
 /// Rebuild an agent's live config from the provider the gateway serves it:

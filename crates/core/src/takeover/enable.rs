@@ -9,7 +9,7 @@ use crate::takeover::rewrite::{codex_rewrites, rewrite};
 use crate::takeover::state::live_placeholder_key;
 use crate::vm::Aux;
 use kiwano_adapters::config::atomic_write_private;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The local gateway's origin. The port comes from the caller (the sidecar's
 /// data port), and the per-agent path suffix from [`gateway_target`].
@@ -31,9 +31,36 @@ pub fn enable(
     home: &Path,
     vars: &ShellVars,
 ) -> Result<(), String> {
+    // Read: the files as they are now, and whether each was there at all.
     let paths = takeover_paths(agent, home, vars)?;
-    let mut originals: Vec<BackupFile> = Vec::new();
-    for p in &paths {
+    let originals = read_originals(agent, &paths)?;
+
+    // Rewrite: every new content computed in memory, so a refusal costs nothing.
+    let rewritten = compute_rewrites(agent, &originals, placeholder_key, data_port)?;
+
+    // Back up unless what is on disk is already our route: a repeated enable
+    // must not record a loopback config as the user's original (escape-hatch
+    // semantics). The backup *row* is not the question it used to be — it can
+    // be a leftover from a takeover whose rewrite is gone (the agent's config
+    // was put back by hand or by another tool), and skipping the backup then
+    // would leave restore aimed at a config this takeover is not replacing.
+    let first_time = live_placeholder_key(agent, home, vars).is_none();
+    if first_time {
+        aux.save_takeover_backup(agent, &originals)
+            .map_err(|e| e.to_string())?;
+        copy_files(agent, home, &originals);
+    }
+
+    // Write, and put everything back if a write fails.
+    write_rewrites(aux, agent, &rewritten, &originals, first_time)
+}
+
+/// The first step of [`enable`]: read every file a takeover will touch, with
+/// what each held before. Nothing is created here — a takeover writes only
+/// after every rewrite has been computed.
+fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, String> {
+    let mut originals: Vec<BackupFile> = Vec::with_capacity(paths.len());
+    for p in paths {
         // codex's auth.json, every additive agent's config, and
         // all claude-desktop files are allowed to be missing (treated as empty
         // files — every claude-desktop write normalizes a missing/non-object
@@ -72,22 +99,20 @@ pub fn enable(
             existed,
         });
     }
+    Ok(originals)
+}
 
-    let rewritten = compute_rewrites(agent, &originals, placeholder_key, data_port)?;
-
-    // Back up unless what is on disk is already our route: a repeated enable
-    // must not record a loopback config as the user's original (escape-hatch
-    // semantics). The backup *row* is not the question it used to be — it can
-    // be a leftover from a takeover whose rewrite is gone (the agent's config
-    // was put back by hand or by another tool), and skipping the backup then
-    // would leave restore aimed at a config this takeover is not replacing.
-    let first_time = live_placeholder_key(agent, home, vars).is_none();
-    if first_time {
-        aux.save_takeover_backup(agent, &originals)
-            .map_err(|e| e.to_string())?;
-        copy_files(agent, home, &originals);
-    }
-
+/// The last step of [`enable`]: write every rewrite, and on the first failure
+/// put the files this call already replaced back and drop the backup row it
+/// created — so a takeover that did not land leaves nothing behind that says it
+/// did.
+fn write_rewrites(
+    aux: &Aux,
+    agent: &str,
+    rewritten: &Files,
+    originals: &[BackupFile],
+    first_time: bool,
+) -> Result<(), String> {
     let mut written: Vec<usize> = Vec::with_capacity(rewritten.len());
     for (index, (path, content)) in rewritten.iter().enumerate() {
         // The config's directory may not exist at all (a first takeover), so
@@ -96,7 +121,7 @@ pub fn enable(
             let _ = std::fs::create_dir_all(parent);
         }
         if let Err(e) = atomic_write_private(Path::new(path), content.as_bytes()) {
-            rollback_writes(&rewritten, &written, &originals);
+            rollback_writes(rewritten, &written, originals);
             if first_time {
                 let _ = aux.delete_takeover_backup(agent);
             }

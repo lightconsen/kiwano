@@ -1146,6 +1146,7 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            request_notes: None,
         })
         .unwrap();
 }
@@ -1602,6 +1603,7 @@ fn seed_insight_row(
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            request_notes: None,
         })
         .unwrap()
 }

@@ -619,6 +619,7 @@ fn update_settings(
     if patch.get("request_logs").is_some()
         || patch.get("log_retention_days").is_some()
         || patch.get("log_max_body_bytes").is_some()
+        || patch.get("compat_shim").is_some()
         || patch.get("stream_first_byte_secs").is_some()
         || patch.get("stream_idle_secs").is_some()
     {

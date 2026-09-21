@@ -21,7 +21,7 @@ use crate::error::Result;
 use kiwano_adapters::model_pricing::{DeclaredPrices, ModelPriceEntry};
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 25;
+pub const SCHEMA_VERSION: i32 = 26;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -679,6 +679,24 @@ ALTER TABLE request_logs ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE request_logs ADD COLUMN usage_missing INTEGER NOT NULL DEFAULT 0;
 "#;
 
+/// v26: what the compat shim changed about a request, in the request's own
+/// row.
+///
+/// The shim (providers/shim.rs in adapters) edits a passthrough body before
+/// it reaches an upstream — removing parameters the upstream's parser cannot
+/// know, filling schemas it would refuse. Those edits are the gateway doing
+/// something the client did not ask for, on the client's behalf, and a request
+/// log that showed only the outcome would leave the middle unexplained. The
+/// notes are the explanation: one line per action, NULL when nothing was
+/// touched — which is almost every row, and deliberately a different
+/// statement from any note.
+///
+/// Never folded into `error_kind`/`error_message`: those gate the UI's error
+/// rendering, and a sanitized request that answered 200 is not an error.
+const MIGRATION_V26: &str = r#"
+ALTER TABLE request_logs ADD COLUMN request_notes TEXT;
+"#;
+
 const MIGRATION_V23: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE providers_new (
@@ -1191,6 +1209,9 @@ pub struct RequestLogNew {
     pub cost_currency: Option<String>,
     /// The off-peak equivalent of `cost` (migration v13) — see `UsageRecord`.
     pub cost_off_peak: Option<f64>,
+    /// What the compat shim changed about this request, one line per action
+    /// (migration v26). `None` when nothing was touched — the common case.
+    pub request_notes: Option<String>,
 }
 
 /// Metadata row of `request_logs` (list view — never includes bodies).
@@ -1234,6 +1255,9 @@ pub struct RequestLogEntry {
     /// Its off-peak equivalent (migration v13) — see `UsageRecord`. Not in the
     /// CSV export: that file states what happened, not what could have.
     pub cost_off_peak: Option<f64>,
+    /// What the compat shim changed about this request (migration v26), one
+    /// line per action; `None` when nothing was touched.
+    pub request_notes: Option<String>,
 }
 
 /// One row of an export: the metadata every export carries, plus the captured
@@ -1298,13 +1322,13 @@ const REQUEST_LOG_COLUMNS: &str = "id, ts, method, path, query, agent, attributi
                                    cache_creation_tokens, latency_ms, first_token_ms,
                                    request_headers, response_headers, request_size, response_size,
                                    truncated, cost, cost_currency, cost_off_peak,
-                                   reasoning_tokens, usage_missing";
+                                   reasoning_tokens, usage_missing, request_notes";
 
 /// How many columns [`REQUEST_LOG_COLUMNS`] names. The body join appends two
 /// more, and the only way to read them by index without counting commas is to
 /// count them here — an off-by-one silently reads the wrong field into
 /// `request_body` (the CSV export test caught exactly that when v13 added one).
-const REQUEST_LOG_COLUMN_COUNT: usize = 30;
+const REQUEST_LOG_COLUMN_COUNT: usize = 31;
 
 /// Ceiling on one export. A local log can be large, and the CSV is built in
 /// memory before it is written, so the read is capped rather than unbounded;
@@ -1352,6 +1376,25 @@ impl Default for LogConfig {
 
 /// `gateway_settings` key holding the serialized `LogConfig`.
 pub const LOG_CONFIG_KEY: &str = "request_logs";
+
+/// The compat shim's configuration (`gateway_settings` JSON blob). One switch:
+/// the rules themselves are built in and deliberately not configurable
+/// one-by-one — each is narrow enough that the honest choices are "on" and
+/// "off", and a matrix of toggles nobody asked for is just places to be wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatShimConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for CompatShimConfig {
+    fn default() -> Self {
+        CompatShimConfig { enabled: true }
+    }
+}
+
+/// `gateway_settings` key holding the serialized `CompatShimConfig`.
+pub const COMPAT_SHIM_CONFIG_KEY: &str = "compat_shim";
 
 /// How long an upstream stream may go without producing anything
 /// (`gateway_settings` JSON blob, [`STREAM_TIMEOUTS_KEY`]).
@@ -1868,6 +1911,9 @@ impl Store {
         }
         if version < 25 {
             conn.execute_batch(MIGRATION_V25)?;
+        }
+        if version < 26 {
+            conn.execute_batch(MIGRATION_V26)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -2737,10 +2783,10 @@ impl Store {
                                        request_headers, response_headers,
                                        request_size, response_size, truncated,
                                        cost, cost_currency, cost_off_peak,
-                                       reasoning_tokens, usage_missing)
+                                       reasoning_tokens, usage_missing, request_notes)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                      ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-                     ?28, ?29)",
+                     ?28, ?29, ?30)",
             params![
                 r.ts,
                 r.method,
@@ -2771,6 +2817,7 @@ impl Store {
                 r.cost_off_peak,
                 r.reasoning_tokens,
                 r.usage_missing as i64,
+                r.request_notes,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -3136,6 +3183,34 @@ impl Store {
         Ok(())
     }
 
+    /// Load the compat shim config (defaults when the key is absent/corrupt).
+    pub fn load_compat_shim_config(&self) -> Result<CompatShimConfig> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT value FROM gateway_settings WHERE key = ?1",
+                params![COMPAT_SHIM_CONFIG_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(match value {
+            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            None => CompatShimConfig::default(),
+        })
+    }
+
+    /// Persist the compat shim config (same contract as the log config).
+    pub fn save_compat_shim_config(&self, cfg: &CompatShimConfig) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let json = serde_json::to_string(cfg)?;
+        conn.execute(
+            "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![COMPAT_SHIM_CONFIG_KEY, json],
+        )?;
+        Ok(())
+    }
+
     /// Streaming timeouts, same contract as the log config: the GUI writes, the
     /// gateway reads at startup and on `/reload`.
     pub fn load_stream_timeouts(&self) -> Result<StreamTimeouts> {
@@ -3447,6 +3522,7 @@ fn request_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogE
         cost_off_peak: row.get(27)?,
         reasoning_tokens: row.get(28)?,
         usage_missing: row.get::<_, i64>(29)? != 0,
+        request_notes: row.get(30)?,
     })
 }
 
@@ -4454,6 +4530,84 @@ mod tests {
     }
 
     #[test]
+    fn migration_v26_adds_request_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v25 database holding one request, logged by a build
+        // that knew nothing about the shim's notes.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+                MIGRATION_V21,
+                MIGRATION_V22,
+                MIGRATION_V23,
+                MIGRATION_V24,
+                MIGRATION_V25,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO request_logs (ts, method, path, status_code, input_tokens,
+                                           output_tokens, cache_read_tokens,
+                                           cache_creation_tokens, request_size, response_size)
+                 VALUES ('2026-09-07T10:00:00+00:00', 'POST', '/v1/messages', 200, 15302,
+                         102, 15232, 0, 10, 20);
+                 PRAGMA user_version = 25;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        let (rows, _) = store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
+        assert_eq!(rows.len(), 1, "the row an older build wrote is still there");
+        assert_eq!(
+            rows[0].request_notes, None,
+            "the new column reads its default on a row that predates it"
+        );
+
+        // The column is writable: a row written now carries its notes, and a
+        // shim-free row stays NULL — not empty text, so the UI can tell
+        // "nothing happened" from a note that has not arrived.
+        let mut log = sample_log("2026-09-07T11:00:00+00:00", Some("codex"), 200);
+        log.request_notes = Some("thinking: removed unsupported type \"adaptive\"".into());
+        store.insert_request_log(&log).unwrap();
+        let mut clean = sample_log("2026-09-07T12:00:00+00:00", Some("codex"), 200);
+        clean.request_notes = None;
+        store.insert_request_log(&clean).unwrap();
+        let (rows, _) = store
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
+        assert_eq!(
+            rows[1].request_notes.as_deref(),
+            Some("thinking: removed unsupported type \"adaptive\""),
+            "newest first: the clean 12:00 row reads [0]"
+        );
+        assert_eq!(rows[0].request_notes, None);
+    }
+
+    #[test]
     /// v24 adds the column without disturbing what was already there: an agent
     /// defined before it says nothing about its protocol, and saying nothing is
     /// not one of the three words.
@@ -5389,6 +5543,7 @@ mod tests {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            request_notes: None,
         }
     }
 

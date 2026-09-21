@@ -26,7 +26,7 @@ use serde_json::json;
 
 use crate::error::{GatewayError, Result};
 use crate::router::RouteTable;
-use crate::store::{LogConfig, Protocol, Store, StreamTimeouts};
+use crate::store::{CompatShimConfig, LogConfig, Protocol, Store, StreamTimeouts};
 
 /// Max inbound body size forwarded to upstreams (32 MiB is generous for
 /// long-context agent payloads).
@@ -44,6 +44,9 @@ pub struct GatewayState {
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Request-log capture config, refreshed alongside the route table.
     log_cfg: RwLock<LogConfig>,
+    /// Compat shim on/off, same lifecycle as `log_cfg`: read at startup,
+    /// re-read on `/reload`.
+    shim_cfg: RwLock<CompatShimConfig>,
     /// The credentials this install holds, for scrubbing captured bodies by
     /// value. Refreshed with the rest of the cached configuration, so a key
     /// added in the UI applies to the next request rather than the next
@@ -135,6 +138,7 @@ impl GatewayState {
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
         let log_config = store.load_log_config().unwrap_or_default();
+        let shim_cfg = store.load_compat_shim_config().unwrap_or_default();
         let stream_cfg = store.load_stream_timeouts().unwrap_or_default();
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
@@ -162,6 +166,7 @@ impl GatewayState {
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
             log_cfg: RwLock::new(log_config),
+            shim_cfg: RwLock::new(shim_cfg),
             redactor: RwLock::new(Arc::new(redactor)),
             stream_cfg: RwLock::new(stream_cfg),
             pricing: RwLock::new(pricing),
@@ -245,6 +250,14 @@ impl GatewayState {
             .clone()
     }
 
+    /// Whether the compat shim sanitizes passthrough bodies (Copy, so free).
+    pub fn compat_shim_enabled(&self) -> bool {
+        self.shim_cfg
+            .read()
+            .expect("shim config lock poisoned")
+            .enabled
+    }
+
     /// The credential scrubber for captured bodies (cheap clone of an Arc).
     pub fn redactor(&self) -> Arc<crate::log_capture::Redactor> {
         self.redactor
@@ -280,6 +293,9 @@ impl GatewayState {
         *self.route_table.write().expect("route table lock poisoned") = table;
         if let Ok(cfg) = self.store.load_log_config() {
             *self.log_cfg.write().expect("log config lock poisoned") = cfg;
+        }
+        if let Ok(cfg) = self.store.load_compat_shim_config() {
+            *self.shim_cfg.write().expect("shim config lock poisoned") = cfg;
         }
         // Rebuilt rather than patched, and on every reload: a provider whose key
         // the user just replaced must not be scrubbed by the old value only.

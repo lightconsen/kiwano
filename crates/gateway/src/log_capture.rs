@@ -615,6 +615,10 @@ pub fn persist_attempt_failure(
         cost: None,
         cost_currency: None,
         cost_off_peak: None,
+        // These rows are written by paths that never ran the shim (a failed
+        // attempt or a pre-forward failure); the request-level row carries
+        // the notes, if any.
+        request_notes: None,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist attempt log");
@@ -672,6 +676,10 @@ pub fn persist_failure(
         cost: None,
         cost_currency: None,
         cost_off_peak: None,
+        // These rows are written by paths that never ran the shim (a failed
+        // attempt or a pre-forward failure); the request-level row carries
+        // the notes, if any.
+        request_notes: None,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist request log");

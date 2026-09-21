@@ -2061,6 +2061,11 @@ fn render_log_detail(detail: &kiwanod::store::RequestLogDetail) -> String {
             e.error_message.as_deref().unwrap_or("(no message)")
         ));
     }
+    if let Some(notes) = &e.request_notes {
+        // What the compat shim changed on the way through — diagnostic text
+        // the raw request body alone does not explain.
+        out.push_str(&format!("\nsanitizer {notes}"));
+    }
     // Bodies are the reason to open one of these; they are already redacted by
     // the capture layer.
     for (label, body) in [

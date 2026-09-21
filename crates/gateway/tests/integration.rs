@@ -2210,3 +2210,472 @@ mod metrics_auth {
         assert!(body.contains("agent=\"claude\""));
     }
 }
+
+// ── Compat shim: the native passthrough path's request sanitization ──
+
+/// Raw upstream request bodies, captured byte-exact: the shim's "untouched
+/// means untouched" promise is about bytes, and a `Value` capture would
+/// re-serialize away the very property under test.
+type CapturedRawBodies = Arc<Mutex<Vec<Bytes>>>;
+
+/// Spawn a mock Anthropic upstream that records every request body it gets,
+/// byte-exact, on both `/v1/messages` and `/v1/messages/count_tokens` — the
+/// shim runs on the latter too, and the tests hold it to that.
+async fn mock_anthropic_capturing_body(
+    response: MockReply,
+) -> (String, Captured, CapturedRawBodies) {
+    let captured: Captured = Arc::new(Mutex::new(Vec::new()));
+    let bodies: CapturedRawBodies = Arc::new(Mutex::new(Vec::new()));
+    let (reply_messages, reply_count) = (response.clone(), response);
+    let app = Router::new()
+        .route(
+            "/v1/messages",
+            post(
+                move |AxumState((c, b)): AxumState<(Captured, CapturedRawBodies)>,
+                      headers: HeaderMap,
+                      body: Bytes| {
+                    let reply = reply_messages;
+                    async move {
+                        capture(&c, &headers, "x-api-key");
+                        b.lock().unwrap().push(body);
+                        mock_response(&reply)
+                    }
+                },
+            ),
+        )
+        .route(
+            "/v1/messages/count_tokens",
+            post(
+                move |AxumState((c, b)): AxumState<(Captured, CapturedRawBodies)>,
+                      headers: HeaderMap,
+                      body: Bytes| {
+                    let reply = reply_count;
+                    async move {
+                        capture(&c, &headers, "x-api-key");
+                        b.lock().unwrap().push(body);
+                        mock_response(&reply)
+                    }
+                },
+            ),
+        )
+        .with_state((captured.clone(), bodies.clone()));
+    (spawn(app).await, captured, bodies)
+}
+
+fn raw_body(bodies: &CapturedRawBodies) -> Bytes {
+    let raw = bodies.lock().unwrap();
+    assert!(!raw.is_empty(), "the upstream received no body");
+    raw[0].clone()
+}
+
+fn parsed_body(bodies: &CapturedRawBodies) -> Value {
+    serde_json::from_slice(&raw_body(bodies)).unwrap()
+}
+
+/// R1 (#2693): Claude Code's `thinking: adaptive` never reaches an
+/// anthropic-native upstream, and the request log row explains the delta.
+#[tokio::test]
+async fn the_shim_strips_adaptive_thinking_and_records_what_it_did() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","thinking":{"type":"adaptive","budget_tokens":2048},"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_body = parsed_body(&bodies);
+    assert!(
+        upstream_body.get("thinking").is_none(),
+        "the upstream never sees the parameter it cannot parse: {upstream_body}"
+    );
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(
+        rows[0].request_notes.as_deref(),
+        Some("thinking: removed unsupported type \"adaptive\"")
+    );
+}
+
+/// R2 (#3216): history produced under one provider is replayed against
+/// another; the blocks the new upstream cannot verify go, and the log says so.
+#[tokio::test]
+async fn the_shim_strips_thinking_history_once_thinking_is_not_requested() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","thinking":{"type":"disabled"},"messages":[
+            {"role":"user","content":"go"},
+            {"role":"assistant","content":[
+                {"type":"thinking","thinking":"hmm","signature":"sig"},
+                {"type":"text","text":"done"}]}
+        ]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_body = parsed_body(&bodies);
+    let content = upstream_body["messages"][1]["content"].as_array().unwrap();
+    assert!(
+        content.iter().all(|b| b["type"] != "thinking"),
+        "the new upstream gets history it can parse: {upstream_body}"
+    );
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().unwrap_or_default();
+    assert!(notes.contains("assistant history: removed 1 thinking/redacted_thinking block(s)"));
+}
+
+/// R3 (#5327): Codex's `null` tool schema reaches an OpenAI-native upstream
+/// as a minimal object schema instead.
+#[tokio::test]
+async fn the_shim_fills_a_null_tool_schema_for_openai_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, bodies) = mock_openai_capturing_body(MockReply::Json(json!({
+        "id": "chatcmpl_1",
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"deepseek-chat","tools":[{"type":"function","function":{"name":"automation_update","parameters":null}}],"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_body = bodies.lock().unwrap()[0].clone();
+    assert_eq!(
+        upstream_body["tools"][0]["function"]["parameters"]["type"],
+        "object"
+    );
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().unwrap_or_default();
+    assert!(notes.contains(
+        "tool \"automation_update\": null parameters schema replaced with an empty object schema"
+    ));
+}
+
+/// The switch is the escape hatch: off means the shim never ran, and the
+/// upstream gets the client's request down to the byte.
+#[tokio::test]
+async fn with_the_shim_off_the_body_is_forwarded_exactly_as_sent() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    // Off before the state snapshots its config — `new` is the read.
+    store
+        .save_compat_shim_config(&kiwanod::store::CompatShimConfig { enabled: false })
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let client_body = r#"{"model":"claude-sonnet-4-5","thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}"#;
+    let response = post_json(&app, "/v1/messages", Some("kw-ag-claude-test"), client_body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    assert_eq!(
+        raw_body(&bodies),
+        Bytes::from_static(client_body.as_bytes()),
+        "shim off: the upstream sees the client's exact bytes"
+    );
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(rows[0].request_notes, None);
+}
+
+/// Default on, but a body with nothing to sanitize must not be re-serialized:
+/// upstream prompt caches key on the exact prefix.
+#[tokio::test]
+async fn a_body_with_nothing_to_sanitize_is_forwarded_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let client_body =
+        r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}"#;
+    let response = post_json(&app, "/v1/messages", Some("kw-ag-claude-test"), client_body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    assert_eq!(
+        raw_body(&bodies),
+        Bytes::from_static(client_body.as_bytes())
+    );
+    let rows = wait_for_log(&state, 1).await;
+    assert_eq!(rows[0].request_notes, None);
+}
+
+/// Failover replays the pristine client body through `forward()` per
+/// candidate, so each upstream gets the same sanitized shape — and each
+/// attempt's log row carries the same explanation.
+#[tokio::test]
+async fn failover_replays_the_sanitized_body_and_notes_both_attempts() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (primary_url, _primary_hits, primary_bodies) =
+        mock_anthropic_capturing_body(MockReply::Status(StatusCode::TOO_MANY_REQUESTS)).await;
+    let (backup_url, _backup_hits, backup_bodies) =
+        mock_anthropic_capturing_body(MockReply::Json(json!({
+            "served_by": "backup",
+            "usage": {"input_tokens": 7, "output_tokens": 3}
+        })))
+        .await;
+    store
+        .insert_provider(&provider("p-a", Protocol::Anthropic, primary_url))
+        .unwrap();
+    store
+        .insert_provider(&provider("p-b", Protocol::Anthropic, backup_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
+    store.upsert_binding(&bind("claude", "p-b", 1)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    store
+        .upsert_strategy("claude", StrategyType::Failover, None)
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m","thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Both upstreams were asked, both saw the same sanitized body.
+    let primary = parsed_body(&primary_bodies);
+    let backup = parsed_body(&backup_bodies);
+    assert!(primary.get("thinking").is_none());
+    assert_eq!(
+        primary, backup,
+        "the replay carries the same sanitized shape"
+    );
+
+    let rows = wait_for_log(&state, 2).await;
+    assert_eq!(
+        total_note(&rows, "p-a"),
+        1,
+        "the refused attempt explains itself too"
+    );
+    assert_eq!(total_note(&rows, "p-b"), 1);
+}
+
+fn total_note(rows: &[RequestLogEntry], provider_id: &str) -> usize {
+    rows.iter()
+        .filter(|r| r.provider_id.as_deref() == Some(provider_id))
+        .filter(|r| {
+            r.request_notes
+                .as_deref()
+                .map(|n| n.contains("thinking: removed unsupported type \"adaptive\""))
+                .unwrap_or(false)
+        })
+        .count()
+}
+
+/// An empty body has nothing to sanitize: the models scrape rides through.
+#[tokio::test]
+async fn get_models_with_an_empty_body_is_a_noop() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    // The gateway forwards GET /v1/models to the upstream's own path.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/v1/models",
+                axum::routing::get(|| async { Json(json!({"data": []})) }),
+            ),
+        )
+        .await
+    });
+    let url = format!("http://{addr}");
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let mut builder = Request::builder().method("GET").uri("/v1/models");
+    builder = builder.header("x-api-key", "kw-ag-claude-test");
+    let response = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8_lossy(&response_body(response).await).to_string();
+    assert!(body.contains("data"));
+}
+
+/// count_tokens rides the same native path and gets the same treatment: an
+/// upstream that rejects thinking blocks rejects them here too.
+#[tokio::test]
+async fn count_tokens_is_sanitized_like_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "input_tokens": 42
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages/count_tokens",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_body = parsed_body(&bodies);
+    assert!(upstream_body.get("thinking").is_none());
+    let rows = wait_for_log(&state, 1).await;
+    assert!(rows[0]
+        .request_notes
+        .as_deref()
+        .unwrap_or_default()
+        .contains("thinking: removed unsupported type \"adaptive\""));
+}
+
+/// The SSE path persists its log row in `SseUsageStream::finish`, a different
+/// writer than the buffered one — the notes must survive that handoff.
+#[tokio::test]
+async fn streaming_requests_carry_the_notes_through_the_sse_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let chunks = vec![
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"m\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    ];
+    let (url, _captured, bodies) = mock_anthropic_capturing_body(MockReply::Sse(chunks)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m","stream":true,"thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = response_body(response).await;
+
+    let upstream_body = parsed_body(&bodies);
+    assert!(upstream_body.get("thinking").is_none());
+    let rows = wait_for_log(&state, 1).await;
+    assert!(rows[0].is_streaming);
+    assert_eq!(
+        rows[0].request_notes.as_deref(),
+        Some("thinking: removed unsupported type \"adaptive\"")
+    );
+}

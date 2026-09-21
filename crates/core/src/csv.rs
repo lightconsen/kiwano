@@ -10,7 +10,7 @@
 //! cells: with bodies, [`BODY_HEADERS`] are appended after the metadata
 //! columns; without, the file is the metadata columns alone. A file that says
 //! nothing about bodies should not carry two empty columns implying the bodies
-//! were empty, and the 27 metadata columns keep their positions either way, so
+//! were empty, and the 30 metadata columns keep their positions either way, so
 //! a reader that indexes by position is unaffected by the choice.
 
 use kiwanod::store::RequestLogExportRow;
@@ -23,7 +23,7 @@ const BOM: &str = "\u{feff}";
 /// Column order is the contract for whoever parses the file — append, never
 /// reorder. Appending [`BODY_HEADERS`] behind these is exactly that: an
 /// existing position keeps its meaning.
-const HEADERS: [&str; 29] = [
+const HEADERS: [&str; 30] = [
     "id",
     "ts",
     "method",
@@ -53,6 +53,7 @@ const HEADERS: [&str; 29] = [
     "cost_currency",
     "request_headers",
     "response_headers",
+    "request_notes",
 ];
 
 /// The optional tail: present only when the export was asked for bodies.
@@ -110,6 +111,7 @@ fn row(row: &RequestLogExportRow, include_bodies: bool) -> String {
         opt(&entry.cost_currency).to_string(),
         opt(&entry.request_headers).to_string(),
         opt(&entry.response_headers).to_string(),
+        opt(&entry.request_notes).to_string(),
     ];
     if include_bodies {
         // A stored `None` is an absent body, not a body that was withheld —
@@ -194,6 +196,7 @@ mod tests {
             cost: Some(0.02),
             cost_currency: Some("USD".into()),
             cost_off_peak: None,
+            request_notes: None,
         }
     }
 
@@ -249,6 +252,18 @@ mod tests {
             cells[HEADERS.iter().position(|h| *h == "query").unwrap()],
             ""
         );
+    }
+
+    #[test]
+    fn the_sanitizers_notes_export_with_their_row() {
+        let mut e = entry();
+        e.request_notes = Some("tool \"read\": null input_schema, replaced".into());
+        let csv = to_csv(&[export_row_with(e)], false);
+        // The notes carry a comma of their own, so they land quoted — and the
+        // cell must still be findable by its header position. (A note with a
+        // line break would split a naive lines() walk, by design of RFC 4180;
+        // the shim joins its capped notes with \n, so real exports quote too.)
+        assert!(csv.contains("\"tool \"\"read\"\": null input_schema, replaced\""));
     }
 
     #[test]

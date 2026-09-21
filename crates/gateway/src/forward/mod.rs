@@ -87,6 +87,9 @@ struct CompletedLog {
     response_size: i64,
     truncated: bool,
     response_headers: Option<String>,
+    /// What the compat shim changed, one line per action — `None` when it
+    /// touched nothing, which is the statement the row should carry.
+    request_notes: Option<String>,
 }
 
 /// One metered request, ready for the `usage` table (+ full request log).
@@ -630,6 +633,31 @@ fn ensure_openai_stream_usage(body: &Bytes) -> Option<Bytes> {
     Some(Bytes::from(serde_json::to_vec(&v).ok()?))
 }
 
+/// Run the compat shim over a passthrough body and report what it changed.
+///
+/// `None` means "forward the original bytes": empty body (GET /v1/models),
+/// not JSON, Gemini (the one protocol v1 has no rules for), or — the common
+/// case by far — nothing matched. That last answer is deliberately an
+/// untouched `None` rather than a re-serialization: upstream prompt caches
+/// key on the exact prefix, and a body we never needed to edit must not
+/// rotate one. `Some` carries the sanitized bytes plus the notes the request
+/// log will store.
+fn apply_compat_shim(body: &Bytes, protocol: Protocol) -> Option<(Bytes, String)> {
+    if body.is_empty() || protocol == Protocol::Gemini {
+        return None;
+    }
+    let mut v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let notes = match protocol {
+        Protocol::Anthropic => kiwano_adapters::proxy::providers::shim::sanitize_anthropic(&mut v),
+        Protocol::OpenAI => kiwano_adapters::proxy::providers::shim::sanitize_openai(&mut v),
+        Protocol::Gemini => return None,
+    };
+    if notes.is_empty() {
+        return None;
+    }
+    Some((Bytes::from(serde_json::to_vec(&v).ok()?), notes.join("\n")))
+}
+
 /// Whether an SSE line is the usage-only chunk: an empty `choices` array beside
 /// a `usage` object. That is the shape `include_usage` produces, and the shape
 /// a client that did not ask for the option has no reason to expect.
@@ -772,6 +800,7 @@ pub async fn forward(
         response_size: 0,
         truncated: false,
         response_headers: None,
+        request_notes: None,
     });
 
     // Resolve the endpoint + protocol for the inbound flavor: native when it
@@ -874,6 +903,21 @@ pub async fn forward(
     // API names it in the path instead, so that shape is read from there.
     let model = request_model(&body).or_else(|| model_from_path(&path));
 
+    // The compat shim runs first, on the client's own bytes: strip parameters
+    // the effective upstream cannot parse, and remember what changed so the
+    // request log can explain the delta. Keyed on the resolved provider —
+    // an Alternate endpoint's protocol counts — and skipped entirely when the
+    // global switch is off.
+    let shimmed = if state.compat_shim_enabled() {
+        apply_compat_shim(&body, provider.protocol)
+    } else {
+        None
+    };
+    if let (Some(l), Some((_, notes))) = (log.as_mut(), shimmed.as_ref()) {
+        l.request_notes = Some(notes.clone());
+    }
+    let body = shimmed.map_or_else(|| body.clone(), |(b, _)| b);
+
     // Ask the upstream to report usage when the client did not, and remember
     // that we did: the extra chunk it sends back is ours to take out again.
     //
@@ -969,6 +1013,7 @@ pub async fn forward(
                     response_body: None,
                     response_size: 0,
                     truncated: false,
+                    request_notes: l.request_notes,
                 }),
             },
             started,
@@ -1256,6 +1301,7 @@ async fn forward_anthropic_via_openai(
                     response_body: None,
                     response_size: 0,
                     truncated: false,
+                    request_notes: l.request_notes,
                 }),
             },
             started,
@@ -1499,6 +1545,7 @@ fn record_sample(state: &GatewayState, sample: UsageSample) {
             cost: record.cost,
             cost_currency: record.cost_currency,
             cost_off_peak: record.cost_off_peak,
+            request_notes: log.request_notes,
         };
         if let Err(e) = state.store.insert_request_log(&entry) {
             tracing::warn!(error = %e, "failed to persist request log");

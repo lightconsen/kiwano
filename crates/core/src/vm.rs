@@ -1105,6 +1105,12 @@ pub struct SettingsVm {
     pub custom_agents: Vec<CustomAgentVm>,
     pub auto_failover: bool,
     pub request_logs: bool,
+    /// Compat shim on the gateway's passthrough path (mirrored into
+    /// gateway_settings for the sidecar). Default on: each rule is narrow
+    /// enough that the honest choices are on and off, and off reproduces the
+    /// 400s the shim exists to absorb.
+    #[serde(default = "default_true")]
+    pub compat_shim: bool,
     /// Request-log retention in days (mirrored into gateway_settings for the
     /// sidecar); 0 keeps every row, which is the default — capture is the
     /// point of the feature, and a retention nobody chose is a silent cap on
@@ -1227,6 +1233,7 @@ impl Default for SettingsVm {
             custom_agents: Vec::new(),
             auto_failover: true,
             request_logs: true,
+            compat_shim: true,
             log_retention_days: 0,
             log_max_body_bytes: 0,
             stream_first_byte_secs: default_stream_first_byte_secs(),
@@ -3286,6 +3293,15 @@ pub fn update_settings(
             }
         }
         store.save_log_config(&cfg).map_err(e2s)?;
+    }
+    // The compat shim's switch moves the same way: one gateway_settings key
+    // the sidecar reads at startup and on /reload.
+    if patch.get("compat_shim").is_some() {
+        let mut cfg = store.load_compat_shim_config().unwrap_or_default();
+        if let Some(v) = patch.get("compat_shim").and_then(|v| v.as_bool()) {
+            cfg.enabled = v;
+        }
+        store.save_compat_shim_config(&cfg).map_err(e2s)?;
     }
     // Same contract for the streaming timeouts: the sidecar reads them at
     // startup and on /reload, so the two copies move together.
@@ -6417,6 +6433,7 @@ mod tests {
                 cost: Some(0.5),
                 cost_currency: Some("USD".into()),
                 cost_off_peak: None,
+                request_notes: None,
             })
             .unwrap();
         }
@@ -7501,6 +7518,7 @@ mod tests {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            request_notes: None,
         };
         s.insert_request_log(&log(200, (1000, 500))).unwrap();
         s.insert_request_log(&log(503, (0, 0))).unwrap();
@@ -7704,6 +7722,7 @@ mod tests {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            request_notes: None,
         })
         .unwrap();
 
@@ -8416,6 +8435,7 @@ mod tests {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            request_notes: None,
         }
     }
 

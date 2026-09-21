@@ -43,3 +43,4 @@ ScreenShot_*.png
 apple/
 
 docs/media/*.mp4
+.env

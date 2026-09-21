@@ -13,17 +13,29 @@ There is no GUI here. The desktop app is a separate download.
 
 ## What it needs
 
-glibc 2.35 or newer — Ubuntu 22.04+, Debian 12+, Fedora 36+. The bundles are
-built on Ubuntu 22.04, and a GNU binary runs on its build glibc or newer,
-never older; the installer checks this before it downloads anything. On an
-older system (Ubuntu 20.04), build the two binaries from source instead:
+glibc 2.35 or newer — Ubuntu 22.04+, Debian 12+, Fedora 36+, RHEL/Rocky 10+.
+The bundles are built on Ubuntu 22.04, and a GNU binary runs on its build
+glibc or newer, never older; the installer checks this before it downloads
+anything, and names the way out for the distribution it detects.
+
+Systems below the floor build the two binaries from source:
 
 ```sh
 cargo build --release -p kiwano -p kiwanod
 ```
 
 They land in `target/release/` — put them on your PATH and the rest of this
-document applies unchanged.
+document applies unchanged. Which systems are below it, and what that means:
+
+- **Ubuntu 20.04, Debian 11** (glibc 2.31): source build works; the desktop
+  app does not exist for these — no webkit2gtk 4.1 to link against.
+- **RHEL 9 family — RHEL, Rocky, AlmaLinux, Oracle Linux** (glibc 2.34): one
+  point under the floor; source build works. The desktop app does not run
+  here either: this family ships webkit2gtk 4.0 only.
+- **Amazon Linux** (AL2023 = 2.34): same shape as RHEL 9 — CLI by source
+  build; no desktop app (Amazon's repos carry no webkit2gtk 4.1).
+- **Alpine** (musl): the glibc-linked binaries cannot run at all, and the
+  source build needs a glibc-shaped toolchain — not supported.
 
 ## The quick way
 

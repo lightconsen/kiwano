@@ -166,17 +166,39 @@ say ""
 # installer can produce, and one a real user hit on 20.04. Checked here,
 # before anything is downloaded; a musl system (Alpine) has no glibc at all
 # and gets the same early exit with its own wording.
+#
+# The refusal names the *distribution-shaped* way out, because that is what
+# the reader needs: the floor splits the field cleanly — Ubuntu 20.04 and
+# Debian 11 build the CLI from source, while RHEL 9 / Amazon Linux 2023 sit
+# at 2.34, one tick under it, and those users usually run servers where only
+# the CLI matters anyway. The desktop app is a different sentence and the
+# refusal does not pretend otherwise (see README's Linux section).
 required_glibc=2.35
 libc_report=$(ldd --version 2>/dev/null | head -n1) || true
 case "$libc_report" in
-  *musl*) die "this system uses musl libc; Kiwano's Linux builds are glibc-linked (Ubuntu 22.04+, Debian 12+). An older system can build from source — see packaging/INSTALL.md."
+  *musl*) die "this system uses musl libc; Kiwano's Linux builds are glibc-linked (Ubuntu 22.04+, Debian 12+, Fedora 36+). Alpine is not supported for the binaries — build from source, which itself needs a glibc-shaped toolchain (see packaging/INSTALL.md)."
 esac
 found_glibc=$(printf '%s\n' "$libc_report" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) print $i }' | tail -n1)
 if [ -z "$found_glibc" ]; then
     die "cannot determine the system's glibc version (ldd reported: ${libc_report:-nothing}); the bundles need glibc >= $required_glibc"
 fi
 if ! printf '%s\n' "$required_glibc" "$found_glibc" | sort -V -C 2>/dev/null; then
-    die "glibc $found_glibc is too old for these binaries (need >= $required_glibc): Ubuntu 22.04+, Debian 12+ — or build from source (packaging/INSTALL.md)"
+    distro=""
+    [ -r /etc/os-release ] && . /etc/os-release && distro="${ID:-} ${VERSION_ID:-}"
+    case "$distro" in
+      "amzn"*)
+        die "Amazon Linux (glibc $found_glibc) is under the floor these binaries need ($required_glibc): AL2 is older still, and AL2023 sits at 2.34. Build the CLI from source (packaging/INSTALL.md); the desktop app is not available here — Amazon's repos carry no webkit2gtk 4.1."
+        ;;
+      "rhel 9"*|"rocky"*|"almalinux 9"*|"ol 9"*)
+        die "$distro (glibc $found_glibc) is one point under the floor these binaries need ($required_glibc): the RHEL 9 family ships 2.34. Build the CLI from source (packaging/INSTALL.md) — the desktop app additionally needs webkit2gtk 4.1, which this family does not ship (only 4.0)."
+        ;;
+      "debian 11"*|"ubuntu 20."*|"ubuntu 18."*)
+        die "$distro (glibc $found_glibc) is too old for these binaries (need >= $required_glibc): Ubuntu 22.04+, Debian 12+. The CLI builds from source (packaging/INSTALL.md); the desktop app does not — these releases have no webkit2gtk 4.1 to link against."
+        ;;
+      *)
+        die "glibc $found_glibc is too old for these binaries (need >= $required_glibc): Ubuntu 22.04+, Debian 12+, Fedora 36+, RHEL/Rocky 10+ — or build the CLI from source (packaging/INSTALL.md)"
+        ;;
+    esac
 fi
 note "glibc $found_glibc ok (need >= $required_glibc)"
 

@@ -66,7 +66,7 @@ Those links are served from Cloudflare R2 and always point at the newest build �
 
 **Windows builds are not code-signed yet.** SmartScreen will warn on first launch; choose **More info → Run anyway**.
 
-**Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager. The Linux builds need **glibc 2.35+** (Ubuntu 22.04+, Debian 12+, Fedora 36+); the desktop app additionally runs on webkit2gtk 4.1, which is what sets that floor — the installer checks glibc before it downloads anything. Ubuntu 20.04 and older: the CLI and gateway build from source (`cargo build --release -p kiwano -p kiwanod`); the desktop app does not, because 20.04 has no webkit2gtk 4.1 to link against.
+**Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager. The Linux builds need **glibc 2.35+** (Ubuntu 22.04+, Debian 12+, Fedora 36+, RHEL/Rocky 10+); the desktop app additionally runs on webkit2gtk 4.1, which is what sets that floor — the installer checks glibc before it downloads anything, and names the way out per distribution. Older systems: the **CLI and gateway build from source** (`cargo build --release -p kiwano -p kiwanod`) — that covers Ubuntu 20.04, Debian 11, RHEL 9 and Amazon Linux 2023 (glibc 2.31–2.34). The **desktop app** does not work on any of them: it needs webkit2gtk 4.1, which those releases either lack entirely (20.04, Debian 11) or ship only as 4.0 (RHEL 9 family, Amazon Linux).
 
 ### Verify your download
 

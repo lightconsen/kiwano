@@ -17,6 +17,30 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.3] - 2026-09-21
+
+### Added
+
+- **A compat shim on the passthrough path.** When an agent and a provider
+  speak the same protocol, the gateway forwarded the request untouched —
+  and a client that speaks a newer dialect than the upstream's parser got
+  a bare 400 for its trouble. Claude Code's `thinking: adaptive` against
+  a relay that only knows `enabled`/`disabled`; thinking blocks in
+  assistant history replayed against a provider that did not produce them;
+  Codex's `null` tool schemas against a strict JSON-Schema parser. Five
+  separate failure reports, one missing layer. The shim now sanitizes each
+  passthrough request by the provider's own protocol: unsupported thinking
+  parameters are removed (never rewritten — a mapping would silently change
+  generation behavior), thinking history is stripped whenever the client is
+  not asking for thinking, and a `null` tool schema becomes the minimal
+  object schema. Nothing else moves: a body with nothing to sanitize is
+  forwarded byte-for-byte, so upstream prompt caches keep their prefix.
+  And every change is recorded — the request log carries a notes line per
+  action (the CSV export a column), so "what did the gateway do to my
+  request" has an answer in the row itself. One switch in Settings turns
+  the whole thing off; off means the client's exact bytes reach the
+  upstream, 400s and all.
+
 ## [0.2.2] - 2026-09-21
 
 ### Added

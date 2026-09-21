@@ -34,17 +34,17 @@
 //! with its retries, the body rewriting, the SSE passthrough — and `native`
 //! and `convert` are the two entry points, both of which end in `metering`.
 
-pub(crate) mod convert;
-pub(crate) mod finish;
-pub(crate) mod headers;
-pub(crate) mod inbound;
-pub(crate) mod metering;
-pub(crate) mod native;
-pub(crate) mod pricing;
-pub(crate) mod sample;
-pub(crate) mod shim;
-pub(crate) mod stream;
-pub(crate) mod upstream;
+pub mod convert;
+pub mod finish;
+pub mod headers;
+pub mod inbound;
+pub mod metering;
+pub mod native;
+pub mod pricing;
+pub mod sample;
+pub mod shim;
+pub mod stream;
+pub mod upstream;
 
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

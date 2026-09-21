@@ -21,6 +21,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Fixed
 
+- **The Linux installer refuses what it cannot run.** The Linux bundles were
+  built on Ubuntu 24.04, so an Ubuntu 20.04 server installed cleanly and then
+  failed at first run with five bare `GLIBC_2.xx not found` lines — a real
+  user hit exactly that. The Linux build now pins to 22.04, which widens
+  support from 24.04-only to 22.04+ (glibc 2.35 is the floor; the desktop
+  bundles build there too, since jammy ships webkit2gtk 4.1); the installer
+  checks glibc — and names musl honestly — before it downloads anything; and
+  README / INSTALL.md state the floor, with a from-source path for older
+  systems, whose desktop app cannot work at all (20.04 has no webkit2gtk 4.1
+  to link against).
 - **An in-app update could be offered, downloaded, and then refused by its
   own signature.** v0.2.0 and v0.2.1's update manifest carried a wrong
   signature for the generic Windows entry — the updater reported "signature

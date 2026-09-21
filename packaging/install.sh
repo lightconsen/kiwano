@@ -158,6 +158,28 @@ note "platform $os/$arch → $triple"
 note "from     $asset_url"
 say ""
 
+# ── glibc floor ─────────────────────────────────────────────────────────────
+#
+# The Linux bundles are built on Ubuntu 22.04, so a GNU binary wants
+# glibc >= 2.35. An older system installs cleanly and then fails at first run
+# with five bare "GLIBC_2.xx not found" lines — the worst failure mode this
+# installer can produce, and one a real user hit on 20.04. Checked here,
+# before anything is downloaded; a musl system (Alpine) has no glibc at all
+# and gets the same early exit with its own wording.
+required_glibc=2.35
+libc_report=$(ldd --version 2>/dev/null | head -n1) || true
+case "$libc_report" in
+  *musl*) die "this system uses musl libc; Kiwano's Linux builds are glibc-linked (Ubuntu 22.04+, Debian 12+). An older system can build from source — see packaging/INSTALL.md."
+esac
+found_glibc=$(printf '%s\n' "$libc_report" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) print $i }' | tail -n1)
+if [ -z "$found_glibc" ]; then
+    die "cannot determine the system's glibc version (ldd reported: ${libc_report:-nothing}); the bundles need glibc >= $required_glibc"
+fi
+if ! printf '%s\n' "$required_glibc" "$found_glibc" | sort -V -C 2>/dev/null; then
+    die "glibc $found_glibc is too old for these binaries (need >= $required_glibc): Ubuntu 22.04+, Debian 12+ — or build from source (packaging/INSTALL.md)"
+fi
+note "glibc $found_glibc ok (need >= $required_glibc)"
+
 if ! download "$asset_url" "$tmp/$asset"; then
     die "could not download $asset_url"
 fi

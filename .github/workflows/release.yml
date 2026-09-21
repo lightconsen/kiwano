@@ -254,7 +254,7 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin # Intel
             rust_targets: x86_64-apple-darwin
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             rust_targets: x86_64-unknown-linux-gnu
           - os: windows-latest
@@ -286,6 +286,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      # The Linux leg builds on 22.04 on purpose: a GNU binary runs on its
+      # build glibc or newer, never older, so the newest-LTS runner was
+      # silently shipping binaries that only Ubuntu 24.04 could execute (a
+      # 20.04 server installed cleanly and then failed with five bare
+      # "GLIBC_2.xx not found" lines). jammy's glibc 2.35 sets the floor the
+      # installer enforces; webkit2gtk-4.1 exists on jammy, so the desktop
+      # bundles build there too.
 
       # Version pinned in rust-toolchain.toml — keep the two in sync.
       - uses: dtolnay/rust-toolchain@master

@@ -11,6 +11,20 @@ This bundle contains the two pieces a headless host needs, and nothing else:
 
 There is no GUI here. The desktop app is a separate download.
 
+## What it needs
+
+glibc 2.35 or newer — Ubuntu 22.04+, Debian 12+, Fedora 36+. The bundles are
+built on Ubuntu 22.04, and a GNU binary runs on its build glibc or newer,
+never older; the installer checks this before it downloads anything. On an
+older system (Ubuntu 20.04), build the two binaries from source instead:
+
+```sh
+cargo build --release -p kiwano -p kiwanod
+```
+
+They land in `target/release/` — put them on your PATH and the rest of this
+document applies unchanged.
+
 ## The quick way
 
 ```sh

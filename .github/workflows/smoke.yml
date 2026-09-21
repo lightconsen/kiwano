@@ -84,13 +84,13 @@ jobs:
           Write-Host "--- artifacts ---"
           Get-ChildItem "$env:GITHUB_WORKSPACE\artifacts" -ErrorAction Continue | Format-Table -AutoSize | Out-String | Write-Host
           $installer = Get-ChildItem "$env:GITHUB_WORKSPACE\artifacts" -Filter '*.exe' -ErrorAction Stop |
-            Select-Object -First 1 -ExpandProperty FullPath
+            Select-Object -First 1 -ExpandProperty FullName
           Start-Process -FilePath $installer -ArgumentList '/S' -Wait -ErrorAction Stop
           $roots = @(Join-Path $env:LOCALAPPDATA 'Kiwano'),
                     (Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
                     (Join-Path ${env:PROGRAMFILES} 'Kiwano')
           $exe = Get-ChildItem -Path $roots -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty FullPath
+            Select-Object -First 1 -ExpandProperty FullName
           if (-not $exe) {
             # Name what is actually on disk before giving up: the installer's
             # layout is the thing being tested, and a bare "not found" costs a
@@ -224,13 +224,21 @@ jobs:
           ).fetchone()[0]
           sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
           sock.connect(os.path.join(home, ".kiwano", "admin.sock"))
+          # The admin plane answers with keep-alive headers and never closes
+          # the connection, so a bare recv loop waits for an EOF that will not
+          # come — on the very success this step is verifying. Bounded reads:
+          # stop at the first quiet second and parse what arrived.
+          sock.settimeout(10)
           sock.sendall(
               f"GET /status HTTP/1.1\r\nHost: localhost\r\n"
               f"x-kiwano-admin-token: {token}\r\n\r\n".encode()
           )
           data = b""
           while True:
-              chunk = sock.recv(65536)
+              try:
+                  chunk = sock.recv(65536)
+              except socket.timeout:
+                  break
               if not chunk:
                   break
               data += chunk

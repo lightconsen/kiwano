@@ -80,8 +80,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $installer = Get-ChildItem "$env:GITHUB_WORKSPACE\artifacts" -Filter '*.exe' | Select-Object -First 1 -ExpandProperty FullPath
-          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+          Write-Host "GITHUB_WORKSPACE = $env:GITHUB_WORKSPACE"
+          Write-Host "--- artifacts ---"
+          Get-ChildItem "$env:GITHUB_WORKSPACE\artifacts" -ErrorAction Continue | Format-Table -AutoSize | Out-String | Write-Host
+          $installer = Get-ChildItem "$env:GITHUB_WORKSPACE\artifacts" -Filter '*.exe' -ErrorAction Stop |
+            Select-Object -First 1 -ExpandProperty FullPath
+          Start-Process -FilePath $installer -ArgumentList '/S' -Wait -ErrorAction Stop
           $roots = @(Join-Path $env:LOCALAPPDATA 'Kiwano'),
                     (Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
                     (Join-Path ${env:PROGRAMFILES} 'Kiwano')
@@ -201,6 +205,15 @@ jobs:
           tail -40 app.stderr 2>/dev/null || true
           echo "--- daemon log tail ---"
           tail -20 "$HOME/.kiwano/logs/"kiwano.log.* 2>/dev/null || true
+          echo "--- is a daemon running? ---"
+          ps aux | grep -E "kiwanod|kiwano-app" | grep -v grep || echo "(none)"
+          echo "--- system GL state ---"
+          ldconfig -p | grep -iE "libGLESv2|libEGL" || echo "(no GL libs registered)"
+          echo "--- the daemon, run directly (15s) ---"
+          daemon_bin=$(find squashfs-root -type f -name 'kiwanod' | head -1)
+          echo "direct run: $daemon_bin"
+          timeout 15 "$daemon_bin" > daemon-direct.log 2>&1 || true
+          tail -10 daemon-direct.log 2>/dev/null || echo "(no output)"
 
       - name: Ask the admin plane for its version (Linux)
         if: ${{ !cancelled() && runner.os == 'Linux' }}

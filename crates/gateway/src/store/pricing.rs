@@ -26,33 +26,37 @@ impl Store {
                     cache_read, cache_creation, currency, tiers
              FROM model_pricing",
         )?;
-        let rows = stmt.query_map([], |r| {
-            let tiers: Option<String> = r.get(8)?;
-            let mut entry = ModelPriceEntry {
-                long_context: None,
-                provider_id: r.get(0)?,
-                model_id: r.get(1)?,
-                display_name: r.get(2)?,
-                input: r.get(3)?,
-                output: r.get(4)?,
-                cache_read: r.get(5)?,
-                cache_creation: r.get(6)?,
-                currency: r.get(7)?,
-                off_peak: None,
-                peak_hours: None,
-            };
-            // A blob this build cannot read leaves the row at its listed rates
-            // rather than failing the read: `resolve_pricing` answers an error
-            // with an empty table, which would blank every cost.
-            entry.apply_tiers(tiers.as_deref());
-            Ok(entry)
-        })?;
+        let rows = stmt.query_map([], model_price_from_row)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
         }
         Ok(out)
     }
+}
+
+/// One `model_pricing` row, tiers applied.
+///
+/// A blob this build cannot read leaves the row at its listed rates rather than
+/// failing the read: `resolve_pricing` answers an error with an empty table,
+/// which would blank every cost.
+fn model_price_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ModelPriceEntry> {
+    let tiers: Option<String> = r.get(8)?;
+    let mut entry = ModelPriceEntry {
+        long_context: None,
+        provider_id: r.get(0)?,
+        model_id: r.get(1)?,
+        display_name: r.get(2)?,
+        input: r.get(3)?,
+        output: r.get(4)?,
+        cache_read: r.get(5)?,
+        cache_creation: r.get(6)?,
+        currency: r.get(7)?,
+        off_peak: None,
+        peak_hours: None,
+    };
+    entry.apply_tiers(tiers.as_deref());
+    Ok(entry)
 }
 
 impl Store {

@@ -802,8 +802,33 @@ impl Store {
     }
 
     /// Idempotent schema migration using `PRAGMA user_version`.
+    ///
+    /// The steps run in the order a database is brought through, and two of them
+    /// are not a plain `execute_batch`: `version < 6` replays migrations an early
+    /// build stamped over, and `version < 15` counts the gemini providers before
+    /// the batch that removes them. Both keep their place in that sequence, and
+    /// the final `pragma_update` stays last because `execute_batch` does not bump
+    /// `user_version` itself.
     fn migrate(&self, conn: &Connection) -> Result<()> {
         let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        Self::apply_migrations_v1_through_v5(conn, version)?;
+        if version < 6 {
+            Self::replay_migrations_an_early_build_stamped_over(conn)?;
+        }
+        Self::apply_migrations_v7_through_v14(conn, version)?;
+        if version < 15 {
+            Self::remove_gemini_providers(conn)?;
+        }
+        Self::apply_migrations_v16_through_v26(conn, version)?;
+        if version < SCHEMA_VERSION {
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
+        Ok(())
+    }
+
+    /// v1—v5: the base tables, through the provider rebuild and the request-log
+    /// pair.
+    fn apply_migrations_v1_through_v5(conn: &Connection, version: i32) -> Result<()> {
         if version < 1 {
             conn.execute_batch(MIGRATION_V1)?;
         }
@@ -819,17 +844,28 @@ impl Store {
         if version < 5 {
             conn.execute_batch(MIGRATION_V5)?;
         }
-        if version < 6 {
-            // Repair: early dev builds stamped user_version ahead of the final
-            // migration bodies, so a database can claim v5 while missing the v3
-            // api_keys table, the v4 gemini-capable providers shape, or the v5
-            // request-log tables. V3/V5 are IF NOT EXISTS and V4 is a lossless
-            // named-column swap, so replaying all three on a complete schema
-            // (or a partial one) converges to the target state.
-            conn.execute_batch(MIGRATION_V3)?;
-            conn.execute_batch(MIGRATION_V4)?;
-            conn.execute_batch(MIGRATION_V5)?;
-        }
+        Ok(())
+    }
+
+    /// Repair: early dev builds stamped user_version ahead of the final
+    /// migration bodies, so a database can claim v5 while missing the v3
+    /// api_keys table, the v4 gemini-capable providers shape, or the v5
+    /// request-log tables. V3/V5 are IF NOT EXISTS and V4 is a lossless
+    /// named-column swap, so replaying all three on a complete schema
+    /// (or a partial one) converges to the target state.
+    ///
+    /// In that order: it is the order a fresh database walks them in.
+    fn replay_migrations_an_early_build_stamped_over(conn: &Connection) -> Result<()> {
+        conn.execute_batch(MIGRATION_V3)?;
+        conn.execute_batch(MIGRATION_V4)?;
+        conn.execute_batch(MIGRATION_V5)?;
+        Ok(())
+    }
+
+    /// v7—v14: the extra-endpoints table, the request-tuning columns, the plan
+    /// and key/price rebuilds, the off-peak backfills, and the catalog/shape
+    /// columns the Apps screen round-trips.
+    fn apply_migrations_v7_through_v14(conn: &Connection, version: i32) -> Result<()> {
         if version < 7 {
             conn.execute_batch(MIGRATION_V7)?;
         }
@@ -854,22 +890,32 @@ impl Store {
         if version < 14 {
             conn.execute_batch(MIGRATION_V14)?;
         }
-        if version < 15 {
-            // Counted before the delete rather than after: a user with a gemini
-            // provider should be able to find out where it went, and the only
-            // other trace is a catalog entry that is no longer published.
-            let dropped: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM providers WHERE protocol = 'gemini'",
-                [],
-                |r| r.get(0),
-            )?;
-            conn.execute_batch(MIGRATION_V15)?;
-            if dropped > 0 {
-                eprintln!(
-                    "kiwano: removed {dropped} provider(s) whose protocol (gemini) is no longer supported"
-                );
-            }
+        Ok(())
+    }
+
+    /// v15: retire the gemini protocol.
+    ///
+    /// Counted before the delete rather than after: a user with a gemini
+    /// provider should be able to find out where it went, and the only
+    /// other trace is a catalog entry that is no longer published.
+    fn remove_gemini_providers(conn: &Connection) -> Result<()> {
+        let dropped: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM providers WHERE protocol = 'gemini'",
+            [],
+            |r| r.get(0),
+        )?;
+        conn.execute_batch(MIGRATION_V15)?;
+        if dropped > 0 {
+            eprintln!(
+                "kiwano: removed {dropped} provider(s) whose protocol (gemini) is no longer supported"
+            );
         }
+        Ok(())
+    }
+
+    /// v16—v26: custom agents and their limits, the provider-health table and
+    /// its rewrites, and the `providers`/`request_logs` columns added since.
+    fn apply_migrations_v16_through_v26(conn: &Connection, version: i32) -> Result<()> {
         if version < 16 {
             conn.execute_batch(MIGRATION_V16)?;
         }
@@ -902,9 +948,6 @@ impl Store {
         }
         if version < 26 {
             conn.execute_batch(MIGRATION_V26)?;
-        }
-        if version < SCHEMA_VERSION {
-            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         Ok(())
     }

@@ -1,0 +1,148 @@
+<!doctype html>
+<!-- X/Twitter profile banner, 1500x500 (official spec). Keep key content inside the
+     center ~1100px: mobile crops the sides, and the profile avatar overlaps the
+     bottom-left corner on the web profile. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Kiwano X banner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000;
+    --ink: oklch(0.93 0.005 260);
+    --mut: oklch(0.58 0.01 260);
+    --line: oklch(0.30 0.012 260);
+    --kiwi: oklch(0.80 0.19 132); /* ≈ #7FE05A */
+    --kiwi-soft: oklch(0.80 0.19 132 / 0.12);
+    --sans: Inter, -apple-system, "Helvetica Neue", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1500px; height: 500px; overflow: hidden; }
+  body {
+    position: relative;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* faint radial glow behind the gateway node */
+  .glow {
+    position: absolute; left: 1060px; top: -40px; width: 520px; height: 580px;
+    background: radial-gradient(closest-side, oklch(0.80 0.19 132 / 0.10), transparent 70%);
+    pointer-events: none;
+  }
+
+  .row { position: absolute; left: 235px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 30px; }
+  .logo { width: 116px; height: 116px; flex: none; }
+
+  .brand h1 { font-size: 66px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; }
+  .brand h1 .dot { color: var(--kiwi); }
+  .tagline { margin-top: 10px; font-size: 23px; font-weight: 600; color: var(--mut); letter-spacing: 0.005em; }
+  .tagline b { color: var(--ink); font-weight: 600; }
+
+  .meta { margin-top: 22px; display: flex; align-items: center; gap: 18px; }
+  .chip {
+    font-family: var(--mono); font-size: 19px; font-weight: 600; color: var(--kiwi);
+    background: var(--kiwi-soft); border: 1px solid oklch(0.80 0.19 132 / 0.35);
+    border-radius: 10px; padding: 8px 16px; line-height: 1;
+  }
+  .stats { font-family: var(--mono); font-size: 15px; color: var(--mut); letter-spacing: 0.02em; }
+  .stats .sep { color: oklch(0.35 0.01 260); padding: 0 6px; }
+
+  .url { position: absolute; right: 48px; bottom: 36px; font-family: var(--mono); font-size: 15px; color: var(--mut); letter-spacing: 0.04em; }
+  .url b { color: var(--kiwi); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <div class="row">
+    <!-- Kiwano logo mark, inlined from site/assets/kiwano-logo.svg -->
+    <svg class="logo" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="body" cx="0.38" cy="0.32" r="0.85">
+          <stop offset="0%" stop-color="#96EE73"/>
+          <stop offset="55%" stop-color="#7FE05A"/>
+          <stop offset="100%" stop-color="#5CC93F"/>
+        </radialGradient>
+        <linearGradient id="spike" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#8CE968"/>
+          <stop offset="100%" stop-color="#5CC93F"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#spike)" stroke="#3F8F2F" stroke-width="3" stroke-linejoin="round">
+        <path transform="rotate(0   256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(45  256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(90  256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(135 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(180 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(225 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(270 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+        <path transform="rotate(315 256 256)" d="M234 109 L256 26 L278 109 Z"/>
+      </g>
+      <ellipse cx="256" cy="256" rx="192" ry="152" fill="url(#body)" stroke="#3F8F2F" stroke-width="4"/>
+      <ellipse cx="192" cy="195" rx="74" ry="42" fill="#FFFFFF" opacity="0.22" transform="rotate(-18 192 195)"/>
+      <g fill="#D8FBC4" opacity="0.55">
+        <circle cx="314" cy="208" r="9.5"/>
+        <circle cx="355" cy="272" r="7"/>
+        <circle cx="266" cy="301" r="9"/>
+        <circle cx="192" cy="285" r="6.5"/>
+        <circle cx="230" cy="214" r="5.5"/>
+        <circle cx="326" cy="326" r="5.5"/>
+      </g>
+    </svg>
+
+    <div class="brand">
+      <h1>Kiwano<span class="dot">.</span></h1>
+      <div class="tagline"><b>Every coding agent.</b> One local port. Real costs.</div>
+      <div class="meta">
+        <span class="chip">127.0.0.1:8317</span>
+        <span class="stats">14 agents<span class="sep">·</span>24 providers<span class="sep">·</span>local-first</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Abstract gateway: many routes converge into one node, a few fan back out -->
+  <svg style="position:absolute; inset:0; pointer-events:none;" width="1500" height="500" viewBox="0 0 1500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <g stroke="var(--line)" stroke-width="1.5">
+      <path d="M985 105 C1060 105, 1120 190, 1195 240"/>
+      <path d="M985 165 C1060 165, 1120 210, 1195 244"/>
+      <path d="M985 225 C1060 225, 1120 235, 1195 248"/>
+      <path d="M985 285 C1060 285, 1120 270, 1195 254"/>
+      <path d="M985 345 C1060 345, 1120 310, 1195 258"/>
+      <path d="M985 405 C1060 405, 1120 350, 1195 262"/>
+    </g>
+    <path d="M985 225 C1060 225, 1120 235, 1195 248" stroke="var(--kiwi)" stroke-width="2" opacity="0.9"/>
+    <g fill="oklch(0.42 0.012 260)">
+      <circle cx="985" cy="105" r="5"/>
+      <circle cx="985" cy="165" r="5"/>
+      <circle cx="985" cy="285" r="5"/>
+      <circle cx="985" cy="345" r="5"/>
+      <circle cx="985" cy="405" r="5"/>
+    </g>
+    <circle cx="985" cy="225" r="5" fill="var(--kiwi)"/>
+    <!-- the single node -->
+    <circle cx="1195" cy="250" r="26" fill="var(--kiwi)" opacity="0.18"/>
+    <circle cx="1195" cy="250" r="13" fill="var(--kiwi)"/>
+    <g stroke="var(--line)" stroke-width="1.5" opacity="0.85">
+      <path d="M1195 250 C1260 250, 1310 190, 1390 165"/>
+      <path d="M1195 250 C1260 250, 1310 250, 1390 250"/>
+      <path d="M1195 250 C1260 250, 1310 310, 1390 335"/>
+    </g>
+    <g fill="oklch(0.42 0.012 260)">
+      <circle cx="1390" cy="165" r="5"/>
+      <circle cx="1390" cy="250" r="5"/>
+      <circle cx="1390" cy="335" r="5"/>
+    </g>
+    <text x="1195" y="336" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace" font-size="14" fill="oklch(0.55 0.01 260)" letter-spacing="2">ONE PORT</text>
+  </svg>
+
+  <div class="url"><b>kiwano.cc</b></div>
+</body>
+</html>

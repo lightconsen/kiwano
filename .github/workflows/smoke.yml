@@ -91,7 +91,7 @@ jobs:
                     (Join-Path ${env:PROGRAMFILES} 'Kiwano')
           $exe = $null
           foreach ($root in $roots) {
-            $found = Get-ChildItem -Path $root -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
+            $found = Get-ChildItem -Path $root -Recurse -Filter 'kiwano-app.exe' -ErrorAction SilentlyContinue |
               Select-Object -First 1 -ExpandProperty FullName
             if ($found) { $exe = $found; break }
           }
@@ -105,7 +105,7 @@ jobs:
             }
             Get-ChildItem "$env:LOCALAPPDATA","$env:ProgramFiles" -Directory -ErrorAction SilentlyContinue |
               Where-Object Name -like '*iwano*' | Format-Table -AutoSize | Out-String | Write-Host
-            Write-Error "installed Kiwano.exe not found under: $($roots -join ', ')"
+            Write-Error "installed kiwano-app.exe not found under: $($roots -join ', ')"
           }
           echo "APP_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
@@ -285,7 +285,7 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            taskkill //F //IM Kiwano.exe 2>/dev/null || true
+            taskkill //F //IM kiwano-app.exe 2>/dev/null || true
             taskkill //F //IM kiwanod.exe 2>/dev/null || true
           else
             kill "$(cat daemon.pid 2>/dev/null)" 2>/dev/null || true

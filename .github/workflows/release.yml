@@ -1153,12 +1153,11 @@ jobs:
         run: |
           $installer = Get-ChildItem artifacts -Filter '*.exe' | Select-Object -First 1 -ExpandProperty FullPath
           Start-Process -FilePath $installer -ArgumentList '/S' -Wait
-          $roots = @(Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
+          $roots = @(Join-Path $env:LOCALAPPDATA 'Kiwano'),
+                    (Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
                     (Join-Path ${env:PROGRAMFILES} 'Kiwano')
-          $exe = foreach ($root in $roots) {
-            Get-ChildItem -Path $root -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullPath
-          } | Select-Object -First 1
+          $exe = Get-ChildItem -Path $roots -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullPath
           if (-not $exe) {
             Write-Error "installed Kiwano.exe not found under: $($roots -join ', ')"
           }
@@ -1188,7 +1187,10 @@ jobs:
           Xvfb :99 -screen 0 1280x800x24 &
 
           export DISPLAY=:99
-          "$APP" &
+          # Xvfb has no GPU compositing; webkit will not initialize without
+          # this in a headless display — the standard CI requirement.
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          "$APP" > app.stderr 2>&1 &
           echo $! > app.pid
           # Let the webview come up before anyone screenshots it.
           sleep 25
@@ -1213,6 +1215,14 @@ jobs:
             4[0-9][0-9]|2[0-9][0-9]) echo "gateway is up" ;;
             *) echo "::error::data plane never answered; code=$code" ; exit 1 ;;
           esac
+
+      - name: Show what the app printed (on failure)
+        if: failure() && runner.os == 'Linux'
+        run: |
+          echo "--- app.stderr ---"
+          tail -40 app.stderr 2>/dev/null || true
+          echo "--- daemon log tail ---"
+          tail -20 "$HOME/.kiwano/logs/"kiwano.log.* 2>/dev/null || true
 
       # The admin plane is the deeper claim: it needs the token out of the
       # shared SQLite and answers only to it — so a parsed, version-matched

@@ -140,22 +140,25 @@ fn delta_pct(current: f64, previous: f64) -> Option<i64> {
     (previous > 0.0).then(|| ((current - previous) / previous * 100.0).round() as i64)
 }
 
-/// Dashboard aggregation. `provider_id`/`agent` narrow every stat (headline,
-/// trend, distributions, latency) to that slice; None means all.
-pub fn build_dashboard(
-    store: &Store,
-    aux: &Aux,
-    window: &str,
-    provider_id: Option<&str>,
-    agent: Option<&str>,
-) -> Result<DashboardVm, String> {
-    let now = unix_now();
+/// The window a dashboard request resolved to: the key it echoes back, the lower
+/// bound the queries take, the local day index today sits on, and the window
+/// before this one.
+struct DashWindow {
+    key: &'static str,
+    since: Option<String>,
+    days: i64,
+    today_days: i64,
+    tz: i64,
+    previous: Option<(String, String)>,
+}
+
+fn resolve_window(aux: &Aux, now: i64, window: &str) -> DashWindow {
     let tz = tz_offset(aux);
     // Whole local calendar days, so a stat and its chart describe the same
     // span: 7 days is today plus the six before it, not a rolling 168 hours
     // (which would count the hours between 6 and 7 days back that the chart's
     // seven daily points cannot show).
-    let (window, since, days) = match window {
+    let (key, since, days) = match window {
         "today" => ("today", Some(local_day_start(tz, now)), 1),
         "30d" => ("30d", Some(local_day_start(tz, now - 29 * 86_400)), 30),
         // Everything the store holds. No lower bound is invented here: a window
@@ -174,48 +177,57 @@ pub fn build_dashboard(
             start.clone(),
         )
     });
+    DashWindow {
+        key,
+        since,
+        days,
+        today_days,
+        tz,
+        previous,
+    }
+}
 
-    let cur = store
-        .usage_totals(agent, provider_id, since.as_deref())
-        .map_err(e2s)?;
-    // Headline request count shares the Logs card's source (request_logs):
-    // usage rows only cover forwarded requests, so failures before the forward
-    // leg (no provider bound, protocol mismatch…) would vanish from the top
-    // stat while the Logs card below still shows them. Token/cost/latency stay
-    // usage-based — failed requests carry none.
-    let requests = store
-        .count_request_logs(agent, provider_id, since.as_deref(), None)
-        .map_err(e2s)?;
-    // The same count over the window before, from the same source: two numbers
-    // compared as a percentage have to be measured the same way.
-    let previous_requests = match &previous {
-        Some((from, to)) => store
-            .count_request_logs(agent, provider_id, Some(from), Some(to))
-            .map_err(e2s)?,
-        None => 0,
-    };
-    let providers = store.list_providers().map_err(e2s)?;
-    let name_by_id: HashMap<String, String> = providers
-        .iter()
-        .map(|p| (p.id.clone(), p.name.clone()))
-        .collect();
+/// What the costs panel needs, resolved once for the page.
+struct DashboardCosts {
+    /// Headline cost for the window in the preferred currency, **unrounded**:
+    /// the caller rounds it once, where it becomes a `DashboardVm` field.
+    cost: f64,
+    /// The off-peak equivalent of the same rows, rounded here as it always was.
+    cost_off_peak: f64,
+    by_pid: HashMap<String, f64>,
+    off_peak_by_pid: HashMap<String, f64>,
+    preferred: String,
+    rates: HashMap<String, f64>,
+}
 
+impl DashboardCosts {
+    /// The same roll-up the headline used, so the per-agent card prices its
+    /// buckets exactly the way the stat above it does.
+    fn convert(&self, buckets: &[(Option<String>, f64)]) -> f64 {
+        crate::pricing::convert_cost_buckets(buckets, &self.preferred, &self.rates)
+    }
+}
+
+fn dashboard_costs(
+    store: &Store,
+    aux: &Aux,
+    agent: Option<&str>,
+    provider_id: Option<&str>,
+    since: Option<&str>,
+) -> Result<DashboardCosts, String> {
     // Cost rolls up per-currency buckets (each row's cost_currency) into the
     // user's preferred display currency via the Hub's published rates, so this
     // agrees with the currency selector. Before the first sync there are no
     // rates and the buckets are summed as-is.
     let rates = crate::pricing::effective_rates(aux);
-    let pref = crate::pricing::preferred_currency(aux);
-    let cost_of = |buckets: &[(Option<String>, f64)]| {
-        crate::pricing::convert_cost_buckets(buckets, &pref, &rates)
-    };
+    let preferred = crate::pricing::preferred_currency(aux);
 
     // Headline cost for the window, with the off-peak equivalent of the same
     // rows beside it. Both sums come from one query over one row set, which is
     // what makes their difference "what running at peak cost you" rather than a
     // comparison of two different populations.
     let headline = store
-        .usage_cost_with_off_peak_by_currency(agent, provider_id, since.as_deref())
+        .usage_cost_with_off_peak_by_currency(agent, provider_id, since)
         .map_err(e2s)?;
     let pairs = |pick: fn(&kiwanod::store::CostBucket) -> f64| -> Vec<(Option<String>, f64)> {
         headline
@@ -223,117 +235,158 @@ pub fn build_dashboard(
             .map(|b| (b.currency.clone(), pick(b)))
             .collect()
     };
-    let cost = cost_of(&pairs(|b| b.cost));
-    let cost_off_peak = (cost_of(&pairs(|b| b.cost_off_peak)) * 1e6).round() / 1e6;
+    let cost = crate::pricing::convert_cost_buckets(&pairs(|b| b.cost), &preferred, &rates);
+    let cost_off_peak =
+        (crate::pricing::convert_cost_buckets(&pairs(|b| b.cost_off_peak), &preferred, &rates)
+            * 1e6)
+            .round()
+            / 1e6;
 
     // Per-provider cost for the distribution card.
-    let mut cost_by_pid: HashMap<String, f64> = HashMap::new();
+    let mut by_pid: HashMap<String, f64> = HashMap::new();
     let mut off_peak_by_pid: HashMap<String, f64> = HashMap::new();
-    for b in store
-        .usage_cost_by_provider(agent, since.as_deref())
-        .map_err(e2s)?
-    {
+    for b in store.usage_cost_by_provider(agent, since).map_err(e2s)? {
         let convert = |c: f64| match b.currency.as_deref() {
-            Some(cur) => crate::pricing::convert_amount(c, cur, &pref, &rates),
+            Some(cur) => crate::pricing::convert_amount(c, cur, &preferred, &rates),
             None => 0.0,
         };
-        *cost_by_pid.entry(b.provider_id.clone()).or_default() += convert(b.cost);
+        *by_pid.entry(b.provider_id.clone()).or_default() += convert(b.cost);
         *off_peak_by_pid.entry(b.provider_id).or_default() += convert(b.cost_off_peak);
     }
 
-    let mut trend = Vec::new();
-    if window == "today" {
-        // "today" plots the day's hours, not one bar for the whole day: 24 local
-        // hour buckets, zero-filled exactly like the daily axis so the chart
-        // spans the same day the stat above it counts (and its bars still sum
-        // to that stat).
-        let mut hourly: HashMap<String, UsageTotals> = HashMap::new();
-        for b in store
-            .usage_hourly(agent, provider_id, since.as_deref(), tz)
-            .map_err(e2s)?
-        {
-            hourly.insert(b.day, b.totals);
-        }
-        // The local day index, turned back into the 24 hour keys of that day.
-        for h in 0..24 {
-            let key = hour_key(today_days * 86_400 + h * 3_600);
-            let t = hourly.get(&key).cloned().unwrap_or_default();
-            trend.push(TrendVm {
-                date: hh00(&key),
-                requests: t.requests,
-                tokens: t.input_tokens + t.output_tokens,
-            });
-        }
-    } else {
-        // One bar per local day, zero-filled: the chart draws exactly the days
-        // the window selected, so its bars sum to the stat above it and each
-        // label names the one day its own bar covers. Merging days (30d used to
-        // draw six five-day blocks) made a bar mean something the axis could
-        // not say.
-        let mut daily: HashMap<String, UsageTotals> = HashMap::new();
-        for d in store
-            .usage_daily(agent, provider_id, since.as_deref(), tz)
-            .map_err(e2s)?
-        {
-            daily.insert(d.day, d.totals);
-        }
-        // Local day index: the buckets have to be the same days the window
-        // above selected, or the chart and its stat disagree again.
-        // Where the chart starts. A counted window is a fixed number of days
-        // back from today; "all" is wherever the oldest recorded row is, which
-        // only the buckets themselves can say.
-        let first_days = if window == "all" {
-            daily
-                .keys()
-                .filter_map(|k| day_index_of_key(k))
-                .min()
-                .unwrap_or(today_days)
-        } else {
-            today_days - (days - 1)
-        };
-        let span = (today_days - first_days + 1).max(1);
-        // A day per bar reads while the days fit side by side. Past the point
-        // where they stop fitting, the same rows are summed a week at a time and
-        // a bar says which week it starts — an installation older than that has
-        // stopped asking about individual days, and a hundred hairline columns
-        // answer nothing.
-        let step = if span > TREND_DAILY_LIMIT_DAYS { 7 } else { 1 };
-        let mut start = first_days;
-        while start <= today_days {
-            let mut t = UsageTotals::default();
-            for offset in 0..step {
-                let day = start + offset;
-                if day > today_days {
-                    break;
-                }
-                let key = local_day_key(tz, day * 86_400);
-                if let Some(row) = daily.get(&key) {
-                    t.requests += row.requests;
-                    t.input_tokens += row.input_tokens;
-                    t.output_tokens += row.output_tokens;
-                    t.cache_read_tokens += row.cache_read_tokens;
-                    t.cache_creation_tokens += row.cache_creation_tokens;
-                }
-            }
-            let key = local_day_key(tz, start * 86_400);
-            trend.push(TrendVm {
-                date: mmdd(&key),
-                requests: t.requests,
-                tokens: t.input_tokens + t.output_tokens,
-            });
-            start += step;
-        }
-    }
+    Ok(DashboardCosts {
+        cost,
+        cost_off_peak,
+        by_pid,
+        off_peak_by_pid,
+        preferred,
+        rates,
+    })
+}
 
-    // provider distribution
-    let total_req = cur.requests.max(1);
+/// The "today" chart: the day's 24 local hours, zero-filled.
+fn trend_today(
+    store: &Store,
+    agent: Option<&str>,
+    provider_id: Option<&str>,
+    since: Option<&str>,
+    today_days: i64,
+    tz: i64,
+) -> Result<Vec<TrendVm>, String> {
+    let mut trend = Vec::new();
+    // "today" plots the day's hours, not one bar for the whole day: 24 local
+    // hour buckets, zero-filled exactly like the daily axis so the chart
+    // spans the same day the stat above it counts (and its bars still sum
+    // to that stat).
+    let mut hourly: HashMap<String, UsageTotals> = HashMap::new();
+    for b in store
+        .usage_hourly(agent, provider_id, since, tz)
+        .map_err(e2s)?
+    {
+        hourly.insert(b.day, b.totals);
+    }
+    // The local day index, turned back into the 24 hour keys of that day.
+    for h in 0..24 {
+        let key = hour_key(today_days * 86_400 + h * 3_600);
+        let t = hourly.get(&key).cloned().unwrap_or_default();
+        trend.push(TrendVm {
+            date: hh00(&key),
+            requests: t.requests,
+            tokens: t.input_tokens + t.output_tokens,
+        });
+    }
+    Ok(trend)
+}
+
+/// Every other window: one bar per local day, or per week once the days stop
+/// fitting side by side.
+fn trend_daily(
+    store: &Store,
+    agent: Option<&str>,
+    provider_id: Option<&str>,
+    w: &DashWindow,
+) -> Result<Vec<TrendVm>, String> {
+    let mut trend = Vec::new();
+    // One bar per local day, zero-filled: the chart draws exactly the days
+    // the window selected, so its bars sum to the stat above it and each
+    // label names the one day its own bar covers. Merging days (30d used to
+    // draw six five-day blocks) made a bar mean something the axis could
+    // not say.
+    let mut daily: HashMap<String, UsageTotals> = HashMap::new();
+    for d in store
+        .usage_daily(agent, provider_id, w.since.as_deref(), w.tz)
+        .map_err(e2s)?
+    {
+        daily.insert(d.day, d.totals);
+    }
+    // Local day index: the buckets have to be the same days the window
+    // above selected, or the chart and its stat disagree again.
+    // Where the chart starts. A counted window is a fixed number of days
+    // back from today; "all" is wherever the oldest recorded row is, which
+    // only the buckets themselves can say.
+    let first_days = if w.key == "all" {
+        daily
+            .keys()
+            .filter_map(|k| day_index_of_key(k))
+            .min()
+            .unwrap_or(w.today_days)
+    } else {
+        w.today_days - (w.days - 1)
+    };
+    let span = (w.today_days - first_days + 1).max(1);
+    // A day per bar reads while the days fit side by side. Past the point
+    // where they stop fitting, the same rows are summed a week at a time and
+    // a bar says which week it starts — an installation older than that has
+    // stopped asking about individual days, and a hundred hairline columns
+    // answer nothing.
+    let step = if span > TREND_DAILY_LIMIT_DAYS { 7 } else { 1 };
+    let mut start = first_days;
+    while start <= w.today_days {
+        let mut t = UsageTotals::default();
+        for offset in 0..step {
+            let day = start + offset;
+            if day > w.today_days {
+                break;
+            }
+            let key = local_day_key(w.tz, day * 86_400);
+            if let Some(row) = daily.get(&key) {
+                t.requests += row.requests;
+                t.input_tokens += row.input_tokens;
+                t.output_tokens += row.output_tokens;
+                t.cache_read_tokens += row.cache_read_tokens;
+                t.cache_creation_tokens += row.cache_creation_tokens;
+            }
+        }
+        let key = local_day_key(w.tz, start * 86_400);
+        trend.push(TrendVm {
+            date: mmdd(&key),
+            requests: t.requests,
+            tokens: t.input_tokens + t.output_tokens,
+        });
+        start += step;
+    }
+    Ok(trend)
+}
+
+/// The provider distribution card, colours included: they are assigned last
+/// because they depend on the whole roster (see `chart_palette`), and assigning
+/// them after the sort keeps the largest slice's slot stable.
+fn provider_distribution(
+    store: &Store,
+    agent: Option<&str>,
+    provider_id: Option<&str>,
+    since: Option<&str>,
+    names: &HashMap<String, String>,
+    total_req: i64,
+    costs: &DashboardCosts,
+) -> Result<Vec<ProviderDistVm>, String> {
     let mut by_provider: Vec<ProviderDistVm> = store
-        .usage_by_provider(agent, provider_id, since.as_deref())
+        .usage_by_provider(agent, provider_id, since)
         .map_err(e2s)?
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
         .map(|pu| {
-            let name = name_by_id
+            let name = names
                 .get(&pu.provider_id)
                 .cloned()
                 .unwrap_or(pu.provider_id.clone());
@@ -343,9 +396,14 @@ pub fn build_dashboard(
                 color: String::new(), // assigned below, once the list is fixed
                 requests: pu.totals.requests,
                 pct: pu.totals.requests * 100 / total_req,
-                cost: (cost_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
+                cost: (costs.by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
                     / 1e6,
-                cost_off_peak: (off_peak_by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6)
+                cost_off_peak: (costs
+                    .off_peak_by_pid
+                    .get(&pu.provider_id)
+                    .copied()
+                    .unwrap_or(0.0)
+                    * 1e6)
                     .round()
                     / 1e6,
             }
@@ -358,21 +416,36 @@ pub fn build_dashboard(
     for (entry, color) in by_provider.iter_mut().zip(chart_palette(&ids)) {
         entry.color = color.to_string();
     }
+    Ok(by_provider)
+}
 
-    // Who gets a row: the registry in its own order (which is the order this
-    // table has always used), then the user's own agents, then anything else
-    // with traffic in the window. That last group is an agent whose route was
-    // deleted: its usage rows stay, and its traffic should not disappear from
-    // the page just because the name did.
+/// Who gets a row: the registry in its own order (which is the order this
+/// table has always used), then the user's own agents, then anything else
+/// with traffic in the window. That last group is an agent whose route was
+/// deleted: its usage rows stay, and its traffic should not disappear from
+/// the page just because the name did.
+fn agent_roster(store: &Store, since: Option<&str>) -> Result<Vec<(String, String)>, String> {
     let mut roster: Vec<(String, String)> = list_agents(store)?;
-    for id in store.usage_agents(since.as_deref()).map_err(e2s)? {
+    for id in store.usage_agents(since).map_err(e2s)? {
         if !roster.iter().any(|(a, _)| *a == id) {
             roster.push((id.clone(), id));
         }
     }
+    Ok(roster)
+}
 
+/// The per-agent breakdown. `roster` is passed in rather than rebuilt: the
+/// filter options below walk the same list.
+fn agent_distribution(
+    store: &Store,
+    agent: Option<&str>,
+    provider_id: Option<&str>,
+    since: Option<&str>,
+    roster: &[(String, String)],
+    costs: &DashboardCosts,
+) -> Result<Vec<AgentDistVm>, String> {
     let mut by_agent = Vec::new();
-    for (name, label) in &roster {
+    for (name, label) in roster {
         // The agent filter narrows this breakdown like every other panel,
         // leaving one row at 100% when one agent is selected. `name` is the
         // loop's, not the filter's, so skipping here is what applies it — a
@@ -381,13 +454,13 @@ pub fn build_dashboard(
             continue;
         }
         let t = store
-            .usage_totals(Some(name), provider_id, since.as_deref())
+            .usage_totals(Some(name), provider_id, since)
             .map_err(e2s)?;
         if t.requests > 0 {
             let buckets = store
-                .usage_cost_with_off_peak_by_currency(Some(name), provider_id, since.as_deref())
+                .usage_cost_with_off_peak_by_currency(Some(name), provider_id, since)
                 .unwrap_or_default();
-            let off_peak = cost_of(
+            let off_peak = costs.convert(
                 &buckets
                     .iter()
                     .map(|b| (b.currency.clone(), b.cost_off_peak))
@@ -398,7 +471,7 @@ pub fn build_dashboard(
                 label: label.clone(),
                 requests: t.requests,
                 tokens: fmt_tokens(t.input_tokens + t.output_tokens),
-                cost: (cost_of(
+                cost: (costs.convert(
                     &buckets
                         .iter()
                         .map(|b| (b.currency.clone(), b.cost))
@@ -410,60 +483,157 @@ pub fn build_dashboard(
             });
         }
     }
+    Ok(by_agent)
+}
 
-    let latency_now = aux.avg_latency(provider_id, agent, since.as_deref(), None);
-    let latency_before = previous
-        .as_ref()
-        .and_then(|(from, to)| aux.avg_latency(provider_id, agent, Some(from), Some(to)));
+/// The headline latency and its change against the window before.
+fn latency_pair(
+    aux: &Aux,
+    provider_id: Option<&str>,
+    agent: Option<&str>,
+    since: Option<&str>,
+    previous: Option<&(String, String)>,
+) -> (i64, Option<i64>) {
+    let latency_now = aux.avg_latency(provider_id, agent, since, None);
+    let latency_before =
+        previous.and_then(|(from, to)| aux.avg_latency(provider_id, agent, Some(from), Some(to)));
     // Both halves have to exist: an average with nothing to compare it against is
     // not a change, and neither is one measured over no rows. `avg_latency`
     // already ignores rows with no latency, so "no average" means "nothing was
     // measured", which is the honest absence this leaves as None.
-    let latency_delta_pct = match (latency_now, latency_before) {
+    let delta = match (latency_now, latency_before) {
         (Some(cur), Some(before)) => delta_pct(cur as f64, before as f64),
         _ => None,
     };
-    let latency = latency_now.unwrap_or(0);
+    (latency_now.unwrap_or(0), delta)
+}
 
-    // Filter select options: who has traffic in the window, independent of
-    // the active filter. The provider side reuses the same per-provider
-    // aggregation (query already orders by request count DESC); the agent
-    // side mirrors the by_agent loop without its provider narrowing.
-    let filter_providers: Vec<FilterOptionVm> = store
-        .usage_by_provider(None, None, since.as_deref())
+/// The two filter selects: who has traffic in the window, independent of the
+/// active filter. The provider side reuses the same per-provider aggregation
+/// (query already orders by request count DESC); the agent side mirrors the
+/// `agent_distribution` loop without its provider narrowing.
+fn filter_options(
+    store: &Store,
+    since: Option<&str>,
+    roster: &[(String, String)],
+    names: &HashMap<String, String>,
+) -> Result<(Vec<FilterOptionVm>, Vec<FilterOptionVm>), String> {
+    let providers: Vec<FilterOptionVm> = store
+        .usage_by_provider(None, None, since)
         .map_err(e2s)?
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
         .map(|pu| FilterOptionVm {
             id: pu.provider_id.clone(),
-            label: name_by_id
+            label: names
                 .get(&pu.provider_id)
                 .cloned()
                 .unwrap_or(pu.provider_id.clone()),
         })
         .collect();
-    let filter_agents: Vec<FilterOptionVm> = roster
+    let agents: Vec<FilterOptionVm> = roster
         .iter()
         .filter_map(|(name, label)| {
-            let t = store
-                .usage_totals(Some(name), None, since.as_deref())
-                .ok()?;
+            let t = store.usage_totals(Some(name), None, since).ok()?;
             (t.requests > 0).then(|| FilterOptionVm {
                 id: name.clone(),
                 label: label.clone(),
             })
         })
         .collect();
+    Ok((providers, agents))
+}
+
+/// Dashboard aggregation. `provider_id`/`agent` narrow every stat (headline,
+/// trend, distributions, latency) to that slice; None means all.
+pub fn build_dashboard(
+    store: &Store,
+    aux: &Aux,
+    window: &str,
+    provider_id: Option<&str>,
+    agent: Option<&str>,
+) -> Result<DashboardVm, String> {
+    let w = resolve_window(aux, unix_now(), window);
+
+    let cur = store
+        .usage_totals(agent, provider_id, w.since.as_deref())
+        .map_err(e2s)?;
+    // Headline request count shares the Logs card's source (request_logs):
+    // usage rows only cover forwarded requests, so failures before the forward
+    // leg (no provider bound, protocol mismatch…) would vanish from the top
+    // stat while the Logs card below still shows them. Token/cost/latency stay
+    // usage-based — failed requests carry none.
+    let requests = store
+        .count_request_logs(agent, provider_id, w.since.as_deref(), None)
+        .map_err(e2s)?;
+    // The same count over the window before, from the same source: two numbers
+    // compared as a percentage have to be measured the same way.
+    let previous_requests = match &w.previous {
+        Some((from, to)) => store
+            .count_request_logs(agent, provider_id, Some(from), Some(to))
+            .map_err(e2s)?,
+        None => 0,
+    };
+    let name_by_id: HashMap<String, String> = store
+        .list_providers()
+        .map_err(e2s)?
+        .iter()
+        .map(|p| (p.id.clone(), p.name.clone()))
+        .collect();
+
+    let costs = dashboard_costs(store, aux, agent, provider_id, w.since.as_deref())?;
+
+    let trend = if w.key == "today" {
+        trend_today(
+            store,
+            agent,
+            provider_id,
+            w.since.as_deref(),
+            w.today_days,
+            w.tz,
+        )?
+    } else {
+        trend_daily(store, agent, provider_id, &w)?
+    };
+
+    let by_provider = provider_distribution(
+        store,
+        agent,
+        provider_id,
+        w.since.as_deref(),
+        &name_by_id,
+        cur.requests.max(1),
+        &costs,
+    )?;
+    // Computed once: the agent breakdown and the filter selects walk the same list.
+    let roster = agent_roster(store, w.since.as_deref())?;
+    let by_agent = agent_distribution(
+        store,
+        agent,
+        provider_id,
+        w.since.as_deref(),
+        &roster,
+        &costs,
+    )?;
+    let (latency, latency_delta_pct) = latency_pair(
+        aux,
+        provider_id,
+        agent,
+        w.since.as_deref(),
+        w.previous.as_ref(),
+    );
+    let (filter_providers, filter_agents) =
+        filter_options(store, w.since.as_deref(), &roster, &name_by_id)?;
 
     Ok(DashboardVm {
-        window: window.to_string(),
+        window: w.key.to_string(),
         requests,
         requests_delta_pct: delta_pct(requests as f64, previous_requests as f64),
         input_tokens: cur.input_tokens,
         cache_read_tokens: cur.cache_read_tokens,
         output_tokens: cur.output_tokens,
-        cost: (cost * 1e6).round() / 1e6,
-        cost_off_peak,
+        cost: (costs.cost * 1e6).round() / 1e6,
+        cost_off_peak: costs.cost_off_peak,
         latency_ms: latency,
         latency_delta_pct,
         trend,

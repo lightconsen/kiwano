@@ -89,8 +89,12 @@ jobs:
           $roots = @(Join-Path $env:LOCALAPPDATA 'Kiwano'),
                     (Join-Path $env:LOCALAPPDATA 'Programs\Kiwano'),
                     (Join-Path ${env:PROGRAMFILES} 'Kiwano')
-          $exe = Get-ChildItem -Path $roots -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty FullName
+          $exe = $null
+          foreach ($root in $roots) {
+            $found = Get-ChildItem -Path $root -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+            if ($found) { $exe = $found; break }
+          }
           if (-not $exe) {
             # Name what is actually on disk before giving up: the installer's
             # layout is the thing being tested, and a bare "not found" costs a

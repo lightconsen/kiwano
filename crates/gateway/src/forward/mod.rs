@@ -35,6 +35,7 @@
 //! and `convert` are the two entry points, both of which end in `metering`.
 
 pub(crate) mod convert;
+pub(crate) mod finish;
 pub(crate) mod headers;
 pub(crate) mod inbound;
 pub(crate) mod metering;

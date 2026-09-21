@@ -5,11 +5,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::body::{Body, Bytes};
+use axum::body::Bytes;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
 
 use kiwano_adapters::proxy::model_mapper::strip_one_m_suffix_for_upstream_from_body;
 use kiwano_adapters::proxy::providers::streaming::create_anthropic_sse_stream;
@@ -18,15 +17,14 @@ use kiwano_adapters::proxy::providers::transform::{
 };
 
 use crate::error::GatewayError;
+use crate::forward::finish::{buffered_response, finish_log, log_failure, sse_response};
 use crate::forward::headers::{
-    build_upstream_headers, copy_response_headers, response_headers_text, select_upstream_key,
+    copy_response_headers, response_headers_text, upstream_key_and_headers,
 };
-use crate::forward::metering::{record_pending_usage, record_sample};
 use crate::forward::sample::{attribution_str, CompletedLog, UsageSample};
-use crate::forward::stream::{SseUsageStream, StreamPolicy};
-use crate::forward::upstream::{read_upstream_body_capped, send_upstream, MAX_UPSTREAM_BODY_BYTES};
+use crate::forward::stream::StreamPolicy;
+use crate::forward::upstream::{read_body_or_response, send_upstream};
 use crate::forward::BoxError;
-use crate::log_capture::cap_body;
 use crate::meter::{parse_response_usage, request_model, Usage};
 use crate::router::RoutedRequest;
 use crate::server::data::upstream_url;
@@ -64,12 +62,11 @@ pub(crate) async fn forward_anthropic_via_openai(
         Ok(v) => v,
         Err(e) => {
             let message = format!("kiwanod: inbound body is not valid JSON: {e}");
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
+            log_failure(
+                &state,
+                log.as_ref(),
+                provider,
+                &routed,
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 message.clone(),
@@ -90,12 +87,11 @@ pub(crate) async fn forward_anthropic_via_openai(
             // reader with no way to find out.
             let reason = e.to_string();
             let resp = proxy_error_into_response(e, inbound);
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
+            log_failure(
+                &state,
+                log.as_ref(),
+                provider,
+                &routed,
                 resp.status(),
                 "conversion_failed",
                 format!("kiwanod: adapters conversion failed: {reason}"),
@@ -118,12 +114,11 @@ pub(crate) async fn forward_anthropic_via_openai(
                 GatewayError::Upstream(format!("serializing converted body failed: {e}")),
                 inbound,
             );
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
+            log_failure(
+                &state,
+                log.as_ref(),
+                provider,
+                &routed,
                 resp.status(),
                 "internal_error",
                 format!("serializing converted body failed: {e}"),
@@ -134,39 +129,16 @@ pub(crate) async fn forward_anthropic_via_openai(
 
     let url = upstream_url(provider, "/v1/chat/completions");
     // Query strings are meaningless across protocol conversion; drop them.
-    let api_key = match select_upstream_key(&state, provider) {
-        Ok(k) => k,
-        Err(e) => {
-            let resp = error_into_response(e, inbound);
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
-                resp.status(),
-                "upstream_error",
-                "selecting upstream key failed".to_string(),
-            );
-            return resp;
-        }
-    };
-    let headers = match build_upstream_headers(&inbound_headers, provider, &api_key) {
+    let headers = match upstream_key_and_headers(
+        &state,
+        provider,
+        &inbound_headers,
+        inbound,
+        log.as_ref(),
+        &routed,
+    ) {
         Ok(h) => h,
-        Err(e) => {
-            let resp = error_into_response(e, inbound);
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
-                resp.status(),
-                "upstream_error",
-                "building upstream headers failed".to_string(),
-            );
-            return resp;
-        }
+        Err(resp) => return resp,
     };
 
     let mut upstream = match send_upstream(
@@ -209,13 +181,11 @@ pub(crate) async fn forward_anthropic_via_openai(
         // Convert the OpenAI chunk stream into an Anthropic event stream; the
         // metering scanner then reads the converted Anthropic usage events
         // and the capture tee records the client-visible stream.
-        let (tx, rx) = mpsc::channel::<UsageSample>(1);
-        tokio::spawn(record_pending_usage(state.clone(), rx));
         let converted = create_anthropic_sse_stream(Box::pin(upstream.bytes_stream()));
         let max_body_bytes = state.log_config().max_body_bytes;
-        let stream = SseUsageStream::new(
+        sse_response(
+            &state,
             Box::pin(converted.map(|r| r.map_err(|e| Box::new(e) as BoxError))),
-            tx,
             UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
@@ -252,30 +222,22 @@ pub(crate) async fn forward_anthropic_via_openai(
                 strip_usage_chunk: false,
             },
             inbound,
-            state.stream_timeouts(),
-        );
-        let mut response = Response::new(Body::from_stream(stream));
-        *response.status_mut() = status;
-        *response.headers_mut() = response_headers;
-        response
+            status,
+            response_headers,
+        )
     } else {
-        let bytes = match read_upstream_body_capped(&mut upstream, MAX_UPSTREAM_BODY_BYTES).await {
+        let bytes = match read_body_or_response(
+            &mut upstream,
+            &state,
+            log.as_ref(),
+            provider,
+            &routed,
+            inbound,
+        )
+        .await
+        {
             Ok(b) => b,
-            Err(e) => {
-                let resp =
-                    error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
-                crate::log_capture::persist_failure(
-                    &state.store,
-                    log.as_ref().map(|l| &l.capture),
-                    Some(routed.agent.clone()),
-                    Some(attribution_str(routed.attribution)),
-                    Some(provider.id.clone()),
-                    resp.status(),
-                    e.kind(),
-                    e.message().to_string(),
-                );
-                return resp;
-            }
+            Err(resp) => return resp,
         };
         let latency_ms = started.elapsed().as_millis() as i64;
         let (usage, upstream_model) = parse_response_usage(Protocol::OpenAI, &bytes);
@@ -283,17 +245,7 @@ pub(crate) async fn forward_anthropic_via_openai(
         if !status.is_success() {
             // Pass upstream error bodies through unconverted (error shapes
             // are not chat.completion objects; converting would corrupt them).
-            let log = log.map(|mut l| {
-                let max_body_bytes = state.log_config().max_body_bytes;
-                let (response_body, truncated) =
-                    cap_body(&bytes, max_body_bytes, &state.redactor());
-                l.response_body = Some(response_body);
-                l.response_size = bytes.len() as i64;
-                l.truncated = truncated;
-                l.status_code = status.as_u16();
-                l.response_headers = Some(response_headers_text(&response_headers));
-                l
-            });
+            let log = finish_log(log, &bytes, status, Some(&response_headers), &state);
             let sample = UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
@@ -308,11 +260,7 @@ pub(crate) async fn forward_anthropic_via_openai(
                 cache_inclusive: true,
                 log,
             };
-            record_sample(&state, sample);
-            let mut response = Response::new(Body::from(bytes));
-            *response.status_mut() = status;
-            *response.headers_mut() = response_headers;
-            return response;
+            return buffered_response(&state, bytes, sample, status, response_headers);
         }
 
         let anthropic = match serde_json::from_slice::<serde_json::Value>(&bytes)
@@ -325,12 +273,11 @@ pub(crate) async fn forward_anthropic_via_openai(
             Err(e) => {
                 let message = e.to_string();
                 let resp = error_into_response(e, inbound);
-                crate::log_capture::persist_failure(
-                    &state.store,
-                    log.as_ref().map(|l| &l.capture),
-                    Some(routed.agent.clone()),
-                    Some(attribution_str(routed.attribution)),
-                    Some(provider.id.clone()),
+                log_failure(
+                    &state,
+                    log.as_ref(),
+                    provider,
+                    &routed,
                     resp.status(),
                     "conversion_failed",
                     message,
@@ -345,12 +292,11 @@ pub(crate) async fn forward_anthropic_via_openai(
                     GatewayError::Upstream(format!("serializing converted response failed: {e}")),
                     inbound,
                 );
-                crate::log_capture::persist_failure(
-                    &state.store,
-                    log.as_ref().map(|l| &l.capture),
-                    Some(routed.agent.clone()),
-                    Some(attribution_str(routed.attribution)),
-                    Some(provider.id.clone()),
+                log_failure(
+                    &state,
+                    log.as_ref(),
+                    provider,
+                    &routed,
                     resp.status(),
                     "internal_error",
                     format!("serializing converted response failed: {e}"),
@@ -359,16 +305,7 @@ pub(crate) async fn forward_anthropic_via_openai(
             }
         };
 
-        let log = log.map(|mut l| {
-            let max_body_bytes = state.log_config().max_body_bytes;
-            let (response_body, truncated) = cap_body(&out, max_body_bytes, &state.redactor());
-            l.response_body = Some(response_body);
-            l.response_size = out.len() as i64;
-            l.truncated = truncated;
-            l.status_code = status.as_u16();
-            l.response_headers = Some(response_headers_text(&response_headers));
-            l
-        });
+        let log = finish_log(log, &out, status, Some(&response_headers), &state);
         let sample = UsageSample {
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
@@ -383,13 +320,10 @@ pub(crate) async fn forward_anthropic_via_openai(
             cache_inclusive: true,
             log,
         };
-        record_sample(&state, sample);
-
-        let mut response = Response::new(Body::from(out));
-        *response.status_mut() = status;
         // The upstream headers were snapshotted for an OpenAI payload; the
         // converted body is always JSON.
-        *response.headers_mut() = response_headers;
+        let mut response =
+            buffered_response(&state, Bytes::from(out), sample, status, response_headers);
         if let Ok(ct) = HeaderValue::from_str("application/json") {
             response
                 .headers_mut()

@@ -8,8 +8,10 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 
 use crate::error::GatewayError;
+use crate::forward::finish::log_failure;
+use crate::forward::sample::CompletedLog;
 use crate::log_capture::RequestCapture;
-use crate::router::UpstreamProvider;
+use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::{error_into_response, GatewayState};
 use crate::store::Protocol;
 
@@ -102,6 +104,36 @@ pub(crate) async fn read_upstream_body_capped(
         out.extend_from_slice(&chunk);
     }
     Ok(Bytes::from(out))
+}
+
+/// Read the upstream body whole — or hand back the response the client gets
+/// instead, its request-log row already written.
+#[allow(clippy::result_large_err)] // Err is the client-facing response, not a diagnostic
+pub(crate) async fn read_body_or_response(
+    upstream: &mut reqwest::Response,
+    state: &GatewayState,
+    log: Option<&CompletedLog>,
+    provider: &UpstreamProvider,
+    routed: &RoutedRequest,
+    inbound: Option<Protocol>,
+) -> Result<Bytes, Response> {
+    match read_upstream_body_capped(upstream, MAX_UPSTREAM_BODY_BYTES).await {
+        Ok(b) => Ok(b),
+        Err(e) => {
+            let resp =
+                error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
+            log_failure(
+                state,
+                log,
+                provider,
+                routed,
+                resp.status(),
+                e.kind(),
+                e.message().to_string(),
+            );
+            Err(resp)
+        }
+    }
 }
 
 /// A failed send attempt: either the per-provider response-header timeout

@@ -2,9 +2,13 @@
 //! carries, what the upstream is told, and what the client is told back.
 
 use axum::http::{HeaderMap, HeaderValue};
+use axum::response::Response;
 
 use crate::error::GatewayError;
-use crate::router::UpstreamProvider;
+use crate::forward::finish::log_failure;
+use crate::forward::sample::CompletedLog;
+use crate::router::{RoutedRequest, UpstreamProvider};
+use crate::server::{error_into_response, GatewayState};
 use crate::store::Protocol;
 
 /// Hop-by-hop headers never forwarded in either direction.
@@ -113,6 +117,51 @@ pub(crate) fn build_upstream_headers(
         }
     }
     Ok(out)
+}
+
+/// The credential and the headers one upstream request goes out with — or the
+/// client-facing failure to answer with, whose log row is written here.
+#[allow(clippy::result_large_err)] // Err is the client-facing response, not a diagnostic
+pub(crate) fn upstream_key_and_headers(
+    state: &GatewayState,
+    provider: &UpstreamProvider,
+    inbound_headers: &HeaderMap,
+    inbound: Option<Protocol>,
+    log: Option<&CompletedLog>,
+    routed: &RoutedRequest,
+) -> Result<HeaderMap, Response> {
+    let api_key = match select_upstream_key(state, provider) {
+        Ok(k) => k,
+        Err(e) => {
+            let resp = error_into_response(e, inbound);
+            log_failure(
+                state,
+                log,
+                provider,
+                routed,
+                resp.status(),
+                "upstream_error",
+                "selecting upstream key failed".to_string(),
+            );
+            return Err(resp);
+        }
+    };
+    match build_upstream_headers(inbound_headers, provider, &api_key) {
+        Ok(h) => Ok(h),
+        Err(e) => {
+            let resp = error_into_response(e, inbound);
+            log_failure(
+                state,
+                log,
+                provider,
+                routed,
+                resp.status(),
+                "upstream_error",
+                "building upstream headers failed".to_string(),
+            );
+            Err(resp)
+        }
+    }
 }
 
 /// Copy upstream response headers onto a gateway response, dropping framing

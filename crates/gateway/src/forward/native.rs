@@ -6,29 +6,27 @@ use std::time::Instant;
 
 use chrono::Utc;
 
-use axum::body::{Body, Bytes};
+use axum::body::Bytes;
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
 
-use crate::error::GatewayError;
 use crate::forward::convert::forward_anthropic_via_openai;
+use crate::forward::finish::{buffered_response, finish_log, log_failure, sse_response};
 use crate::forward::headers::{
-    build_upstream_headers, copy_response_headers, response_headers_text, select_upstream_key,
+    copy_response_headers, response_headers_text, upstream_key_and_headers,
 };
 use crate::forward::inbound::{resolve_inbound, InboundResolution};
-use crate::forward::metering::{record_pending_usage, record_sample};
 use crate::forward::sample::{attribution_str, CompletedLog, UsageSample};
 use crate::forward::shim::{apply_compat_shim, ensure_openai_stream_usage};
-use crate::forward::stream::{SseUsageStream, StreamPolicy};
-use crate::forward::upstream::{read_upstream_body_capped, send_upstream, MAX_UPSTREAM_BODY_BYTES};
+use crate::forward::stream::StreamPolicy;
+use crate::forward::upstream::{read_body_or_response, send_upstream};
 use crate::forward::BoxError;
-use crate::log_capture::{cap_body, RequestCapture};
+use crate::log_capture::RequestCapture;
 use crate::meter::{model_from_path, parse_response_usage, request_model, Usage};
 use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::data::upstream_url;
-use crate::server::{error_into_response, error_response, GatewayState};
+use crate::server::{error_response, GatewayState};
 use crate::store::Protocol;
 
 /// Forward one resolved request to its provider and return the client-facing
@@ -101,12 +99,11 @@ pub async fn forward(
             .await;
         }
         InboundResolution::Mismatch { message } => {
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
+            log_failure(
+                &state,
+                log.as_ref(),
+                provider,
+                &routed,
                 StatusCode::BAD_GATEWAY,
                 "protocol_mismatch",
                 message.clone(),
@@ -126,39 +123,16 @@ pub async fn forward(
         url.push_str(q);
     }
 
-    let api_key = match select_upstream_key(&state, provider) {
-        Ok(k) => k,
-        Err(e) => {
-            let resp = error_into_response(e, inbound);
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
-                resp.status(),
-                "upstream_error",
-                "selecting upstream key failed".to_string(),
-            );
-            return resp;
-        }
-    };
-    let headers = match build_upstream_headers(&inbound_headers, provider, &api_key) {
+    let headers = match upstream_key_and_headers(
+        &state,
+        provider,
+        &inbound_headers,
+        inbound,
+        log.as_ref(),
+        &routed,
+    ) {
         Ok(h) => h,
-        Err(e) => {
-            let resp = error_into_response(e, inbound);
-            crate::log_capture::persist_failure(
-                &state.store,
-                log.as_ref().map(|l| &l.capture),
-                Some(routed.agent.clone()),
-                Some(attribution_str(routed.attribution)),
-                Some(provider.id.clone()),
-                resp.status(),
-                "upstream_error",
-                "building upstream headers failed".to_string(),
-            );
-            return resp;
-        }
+        Err(resp) => return resp,
     };
 
     // Read the model from the client's own body, before the send consumes it —
@@ -242,16 +216,15 @@ pub async fn forward(
     if is_sse {
         // Streaming passthrough with usage scanning + response capture; the
         // sample is persisted by a side task when the stream finishes.
-        let (tx, rx) = mpsc::channel::<UsageSample>(1);
-        tokio::spawn(record_pending_usage(state.clone(), rx));
+        //
         // `None` here is both "logging is off" and "no cap configured", and
         // the two are the same answer for the buffer this bounds: with logging
         // off nothing is persisted, and with no cap configured the whole
         // response is kept. Neither is a cap of zero.
         let max_body_bytes = log.as_ref().and_then(|_| state.log_config().max_body_bytes);
-        let stream = SseUsageStream::new(
+        sse_response(
+            &state,
             Box::pin(upstream.bytes_stream().map(|r| r.map_err(BoxError::from))),
-            tx,
             UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
@@ -286,42 +259,28 @@ pub async fn forward(
                 strip_usage_chunk,
             },
             inbound,
-            state.stream_timeouts(),
-        );
-        let mut response = Response::new(Body::from_stream(stream));
-        *response.status_mut() = status;
-        *response.headers_mut() = response_headers;
-        response
+            status,
+            response_headers,
+        )
     } else {
-        let bytes = match read_upstream_body_capped(&mut upstream, MAX_UPSTREAM_BODY_BYTES).await {
+        let bytes = match read_body_or_response(
+            &mut upstream,
+            &state,
+            log.as_ref(),
+            provider,
+            &routed,
+            inbound,
+        )
+        .await
+        {
             Ok(b) => b,
-            Err(e) => {
-                let resp =
-                    error_into_response(GatewayError::Upstream(e.message().to_string()), inbound);
-                crate::log_capture::persist_failure(
-                    &state.store,
-                    log.as_ref().map(|l| &l.capture),
-                    Some(routed.agent.clone()),
-                    Some(attribution_str(routed.attribution)),
-                    Some(provider.id.clone()),
-                    resp.status(),
-                    e.kind(),
-                    e.message().to_string(),
-                );
-                return resp;
-            }
+            Err(resp) => return resp,
         };
         let latency_ms = started.elapsed().as_millis() as i64;
         let (usage, upstream_model) = parse_response_usage(provider.protocol, &bytes);
-        let log = log.map(|mut l| {
-            let max_body_bytes = state.log_config().max_body_bytes;
-            let (response_body, truncated) = cap_body(&bytes, max_body_bytes, &state.redactor());
-            l.response_body = Some(response_body);
-            l.response_size = bytes.len() as i64;
-            l.truncated = truncated;
-            l.status_code = status.as_u16();
-            l
-        });
+        // The headers were written to the log before the branch, for both
+        // shapes; the body is the half this leg still owes it.
+        let log = finish_log(log, &bytes, status, None, &state);
         let sample = UsageSample {
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
@@ -335,11 +294,6 @@ pub async fn forward(
             cache_inclusive: matches!(provider.protocol, Protocol::OpenAI | Protocol::Gemini),
             log,
         };
-        record_sample(&state, sample);
-
-        let mut response = Response::new(Body::from(bytes));
-        *response.status_mut() = status;
-        *response.headers_mut() = response_headers;
-        response
+        buffered_response(&state, bytes, sample, status, response_headers)
     }
 }

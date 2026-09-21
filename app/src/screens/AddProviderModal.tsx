@@ -1,27 +1,12 @@
 // Add/edit provider modal (design/index.html #modal, cc-switch AddProviderDialog pattern)
 // Base controls use shadcn/ui (Dialog/Input/Label/Select/Button); the segmented pills are kept as design language
+//
+// The container: it owns the form's state, the eight effects behind it and the
+// save, and composes the pieces that live in `screens/AddProviderModal/`.
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Eye, Gauge, Infinity as InfinityIcon, Plus, RefreshCw, Store, XIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "../api/client";
 import { useT } from "../i18n";
-import { allAgentMetas } from "../lib/agents";
 import {
   PLAN_QUERY_TEMPLATES,
   type AgentRef,
@@ -34,13 +19,24 @@ import {
   type Protocol,
   type Provider,
 } from "../api/types";
-import { AgentChip } from "@/components/bits";
-import { ProviderLogo } from "@/components/icons/ProviderLogo";
-import { hubAssetUrl, useHubUrl } from "../lib/hub";
-import { AUTH_HEADER_NAMES } from "./AddProviderModal/advanced";
-import { probeColor } from "./AddProviderModal/endpoints";
-import { PLAN_PRESET_PCTS } from "./AddProviderModal/limits";
-import { RATE_FIELDS } from "./AddProviderModal/prices";
+import { useHubUrl } from "../lib/hub";
+import { AdvancedSection } from "./AddProviderModal/advanced";
+import { AgentBinding } from "./AddProviderModal/binding";
+import { BillingSection } from "./AddProviderModal/billing";
+import { EndpointsSection } from "./AddProviderModal/endpoints";
+import { Footer } from "./AddProviderModal/footer";
+import { IdentitySection } from "./AddProviderModal/identity";
+import { RotatingKeys } from "./AddProviderModal/keys";
+import {
+  invalidPct,
+  PaygLimit,
+  PlanCeilings,
+  PlanQuotaNotice,
+  UnlimitedNote,
+} from "./AddProviderModal/limits";
+import { CatalogPicker, EntryChip, ModeSwitch } from "./AddProviderModal/mode";
+import { ModelSection } from "./AddProviderModal/model";
+import { invalidRate, PricesSection, RATE_FIELDS } from "./AddProviderModal/prices";
 
 export default function AddProviderModal({
   open,
@@ -60,30 +56,13 @@ export default function AddProviderModal({
 }) {
   const hubUrl = useHubUrl();
   const t = useT();
-  // Billing, protocol and probe labels: resolved here so a language change
-  // re-renders them along with the rest of the form.
+  // Billing labels: resolved here so a language change re-renders them along
+  // with the rest of the form.
   const billOptions: { id: Billing; label: string }[] = [
     { id: "plan", label: t("addProvider.billingPlan") },
     { id: "payg", label: t("addProvider.billingPayg") },
     { id: "unl", label: t("addProvider.billingUnlimited") },
   ];
-  const protocolLabel = (id: string) =>
-    protocolOptions.find((p) => p.id === id)?.label ?? id;
-  const protocolOptions: { id: Protocol; label: string }[] = [
-    { id: "openai", label: t("addProvider.protoOpenai") },
-    { id: "anthropic", label: t("addProvider.protoAnthropic") },
-    { id: "gemini", label: t("addProvider.protoGemini") },
-  ];
-  // Inline probe readout: ok shows the measured latency, every other verdict
-  // shows a short word (full detail lives in the span's title). Green/kiwi =
-  // usable (ok, or route exists but key invalid), red = broken/unreachable.
-  const probeText: Record<ProbeReport["verdict"], string> = {
-    ok: t("addProvider.probeOk"),
-    auth: t("addProvider.probeAuth"),
-    unsupported: t("addProvider.probeUnsupported"),
-    error: t("addProvider.probeError"),
-    unreachable: t("addProvider.probeUnreachable"),
-  };
   const [mode, setMode] = useState<"shelf" | "custom">("shelf");
   // Catalog entry chosen in the "From Models" mode (preset pre-seeds it when
   // the modal opens from the Models page; otherwise picked in-modal)
@@ -163,10 +142,6 @@ export default function AddProviderModal({
   const [advTimeout, setAdvTimeout] = useState("");
   const [advRetries, setAdvRetries] = useState("");
   const [advHeaders, setAdvHeaders] = useState<{ name: string; value: string }[]>([]);
-  // Case-insensitive, like HTTP itself.
-  const authHeaderOverride = advHeaders
-    .map((r) => r.name.trim())
-    .find((n) => AUTH_HEADER_NAMES.includes(n.toLowerCase()));
   const [pqTemplate, setPqTemplate] = useState("");
   const [pqFields, setPqFields] = useState<Record<string, string>>({});
   // Plan-mode percent limits: per-window utilization ceilings over the
@@ -229,17 +204,6 @@ export default function AddProviderModal({
     : [];
   const modelOptions = fetchedModels ?? shelfModelOptions;
   const showModelSelect = (fetchedModels?.length ?? 0) > 0 || (!edit && mode === "shelf" && !!shelf);
-
-  // Protocols this provider serves: the primary + every additional endpoint's
-  const supportedProtocols = new Set<Protocol>([protocol, ...altEndpoints.map((r) => r.protocol)]);
-
-  const setHeader = (i: number, patch: Partial<{ name: string; value: string }>) =>
-    setAdvHeaders((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-
-  const removeHeader = (i: number) =>
-    setAdvHeaders((rows) => rows.filter((_, j) => j !== i));
-
-  const addHeader = () => setAdvHeaders((rows) => [...rows, { name: "", value: "" }]);
 
   const resetAdvanced = () => {
     setAdvOpen(false);
@@ -400,11 +364,6 @@ export default function AddProviderModal({
     }
   }, [open, edit, mode, shelf, catalog]);
 
-  /** What the picker offers. */
-  const currencyOptions = Array.from(
-    new Set([...(currencies.length ? currencies : [limitCurrency]), limitCurrency]),
-  );
-
   /// The catalog entry an edited provider was added from, when the Hub still
   /// publishes it.
   ///
@@ -479,122 +438,9 @@ export default function AddProviderModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [agentsOpen]);
 
-  /** A ceiling is a percentage in (0, 100], or blank for "no ceiling".
-   *
-   * Anything else is not a value to save. The backend keeps only that range and
-   * silently drops the rest, so `150` — or `0`, or a stray letter — used to look
-   * accepted and store nothing at all: a routing policy the user believed they
-   * had set. The dialog says so instead, and refuses the save. */
-  const invalidPct = (raw: string): boolean => {
-    if (raw.trim() === "") return false;
-    const pct = Number(raw);
-    return !Number.isFinite(pct) || pct <= 0 || pct > 100;
-  };
-
-  /** A declared rate: blank (a box not filled in yet), or a number that is zero
-   * or more.
-   *
-   * Blank is allowed through because a row is entered field by field, and a
-   * rate the user never states is zero — the backend reads it that way, and the
-   * section's own note says so. Anything else is refused rather than dropped:
-   * the price table parses these as numbers when it costs a request, so a stray
-   * character would become the cost of *every* request this provider serves. */
-  const invalidRate = (raw: string): boolean => {
-    if (raw.trim() === "") return false;
-    const rate = Number(raw);
-    return !Number.isFinite(rate) || rate < 0;
-  };
   const badPrice = prices.some((row) =>
     RATE_FIELDS.some((f) => invalidRate(row[f.key])),
   );
-
-  /** Patch one row: its model id, or one of its four rates. */
-  const setPrice = (i: number, patch: Partial<DeclaredPrice>) =>
-    setPrices((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
-
-  /** A new row, seeded with the default model when the form has one and does
-   * not already price it: the model this provider routes is the one whose rates
-   * the user came here to write down. */
-  const addPrice = () =>
-    setPrices((rows) => [
-      ...rows,
-      {
-        model_id: rows.some((r) => r.model_id.trim() === model.trim()) ? "" : model.trim(),
-        input: "",
-        output: "",
-        cache_read: "",
-        cache_creation: "",
-      },
-    ]);
-
-  /** One plan-window ceiling: a field that reads as a percentage, the presets
-      beside the window's name, and the reason when it cannot be saved. */
-  /** One endpoint row's protocol: a badge while a catalog entry owns the form, a
-      picker when the user does. Both rows use it, and so the coverage badges above
-      follow whatever is picked here. */
-  const protocolField = (value: Protocol, onChange: (p: Protocol) => void) =>
-    fromEntry ? (
-      <span className="flex h-8 w-[108px] flex-none items-center overflow-hidden rounded-md border border-line bg-surface2 px-2 text-[11.5px] text-mut">
-        <span className="truncate">{protocolLabel(value)}</span>
-      </span>
-    ) : (
-      <Select value={value} onValueChange={(v) => v && onChange(v as Protocol)}>
-        <SelectTrigger
-          className="h-8 w-[108px] flex-none bg-bg text-[11.5px] dark:bg-bg"
-          aria-label={t("addProvider.protocol")}
-        >
-          <SelectValue>{(v) => protocolLabel(String(v ?? value))}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {protocolOptions.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-
-  /** The protocol no endpoint covers yet, for a row that is about to be added.
-      Only two exist, so the add button runs out rather than repeating one. */
-  const nextFreeProtocol = (): Protocol =>
-    protocolOptions.find((p) => !supportedProtocols.has(p.id))?.id ?? protocol;
-
-  const ceilingField = (value: string, setValue: (v: string) => void, name: string) => {
-    const bad = invalidPct(value);
-    return (
-      <div>
-        <div className="flex items-center gap-1.5">
-          <Input
-            className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            inputMode="decimal"
-            aria-invalid={bad}
-          />
-          <span className="text-[11.5px] text-mut">%</span>
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-1">
-          <p className="text-[10px] text-mut">{name}</p>
-          {PLAN_PRESET_PCTS.map((pct) => (
-            <button
-              key={pct}
-              type="button"
-              className="chip rounded border border-line px-1.5 text-[10px] text-mut hover:text-foreground"
-              onClick={() => setValue(String(pct))}
-            >
-              {pct}%
-            </button>
-          ))}
-        </div>
-        {bad && (
-          <p className="mt-1 text-[10px]" style={{ color: "var(--red)" }}>
-            {t("addProvider.planLimitRange")}
-          </p>
-        )}
-      </div>
-    );
-  };
 
   // An invalid ceiling is refused rather than dropped: see `invalidPct`.
   const canSave =
@@ -818,135 +664,36 @@ export default function AddProviderModal({
         <div className="px-4 py-3.5">
           {/* Mode switch (hidden in edit mode: no models involved) */}
           {!edit && (
-            <div className="flex overflow-hidden rounded-md border border-line text-[11.5px]">
-              <div
-                className="btn flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1 font-medium"
-                style={mode === "shelf" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
-                onClick={() => setMode("shelf")}
-              >
-                <Store className="h-3 w-3" />
-                {shelf
-                  ? t("addProvider.fromModelsNamed", { name: shelf.name })
-                  : t("addProvider.fromModels")}
-              </div>
-              <div
-                className="btn flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center"
-                style={mode === "custom" ? { background: "var(--kiwi-soft)", color: "var(--kiwi)" } : { color: "var(--mut)" }}
-                onClick={() => setMode("custom")}
-              >
-                {t("addProvider.custom")}
-              </div>
-            </div>
+            <ModeSwitch mode={mode} shelf={shelf} setMode={setMode} />
           )}
 
           {/* In-modal catalog picker (shelf mode without a chosen entry) */}
           {!edit && mode === "shelf" && !shelf && (
-            <div className="mt-3">
-              <Input
-                className="h-8 bg-bg text-[12px] dark:bg-bg"
-                placeholder={t("addProvider.searchCatalog")}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              {/* rows carry logo + name only (endpoint URLs were dropped: they
-                  ellipsized awkwardly in the narrow list); overflow-x-hidden
-                  stays as WKWebView hardening */}
-              <div className="mt-1.5 max-h-40 overflow-x-hidden overflow-y-auto rounded-md border border-line">
-                {(catalog ?? [])
-                  .filter(
-                    (e) =>
-                      !e.added &&
-                      e.name.toLowerCase().includes(query.trim().toLowerCase()),
-                  )
-                  .map((e) => (
-                    <button
-                      key={e.id}
-                      className="btn flex w-full items-center gap-2 border-b border-line px-2.5 py-1.5 text-left last:border-b-0 hover:bg-surface2"
-                      onClick={() => {
-                        setShelf(e);
-                        applyShelf(e);
-                      }}
-                    >
-                      <ProviderLogo
-                        logo={e.logo && hubUrl ? hubAssetUrl(hubUrl, e.logo) : undefined}
-                        name={e.name}
-                        color={e.logo_color}
-                        size={16}
-                      />
-                      <span className="min-w-0 truncate text-[12px] font-medium">{e.name}</span>
-                    </button>
-                  ))}
-                {catalog && catalog.filter((e) => !e.added && e.name.toLowerCase().includes(query.trim().toLowerCase())).length === 0 && (
-                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">
-                    {t("addProvider.noMatching")}
-                  </div>
-                )}
-                {!catalog && (
-                  <div className="px-2.5 py-3 text-center text-[11px] text-mut">
-                    {t("common.loading")}
-                  </div>
-                )}
-              </div>
-            </div>
+            <CatalogPicker
+              query={query}
+              setQuery={setQuery}
+              catalog={catalog}
+              hubUrl={hubUrl}
+              setShelf={setShelf}
+              applyShelf={applyShelf}
+            />
           )}
 
           {/* Chosen catalog entry (with a way back to the picker) */}
           {!edit && mode === "shelf" && shelf && (
-            <div className="mt-3 flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
-              <ProviderLogo
-                logo={shelf.logo && hubUrl ? hubAssetUrl(hubUrl, shelf.logo) : undefined}
-                name={shelf.name}
-                color={shelf.logo_color}
-                size={16}
-              />
-              <span className="min-w-0 truncate text-[12px] font-medium">{shelf.name}</span>
-              <button
-                className="ml-auto flex-none text-[11px] font-medium"
-                style={{ color: "var(--kiwi)" }}
-                onClick={() => setShelf(null)}
-              >
-                {t("addProvider.change")}
-              </button>
-            </div>
+            <EntryChip shelf={shelf} hubUrl={hubUrl} setShelf={setShelf} />
           )}
 
           <div className="mt-3 space-y-3">
-            <div>
-              <Label className="text-[11px] font-medium text-mut">{t("addProvider.name")}</Label>
-              <Input
-                className="mt-1 h-8 bg-bg text-[12px] dark:bg-bg"
-                value={name}
-                aria-label={t("addProvider.name")}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label className="text-[11px] font-medium text-mut">
-                {t("addProvider.apiKey")}{" "}
-                <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                  {edit ? t("addProvider.keyKeep") : t("addProvider.keyLocal")}
-                </span>
-              </Label>
-              <div className="relative mt-1">
-                <Input
-                  type={showKey ? "text" : "password"}
-                  className="h-8 bg-bg pr-8 font-mono text-[12px] dark:bg-bg"
-                  value={apiKey}
-                  placeholder={edit ? "••••••••" : ""}
-                  onChange={(e) => setApiKey(e.target.value)}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="absolute top-1/2 right-1 -translate-y-1/2 text-mut"
-                  onClick={() => setShowKey(!showKey)}
-                  aria-label={t("addProvider.showHideKey")}
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
+            <IdentitySection
+              name={name}
+              setName={setName}
+              apiKey={apiKey}
+              setApiKey={setApiKey}
+              showKey={showKey}
+              setShowKey={setShowKey}
+              edit={edit}
+            />
 
             {/* Endpoint URLs, one row per protocol: protocol + URL + Test. The
                 first row is the primary endpoint, the rest serve agents speaking
@@ -960,318 +707,76 @@ export default function AddProviderModal({
                 rows' own union drawn a second time — its comment already said the
                 per-endpoint rows were authoritative — so it is gone, and each row
                 carries its protocol itself. */}
-            <div>
-              <Label className="text-[11px] font-medium text-mut">
-                {t("addProvider.endpointUrl")}{" "}
-                <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                  {!edit && mode === "shelf" && shelf
-                    ? t("addProvider.endpointHintShelf")
-                    : t("addProvider.endpointHint")}
-                </span>
-              </Label>
-              <div className="mt-1 space-y-1.5">
-                {/* Primary endpoint row */}
-                <div className="flex items-center gap-1.5">
-                  {protocolField(protocol, (p) => {
-                    setProtocol(p);
-                    // The verdict was for the old protocol's endpoint call shape
-                    setProbe(null);
-                  })}
-                  <Input
-                    className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                    value={endpoint}
-                    readOnly={fromEntry}
-                    aria-label={t("addProvider.endpointUrl")}
-                    onChange={(e) => {
-                      setEndpoint(e.target.value);
-                      setProbe(null);
-                      // The fetched list belongs to the old endpoint
-                      setFetchedModels(null);
-                      setFetchError(null);
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 flex-none gap-1 px-2.5 text-[11px]"
-                    disabled={testing}
-                    onClick={async () => {
-                      setTesting(true);
-                      try {
-                        setProbe(
-            await api.testEndpoint(protocol, endpoint.trim(), apiKey.trim() || undefined, edit?.id),
-          );
-                      } catch (e) {
-                        // A rejected invoke (e.g. command missing in a stale app
-                        // binary) must still land as a visible verdict, not vanish
-                        setProbe({ verdict: "error", status: null, latency_ms: 0, detail: String(e) });
-                      } finally {
-                        setTesting(false);
-                      }
-                    }}
-                  >
-                    <Gauge className="h-3 w-3" />
-                    {t("addProvider.test")}{" "}
-                    {probe && (
-                      <span className="font-mono" style={{ color: probeColor(probe.verdict) }} title={probe.detail}>
-                        {probe.verdict === "ok" ? `${probe.latency_ms}ms` : probeText[probe.verdict]}
-                      </span>
-                    )}
-                  </Button>
-                </div>
-                {altEndpoints.map((r, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    {protocolField(r.protocol, (p) => {
-                      setAltEndpoints((rs) =>
-                        rs.map((x, j) => (j === i ? { ...x, protocol: p } : x)),
-                      );
-                      // The verdict was for the old protocol's call shape
-                      setAltProbes((m) => {
-                        const next = { ...m };
-                        delete next[i];
-                        return next;
-                      });
-                    })}
-                    <span className="min-w-0 flex-1">
-                      <Input
-                        className="h-8 w-full bg-bg font-mono text-[12px] dark:bg-bg"
-                        value={r.endpoint}
-                        readOnly={fromEntry}
-                        aria-label={t("addProvider.endpointUrl")}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setAltEndpoints((rs) =>
-                            rs.map((x, j) => (j === i ? { ...x, endpoint: value } : x)),
-                          );
-                          setAltProbes((m) => {
-                            const next = { ...m };
-                            delete next[i];
-                            return next;
-                          });
-                        }}
-                      />
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 flex-none gap-1 px-2.5 text-[11px]"
-                      disabled={!r.endpoint.trim() || altTesting[i]}
-                      onClick={() => testAlt(i)}
-                    >
-                      <Gauge className="h-3 w-3" />
-                      {t("addProvider.test")}{" "}
-                      {altProbes[i] && (
-                        <span
-                          className="font-mono"
-                          style={{ color: probeColor(altProbes[i]!.verdict) }}
-                          title={altProbes[i]!.detail}
-                        >
-                          {altProbes[i]!.verdict === "ok"
-                            ? `${altProbes[i]!.latency_ms}ms`
-                            : probeText[altProbes[i]!.verdict]}
-                        </span>
-                      )}
-                    </Button>
-                    {!fromEntry && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 flex-none px-0 text-mut hover:text-ink"
-                        aria-label={t("addProvider.removeEndpoint")}
-                        title={t("addProvider.removeEndpoint")}
-                        onClick={() => {
-                          setAltEndpoints((rs) => rs.filter((_, j) => j !== i));
-                          setAltProbes({});
-                        }}
-                      >
-                        <XIcon className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                {/* A provider typed in by hand declares its own endpoints: one row
-                    per protocol it answers on. A catalog entry has already said
-                    which those are, so the button is not there while it owns the
-                    form — and with two protocols there is nothing to add once both
-                    are covered. */}
-                {!fromEntry && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1 px-2 text-[11.5px] text-mut hover:text-ink"
-                    disabled={protocolOptions.every((p) => supportedProtocols.has(p.id))}
-                    onClick={() =>
-                      setAltEndpoints((rs) => [
-                        ...rs,
-                        { protocol: nextFreeProtocol(), endpoint: "" },
-                      ])
-                    }
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {t("addProvider.addEndpoint")}
-                  </Button>
-                )}
-              </div>
-            </div>
+            <EndpointsSection
+              protocol={protocol}
+              setProtocol={setProtocol}
+              endpoint={endpoint}
+              setEndpoint={setEndpoint}
+              altEndpoints={altEndpoints}
+              setAltEndpoints={setAltEndpoints}
+              altProbes={altProbes}
+              setAltProbes={setAltProbes}
+              altTesting={altTesting}
+              probe={probe}
+              setProbe={setProbe}
+              testing={testing}
+              setTesting={setTesting}
+              setFetchedModels={setFetchedModels}
+              setFetchError={setFetchError}
+              apiKey={apiKey}
+              edit={edit}
+              fromEntry={fromEntry}
+              mode={mode}
+              shelf={shelf}
+              testAlt={testAlt}
+            />
 
-            <div>
-              <div className="flex items-center justify-between">
-                <Label className="text-[11px] font-medium text-mut">{t("addProvider.defaultModel")}</Label>
-                {/* Pulls the live model list from the primary endpoint; needs
-                    the API key, so a click without one shows an inline error */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-[10.5px] text-mut"
-                  disabled={fetching || !endpoint.trim()}
-                  onClick={fetchModels}
-                >
-                  <RefreshCw className={`h-3 w-3${fetching ? " animate-spin" : ""}`} />
-                  {fetching ? t("addProvider.fetching") : t("addProvider.fetch")}
-                </Button>
-              </div>
-              {showModelSelect ? (
-                <Select value={model} open={modelOpen} onOpenChange={setModelOpen} onValueChange={(v) => setModel(v ?? "")}>
-                  <SelectTrigger className="mt-1 w-full bg-bg text-[12px] dark:bg-bg">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelOptions.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder={t("addProvider.modelIdPlaceholder")}
-                />
-              )}
-              {fetchError && (
-                <p className="mt-1 text-[10.5px]" style={{ color: "var(--red)" }} title={fetchError}>
-                  {fetchError}
-                </p>
-              )}
-            </div>
+            <ModelSection
+              model={model}
+              setModel={setModel}
+              modelOpen={modelOpen}
+              setModelOpen={setModelOpen}
+              modelOptions={modelOptions}
+              showModelSelect={showModelSelect}
+              fetching={fetching}
+              fetchError={fetchError}
+              endpoint={endpoint}
+              fetchModels={fetchModels}
+            />
 
-            <div>
-              <Label className="text-[11px] font-medium text-mut">
-                {t("addProvider.billing")}
-                {billingLocked && (
-                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    {edit ? t("addProvider.billingFixed") : t("addProvider.billingFromCatalog")}
-                  </span>
-                )}
-              </Label>
-              {billingLocked ? (
-                <div className="mt-1 flex h-8 items-center rounded-md border border-line bg-surface2 px-2.5 text-[11.5px] text-ink">
-                  {billOptions.find((b) => b.id === billing)?.label ?? billing}
-                </div>
-              ) : (
-                <div className={`mt-1 grid gap-1.5 ${bothEntry ? "grid-cols-2" : "grid-cols-3"}`}>
-                  {(bothEntry ? billOptions.filter((b) => b.id !== "unl") : billOptions).map((b) => {
-                    const active = billing === b.id;
-                    return (
-                      <button
-                        key={b.id}
-                        className="btn h-8 cursor-pointer rounded-md border text-[11.5px]"
-                        style={active
-                          ? { borderColor: "var(--kiwi-dim)", background: "var(--kiwi-soft)", color: "var(--kiwi)" }
-                          : { borderColor: "var(--line)", color: "var(--mut)" }}
-                        onClick={() => setBilling(b.id)}
-                      >
-                        {b.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {!billingKnown && (
-                <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
-                  {t("addProvider.billingUnknown", { billing })}
-                </p>
-              )}
-              {bothEntry && (
-                // Amber while the choice is still owed, muted once it is made:
-                // same sentence either way, because the fact it states — this
-                // vendor charges both — outlives the decision.
-                <p
-                  className="mt-1 text-[10.5px]"
-                  style={{ color: unresolvedBoth ? "var(--amber)" : "var(--mut)" }}
-                >
-                  {t("addProvider.billingBoth")}
-                </p>
-              )}
-            </div>
+            <BillingSection
+              billing={billing}
+              setBilling={setBilling}
+              billOptions={billOptions}
+              billingKnown={billingKnown}
+              billingLocked={billingLocked}
+              bothEntry={bothEntry}
+              unresolvedBoth={unresolvedBoth}
+              edit={edit}
+            />
 
             {billing === "plan" && !canQueryQuota && (
-              <div className="flex h-8 items-center gap-1.5 text-[11.5px] text-mut">
-                <Gauge className="h-3.5 w-3.5" />
-                {t("addProvider.noQuotaEndpoint")}
-              </div>
+              <PlanQuotaNotice />
             )}
 
             {billing === "plan" && canQueryQuota && (
-              <div>
-                <Label className="text-[11px] font-medium text-mut">
-                  {t("addProvider.usageLimits")}
-                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    {t("addProvider.usageLimitsHint")}
-                  </span>
-                </Label>
-                <div className="mt-1 grid grid-cols-2 gap-2">
-                  {ceilingField(planFiveHour, setPlanFiveHour, t("addProvider.fiveHourWindow"))}
-                  {ceilingField(planWeekly, setPlanWeekly, t("addProvider.weeklyWindow"))}
-                </div>
-                <p className="mt-1.5 text-[10.5px] text-mut">{t("addProvider.planLimitsBody")}</p>
-              </div>
+              <PlanCeilings
+                planFiveHour={planFiveHour}
+                setPlanFiveHour={setPlanFiveHour}
+                planWeekly={planWeekly}
+                setPlanWeekly={setPlanWeekly}
+              />
             )}
 
             {billing === "payg" && (
-              <div>
-                <Label className="text-[11px] font-medium text-mut">
-                  {t("addProvider.spendingLimit")}{" "}
-                  <span className="text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    {t("addProvider.spendingLimitHint")}
-                  </span>
-                </Label>
-                <div className="mt-1 flex gap-1.5">
-                  <Input
-                    className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                    value={limitValue}
-                    onChange={(e) => setLimitValue(e.target.value)}
-                    placeholder="50"
-                  />
-                  {/* A catalog entry states the currency its prices are in, and
-                      the limit is measured against those — so it is that while the
-                      entry owns the form. A provider typed in by hand has no such
-                      statement, and this is where the user makes it. */}
-                  <Select
-                    value={limitCurrency}
-                    disabled={fromEntry}
-                    onValueChange={(v) => v && setLimitCurrency(v)}
-                  >
-                    <SelectTrigger
-                      className="w-[84px] bg-bg text-[12px] dark:bg-bg"
-                      aria-label={t("addProvider.spendingLimit")}
-                      title={t("addProvider.currencyTitle", { currency: limitCurrency })}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {currencyOptions.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <PaygLimit
+                limitValue={limitValue}
+                setLimitValue={setLimitValue}
+                limitCurrency={limitCurrency}
+                setLimitCurrency={setLimitCurrency}
+                currencies={currencies}
+                fromEntry={fromEntry}
+              />
             )}
 
             {/* What this provider charges, for a pay-as-you-go provider with no
@@ -1281,78 +786,17 @@ export default function AddProviderModal({
                 recorded unpriced, which leaves its spending limit with nothing
                 to measure. Two lines per model: the id, then its four rates. */}
             {priceRowsShown && (
-              <div>
-                <Label className="text-[11px] font-medium text-mut">
-                  {t("addProvider.prices")}{" "}
-                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    {t("addProvider.pricesHint", { currency: limitCurrency })}
-                  </span>
-                </Label>
-                <div className="mt-1 space-y-1.5">
-                  {prices.map((row, i) => (
-                    <div key={i} className="rounded-md border border-line px-2 py-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <Input
-                          className="h-7 min-w-0 flex-1 bg-bg font-mono text-[11.5px] dark:bg-bg"
-                          value={row.model_id}
-                          onChange={(e) => setPrice(i, { model_id: e.target.value })}
-                          aria-label={t("addProvider.priceModel")}
-                          placeholder={t("addProvider.priceModelPlaceholder")}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="flex-none text-mut"
-                          aria-label={t("addProvider.removePrice")}
-                          title={t("addProvider.removePrice")}
-                          onClick={() => setPrices((rows) => rows.filter((_, j) => j !== i))}
-                        >
-                          <XIcon />
-                        </Button>
-                      </div>
-                      <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-1">
-                        {RATE_FIELDS.map((f) => (
-                          <label key={f.key} className="flex min-w-0 items-center gap-1.5">
-                            <span className="flex-none text-[10px] text-mut">
-                              {t(f.labelKey)}
-                            </span>
-                            <Input
-                              className="h-7 min-w-0 flex-1 bg-bg font-mono text-[11.5px] dark:bg-bg"
-                              value={row[f.key]}
-                              onChange={(e) => setPrice(i, { [f.key]: e.target.value })}
-                              inputMode="decimal"
-                              aria-invalid={invalidRate(row[f.key])}
-                              aria-label={t(f.labelKey)}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-full gap-1 text-[11px] text-mut"
-                    onClick={addPrice}
-                  >
-                    <Plus className="h-3 w-3" />
-                    {t("addProvider.addPrice")}
-                  </Button>
-                  <p className="text-[10.5px] text-mut">{t("addProvider.pricesBody")}</p>
-                  {badPrice && (
-                    <p className="text-[10.5px]" style={{ color: "var(--red)" }}>
-                      {t("addProvider.priceInvalid")}
-                    </p>
-                  )}
-                </div>
-              </div>
+              <PricesSection
+                prices={prices}
+                setPrices={setPrices}
+                model={model}
+                limitCurrency={limitCurrency}
+                badPrice={badPrice}
+              />
             )}
 
             {billing === "unl" && (
-              <div className="flex h-8 items-center gap-1.5 text-[11.5px] text-mut">
-                <InfinityIcon className="h-3.5 w-3.5" />
-                {t("addProvider.noQuotaConfig")}
-              </div>
+              <UnlimitedNote />
             )}
 
             {/* Adding only. Which providers serve an agent is the Apps screen's
@@ -1362,122 +806,26 @@ export default function AddProviderModal({
                 flattened to Single. Saving an unrelated change must not do that,
                 so an edit neither shows the control nor sends the set. */}
             {!edit && (
-            <div className="relative">
-              <Label
-                className="cursor-pointer select-none text-[11px] font-medium text-mut"
-                onClick={() => setAgentsOpen((o) => !o)}
-              >
-                {t("addProvider.bindAgents")}
-              </Label>
-              <button
-                type="button"
-                className="mt-1 flex min-h-8 w-full cursor-pointer flex-wrap items-center gap-1 rounded-md border border-line bg-bg px-2 py-1 text-left text-[12px] dark:bg-bg"
-                onClick={() => setAgentsOpen((o) => !o)}
-              >
-                {agents.length === 0 ? (
-                  <span className="text-mut">{t("addProvider.selectAgents")}</span>
-                ) : (
-                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                    {allAgentMetas().filter((a) => agents.includes(a.id)).map((a) => (
-                      <span
-                        key={a.id}
-                        className="flex items-center gap-1 rounded bg-surface2 px-1 py-0.5 text-[10.5px]"
-                      >
-                        <AgentChip meta={a} size={12} />
-                        {a.label}
-                      </span>
-                    ))}
-                  </span>
-                )}
-                <ChevronDown
-                  className={`ml-auto h-3.5 w-3.5 flex-none text-mut transition-transform ${agentsOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-              {agentsOpen && (
-                <>
-                  {/* Click-catcher behind the panel: any press elsewhere in the
-                      modal lands here and closes the dropdown */}
-                  <div className="fixed inset-0 z-40" onClick={() => setAgentsOpen(false)} />
-                  <div className="absolute z-50 mt-1 max-h-[210px] w-full overflow-y-auto rounded-md border border-line bg-bg py-1 shadow-lg">
-                  {allAgentMetas().map((a) => {
-                    const active = agents.includes(a.id);
-                    return (
-                      <button
-                        key={a.id}
-                        type="button"
-                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-surface2"
-                        onClick={() =>
-                          setAgents(active ? agents.filter((x) => x !== a.id) : [...agents, a.id])
-                        }
-                      >
-                        <AgentChip meta={a} size={16} />
-                        <span className="min-w-0 flex-1 truncate">{a.label}</span>
-                        {active && <Check className="h-3.5 w-3.5 flex-none" style={{ color: "var(--kiwi)" }} />}
-                      </button>
-                    );
-                  })}
-                  </div>
-                </>
-              )}
-            </div>
+              <AgentBinding
+                agents={agents}
+                setAgents={setAgents}
+                agentsOpen={agentsOpen}
+                setAgentsOpen={setAgentsOpen}
+              />
             )}
 
             {/* Rotating keys (edit mode: multiple keys rotate automatically, spec §4.1 P1) */}
             {edit && (
-              <div>
-                <Label className="text-[11px] font-medium text-mut">
-                  {t("addProvider.rotatingKeys")}{" "}
-                  <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                    {t("addProvider.rotatingKeysHint")}
-                  </span>
-                </Label>
-                <div className="mt-1 space-y-1">
-                  {pollKeys.map((k) => (
-                    <div
-                      key={k.id}
-                      className="flex h-8 items-center justify-between rounded-md border border-line px-2.5"
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="font-mono text-[11.5px]">{k.masked}</span>
-                        {k.label && <span className="text-[10.5px] text-mut">{k.label}</span>}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="text-mut"
-                        aria-label={t("addProvider.deleteKey")}
-                        onClick={() => removePollKey(k.id)}
-                      >
-                        <XIcon />
-                      </Button>
-                    </div>
-                  ))}
-                  <div className="flex gap-1.5">
-                    <Input
-                      className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                      value={newKey}
-                      onChange={(e) => setNewKey(e.target.value)}
-                      placeholder={t("addProvider.addKeyPlaceholder")}
-                    />
-                    <Input
-                      className="h-8 w-[84px] bg-bg text-[11.5px] dark:bg-bg"
-                      value={newKeyLabel}
-                      onChange={(e) => setNewKeyLabel(e.target.value)}
-                      placeholder={t("addProvider.labelPlaceholder")}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1 px-2.5 text-[11px]"
-                      disabled={!newKey.trim() || keyBusy}
-                      onClick={addPollKey}
-                    >
-                      <Plus className="h-3 w-3" />
-                      {t("common.add")}
-                    </Button>
-                  </div>
-                </div>
-              </div>
+              <RotatingKeys
+                pollKeys={pollKeys}
+                newKey={newKey}
+                setNewKey={setNewKey}
+                newKeyLabel={newKeyLabel}
+                setNewKeyLabel={setNewKeyLabel}
+                keyBusy={keyBusy}
+                addPollKey={addPollKey}
+                removePollKey={removePollKey}
+              />
             )}
 
 
@@ -1485,119 +833,20 @@ export default function AddProviderModal({
                 when blank): timeout = time to response headers, never aborts
                 an in-flight stream; retries cover failures before any bytes
                 reach the client; headers merge over injected credentials */}
-            <div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-full justify-between text-[11.5px] text-mut"
-                onClick={() => setAdvOpen((o) => !o)}
-              >
-                <span className="flex items-center gap-1.5">
-                  <Gauge className="h-3 w-3" />
-                  {t("addProvider.advanced")}
-                </span>
-                <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform ${advOpen ? "rotate-180" : ""}`}
-                />
-              </Button>
-              {advOpen && (
-                <div className="mt-2 space-y-2.5">
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <div>
-                      <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.timeoutLabel")}</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={3600}
-                        className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                        value={advTimeout}
-                        onChange={(e) => setAdvTimeout(e.target.value)}
-                        placeholder="10"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[10.5px] font-medium text-mut">{t("addProvider.retriesLabel")}</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={5}
-                        className="mt-1 h-8 bg-bg font-mono text-[12px] dark:bg-bg"
-                        value={advRetries}
-                        onChange={(e) => setAdvRetries(e.target.value)}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-[10.5px] text-mut">{t("addProvider.advancedBody")}</p>
-                  <div>
-                    <Label className="text-[10.5px] font-medium text-mut">
-                      {t("addProvider.customHeaders")}{" "}
-                      <span className="ml-1 text-[10px]" style={{ color: "var(--kiwi)" }}>
-                        {t("addProvider.customHeadersHint")}
-                      </span>
-                    </Label>
-                    {/* An auth header here wins over the injected credential —
-                        which can be exactly what an Azure-style endpoint needs,
-                        and is otherwise a silent way to send the wrong key
-                        upstream. Named so the reader can tell which it is. */}
-                    {authHeaderOverride && (
-                      <p className="mt-1 text-[10.5px]" style={{ color: "var(--amber)" }}>
-                        {t("addProvider.customHeadersAuthWarning", {
-                          name: authHeaderOverride,
-                        })}
-                      </p>
-                    )}
-                    <div className="mt-1 space-y-1.5">
-                      {advHeaders.map((r, i) => (
-                        <div key={i} className="flex items-center gap-1.5">
-                          <Input
-                            className="h-8 w-[38%] min-w-0 flex-none bg-bg font-mono text-[12px] dark:bg-bg"
-                            value={r.name}
-                            onChange={(e) => setHeader(i, { name: e.target.value })}
-                            placeholder={t("addProvider.headerNamePlaceholder")}
-                          />
-                          <Input
-                            className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-                            value={r.value}
-                            onChange={(e) => setHeader(i, { value: e.target.value })}
-                            placeholder={t("addProvider.headerValuePlaceholder")}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="flex-none text-mut"
-                            aria-label={t("addProvider.removeHeader")}
-                            onClick={() => removeHeader(i)}
-                          >
-                            <XIcon />
-                          </Button>
-                        </div>
-                      ))}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 w-full gap-1 text-[11px] text-mut"
-                        onClick={addHeader}
-                      >
-                        <Plus className="h-3 w-3" />
-                        {t("addProvider.addHeader")}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <AdvancedSection
+              advOpen={advOpen}
+              setAdvOpen={setAdvOpen}
+              advTimeout={advTimeout}
+              setAdvTimeout={setAdvTimeout}
+              advRetries={advRetries}
+              setAdvRetries={setAdvRetries}
+              advHeaders={advHeaders}
+              setAdvHeaders={setAdvHeaders}
+            />
           </div>
         </div>
 
-        <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button size="sm" className="font-semibold" disabled={!canSave} onClick={save}>
-            {saving ? t("addProvider.saving") : edit ? t("common.save") : t("addProvider.saveEnable")}
-          </Button>
-        </DialogFooter>
+        <Footer onClose={onClose} save={save} canSave={canSave} saving={saving} edit={edit} />
       </DialogContent>
     </Dialog>
   );

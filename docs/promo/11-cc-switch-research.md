@@ -48,6 +48,34 @@
 补齐 thinking 回传、清洗 tool schema。上表每一个 400 在带垫层的网关下都不会发生。
 这是「协议归一」从口号变成可演示功能的最短路径。
 
+### 垫层与现有代码的结合点(2026-09-21 已核对源码)
+
+五个 400 全部死在**「客户端与上游同协议」的原生透传路径**上。结合点:
+
+- 转发入口 `crates/gateway/src/forward/mod.rs:747`(`forward`),经 `resolve_inbound`
+  (`:707`)分流:
+  - **跨协议路径(已有,不用动)**:anthropic 进 / OpenAI 出走
+    `forward_anthropic_via_openai`(`:1060`)→ `crates/adapters/src/proxy/providers/transform.rs`
+    的转换链。该链已经很厚:`resolve_reasoning_effort` 已把 `adaptive` 映射为 `xhigh`
+    (`transform.rs:131`),thinking / redacted_thinking 块已转 `reasoning_content`,
+    已有 DeepSeek/MiMo 专属兼容分支(`:388`),`clean_schema`(`:543`)也在。
+  - **原生透传路径(缺口)**:`resolve_inbound` 判定 `Native` 时 body 一字不动直达上游,
+    没有任何净化。垫层就是在这里、`send_upstream` 之前插一个 sanitize 步骤。
+- 复用件:`clean_schema` 管 schema;thinking 剥离参考转换链里已有的块处理;
+  per-provider 容差位挂在现有 provider 条目(目前只有 `protocol` 字段,加一个容差字段)。
+- 规模:一次聚焦的 PR——sanitize 模块 + 容差字段 + 三四条规则 + 测试(社区五帖即测试语料),
+  不是重写。
+
+设计约束(做之前想清楚):
+
+1. **不许静默改请求**:剥离历史 thinking 会轻微改变模型行为;每次净化必须落
+   request log(可见、可归因),默认保守、per-provider 可关。
+2. **持久战**:Claude Code 每个版本都可能加新参数(adaptive 就是 v2.1.97 引入的),
+   规则表要做成「加一行」的成本,不是改逻辑。
+
+节奏:排在 9/24 之后,作为 v0.2.3 的单亮点版本帖(runbook 阶段 6)——
+对 cc-switch 社区是精准帖,对 HN 是「协议归一」的实物证明。
+
 ---
 
 ## 3. 最值得抄的想法:模型级路由 + 子 agent 分层(#4721)

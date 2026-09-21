@@ -1193,12 +1193,17 @@ jobs:
           # set (nss, atk, x-extensions, gbm). Miss any one and the app dies
           # with a bare abort before its first log line. The ldd below is the
           # receipt: it names anything still missing.
-          sudo apt-get update && sudo apt-get install -y \
-            libegl1 libgl1 \
-            libnss3 libnspr4 \
-            libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
-            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-            libgbm1 libxkbcommon0 libasound2
+          # `libasound2` split into `libasound2t64` on noble; jammy keeps the
+          # old name — hence the fallback rather than one name for both.
+          sudo apt-get update \
+            && { sudo apt-get install -y libegl1 libgl1 libnss3 libnspr4 \
+                   libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
+                   libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+                   libgbm1 libxkbcommon0 libasound2t64 \
+              || sudo apt-get install -y libegl1 libgl1 libnss3 libnspr4 \
+                   libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
+                   libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+                   libgbm1 libxkbcommon0 libasound2; }
 
 
       - name: Name anything still missing (Linux)

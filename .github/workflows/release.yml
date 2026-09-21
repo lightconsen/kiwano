@@ -1199,11 +1199,11 @@ jobs:
             && { sudo apt-get install -y libegl1 libgl1 libnss3 libnspr4 \
                    libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
                    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-                   libgbm1 libxkbcommon0 libasound2t64 \
+                   libgbm1 libxkbcommon0 libasound2t64 dbus-x11 shared-mime-info \
               || sudo apt-get install -y libegl1 libgl1 libnss3 libnspr4 \
                    libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
                    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-                   libgbm1 libxkbcommon0 libasound2; }
+                   libgbm1 libxkbcommon0 libasound2 dbus-x11 shared-mime-info; }
 
 
       - name: Name anything still missing (Linux)
@@ -1220,9 +1220,12 @@ jobs:
 
           export DISPLAY=:99
           # Xvfb has no GPU compositing; webkit will not initialize without
-          # this in a headless display — the standard CI requirement.
+          # this in a headless display — the standard CI requirement. And GTK
+          # wants a session bus, which a bare runner also lacks: without
+          # dbus-run-session, gtk_init fails with "Failed to initialize gtk
+          # backend!" before the app gets anywhere.
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
-          "$APP" > app.stderr 2>&1 &
+          dbus-run-session -- "$APP" > app.stderr 2>&1 &
           echo $! > app.pid
           # Let the webview come up before anyone screenshots it.
           sleep 25

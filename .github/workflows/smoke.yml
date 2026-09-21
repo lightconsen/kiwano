@@ -88,6 +88,12 @@ jobs:
           $exe = Get-ChildItem -Path $roots -Recurse -Filter 'Kiwano.exe' -ErrorAction SilentlyContinue |
             Select-Object -First 1 -ExpandProperty FullPath
           if (-not $exe) {
+            # Name what is actually on disk before giving up: the installer's
+            # layout is the thing being tested, and a bare "not found" costs a
+            # round trip to learn what it actually wrote.
+            Get-ChildItem $roots -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Write-Host
+            Get-ChildItem "$env:LOCALAPPDATA","$env:ProgramFiles" -Directory -ErrorAction SilentlyContinue |
+              Where-Object Name -like '*iwano*' | Format-Table -AutoSize | Out-String | Write-Host
             Write-Error "installed Kiwano.exe not found under: $($roots -join ', ')"
           }
           echo "APP_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii

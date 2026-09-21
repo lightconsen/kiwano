@@ -17,7 +17,22 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
-## [Unreleased]
+## [0.2.2] - 2026-09-21
+
+### Added
+
+- **A release smoke job.** When a release publishes, a workflow downloads
+  each packaged artifact on its own platform, installs it (Windows
+  silently; Linux runs the AppImage under Xvfb), launches the app, and
+  proves the gateway came up — a probe to the data plane on every platform,
+  the admin plane's `/status` matched against the released version on
+  Linux, and the daemon's own `ready` log line. "Does the installed app
+  actually run?" finally has an owner. A window screenshot rides along as
+  evidence, never a gate.
+- **A copy button beside the site's install command.** The one command a
+  visitor is here to take away no longer needs a careful text selection.
+  The icon is the state — copy, then a check for a beat — and the label
+  follows the page language.
 
 ### Fixed
 

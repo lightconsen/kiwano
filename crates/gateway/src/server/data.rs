@@ -17,6 +17,7 @@ use crate::log_capture::{persist_failure, RequestCapture};
 use crate::protocol::{classify_path, PathProtocol};
 use crate::router::resolve_via_engine;
 use crate::server::{error_into_response, error_response, GatewayState, MAX_BODY_BYTES};
+use crate::store::DlpMode;
 
 /// Data-plane router: the paths agents actually call, plus the two read-only
 /// endpoints a probe or a scraper needs (see [`crate::metrics`] for why those
@@ -196,6 +197,27 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     };
     if let Some(c) = capture.as_mut() {
         c.set_body(&body_bytes, log_cfg.max_body_bytes, &state.redactor());
+    }
+
+    // The credential detector's read of the same bytes. It reports and never
+    // blocks, so it sits here rather than in front of the forward: nothing
+    // downstream waits on it, and a rule that fired cannot fail a request.
+    //
+    // Two facts about *what* it sees, both worth knowing rather than
+    // discovering. The scan runs on the client's own bytes, before the compat
+    // shim rewrites them — the shim only removes, so this is the conservative
+    // direction: it can report something the shim was about to strip, never
+    // miss something the shim adds. And its reach follows `max_body_bytes`, the
+    // same cap the capture uses, so a finding past the cap is a body the log
+    // would not have kept either.
+    //
+    // With the request-log switch off there is no capture to write a note to,
+    // so the detector is silent — the mode governs a pass whose only output is
+    // a log line.
+    if let Some(c) = capture.as_mut() {
+        if state.dlp_mode() == DlpMode::Alert {
+            c.dlp_note = crate::dlp::render(&crate::dlp::scan(&body_bytes, log_cfg.max_body_bytes));
+        }
     }
 
     // Attribution + strategy-engine provider selection (tech.md §4.7).

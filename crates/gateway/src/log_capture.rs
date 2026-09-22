@@ -478,6 +478,15 @@ pub struct RequestCapture {
     pub request_body: Option<String>,
     pub request_size: i64,
     pub truncated: bool,
+    /// What the outbound credential detector found in this request, already
+    /// rendered as note lines — `None` when it found nothing or was not run.
+    ///
+    /// It lives here because this is the struct that travels from the request
+    /// entry point to the forward leg, and the note is composed there with the
+    /// compat shim's ([`crate::forward`]). Set from `data.rs`, next to the
+    /// capture, because that is where the body and the setting are both in
+    /// scope.
+    pub dlp_note: Option<String>,
 }
 
 impl RequestCapture {
@@ -502,6 +511,7 @@ impl RequestCapture {
             request_body: None,
             request_size: 0,
             truncated: false,
+            dlp_note: None,
         })
     }
 

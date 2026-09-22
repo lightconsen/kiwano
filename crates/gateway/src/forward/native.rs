@@ -150,8 +150,20 @@ pub async fn forward(
     } else {
         None
     };
-    if let (Some(l), Some((_, notes))) = (log.as_mut(), shimmed.as_ref()) {
-        l.request_notes = Some(notes.clone());
+    // One note field, two sources. The credential detector read the request on
+    // the way in (`data.rs`), and the shim describes what it rewrote here.
+    // Either, both or neither can be present, so this composes rather than
+    // assigns — an assignment would let the shim's silence erase a finding.
+    // Detector first: what left the machine is the more important line.
+    if let Some(l) = log.as_mut() {
+        let dlp = l.capture.dlp_note.clone();
+        let shim = shimmed.as_ref().map(|(_, notes)| notes.clone());
+        l.request_notes = match (dlp, shim) {
+            (Some(d), Some(s)) => Some(format!("{d}\n{s}")),
+            (Some(d), None) => Some(d),
+            (None, Some(s)) => Some(s),
+            (None, None) => None,
+        };
     }
     let body = shimmed.map_or_else(|| body.clone(), |(b, _)| b);
 

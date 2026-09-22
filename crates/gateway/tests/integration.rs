@@ -2319,6 +2319,93 @@ async fn the_shim_strips_adaptive_thinking_and_records_what_it_did() {
 
 /// R2 (#3216): history produced under one provider is replayed against
 /// another; the blocks the new upstream cannot verify go, and the log says so.
+/// The credential detector's read of a request reaches the row's note. The
+/// redactor has no value to match here — this token belongs to nobody on this
+/// machine — which is exactly the gap the detector fills.
+#[tokio::test]
+async fn the_credential_detector_notes_what_is_leaving() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, _bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"here: ghp_abcdefghijklmnopqrstuvwxyz"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().expect("a note");
+    // The rule and the count, and not the token: the body is stored anyway, and
+    // a note that repeated it would be a second copy of what it warns about.
+    assert_eq!(notes, "dlp: github-token \u{d7}1", "{notes}");
+}
+
+/// A request can trip both sources at once, and neither may erase the other:
+/// the compose in `forward` replaces what used to be a plain assignment.
+#[tokio::test]
+async fn a_finding_and_a_shim_rewrite_share_the_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (url, _captured, _bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    // The shim rewrites the thinking parameter and the detector sees the token.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","thinking":{"type":"adaptive","budget_tokens":2048},"messages":[{"role":"user","content":"here: ghp_abcdefghijklmnopqrstuvwxyz"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let rows = wait_for_log(&state, 1).await;
+    let notes = rows[0].request_notes.as_deref().expect("a note");
+    assert!(notes.contains("dlp: github-token"), "{notes}");
+    assert!(
+        notes.contains("thinking: removed unsupported type"),
+        "{notes}"
+    );
+    // The finding reads first: what left the machine outranks what was rewritten
+    // on the way.
+    assert!(notes.starts_with("dlp: github-token"), "{notes}");
+}
+
 #[tokio::test]
 async fn the_shim_strips_thinking_history_once_thinking_is_not_requested() {
     let dir = tempfile::tempdir().unwrap();

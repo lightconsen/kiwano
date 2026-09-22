@@ -275,10 +275,17 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     // simply not served this request — the client asked once and is owed one
     // answer, not a list of the gateway's misfortunes.
     //
+    // The plan as a whole carries the same budget a single candidate's retry
+    // loop does (`forward/upstream.rs`): a candidate whose Layer-A retries fit
+    // inside the budget can still stack N candidates past what any client would
+    // wait for, so the replay stops handing the request onward once the clock
+    // says the client is gone — the last answer is what the caller gets.
+    //
     // Attempts are logged as they happen, so a failed-over request leaves the
     // failed candidate's row beside the one that served it: that pair is how
     // someone learns their primary is flaking. Usage is untouched by the failed
     // attempt — nothing was metered, so nothing was billed.
+    let plan_started = std::time::Instant::now();
     for tried in 0..plan.candidates.len() {
         let last = tried + 1 == plan.candidates.len();
         let attempt = plan.attempt(tried).expect("tried is within the plan");
@@ -312,7 +319,19 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         )
         .await;
 
-        if last || !crate::forward::is_retryable_status(response.status()) {
+        if last
+            || !crate::forward::is_retryable_status(response.status())
+            || plan_started.elapsed() + std::time::Duration::from_secs(1)
+                >= crate::forward::RETRY_BUDGET
+        {
+            if !last {
+                tracing::warn!(
+                    provider = %provider_id,
+                    status = %response.status(),
+                    attempt = tried + 1,
+                    "retry budget exhausted for the whole plan; handing the answer on"
+                );
+            }
             return response;
         }
         tracing::warn!(

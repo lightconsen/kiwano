@@ -81,7 +81,7 @@ pub fn upsert_mcode_gateway(content: &str, base_url: &str, key: &str) -> Result<
     let mut model = serde_yaml::Mapping::new();
     model.insert(
         serde_yaml::Value::String("modelId".into()),
-        serde_yaml::Value::String(model_id.clone().into()),
+        serde_yaml::Value::String(model_id.clone()),
     );
     models.push(serde_yaml::Value::Mapping(model));
     entry.insert(

@@ -53,7 +53,7 @@ pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub use native::forward;
 pub use upstream::MAX_UPSTREAM_BODY_BYTES;
 // `pub use` would not compile: the item itself is only crate-visible.
-pub(crate) use upstream::is_retryable_status;
+pub(crate) use upstream::{is_retryable_status, RETRY_BUDGET};
 
 /// Fixtures more than one submodule's tests need.
 #[cfg(test)]

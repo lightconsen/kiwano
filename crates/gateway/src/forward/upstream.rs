@@ -29,6 +29,54 @@ pub(crate) fn is_retryable_status(status: StatusCode) -> bool {
         || status.is_server_error()
 }
 
+/// Ceiling on a retry plan's wall clock. Attempts plus backoffs must fit
+/// inside what the agent's own client timeout allows — a plan that outlives
+/// the client burns attempts (and money) for a connection that has already
+/// gone. 240s sits under every known agent read timeout with margin left for
+/// the body read and the capture write that follow the loop. Read twice: also
+/// by the data plane's failover loop, which must not stack candidates past
+/// the same deadline.
+pub(crate) const RETRY_BUDGET: Duration = Duration::from_secs(240);
+
+/// Ceiling on honouring an upstream `Retry-After`. A numeric window longer
+/// than this is not waited out — the answer is handed on instead, which is
+/// what lets the failover layer try another candidate instead of parking a
+/// retry that outlives both the window's usefulness and the client's
+/// patience. Windows within the cap are honoured verbatim: the upstream
+/// knows its own rate-limit reset better than a backoff formula does.
+const RETRY_AFTER_CAP: u64 = 30;
+
+/// The backoff before the next attempt: linear in the attempt count, capped,
+/// and jittered. The jitter is the system clock's sub-second reading rather
+/// than an RNG — the quality needed is "two agents hitting the same provider
+/// must not retry in lockstep", and a fresh clock reading after a real
+/// network round-trip provides exactly that, for no dependency.
+fn backoff_delay(attempt: usize) -> Duration {
+    let base = (300 * attempt as u64).min(2000);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|t| t.subsec_nanos() as u64)
+        .unwrap_or(0);
+    Duration::from_millis(base + nanos % (base / 2 + 1))
+}
+
+/// An upstream `Retry-After` as a duration, when it is the numeric form.
+/// HTTP-date form parses as nothing here — numeric seconds is what every
+/// major provider sends, and a date-shaped value needs no second look before
+/// falling back to the plain backoff.
+fn retry_after_secs(upstream: &reqwest::Response) -> Option<Duration> {
+    let value = upstream.headers().get(reqwest::header::RETRY_AFTER)?;
+    let secs: u64 = value.to_str().ok()?.trim().parse().ok()?;
+    (secs > 0).then(|| Duration::from_secs(secs))
+}
+
+/// Whether a retry is still worth starting: the wait plus everything already
+/// spent must fit inside the budget, or the client will have given up before
+/// the attempt ever lands.
+fn budget_left(started: std::time::Instant, delay: Duration) -> bool {
+    started.elapsed() + delay < RETRY_BUDGET
+}
+
 /// Ceiling on a non-streaming upstream response the gateway will hold whole.
 ///
 /// An SSE body is streamed through and costs no memory however long it runs;
@@ -213,6 +261,9 @@ pub(crate) async fn send_upstream(
     capture: Option<&RequestCapture>,
 ) -> Result<reqwest::Response, Response> {
     let attempts = provider.retries.map_or(1, |r| r as usize + 1);
+    // The whole plan — attempts and backoffs alike — is timed against the
+    // client, whose patience is the one deadline none of this may outlive.
+    let started = Instant::now();
     for attempt in 1..=attempts {
         let last = attempt == attempts;
         // Admission is asked per attempt, not once per request: in HalfOpen the
@@ -274,6 +325,33 @@ pub(crate) async fn send_upstream(
                     )
                     .await;
                 if !last && is_retryable_status(status) {
+                    // The upstream knows its own rate-limit window: a numeric
+                    // Retry-After outranks the plain backoff. A window longer
+                    // than the cap is not waited out, and neither is a wait
+                    // the budget cannot afford — both hand the upstream's own
+                    // status on instead, which is what lets the failover
+                    // layer try the next candidate.
+                    let retry_after = retry_after_secs(&upstream);
+                    let window_too_long =
+                        retry_after.is_some_and(|d| d > Duration::from_secs(RETRY_AFTER_CAP));
+                    let delay = retry_after.unwrap_or_else(|| backoff_delay(attempt));
+                    if window_too_long || !budget_left(started, delay) {
+                        crate::log_capture::persist_attempt_failure(
+                            &state.store,
+                            capture,
+                            Some(agent.to_string()),
+                            Some(attribution.to_string()),
+                            Some(provider.id.clone()),
+                            status,
+                            "retry_handed_on",
+                            format!(
+                                "attempt {attempt}/{attempts}: upstream answered {status}; \
+                                 the retry window does not fit the client"
+                            ),
+                            attempt_ms,
+                        );
+                        return Ok(upstream);
+                    }
                     // Its own row: the client never sees this status (the retry
                     // hides it), and the request-level row will carry the last
                     // attempt's outcome instead. Without this the retry count and
@@ -295,8 +373,7 @@ pub(crate) async fn send_upstream(
                         provider = %provider.id,
                         "retryable upstream status; retrying"
                     );
-                    tokio::time::sleep(Duration::from_millis((300 * attempt as u64).min(2000)))
-                        .await;
+                    tokio::time::sleep(delay).await;
                     continue;
                 }
                 return Ok(upstream);
@@ -308,26 +385,43 @@ pub(crate) async fn send_upstream(
                     .record(agent, &provider.id, false, admission.used_half_open_permit)
                     .await;
                 if !last {
-                    crate::log_capture::persist_attempt_failure(
-                        &state.store,
-                        capture,
-                        Some(agent.to_string()),
-                        Some(attribution.to_string()),
-                        Some(provider.id.clone()),
-                        StatusCode::BAD_GATEWAY,
-                        "attempt_failed",
-                        format!("attempt {attempt}/{attempts}: {message}"),
-                        attempt_ms,
-                    );
-                    tracing::warn!(
-                        attempt,
-                        provider = %provider.id,
-                        error = %message,
-                        "upstream attempt failed; retrying"
-                    );
-                    tokio::time::sleep(Duration::from_millis((300 * attempt as u64).min(2000)))
-                        .await;
-                    continue;
+                    let delay = backoff_delay(attempt);
+                    if !budget_left(started, delay) {
+                        crate::log_capture::persist_attempt_failure(
+                            &state.store,
+                            capture,
+                            Some(agent.to_string()),
+                            Some(attribution.to_string()),
+                            Some(provider.id.clone()),
+                            StatusCode::BAD_GATEWAY,
+                            "retry_budget_exhausted",
+                            format!(
+                                "attempt {attempt}/{attempts}: {message}; \
+                                 the retry would outlive the client"
+                            ),
+                            attempt_ms,
+                        );
+                    } else {
+                        crate::log_capture::persist_attempt_failure(
+                            &state.store,
+                            capture,
+                            Some(agent.to_string()),
+                            Some(attribution.to_string()),
+                            Some(provider.id.clone()),
+                            StatusCode::BAD_GATEWAY,
+                            "attempt_failed",
+                            format!("attempt {attempt}/{attempts}: {message}"),
+                            attempt_ms,
+                        );
+                        tracing::warn!(
+                            attempt,
+                            provider = %provider.id,
+                            error = %message,
+                            "upstream attempt failed; retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
                 }
                 let resp = error_into_response(GatewayError::Upstream(message.clone()), inbound);
                 crate::log_capture::persist_failure(
@@ -422,6 +516,9 @@ mod tests {
     /// is also a count of how many attempts actually arrived.
     enum Stub {
         Answer(u16, &'static str),
+        /// Like [`Stub::Answer`], with a `Retry-After` header — the 429 case
+        /// the upstream uses to name its own rate-limit window.
+        RetryAfter(u16, u64),
         /// Accept, then say nothing until the caller gives up — the only way to
         /// observe a timeout rather than a refusal.
         Silence,
@@ -450,6 +547,12 @@ mod tests {
                         );
                         let _ = sock.write_all(head.as_bytes()).await;
                         let _ = sock.write_all(body.as_bytes()).await;
+                    }
+                    Stub::RetryAfter(status, secs) => {
+                        let head = format!(
+                            "HTTP/1.1 {status} X\r\nRetry-After: {secs}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
+                        let _ = sock.write_all(head.as_bytes()).await;
                     }
                     Stub::Silence => tokio::time::sleep(Duration::from_secs(5)).await,
                 }
@@ -535,5 +638,111 @@ mod tests {
             started.elapsed()
         );
         server.abort();
+    }
+
+    /// A numeric `Retry-After` outranks the plain backoff: the wait before the
+    /// retry honours the upstream's own window (here 2s, far above the ~300ms
+    /// linear default), and the retried answer is still what the caller gets.
+    #[tokio::test]
+    async fn a_retry_after_header_paces_the_retry() {
+        let (url, server) = stub(vec![
+            Stub::RetryAfter(429, 2),
+            Stub::Answer(200, "{\"ok\":true}"),
+        ])
+        .await;
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.base_url = url.clone();
+        p.retries = Some(1);
+
+        let started = std::time::Instant::now();
+        let outcome = send_upstream(
+            &state,
+            &p,
+            "claude",
+            "claude:1",
+            Method::POST,
+            &url,
+            HeaderMap::new(),
+            Bytes::from_static(b"{}"),
+            None,
+            None,
+        )
+        .await;
+
+        let resp = outcome.expect("the paced retry's answer");
+        assert_eq!(resp.status(), StatusCode::OK);
+        // The window was honoured: noticeably more than the plain backoff's
+        // first-step 300ms, and the jitter adds at most half a step.
+        assert!(
+            started.elapsed() >= Duration::from_millis(1900),
+            "took {:?}",
+            started.elapsed()
+        );
+        server.abort();
+    }
+
+    /// A `Retry-After` the client cannot afford: a window longer than the cap
+    /// is not waited out — the 429 is handed on untouched, fast, which is
+    /// what lets the failover layer key on the status and try the next
+    /// candidate.
+    #[tokio::test]
+    async fn an_unaffordable_retry_after_is_handed_on() {
+        let (url, server) = stub(vec![Stub::RetryAfter(429, 120)]).await;
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.base_url = url.clone();
+        p.retries = Some(1);
+
+        let started = std::time::Instant::now();
+        let outcome = send_upstream(
+            &state,
+            &p,
+            "claude",
+            "claude:1",
+            Method::POST,
+            &url,
+            HeaderMap::new(),
+            Bytes::from_static(b"{}"),
+            None,
+            None,
+        )
+        .await;
+
+        let resp = outcome.expect("the status itself, not a synthesized 502");
+        assert_eq!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "the upstream's own status, for the failover layer to act on"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "no retry was started: took {:?}",
+            started.elapsed()
+        );
+        server.abort();
+    }
+
+    /// The backoff is not in lockstep: two calls for the same attempt number
+    /// differ, which is the whole job of the jitter. (A real collision needs
+    /// two agents to read the same nanosecond after independent network
+    /// round-trips; the test only pins that the spread exists at all.)
+    #[test]
+    fn the_backoff_carries_jitter() {
+        let a = backoff_delay(3);
+        let b = backoff_delay(3);
+        // The base for attempt 3 is 900ms and the jitter adds 0..=450ms; two
+        // draws landing on the same millisecond twice in a row would be a
+        // coincidence worth investigating, not a failure — so the assertion is
+        // on the range, and the two draws are printed for the reader.
+        for d in [a, b] {
+            assert!(d >= Duration::from_millis(900), "{d:?}");
+            assert!(d <= Duration::from_millis(1350), "{d:?}");
+        }
+        println!("jitter draws: {a:?} vs {b:?}");
     }
 }

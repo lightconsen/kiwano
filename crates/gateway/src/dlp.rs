@@ -341,3 +341,49 @@ mod tests {
         );
     }
 }
+
+/// The detector's cost, measured rather than assumed.
+///
+/// The durable facts, none of which move with the machine: it is the same order
+/// as the capture's own scan (`log_capture::cap_body`), which walks the same
+/// bytes on the same path — measured within about a seventh of it, so this is a
+/// second consumer of work already being done rather than a second pass over the
+/// body. Both scale with the body, and the cap bounds both. The absolute figure
+/// is not small at the top of the range: a request near `MAX_BODY_BYTES` costs
+/// seconds in the capture path today, and this adds its share of that.
+///
+/// Deliberately no numbers here. Two runs of the test below on one machine
+/// differed by more than 5x under load, so an absolute in a comment would be
+/// wrong most of the time. `#[ignore]`d for the same reason: a timing assertion
+/// in CI is a flake generator. Run it with
+/// `cargo test -p kiwanod --lib cost -- --ignored --nocapture`.
+#[cfg(test)]
+mod cost {
+    use super::*;
+
+    #[test]
+    #[ignore = "measurement, not an assertion"]
+    fn against_the_captures_own_scan() {
+        let redactor = crate::log_capture::Redactor::default();
+        // JSON-shaped, which is the realistic worst case: short tokens separated
+        // by non-token bytes, so the token-start rule rejects little and every
+        // position tries the whole rule table.
+        for size in [61 * 1024usize, 32 * 1024 * 1024] {
+            let mut body = Vec::new();
+            while body.len() < size {
+                body.extend_from_slice(br#"{"role":"user","content":"hello world "},"#);
+            }
+            let t = std::time::Instant::now();
+            let found = scan(&body, None);
+            let dlp = t.elapsed();
+            let t = std::time::Instant::now();
+            let _ = crate::log_capture::cap_body(&body, None, &redactor);
+            let capture = t.elapsed();
+            println!(
+                "{:>9} bytes  dlp={dlp:?}  capture={capture:?}  findings={}",
+                body.len(),
+                found.len()
+            );
+        }
+    }
+}

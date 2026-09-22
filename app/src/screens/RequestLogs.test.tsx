@@ -119,19 +119,17 @@ describe("the request log table", () => {
     expect(within(dialog).queryByText(/Exported/)).toBeNull();
   });
 
-  it("exports the chosen path with the bodies toggle as asked", async () => {
+  it("exports the chosen path", async () => {
     const { user, dialog } = await openExportDialog();
 
-    // Bodies are prompt text and off by default; the dialog is where the user
-    // opts in, and the call has to carry that decision.
-    await user.click(within(dialog).getByRole("switch"));
+    // There is no bodies switch to flip: the file always carries them, so the
+    // call is the path and the filter and nothing else.
     await user.click(within(dialog).getByRole("button", { name: en.logs.exportCsv }));
 
     await waitFor(() =>
       expect(apiMock.exportRequestLogs).toHaveBeenCalledWith(
         "/tmp/kiwano-logs.csv",
         expect.any(Object),
-        true,
       ),
     );
     // The dialog closes on success, and the row count is reported where the

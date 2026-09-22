@@ -1019,13 +1019,12 @@ export interface KiwanoApi {
   getRequestLog(id: number): Promise<RequestLogDetail | null>;
   /** Write every row the filter matches to `path` as CSV. Unpaged, so it can
    *  exceed the list's page size; `truncated` says the cap was hit.
-   *  `includeBodies` appends the captured request/response bodies as two extra
-   *  columns; without it the file is metadata only. Bodies are always captured,
-   *  so this is the one place they can be left out. */
+   *  The captured request/response bodies ride along as two extra columns: there
+   *  is no metadata-only export, because the page and the file want the same
+   *  payload. */
   exportRequestLogs(
     path: string,
     filter?: RequestLogFilter,
-    includeBodies?: boolean,
   ): Promise<RequestLogExport>;
   /** Delete every request-log row (bodies cascade) */
   clearRequestLogs(): Promise<void>;

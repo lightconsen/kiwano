@@ -17,6 +17,25 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [Unreleased]
+
+### Changed
+
+- **The CSV export always carries the request and response bodies.** Bodies
+  were recorded either way; the export was the one place they could be
+  withheld — `logs export --include-bodies`, off unless asked, and a switch in
+  the Logs export dialog. Both are gone. The argument is the one that removed
+  the capture-side switch earlier: the log exists so a request can be looked at
+  later, so a file that cannot show the body is that look failing, and both
+  ends of the trip want the same payload. A row whose body was never stored
+  still gets its two cells, empty, so every record in the file has the same
+  column count and no reader has to branch. Two costs come with it, both
+  deliberate: an export now reads `request_bodies`, which the metadata-only
+  read used to skip, and a file that leaves the machine carries prompt text
+  without being asked. **`logs export` no longer accepts `--include-bodies`** —
+  a script passing it will fail on the unknown flag rather than silently
+  exporting less.
+
 ## [0.2.3] - 2026-09-21
 
 ### Added

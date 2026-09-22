@@ -47,8 +47,6 @@ export const logs = {
 
   exportDialogTitle: "导出日志",
   dateRange: "日期范围",
-  includeBodies: "包含请求和响应正文",
-  twoExtraColumns: "额外两列",
   exportNote: "范围内每个请求都会写入，而不仅是屏幕上的 {n} 条。",
   exporting: "导出中…",
   exported: "已导出 {n} 行",

@@ -50,7 +50,7 @@ pub fn logs(cmd: &LogsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             let path = args.out.to_string_lossy();
             let report = {
                 let store = ctx.store()?;
-                vm::export_request_logs_csv(store, &path, filter, args.include_bodies)?
+                vm::export_request_logs_csv(store, &path, filter)?
             };
             if report.truncated {
                 ctx.out.note(format!(

@@ -40,12 +40,11 @@ pub fn list_request_logs(
 /// Writes the filtered log slice to `path` as CSV. The frontend picks the path
 /// from the dialog plugin first — the same split as `export_config` — and this
 /// is `async` because a full export is a lot of formatting to block a thread on.
-/// `include_bodies` is the export dialog's choice; bodies are always captured,
-/// so this is where the file decides whether to carry them. Defaults to off for
-/// a caller that does not send it — the safe direction for a file that may be
-/// shared.
+///
+/// The bodies are in the file. Capture records them and there is no switch
+/// between the two, so a full export reads `request_bodies` — the trade the
+/// export makes for a file that can actually be looked at.
 #[tauri::command(async)]
-#[allow(clippy::too_many_arguments)]
 pub fn export_request_logs(
     state: State<AppState>,
     path: String,
@@ -54,7 +53,6 @@ pub fn export_request_logs(
     status: Option<String>,
     from: Option<String>,
     to: Option<String>,
-    include_bodies: Option<bool>,
 ) -> Result<vm::RequestLogExportVm, String> {
     vm::export_request_logs_csv(
         &state.store,
@@ -66,7 +64,6 @@ pub fn export_request_logs(
             from: from.as_deref(),
             to: to.as_deref(),
         },
-        include_bodies.unwrap_or(false),
     )
 }
 

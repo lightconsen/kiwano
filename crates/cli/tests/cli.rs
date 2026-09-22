@@ -1199,22 +1199,9 @@ fn logs_export_writes_the_file_and_requires_no_confirmation() {
     assert_eq!(code, 0, "{err}");
     let csv = std::fs::read_to_string(&out_path).unwrap();
     assert!(csv.contains("claude"), "{csv}");
-    assert!(!csv.contains("request_body"), "bodies are opt-in: {csv}");
-
-    let with_bodies = dir.path().join("with-bodies.csv");
-    let (code, _, err) = run(
-        &db,
-        &[
-            "logs",
-            "export",
-            "--out",
-            &with_bodies.display().to_string(),
-            "--include-bodies",
-        ],
-    );
-    assert_eq!(code, 0, "{err}");
-    let csv = std::fs::read_to_string(&with_bodies).unwrap();
-    assert!(csv.contains("request_body"), "{csv}");
+    // The bodies ride along — there is no flag that withholds them — and the
+    // header says so.
+    assert!(csv.contains("request_body,response_body"), "{csv}");
 }
 
 #[test]

@@ -1,9 +1,7 @@
 //! Request logs: the list, one detail row, the CSV export, and the clear.
 
 use crate::vm::e2s;
-use kiwanod::store::{
-    RequestLogDetail, RequestLogEntry, RequestLogExportRow, RequestLogFilter, Store, EXPORT_ROW_CAP,
-};
+use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter, Store, EXPORT_ROW_CAP};
 use serde::Serialize;
 
 // ── Request logs (request_logs + request_bodies, migration V5) ──
@@ -37,38 +35,25 @@ pub struct RequestLogExportVm {
 /// writes. Unpaged, unlike `list_request_logs`: the page size is a display
 /// concern and must not cap what lands in the file.
 ///
-/// `include_bodies` is the export's own choice, not a capture setting: bodies
-/// are always recorded, and the file either carries them or does not. It also
-/// picks the read — the bodyless one never touches `request_bodies` at all,
-/// so a metadata-only export of a large log does not load every body.
+/// The bodies ride along, always. There is no metadata-only export: the log
+/// exists so a request can be looked at later, and both ends of the trip — the
+/// audit trail here and the file someone carries out — want the same payload,
+/// so there was nothing for a switch to decide. The cost is that every export
+/// now reads `request_bodies`, which the metadata-only read used to skip; that
+/// is the trade this makes deliberately.
 pub fn export_request_logs_csv(
     store: &Store,
     path: &str,
     filter: RequestLogFilter<'_>,
-    include_bodies: bool,
 ) -> Result<RequestLogExportVm, String> {
     // Ask for one row more than the cap will allow, so "exactly at the cap"
     // and "more than the cap" are distinguishable.
-    let (mut rows, truncated) = if include_bodies {
-        let rows = store
-            .export_request_logs_with_bodies(filter, EXPORT_ROW_CAP + 1)
-            .map_err(e2s)?;
-        let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
-        (rows, truncated)
-    } else {
-        let rows = store
-            .export_request_logs(filter, EXPORT_ROW_CAP + 1)
-            .map_err(e2s)?;
-        let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
-        (
-            rows.into_iter()
-                .map(RequestLogExportRow::from_entry)
-                .collect(),
-            truncated,
-        )
-    };
+    let mut rows = store
+        .export_request_logs_with_bodies(filter, EXPORT_ROW_CAP + 1)
+        .map_err(e2s)?;
+    let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
     rows.truncate(EXPORT_ROW_CAP as usize);
-    crate::csv::write_csv(path, &rows, include_bodies).map_err(e2s)?;
+    crate::csv::write_csv(path, &rows).map_err(e2s)?;
     Ok(RequestLogExportVm {
         rows_written: rows.len(),
         truncated,
@@ -104,7 +89,7 @@ mod tests {
         let path = dir.path().join("logs.csv");
         let path = path.to_str().unwrap();
 
-        let out = export_request_logs_csv(&s, path, RequestLogFilter::default(), false).unwrap();
+        let out = export_request_logs_csv(&s, path, RequestLogFilter::default()).unwrap();
         assert_eq!(out.rows_written, 3);
         assert!(!out.truncated);
 
@@ -126,17 +111,16 @@ mod tests {
                 agent: Some("codex"),
                 ..Default::default()
             },
-            false,
         )
         .unwrap();
         assert_eq!(empty.rows_written, 0);
         assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 1);
     }
 
-    /// The export's body flag is the only place a body can be withheld, so it
-    /// has to actually withhold one — and actually produce one.
+    /// The export carries the bodies. There is no metadata-only shape to ask
+    /// for any more, so the markers have to actually be in the file.
     #[test]
-    fn export_includes_bodies_only_when_asked() {
+    fn the_export_carries_the_bodies() {
         let s = store();
         // One row, with markers that need no CSV quoting, so "is it in the
         // file" is a plain substring test.
@@ -180,21 +164,11 @@ mod tests {
         let path = dir.path().join("logs.csv");
         let path = path.to_str().unwrap();
 
-        let out = export_request_logs_csv(&s, path, RequestLogFilter::default(), false).unwrap();
+        let out = export_request_logs_csv(&s, path, RequestLogFilter::default()).unwrap();
         assert_eq!(out.rows_written, 1);
-        let without = std::fs::read_to_string(path).unwrap();
-        assert!(!without.contains("request-body-marker"), "{without}");
-        assert!(!without.contains("response-body-marker"), "{without}");
-        assert!(!without.contains("request_body"), "no body column either");
-
-        let out = export_request_logs_csv(&s, path, RequestLogFilter::default(), true).unwrap();
-        assert_eq!(out.rows_written, 1);
-        let with = std::fs::read_to_string(path).unwrap();
-        assert!(with.contains("request-body-marker"), "{with}");
-        assert!(with.contains("response-body-marker"), "{with}");
-        assert!(
-            with.contains("request_body,response_body"),
-            "header matches"
-        );
+        let csv = std::fs::read_to_string(path).unwrap();
+        assert!(csv.contains("request-body-marker"), "{csv}");
+        assert!(csv.contains("response-body-marker"), "{csv}");
+        assert!(csv.contains("request_body,response_body"), "header matches");
     }
 }

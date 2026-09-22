@@ -4,14 +4,14 @@
 //! than in `vm` so the formatting is a pure function of the rows and can be
 //! unit-tested without touching a file.
 //!
-//! Bodies are the one optional part. The export is the only place a body can be
-//! withheld — capture always records them — so [`to_csv`] takes the choice as
-//! an argument, and it changes the *shape* of the file rather than blanking
-//! cells: with bodies, [`BODY_HEADERS`] are appended after the metadata
-//! columns; without, the file is the metadata columns alone. A file that says
-//! nothing about bodies should not carry two empty columns implying the bodies
-//! were empty, and the 30 metadata columns keep their positions either way, so
-//! a reader that indexes by position is unaffected by the choice.
+//! Bodies are not optional. Capture records them and the export carries them,
+//! with no switch in between: both ends of the trip want the same payload. A
+//! metadata-only export used to exist and was removed — the log's whole purpose
+//! is to be looked at later, so the file should not be able to lose the half
+//! that matters, and the two extra columns cost a reader nothing. [`to_csv`]
+//! therefore always appends [`BODY_HEADERS`] behind the metadata columns, whose
+//! 30 positions are unchanged, so a reader that indexes by position is
+//! unaffected.
 
 use kiwanod::store::RequestLogExportRow;
 
@@ -56,7 +56,7 @@ const HEADERS: [&str; 30] = [
     "request_notes",
 ];
 
-/// The optional tail: present only when the export was asked for bodies.
+/// The tail, always written: the two columns the body columns occupy.
 const BODY_HEADERS: [&str; 2] = ["request_body", "response_body"];
 
 /// Quote a field only when it needs it (RFC 4180): at least the delimiter, a
@@ -79,7 +79,7 @@ fn opt_num<T: std::fmt::Display>(field: Option<T>) -> String {
     field.map(|v| v.to_string()).unwrap_or_default()
 }
 
-fn row(row: &RequestLogExportRow, include_bodies: bool) -> String {
+fn row(row: &RequestLogExportRow) -> String {
     let entry = &row.entry;
     let mut cells = vec![
         entry.id.to_string(),
@@ -113,50 +113,37 @@ fn row(row: &RequestLogExportRow, include_bodies: bool) -> String {
         opt(&entry.response_headers).to_string(),
         opt(&entry.request_notes).to_string(),
     ];
-    if include_bodies {
-        // A stored `None` is an absent body, not a body that was withheld —
-        // the same empty cell either way, because the header already says
-        // bodies were asked for.
-        cells.push(opt(&row.request_body).to_string());
-        cells.push(opt(&row.response_body).to_string());
-    }
+    // A stored `None` is an absent body — a row whose capture predates the
+    // body, or one that never had one. The empty cell says that, and the
+    // header above it says the column exists.
+    cells.push(opt(&row.request_body).to_string());
+    cells.push(opt(&row.response_body).to_string());
     cells.iter().map(|c| quote(c)).collect::<Vec<_>>().join(",")
 }
 
 /// The whole file as a string, BOM and header included. Records end CRLF, as
 /// RFC 4180 specifies — every parser worth the name accepts it.
 ///
-/// `include_bodies` is the one thing that changes the file's shape: `true`
-/// appends [`BODY_HEADERS`] and their cells, `false` writes the metadata
-/// columns alone. The header row is written to match in both cases, so the
-/// file never advertises a column it does not have.
-///
 /// Fields are quoted but not otherwise neutralised, so a value starting with
 /// `=`, `+`, `-` or `@` stays exactly what was logged. Spreadsheets may read
 /// such a cell as a formula; that is a real risk only when the file is opened
 /// by someone else, and mangling the value with a leading apostrophe would
 /// corrupt a local audit trail to guard against it.
-pub fn to_csv(rows: &[RequestLogExportRow], include_bodies: bool) -> String {
+pub fn to_csv(rows: &[RequestLogExportRow]) -> String {
     let mut out = String::from(BOM);
     let mut headers = HEADERS.to_vec();
-    if include_bodies {
-        headers.extend_from_slice(&BODY_HEADERS);
-    }
+    headers.extend_from_slice(&BODY_HEADERS);
     out.push_str(&headers.join(","));
     out.push_str("\r\n");
     for r in rows {
-        out.push_str(&row(r, include_bodies));
+        out.push_str(&row(r));
         out.push_str("\r\n");
     }
     out
 }
 
-pub fn write_csv(
-    path: &str,
-    rows: &[RequestLogExportRow],
-    include_bodies: bool,
-) -> std::io::Result<()> {
-    std::fs::write(path, to_csv(rows, include_bodies))
+pub fn write_csv(path: &str, rows: &[RequestLogExportRow]) -> std::io::Result<()> {
+    std::fs::write(path, to_csv(rows))
 }
 
 #[cfg(test)]
@@ -205,7 +192,7 @@ mod tests {
         RequestLogExportRow::from_entry(entry())
     }
 
-    /// Wrap an edited metadata row for the bodyless export calls.
+    /// Wrap an edited metadata row for the export calls.
     fn export_row_with(entry: RequestLogEntry) -> RequestLogExportRow {
         RequestLogExportRow::from_entry(entry)
     }
@@ -224,18 +211,19 @@ mod tests {
 
     #[test]
     fn header_and_bom_come_first() {
-        let csv = to_csv(&[export_row()], false);
+        let csv = to_csv(&[export_row()]);
         assert!(csv.starts_with(BOM), "Excel needs the BOM to read UTF-8");
         assert_eq!(csv.matches(BOM).count(), 1, "and exactly one of them");
         let mut lines = body(&csv).lines();
-        assert_eq!(lines.next().unwrap().split(',').count(), HEADERS.len());
-        assert_eq!(lines.next().unwrap().split(',').count(), HEADERS.len());
+        let width = HEADERS.len() + BODY_HEADERS.len();
+        assert_eq!(lines.next().unwrap().split(',').count(), width);
+        assert_eq!(lines.next().unwrap().split(',').count(), width);
         assert!(lines.next().is_none(), "no trailing blank row");
     }
 
     #[test]
     fn empty_cells_are_not_zeroes() {
-        let csv = to_csv(&[export_row()], false);
+        let csv = to_csv(&[export_row()]);
         let row = body(&csv).lines().nth(1).unwrap();
         let cells: Vec<&str> = row.split(',').collect();
         // first_token_ms is absent, output_tokens is a real 200 — and they must
@@ -258,7 +246,7 @@ mod tests {
     fn the_sanitizers_notes_export_with_their_row() {
         let mut e = entry();
         e.request_notes = Some("tool \"read\": null input_schema, replaced".into());
-        let csv = to_csv(&[export_row_with(e)], false);
+        let csv = to_csv(&[export_row_with(e)]);
         // The notes carry a comma of their own, so they land quoted — and the
         // cell must still be findable by its header position. (A note with a
         // line break would split a naive lines() walk, by design of RFC 4180;
@@ -274,7 +262,7 @@ mod tests {
         e.request_headers = Some("{\n  \"a\": 1\n}".into());
         // Assert against the whole file: a cell containing a line break makes
         // `lines()` split one record across several, which is the point.
-        let csv = to_csv(&[export_row_with(e)], false);
+        let csv = to_csv(&[export_row_with(e)]);
         assert!(csv.contains("\"/v1/a,b\""), "comma forces quotes");
         assert!(
             csv.contains("\"boom \"\"quoted\"\"\""),
@@ -292,7 +280,7 @@ mod tests {
 
     #[test]
     fn records_end_crlf() {
-        let csv = to_csv(&[export_row(), export_row()], false);
+        let csv = to_csv(&[export_row(), export_row()]);
         assert_eq!(csv.matches("\r\n").count(), 3, "header + 2 rows");
         assert_eq!(
             body(&csv).matches('\n').count(),
@@ -307,7 +295,7 @@ mod tests {
         // commas that are not inside quotes, and get the original bytes back.
         let mut e = entry();
         e.request_headers = Some(r#"{"a":"b,c","d":"say \"hi\""}"#.into());
-        let csv = to_csv(&[export_row_with(e)], false);
+        let csv = to_csv(&[export_row_with(e)]);
         let record = body(&csv).split("\r\n").nth(1).unwrap();
 
         let mut cells = Vec::new();
@@ -337,7 +325,7 @@ mod tests {
         let mut e = entry();
         e.is_streaming = true;
         e.truncated = true;
-        let csv = to_csv(&[export_row_with(e)], false);
+        let csv = to_csv(&[export_row_with(e)]);
         let row = body(&csv).lines().nth(1).unwrap();
         let cells: Vec<&str> = row.split(',').collect();
         let at = |name: &str| cells[HEADERS.iter().position(|h| *h == name).unwrap()];
@@ -349,28 +337,17 @@ mod tests {
 
     #[test]
     fn no_rows_still_gives_a_header() {
-        let csv = to_csv(&[], false);
+        let csv = to_csv(&[]);
         assert_eq!(body(&csv).lines().count(), 1);
     }
 
     #[test]
-    fn body_columns_appear_only_when_asked_for() {
-        // Off: the file is the metadata columns, and no body text is anywhere
-        // in it — the point of the flag.
-        let csv = to_csv(&[export_row_with_bodies()], false);
-        let header = body(&csv).split("\r\n").next().unwrap().to_string();
-        assert_eq!(header, HEADERS.join(","));
-        assert_eq!(
-            body(&csv).split("\r\n").nth(1).unwrap().split(',').count(),
-            HEADERS.len()
-        );
-        assert!(!csv.contains("request-body-marker"), "{csv}");
-        assert!(!csv.contains("response-body-marker"), "{csv}");
-
-        // On: the same 27 columns, in place, with the bodies appended. The
-        // header row is rewritten to match, so the file never advertises a
-        // column it does not carry.
-        let csv = to_csv(&[export_row_with_bodies()], true);
+    fn the_body_columns_are_always_there() {
+        // The metadata columns keep their positions and the two body columns are
+        // appended after them; the header row is written to match, so the file
+        // never advertises a column it does not carry. There is no metadata-only
+        // shape to ask for.
+        let csv = to_csv(&[export_row_with_bodies()]);
         let header = body(&csv).split("\r\n").next().unwrap();
         let names: Vec<&str> = header.split(',').collect();
         assert_eq!(names.len(), HEADERS.len() + BODY_HEADERS.len());
@@ -380,8 +357,8 @@ mod tests {
         assert!(csv.contains("response-body-marker"), "{csv}");
 
         // A row that stored no body still gets its two cells (empty), so every
-        // record in a bodies-on file has the same column count.
-        let csv = to_csv(&[export_row()], true);
+        // record has the same column count.
+        let csv = to_csv(&[export_row()]);
         let mut lines = body(&csv).lines();
         assert_eq!(lines.next().unwrap().split(',').count(), HEADERS.len() + 2);
         assert_eq!(lines.next().unwrap().split(',').count(), HEADERS.len() + 2);

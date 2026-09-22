@@ -56,8 +56,6 @@ export const logs = {
 
   exportDialogTitle: "Export logs",
   dateRange: "DATE RANGE",
-  includeBodies: "Include request and response bodies",
-  twoExtraColumns: "Two extra columns",
   exportNote: "Every request in the range is written, not just the {n} on screen.",
   exporting: "Exporting…",
   exported: "Exported {n} rows",

@@ -286,10 +286,6 @@ pub struct LogsExportArgs {
     #[arg(long, value_name = "PATH")]
     pub out: PathBuf,
 
-    /// Include the request and response bodies (appends two columns)
-    #[arg(long)]
-    pub include_bodies: bool,
-
     #[command(flatten)]
     pub filter: LogFilterArgs,
 }

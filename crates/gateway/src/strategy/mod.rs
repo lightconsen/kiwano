@@ -9,9 +9,15 @@
 //!   midnight); falls back to the primary when nothing matches
 //! - `quota` — when the primary's same-day usage (requests/tokens, read from usage
 //!   aggregates) exceeds the threshold in the strategy config, sink to backups (failover semantics)
+//! - `least-busy` — the breaker-available candidate with the fewest requests
+//!   currently in flight (sessions drain first, like the other sticky strategies);
+//!   priority order breaks ties
 //!
 //! After each real upstream attempt, the forward layer calls [`StrategyEngine::record`]
-//! to feed the breaker back (key = `agent:provider_id`, tech.md §4.7.3).
+//! to feed the breaker back (key = `agent:provider_id`, tech.md §4.7.3). The outcome
+//! is classified — served / rate-limited / auth-rejected / failed — because a 429
+//! and a 500 call for different treatment: the former sets a short pause the
+//! provider itself named, the latter is what the breaker counts.
 //!
 //! The module is split by strategy and by the state each one reads. Every `pub`
 //! item keeps the path it had when this was one file (`strategy::StrategyEngine`,
@@ -25,12 +31,13 @@
 //! tail), `breaker_registry` owns the breakers it dispatches around, and each
 //! strategy arm lives with the state it reads: `failover` and `roundrobin`
 //! answer from the breakers, `timewindow` from its own clock, `quota` from its
-//! config payload, and the sticky table every draining strategy pins through is
-//! `sticky`.
+//! config payload, `least_busy` from the in-flight counter, and the sticky
+//! table every draining strategy pins through is `sticky`.
 
 pub mod breaker_registry;
 pub mod circuit_breaker;
 pub mod failover;
+pub mod least_busy;
 pub mod prober;
 pub mod quota;
 pub mod roundrobin;
@@ -43,6 +50,7 @@ pub mod timewindow;
 pub use quota::QuotaConfig;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use circuit_breaker::CircuitBreaker;
@@ -56,6 +64,10 @@ pub struct StrategyEngine {
     pub(crate) sticky: Mutex<StickyTable>,
     /// Cursor advanced on the weighted ring as new sessions join.
     pub(crate) cursor: Mutex<u64>,
+    /// least-busy: requests currently in flight, per `agent:provider_id` — the
+    /// gauge a new request's head choice reads. RAII-guarded (see
+    /// `inflight_guard`), so an abandoned future cannot leak a count.
+    pub(crate) inflight: Mutex<HashMap<String, Arc<AtomicUsize>>>,
 }
 
 impl Default for StrategyEngine {
@@ -70,6 +82,7 @@ impl StrategyEngine {
             breakers: Mutex::new(HashMap::new()),
             sticky: Mutex::new(StickyTable::new()),
             cursor: Mutex::new(0),
+            inflight: Mutex::new(HashMap::new()),
         }
     }
 }

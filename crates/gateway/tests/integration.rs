@@ -1857,7 +1857,15 @@ async fn health_and_metrics_answer_without_a_key_and_leave_no_trace() {
     // breakers have taken out. Worth a round trip of its own because it comes
     // from in-memory state, not from the database.
     for _ in 0..4 {
-        state.engine.record("claude", "p-ant", false, false).await;
+        state
+            .engine
+            .record(
+                "claude",
+                "p-ant",
+                kiwanod::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
     }
     let response = app
         .clone()
@@ -2112,7 +2120,15 @@ async fn an_open_breaker_refuses_before_anything_is_sent() {
 
     // Open it the way real failures do; the default threshold is four.
     for _ in 0..4 {
-        state.engine.record("claude", "p-ant", false, false).await;
+        state
+            .engine
+            .record(
+                "claude",
+                "p-ant",
+                kiwanod::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
     }
 
     let response = post_json(
@@ -2143,6 +2159,98 @@ async fn an_open_breaker_refuses_before_anything_is_sent() {
     assert_eq!(
         state.store.usage_totals(None, None, None).unwrap().requests,
         0
+    );
+}
+
+/// Two refused keys open the breaker with the auth-failed mark, and the verdict
+/// lands where users look: the provider's health row says "invalid API key", so
+/// the Apps card's Status column reads "the key" rather than "no answer". The
+/// rate-limit side of the split is pinned at the breaker level; this is the
+/// end-to-end half — a real 401 through the wire, twice.
+#[tokio::test]
+async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, hits) = mock_anthropic(MockReply::Status(StatusCode::UNAUTHORIZED)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    for _ in 0..2 {
+        let response = post_json(
+            &app,
+            "/v1/messages",
+            Some("kw-ag-claude-test"),
+            r#"{"model":"m"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // The third request is refused before it leaves: the key is not going to
+    // start working, and the gateway knows it.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"m"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        hits.lock().unwrap().len(),
+        2,
+        "only the two real attempts ran"
+    );
+
+    // The verdict is where the Status column reads it — not just in the log.
+    let health = state
+        .store
+        .list_provider_health()
+        .unwrap()
+        .into_iter()
+        .find(|h| h.provider_id == "p-ant")
+        .expect("the auth failure wrote a health row");
+    // `status` is reachability — a 401 is the vendor answering — and the key
+    // verdict it refused lives in `error`.
+    assert_eq!(health.status, "reachable");
+    assert_eq!(health.source, "traffic");
+    assert!(
+        health
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("invalid API key"),
+        "{:?}",
+        health.error
+    );
+
+    // And the machine-readable exit says the same thing.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap_or_default();
+    assert!(
+        text.contains("kiwano_auth_failed") && text.contains("kiwano_auth_failed{route="),
+        "the auth-failed gauge is missing: {text}"
     );
 }
 

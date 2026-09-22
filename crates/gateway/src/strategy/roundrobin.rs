@@ -198,7 +198,14 @@ mod tests {
 
         // Sticky candidate trips its breaker → same session is reassigned to another
         for _ in 0..4 {
-            engine.record("claude", &sticky, false, false).await;
+            engine
+                .record(
+                    "claude",
+                    &sticky,
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
         }
         let reassigned = engine
             .select(&s, &r, Some("s"), &crate::limits::LimitState::default())

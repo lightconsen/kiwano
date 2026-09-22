@@ -14,6 +14,12 @@ use crate::log_capture::RequestCapture;
 use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::{error_into_response, GatewayState};
 use crate::store::Protocol;
+use crate::strategy::circuit_breaker::AttemptOutcome;
+
+/// The pause a 429 asks for when the upstream did not name one: short, on the
+/// theory that the next attempt is cheap and the window may already have
+/// moved — the upstream's own Retry-After outranks this whenever it speaks.
+pub(crate) const RATE_LIMIT_DEFAULT_COOLDOWN: Duration = Duration::from_secs(5);
 
 /// Whether an upstream status means "this provider did not serve it": request
 /// timeout, rate limiting, and server-side errors. Client errors (4xx besides
@@ -315,15 +321,49 @@ pub(crate) async fn send_upstream(
         match outcome {
             Ok(upstream) => {
                 let status = upstream.status();
-                state
+                // The outcome decides which counter the attempt feeds — a 429
+                // is the provider asking for a pause (never a failure), a 401
+                // is a key the provider refuses (counted on its own), and the
+                // rest are the failures the breaker exists for. The 429's
+                // cooldown comes from the upstream's own Retry-After when it
+                // names one, else the short default.
+                let outcome = if status.is_success() {
+                    AttemptOutcome::Served
+                } else if status == StatusCode::TOO_MANY_REQUESTS {
+                    AttemptOutcome::RateLimited {
+                        cooldown: retry_after_secs(&upstream)
+                            .unwrap_or(RATE_LIMIT_DEFAULT_COOLDOWN),
+                    }
+                } else if status == StatusCode::UNAUTHORIZED {
+                    AttemptOutcome::AuthRejected
+                } else {
+                    AttemptOutcome::Failed
+                };
+                let auth_failed_now = state
                     .engine
                     .record(
                         agent,
                         &provider.id,
-                        status.is_success(),
+                        outcome,
                         admission.used_half_open_permit,
                     )
                     .await;
+                if auth_failed_now {
+                    // The threshold just tripped: say so where users look. The
+                    // Status column reads this row — `status` is a *reachability*
+                    // verdict (a 401 is the vendor answering, so "reachable"),
+                    // and `error` carries the key verdict it refused to accept.
+                    // `traffic` distinguishes this from the key-less prober's.
+                    if let Err(e) = state.store.upsert_provider_health(
+                        &provider.id,
+                        "reachable",
+                        attempt_started.elapsed().as_millis() as i64,
+                        "traffic",
+                        Some("invalid API key (401)"),
+                    ) {
+                        tracing::warn!(provider = %provider.id, error = %e, "failed to persist auth failure");
+                    }
+                }
                 if !last && is_retryable_status(status) {
                     // The upstream knows its own rate-limit window: a numeric
                     // Retry-After outranks the plain backoff. A window longer
@@ -382,7 +422,12 @@ pub(crate) async fn send_upstream(
                 let message = failure.message(url);
                 state
                     .engine
-                    .record(agent, &provider.id, false, admission.used_half_open_permit)
+                    .record(
+                        agent,
+                        &provider.id,
+                        AttemptOutcome::Failed,
+                        admission.used_half_open_permit,
+                    )
                     .await;
                 if !last {
                     let delay = backoff_delay(attempt);
@@ -744,5 +789,23 @@ mod tests {
             assert!(d <= Duration::from_millis(1350), "{d:?}");
         }
         println!("jitter draws: {a:?} vs {b:?}");
+    }
+
+    /// The retry plan stops asking for time the client will not be around to
+    /// spend: a plan started far in the past has nothing left, a fresh one
+    /// does, and the wait itself counts against what remains.
+    #[test]
+    fn the_budget_runs_out_and_the_wait_counts_against_it() {
+        // `now - 250s`: 10s past the 240s budget, so even a zero wait is out.
+        let deep_past = std::time::Instant::now() - Duration::from_secs(250);
+        assert!(!budget_left(deep_past, Duration::ZERO));
+        // A fresh start fits, and the wait itself is part of the check.
+        assert!(budget_left(
+            std::time::Instant::now(),
+            Duration::from_secs(1)
+        ));
+        // The wait eats the budget too: at 239.5s elapsed, a 1s wait crosses.
+        let nearly_done = std::time::Instant::now() - Duration::from_millis(239_500);
+        assert!(!budget_left(nearly_done, Duration::from_secs(1)));
     }
 }

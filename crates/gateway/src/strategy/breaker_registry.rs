@@ -11,8 +11,21 @@ use std::sync::Arc;
 
 use crate::router::AgentRoute;
 
-use super::circuit_breaker::{self, AllowResult, CircuitBreaker, CircuitBreakerConfig};
+use super::circuit_breaker::{
+    self, AllowResult, AttemptOutcome, CircuitBreaker, CircuitBreakerConfig,
+};
 use super::StrategyEngine;
+
+/// A read-only view of one breaker, for the metrics and status surfaces:
+/// whether the circuit is open, and whether it is open *because the key is
+/// bad* — the distinction an operator acts on ("swap the key") rather than
+/// one they can route around.
+#[derive(Debug, Clone)]
+pub struct BreakerSnapshot {
+    pub key: String,
+    pub state: circuit_breaker::CircuitState,
+    pub auth_failed: bool,
+}
 
 /// Breaker registry key (tech.md §4.7.3): `agent:provider_id`.
 fn breaker_key(agent: &str, provider_id: &str) -> String {
@@ -48,7 +61,7 @@ impl StrategyEngine {
     /// Every breaker's current state, keyed `agent:provider_id` — what the
     /// metrics endpoint reports so an operator can see which candidate the
     /// breakers have taken out. Read-only; nothing here admits or records.
-    pub async fn breaker_snapshot(&self) -> Vec<(String, circuit_breaker::CircuitState)> {
+    pub async fn breaker_snapshot(&self) -> Vec<BreakerSnapshot> {
         // Clone the handles out and drop the registry lock before awaiting: the
         // breakers have their own locks, and a std guard must not cross an await.
         let breakers: Vec<(String, Arc<CircuitBreaker>)> = self
@@ -60,9 +73,14 @@ impl StrategyEngine {
             .collect();
         let mut snapshot = Vec::with_capacity(breakers.len());
         for (key, breaker) in breakers {
-            snapshot.push((key, breaker.get_state().await));
+            let stats = breaker.get_stats().await;
+            snapshot.push(BreakerSnapshot {
+                key,
+                state: stats.state,
+                auth_failed: stats.auth_failed,
+            });
         }
-        snapshot.sort_by(|a, b| a.0.cmp(&b.0));
+        snapshot.sort_by(|a, b| a.key.cmp(&b.key));
         snapshot
     }
 
@@ -80,19 +98,36 @@ impl StrategyEngine {
 
     /// Feed back the result of one real upstream attempt (called by the forward
     /// layer once per attempt). `used_half_open_permit` is the flag from the
-    /// matching [`StrategyEngine::allow`] — it releases the probe permit.
+    /// matching [`StrategyEngine::allow`] — it releases the probe permit. The
+    /// outcome decides which counter the attempt feeds: a served request
+    /// clears everything, a rate limit sets its own pause, a refused key
+    /// counts on the auth counter, and the rest are breaker failures.
+    ///
+    /// The bool answer is only meaningful for `AuthRejected`: whether this
+    /// rejection is the one that crossed the auth threshold — the moment the
+    /// caller should surface "key invalid" where users look.
     pub async fn record(
         &self,
         agent: &str,
         provider_id: &str,
-        success: bool,
+        outcome: AttemptOutcome,
         used_half_open_permit: bool,
-    ) {
+    ) -> bool {
         let b = self.breaker(agent, provider_id).await;
-        if success {
-            b.record_success(used_half_open_permit).await;
-        } else {
-            b.record_failure(used_half_open_permit).await;
+        match outcome {
+            AttemptOutcome::Served => {
+                b.record_success(used_half_open_permit).await;
+                false
+            }
+            AttemptOutcome::RateLimited { cooldown } => {
+                b.record_rate_limited(used_half_open_permit, cooldown).await;
+                false
+            }
+            AttemptOutcome::AuthRejected => b.record_auth_rejected(used_half_open_permit).await,
+            AttemptOutcome::Failed => {
+                b.record_failure(used_half_open_permit).await;
+                false
+            }
         }
     }
 }
@@ -130,7 +165,14 @@ mod tests {
 
         // Four consecutive failures open it (the default threshold).
         for _ in 0..4 {
-            engine.record("claude", "a", false, false).await;
+            engine
+                .record(
+                    "claude",
+                    "a",
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
         }
 
         // timeout_seconds = 0, so the first admission moves Open → HalfOpen and
@@ -148,7 +190,12 @@ mod tests {
 
         // Handing the flag back is what releases it.
         engine
-            .record("claude", "a", true, probe.used_half_open_permit)
+            .record(
+                "claude",
+                "a",
+                crate::strategy::circuit_breaker::AttemptOutcome::Served,
+                probe.used_half_open_permit,
+            )
             .await;
         let after = engine.allow("claude", "a").await;
         assert!(
@@ -161,7 +208,12 @@ mod tests {
         // would all have been sent, and the recovering provider would have taken
         // the full load it had just failed under.
         engine
-            .record("claude", "a", false, after.used_half_open_permit)
+            .record(
+                "claude",
+                "a",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                after.used_half_open_permit,
+            )
             .await;
         assert_eq!(
             engine.breaker("claude", "a").await.get_state().await,

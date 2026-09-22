@@ -717,7 +717,7 @@ export interface UsageAlert {
   message: string;
 }
 
-export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota";
+export type StrategyKind = "single" | "failover" | "roundrobin" | "timewindow" | "quota" | "least-busy";
 
 /** Agent installation detection (phase 1: existence only — one login-shell probe) */
 /** One prompt round trip through a provider (the Apps row's Test button). */

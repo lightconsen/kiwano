@@ -121,6 +121,7 @@ impl StrategyEngine {
                     .await?
             }
             StrategyType::Quota => self.select_quota(store, usable, limits, session).await?,
+            StrategyType::LeastBusy => self.select_least_busy(usable, session).await?,
         };
         let mut plan = Vec::with_capacity(usable.candidates.len());
         plan.push(first.clone());
@@ -189,7 +190,14 @@ mod tests {
         // Open the head's breaker: the plan starts at the next available
         // candidate, and still names every candidate exactly once.
         for _ in 0..4 {
-            engine.record("claude", "a", false, false).await;
+            engine
+                .record(
+                    "claude",
+                    "a",
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
         }
         assert_eq!(
             ids(&engine.plan(&s, &three, None, &limits).await.unwrap()),

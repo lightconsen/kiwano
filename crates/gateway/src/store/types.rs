@@ -74,6 +74,7 @@ pub enum StrategyType {
     Roundrobin,
     Timewindow,
     Quota,
+    LeastBusy,
 }
 
 impl StrategyType {
@@ -84,6 +85,7 @@ impl StrategyType {
             StrategyType::Roundrobin => "roundrobin",
             StrategyType::Timewindow => "timewindow",
             StrategyType::Quota => "quota",
+            StrategyType::LeastBusy => "least-busy",
         }
     }
 
@@ -95,6 +97,7 @@ impl StrategyType {
             "roundrobin" => Some(StrategyType::Roundrobin),
             "timewindow" => Some(StrategyType::Timewindow),
             "quota" => Some(StrategyType::Quota),
+            "least-busy" => Some(StrategyType::LeastBusy),
             _ => None,
         }
     }

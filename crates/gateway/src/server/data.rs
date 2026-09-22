@@ -306,6 +306,11 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         // protocol (conversion is adapters territory, wired in later phases).
         // Ambiguous paths (GET /v1/models) forward natively to the provider.
         // Query strings are forwarded untouched by the forward leg.
+        // The in-flight seat is held for the whole attempt (retries included —
+        // they are this candidate's work, not new candidates'), and released
+        // when the guard drops: the gauge least-busy reads stays honest about
+        // how busy each candidate actually is.
+        let _inflight = state.engine.inflight_guard(&plan.agent, &provider_id).await;
         let response = crate::forward::forward(
             state.clone(),
             method.clone(),

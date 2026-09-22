@@ -119,14 +119,21 @@ pub async fn prometheus(state: &GatewayState, redact: bool) -> String {
     }
 
     // The signal this endpoint earns its keep on: which candidates the breakers
-    // have taken out of the pool, per agent.
+    // have taken out of the pool, per agent — and whether the reason is a dead
+    // provider or a key the provider keeps refusing.
     out.push_str("# HELP kiwano_circuit_open 1 while a provider's breaker is open\n");
     out.push_str("# TYPE kiwano_circuit_open gauge\n");
-    for (key, circuit) in state.engine.breaker_snapshot().await {
-        let label = redact_label(&key, redact);
+    out.push_str("# HELP kiwano_auth_failed 1 while a provider's key is being refused (401)\n");
+    out.push_str("# TYPE kiwano_auth_failed gauge\n");
+    for snap in state.engine.breaker_snapshot().await {
+        let label = redact_label(&snap.key, redact);
         out.push_str(&format!(
             "kiwano_circuit_open{{route=\"{label}\"}} {}\n",
-            u8::from(circuit == CircuitState::Open)
+            u8::from(snap.state == CircuitState::Open)
+        ));
+        out.push_str(&format!(
+            "kiwano_auth_failed{{route=\"{label}\"}} {}\n",
+            u8::from(snap.auth_failed)
         ));
     }
 

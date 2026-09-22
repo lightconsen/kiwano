@@ -12,6 +12,7 @@ export const strategy = {
   roundrobin: "Weighted round-robin",
   timewindow: "Time window",
   quota: "Quota fallback",
+  leastBusy: "Least busy",
 
   // ── One-line description shown beside the select ──
   singleHint: "Always use the primary provider",
@@ -22,6 +23,8 @@ export const strategy = {
     "A candidate's local time window decides where a session starts; one already running keeps its provider, and a request with no window falls back to the primary",
   quotaHint:
     "Once today's primary reaches the number below, sessions that start after that go to the standbys — one already running keeps its provider",
+  leastBusyHint:
+    "Each request goes to the idlest healthy candidate; a session already running keeps its provider",
 
   // ── Quota-fallback unit select ──
   unitRequestsDay: "requests/day",

@@ -161,6 +161,19 @@ mod tests {
         assert_eq!(s.kind, StrategyType::Single);
         assert_eq!(s.agent, "claude");
 
+        // The least-busy tag round-trips through the store like the rest — the
+        // column is TEXT, and this is what keeps it that way.
+        store
+            .upsert_strategy("claude", StrategyType::LeastBusy, None)
+            .unwrap();
+        let s = store.get_strategy("claude").unwrap().unwrap();
+        assert_eq!(s.kind, StrategyType::LeastBusy);
+        assert_eq!(
+            StrategyType::parse_str("least-busy"),
+            Some(StrategyType::LeastBusy)
+        );
+        assert_eq!(StrategyType::LeastBusy.as_str(), "least-busy");
+
         store
             .upsert_binding(&Binding {
                 agent: "claude".into(),

@@ -43,7 +43,14 @@ mod tests {
 
         // Primary hits the consecutive-failure threshold → sink to backup
         for _ in 0..4 {
-            engine.record("claude", "a", false, false).await;
+            engine
+                .record(
+                    "claude",
+                    "a",
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
         }
         assert_eq!(
             engine
@@ -56,7 +63,14 @@ mod tests {
 
         // Backup also open → fall back to the primary (real upstream failure semantics)
         for _ in 0..4 {
-            engine.record("claude", "b", false, false).await;
+            engine
+                .record(
+                    "claude",
+                    "b",
+                    crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                    false,
+                )
+                .await;
         }
         assert_eq!(
             engine
@@ -70,8 +84,22 @@ mod tests {
         // Primary recovery (timeout=0 goes HalfOpen immediately + success flips to closed)
         // Build a fresh engine to exercise the recovery path: a success record clears consecutive failures
         let engine2 = StrategyEngine::new();
-        engine2.record("claude", "a", false, false).await;
-        engine2.record("claude", "a", true, false).await;
+        engine2
+            .record(
+                "claude",
+                "a",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
+        engine2
+            .record(
+                "claude",
+                "a",
+                crate::strategy::circuit_breaker::AttemptOutcome::Served,
+                false,
+            )
+            .await;
         let r2 = route(
             StrategyType::Failover,
             vec![candidate("a", 1, None), candidate("b", 1, None)],
@@ -97,11 +125,46 @@ mod tests {
             StrategyType::Failover,
             vec![candidate("a", 1, None), candidate("b", 1, None)],
         );
-        engine.record("claude", "b", false, false).await;
-        engine.record("claude", "b", false, false).await;
-        engine.record("claude", "b", false, false).await;
-        engine.record("claude", "b", false, false).await;
-        engine.record("claude", "b", false, false).await;
+        engine
+            .record(
+                "claude",
+                "b",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
+        engine
+            .record(
+                "claude",
+                "b",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
+        engine
+            .record(
+                "claude",
+                "b",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
+        engine
+            .record(
+                "claude",
+                "b",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
+        engine
+            .record(
+                "claude",
+                "b",
+                crate::strategy::circuit_breaker::AttemptOutcome::Failed,
+                false,
+            )
+            .await;
 
         let picked = engine.select(&s, &r, None, &blocked("a")).await.unwrap();
         assert_eq!(picked.id, "b", "the fallback must not reach for 'a'");

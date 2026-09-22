@@ -48,6 +48,17 @@ const GLYPHS: Record<StrategyKind, ReactNode> = {
       <path d="M12 14l4.6-4.6" />
     </>
   ),
+  // Two lanes of traffic, one visibly fuller: requests follow the shorter
+  // queue rather than a fixed order.
+  "least-busy": (
+    <>
+      <circle cx="4" cy="8" r="2.2" />
+      <circle cx="12" cy="8" r="2.4" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="16" r="2.4" fill="currentColor" stroke="none" />
+      <path d="M2.6 8h7" />
+      <path d="M14.6 8h6.8l-2.5 8h-7" />
+    </>
+  ),
 };
 
 export default function StrategyIcon({ id, className }: { id: StrategyKind; className?: string }) {

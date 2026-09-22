@@ -10,6 +10,7 @@ export const strategy = {
   roundrobin: "加权轮询",
   timewindow: "时间窗口",
   quota: "配额兜底",
+  leastBusy: "最少占用",
 
   // ── One-line description shown beside the select ──
   singleHint: "始终使用主用 Provider",
@@ -18,6 +19,7 @@ export const strategy = {
   timewindowHint:
     "由候选的本地时间窗口决定会话从哪开始；已在跑的会话保持原 provider，没有窗口匹配时回退到主用",
   quotaHint: "当天主用达到下方数值后，新会话改发往备用；已在跑的会话保持原 provider",
+  leastBusyHint: "每个请求发往当前最空闲的健康候选；已在跑的会话保持原 provider",
 
   // ── Quota-fallback unit select ──
   unitRequestsDay: "requests/天",

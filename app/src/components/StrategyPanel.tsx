@@ -33,6 +33,7 @@ const STRATEGIES: { id: StrategyKind; label: KeyPath<Messages>; hint: KeyPath<Me
   // provider's — the old wording ("once the primary exceeds its daily
   // threshold") read as an allowance set on one provider.
   { id: "quota", label: "strategy.quota", hint: "strategy.quotaHint" },
+  { id: "least-busy", label: "strategy.leastBusy", hint: "strategy.leastBusyHint" },
 ];
 
 /** The strategy's display label, lowercased so it reads as part of the

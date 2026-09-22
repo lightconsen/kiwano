@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 26;
+pub const SCHEMA_VERSION: i32 = 27;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -697,6 +697,25 @@ const MIGRATION_V26: &str = r#"
 ALTER TABLE request_logs ADD COLUMN request_notes TEXT;
 "#;
 
+/// SQLite cannot alter a CHECK constraint, so the strategy table is rebuilt
+/// with `least-busy` added to the accepted set. Rows carry over; the table
+/// has no foreign keys pointing at it, but the pragma guard follows the
+/// rebuild pattern [`MIGRATION_V23`] established for the same maneuver.
+const MIGRATION_V27: &str = r#"
+PRAGMA foreign_keys=OFF;
+CREATE TABLE agent_strategies_new (
+    agent  TEXT PRIMARY KEY,
+    type   TEXT NOT NULL DEFAULT 'single'
+           CHECK (type IN ('single','failover','roundrobin','timewindow','quota','least-busy')),
+    config TEXT
+);
+INSERT INTO agent_strategies_new (agent, type, config)
+    SELECT agent, type, config FROM agent_strategies;
+DROP TABLE agent_strategies;
+ALTER TABLE agent_strategies_new RENAME TO agent_strategies;
+PRAGMA foreign_keys=ON;
+"#;
+
 const MIGRATION_V23: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE providers_new (
@@ -820,6 +839,9 @@ impl Store {
             Self::remove_gemini_providers(conn)?;
         }
         Self::apply_migrations_v16_through_v26(conn, version)?;
+        if version < 27 {
+            conn.execute_batch(MIGRATION_V27)?;
+        }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -958,7 +980,7 @@ mod tests {
     use super::*;
     use crate::store::logs::RequestLogFilter;
     use crate::store::test_support::{sample_log, sample_provider, temp_store};
-    use crate::store::types::{Billing, Binding, CustomAgent, Protocol};
+    use crate::store::types::{Billing, Binding, CustomAgent, Protocol, StrategyType};
 
     #[test]
     fn migration_creates_tables_and_wal() {
@@ -1762,6 +1784,70 @@ mod tests {
             "newest first: the clean 12:00 row reads [0]"
         );
         assert_eq!(rows[0].request_notes, None);
+    }
+
+    /// v27 rebuilds the strategy table so its CHECK set accepts `least-busy`:
+    /// the rows an older build wrote carry over, and the new tag both passes
+    /// the constraint and reads back as itself.
+    #[test]
+    fn migration_v27_lets_the_strategy_table_speak_least_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+
+        // Hand-build a v26 database holding one strategy row written by a
+        // build whose CHECK set had no word for least-busy.
+        {
+            let conn = Connection::open(&db).unwrap();
+            for m in [
+                MIGRATION_V1,
+                MIGRATION_V2,
+                MIGRATION_V3,
+                MIGRATION_V4,
+                MIGRATION_V5,
+                MIGRATION_V7,
+                MIGRATION_V8,
+                MIGRATION_V9,
+                MIGRATION_V10,
+                MIGRATION_V11,
+                MIGRATION_V12,
+                MIGRATION_V13,
+                MIGRATION_V14,
+                MIGRATION_V15,
+                MIGRATION_V16,
+                MIGRATION_V17,
+                MIGRATION_V18,
+                MIGRATION_V19,
+                MIGRATION_V20,
+                MIGRATION_V21,
+                MIGRATION_V22,
+                MIGRATION_V23,
+                MIGRATION_V24,
+                MIGRATION_V25,
+                MIGRATION_V26,
+            ] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO agent_strategies (agent, type, config)
+                 VALUES ('claude', 'quota', '{\"threshold\": 3}');
+                 PRAGMA user_version = 26;",
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db).unwrap();
+        // The old row survived the rebuild, untouched.
+        let s = store.get_strategy("claude").unwrap().unwrap();
+        assert_eq!(s.kind, StrategyType::Quota);
+        assert_eq!(s.config.as_deref(), Some("{\"threshold\": 3}"));
+
+        // And the new tag both writes and reads back — the whole reason the
+        // constraint had to widen.
+        store
+            .upsert_strategy("codex", StrategyType::LeastBusy, None)
+            .unwrap();
+        let s = store.get_strategy("codex").unwrap().unwrap();
+        assert_eq!(s.kind, StrategyType::LeastBusy);
     }
 
     #[test]

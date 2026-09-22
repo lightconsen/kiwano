@@ -80,6 +80,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "codebuddy"
                         | "kimi"
                         | "qwen"
+                        | "mimo"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -192,6 +193,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
         // Kimi and Qwen want the version root; their clients append the route.
         "kimi" | "qwen" => "/v1",
+        // MiMo Code passes its custom baseURL straight to an OpenAI SDK, which
+        // appends only /chat/completions — the version root is required.
+        "mimo" => "/v1",
         // Cline's `openai-compatible` provider is handed to the OpenAI client
         // as-is — `/v1` included, trailing slashes trimmed, nothing appended —
         // so the version root is what its `baseUrl` holds.
@@ -862,6 +866,45 @@ base_url = "https://relay.example.com/v1"
         assert!(aux.load_takeover_backup("qwen").is_none());
     }
 
+    #[test]
+    fn mimo_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".config").join("mimocode");
+        std::fs::create_dir_all(&dir).unwrap();
+        // The config MiMo's own docs shape for a custom provider.
+        let original = r#"{
+  // user comment survives the parse, not the write-back
+  "model": "custom/deepseek-chat",
+  "provider": {
+    "custom": {
+      "name": "Custom",
+      "npm": "@ai-sdk/openai-compatible",
+      "only_configured_models": true,
+      "models": { "deepseek-chat": { "name": "deepseek-chat" } },
+      "options": { "baseURL": "https://example.com/v1", "apiKey": "sk-old" }
+    }
+  }
+}"#;
+        std::fs::write(dir.join("mimocode.jsonc"), original).unwrap();
+
+        enable(&aux, "mimo", "kw-ag-mimo-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("mimocode.jsonc")).unwrap())
+                .unwrap();
+        assert_eq!(v["model"], "custom/deepseek-chat");
+        let entry = &v["provider"]["custom"];
+        assert_eq!(entry["options"]["baseURL"], "http://127.0.0.1:8317/v1");
+        assert_eq!(entry["options"]["apiKey"], "kw-ag-mimo-abcd");
+
+        restore(&aux, "mimo", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("mimocode.jsonc")).unwrap(),
+            original
+        );
+        assert!(aux.load_takeover_backup("mimo").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -873,6 +916,7 @@ base_url = "https://relay.example.com/v1"
             // successor's path is the one written (see `takeover_paths`).
             ("kimi", ".kimi-code/config.toml"),
             ("qwen", ".qwen/settings.json"),
+            ("mimo", ".config/mimocode/mimocode.jsonc"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

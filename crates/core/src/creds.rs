@@ -44,6 +44,12 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
             home.join(".config").join("opencode").join("opencode.json"),
             kiwano_adapters::gateway_takeover::read_opencode_current,
         ),
+        // MiMo follows the XDG rules for where its global config lives, same
+        // as OpenCode — a moved XDG_CONFIG_HOME moves this file too.
+        "mimo" => read_additive_one(
+            home.join(".config").join("mimocode").join("mimocode.jsonc"),
+            kiwano_adapters::gateway_takeover::read_mimo_current,
+        ),
         "openclaw" => read_additive_one(home.join(".openclaw").join("openclaw.json"), |c| {
             kiwano_adapters::gateway_takeover::read_openclaw_current(c)
         }),
@@ -520,6 +526,30 @@ mod tests {
         )
         .unwrap();
         assert!(read_current_creds("opencode", &home).is_none());
+    }
+
+    #[test]
+    fn mimo_creds_read_the_custom_provider_the_selector_names() {
+        let home = temp_home("mimo");
+        let dir = home.join(".config").join("mimocode");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("mimocode.jsonc"),
+            r#"{"model":"custom/deepseek-chat","provider":{"custom":{"options":{"baseURL":"https://example.com/v1","apiKey":"sk-old"}}}}"#,
+        )
+        .unwrap();
+        let creds = read_current_creds("mimo", &home).unwrap();
+        assert_eq!(creds.name.as_deref(), Some("custom"));
+        assert_eq!(creds.base_url, "https://example.com/v1");
+        assert_eq!(creds.api_key, "sk-old");
+
+        // Post-takeover config never re-imports our own loopback endpoint.
+        std::fs::write(
+            dir.join("mimocode.jsonc"),
+            r#"{"model":"custom/deepseek-chat","provider":{"custom":{"options":{"baseURL":"http://127.0.0.1:8317/v1","apiKey":"kw"}}}}"#,
+        )
+        .unwrap();
+        assert!(read_current_creds("mimo", &home).is_none());
     }
 
     #[test]

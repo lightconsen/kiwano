@@ -60,6 +60,7 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("kimi", "kimi"),
     ("qwen", "qwen"),
     ("cline", "cline"),
+    ("mimo", "mimo"),
 ];
 
 /// One pass over every tool, through the login shell — whose only reader is the

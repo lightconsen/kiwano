@@ -150,6 +150,7 @@ pub(crate) mod test_support {
                 "openclaw" => ".openclaw/openclaw.json",
                 "hermes" => ".hermes/config.yaml",
                 "pi" => ".pi/agent/settings.json",
+                "mimo" => ".config/mimocode/mimocode.jsonc",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

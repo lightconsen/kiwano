@@ -130,6 +130,13 @@ pub(crate) fn takeover_paths(
         // one that exists is the one to write; with neither, the successor —
         // that is what a fresh install is.
         "kimi" => Ok(vec![kimi_config(vars, home)?]),
+        // MiMo Code follows the XDG rules for its global config, exactly like
+        // OpenCode: a moved XDG_CONFIG_HOME moves this file. Its per-agent
+        // auth.json is not rewritten — the takeover works on the custom
+        // provider entry in the main config.
+        "mimo" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
+            .join("mimocode")
+            .join("mimocode.jsonc")]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base
@@ -521,6 +528,11 @@ mod tests {
             takeover_paths("opencode", home, &vars).unwrap(),
             vec![xdg.join("opencode").join("opencode.json")]
         );
+        // MiMo Code follows the same XDG rules for its global config.
+        assert_eq!(
+            takeover_paths("mimo", home, &vars).unwrap(),
+            vec![xdg.join("mimocode").join("mimocode.jsonc")]
+        );
         // Unset, the XDG location is `~/.config/opencode/opencode.json`: the
         // default's sibling, not a replacement for it.
         let unset = ShellVars::from([("XDG_CONFIG_HOME".to_string(), "  ".to_string())]);
@@ -528,6 +540,11 @@ mod tests {
             takeover_paths("opencode", home, &unset).unwrap(),
             vec![home.join(".config").join("opencode").join("opencode.json")],
             "a blank value is nobody saying otherwise"
+        );
+        // Same default for MiMo, beside the OpenCode one.
+        assert_eq!(
+            takeover_paths("mimo", home, &unset).unwrap(),
+            vec![home.join(".config").join("mimocode").join("mimocode.jsonc")]
         );
     }
 

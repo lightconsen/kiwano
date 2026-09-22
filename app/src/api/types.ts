@@ -20,6 +20,7 @@ export type AgentId =
   | "pi"
   | "workbuddy"
   | "codebuddy"
+  | "mimo"
   | "kimi"
   | "qwen"
   | "cline";
@@ -74,6 +75,7 @@ export const ADDITIVE_AGENTS: AgentId[] = [
   "codebuddy",
   "kimi",
   "qwen",
+  "mimo",
 ];
 
 export const AGENTS: AgentMeta[] = [
@@ -91,6 +93,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "kimi", label: "Kimi Code CLI", chip_char: "K", chip_color: "#1783FF" },
   { id: "qwen", label: "Qwen Code", chip_char: "Q", chip_color: "#615CED" },
   { id: "cline", label: "Cline", chip_char: "C", chip_color: "#1C1C24", chip_border: true },
+  { id: "mimo", label: "MiMo Code", chip_char: "M", chip_color: "#FF6900" },
 ];
 
 export interface ProviderHealth {

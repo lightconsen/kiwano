@@ -93,7 +93,9 @@ pub(crate) fn rewrite(
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
         "opencode" | "openclaw" | "hermes" | "pi" | "workbuddy" | "codebuddy" | "qwen" | "kimi"
-        | "cline" => additive_rewrite(agent, path, original, target, key, now, sibling_config),
+        | "cline" | "mimo" => {
+            additive_rewrite(agent, path, original, target, key, now, sibling_config)
+        }
         _ => Err("unsupported agent".into()),
     }
 }
@@ -161,6 +163,10 @@ fn additive_rewrite(
             original, target, key,
         ),
         "qwen" => kiwano_adapters::gateway_takeover::upsert_qwen_gateway(original, target, key),
+        // MiMo Code pins its custom provider id to `custom` (its own docs), so
+        // the upsert fills that slot rather than `kiwano-gateway` — see the
+        // adapter for the why.
+        "mimo" => kiwano_adapters::gateway_takeover::upsert_mimo_gateway(original, target, key),
         // The two Kimi generations spell the same OpenAI shape differently:
         // the successor calls it `openai`, the Python original `kimi` — the
         // type whose dispatcher attaches the conversation's prompt_cache_key

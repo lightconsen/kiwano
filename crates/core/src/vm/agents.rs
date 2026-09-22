@@ -7,7 +7,7 @@ use crate::vm::{e2s, slug, Aux};
 use kiwanod::store::{Provider, Store, StrategyType};
 use serde::{Deserialize, Serialize};
 
-pub const AGENTS: [(&str, &str); 14] = [
+pub const AGENTS: [(&str, &str); 15] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
     ("gemini", "Gemini CLI"),
@@ -22,6 +22,7 @@ pub const AGENTS: [(&str, &str); 14] = [
     ("kimi", "Kimi Code CLI"),
     ("qwen", "Qwen Code"),
     ("cline", "Cline"),
+    ("mimo", "MiMo Code"),
 ];
 
 /// Whether `id` names a built-in agent — one whose *config* this app knows how
@@ -331,7 +332,7 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
 /// **A label.** Nothing routes, validates or filters by it: the gateway learns
 /// an inbound's protocol from the path it was called on
 /// (`gateway::protocol::classify_path`), and that is unchanged.
-pub const AGENT_PROTOCOLS: [(&str, &[&str]); 14] = [
+pub const AGENT_PROTOCOLS: [(&str, &[&str]); 15] = [
     ("claude", &["anthropic"]),
     ("codex", &["openai"]),
     ("gemini", &["gemini"]),
@@ -346,6 +347,7 @@ pub const AGENT_PROTOCOLS: [(&str, &[&str]); 14] = [
     ("kimi", &["openai"]),
     ("qwen", &["openai"]),
     ("cline", &["openai"]),
+    ("mimo", &["openai"]),
 ];
 
 /// The protocols `agent` speaks, or an empty slice for an id nobody knows — a
@@ -362,7 +364,7 @@ pub fn agent_protocols(agent: &str) -> &'static [&'static str] {
 /// Additive-mode agents: their native config keeps multiple providers
 /// coexisting, so takeover writes a gateway-pointed provider entry and selects
 /// it, instead of replacing an exclusive provider slot like the other five.
-pub const ADDITIVE_AGENTS: [&str; 8] = [
+pub const ADDITIVE_AGENTS: [&str; 9] = [
     "opencode",
     "openclaw",
     "hermes",
@@ -371,6 +373,7 @@ pub const ADDITIVE_AGENTS: [&str; 8] = [
     "codebuddy",
     "kimi",
     "qwen",
+    "mimo",
 ];
 
 #[cfg(test)]

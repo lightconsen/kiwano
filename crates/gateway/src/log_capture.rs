@@ -212,12 +212,12 @@ fn scrub_json(value: &mut serde_json::Value) -> bool {
 
 /// Bytes that may appear inside a credential token. Deliberately excludes `.`,
 /// which is only significant for JWTs (see `jwt_len`).
-fn is_token_byte(b: u8) -> bool {
+pub(crate) fn is_token_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
 }
 
 /// Length of the run of token bytes at the start of `bytes`.
-fn token_run_len(bytes: &[u8]) -> usize {
+pub(crate) fn token_run_len(bytes: &[u8]) -> usize {
     bytes.iter().take_while(|b| is_token_byte(**b)).count()
 }
 
@@ -226,7 +226,7 @@ fn token_run_len(bytes: &[u8]) -> usize {
 /// `eyJ` is the base64 of `{"`, so a `eyJ…` run carrying two `.` separators
 /// and enough material is a JWT with very high confidence — no delimiter
 /// needed to avoid false positives on prose.
-fn jwt_len(text: &str) -> Option<usize> {
+pub(crate) fn jwt_len(text: &str) -> Option<usize> {
     const HEAD: &str = "eyJ";
     if !text.starts_with(HEAD) {
         return None;

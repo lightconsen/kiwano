@@ -6,6 +6,7 @@
 //! `server/` (data plane :8317 + admin plane on a socket/pipe), `meter/` (usage
 //! capture), `main.rs` (binary entry).
 
+pub mod dlp;
 pub mod error;
 pub mod forward;
 pub mod limits;

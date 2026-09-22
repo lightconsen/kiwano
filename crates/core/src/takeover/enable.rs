@@ -81,6 +81,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "kimi"
                         | "qwen"
                         | "mimo"
+                        | "mcode"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -196,6 +197,10 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // MiMo Code passes its custom baseURL straight to an OpenAI SDK, which
         // appends only /chat/completions — the version root is required.
         "mimo" => "/v1",
+        // MiniMax Code's official endpoint ends at the version root
+        // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
+        // same OpenAI-completions client — the root is required here too.
+        "mcode" => "/v1",
         // Cline's `openai-compatible` provider is handed to the OpenAI client
         // as-is — `/v1` included, trailing slashes trimmed, nothing appended —
         // so the version root is what its `baseUrl` holds.
@@ -905,6 +910,45 @@ base_url = "https://relay.example.com/v1"
         assert!(aux.load_takeover_backup("mimo").is_none());
     }
 
+    #[test]
+    fn mcode_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".minimax");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = r#"defaultModel: minimax/minimax-m2.5
+custom_provider:
+  openrouter:
+    name: OpenRouter
+    baseUrl: https://openrouter.ai/api/v1
+    apiKey: sk-or
+    apiFormat: openai-completions
+    models:
+      - modelId: deepseek-chat
+"#;
+        std::fs::write(dir.join("config.yaml"), original).unwrap();
+
+        enable(&aux, "mcode", "kw-ag-mcode-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(dir.join("config.yaml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["defaultModel"],
+            "custom_provider:kiwano-gateway/minimax-m2.5"
+        );
+        let gw = &v["custom_provider"]["kiwano-gateway"];
+        assert_eq!(gw["baseUrl"], "http://127.0.0.1:8317/v1");
+        assert_eq!(gw["apiKey"], "kw-ag-mcode-abcd");
+        assert_eq!(gw["apiFormat"], "openai-completions");
+
+        restore(&aux, "mcode", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.yaml")).unwrap(),
+            original
+        );
+        assert!(aux.load_takeover_backup("mcode").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -917,6 +961,7 @@ base_url = "https://relay.example.com/v1"
             ("kimi", ".kimi-code/config.toml"),
             ("qwen", ".qwen/settings.json"),
             ("mimo", ".config/mimocode/mimocode.jsonc"),
+            ("mcode", ".minimax/config.yaml"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

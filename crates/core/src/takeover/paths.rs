@@ -137,6 +137,16 @@ pub(crate) fn takeover_paths(
         "mimo" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
             .join("mimocode")
             .join("mimocode.jsonc")]),
+        // MiniMax Code keeps its config in ~/.minimax/config.yaml, and names
+        // the relocation variable itself (MCODE_CONFIG_DIR) — the shipped CLI
+        // reads it when resolving its config root.
+        "mcode" => Ok(vec![config_dir(
+            vars,
+            "MCODE_CONFIG_DIR",
+            ".minimax",
+            home,
+        )?
+        .join("config.yaml")]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base
@@ -248,6 +258,7 @@ pub const CONFIG_DIR_VARS: &[&str] = &[
     "CLINE_PROVIDER_SETTINGS_PATH",
     "CLINE_DATA_DIR",
     "CLINE_DIR",
+    "MCODE_CONFIG_DIR",
 ];
 
 /// The config root an agent resolves for itself: the environment variable that
@@ -532,6 +543,17 @@ mod tests {
         assert_eq!(
             takeover_paths("mimo", home, &vars).unwrap(),
             vec![xdg.join("mimocode").join("mimocode.jsonc")]
+        );
+        // MiniMax Code names its own relocation variable.
+        let vars = ShellVars::from([(
+            "MCODE_CONFIG_DIR".to_string(),
+            home.join(".minimax-elsewhere")
+                .to_string_lossy()
+                .into_owned(),
+        )]);
+        assert_eq!(
+            takeover_paths("mcode", home, &vars).unwrap(),
+            vec![home.join(".minimax-elsewhere").join("config.yaml")]
         );
         // Unset, the XDG location is `~/.config/opencode/opencode.json`: the
         // default's sibling, not a replacement for it.

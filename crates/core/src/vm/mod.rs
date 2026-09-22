@@ -151,6 +151,7 @@ pub(crate) mod test_support {
                 "hermes" => ".hermes/config.yaml",
                 "pi" => ".pi/agent/settings.json",
                 "mimo" => ".config/mimocode/mimocode.jsonc",
+                "mcode" => ".minimax/config.yaml",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

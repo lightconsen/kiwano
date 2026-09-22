@@ -50,6 +50,18 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
             home.join(".config").join("mimocode").join("mimocode.jsonc"),
             kiwano_adapters::gateway_takeover::read_mimo_current,
         ),
+        // MiniMax Code names its own relocation variable; the default root is
+        // ~/.minimax (the shipped CLI's own resolution).
+        "mcode" => {
+            let dir = match kiwano_adapters::config::env_dir("MCODE_CONFIG_DIR") {
+                kiwano_adapters::config::EnvDir::Absolute(dir) => dir,
+                kiwano_adapters::config::EnvDir::Unset => home.join(".minimax"),
+                kiwano_adapters::config::EnvDir::Relative(_) => return None,
+            };
+            read_additive_one(dir.join("config.yaml"), |c| {
+                kiwano_adapters::gateway_takeover::read_mcode_current(c)
+            })
+        }
         "openclaw" => read_additive_one(home.join(".openclaw").join("openclaw.json"), |c| {
             kiwano_adapters::gateway_takeover::read_openclaw_current(c)
         }),
@@ -550,6 +562,42 @@ mod tests {
         )
         .unwrap();
         assert!(read_current_creds("mimo", &home).is_none());
+    }
+
+    #[test]
+    fn mcode_creds_read_the_selector_named_provider() {
+        let home = temp_home("mcode");
+        let dir = home.join(".minimax");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.yaml"),
+            r#"defaultModel: custom_provider:openrouter/deepseek-chat
+custom_provider:
+  openrouter:
+    name: OpenRouter
+    baseUrl: https://openrouter.ai/api/v1
+    apiKey: sk-or
+"#,
+        )
+        .unwrap();
+        let creds = read_current_creds("mcode", &home).unwrap();
+        assert_eq!(creds.name.as_deref(), Some("openrouter"));
+        assert_eq!(creds.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(creds.api_key, "sk-or");
+
+        // Post-takeover config never re-imports our own loopback endpoint.
+        std::fs::write(
+            dir.join("config.yaml"),
+            r#"defaultModel: custom_provider:kiwano-gateway/deepseek-chat
+custom_provider:
+  kiwano-gateway:
+    name: Kiwano Gateway
+    baseUrl: http://127.0.0.1:8317/v1
+    apiKey: kw
+"#,
+        )
+        .unwrap();
+        assert!(read_current_creds("mcode", &home).is_none());
     }
 
     #[test]

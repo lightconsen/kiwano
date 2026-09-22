@@ -9,14 +9,16 @@
 // pipeline is the sole writer and serializes file access itself.
 
 //! Gateway takeover transforms for the agents whose config this app writes an
-//! entry into: opencode, openclaw, hermes, pi, workbuddy, codebuddy, kimi, qwen
-//! and cline.
+//! entry into: opencode, openclaw, hermes, pi, workbuddy, codebuddy, kimi,
+//! qwen, cline, mimo and mcode.
 //!
-//! The first eight are additive: their configs hold many providers and select
-//! one, so "takeover" means upsert a `kiwano-gateway` entry pointing at the
-//! local gateway and select it — every pre-existing provider entry survives.
-//! The gateway forwards model names verbatim, so selections keep the user's
-//! existing model id and only swap the provider prefix.
+//! All but cline are additive: their configs hold many providers and select
+//! one, so "takeover" means upsert a gateway entry pointing at the local
+//! gateway and select it — every pre-existing provider entry survives. (mimo's
+//! entry is filed under its doc-mandated `custom` id rather than
+//! `kiwano-gateway`; see that module.) The gateway forwards model names
+//! verbatim, so selections keep the user's existing model id and only swap the
+//! provider prefix.
 //!
 //! Cline is the exception this module's name does not cover: its selector names
 //! a provider *id* rather than an entry of ours, so the takeover replaces the
@@ -44,6 +46,7 @@ pub mod gateway;
 pub mod hermes;
 pub mod json;
 pub mod kimi;
+pub mod mcode;
 pub mod mimo;
 pub mod model_list;
 pub mod openclaw;
@@ -60,6 +63,7 @@ pub use codebuddy::upsert_codebuddy_models_gateway;
 pub use gateway::GATEWAY_PROVIDER_ID;
 pub use hermes::upsert_hermes_gateway;
 pub use kimi::upsert_kimi_gateway;
+pub use mcode::{read_mcode_current, upsert_mcode_gateway};
 pub use mimo::{read_mimo_current, upsert_mimo_gateway};
 pub use model_list::GATEWAY_VENDOR;
 pub use openclaw::{upsert_openclaw_gateway, upsert_openclaw_models_json};

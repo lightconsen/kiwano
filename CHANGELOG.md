@@ -19,6 +19,28 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A credential watch on the data plane.** The gateway has always scrubbed the
+  credentials it knows out of the request log — its own provider keys by value,
+  anything under a secret-shaped name, anything carrying a listed prefix. That
+  is an allowlist and the module says so; a credential it had never seen, in a
+  shape nobody listed, went to the provider untouched. It now reads the outgoing
+  request for the shapes themselves and records what it found as a note on the
+  request-log row: vendor key prefixes (OpenAI, Anthropic, GitHub, GitLab,
+  Slack, AWS, Stripe, npm, PyPI, Docker, Google), JWTs, and PEM private-key
+  headers. **It reports and never blocks.** By the time a finding exists the
+  request has already been sent, so the honest description is "you find out it
+  left" — nothing in this path can hold a request up or fail one. A finding
+  carries the rule and a count and never the matched text: the body is stored
+  anyway, and a note that repeated what it caught would be a second copy of the
+  thing it warns about. `Settings → Local gateway → Credential watch` sets it to
+  **Alert** (the default) or **Off**. Four limits, all deliberate and all
+  written down where the code is: a credential in a format nobody listed passes;
+  a payload encoded before sending passes; only traffic through the gateway is
+  seen; and the finding is written into the request log, so with request logging
+  off the watch has nowhere to report and stays quiet.
+
 ### Changed
 
 - **The CSV export always carries the request and response bodies.** Bodies
@@ -35,6 +57,12 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   without being asked. **`logs export` no longer accepts `--include-bodies`** —
   a script passing it will fail on the unknown flag rather than silently
   exporting less.
+
+- **A log row's note heading reads "Gateway notes" rather than "Sanitizer".**
+  That field now carries a credential-watch finding as well as the compat shim's
+  rewrites, and the old heading would have been a lie in front of the one place
+  a user reads security information. The CSV column keeps its name, because
+  renaming a column breaks whoever parses the file.
 
 ## [0.2.3] - 2026-09-21
 

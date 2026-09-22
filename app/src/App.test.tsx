@@ -9,7 +9,7 @@
 //
 // The tick is the same read without the user: the gateway says a request was
 // recorded, and what is on screen re-reads.
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,6 +48,14 @@ const { apiMock } = vi.hoisted(() => ({
     probeAgentVersions: vi.fn(),
     // The update banner the shell renders reads this on mount.
     getPendingUpdate: vi.fn(),
+    // The credential banner polls this on mount, and the click-through opens
+    // the Dashboard's request-log dialog for the finding's row.
+    checkCredentialFinding: vi.fn(),
+    ackCredentialFinding: vi.fn(),
+    // The Dashboard screen the banner navigates to reads all of these.
+    getDashboard: vi.fn(),
+    listRequestLogs: vi.fn(),
+    getRequestLog: vi.fn(),
   },
 }));
 
@@ -83,7 +91,63 @@ beforeEach(() => {
   apiMock.detectAgents.mockResolvedValue([]);
   apiMock.probeAgentVersions.mockResolvedValue([]);
   apiMock.getPendingUpdate.mockResolvedValue(null);
+  apiMock.checkCredentialFinding.mockResolvedValue(null);
+  apiMock.ackCredentialFinding.mockResolvedValue(undefined);
+  apiMock.getDashboard.mockResolvedValue({
+    requests: 0,
+    requests_delta_pct: null,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    reasoning_tokens: 0,
+    latency_ms: 0,
+    latency_delta_pct: null,
+    cost: 0,
+    cost_off_peak: 0,
+    trend: [],
+    by_provider: [],
+    by_agent: [],
+    filter_providers: [],
+    filter_agents: [],
+  });
+  apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
+  apiMock.getRequestLog.mockResolvedValue(null);
 });
+
+/** ONE_SHAPE: the minimal log row the banner click opens. */
+function findingRow(id: number) {
+  return {
+    id,
+    ts: "2026-09-14T10:00:00Z",
+    method: "POST",
+    path: "/v1/messages",
+    query: null,
+    agent: "claude",
+    attribution: "key",
+    provider_id: "deepseek",
+    model: "deepseek-chat",
+    status_code: 200,
+    error_kind: null,
+    error_message: null,
+    session_id: null,
+    is_streaming: false,
+    input_tokens: 1_000,
+    output_tokens: 200,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    reasoning_tokens: 0,
+    usage_missing: false,
+    latency_ms: 900,
+    first_token_ms: 300,
+    request_headers: null,
+    response_headers: null,
+    request_size: 0,
+    response_size: 0,
+    truncated: false,
+    request_notes: "dlp: github-token ×1",
+  };
+}
 
 describe("the status bar's reload", () => {
   it("flashes a check once the reads land, then goes back to the glyph", async () => {
@@ -120,5 +184,38 @@ describe("the gateway's live numbers", () => {
     act(() => listeners.get("usage-changed")!());
 
     await waitFor(() => expect(apiMock.getFooterStats).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("the credential banner's click-through", () => {
+  it("opens the request-log detail on the Dashboard it navigates to", async () => {
+    window.location.hash = "";
+    const user = userEvent.setup();
+
+    apiMock.checkCredentialFinding.mockResolvedValue(findingRow(41));
+    apiMock.getRequestLog.mockResolvedValue({
+      ...findingRow(41),
+      request_body: null,
+      response_body: null,
+    });
+    render(<App />);
+
+    // The banner shows the finding; the click acks and deep-links the row.
+    await screen.findByText(en.app.credentialBannerTitle);
+    await user.click(screen.getByRole("button", { name: en.app.credentialBannerCta }));
+    expect(apiMock.ackCredentialFinding).toHaveBeenCalledWith(41);
+
+    // The Dashboard the route lands on asks for the row by id and opens the
+    // detail dialog: the whole reason the deep-link exists.
+    await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(41));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(new RegExp(en.logs.logTitle.replace("{id}", "41"))),
+    ).toBeInTheDocument();
+
+    // The link is spent: the hash rewrites to plain Dashboard once the row is
+    // open, and the dialog survives its own deep-link being consumed.
+    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

@@ -45,6 +45,9 @@ export const logs = {
 
   detailSession: "Session",
   detailNotes: "Gateway notes:",
+  /** Row badge + detail block for a credential-watch finding (dlp:* notes). */
+  dlpBadge: "key",
+  detailCredentialWatch: "Credential watch: an API key or private key left the machine in this request.",
   detailRequest: "Request",
   detailResponse: "Response",
   detailBodyTruncated: "(body truncated)",

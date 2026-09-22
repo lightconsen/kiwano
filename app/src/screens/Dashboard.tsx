@@ -411,7 +411,15 @@ function Delta({ pct, invert }: { pct: number | null; invert?: boolean }) {
   );
 }
 
-export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null } = {}) {
+export default function Dashboard({
+  gateway,
+  openLogId,
+}: {
+  gateway?: GatewayStatus | null;
+  /** Deep-linked request-log detail (`#dashboard/log/<id>`), passed through to
+   *  the Logs card, which consumes it. */
+  openLogId?: number;
+} = {}) {
   const t = useT();
   const [win, setWin] = useState<DashboardWindow>("7d");
   // The gateway decides which providers it will not route to, and reports it;
@@ -662,6 +670,7 @@ export default function Dashboard({ gateway }: { gateway?: GatewayStatus | null 
         <RequestLogs
           agent={agentFilter === "all" ? undefined : agentFilter}
           providerId={providerFilter === "all" ? undefined : providerFilter}
+          initialOpenId={openLogId}
         />
       </div>
     </section>

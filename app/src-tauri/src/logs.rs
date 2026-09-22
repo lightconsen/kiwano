@@ -80,6 +80,25 @@ pub fn clear_request_logs(state: State<AppState>) -> Result<(), String> {
     vm::clear_request_logs(&state.store)
 }
 
+// ── Credential-watch banner ──
+
+/// The newest credential finding the user has not acknowledged — the banner's
+/// poll. Read-only on purpose: only an explicit dismiss/click acks, so the
+/// banner survives across polls and restarts until then.
+#[tauri::command]
+pub fn check_credential_finding(
+    state: State<AppState>,
+) -> Result<Option<kiwanod::store::RequestLogEntry>, String> {
+    vm::check_credential_finding(&state.store, &state.aux)
+}
+
+/// Banner dismissed or clicked: acknowledge that log id. A newer finding
+/// re-raises the banner.
+#[tauri::command]
+pub fn ack_credential_finding(state: State<AppState>, id: i64) -> Result<(), String> {
+    vm::ack_credential_finding(&state.aux, id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 // ── Logs ──
 

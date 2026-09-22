@@ -154,4 +154,81 @@ describe("the request log table", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("badges a row with a credential finding and splits it out in the detail", async () => {
+    const user = userEvent.setup();
+    const finding = {
+      ...entry(7),
+      request_notes: "dlp: github-token ×1\nthinking: removed invalid value",
+    };
+    apiMock.listRequestLogs.mockResolvedValue({
+      rows: [finding, { ...entry(8), model: "other-model" }],
+      total: 2,
+    });
+    apiMock.getRequestLog.mockResolvedValue({ ...finding, request_body: null, response_body: null });
+    render(<RequestLogs />);
+
+    // The badge rides the status cell of the finding's row only.
+    expect(await screen.findByText(en.logs.dlpBadge)).toBeInTheDocument();
+    expect(screen.getAllByText(en.logs.dlpBadge)).toHaveLength(1);
+
+    await user.click(screen.getByText("deepseek-chat"));
+    const dialog = await screen.findByRole("dialog");
+    // The finding is its own red block; the shim's line stays under the
+    // generic notes label, not promoted with it.
+    expect(await within(dialog).findByText(en.logs.detailCredentialWatch)).toBeInTheDocument();
+    expect(within(dialog).getByText(/dlp: github-token ×1/)).toBeInTheDocument();
+    expect(within(dialog).getByText(en.logs.detailNotes)).toBeInTheDocument();
+    expect(within(dialog).getByText(/thinking: removed invalid value/)).toBeInTheDocument();
+  });
+
+  it("opens a deep-linked log by id, off the current page, and spends the link", async () => {
+    const detail = { ...entry(99), request_body: null, response_body: null };
+    apiMock.getRequestLog.mockResolvedValue(detail);
+    window.location.hash = "#dashboard/log/99";
+    render(<RequestLogs initialOpenId={99} />);
+
+    // Straight to the row by id — the paged list is never asked to find it.
+    await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(99));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(new RegExp(en.logs.logTitle.replace("{id}", "99"))),
+    ).toBeInTheDocument();
+    // Consumed: the hash no longer names the row, so a refresh cannot reopen it.
+    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
+  });
+
+  it("still opens the deep-linked dialog when the row read fails", async () => {
+    // The banner's click must never be swallowed by a detail fetch that fails
+    // or a row the log no longer has — the dialog opens on the id alone and
+    // the title still names it.
+    apiMock.getRequestLog.mockRejectedValue(new Error("pruned"));
+    window.location.hash = "#dashboard/log/99";
+    render(<RequestLogs initialOpenId={99} />);
+
+    await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(99));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(new RegExp(en.logs.logTitle.replace("{id}", "99"))),
+    ).toBeInTheDocument();
+    // The link is still spent: the failure does not wedge the hash.
+    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
+  });
+
+  it("does not spring the deep-linked dialog back open after it is dismissed", async () => {
+    // The detail read never answers: the dialog is up on the id alone, and
+    // dismissing it must stick even while the hash-reset round-trip (which
+    // waits on that read) has not cleared `initialOpenId` yet.
+    apiMock.getRequestLog.mockReturnValue(new Promise(() => {}));
+    window.location.hash = "#dashboard/log/99";
+    const user = userEvent.setup();
+    render(<RequestLogs initialOpenId={99} />);
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: en.common.close }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Still, a moment later, nothing re-raises it.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });

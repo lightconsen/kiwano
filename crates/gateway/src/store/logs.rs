@@ -366,6 +366,25 @@ impl Store {
         Ok(rows)
     }
 
+    /// The newest row carrying a credential-watch finding, if any. DLP note
+    /// lines always lead `request_notes` (`forward/native.rs` composes detector
+    /// first) and always start with `dlp: `, so a prefix LIKE is an exact
+    /// "this row has a finding" test — shim-only rows never match. This is the
+    /// banner's read: one row is enough, the banner only ever shows the latest.
+    pub fn latest_credential_finding(&self) -> Result<Option<RequestLogEntry>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {REQUEST_LOG_COLUMNS} FROM request_logs
+             WHERE request_notes LIKE 'dlp:%'
+             ORDER BY id DESC LIMIT 1",
+        ))?;
+        let row = stmt
+            .query_map([], request_log_from_row)?
+            .next()
+            .transpose()?;
+        Ok(row)
+    }
+
     /// COUNT of data-plane requests (every row: forwarded + pre-forward
     /// failures), optionally filtered by agent, provider and/or a window.
     /// `since`/`until` are half-open, which is what lets the dashboard ask for
@@ -739,6 +758,38 @@ mod tests {
         assert_eq!(detail.response_body, None);
 
         assert!(store.get_request_log(9999).unwrap().is_none());
+    }
+
+    #[test]
+    fn latest_credential_finding_matches_only_dlp_led_notes() {
+        let (_dir, store) = temp_store();
+        let insert = |ts: &str, notes: Option<&str>| {
+            let mut log = sample_log(ts, Some("claude"), 200);
+            log.request_notes = notes.map(str::to_string);
+            store.insert_request_log(&log).unwrap()
+        };
+
+        assert_eq!(store.latest_credential_finding().unwrap(), None);
+
+        // Shim-only notes: no `dlp: ` line, must never match.
+        insert(
+            "2026-09-07T10:00:00+00:00",
+            Some("thinking: removed invalid value"),
+        );
+        // A finding leads; shim lines can follow on the same row.
+        let finding = insert(
+            "2026-09-07T11:00:00+00:00",
+            Some("dlp: github-token ×1\nthinking: removed invalid value"),
+        );
+        // Newer than the finding but plain: the finding is still the answer.
+        insert("2026-09-07T12:00:00+00:00", None);
+
+        let row = store.latest_credential_finding().unwrap().unwrap();
+        assert_eq!(row.id, finding, "the newest finding, not the newest row");
+        assert_eq!(
+            row.request_notes.as_deref(),
+            Some("dlp: github-token ×1\nthinking: removed invalid value")
+        );
     }
 
     #[test]

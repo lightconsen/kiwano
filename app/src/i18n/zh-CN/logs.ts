@@ -36,6 +36,8 @@ export const logs = {
 
   detailSession: "会话",
   detailNotes: "网关记录：",
+  dlpBadge: "凭证",
+  detailCredentialWatch: "凭证监视：此请求中有 API key 或私钥离开了本机。",
   detailRequest: "请求",
   detailResponse: "响应",
   detailBodyTruncated: "（正文已截断）",

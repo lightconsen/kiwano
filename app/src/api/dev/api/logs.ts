@@ -12,6 +12,8 @@ export const logsApi: Pick<
   | "exportRequestLogs"
   | "openLogFolder"
   | "clearRequestLogs"
+  | "checkCredentialFinding"
+  | "ackCredentialFinding"
 > = {
   async listRequestLogs(page: number, pageSize: number, filter?: RequestLogFilter): Promise<RequestLogList> {
     await delay();
@@ -45,4 +47,19 @@ export const logsApi: Pick<
     await delay();
     requestLogs.length = 0;
   },
+
+  // The browser stand-in for the gateway's KV ack: session-scoped, which is
+  // fine for a mock — a reload simply re-shows the banner.
+  async checkCredentialFinding() {
+    await delay();
+    const latest = requestLogs.find((r) => r.request_notes?.startsWith("dlp:"));
+    return latest && latest.id > ackedFindingId ? { ...latest } : null;
+  },
+
+  async ackCredentialFinding(id: number): Promise<void> {
+    await delay();
+    ackedFindingId = id;
+  },
 };
+
+let ackedFindingId = 0;

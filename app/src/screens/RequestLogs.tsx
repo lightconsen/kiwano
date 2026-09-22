@@ -89,6 +89,12 @@ function prettyJson(json: string | null): string {
 }
 
 /** Whole-log plain text for the clipboard: metadata, then detail sections when available. */
+function noteLines(notes: string | null): string[] {
+  if (!notes) return [];
+  const { dlp, rest } = splitNotes(notes);
+  // The detector's lines are self-prefixed ("dlp: …"); the shim's need naming.
+  return [...dlp, ...(rest.length > 0 ? ["sanitizer: " + rest.join("\n")] : [])];
+}
 function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
   const lines = [
     `#${r.id} · ${r.ts}`,
@@ -99,9 +105,10 @@ function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
     // thinking is not saying the model did none.
     ...(r.reasoning_tokens > 0 ? [`reasoning: ${r.reasoning_tokens} (of the output)`] : []),
     ...(r.usage_missing ? ["usage: not reported by the upstream"] : []),
-    // What the shim changed on the way through — the raw request body alone
-    // does not explain the delta.
-    ...(r.request_notes ? ["sanitizer: " + r.request_notes] : []),
+    // What the gateway noted on the way through — detector findings and shim
+    // rewrites are different audiences, so the dump keeps them on their own
+    // lines rather than under one prefix.
+    ...noteLines(r.request_notes),
   ];
   if (r.error_kind) lines.push(`error: ${r.error_kind} ${r.error_message ?? ""}`);
   if (d?.session_id) lines.push(`session: ${d.session_id}`);
@@ -154,6 +161,39 @@ function StatusPill({ code }: { code: number }) {
   );
 }
 
+/** The list-row marker for a credential-watch finding: the detector's note
+    lines always lead `request_notes`, so a prefix test on the row is exact. */
+function DlpBadge() {
+  const t = useT();
+  return (
+    <span
+      className="ml-1 inline-block rounded px-1 py-0.5 text-[9.5px] font-semibold"
+      style={{
+        color: "var(--red)",
+        background: "color-mix(in srgb, var(--red) 12%, transparent)",
+      }}
+    >
+      {t("logs.dlpBadge")}
+    </span>
+  );
+}
+
+/** A finding rides the row when its notes lead with the detector's prefix. */
+export function hasCredentialFinding(notes: string | null): boolean {
+  return notes?.startsWith("dlp:") ?? false;
+}
+
+/** Split gateway notes into the detector's lines and everything else (the
+    shim's). The detail shows the two in separate blocks. */
+function splitNotes(notes: string): { dlp: string[]; rest: string[] } {
+  const dlp: string[] = [];
+  const rest: string[] = [];
+  for (const line of notes.split("\n")) {
+    (line.startsWith("dlp: ") ? dlp : rest).push(line);
+  }
+  return { dlp, rest };
+}
+
 function Detail({ d }: { d: RequestLogDetail | null }) {
   const t = useT();
   if (!d) return <div className="px-5 pb-4 text-[11px] text-mut">{t("common.loading")}</div>;
@@ -193,12 +233,33 @@ function Detail({ d }: { d: RequestLogDetail | null }) {
       )}
       {/* Not gated on error_kind on purpose: a sanitized request usually
           answered 200, and its explanation is not an error. */}
-      {d.request_notes && (
-        <div className="whitespace-pre-line rounded border border-line bg-surface2 p-2 text-[11px] text-mut">
-          <span className="font-semibold text-ink">{t("logs.detailNotes")}</span>{" "}
-          {d.request_notes}
-        </div>
-      )}
+      {d.request_notes &&
+        (() => {
+          const { dlp, rest } = splitNotes(d.request_notes);
+          return (
+            <>
+              {dlp.length > 0 && (
+                <div
+                  className="whitespace-pre-line rounded border p-2 text-[11px]"
+                  style={{
+                    color: "var(--red)",
+                    borderColor: "color-mix(in srgb, var(--red) 35%, transparent)",
+                    background: "color-mix(in srgb, var(--red) 8%, transparent)",
+                  }}
+                >
+                  <span className="font-semibold">{t("logs.detailCredentialWatch")}</span>{" "}
+                  {dlp.join("\n")}
+                </div>
+              )}
+              {rest.length > 0 && (
+                <div className="whitespace-pre-line rounded border border-line bg-surface2 p-2 text-[11px] text-mut">
+                  <span className="font-semibold text-ink">{t("logs.detailNotes")}</span>{" "}
+                  {rest.join("\n")}
+                </div>
+              )}
+            </>
+          );
+        })()}
       <div className="grid grid-cols-2 gap-2">
         <div>
           <div className="mb-1 text-[10px] font-medium text-mut">
@@ -284,12 +345,18 @@ function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => 
 export default function RequestLogs({
   agent,
   providerId,
+  initialOpenId,
 }: {
   /** The page's provider/agent filters. They narrow this table the same way
    *  they narrow the cards above it — the reader set one slice and expects
    *  every panel to be answering for it. */
   agent?: string;
   providerId?: string;
+  /** Deep-linked detail (`#dashboard/log/<id>`, e.g. from the credential
+   *  banner): open that log's dialog even when the row is not on the current
+   *  page. Consumed on open — the hash is rewritten so a refresh or a
+   *  screen switch does not spring the dialog back up. */
+  initialOpenId?: number;
 } = {}) {
   const t = useT();
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -297,6 +364,9 @@ export default function RequestLogs({
   const [rows, setRows] = useState<RequestLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
+  // A deep-linked dialog whose row is off the current page: `openId` resolves
+  // against the fetched page, so an outside open keeps its own entry.
+  const [externalOpen, setExternalOpen] = useState<RequestLogEntry | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [range, setRange] = useState<RangeId>("any");
   const [fromDate, setFromDate] = useState(todayLocalDate);
@@ -335,6 +405,11 @@ export default function RequestLogs({
         }),
   });
 
+  // A deep-link already shown and dismissed: without this, the hash-reset
+  // round-trip (App clears `logId` only after the row fetch lands) would let
+  // the dialog spring back open from a stale `initialOpenId`.
+  const [spentOpenId, setSpentOpenId] = useState<number | null>(null);
+
   // The page filters change what the result set is, not just which rows of it
   // are on screen, so the pager has to go back to the start. Keyed by value
   // because the props are plain strings by the time they arrive.
@@ -342,7 +417,72 @@ export default function RequestLogs({
   useEffect(() => {
     setPage(1);
     setOpenId(null);
+    setExternalOpen(null);
+    setSpentOpenId(null);
   }, [scope]);
+
+  // Consume a deep link: fetch the row straight by id rather than paging the
+  // table to find it, then rewrite the hash so the link is spent. The dialog's
+  // existence is *not* coupled to this read (the render derives it from
+  // `initialOpenId` below), precisely so that a fetch failure or a race cannot
+  // swallow the banner's click — the dialog opens on the skeleton and fills in
+  // when the detail lands.
+  useEffect(() => {
+    if (initialOpenId == null) return;
+    let alive = true;
+    api
+      .getRequestLog(initialOpenId)
+      .then((d) => {
+        if (alive && d) setExternalOpen(d);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) window.location.hash = "#dashboard";
+      });
+    return () => {
+      alive = false;
+    };
+  }, [initialOpenId]);
+
+  // The deep-linked dialog: a full row when one came back, otherwise a stub
+  // that only carries the id — the dialog's own read fills the rest in. Never
+  // waits on `getRequestLog`, so the dialog is open the moment the hash lands.
+  // `spentOpenId` gates the stub: dismissing it marks it spent, so the id's
+  // hash-reset round-trip cannot spring the dialog back open.
+  const externalEntry =
+    externalOpen ??
+    (initialOpenId != null && spentOpenId !== initialOpenId
+      ? rows.find((r) => r.id === initialOpenId) ?? {
+          id: initialOpenId,
+          ts: "",
+          method: "",
+          path: "",
+          query: null,
+          agent: null,
+          attribution: null,
+          provider_id: null,
+          model: null,
+          status_code: 0,
+          error_kind: null,
+          error_message: null,
+          session_id: null,
+          is_streaming: false,
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_creation_tokens: 0,
+          reasoning_tokens: 0,
+          usage_missing: false,
+          latency_ms: null,
+          first_token_ms: null,
+          request_headers: null,
+          response_headers: null,
+          request_size: 0,
+          response_size: 0,
+          truncated: false,
+          request_notes: null,
+        }
+      : null);
 
   // Returns what it started, so the shell's ⟳ can await it (`lib/reload.ts`) — a
   // reader that resolves before its rows land would let the spinner stop on a
@@ -516,8 +656,9 @@ export default function RequestLogs({
                   <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
                   <td className="px-2 py-1.5 font-sans">{r.provider_id ?? "—"}</td>
                   <td className="max-w-[180px] truncate px-2 py-1.5 text-mut">{r.model ?? "—"}</td>
-                  <td className="px-2 py-1.5">
+                  <td className="whitespace-nowrap px-2 py-1.5">
                     <StatusPill code={r.status_code} />
+                    {hasCredentialFinding(r.request_notes) && <DlpBadge />}
                   </td>
                   <td className="text-right px-2 py-1.5">
                     {fmtLatency(r.latency_ms)}
@@ -554,7 +695,18 @@ export default function RequestLogs({
           </div>
         )}
 
-        {openLog && <LogDialog entry={openLog} onClose={() => setOpenId(null)} />}
+        {openLog ? (
+          <LogDialog entry={openLog} onClose={() => setOpenId(null)} />
+        ) : (
+          externalEntry &&
+          <LogDialog
+            entry={externalEntry}
+            onClose={() => {
+              setExternalOpen(null);
+              if (initialOpenId != null) setSpentOpenId(initialOpenId);
+            }}
+          />
+        )}
 
         {/* The range lives here, not in the toolbar: the table is for browsing
             and the file is a report, and asking for the range up front made you

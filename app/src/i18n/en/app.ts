@@ -47,4 +47,10 @@ export const app = {
     plan: "Plan",
     unl: "Unl",
   },
+
+  // Credential-watch banner (under the nav; the finding's own note line
+  // carries the rule names, e.g. "dlp: github-token ×1")
+  credentialBannerTitle: "An API key or private key left the machine in a recent request.",
+  credentialBannerCta: "View the request",
+  credentialBannerDismiss: "Dismiss",
 };

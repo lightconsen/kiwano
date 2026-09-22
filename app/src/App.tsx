@@ -9,6 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { api } from "./api/client";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { CredentialBanner } from "./components/CredentialBanner";
 import { applyTheme } from "./lib/theme";
 import { ReloadRegistryProvider, useReloadRegistry } from "./lib/reload";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
@@ -47,17 +48,22 @@ const NAV: { id: Route; labelKey: KeyPath<Messages> }[] = [
     (#providers/openclaw) that the Apps screen adopts as its active tab.
     The id is *not* checked against the registry: a user-defined agent's tab is
     deep-linked the same way, and the Apps screen already falls back to "all"
-    for an id nothing knows. */
-function routeFromHash(): { route: Route; agent: AgentRef | null } {
-  const [head, tail] = window.location.hash.slice(1).split("/");
+    for an id nothing knows. One more shape: #dashboard/log/<id> opens that
+    request log's detail (the credential banner's click-through). */
+function routeFromHash(): { route: Route; agent: AgentRef | null; logId: number | null } {
+  const [head, tail, extra] = window.location.hash.slice(1).split("/");
   const route: Route = NAV.some((n) => n.id === head) ? (head as Route) : "providers";
-  return { route, agent: tail ? decodeURIComponent(tail) : null };
+  const logId =
+    route === "dashboard" && tail === "log" && extra && /^\d+$/.test(extra)
+      ? Number(extra)
+      : null;
+  return { route, agent: logId ? null : tail ? decodeURIComponent(tail) : null, logId };
 }
 
 export default function App() {
   const t = useT();
   const locale = useLocale();
-  const [route, setRoute] = useState<{ route: Route; agent: AgentRef | null }>(routeFromHash);
+  const [route, setRoute] = useState<{ route: Route; agent: AgentRef | null; logId: number | null }>(routeFromHash);
   // The app's own reload: what the current screen re-reads, and whether one is
   // in flight (the button spins and disables for exactly as long as that is
   // true). It replaces a remount — see lib/reload.ts for why that was wrong.
@@ -275,7 +281,7 @@ export default function App() {
   }, []);
 
   const nav = (id: Route) => {
-    setRoute({ route: id, agent: null });
+    setRoute({ route: id, agent: null, logId: null });
     window.location.hash = id;
   };
 
@@ -305,6 +311,7 @@ export default function App() {
       </header>
 
       <UpdateBanner />
+      <CredentialBanner />
 
       {/* overscroll-none: this is the app's only scroll region, and once it
           hits its end WebKit hands the remaining scroll to the document, which
@@ -326,7 +333,7 @@ export default function App() {
         {route.route === "shelf" && (
           <Shelf onAdd={(preset) => setModal({ open: true, preset, edit: null })} />
         )}
-        {route.route === "dashboard" && <Dashboard gateway={gw} />}
+        {route.route === "dashboard" && <Dashboard gateway={gw} openLogId={route.logId ?? undefined} />}
         {route.route === "settings" && <Settings />}
         </ReloadRegistryProvider>
       </main>

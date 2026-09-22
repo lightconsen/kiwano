@@ -82,7 +82,8 @@ pub use dashboard::get_dashboard;
 pub use hub::sync_hub;
 pub use keys::{add_api_key, delete_api_key, list_api_keys};
 pub use logs::{
-    clear_request_logs, export_request_logs, get_request_log, list_request_logs, open_log_folder,
+    ack_credential_finding, check_credential_finding, clear_request_logs, export_request_logs,
+    get_request_log, list_request_logs, open_log_folder,
 };
 pub use probe::{list_models, test_endpoint, test_latency, test_provider_latency};
 pub use providers::{
@@ -277,6 +278,8 @@ pub fn run() {
             export_request_logs,
             get_request_log,
             clear_request_logs,
+            check_credential_finding,
+            ack_credential_finding,
             set_agent_takeover,
             get_footer_stats,
             sync_hub,

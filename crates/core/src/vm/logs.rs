@@ -71,6 +71,39 @@ pub fn clear_request_logs(store: &Store) -> Result<(), String> {
     store.clear_request_logs().map_err(e2s).map(drop)
 }
 
+// ── Credential-watch banner (spec: dlp findings surface in-app) ──
+
+/// The app_settings key holding the last log id the user acknowledged via the
+/// banner (dismiss or click both acknowledge). Same KV family the cost alerts
+/// dedup with.
+const DLP_FINDING_ACKED_KEY: &str = "dlp_finding_acked";
+
+/// The newest credential-watch finding the user has not yet acknowledged —
+/// what the banner polls. Read-only: the banner stays up across polls (and
+/// restarts) until the user explicitly acks, so nothing is marked here.
+pub fn check_credential_finding(
+    store: &Store,
+    aux: &crate::auxiliary::Aux,
+) -> Result<Option<RequestLogEntry>, String> {
+    let Some(row) = store.latest_credential_finding().map_err(e2s)? else {
+        return Ok(None);
+    };
+    let acked: i64 = aux
+        .get_setting(DLP_FINDING_ACKED_KEY)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    // Ids are rowids: strictly increasing, so `>` covers "a newer finding
+    // arrived since the ack" without a list of acked ids.
+    Ok((row.id > acked).then_some(row))
+}
+
+/// Acknowledge a finding: banner dismissed or clicked. The next poll hides it;
+/// a finding with a higher log id shows again.
+pub fn ack_credential_finding(aux: &crate::auxiliary::Aux, id: i64) -> Result<(), String> {
+    aux.set_setting(DLP_FINDING_ACKED_KEY, &id.to_string())
+        .map_err(e2s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +203,82 @@ mod tests {
         assert!(csv.contains("request-body-marker"), "{csv}");
         assert!(csv.contains("response-body-marker"), "{csv}");
         assert!(csv.contains("request_body,response_body"), "header matches");
+    }
+
+    /// The banner's contract: an unacked finding is returned, acking hides it,
+    /// and a *newer* finding shows again. Ids do the ordering.
+    #[test]
+    fn credential_finding_hides_on_ack_and_returns_on_a_newer_one() {
+        let s = store();
+        let aux = crate::vm::test_support::linkless_aux();
+        let insert = |notes: Option<&str>| {
+            let log = kiwanod::store::RequestLogNew {
+                ts: rfc3339(unix_now()),
+                method: "POST".into(),
+                path: "/v1/messages".into(),
+                query: None,
+                agent: Some("claude".into()),
+                attribution: None,
+                provider_id: Some("demo-alpha".into()),
+                model: Some("demo-model".into()),
+                status_code: 200,
+                error_kind: None,
+                error_message: None,
+                session_id: None,
+                is_streaming: false,
+                input_tokens: 10,
+                output_tokens: 2,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                reasoning_tokens: 0,
+                usage_missing: false,
+                latency_ms: None,
+                first_token_ms: None,
+                request_headers: None,
+                response_headers: None,
+                request_body: None,
+                response_body: None,
+                request_size: 0,
+                response_size: 0,
+                truncated: false,
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+                request_notes: notes.map(str::to_string),
+            };
+            s.insert_request_log(&log).unwrap()
+        };
+
+        assert_eq!(check_credential_finding(&s, &aux).unwrap(), None);
+
+        insert(Some("thinking: removed invalid value"));
+        assert_eq!(
+            check_credential_finding(&s, &aux).unwrap(),
+            None,
+            "shim notes are not findings"
+        );
+
+        let first = insert(Some("dlp: github-token ×1"));
+        assert_eq!(
+            check_credential_finding(&s, &aux).unwrap().map(|r| r.id),
+            Some(first)
+        );
+
+        // A read is not an ack: polling again returns the same finding.
+        assert_eq!(
+            check_credential_finding(&s, &aux).unwrap().map(|r| r.id),
+            Some(first),
+            "the banner survives its own poll"
+        );
+
+        ack_credential_finding(&aux, first).unwrap();
+        assert_eq!(check_credential_finding(&s, &aux).unwrap(), None);
+
+        let second = insert(Some("dlp: openai-key ×1"));
+        assert_eq!(
+            check_credential_finding(&s, &aux).unwrap().map(|r| r.id),
+            Some(second),
+            "a newer finding re-raises the banner"
+        );
     }
 }

@@ -30,4 +30,8 @@ export const app = {
     plan: "套餐",
     unl: "无限",
   },
+
+  credentialBannerTitle: "最近的请求中有 API key 或私钥离开了本机。",
+  credentialBannerCta: "查看该请求",
+  credentialBannerDismiss: "关闭",
 };

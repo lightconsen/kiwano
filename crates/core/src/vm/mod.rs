@@ -82,8 +82,8 @@ pub use limits::{
     normalize_limit_unit, ProviderPriceInput, ProviderPricesInput,
 };
 pub use logs::{
-    clear_request_logs, export_request_logs_csv, get_request_log, list_request_logs,
-    RequestLogDetailVm, RequestLogExportVm, RequestLogListVm,
+    ack_credential_finding, check_credential_finding, clear_request_logs, export_request_logs_csv,
+    get_request_log, list_request_logs, RequestLogDetailVm, RequestLogExportVm, RequestLogListVm,
 };
 pub use provider_edit::{
     add_provider, bind_as_primary, delete_provider, set_provider_enabled, update_provider,

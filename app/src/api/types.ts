@@ -1033,6 +1033,11 @@ export interface KiwanoApi {
   ): Promise<RequestLogExport>;
   /** Delete every request-log row (bodies cascade) */
   clearRequestLogs(): Promise<void>;
+  /** The newest credential-watch finding the user has not acknowledged
+   *  (dismissed or clicked in the banner); null = nothing to show */
+  checkCredentialFinding(): Promise<RequestLogEntry | null>;
+  /** Acknowledge a finding by log id; a finding with a higher id shows again */
+  ackCredentialFinding(id: number): Promise<void>;
   /** Reveal the app's log directory in the OS file manager */
   openLogFolder(): Promise<void>;
   getFooterStats(): Promise<FooterStats>;

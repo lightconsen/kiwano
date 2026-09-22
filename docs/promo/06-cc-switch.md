@@ -22,7 +22,7 @@ project that was built *on top of* cc-switch's approach (selected agent-config
 adapter modules are ported from this repo, MIT, credited in THIRD-PARTY-NOTICES).
 
 Kiwano is a local-first AI provider manager: a desktop app + local gateway on
-127.0.0.1:8317 that takes over 14 coding agents (Claude Code, Codex, Gemini
+127.0.0.1 that takes over 14 coding agents (Claude Code, Codex, Gemini
 CLI, Cline, ...) with one click, routes request-by-request across providers by
 strategy (failover / roundrobin / timewindow / quota), and meters real
 per-request cost per agent × provider.
@@ -45,6 +45,39 @@ AND every agent, and knowing what it all costs" — switching is folded in, and
 migration is explicit. Happy to hear what I should import next (which provider
 records, which agent configs) so the path in is painless. Thanks forever for the
 MIT code this project stands on.
+```
+
+## Discussion 正文(中文版,可直接粘贴)
+
+> cc-switch 用户群以中文为主,**默认发这一版**;英文版留作楼中楼或备选。
+
+```
+标题:Kiwano:一个本地优先的网关,一键导入 cc-switch 配置 | 迁移路径
+
+大家好——我是 Kiwano 的维护者。这个开源项目是站在 cc-switch 的肩膀上做的:
+其中一部分 agent 配置适配模块移植自本仓库(MIT 协议,已在 THIRD-PARTY-NOTICES
+中署名致谢)。
+
+Kiwano 是一个本地优先的 AI Provider 管理器:桌面应用 + 跑在本机 127.0.0.1 的
+网关,一键接管 14 个编码 agent(Claude Code、Codex、Gemini CLI、Cline……),
+按策略(failover / roundrobin / timewindow / quota)逐请求在多个 Provider 之间
+路由,并按 agent × provider 计量每一笔真实成本。
+
+如果你现在在用 cc-switch,一条命令即可迁移现有配置:
+
+    kiwano import cc-switch
+
+它会读取当前 cc-switch 配置并迁入 providers;接管功能会备份每个 agent 的原始
+配置,关闭接管时自动恢复原状。密钥只存在 owner-only 的本地 SQLite 里,无遥测,
+每个 release 附 SHA256SUMS 与签名构建溯源。
+
+下载:https://kiwano.cc —— 30 秒演示:https://youtu.be/M0pO79Wlx-s ——
+仓库:https://github.com/lightconsen/kiwano
+
+坦白说我们和你们的位置关系:cc-switch 解决的是"切换 Provider";Kiwano 往前多走
+了一步——"托管全部 Provider 和全部 Agent,并且知道这一切花了多少钱",切换被
+折叠了进来,迁移路径是显式的。欢迎告诉我还缺什么(哪些 Provider 记录、哪些
+agent 配置需要导入),我们把迁入路径做顺。再次感谢本项目所依赖的 MIT 代码。
 ```
 
 ## 给操作者的中文摘要

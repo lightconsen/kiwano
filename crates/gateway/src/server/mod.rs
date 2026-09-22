@@ -26,7 +26,9 @@ use serde_json::json;
 
 use crate::error::{GatewayError, Result};
 use crate::router::RouteTable;
-use crate::store::{CompatShimConfig, LogConfig, Protocol, Store, StreamTimeouts};
+use crate::store::{
+    CompatShimConfig, DlpConfig, DlpMode, LogConfig, Protocol, Store, StreamTimeouts,
+};
 
 /// Max inbound body size forwarded to upstreams (32 MiB is generous for
 /// long-context agent payloads).
@@ -55,6 +57,10 @@ pub struct GatewayState {
     /// Streaming timeouts, same contract as `log_cfg`: read at startup, re-read
     /// on `/reload` so a change lands without restarting the daemon.
     stream_cfg: RwLock<StreamTimeouts>,
+    /// Outbound credential detection, same contract as `log_cfg`: read at
+    /// startup, re-read on `/reload`. Governance only — `Alert` adds a note to
+    /// the request log and never touches the request itself.
+    dlp_cfg: RwLock<DlpConfig>,
     /// Model price table, built from the GUI-seeded `model_pricing` mirror and
     /// consulted at usage-record time to cost every metered request.
     pub(crate) pricing: RwLock<kiwano_adapters::model_pricing::PricingTable>,
@@ -140,6 +146,7 @@ impl GatewayState {
         let log_config = store.load_log_config().unwrap_or_default();
         let shim_cfg = store.load_compat_shim_config().unwrap_or_default();
         let stream_cfg = store.load_stream_timeouts().unwrap_or_default();
+        let dlp_cfg = store.load_dlp_config().unwrap_or_default();
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(300))
@@ -169,6 +176,7 @@ impl GatewayState {
             shim_cfg: RwLock::new(shim_cfg),
             redactor: RwLock::new(Arc::new(redactor)),
             stream_cfg: RwLock::new(stream_cfg),
+            dlp_cfg: RwLock::new(dlp_cfg),
             pricing: RwLock::new(pricing),
             declared: RwLock::new(declared),
             limits: RwLock::new(Arc::new(limits)),
@@ -271,6 +279,11 @@ impl GatewayState {
         *self.stream_cfg.read().expect("stream config lock poisoned")
     }
 
+    /// What the credential detector does with a finding (Copy, so free).
+    pub fn dlp_mode(&self) -> DlpMode {
+        self.dlp_cfg.read().expect("dlp config lock poisoned").mode
+    }
+
     /// Next index into a provider's key pool (round-robin, spec §4.1 P1).
     /// Pools of size <= 1 always answer 0 and never touch the map.
     pub fn next_key_index(&self, provider_id: &str, pool_len: usize) -> usize {
@@ -308,6 +321,9 @@ impl GatewayState {
                 .stream_cfg
                 .write()
                 .expect("stream config lock poisoned") = cfg;
+        }
+        if let Ok(cfg) = self.store.load_dlp_config() {
+            *self.dlp_cfg.write().expect("dlp config lock poisoned") = cfg;
         }
         // Rebuild prices too: the GUI re-seeds the mirror after a Hub refresh
         // and then reloads, which is how a price update takes effect — and this

@@ -132,6 +132,55 @@ impl StreamTimeouts {
 /// `gateway_settings` key holding the serialized `StreamTimeouts`.
 pub const STREAM_TIMEOUTS_KEY: &str = "streaming";
 
+/// What the outbound credential detector does with what it finds.
+///
+/// An enum rather than a bool because the third answer — block — is the obvious
+/// next one, and a stored `"alert"` that later has to mean "alert, or maybe
+/// block" is a migration nobody wants. Two variants exist today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DlpMode {
+    Off,
+    /// Report findings in the request log; never hold a request up. The
+    /// default, because it costs an install nothing: a finding is a line in a
+    /// log, not a failed request.
+    #[default]
+    Alert,
+}
+
+impl DlpMode {
+    /// The spelling the blob, the GUI and the CLI share. Lowercase, matching
+    /// the `serde(rename_all)` above — one spelling, so a value typed into a
+    /// settings field and one read back from JSON cannot disagree.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DlpMode::Off => "off",
+            DlpMode::Alert => "alert",
+        }
+    }
+
+    /// Inverse of `as_str`; `None` on an unrecognized tag, which the caller
+    /// treats as "leave the mode as it was" rather than as an error.
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "off" => Some(DlpMode::Off),
+            "alert" => Some(DlpMode::Alert),
+            _ => None,
+        }
+    }
+}
+
+/// `gateway_settings` blob: the credential detector's setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DlpConfig {
+    /// `default` so a blob written before another field existed still parses.
+    #[serde(default)]
+    pub mode: DlpMode,
+}
+
+/// `gateway_settings` key holding the serialized `DlpConfig`.
+pub const DLP_CONFIG_KEY: &str = "dlp";
+
 impl Store {
     /// Load the log capture config (defaults when the key is absent/corrupt).
     pub fn load_log_config(&self) -> Result<LogConfig> {
@@ -217,6 +266,34 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// The DLP mode, same contract as the other blobs: the GUI writes it, the
+    /// gateway reads it at startup and on `/reload`.
+    pub fn load_dlp_config(&self) -> Result<DlpConfig> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT value FROM gateway_settings WHERE key = ?1",
+                params![DLP_CONFIG_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(match value {
+            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            None => DlpConfig::default(),
+        })
+    }
+
+    pub fn save_dlp_config(&self, cfg: &DlpConfig) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let json = serde_json::to_string(cfg)?;
+        conn.execute(
+            "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![DLP_CONFIG_KEY, json],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +357,59 @@ mod tests {
         .unwrap();
         drop(conn);
         assert_eq!(store.load_log_config().unwrap(), LogConfig::default());
+    }
+
+    #[test]
+    fn dlp_roundtrips_and_defaults_to_reporting() {
+        let (_dir, store) = temp_store();
+        // Absent: the switch is on. The pass reports and never holds a request
+        // up, so an install that never touches this gets the information and
+        // loses nothing when there is none.
+        assert_eq!(store.load_dlp_config().unwrap(), DlpConfig::default());
+        assert_eq!(DlpConfig::default().mode, DlpMode::Alert);
+
+        store
+            .save_dlp_config(&DlpConfig { mode: DlpMode::Off })
+            .unwrap();
+        assert_eq!(store.load_dlp_config().unwrap().mode, DlpMode::Off);
+
+        // Corrupt JSON falls back to defaults instead of breaking the gateway.
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE gateway_settings SET value = 'not-json' WHERE key = ?1",
+            params![DLP_CONFIG_KEY],
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(store.load_dlp_config().unwrap().mode, DlpMode::Alert);
+    }
+
+    #[test]
+    fn dlp_mode_is_a_lowercase_tag_on_the_wire() {
+        // The GUI writes this blob and the CLI prints it, so the spelling is a
+        // small contract worth pinning.
+        assert_eq!(
+            serde_json::to_string(&DlpConfig {
+                mode: DlpMode::Alert
+            })
+            .unwrap(),
+            r#"{"mode":"alert"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DlpConfig>(r#"{"mode":"off"}"#)
+                .unwrap()
+                .mode,
+            DlpMode::Off
+        );
+        // A tag this build does not know is a parse failure, so the whole blob
+        // falls back — and the fallback is the safe direction: a mode that
+        // later means "block", read by a build that predates it, degrades to
+        // reporting rather than to enforcing something it cannot show.
+        assert_eq!(
+            serde_json::from_str::<DlpConfig>(r#"{"mode":"block"}"#)
+                .unwrap_or_default()
+                .mode,
+            DlpMode::Alert
+        );
     }
 }

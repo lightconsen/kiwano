@@ -46,8 +46,8 @@ pub mod usage;
 // ── the public surface, re-exported so every `store::x` path still resolves ──
 
 pub use config::{
-    CompatShimConfig, LogConfig, StreamTimeouts, COMPAT_SHIM_CONFIG_KEY, LOG_CONFIG_KEY,
-    STREAM_TIMEOUTS_KEY,
+    CompatShimConfig, DlpConfig, DlpMode, LogConfig, StreamTimeouts, COMPAT_SHIM_CONFIG_KEY,
+    DLP_CONFIG_KEY, LOG_CONFIG_KEY, STREAM_TIMEOUTS_KEY,
 };
 pub use logs::{
     RequestLogDetail, RequestLogEntry, RequestLogExportRow, RequestLogFilter, RequestLogNew,

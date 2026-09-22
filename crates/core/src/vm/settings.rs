@@ -61,6 +61,12 @@ pub struct SettingsVm {
     /// 400s the shim exists to absorb.
     #[serde(default = "default_true")]
     pub compat_shim: bool,
+    /// Outbound credential detection on the gateway's data plane (mirrored into
+    /// gateway_settings for the sidecar). `"alert"` or `"off"`; default
+    /// `"alert"`, because the pass reports and never blocks — an install that
+    /// ignores this switch loses nothing by it.
+    #[serde(default = "default_dlp_mode")]
+    pub dlp_mode: String,
     /// Request-log retention in days (mirrored into gateway_settings for the
     /// sidecar); 0 keeps every row, which is the default — capture is the
     /// point of the feature, and a retention nobody chose is a silent cap on
@@ -178,6 +184,7 @@ impl Default for SettingsVm {
             auto_failover: true,
             request_logs: true,
             compat_shim: true,
+            dlp_mode: default_dlp_mode(),
             log_retention_days: 0,
             log_max_body_bytes: 0,
             stream_first_byte_secs: default_stream_first_byte_secs(),
@@ -204,6 +211,12 @@ impl Default for SettingsVm {
 
 pub fn default_true() -> bool {
     true
+}
+
+/// The DLP mode an install that never chose one gets — the reporting mode, for
+/// the reason on `SettingsVm::dlp_mode`.
+pub fn default_dlp_mode() -> String {
+    "alert".to_string()
 }
 
 /// Mirrors `kiwanod::store::StreamTimeouts::default`, which is what the gateway
@@ -376,6 +389,22 @@ pub fn update_settings(
         }
         store.save_compat_shim_config(&cfg).map_err(e2s)?;
     }
+    // The DLP mode moves the same way: one gateway_settings key the sidecar
+    // reads at startup and on /reload. A mode rather than a flag, so the third
+    // answer (block) does not need a new storage shape — and a value this build
+    // does not recognize leaves the gateway on the mode it already had rather
+    // than guessing at one.
+    if patch.get("dlp_mode").is_some() {
+        let mut cfg = store.load_dlp_config().unwrap_or_default();
+        if let Some(mode) = patch
+            .get("dlp_mode")
+            .and_then(|v| v.as_str())
+            .and_then(kiwanod::store::DlpMode::parse_str)
+        {
+            cfg.mode = mode;
+        }
+        store.save_dlp_config(&cfg).map_err(e2s)?;
+    }
     // Same contract for the streaming timeouts: the sidecar reads them at
     // startup and on /reload, so the two copies move together.
     if patch.get("stream_first_byte_secs").is_some() || patch.get("stream_idle_secs").is_some() {
@@ -485,6 +514,34 @@ mod tests {
         // And the screen reads back what it wrote.
         let reread = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert_eq!(reread.stream_idle_secs, 45);
+    }
+
+    /// The DLP mode is the same contract as the switches above: the UI's copy
+    /// and the sidecar's blob have to move together, or the switch does nothing.
+    #[test]
+    fn the_dlp_mode_reaches_the_gateways_own_settings() {
+        let s = store();
+        let aux = Aux::open_in_memory().unwrap();
+        assert_eq!(
+            s.load_dlp_config().unwrap().mode,
+            kiwanod::store::DlpMode::Alert,
+            "an install that never chose a mode gets the reporting one"
+        );
+
+        let vm = update_settings(
+            &s,
+            &aux,
+            &serde_json::json!({ "dlp_mode": "off" }),
+            &no_vars(),
+        )
+        .unwrap();
+        assert_eq!(vm.dlp_mode, "off");
+        assert_eq!(
+            s.load_dlp_config().unwrap().mode,
+            kiwanod::store::DlpMode::Off,
+            "the sidecar's copy moved"
+        );
+        assert_eq!(ui_settings(&aux).dlp_mode, "off", "and so did the UI's");
     }
 
     // The files a takeover would rewrite, as the agent's settings dialog lists

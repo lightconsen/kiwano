@@ -195,7 +195,7 @@ function Detail({ d }: { d: RequestLogDetail | null }) {
           answered 200, and its explanation is not an error. */}
       {d.request_notes && (
         <div className="whitespace-pre-line rounded border border-line bg-surface2 p-2 text-[11px] text-mut">
-          <span className="font-semibold text-ink">{t("logs.detailSanitizer")}</span>{" "}
+          <span className="font-semibold text-ink">{t("logs.detailNotes")}</span>{" "}
           {d.request_notes}
         </div>
       )}

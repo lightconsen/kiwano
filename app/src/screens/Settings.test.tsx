@@ -60,6 +60,7 @@ function settingsWith(codexTakenOver: boolean): AppSettings {
     auto_failover: true,
     request_logs: true,
     compat_shim: true,
+    dlp_mode: "alert",
     log_retention_days: 30,
     log_max_body_bytes: 0,
     stream_first_byte_secs: 120,
@@ -171,6 +172,38 @@ describe("the request-log limits", () => {
       expect(apiMock.updateSettings).toHaveBeenCalledWith({ log_max_body_bytes: 4 * 1024 * 1024 }),
     );
   });
+
+  it("patches the credential detector's mode, spelled as the gateway reads it", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    apiMock.updateSettings.mockResolvedValue({ ...settingsWith(true), dlp_mode: "off" });
+    const user = userEvent.setup();
+    render(<Settings />);
+
+    // A segmented control rather than a switch, so both answers are on screen
+    // at once and the click names the one being chosen.
+    await user.click(await screen.findByRole("button", { name: en.settings.off }));
+
+    // The string is the contract: it goes through `update_settings` into the
+    // blob the gateway reads, where `DlpMode::parse_str` knows "off" and
+    // "alert" and nothing else.
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalledWith({ dlp_mode: "off" }));
+  });
+
+  it("shows the mode that is stored, and sends the other one", async () => {
+    apiMock.getSettings.mockResolvedValue({ ...settingsWith(true), dlp_mode: "off" });
+    apiMock.updateSettings.mockResolvedValue({ ...settingsWith(true), dlp_mode: "alert" });
+    const user = userEvent.setup();
+    render(<Settings />);
+
+    // The stored answer is the one marked, which is the whole reason the row is
+    // a segmented control and not a switch with a position.
+    expect(await screen.findByRole("button", { name: en.settings.off })).toHaveClass("active");
+
+    await user.click(screen.getByRole("button", { name: en.settings.dlpAlert }));
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith({ dlp_mode: "alert" }),
+    );
+  });
 });
 
 // The two waits a stream can die in. The gateway enforces them; this screen is
@@ -195,7 +228,12 @@ describe("the streaming timeouts", () => {
     render(<Settings />);
 
     expect(await screen.findByText(en.settings.streamIdle)).toBeInTheDocument();
-    expect(screen.getByText(en.settings.off)).toBeInTheDocument();
+    // Scoped to this row's control rather than searched for by text: "Off" is a
+    // shared word, and any other control that offers an off answer puts a second
+    // one on the screen.
+    expect(await screen.findByRole("combobox", { name: en.settings.streamIdle })).toHaveTextContent(
+      en.settings.off,
+    );
   });
 
   it("patches the wait the row owns", async () => {

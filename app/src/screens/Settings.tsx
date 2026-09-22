@@ -52,6 +52,16 @@ const RETENTION_CHOICES = [0, 7, 30, 90];
 /// bytes because that is the unit the cap is applied in.
 const BODY_CAP_CHOICES = [0, 1, 4, 16, 64].map((mb) => mb * 1024 * 1024);
 
+/** The credential detector's answers, exactly as `DlpMode` spells them on the
+    Rust side — the string travels through `update_settings` into the blob the
+    gateway reads, so the two spellings are one contract. A segmented control
+    rather than a switch because the answer is a mode: the third one ("block")
+    is the obvious next, and it takes a seat here rather than replacing this. */
+const DLP_MODES = [
+  { id: "off", labelKey: "settings.off" },
+  { id: "alert", labelKey: "settings.dlpAlert" },
+] as const;
+
 /** The same select again, over a body size. Its own control rather than a
     third copy of the pattern: the unit, the list and the wording of "off" all
     differ, and only the shape is shared. */
@@ -427,6 +437,22 @@ export default function Settings() {
               bytes={s.log_max_body_bytes ?? 0}
               onChange={(v) => patch({ log_max_body_bytes: v })}
             />
+          </Row>
+          {/* A finding is written into the request log, which is why the note
+              says so: with logging off there is nowhere for one to go, and the
+              control would look broken rather than merely quiet. */}
+          <Row label={t("settings.dlpScan")} note={t("settings.dlpScanNote")}>
+            <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
+              {DLP_MODES.map((m, i) => (
+                <button
+                  key={m.id}
+                  className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${s.dlp_mode === m.id ? " active" : ""}`}
+                  onClick={() => patch({ dlp_mode: m.id })}
+                >
+                  {t(m.labelKey)}
+                </button>
+              ))}
+            </div>
           </Row>
           {/* The two waits a stream can die in. `provider.timeout_secs` bounds
               only the wait for headers, so without these an upstream that

@@ -35,7 +35,7 @@ export const logs = {
   logTitle: "日志 #{id}",
 
   detailSession: "会话",
-  detailSanitizer: "垫层修改：",
+  detailNotes: "网关记录：",
   detailRequest: "请求",
   detailResponse: "响应",
   detailBodyTruncated: "（正文已截断）",

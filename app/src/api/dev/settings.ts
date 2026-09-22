@@ -80,6 +80,7 @@ export const settings: AppSettings = {
   auto_failover: true,
   request_logs: true,
   compat_shim: true,
+  dlp_mode: "alert",
   log_retention_days: 0,
   log_max_body_bytes: 0,
   stream_first_byte_secs: 120,

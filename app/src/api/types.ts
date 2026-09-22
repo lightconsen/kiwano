@@ -589,6 +589,11 @@ export interface AppSettings {
    *  parse (new thinking params, null tool schemas, foreign thinking history).
    *  Default on; every action is recorded in the request log. */
   compat_shim: boolean;
+  /** Outbound credential detection: report a credential an agent is about to
+   *  send, in the request log. "alert" (the default) records a finding; "off"
+   *  runs no pass at all. It never blocks a request, and with request logging
+   *  off there is no row to record one in. */
+  dlp_mode: string;
   /** Request-log retention in days (gateway prunes older rows every 6h) */
   log_retention_days: number;
   /** Per-body capture cap in bytes; 0 stores every byte. */

@@ -254,9 +254,12 @@ fn events_request(token: Option<&str>) -> String {
 /// "try again shortly" to that caller, and none of them is worth an error type
 /// nobody would branch on.
 ///
-/// One tick per recorded request is what lets the app's screens re-read rather
-/// than poll for their numbers (see `kiwanod::server::admin`'s `/events`).
-pub fn watch_events(endpoint: &AdminEndpoint, mut on_tick: impl FnMut()) {
+/// One event per `data:` line: the payload string is handed to `on_event`
+/// verbatim — a usage tick (`{"kind":"usage"}`) as well as typed ones (a DLP
+/// finding, a limit transition). Each is one line of JSON by the gateway's
+/// own contract, which is also why a reader that treats every `data:` line
+/// as exactly one event is safe here.
+pub fn watch_events(endpoint: &AdminEndpoint, mut on_event: impl FnMut(&str)) {
     let Ok(mut stream) = endpoint.connect_streaming(CONNECT_TIMEOUT) else {
         return;
     };
@@ -297,8 +300,8 @@ pub fn watch_events(endpoint: &AdminEndpoint, mut on_tick: impl FnMut()) {
             // The stream ended: the gateway stopped, or was replaced.
             Ok(0) | Err(_) => return,
             Ok(_) => {
-                if line.starts_with("data:") {
-                    on_tick();
+                if let Some(payload) = line.strip_prefix("data:").map(str::trim) {
+                    on_event(payload);
                 }
             }
         }
@@ -935,9 +938,10 @@ mod tests {
         endpoint
     }
 
-    /// The subscription the app lives on: one call per `data:` frame, the
-    /// keep-alive comments ignored, and a return — rather than a hang — when the
-    /// stream ends, which is when the caller reconnects.
+    /// The subscription the app lives on: one call per `data:` frame carrying
+    /// that frame's payload, the keep-alive comments ignored, and a return —
+    /// rather than a hang — when the stream ends, which is when the caller
+    /// reconnects.
     #[cfg(unix)]
     #[test]
     fn watch_events_reports_ticks_and_returns_when_the_stream_ends() {
@@ -945,13 +949,19 @@ mod tests {
         let endpoint = events_stub(
             dir.path(),
             "200 OK",
-            ": keep-alive\n\ndata: usage\n\ndata: usage\n\n",
+            ": keep-alive\n\ndata: {\"kind\":\"usage\"}\n\ndata: {\"kind\":\"dlp_finding\",\"log_id\":7}\n\n",
         );
 
-        let mut ticks = 0;
-        watch_events(&endpoint, || ticks += 1);
+        let mut events = Vec::new();
+        watch_events(&endpoint, |payload| events.push(payload.to_string()));
 
-        assert_eq!(ticks, 2, "one call per event, and none for the comment");
+        assert_eq!(
+            events.len(),
+            2,
+            "one call per event, and none for the comment"
+        );
+        assert_eq!(events[0], r#"{"kind":"usage"}"#);
+        assert_eq!(events[1], r#"{"kind":"dlp_finding","log_id":7}"#);
     }
 
     /// A gateway that refuses the token answers 401 with a JSON body. Reading
@@ -964,7 +974,7 @@ mod tests {
         let endpoint = events_stub(dir.path(), "401 Unauthorized", r#"{"ok":false}"#);
 
         let mut ticks = 0;
-        watch_events(&endpoint, || ticks += 1);
+        watch_events(&endpoint, |_| ticks += 1);
 
         assert_eq!(ticks, 0);
     }

@@ -12,11 +12,11 @@ import { listen } from "@tauri-apps/api/event";
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** Subscribe to a backend signal; returns an unsubscribe function. */
-function subscribe(event: string, cb: () => void): () => void {
+function subscribe(event: string, cb: (payload: string) => void): () => void {
   if (!inTauri) return () => {};
   let unlisten: (() => void) | null = null;
   let disposed = false;
-  listen(event, () => cb())
+  listen<string>(event, (e) => cb(e?.payload ?? ""))
     .then((un) => {
       if (disposed) un();
       else unlisten = un;
@@ -52,4 +52,37 @@ export function onUpdateAvailable(cb: () => void): () => void {
  */
 export function onUsageChanged(cb: () => void): () => void {
   return subscribe("usage-changed", cb);
+}
+
+/** One typed gateway event, as the `/events` stream carries it. */
+export type GatewayEventPayload =
+  | { kind: "usage" }
+  | { kind: "dlp_finding"; log_id: number; agent: string; provider_id: string | null; note: string }
+  | { kind: "limit_hit"; provider_id: string; reason: string }
+  | { kind: "limit_cleared"; provider_id: string }
+  | { kind: "auth_failed"; agent: string; provider_id: string };
+
+/**
+ * A typed gateway event: a credential finding, a billing-limit transition, or a
+ * key the provider keeps refusing. Pushed the moment it happens — the event
+ * carries the facts themselves (the log id to deep-link, the rule names, the
+ * reason) because they happened once and have one source.
+ */
+export function onGatewayEvent(cb: (payload: GatewayEventPayload) => void): () => void {
+  return subscribe("gateway-event", (payload) => {
+    try {
+      cb(JSON.parse(payload) as GatewayEventPayload);
+    } catch {
+      // A payload that does not parse is not news worth crashing on.
+    }
+  });
+}
+
+/**
+ * A tray event entry was clicked: the payload is the deep-link the entry
+ * carries (`#dashboard/log/7`, `#providers`, …). Notifications cannot be
+ * clicked on desktop, so this is the one-click path from "told" to "looking".
+ */
+export function onOpenGatewayEvent(cb: (link: string) => void): () => void {
+  return subscribe("open-gateway-event", cb);
 }

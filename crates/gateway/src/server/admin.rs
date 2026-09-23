@@ -80,7 +80,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
-use crate::server::GatewayState;
+use crate::server::{GatewayEvent, GatewayState};
 use crate::store::Store;
 
 /// Header carrying the admin-plane token.
@@ -116,27 +116,37 @@ async fn events(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
     // `KeepAlive` writes a comment line through an idle stream, which is also
     // how a dead peer is noticed at all: without it, a stream that says nothing
     // for an hour looks exactly like one whose other end is gone.
-    Sse::new(usage_ticks(state.usage_ticks()))
+    Sse::new(usage_events(state.usage_ticks()))
         .keep_alive(KeepAlive::default())
         .into_response()
 }
 
-/// The tick stream, as SSE events.
+/// The event stream, as SSE events.
 ///
 /// `unfold` over `recv` rather than a `Stream` impl: `poll_recv` is not part of
 /// the broadcast receiver in the tokio this builds against, and this is the same
-/// three cases without the `Pin` ceremony.
-fn usage_ticks(
-    rx: tokio::sync::broadcast::Receiver<()>,
+/// three cases without the `Pin` ceremony. Each event carries its payload as
+/// one line of JSON — the reader treats every `data:` line as one event, so a
+/// payload must never span lines.
+fn usage_events(
+    rx: tokio::sync::broadcast::Receiver<GatewayEvent>,
 ) -> impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>> {
     futures_util::stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
-            // A subscriber that fell behind is told what the ticks would have
+            // A subscriber that fell behind is told what the events would have
             // told it: there is newer data than it has seen. An error would
             // close a stream that has nothing wrong with it, and the reader's
             // answer to either is the same re-read.
-            Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                Some((Ok(Event::default().data("usage")), rx))
+            Ok(event) => {
+                let json = serde_json::to_string(&event)
+                    .unwrap_or_else(|_| r#"{"kind":"usage"}"#.to_string());
+                Some((Ok(Event::default().data(json)), rx))
+            }
+            // Behind the buffer: there is newer data than it has seen. The
+            // usage re-read covers the lost ticks; a lost finding is re-read
+            // by the same request-log the event would have linked to.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                Some((Ok(Event::default().data(r#"{"kind":"usage"}"#)), rx))
             }
             // Closed: the gateway is going away.
             Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
@@ -654,7 +664,11 @@ mod tests {
         .await
         .expect("a recorded request shows up as an event");
 
-        assert_eq!(event.trim_end(), "data: usage");
+        assert_eq!(
+            event.trim_end(),
+            r#"data: {"kind":"usage"}"#,
+            "the usage tick carries its typed payload"
+        );
     }
 
     /// `/status` is the liveness probe, so it answers without a token — but

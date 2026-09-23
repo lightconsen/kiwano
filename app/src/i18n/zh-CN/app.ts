@@ -25,6 +25,11 @@ export const app = {
     "{provider} 的用量为 {used}，已达到 {limit}% 的上限 — 在用量回落至上限以下前将被停用",
   notifyCostBody: "{provider} 本期已用 {used}，达到 {limit} 的上限 — 请注意支出",
 
+  // Typed gateway events（经 /events 推送；托盘条目是点击入口）
+  notifyDlpTitle: "Kiwano 凭证监视",
+  notifyLimitTitle: "Kiwano 限额已达",
+  notifyAuthTitle: "Kiwano：Provider key 无效",
+
   billing: {
     payg: "PAYG",
     plan: "套餐",

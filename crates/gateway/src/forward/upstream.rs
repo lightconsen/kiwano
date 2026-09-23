@@ -349,11 +349,16 @@ pub(crate) async fn send_upstream(
                     )
                     .await;
                 if auth_failed_now {
-                    // The threshold just tripped: say so where users look. The
-                    // Status column reads this row — `status` is a *reachability*
+                    // The threshold just tripped: tell the app (notification +
+                    // tray entry), and say so where users look. The Status
+                    // column reads this row — `status` is a *reachability*
                     // verdict (a 401 is the vendor answering, so "reachable"),
                     // and `error` carries the key verdict it refused to accept.
                     // `traffic` distinguishes this from the key-less prober's.
+                    state.notify_event(crate::server::GatewayEvent::AuthFailed {
+                        agent: agent.to_string(),
+                        provider_id: provider.id.clone(),
+                    });
                     if let Err(e) = state.store.upsert_provider_health(
                         &provider.id,
                         "reachable",

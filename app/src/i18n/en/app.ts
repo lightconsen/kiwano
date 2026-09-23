@@ -41,6 +41,11 @@ export const app = {
   notifyCostBody:
     "{provider} used {used} this period and has hit its limit of {limit} — watch your spending",
 
+  // Typed gateway events (pushed over /events; the tray entry is the click)
+  notifyDlpTitle: "Kiwano credential watch",
+  notifyLimitTitle: "Kiwano limit reached",
+  notifyAuthTitle: "Kiwano: provider key invalid",
+
   // Billing chips (components/bits.tsx)
   billing: {
     payg: "PAYG",

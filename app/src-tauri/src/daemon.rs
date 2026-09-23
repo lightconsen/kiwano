@@ -76,17 +76,19 @@ const USAGE_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_milli
 /// fix: bringing the gateway back is the watchdog's job.
 const USAGE_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Bridge the gateway's usage ticks to the webview.
+/// Bridge the gateway's events to the webview.
 ///
 /// The gateway is a separate process and the window cannot hear it directly, so
 /// this thread is the bridge: it holds one subscription to the admin plane's
-/// `/events` stream, reconnecting whenever that ends, and re-emits each tick as
-/// a Tauri event. The frontend's half is only to re-read what it is showing —
-/// see `lib/updateEvents.ts`.
+/// `/events` stream, reconnecting whenever that ends, and re-emits each event
+/// as a Tauri event. The frontend's half is `lib/updateEvents.ts`.
 ///
-/// The tick carries nothing, and this adds nothing to it: the numbers have one
-/// source (the store read the frontend makes in response), and a copy in the
-/// event would be a second truth to disagree with it.
+/// Two kinds ride the stream: usage ticks (`{"kind":"usage"}`, coalesced — the
+/// numbers have one source, the store read the frontend makes in response, and
+/// a burst of requests is one re-read's worth of news) and typed events
+/// (a DLP finding, a limit transition, a refused key), which pass through
+/// un-coalesced — each is a fact that happened once, and the webview turns it
+/// into a notification and a tray entry.
 pub(crate) fn spawn_usage_watch(handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         // Kept across reconnects: a tick arriving moments after the last one is
@@ -98,15 +100,22 @@ pub(crate) fn spawn_usage_watch(handle: tauri::AppHandle) {
                 // No state yet, or the app is shutting down.
                 None => return,
             };
-            sidecar::watch_events(&admin, || {
-                if let Some(prev) = last {
-                    let since = prev.elapsed();
-                    if since < USAGE_TICK_INTERVAL {
-                        std::thread::sleep(USAGE_TICK_INTERVAL - since);
+            sidecar::watch_events(&admin, |payload| {
+                if payload.contains("\"kind\":\"usage\"") {
+                    if let Some(prev) = last {
+                        let since = prev.elapsed();
+                        if since < USAGE_TICK_INTERVAL {
+                            std::thread::sleep(USAGE_TICK_INTERVAL - since);
+                        }
                     }
+                    last = Some(std::time::Instant::now());
+                    let _ = handle.emit("usage-changed", ());
+                    return;
                 }
-                last = Some(std::time::Instant::now());
-                let _ = handle.emit("usage-changed", ());
+                // A typed event: carry the payload as-is — the webview parses
+                // it once, and this side does not need to know its shape.
+                let _ = handle.emit("gateway-event", payload);
+                let _ = crate::tray::refresh_with_event(&handle, payload);
             });
             std::thread::sleep(USAGE_RECONNECT_DELAY);
         }

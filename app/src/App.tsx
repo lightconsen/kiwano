@@ -13,7 +13,7 @@ import { CredentialBanner } from "./components/CredentialBanner";
 import { applyTheme } from "./lib/theme";
 import { ReloadRegistryProvider, useReloadRegistry } from "./lib/reload";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
-import { onOpenSettings, onUsageChanged } from "./lib/updateEvents";
+import { onGatewayEvent, onOpenGatewayEvent, onOpenSettings, onUsageChanged } from "./lib/updateEvents";
 import type { AgentRef } from "./api/types";
 import { rememberCustomAgents } from "./lib/agents";
 import type {
@@ -152,6 +152,52 @@ export default function App() {
         api.getFooterStats().then(setFooter).catch(() => {});
       }),
     [reloadScreen],
+  );
+
+  // Typed gateway events, pushed the moment they happen (the usage tick above
+  // is the same stream, coalesced). Each kind has its own notification and its
+  // own deep-link — the tray's event entries land here too, carrying the link.
+  useEffect(() => {
+    const notify = async (title: string, body: string) => {
+      try {
+        if (!(await isPermissionGranted())) {
+          const st = await requestPermission();
+          if (st !== "granted") return;
+        }
+        sendNotification({ title, body });
+      } catch {
+        // No permission to tell: the banner and the tray entry still say it.
+      }
+    };
+    return onGatewayEvent((e) => {
+      switch (e.kind) {
+        case "dlp_finding":
+          void notify(t("app.notifyDlpTitle"), e.note);
+          break;
+        case "limit_hit":
+          void notify(t("app.notifyLimitTitle"), e.reason);
+          break;
+        case "auth_failed":
+          void notify(
+            t("app.notifyAuthTitle"),
+            `${e.provider_id} — ${e.agent}`,
+          );
+          break;
+        case "limit_cleared":
+          break;
+        case "usage":
+          break;
+      }
+    });
+  }, []);
+
+  // The tray's event entries deep-link into the app: navigate once mounted.
+  useEffect(
+    () =>
+      onOpenGatewayEvent((link) => {
+        window.location.hash = link;
+      }),
+    [],
   );
 
   // The whole of the status bar's ⟳: the current screen's data, the gateway's

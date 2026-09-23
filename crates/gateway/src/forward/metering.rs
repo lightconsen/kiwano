@@ -52,14 +52,20 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
         state.notify_usage();
     }
     if let Some(log) = log {
+        // The finding's first line, read before the entry takes the notes.
+        let dlp_line = log
+            .request_notes
+            .as_ref()
+            .and_then(|n| n.lines().find(|l| l.starts_with("dlp: ")))
+            .map(str::to_string);
         let entry = RequestLogNew {
             ts: log.capture.ts,
             method: log.capture.method,
             path: log.capture.path,
             query: log.capture.query,
-            agent: Some(record.agent),
+            agent: Some(record.agent.clone()),
             attribution: Some(log.attribution),
-            provider_id: Some(record.provider_id),
+            provider_id: Some(record.provider_id.clone()),
             model: record.model,
             status_code: log.status_code as i64,
             error_kind: log.error_kind,
@@ -86,8 +92,25 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
             cost_off_peak: record.cost_off_peak,
             request_notes: log.request_notes,
         };
-        if let Err(e) = state.store.insert_request_log(&entry) {
-            tracing::warn!(error = %e, "failed to persist request log");
+        let log_id = match state.store.insert_request_log(&entry) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to persist request log");
+                return;
+            }
+        };
+        // A credential finding is a fact that happened once, and its
+        // details are the one source: the log row's id is what the app
+        // deep-links, the note's first line is what it shows. Sent here —
+        // after attribution and persistence — rather than at the scan,
+        // which runs before either is known.
+        if let Some(note) = dlp_line {
+            state.notify_event(crate::server::GatewayEvent::DlpFinding {
+                log_id,
+                agent: record.agent,
+                provider_id: Some(record.provider_id),
+                note,
+            });
         }
     }
 }

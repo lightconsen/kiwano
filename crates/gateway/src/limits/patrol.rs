@@ -127,11 +127,18 @@ pub fn publish(state: &GatewayState, next: LimitState) {
                 reason = %reason.describe(),
                 "provider is over its limit; routing around it"
             );
+            state.notify_event(crate::server::GatewayEvent::LimitHit {
+                provider_id: id.to_string(),
+                reason: reason.describe(),
+            });
         }
     }
     for (id, _) in prev.entries() {
         if current.blocked(id).is_none() {
             tracing::info!(provider = %id, "provider is back under its limit");
+            state.notify_event(crate::server::GatewayEvent::LimitCleared {
+                provider_id: id.to_string(),
+            });
         }
     }
     // An agent's own ceiling has no "around it" to describe: the request ends.

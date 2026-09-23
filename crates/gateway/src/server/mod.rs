@@ -89,20 +89,48 @@ pub struct GatewayState {
     /// a gateway left over from another version, and a daemon it adopted is not
     /// its child, so there is no handle to kill.
     shutdown: tokio::sync::watch::Sender<bool>,
-    /// Ticks saying a request has just been metered, which is what the admin
-    /// plane's `/events` streams to the app. The numbers themselves are not in
-    /// here on purpose: they have exactly one source (the store read the app
-    /// makes after a tick), and a copy in the event would be a second truth.
+    /// Events the admin plane's `/events` streams to the app. The usage tick
+    /// deliberately carries no numbers: they have exactly one source (the
+    /// store read the app makes after a tick), and a copy in the event would
+    /// be a second truth. The *typed* events are the opposite on purpose —
+    /// a DLP finding or a tripped limit is a fact that happened once, and its
+    /// payload (the rule, the log id, the reason) is the one source there is.
     ///
     /// A broadcast rather than a watch: one of these is a moment, not a state,
     /// and every subscriber has to see every one of them.
-    usage_ticks: tokio::sync::broadcast::Sender<()>,
+    usage_ticks: tokio::sync::broadcast::Sender<GatewayEvent>,
 }
 
-/// How many ticks a subscriber may fall behind before it is told it lagged
-/// rather than given them one by one. The consumer re-reads a screen per tick,
-/// so what it does with a backlog is the same thing either way; the buffer only
-/// has to be big enough that the ordinary case never sees a gap.
+/// One event on the admin plane's `/events` stream. `Usage` is the original
+/// "a request was metered, re-read your numbers" tick; the rest are facts the
+/// app turns into notifications and tray entries.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GatewayEvent {
+    /// A request was metered — re-read the numbers. No payload, by design.
+    Usage,
+    /// The credential watch caught an outgoing key. `note` is the finding's
+    /// own first line (rule names and counts, never the matched value);
+    /// `log_id` deep-links the request-log row.
+    DlpFinding {
+        log_id: i64,
+        agent: String,
+        provider_id: Option<String>,
+        note: String,
+    },
+    /// A provider crossed a billing limit and routing now goes around it.
+    LimitHit { provider_id: String, reason: String },
+    /// The inverse of [`GatewayEvent::LimitHit`]: back under the limit.
+    LimitCleared { provider_id: String },
+    /// The provider refused its key enough times that the breaker opened with
+    /// the auth-failed mark — the fix is a new key, not a wait.
+    AuthFailed { agent: String, provider_id: String },
+}
+
+/// How many events a subscriber may fall behind before it is told it lagged
+/// rather than given them one by one. The consumer re-reads a screen per usage
+/// tick, so what it does with a backlog is the same thing either way; the
+/// buffer only has to be big enough that the ordinary case never sees a gap.
 const USAGE_TICK_BACKLOG: usize = 16;
 
 /// The price table to serve from: the GUI-seeded `model_pricing` mirror, which
@@ -215,11 +243,17 @@ impl GatewayState {
     /// and a subscriber that fell behind is told by its own `Lagged`, which the
     /// stream turns into the one tick it would have carried anyway.
     pub fn notify_usage(&self) {
-        let _ = self.usage_ticks.send(());
+        let _ = self.usage_ticks.send(GatewayEvent::Usage);
     }
 
-    /// A receiver for those ticks — one per `/events` connection.
-    pub fn usage_ticks(&self) -> tokio::sync::broadcast::Receiver<()> {
+    /// Publish a typed event (a DLP finding, a limit transition, a refused
+    /// key). Same best-effort contract as [`Self::notify_usage`].
+    pub fn notify_event(&self, event: GatewayEvent) {
+        let _ = self.usage_ticks.send(event);
+    }
+
+    /// A receiver for those events — one per `/events` connection.
+    pub fn usage_ticks(&self) -> tokio::sync::broadcast::Receiver<GatewayEvent> {
         self.usage_ticks.subscribe()
     }
 

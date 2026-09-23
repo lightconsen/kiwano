@@ -17,7 +17,7 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
-## [Unreleased]
+## [0.2.4] - 2026-09-23
 
 ### Added
 
@@ -41,6 +41,46 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   seen; and the finding is written into the request log, so with request logging
   off the watch has nowhere to report and stays quiet.
 
+- **A finding is impossible to miss.** The request-log row wears a badge, the
+  detail dialog shows the finding in its own block ("this request sent an API
+  key or private key"), and a global banner under the nav names it and
+  deep-links the row — dismissed or clicked, it acks, and a newer finding
+  raises it again. Acknowledged findings survive a restart (the ack rides the
+  shared settings KV).
+
+- **Two new agents taken over: Xiaomi MiMo Code (`mimo`) and MiniMax Code
+  (`mcode`)**, detected, rewritten to route through the gateway, and metered
+  like the rest. MiMo's config is the doc's own JSONC shape; MiniMax's is read
+  off its shipped CLI (the `mcode provider add` fields), whose custom-provider
+  entry carries the API key in plaintext the same way a takeover does. Both
+  keep the user's model id and swap only where the request goes; disabling
+  restores the original file byte for byte.
+
+- **A retry layer that respects the client's patience.** Same-provider retries
+  now honour the upstream's `Retry-After` when it names a window (short ones
+  are waited out; a longer one is handed on so failover can try another
+  candidate), the backoff carries jitter so two agents do not retry in
+  lockstep, and the whole retry plan — attempts plus waits — fits inside a
+  budget under every known agent read timeout, because a retry that lands
+  after the client hung up is money spent for nothing.
+
+- **A breaker that knows why.** A 429 and a 500 are different problems: a rate
+  limit now sets its own short pause (the upstream's window, or 5s) without
+  counting toward the breaker, and two refused keys (401) open it with an
+  **auth-failed** mark that surfaces as `kiwano_auth_failed` and as "invalid
+  API key (401)" on the provider's row — the fix is a new key, not a wait.
+
+- **A least-busy routing strategy.** Each request goes to the breaker-available
+  candidate with the fewest requests in flight, priority order breaking ties;
+  a running session keeps its provider, so the upstream prompt cache survives.
+
+- **Gateway events, pushed.** The admin plane's `/events` stream now carries
+  typed events — a credential finding, a billing-limit transition, a refused
+  key — the moment they happen, and the app turns them into system
+  notifications and tray-menu entries that deep-link where the event lives
+  (the request-log detail, the provider's row). Usage ticks ride the same
+  stream as before, coalesced as ever.
+
 ### Changed
 
 - **The CSV export always carries the request and response bodies.** Bodies
@@ -63,6 +103,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   rewrites, and the old heading would have been a lie in front of the one place
   a user reads security information. The CSV column keeps its name, because
   renaming a column breaks whoever parses the file.
+
+### Fixed
+
+- A Hub catalog entry that names no primary protocol (its top-level `protocol`
+  is empty — the endpoints each carry their own) no longer takes the Models
+  shelf down with a render error; it renders without a protocol chip, and the
+  detail dialog spells its endpoints out as ever.
 
 ## [0.2.3] - 2026-09-21
 

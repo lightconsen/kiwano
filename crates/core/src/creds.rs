@@ -139,6 +139,13 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
         "droid" => read_additive_one(home.join(".factory").join("settings.json"), |c| {
             kiwano_adapters::gateway_takeover::read_droid_current(c)
         }),
+        // Goose is deliberately not extracted: its selection (config.yaml)
+        // names a provider id, the key lives in the keyring — a store a
+        // reader cannot open — and the provider JSON carries only an
+        // api_key_env name, so there is no extractable endpoint+key pair to
+        // import. Nothing extractable is the honest answer; the onboarding
+        // guide takes over.
+        "goose" => None,
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;

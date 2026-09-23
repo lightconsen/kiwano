@@ -25,6 +25,7 @@ export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   continue: "continue",
   crush: "crush",
   droid: "droid",
+  goose: "goose",
 };
 
 export function Logo({

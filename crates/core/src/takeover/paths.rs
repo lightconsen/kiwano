@@ -172,6 +172,34 @@ pub(crate) fn takeover_paths(
         // docs name no relocation variable, only the legacy config.json it
         // merges behind this one.
         "droid" => Ok(vec![home.join(".factory").join("settings.json")]),
+        // Goose resolves its root through the etcetera app-strategy rules
+        // (top-level domain "Block", app "goose"): on macOS that is
+        // ~/Library/Application Support/Block/goose — *not* the ~/.config/goose
+        // its Linux-first docs show — and on Linux the XDG rules, which honor
+        // XDG_CONFIG_HOME. Three files: the selection, the provider definition
+        // goose reads from its custom_providers/ directory, and the key file
+        // the provider's auth.command cats (see the adapter for why a file).
+        // GOOSE_PATH_ROOT is deliberately not honored: relocating the whole
+        // root would split these three files across two trees (the openclaw
+        // stance).
+        //
+        // The provider JSON derives the key file's absolute path from its own
+        // location (the directory above custom_providers/), so the three must
+        // stay siblings of the same root for the takeover to wire up at all.
+        #[cfg(target_os = "macos")]
+        "goose" => {
+            let root = home
+                .join("Library")
+                .join("Application Support")
+                .join("Block")
+                .join("goose");
+            Ok(goose_paths(root))
+        }
+        #[cfg(not(target_os = "macos"))]
+        "goose" => {
+            let root = config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?.join("goose");
+            Ok(goose_paths(root))
+        }
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base
@@ -204,6 +232,23 @@ fn claude_desktop_paths(home: &Path) -> Vec<PathBuf> {
             kiwano_adapters::claude_desktop_config::PROFILE_ID
         )),
         threep.join("configLibrary").join("_meta.json"),
+    ]
+}
+
+/// Goose's three files, rooted at the config root both platform arms resolve:
+/// the selection, the provider definition (goose reads its custom providers
+/// from `custom_providers/`), and the key file the provider's auth.command
+/// cats. The order matters to nothing — none of the rewrites read a sibling —
+/// but the provider JSON derives the key file's absolute path from its own
+/// location, so the three have to stay siblings of one root.
+fn goose_paths(root: PathBuf) -> Vec<PathBuf> {
+    vec![
+        root.join("config.yaml"),
+        root.join("custom_providers").join(format!(
+            "{}.json",
+            kiwano_adapters::gateway_takeover::GATEWAY_PROVIDER_ID
+        )),
+        root.join("kiwano-gateway.key"),
     ]
 }
 

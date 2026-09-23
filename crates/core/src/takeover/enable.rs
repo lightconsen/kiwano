@@ -86,6 +86,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "continue"
                         | "crush"
                         | "droid"
+                        | "goose"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -163,11 +164,21 @@ fn compute_rewrites(
     // openclaw's catalogue declares the model the main config selects, so it
     // is rewritten against the main config's *original* content — the right
     // side to read, because the main config's own rewrite keeps the model id
-    // and only swaps the provider prefix. `None` for every other agent.
+    // and only swaps the provider prefix. Goose's provider JSON needs the same
+    // ride-along: the id it declares comes from the selection file's original
+    // content. `None` for every other agent.
     let openclaw_config = originals
         .iter()
         .find(|f| f.path.ends_with("openclaw.json"))
         .map(|f| f.content.as_str());
+    let goose_selection = if agent == "goose" {
+        originals
+            .iter()
+            .find(|f| f.path.ends_with("config.yaml"))
+            .map(|f| f.content.as_str())
+    } else {
+        None
+    };
     originals
         .iter()
         .map(|original| {
@@ -180,7 +191,7 @@ fn compute_rewrites(
                     &target,
                     placeholder_key,
                     &now,
-                    openclaw_config,
+                    openclaw_config.or(goose_selection),
                 )?,
             ))
         })
@@ -214,6 +225,10 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // Droid's `generic-chat-completion-api` provider is the OpenAI Chat
         // Completions client — the version root is what `baseUrl` holds.
         "droid" => "/v1",
+        // Goose's engine "openai" normalizes any base through its own
+        // parse_openai_base_url, where a bare `/v1` path is the default
+        // base_path — so the version root is what `base_url` holds.
+        "goose" => "/v1",
         // MiniMax Code's official endpoint ends at the version root
         // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
         // same OpenAI-completions client — the root is required here too.
@@ -1129,6 +1144,115 @@ models:
         assert!(aux.load_takeover_backup("droid").is_none());
     }
 
+    /// Goose's takeover writes three files: the selection, the provider
+    /// definition (whose auth.command carries the key file's absolute path),
+    /// and the key file itself. All three are created; disable removes what we
+    /// created. A fresh machine has no selection to copy a model id from, so
+    /// the entry carries the placeholder (the user replaces it).
+    #[test]
+    fn goose_takeover_roundtrip_writes_the_three_files() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let root = home
+            .join("Library")
+            .join("Application Support")
+            .join("Block")
+            .join("goose");
+
+        enable(&aux, "goose", "kw-ag-goose-abcd", 8317, &home, &no_vars()).unwrap();
+
+        // The selection points at the gateway; nothing to keep, so the
+        // placeholder model id.
+        let config = root.join("config.yaml");
+        let v: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v["GOOSE_PROVIDER"], "kiwano-gateway");
+        assert_eq!(v["GOOSE_MODEL"], "kiwano");
+
+        // The provider JSON wires auth.command to the key file's absolute path.
+        let provider = root.join("custom_providers").join("kiwano-gateway.json");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&provider).unwrap()).unwrap();
+        assert_eq!(v["engine"], "openai");
+        assert_eq!(v["base_url"], "http://127.0.0.1:8317/v1");
+        assert_eq!(v["api_key_env"], "");
+        assert_eq!(
+            v["auth"]["args"][0],
+            root.join("kiwano-gateway.key").to_string_lossy().as_ref()
+        );
+        assert_eq!(v["models"][0]["name"], "kiwano");
+
+        // The key file holds the placeholder, which is also the live evidence.
+        assert_eq!(
+            std::fs::read_to_string(root.join("kiwano-gateway.key"))
+                .unwrap()
+                .trim(),
+            "kw-ag-goose-abcd"
+        );
+        assert_eq!(
+            live_placeholder_key("goose", &home, &no_vars()).as_deref(),
+            Some("kw-ag-goose-abcd")
+        );
+
+        // The originals were missing, so restore removes what the takeover
+        // created rather than leaving three empty files for goose to choke on.
+        restore(&aux, "goose", &home).unwrap();
+        assert!(!config.exists());
+        assert!(!provider.exists());
+        assert!(!root.join("kiwano-gateway.key").exists());
+        assert!(aux.load_takeover_backup("goose").is_none());
+    }
+
+    /// With the config already on disk, disable puts the user's bytes back
+    /// (the YAML comments do not survive the takeover; the backup restores
+    /// them byte for byte).
+    #[test]
+    fn goose_takeover_roundtrip_restores_the_users_bytes() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let root = home
+            .join("Library")
+            .join("Application Support")
+            .join("Block")
+            .join("goose");
+        let original =
+            "# goose's own settings\nGOOSE_PROVIDER: anthropic\nGOOSE_MODEL: claude-sonnet-4-6\n";
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("config.yaml"), original).unwrap();
+
+        enable(&aux, "goose", "kw-ag-goose-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: serde_yaml::Value = serde_yaml::from_str(
+            &std::fs::read_to_string(root.join("custom_providers").join("kiwano-gateway.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            v["auth"]["args"][0],
+            root.join("kiwano-gateway.key").to_string_lossy().as_ref()
+        );
+        // The user's own selection survives: both files name the same id.
+        let sel: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(root.join("config.yaml")).unwrap())
+                .unwrap();
+        assert_eq!(sel["GOOSE_PROVIDER"], "kiwano-gateway");
+        assert_eq!(sel["GOOSE_MODEL"], "claude-sonnet-4-6");
+        assert_eq!(v["models"][0]["name"], "claude-sonnet-4-6");
+
+        restore(&aux, "goose", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("config.yaml")).unwrap(),
+            original
+        );
+        assert!(
+            !root
+                .join("custom_providers")
+                .join("kiwano-gateway.json")
+                .exists(),
+            "a file the takeover created must not survive disable"
+        );
+        assert!(!root.join("kiwano-gateway.key").exists());
+        assert!(aux.load_takeover_backup("goose").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -1146,6 +1270,32 @@ models:
             ("continue", ".continue/config.yaml"),
             ("crush", ".config/crush/crush.json"),
             ("droid", ".factory/settings.json"),
+            // All three of goose's files, at the root its etcetera strategy
+            // resolves on this platform.
+            #[cfg(target_os = "macos")]
+            (
+                "goose",
+                "Library/Application Support/Block/goose/config.yaml",
+            ),
+            #[cfg(target_os = "macos")]
+            (
+                "goose",
+                "Library/Application Support/Block/goose/custom_providers/kiwano-gateway.json",
+            ),
+            #[cfg(target_os = "macos")]
+            (
+                "goose",
+                "Library/Application Support/Block/goose/kiwano-gateway.key",
+            ),
+            #[cfg(not(target_os = "macos"))]
+            ("goose", ".config/goose/config.yaml"),
+            #[cfg(not(target_os = "macos"))]
+            (
+                "goose",
+                ".config/goose/custom_providers/kiwano-gateway.json",
+            ),
+            #[cfg(not(target_os = "macos"))]
+            ("goose", ".config/goose/kiwano-gateway.key"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

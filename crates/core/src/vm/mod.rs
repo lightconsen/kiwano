@@ -156,6 +156,12 @@ pub(crate) mod test_support {
                 "continue" => ".continue/config.yaml",
                 "crush" => ".config/crush/crush.json",
                 "droid" => ".factory/settings.json",
+                // macOS's etcetera-resolved root; the non-macOS arm differs
+                // (see takeover_paths) but the key file name is shared.
+                #[cfg(target_os = "macos")]
+                "goose" => "Library/Application Support/Block/goose/kiwano-gateway.key",
+                #[cfg(not(target_os = "macos"))]
+                "goose" => ".config/goose/kiwano-gateway.key",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

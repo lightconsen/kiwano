@@ -101,6 +101,42 @@ pub(crate) fn rewrite(
         | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" => {
             additive_rewrite(agent, path, original, target, key, now, sibling_config)
         }
+        // goose's three files are one endpoint split across formats, each by
+        // its own path: the selection (YAML), the provider definition (JSON,
+        // whose auth.command needs the key file's absolute path — derived from
+        // this file's own location: the directory above custom_providers/),
+        // and the key file itself, ours by name.
+        "goose" if path.ends_with("config.yaml") => {
+            let selected = kiwano_adapters::gateway_takeover::read_goose_selected_model(original);
+            let model_id = kiwano_adapters::gateway_takeover::goose_model_id(selected.as_deref());
+            kiwano_adapters::gateway_takeover::upsert_goose_config(original, &model_id)
+        }
+        "goose" if path.ends_with(".json") => {
+            let key_file = std::path::Path::new(path)
+                .parent()
+                .and_then(std::path::Path::parent)
+                .map(|root| root.join("kiwano-gateway.key"))
+                .ok_or("goose provider json has no parent directory")?;
+            // The id the selection named — its *original* content rides in as
+            // `sibling_config` (see compute_rewrites), because that is what
+            // says what the user's requests were using.
+            let model_id = kiwano_adapters::gateway_takeover::goose_model_id(
+                sibling_config
+                    .and_then(kiwano_adapters::gateway_takeover::read_goose_selected_model)
+                    .as_deref(),
+            );
+            kiwano_adapters::gateway_takeover::build_goose_provider_json(
+                target,
+                &key_file.to_string_lossy(),
+                &model_id,
+            )
+        }
+        "goose" => {
+            // The key file, ours by name: the placeholder, verbatim.
+            Ok(kiwano_adapters::gateway_takeover::goose_key_file_content(
+                key,
+            ))
+        }
         _ => Err("unsupported agent".into()),
     }
 }

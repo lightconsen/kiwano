@@ -28,7 +28,8 @@ export type AgentId =
   | "aider"
   | "continue"
   | "crush"
-  | "droid";
+  | "droid"
+  | "goose";
 /** An agent id as it travels through routes, bindings, usage and logs: a
     built-in's, or one the user defined. The closed `AgentId` above stays the
     type wherever the thing being named is a *built-in* — the takeover switch,
@@ -85,6 +86,7 @@ export const ADDITIVE_AGENTS: AgentId[] = [
   "continue",
   "crush",
   "droid",
+  "goose",
 ];
 
 export const AGENTS: AgentMeta[] = [
@@ -108,6 +110,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "continue", label: "Continue", chip_char: "C", chip_color: "#33333B" },
   { id: "crush", label: "Crush", chip_char: "C", chip_color: "#6B51FF" },
   { id: "droid", label: "Droid", chip_char: "D", chip_color: "#000000", chip_border: true },
+  { id: "goose", label: "Goose", chip_char: "G", chip_color: "#000000", chip_border: true },
 ];
 
 export interface ProviderHealth {

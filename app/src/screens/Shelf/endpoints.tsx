@@ -10,9 +10,14 @@ import type { ProbeReport, Protocol } from "../../api/types";
 import { PROTO_ABBR, PROTO_LABEL, PROTO_STYLE } from "./labels";
 
 /** One protocol as a marked letter — see PROTO_ABBR for why, and for what
-    carries the full name. */
+    carries the full name. A protocol the vocabulary does not know (a Hub
+    catalog entry that names no primary protocol — its top-level `protocol`
+    is empty — or names a new one) renders no chip: the endpoint cards in the
+    detail dialog spell the protocols out regardless. */
 export function ProtoChip({ protocol, t }: { protocol: Protocol; t: Translate }) {
-  const name = t(PROTO_LABEL[protocol]);
+  const labelKey = PROTO_LABEL[protocol];
+  if (!labelKey) return null;
+  const name = t(labelKey);
   return (
     <span
       className="rounded px-1.5 py-0.5 font-mono text-[10px]"

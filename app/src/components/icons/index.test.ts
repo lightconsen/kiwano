@@ -10,7 +10,7 @@ import { darkIconUrls, icons, iconUrls } from "./index";
 
 import { AGENT_ICON } from "../bits";
 import { NO_CLI_AGENTS, SEGMENT_ICON } from "../../screens/Providers/agents";
-import { AGENTS } from "../../api/types";
+import { AGENTS, type AgentId } from "../../api/types";
 
 describe("provider icon registry", () => {
   it("sources every icon from a local asset, never a remote URL", () => {
@@ -49,7 +49,9 @@ describe("provider icon registry", () => {
   // GUI-only agents have no CLI binary and, by the same mark, no ported logo.
   it("names an icon for every CLI agent, in both agent→icon tables", () => {
     for (const agent of AGENTS) {
-      if (NO_CLI_AGENTS.includes(agent.id)) continue;
+      // AGENTS is the built-in registry, so every id is a closed AgentId at
+      // runtime — the same assertion Providers.tsx's declare menu makes.
+      if (NO_CLI_AGENTS.includes(agent.id as AgentId)) continue;
       const segIcon = SEGMENT_ICON[agent.id];
       const menuIcon = AGENT_ICON[agent.id];
       expect(segIcon, `${agent.id} has a strip icon`).toBeTruthy();

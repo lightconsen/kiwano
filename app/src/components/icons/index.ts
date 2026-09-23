@@ -66,6 +66,10 @@ import _zetaapiDark from "./zetaapi-icon-dark.png";
 import _together from "./together.svg?url";
 
 export const icons: Record<string, string> = {
+  // Kiwano addition: Continue's mark — two offset rounded loops, the
+  // "continue" ring, traced from their wordmark glyph. Near-black brand
+  // color, so currentColor (same stance as the OpenAI mark).
+  "continue": `<svg height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Continue</title><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.7" y="2.2" width="17.6" height="19" rx="7.4"/><rect x="4.5" y="4" width="17.6" height="19" rx="7.4"/></g></svg>`,
   // Kiwano addition: Aider's own mark — the pixel "a" of its GitHub avatar,
   // redrawn as crisp rects in the sampled brand colors (glyph #01FFB9 on the
   // #014026 tile). The tile is part of the mark: the glyph alone is too bright

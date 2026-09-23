@@ -153,6 +153,7 @@ pub(crate) mod test_support {
                 "mimo" => ".config/mimocode/mimocode.jsonc",
                 "mcode" => ".minimax/config.yaml",
                 "aider" => ".aider.conf.yml",
+                "continue" => ".continue/config.yaml",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

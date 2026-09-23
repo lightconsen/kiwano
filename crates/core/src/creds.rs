@@ -116,6 +116,11 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
                 protocol: "openai",
             })
         }
+        // Continue's first chat model carries its own endpoint: `name` is a
+        // real display name here (unlike Cline/Aider), so the import takes it.
+        "continue" => read_additive_one(home.join(".continue").join("config.yaml"), |c| {
+            kiwano_adapters::gateway_takeover::read_continue_current(c)
+        }),
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;
@@ -638,6 +643,28 @@ custom_provider:
         )
         .unwrap();
         assert!(read_current_creds("aider", &home).is_none());
+    }
+
+    #[test]
+    fn continue_creds_read_the_first_chat_model() {
+        let home = temp_home("continue");
+        let dir = home.join(".continue");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.yaml"),
+            "models:\n  - name: DeepSeek\n    provider: openai\n    model: deepseek-chat\n    apiBase: https://api.deepseek.com/v1\n    apiKey: sk-ds\n",
+        )
+        .unwrap();
+        let creds = read_current_creds("continue", &home).expect("a routed configuration");
+        // Unlike Cline/Aider, Continue entries carry a real display name.
+        assert_eq!(creds.name.as_deref(), Some("DeepSeek"));
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(creds.api_key, "sk-ds");
+        assert_eq!(creds.protocol, "openai");
+
+        // No custom endpoint on the chat model → nothing extractable.
+        std::fs::write(dir.join("config.yaml"), "models: []\n").unwrap();
+        assert!(read_current_creds("continue", &home).is_none());
     }
 
     #[test]

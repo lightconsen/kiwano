@@ -41,8 +41,11 @@
 //! codebuddy) share.
 
 pub mod aider;
+// `continue` is a reserved word: the module keeps the agent id via a raw
+// identifier, and every caller touches the re-export below.
 pub mod cline;
 pub mod codebuddy;
+pub mod r#continue;
 pub mod gateway;
 pub mod hermes;
 pub mod json;
@@ -72,6 +75,7 @@ pub use openclaw::{upsert_openclaw_gateway, upsert_openclaw_models_json};
 pub use opencode::upsert_opencode_gateway;
 pub use pi::{select_pi_gateway, upsert_pi_models_gateway};
 pub use qwen::upsert_qwen_gateway;
+pub use r#continue::{read_continue_current, upsert_continue_gateway};
 pub use readers::{
     read_hermes_current, read_openclaw_current, read_opencode_current, read_pi_current,
     CurrentProvider,

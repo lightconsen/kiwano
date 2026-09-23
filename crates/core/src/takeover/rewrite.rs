@@ -98,7 +98,7 @@ pub(crate) fn rewrite(
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
         "opencode" | "openclaw" | "hermes" | "pi" | "workbuddy" | "codebuddy" | "qwen" | "kimi"
-        | "cline" | "mimo" | "mcode" => {
+        | "cline" | "mimo" | "mcode" | "continue" => {
             additive_rewrite(agent, path, original, target, key, now, sibling_config)
         }
         _ => Err("unsupported agent".into()),
@@ -175,6 +175,12 @@ fn additive_rewrite(
         // MiniMax Code's shape is read off its shipped CLI (the `mcode provider
         // add` fields, YAML), not its docs — see the adapter for the source.
         "mcode" => kiwano_adapters::gateway_takeover::upsert_mcode_gateway(original, target, key),
+        // Continue has no selector field — its active model is the first
+        // chat-role one — so the upsert unshifts the gateway entry at the head
+        // of `models` scoped to `roles: [chat]` (see the adapter for the why).
+        "continue" => {
+            kiwano_adapters::gateway_takeover::upsert_continue_gateway(original, target, key)
+        }
         // The two Kimi generations spell the same OpenAI shape differently:
         // the successor calls it `openai`, the Python original `kimi` — the
         // type whose dispatcher attaches the conversation's prompt_cache_key

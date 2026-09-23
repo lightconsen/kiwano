@@ -22,6 +22,7 @@ export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   mimo: "xiaomimimo",
   mcode: "minimax",
   aider: "aider",
+  continue: "continue",
 };
 
 export function Logo({

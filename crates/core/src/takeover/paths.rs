@@ -154,6 +154,12 @@ pub(crate) fn takeover_paths(
         // "deliberately not honored" stance, with the agent's own docs as the
         // reason no variable exists to honor here.
         "aider" => Ok(vec![home.join(".aider.conf.yml")]),
+        // Continue's model list is `~/.continue/config.yaml`, the docs' main
+        // path. `CONTINUE_HOME` exists in some builds, but the CLI resolves its
+        // global config from the home directory; until that resolution is
+        // pinned to the variable, the takeover writes the documented location
+        // rather than guessing at a relocation the tool may not follow.
+        "continue" => Ok(vec![home.join(".continue").join("config.yaml")]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base

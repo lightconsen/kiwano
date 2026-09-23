@@ -83,6 +83,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "mimo"
                         | "mcode"
                         | "aider"
+                        | "continue"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -202,6 +203,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // OpenAI-compatible provider, which appends /chat/completions to the
         // base — so the version root is what `openai-api-base` holds.
         "aider" => "/v1",
+        // Continue's `provider: openai` model entry is handed to the OpenAI
+        // SDK, which appends only /chat/completions to `apiBase`.
+        "continue" => "/v1",
         // MiniMax Code's official endpoint ends at the version root
         // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
         // same OpenAI-completions client — the root is required here too.
@@ -986,6 +990,56 @@ custom_provider:
         assert!(aux.load_takeover_backup("aider").is_none());
     }
 
+    /// Continue's takeover unshifts the gateway model at the head of `models`
+    /// (its documented default is "first chat model"), scoped to the chat role.
+    #[test]
+    fn continue_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let original = r#"name: my config
+version: 0.0.1
+schema: v1
+models:
+  - name: DeepSeek
+    provider: openai
+    model: deepseek-chat
+    apiBase: https://api.deepseek.com/v1
+    apiKey: sk-ds
+    roles: [chat, edit]
+"#;
+        let config = home.join(".continue").join("config.yaml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, original).unwrap();
+
+        enable(
+            &aux,
+            "continue",
+            "kw-ag-continue-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+        let v: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        let models = v["models"].as_sequence().unwrap();
+        assert_eq!(models[0]["name"], "Kiwano Gateway");
+        assert_eq!(models[0]["model"], "deepseek-chat");
+        assert_eq!(models[0]["apiBase"], "http://127.0.0.1:8317/v1");
+        assert_eq!(models[0]["apiKey"], "kw-ag-continue-abcd");
+        assert_eq!(models[0]["roles"][0], "chat");
+        assert_eq!(models[1]["name"], "DeepSeek", "the user's own entry stays");
+
+        assert_eq!(
+            live_placeholder_key("continue", &home, &no_vars()).as_deref(),
+            Some("kw-ag-continue-abcd")
+        );
+
+        restore(&aux, "continue", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+        assert!(aux.load_takeover_backup("continue").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -1000,6 +1054,7 @@ custom_provider:
             ("mimo", ".config/mimocode/mimocode.jsonc"),
             ("mcode", ".minimax/config.yaml"),
             ("aider", ".aider.conf.yml"),
+            ("continue", ".continue/config.yaml"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

@@ -22,7 +22,7 @@ I'm building Kiwano, a local gateway so all my agent configs share one port — 
 ```
 I got tired of juggling `~/.claude/settings.json` vs Codex vs Gemini CLI, and of
 never knowing what a session actually cost. So I wrote Kiwano: a desktop app
-that runs one local gateway on 127.0.0.1:8317 and takes over 14 agents (Claude
+that runs one local gateway on 127.0.0.1 and takes over 14 agents (Claude
 Code, Codex, Gemini CLI, Grok Build, Cline, Kimi/Qwen Code, Claude Desktop, …)
 in one click — originals backed up, restored when you switch off.
 
@@ -104,7 +104,7 @@ script and it is in the repo if you want to read it before running it.
 
 What it does:
 
-- One port (127.0.0.1:8317) for every agent. Agents are taken over by rewriting
+- One local port (127.0.0.1) for every agent. Agents are taken over by rewriting
   their own config under their own $HOME, with the original backed up and
   restored when you switch the takeover off. That is also why the service must
   run as the same user as the agent.

@@ -24,7 +24,7 @@ HN 标题字段上限 **80 字符**,超了直接提交失败。下面三条已�
 
 ```
 Kiwano is a local-first AI provider manager: register providers once, and it
-runs a local gateway on 127.0.0.1:8317 that every coding agent — Claude Code,
+runs a local gateway on 127.0.0.1 that every coding agent — Claude Code,
 Codex, Gemini CLI, Grok Build, Cline and 9 more — talks to through one port.
 
 https://kiwano.cc

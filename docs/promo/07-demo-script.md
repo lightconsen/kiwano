@@ -12,7 +12,7 @@
 
 | # | 时间 | 画面 | 屏幕上方 CAP(英文) |
 | --- | --- | --- | --- |
-| 1 | 0:03–0:10 | 打开 Kiwano,停在 Apps 屏:左侧 Provider 列表(用户名结尾模糊处理),右侧各 Agent 卡片带用量 | `ONE PORT: 127.0.0.1:8317` |
+| 1 | 0:03–0:10 | 打开 Kiwano,停在 Apps 屏:左侧 Provider 列表(用户名结尾模糊处理),右侧各 Agent 卡片带用量 | `A LOCAL AGENT GATEWAY` |
 | 2 | 0:10–0:22 | 点开「Add provider」→ 从 Models shelf 搜索(e.g. `DeepSeek`,搜出官方/聚合候选)→ 填一个 mock key `sk-••••` → 保存 | `REGISTER ONCE. 24 PROVIDERS ON THE SHELF.` |
 | 3 | 0:22–0:38 | 回到 Apps,把 Claude Code、Codex、Gemini CLI 三张卡的接管开关逐个拨到 ON(注意镜头跟手,卡片出现「Backed up」小標記) | `TAKEOVER IN ONE CLICK. ORIGINALS BACKED UP.` |
 | 4 | 0:38–0:52 | 终端里两条命令并排:`claude` 发一个 prompt,另一窗 `codex` 也发一个;切到 App 的 Request logs 看到两条请求同时刷过 | `TWO AGENTS, ONE PORT.` |

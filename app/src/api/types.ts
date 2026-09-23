@@ -24,7 +24,8 @@ export type AgentId =
   | "mcode"
   | "kimi"
   | "qwen"
-  | "cline";
+  | "cline"
+  | "aider";
 /** An agent id as it travels through routes, bindings, usage and logs: a
     built-in's, or one the user defined. The closed `AgentId` above stays the
     type wherever the thing being named is a *built-in* — the takeover switch,
@@ -97,6 +98,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "cline", label: "Cline", chip_char: "C", chip_color: "#1C1C24", chip_border: true },
   { id: "mimo", label: "MiMo Code", chip_char: "M", chip_color: "#FF6900" },
   { id: "mcode", label: "MiniMax Code", chip_char: "M", chip_color: "#FF6B6B" },
+  { id: "aider", label: "Aider", chip_char: "a", chip_color: "#01FFB9" },
 ];
 
 export interface ProviderHealth {

@@ -83,6 +83,11 @@ pub(crate) fn rewrite(
 ) -> Result<String, String> {
     match agent {
         "claude" => rewrite_claude(original, target, key),
+        // aider is exclusive like claude: its custom endpoint *is* the three
+        // global fields (`openai-api-base`/`openai-api-key`/`model`), not a
+        // provider list — the rewrite overwrites them rather than upserting an
+        // entry beside anything, and restore puts the user's bytes back.
+        "aider" => kiwano_adapters::gateway_takeover::upsert_aider_gateway(original, target, key),
         "codex" => Err("codex files are rewritten together by codex_rewrites".into()),
         "gemini" => rewrite_gemini_env(original, target, key),
         "grokbuild" => rewrite_grok_toml(original, target, key),

@@ -424,4 +424,60 @@ mod tests {
         let err = disable(&aux, "opencode", &home, None, &no_vars()).unwrap_err();
         assert!(err.contains("no fallback route"), "{err}");
     }
+
+    /// Aider has a strip tier (like the exclusive agents): with the backup gone,
+    /// the two endpoint rows that hold our values come out and everything else —
+    /// the user's model choice included — stays exactly as written.
+    #[test]
+    fn aider_lost_backup_strips_our_endpoint_rows_and_keeps_the_model() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let config = home.join(".aider.conf.yml");
+        std::fs::write(
+            &config,
+            "model: openai/claude-sonnet-4-6\ndark-mode: true\nopenai-api-base: http://127.0.0.1:8317/v1\nopenai-api-key: kw-ag-aider-abcd\n",
+        )
+        .unwrap();
+        enable(&aux, "aider", "kw-ag-aider-abcd", 8317, &home, &no_vars()).unwrap();
+        aux.delete_takeover_backup("aider").unwrap();
+
+        let err = disable(&aux, "aider", &home, None, &no_vars()).unwrap_err();
+        assert!(err.contains("backup is gone"), "{err}");
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert!(!text.contains("openai-api-base"), "{text}");
+        assert!(!text.contains("kw-ag-aider-abcd"), "{text}");
+        // Surgical: the model row and the user's own settings stay.
+        assert!(text.contains("model: openai/claude-sonnet-4-6"), "{text}");
+        assert!(text.contains("dark-mode: true"), "{text}");
+
+        // The strip's own handiwork is not a routed config either: a second
+        // restore reads as nothing of ours.
+        let again = disable(&aux, "aider", &home, None, &no_vars()).unwrap();
+        assert_eq!(again.outcome, RestoreOutcome::NotTakenOver);
+    }
+
+    /// The strip is value-matched, not key-matched: a user's own
+    /// `openai-api-base` (a real endpoint, not our loopback) survives a strip
+    /// that finds nothing of ours to remove.
+    #[test]
+    fn aider_strip_leaves_the_users_own_endpoint_alone() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let config = home.join(".aider.conf.yml");
+        std::fs::write(
+            &config,
+            "model: openai/deepseek-chat\nopenai-api-base: https://api.deepseek.com/v1\nopenai-api-key: sk-ds\n",
+        )
+        .unwrap();
+
+        // Never taken over: the config is the user's, and a disable has
+        // nothing of ours to undo.
+        let report = disable(&aux, "aider", &home, None, &no_vars()).unwrap();
+        assert_eq!(report.outcome, RestoreOutcome::NotTakenOver);
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            "model: openai/deepseek-chat\nopenai-api-base: https://api.deepseek.com/v1\nopenai-api-key: sk-ds\n",
+            "an endpoint that is not ours must survive byte for byte"
+        );
+    }
 }

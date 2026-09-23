@@ -40,6 +40,7 @@
 //! provider id. `model_list` holds what the two model-list agents (workbuddy,
 //! codebuddy) share.
 
+pub mod aider;
 pub mod cline;
 pub mod codebuddy;
 pub mod gateway;
@@ -58,6 +59,7 @@ pub mod workbuddy;
 
 // ── the public surface, re-exported so every `gateway_takeover::x` path still resolves ──
 
+pub use aider::{read_aider_current, upsert_aider_gateway};
 pub use cline::{read_cline_current, upsert_cline_gateway};
 pub use codebuddy::upsert_codebuddy_models_gateway;
 pub use gateway::GATEWAY_PROVIDER_ID;

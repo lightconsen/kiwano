@@ -82,6 +82,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "qwen"
                         | "mimo"
                         | "mcode"
+                        | "aider"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -197,6 +198,10 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // MiMo Code passes its custom baseURL straight to an OpenAI SDK, which
         // appends only /chat/completions — the version root is required.
         "mimo" => "/v1",
+        // Aider routes through LiteLLM: the `openai/` model prefix forces the
+        // OpenAI-compatible provider, which appends /chat/completions to the
+        // base — so the version root is what `openai-api-base` holds.
+        "aider" => "/v1",
         // MiniMax Code's official endpoint ends at the version root
         // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
         // same OpenAI-completions client — the root is required here too.
@@ -949,6 +954,38 @@ custom_provider:
         assert!(aux.load_takeover_backup("mcode").is_none());
     }
 
+    /// Aider is exclusive like claude — its custom endpoint *is* three global
+    /// fields — so the takeover overwrites them and restore puts the user's
+    /// bytes back the way they were, comments included.
+    #[test]
+    fn aider_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let original = "# aider's own settings, written by hand\nmodel: anthropic/claude-sonnet-4-6\ndark-mode: true\nauto-commits: false\n";
+        let config = home.join(".aider.conf.yml");
+        std::fs::write(&config, original).unwrap();
+
+        enable(&aux, "aider", "kw-ag-aider-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v["openai-api-base"], "http://127.0.0.1:8317/v1");
+        assert_eq!(v["openai-api-key"], "kw-ag-aider-abcd");
+        assert_eq!(
+            v["model"], "openai/claude-sonnet-4-6",
+            "the model id is kept, reprefixed through LiteLLM's OpenAI route"
+        );
+        assert_eq!(v["auto-commits"], false); // unrelated settings survive
+
+        assert_eq!(
+            live_placeholder_key("aider", &home, &no_vars()).as_deref(),
+            Some("kw-ag-aider-abcd")
+        );
+
+        restore(&aux, "aider", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+        assert!(aux.load_takeover_backup("aider").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -962,6 +999,7 @@ custom_provider:
             ("qwen", ".qwen/settings.json"),
             ("mimo", ".config/mimocode/mimocode.jsonc"),
             ("mcode", ".minimax/config.yaml"),
+            ("aider", ".aider.conf.yml"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

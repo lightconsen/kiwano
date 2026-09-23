@@ -102,6 +102,20 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
                 protocol: "openai",
             })
         }
+        // Aider's custom endpoint is three global fields with no provider id
+        // (same stance as Cline: what names the row would be a *field*, not a
+        // name, so the host inference names the import). A config without both
+        // a base URL and a key is not a routed configuration.
+        "aider" => {
+            let content = std::fs::read_to_string(home.join(".aider.conf.yml")).ok()?;
+            let p = kiwano_adapters::gateway_takeover::read_aider_current(&content)?;
+            Some(CurrentCreds {
+                base_url: p.base_url,
+                api_key: p.api_key,
+                name: None,
+                protocol: "openai",
+            })
+        }
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;
@@ -598,6 +612,32 @@ custom_provider:
         )
         .unwrap();
         assert!(read_current_creds("mcode", &home).is_none());
+    }
+
+    /// Aider's three global fields are the import: both a base URL and a key
+    /// must be present, and — as for Cline — no `name` is offered, because
+    /// aider has no provider id for the row to carry.
+    #[test]
+    fn aider_creds_read_the_custom_endpoint_when_both_fields_exist() {
+        let home = temp_home("aider");
+        std::fs::write(
+            home.join(".aider.conf.yml"),
+            "model: openai/deepseek-chat\nopenai-api-base: https://api.deepseek.com/v1\nopenai-api-key: sk-ds\n",
+        )
+        .unwrap();
+        let creds = read_current_creds("aider", &home).expect("a routed configuration");
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(creds.api_key, "sk-ds");
+        assert_eq!(creds.protocol, "openai");
+        assert_eq!(creds.name, None, "no provider id: host inference names it");
+
+        // A config without a key is not a routed configuration.
+        std::fs::write(
+            home.join(".aider.conf.yml"),
+            "openai-api-base: https://api.deepseek.com/v1\n",
+        )
+        .unwrap();
+        assert!(read_current_creds("aider", &home).is_none());
     }
 
     #[test]

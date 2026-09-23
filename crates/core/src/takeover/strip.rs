@@ -50,6 +50,14 @@ fn strip_file(agent: &str, path: &Path, text: &str) -> Result<Option<String>, St
             dotenv_without_gateway_keys(text, &["GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"])
         }
         "grokbuild" => Ok(drop_gateway_toml_lines(text, agent)),
+        // aider: drop the two custom-endpoint rows when they hold one of ours;
+        // the `model` row stays — its `openai/` prefix is the user's routing
+        // choice to read, and a model id alone points at no loopback.
+        "aider" => Ok(drop_gateway_yaml_lines(
+            text,
+            &["openai-api-base", "openai-api-key"],
+            agent,
+        )),
         other => Err(format!(
             "no fallback route for {other}: its gateway entry cannot be removed without a backup"
         )),
@@ -152,6 +160,38 @@ fn drop_gateway_toml_lines(text: &str, agent: &str) -> Option<String> {
                 return true;
             }
             let ours = value_is_ours(value.trim().trim_matches(['"', '\'']).trim(), agent);
+            if ours {
+                changed = true;
+            }
+            !ours
+        })
+        .collect();
+    changed.then(|| kept.join("\n"))
+}
+
+/// Drop YAML `key: value` lines whose key is one of `keys` and whose value is
+/// one of ours (the aider strip: `openai-api-base` / `openai-api-key`). The
+/// same line-level stance as the TOML strip: only rows carrying our values go,
+/// comments and the user's own settings stay byte for byte.
+fn drop_gateway_yaml_lines(text: &str, keys: &[&str], agent: &str) -> Option<String> {
+    let mut changed = false;
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            let Some((key, value)) = line.split_once(':') else {
+                return true;
+            };
+            if !keys.contains(&key.trim()) {
+                return true;
+            }
+            let ours = value_is_ours(
+                value
+                    .trim()
+                    .trim_matches(',')
+                    .trim_matches(['"', '\''])
+                    .trim(),
+                agent,
+            );
             if ours {
                 changed = true;
             }

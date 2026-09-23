@@ -147,6 +147,13 @@ pub(crate) fn takeover_paths(
             home,
         )?
         .join("config.yaml")]),
+        // Aider's config is a fixed `~/.aider.conf.yml`: its own `AIDER_CONFIG`
+        // variable names an alternate config file, but v1.24 does not honor it
+        // when loading (it is read only as a `--config`-adjacent convenience),
+        // so the home location is the one a takeover writes — the openclaw
+        // "deliberately not honored" stance, with the agent's own docs as the
+        // reason no variable exists to honor here.
+        "aider" => Ok(vec![home.join(".aider.conf.yml")]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base

@@ -7,7 +7,7 @@ use crate::vm::{e2s, slug, Aux};
 use kiwanod::store::{Provider, Store, StrategyType};
 use serde::{Deserialize, Serialize};
 
-pub const AGENTS: [(&str, &str); 16] = [
+pub const AGENTS: [(&str, &str); 17] = [
     ("claude", "Claude Code"),
     ("codex", "Codex"),
     ("gemini", "Gemini CLI"),
@@ -24,6 +24,7 @@ pub const AGENTS: [(&str, &str); 16] = [
     ("cline", "Cline"),
     ("mimo", "MiMo Code"),
     ("mcode", "MiniMax Code"),
+    ("aider", "Aider"),
 ];
 
 /// Whether `id` names a built-in agent — one whose *config* this app knows how
@@ -333,7 +334,7 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
 /// **A label.** Nothing routes, validates or filters by it: the gateway learns
 /// an inbound's protocol from the path it was called on
 /// (`gateway::protocol::classify_path`), and that is unchanged.
-pub const AGENT_PROTOCOLS: [(&str, &[&str]); 16] = [
+pub const AGENT_PROTOCOLS: [(&str, &[&str]); 17] = [
     ("claude", &["anthropic"]),
     ("codex", &["openai"]),
     ("gemini", &["gemini"]),
@@ -350,6 +351,7 @@ pub const AGENT_PROTOCOLS: [(&str, &[&str]); 16] = [
     ("cline", &["openai"]),
     ("mimo", &["openai"]),
     ("mcode", &["openai"]),
+    ("aider", &["openai"]),
 ];
 
 /// The protocols `agent` speaks, or an empty slice for an id nobody knows — a

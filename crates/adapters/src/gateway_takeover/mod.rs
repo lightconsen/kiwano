@@ -45,6 +45,9 @@ pub mod aider;
 // identifier, and every caller touches the re-export below.
 pub mod cline;
 pub mod codebuddy;
+pub mod crush;
+// `continue` is a reserved word: the module keeps the agent id via a raw
+// identifier, and every caller touches the re-export below.
 pub mod r#continue;
 pub mod gateway;
 pub mod hermes;
@@ -65,6 +68,7 @@ pub mod workbuddy;
 pub use aider::{read_aider_current, upsert_aider_gateway};
 pub use cline::{read_cline_current, upsert_cline_gateway};
 pub use codebuddy::upsert_codebuddy_models_gateway;
+pub use crush::{read_crush_current, upsert_crush_gateway};
 pub use gateway::GATEWAY_PROVIDER_ID;
 pub use hermes::upsert_hermes_gateway;
 pub use kimi::upsert_kimi_gateway;

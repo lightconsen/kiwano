@@ -154,6 +154,7 @@ pub(crate) mod test_support {
                 "mcode" => ".minimax/config.yaml",
                 "aider" => ".aider.conf.yml",
                 "continue" => ".continue/config.yaml",
+                "crush" => ".config/crush/crush.json",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

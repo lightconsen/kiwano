@@ -64,6 +64,7 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("mcode", "mcode"),
     ("aider", "aider"),
     ("continue", "cn"),
+    ("crush", "crush"),
 ];
 
 /// One pass over every tool, through the login shell — whose only reader is the

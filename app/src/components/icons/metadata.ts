@@ -12,6 +12,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   together: { name: "together", displayName: "Together AI", defaultColor: "#0F6FFF" },
   "9527code": { name: "9527code", displayName: "9527CODE", defaultColor: "currentColor" },
   continue: { name: "continue", displayName: "Continue", defaultColor: "currentColor" },
+  crush: { name: "crush", displayName: "Crush", defaultColor: "#6B51FF" },
   aider: { name: "aider", displayName: "Aider", defaultColor: "#01FFB9" },
   "a6api": { name: "a6api", displayName: "A6API", defaultColor: "#3B82F6" },
   "aicodewith": { name: "aicodewith", displayName: "AICodeWith", defaultColor: "#3A3B40" },

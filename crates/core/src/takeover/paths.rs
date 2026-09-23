@@ -160,6 +160,14 @@ pub(crate) fn takeover_paths(
         // pinned to the variable, the takeover writes the documented location
         // rather than guessing at a relocation the tool may not follow.
         "continue" => Ok(vec![home.join(".continue").join("config.yaml")]),
+        // Crush resolves its global config through the XDG rules — the same
+        // handling as OpenCode and MiMo. Its own CRUSH_GLOBAL_CONFIG names the
+        // file directly, and is deliberately not honored: like OpenCode's
+        // OPENCODE_CONFIG, it is an override the docs attach caveats to, and
+        // the XDG location is what an unconfigured install reads.
+        "crush" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
+            .join("crush")
+            .join("crush.json")]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base

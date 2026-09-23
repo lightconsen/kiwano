@@ -84,6 +84,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "mcode"
                         | "aider"
                         | "continue"
+                        | "crush"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -206,6 +207,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // Continue's `provider: openai` model entry is handed to the OpenAI
         // SDK, which appends only /chat/completions to `apiBase`.
         "continue" => "/v1",
+        // Crush's openai-compat providers carry the version root, the same
+        // shape its own docs' DeepSeek example uses.
+        "crush" => "/v1",
         // MiniMax Code's official endpoint ends at the version root
         // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
         // same OpenAI-completions client — the root is required here too.
@@ -1040,6 +1044,53 @@ models:
         assert!(aux.load_takeover_backup("continue").is_none());
     }
 
+    /// Crush's takeover fills the `models.large` slot (what its own
+    /// `model large` command persists) and upserts the provider beside the
+    /// user's own ones.
+    #[test]
+    fn crush_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let original = r#"{
+  "$schema": "https://charm.land/crush.json",
+  "models": { "large": { "provider": "deepseek", "model": "deepseek-chat" } },
+  "providers": {
+    "deepseek": { "type": "openai-compat", "base_url": "https://api.deepseek.com/v1",
+                  "api_key": "sk-ds", "models": [] }
+  }
+}"#;
+        let config = home.join(".config").join("crush").join("crush.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, original).unwrap();
+
+        enable(&aux, "crush", "kw-ag-crush-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v["models"]["large"]["provider"], "kiwano-gateway");
+        assert_eq!(v["models"]["large"]["model"], "deepseek-chat");
+        assert_eq!(
+            v["providers"]["kiwano-gateway"]["base_url"],
+            "http://127.0.0.1:8317/v1"
+        );
+        assert_eq!(
+            v["providers"]["kiwano-gateway"]["api_key"],
+            "kw-ag-crush-abcd"
+        );
+        assert!(
+            v["providers"]["deepseek"].is_object(),
+            "the user's provider survives"
+        );
+
+        assert_eq!(
+            live_placeholder_key("crush", &home, &no_vars()).as_deref(),
+            Some("kw-ag-crush-abcd")
+        );
+
+        restore(&aux, "crush", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+        assert!(aux.load_takeover_backup("crush").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -1055,6 +1106,7 @@ models:
             ("mcode", ".minimax/config.yaml"),
             ("aider", ".aider.conf.yml"),
             ("continue", ".continue/config.yaml"),
+            ("crush", ".config/crush/crush.json"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

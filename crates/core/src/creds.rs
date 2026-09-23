@@ -121,6 +121,19 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
         "continue" => read_additive_one(home.join(".continue").join("config.yaml"), |c| {
             kiwano_adapters::gateway_takeover::read_continue_current(c)
         }),
+        // Crush's large slot names the provider doing the routing; the config
+        // follows the XDG rules, same as OpenCode — and a relative XDG names
+        // no one place, which reports as nothing extractable (hermes' stance).
+        "crush" => {
+            let dir = match kiwano_adapters::config::env_dir("XDG_CONFIG_HOME") {
+                kiwano_adapters::config::EnvDir::Absolute(dir) => dir,
+                kiwano_adapters::config::EnvDir::Unset => home.join(".config"),
+                kiwano_adapters::config::EnvDir::Relative(_) => return None,
+            };
+            read_additive_one(dir.join("crush").join("crush.json"), |c| {
+                kiwano_adapters::gateway_takeover::read_crush_current(c)
+            })
+        }
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;
@@ -665,6 +678,35 @@ custom_provider:
         // No custom endpoint on the chat model → nothing extractable.
         std::fs::write(dir.join("config.yaml"), "models: []\n").unwrap();
         assert!(read_current_creds("continue", &home).is_none());
+    }
+
+    /// Crush's import resolves the provider its large slot names; a `$VAR`
+    /// key reference is not resolvable offline and reports as nothing.
+    #[test]
+    fn crush_creds_resolve_the_large_slots_provider() {
+        let _unset = crate::test_env::EnvGuard::set("XDG_CONFIG_HOME", None);
+        let home = temp_home("crush");
+        let dir = home.join(".config").join("crush");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("crush.json"),
+            r#"{"models":{"large":{"provider":"deepseek","model":"deepseek-chat"}},
+                "providers":{"deepseek":{"name":"DeepSeek","base_url":"https://api.deepseek.com/v1","api_key":"sk-ds"}}}"#,
+        )
+        .unwrap();
+        let creds = read_current_creds("crush", &home).expect("a routed configuration");
+        assert_eq!(creds.name.as_deref(), Some("DeepSeek"));
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(creds.api_key, "sk-ds");
+
+        // A $VAR key reference cannot be resolved: nothing to import.
+        std::fs::write(
+            dir.join("crush.json"),
+            r#"{"models":{"large":{"provider":"deepseek","model":"m"}},
+                "providers":{"deepseek":{"base_url":"https://api.deepseek.com/v1","api_key":"$DEEPSEEK_API_KEY"}}}"#,
+        )
+        .unwrap();
+        assert!(read_current_creds("crush", &home).is_none());
     }
 
     #[test]

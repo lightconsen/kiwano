@@ -146,6 +146,21 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
         // import. Nothing extractable is the honest answer; the onboarding
         // guide takes over.
         "goose" => None,
+        // ZCode's selection names a provider rule carrying both endpoint
+        // and key (plaintext, api-key access) — the import reads it.
+        "zcode" => {
+            let path = match kiwano_adapters::config::env_dir("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE")
+            {
+                kiwano_adapters::config::EnvDir::Absolute(path) => path,
+                kiwano_adapters::config::EnvDir::Relative(_) => return None,
+                kiwano_adapters::config::EnvDir::Unset => {
+                    home.join(".zcode").join("v2").join("provider_config.json")
+                }
+            };
+            read_additive_one(path, |c| {
+                kiwano_adapters::gateway_takeover::read_zcode_current(c)
+            })
+        }
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;
@@ -743,6 +758,45 @@ custom_provider:
         )
         .unwrap();
         assert!(read_current_creds("droid", &home).is_none());
+    }
+
+    /// ZCode's import resolves the selection against its provider rule; the
+    /// exact-file env override moves where the read happens, same rule the
+    /// takeover writes by.
+    #[test]
+    fn zcode_creds_resolve_the_selections_provider() {
+        use crate::test_env::EnvGuard;
+
+        let _cleared = EnvGuard::set("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", None);
+        let home = temp_home("zcode");
+        let config = home.join(".zcode").join("v2").join("provider_config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            r#"{"config":{
+                "providerConfigRules":{"providerRules":[
+                  {"providerId":"deepseek","providerName":"DeepSeek","enabled":true,
+                   "config":{"access":{"type":"api-key","apiKey":"sk-ds"},
+                             "api":{"type":"openai-chat-completions","baseUrl":"https://api.deepseek.com/v1"}}}]},
+                "defaultModelSelection":{"providerId":"deepseek","modelId":"deepseek-chat"}}}"#,
+        )
+        .unwrap();
+        let creds = read_current_creds("zcode", &home).expect("a routed configuration");
+        assert_eq!(creds.name.as_deref(), Some("DeepSeek"));
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(creds.api_key, "sk-ds");
+
+        // A relocated provider file is where the read happens now: the moved
+        // file holds the routed config, and the default is no longer read.
+        let moved = temp_home("zcode-moved").join("providers.json");
+        std::fs::write(&moved, std::fs::read_to_string(&config).unwrap()).unwrap();
+        std::fs::write(&config, "").unwrap();
+        let _moved = EnvGuard::set(
+            "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE",
+            Some(moved.to_str().unwrap()),
+        );
+        let creds = read_current_creds("zcode", &home).expect("the moved file is read");
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
     }
 
     #[test]

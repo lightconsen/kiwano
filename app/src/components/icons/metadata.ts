@@ -15,6 +15,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   crush: { name: "crush", displayName: "Crush", defaultColor: "#6B51FF" },
   droid: { name: "droid", displayName: "Droid", defaultColor: "currentColor" },
   goose: { name: "goose", displayName: "Goose", defaultColor: "currentColor" },
+  zai: { name: "zai", displayName: "Z.ai", defaultColor: "currentColor" },
   aider: { name: "aider", displayName: "Aider", defaultColor: "#01FFB9" },
   "a6api": { name: "a6api", displayName: "A6API", defaultColor: "#3B82F6" },
   "aicodewith": { name: "aicodewith", displayName: "AICodeWith", defaultColor: "#3A3B40" },

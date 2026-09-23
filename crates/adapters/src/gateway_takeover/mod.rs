@@ -10,7 +10,7 @@
 
 //! Gateway takeover transforms for the agents whose config this app writes an
 //! entry into: opencode, openclaw, hermes, pi, workbuddy, codebuddy, kimi,
-//! qwen, cline, mimo, mcode, continue, crush, droid and goose.
+//! qwen, cline, mimo, mcode, continue, crush, droid, goose and zcode.
 //!
 //! All but cline are additive: their configs hold many providers and select
 //! one, so "takeover" means upsert a gateway entry pointing at the local
@@ -62,6 +62,7 @@ pub mod pi;
 pub mod qwen;
 pub mod readers;
 pub mod workbuddy;
+pub mod zcode;
 
 // ── the public surface, re-exported so every `gateway_takeover::x` path still resolves ──
 
@@ -90,3 +91,4 @@ pub use readers::{
     CurrentProvider,
 };
 pub use workbuddy::upsert_workbuddy_gateway;
+pub use zcode::{read_zcode_current, upsert_zcode_gateway};

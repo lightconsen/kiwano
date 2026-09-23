@@ -67,6 +67,7 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("crush", "crush"),
     ("droid", "droid"),
     ("goose", "goose"),
+    ("zcode", "zcode"),
 ];
 
 /// One pass over every tool, through the login shell — whose only reader is the

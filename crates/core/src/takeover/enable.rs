@@ -87,6 +87,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "crush"
                         | "droid"
                         | "goose"
+                        | "zcode"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -229,6 +230,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // parse_openai_base_url, where a bare `/v1` path is the default
         // base_path — so the version root is what `base_url` holds.
         "goose" => "/v1",
+        // ZCode's openai-chat-completions api hands the base to an OpenAI
+        // Chat Completions client, which appends the route itself.
+        "zcode" => "/v1",
         // MiniMax Code's official endpoint ends at the version root
         // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
         // same OpenAI-completions client — the root is required here too.
@@ -1253,6 +1257,55 @@ models:
         assert!(aux.load_takeover_backup("goose").is_none());
     }
 
+    /// ZCode's takeover upserts the gateway rule into the native registry and
+    /// points `defaultModelSelection` at it; disable puts the user's bytes
+    /// (rules, ordering and selection included) back the way they were.
+    #[test]
+    fn zcode_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let original = r#"{
+  "schemaVersion": 1,
+  "config": {
+    "providerConfigRules": { "providerRules": [
+      { "providerId": "deepseek", "providerName": "DeepSeek", "enabled": true,
+        "config": { "access": { "type": "api-key", "apiKey": "sk-ds" },
+                    "api": { "type": "openai-chat-completions", "baseUrl": "https://api.deepseek.com/v1" },
+                    "personalModelIds": ["deepseek-chat"] } }
+    ] },
+    "defaultModelSelection": { "providerId": "deepseek", "modelId": "deepseek-chat" }
+  }
+}"#;
+        let config = home.join(".zcode").join("v2").join("provider_config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, original).unwrap();
+
+        enable(&aux, "zcode", "kw-ag-zcode-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        let sel = &v["config"]["defaultModelSelection"];
+        assert_eq!(sel["providerId"], "kiwano-gateway");
+        assert_eq!(sel["modelId"], "deepseek-chat");
+        let rules = v["config"]["providerConfigRules"]["providerRules"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            rules[1]["config"]["api"]["baseUrl"],
+            "http://127.0.0.1:8317/v1"
+        );
+        assert_eq!(rules[1]["config"]["access"]["apiKey"], "kw-ag-zcode-abcd");
+        assert_eq!(rules[0]["providerId"], "deepseek", "the user's rule stays");
+
+        assert_eq!(
+            live_placeholder_key("zcode", &home, &no_vars()).as_deref(),
+            Some("kw-ag-zcode-abcd")
+        );
+
+        restore(&aux, "zcode", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+        assert!(aux.load_takeover_backup("zcode").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -1296,6 +1349,7 @@ models:
             ),
             #[cfg(not(target_os = "macos"))]
             ("goose", ".config/goose/kiwano-gateway.key"),
+            ("zcode", ".zcode/v2/provider_config.json"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

@@ -137,6 +137,10 @@ pub(crate) fn rewrite(
                 key,
             ))
         }
+        // ZCode selects through `defaultModelSelection`, the same field its
+        // /settings and Desktop editors persist — the upsert fills it rather
+        // than adding a second selection.
+        "zcode" => kiwano_adapters::gateway_takeover::upsert_zcode_gateway(original, target, key),
         _ => Err("unsupported agent".into()),
     }
 }

@@ -210,7 +210,31 @@ pub(crate) fn takeover_paths(
         // construction) cannot express it — and it is resolved here rather than
         // with a bespoke directory lookup for that reason.
         "cline" => Ok(vec![cline_provider_settings(vars, home)?]),
+        // ZCode's providers live in the native registry file shared between
+        // the CLI and Desktop — ~/.zcode/v2/provider_config.json — which is
+        // why a takeover write affects both clients. Its exact-file variable
+        // ZCODE_PERSONAL_PROVIDER_CONFIG_FILE is honored (the Cline stance
+        // for file-naming variables); ZCODE_DATA_BASE_DIR is deliberately
+        // not: it relocates the runtime's whole base including credentials,
+        // and half-honoring it would split the provider file from the
+        // credential store (the openclaw stance).
+        "zcode" => Ok(vec![zcode_provider_file(vars, home)?]),
         other => Err(format!("unknown agent: {other}")),
+    }
+}
+
+/// ZCode's provider file: the exact file ZCODE_PERSONAL_PROVIDER_CONFIG_FILE
+/// names when it is set, else the shared native registry under ~/.zcode/v2.
+fn zcode_provider_file(vars: &ShellVars, home: &Path) -> Result<PathBuf, String> {
+    let default = home.join(".zcode").join("v2").join("provider_config.json");
+    match named_dir(vars, "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE") {
+        EnvDir::Unset => Ok(default),
+        EnvDir::Absolute(path) => Ok(path),
+        EnvDir::Relative(raw) => Err(relative_env_refusal(
+            "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE",
+            &raw,
+            &default,
+        )),
     }
 }
 

@@ -39,6 +39,7 @@ export const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[]
   { id: "crush", icon: "crush" },
   { id: "droid", icon: "droid" },
   { id: "goose", icon: "goose" },
+  { id: "zcode", icon: "zai" },
 ];
 
 // Agent labels are brand names and stay as they are; only the "all" segment

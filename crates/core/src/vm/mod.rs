@@ -162,6 +162,7 @@ pub(crate) mod test_support {
                 "goose" => "Library/Application Support/Block/goose/kiwano-gateway.key",
                 #[cfg(not(target_os = "macos"))]
                 "goose" => ".config/goose/kiwano-gateway.key",
+                "zcode" => ".zcode/v2/provider_config.json",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

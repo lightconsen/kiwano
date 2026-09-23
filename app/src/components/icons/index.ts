@@ -66,6 +66,10 @@ import _zetaapiDark from "./zetaapi-icon-dark.png";
 import _together from "./together.svg?url";
 
 export const icons: Record<string, string> = {
+  // Kiwano addition: Factory's (Droid's maker) pinwheel — eight curved arms
+  // radiating from the center, simplified from their GitHub avatar. Black
+  // brand color, so currentColor (same stance as the OpenAI mark).
+  droid: `<svg height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Droid</title><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(45 12 12)"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(90 12 12)"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(135 12 12)"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(180 12 12)"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(225 12 12)"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(270 12 12)"></path><path d="M12.5 10.6 C 12.9 7.4, 12.1 5.3, 10.2 3.4" transform="rotate(315 12 12)"></path></g></svg>`,
   // Kiwano addition: Charm's (Crush's maker) shooting star, simplified from
   // their GitHub avatar — pale star with a face on the #6B51FF tile, one
   // sparkle and the pink trail kept.

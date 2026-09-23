@@ -2,16 +2,10 @@
 //! primary coding model (`crush model large` persists there; `small` is the
 //! summarization slot and stays whatever the user chose).
 
+use crate::gateway_takeover::gateway::{GATEWAY_PROVIDER_ID, PLACEHOLDER_MODEL_ID};
 use serde_json::Value;
 
-use crate::gateway_takeover::gateway::GATEWAY_PROVIDER_ID;
-
 // ── crush (XDG crush.json, CRUSH_GLOBAL_CONFIG not honored by the caller) ──
-
-/// The model id a fresh config gets when nothing selectable exists yet — the
-/// gateway forwards model names verbatim, so the user replaces it with a model
-/// their provider serves.
-const PLACEHOLDER_MODEL_ID: &str = "kiwano";
 
 /// A `models` entry the schema requires in full: catwalk's Model type pins ten
 /// required fields, and a short one makes Crush refuse the whole config. Costs

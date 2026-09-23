@@ -134,6 +134,11 @@ pub fn read_current_creds(agent: &str, home: &Path) -> Option<CurrentCreds> {
                 kiwano_adapters::gateway_takeover::read_crush_current(c)
             })
         }
+        // Droid's default `model` setting, resolved against customModels when
+        // it names a custom entry (an official model has no endpoint to read).
+        "droid" => read_additive_one(home.join(".factory").join("settings.json"), |c| {
+            kiwano_adapters::gateway_takeover::read_droid_current(c)
+        }),
         // claude-desktop: not extracted (MVP) — see module docs
         _ => None,
     }?;
@@ -707,6 +712,30 @@ custom_provider:
         )
         .unwrap();
         assert!(read_current_creds("crush", &home).is_none());
+    }
+
+    #[test]
+    fn droid_creds_resolve_the_default_custom_model() {
+        let home = temp_home("droid");
+        let dir = home.join(".factory");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"model":"deepseek-chat","customModels":[{"model":"deepseek-chat","displayName":"My DeepSeek","baseUrl":"https://api.deepseek.com/v1","apiKey":"sk-ds","provider":"generic-chat-completion-api"}]}"#,
+        )
+        .unwrap();
+        let creds = read_current_creds("droid", &home).expect("a routed configuration");
+        assert_eq!(creds.name.as_deref(), Some("My DeepSeek"));
+        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(creds.api_key, "sk-ds");
+
+        // An official default (no custom entry) extracts nothing.
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"model":"claude-sonnet-4-6"}"#,
+        )
+        .unwrap();
+        assert!(read_current_creds("droid", &home).is_none());
     }
 
     #[test]

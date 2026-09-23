@@ -8,14 +8,10 @@
 //! becomes the default chat model without claiming autocomplete or embed, and
 //! the user's own entries keep their positions behind it.
 
+use crate::gateway_takeover::gateway::{GATEWAY_LABEL, PLACEHOLDER_MODEL_ID};
 use serde_yaml::Value;
 
 // ── continue (~/.continue/config.yaml, fixed home location) ──
-
-const GATEWAY_MODEL_NAME: &str = "Kiwano Gateway";
-
-/// The model id a fresh config gets when the user's had nothing to copy from.
-const PLACEHOLDER_MODEL_ID: &str = "kiwano";
 
 /// The model id worth forwarding: the first entry that is a chat model (no
 /// `roles`, or `roles` containing `chat`). Continue's `model` field is the id
@@ -57,13 +53,13 @@ pub fn upsert_continue_gateway(content: &str, base_url: &str, key: &str) -> Resu
         .cloned()
         .unwrap_or_default();
     // A re-run replaces our entry rather than stacking a second one.
-    models.retain(|m| m.get("name").and_then(|n| n.as_str()) != Some(GATEWAY_MODEL_NAME));
+    models.retain(|m| m.get("name").and_then(|n| n.as_str()) != Some(GATEWAY_LABEL));
 
     let mut entry = serde_yaml::Mapping::new();
     let insert = |entry: &mut serde_yaml::Mapping, key: &str, value: Value| {
         entry.insert(Value::String(key.into()), value);
     };
-    insert(&mut entry, "name", Value::String(GATEWAY_MODEL_NAME.into()));
+    insert(&mut entry, "name", Value::String(GATEWAY_LABEL.into()));
     insert(&mut entry, "provider", Value::String("openai".into()));
     insert(
         &mut entry,

@@ -85,6 +85,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "aider"
                         | "continue"
                         | "crush"
+                        | "droid"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -210,6 +211,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // Crush's openai-compat providers carry the version root, the same
         // shape its own docs' DeepSeek example uses.
         "crush" => "/v1",
+        // Droid's `generic-chat-completion-api` provider is the OpenAI Chat
+        // Completions client — the version root is what `baseUrl` holds.
+        "droid" => "/v1",
         // MiniMax Code's official endpoint ends at the version root
         // (api.minimax.io/v1) and its custom-provider baseUrl is handed to the
         // same OpenAI-completions client — the root is required here too.
@@ -1091,6 +1095,40 @@ models:
         assert!(aux.load_takeover_backup("crush").is_none());
     }
 
+    /// Droid's takeover prepends the gateway model to `customModels` and makes
+    /// it the default `model`.
+    #[test]
+    fn droid_takeover_roundtrip() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let original = r#"{
+  "model": "claude-sonnet-4-6",
+  "reasoningEffort": "high"
+}"#;
+        let config = home.join(".factory").join("settings.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, original).unwrap();
+
+        enable(&aux, "droid", "kw-ag-droid-abcd", 8317, &home, &no_vars()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v["model"], "claude-sonnet-4-6");
+        let models = v["customModels"].as_array().unwrap();
+        assert_eq!(models[0]["displayName"], "Kiwano Gateway");
+        assert_eq!(models[0]["baseUrl"], "http://127.0.0.1:8317/v1");
+        assert_eq!(models[0]["apiKey"], "kw-ag-droid-abcd");
+        assert_eq!(v["reasoningEffort"], "high");
+
+        assert_eq!(
+            live_placeholder_key("droid", &home, &no_vars()).as_deref(),
+            Some("kw-ag-droid-abcd")
+        );
+
+        restore(&aux, "droid", &home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+        assert!(aux.load_takeover_backup("droid").is_none());
+    }
+
     /// A config that does not exist yet is created, and disabling removes it
     /// rather than leaving a zero-byte file the agent would read as broken.
     #[test]
@@ -1107,6 +1145,7 @@ models:
             ("aider", ".aider.conf.yml"),
             ("continue", ".continue/config.yaml"),
             ("crush", ".config/crush/crush.json"),
+            ("droid", ".factory/settings.json"),
             // Both of openclaw's files: the main config and the per-agent
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),

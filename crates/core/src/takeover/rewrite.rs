@@ -98,7 +98,7 @@ pub(crate) fn rewrite(
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
         "opencode" | "openclaw" | "hermes" | "pi" | "workbuddy" | "codebuddy" | "qwen" | "kimi"
-        | "cline" | "mimo" | "mcode" | "continue" | "crush" => {
+        | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" => {
             additive_rewrite(agent, path, original, target, key, now, sibling_config)
         }
         _ => Err("unsupported agent".into()),
@@ -185,6 +185,10 @@ fn additive_rewrite(
         // command persists, so the upsert fills that slot rather than adding a
         // second (the `small` summarization slot stays).
         "crush" => kiwano_adapters::gateway_takeover::upsert_crush_gateway(original, target, key),
+        // Droid's BYOK entries are one array; the upsert prepends ours and
+        // makes it the default `model` (the org-policy refusal lives in the
+        // adapter, where the setting is visible).
+        "droid" => kiwano_adapters::gateway_takeover::upsert_droid_gateway(original, target, key),
         // The two Kimi generations spell the same OpenAI shape differently:
         // the successor calls it `openai`, the Python original `kimi` — the
         // type whose dispatcher attaches the conversation's prompt_cache_key

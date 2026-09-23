@@ -168,6 +168,10 @@ pub(crate) fn takeover_paths(
         "crush" => Ok(vec![config_dir(vars, "XDG_CONFIG_HOME", ".config", home)?
             .join("crush")
             .join("crush.json")]),
+        // Droid keeps its settings in a fixed ~/.factory/settings.json — the
+        // docs name no relocation variable, only the legacy config.json it
+        // merges behind this one.
+        "droid" => Ok(vec![home.join(".factory").join("settings.json")]),
         // Cline resolves this one file through a three-level chain (read from
         // its own `sdk/packages/shared/src/storage/paths.ts`, which the docs do
         // not spell out): an exact file path, else a data directory, else a base

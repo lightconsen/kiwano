@@ -155,6 +155,7 @@ pub(crate) mod test_support {
                 "aider" => ".aider.conf.yml",
                 "continue" => ".continue/config.yaml",
                 "crush" => ".config/crush/crush.json",
+                "droid" => ".factory/settings.json",
                 other => panic!("no agent-config fixture for {other}"),
             };
             let path = dir.path().join(rel);

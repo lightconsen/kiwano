@@ -12,11 +12,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kiwano — Local-first AI Provider Manager</title>
-<meta name="description" content="Discover, compare and switch AI model providers locally; connect Claude Code, Codex and Grok Build to a local gateway in one click, metered per request — nothing leaves your machine.">
+<meta name="description" content="Discover, compare and switch AI providers locally. Connect Claude Code, Codex and Grok Build to a local gateway in one click — nothing leaves your machine.">
+<link rel="canonical" href="https://kiwano.cc/">
+<meta name="theme-color" content="#000000">
+<!-- Open Graph / Twitter:爬虫不执行 JS,卡片全部取自这里的静态值;
+     og:image 必须是绝对地址,相对路径在各家分享器里都拿不到图 -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://kiwano.cc/">
+<meta property="og:site_name" content="Kiwano">
 <meta property="og:title" content="Kiwano — Local-first AI Provider Manager">
 <meta property="og:description" content="Discover, compare and switch providers, take over your coding agents in one click; every request stays local, and your keys are never uploaded.">
-<meta property="og:image" content="assets/app-providers.png">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:image:width" content="2000">
+<meta property="og:image:height" content="1300">
+<meta property="og:image:alt" content="Kiwano's main screen: the local provider list">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Kiwano — Local-first AI Provider Manager">
+<meta name="twitter:description" content="Discover, compare and switch providers, take over your coding agents in one click; every request stays local, and your keys are never uploaded.">
+<meta name="twitter:image" content="https://kiwano.cc/assets/app-providers.png">
 <link rel="icon" type="image/svg+xml" href="assets/kiwano-logo.svg">
+<!-- 结构化数据:不写 softwareVersion——那会像 hero 版本行一样过期,而 sync-site 只盖得到它 -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Kiwano",
+  "url": "https://kiwano.cc/",
+  "description": "Local-first AI provider manager and gateway: discover, compare and switch providers; take over Claude Code, Codex, Grok Build and more in one click; every request stays on your machine.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS 12+, Windows 10+, Linux",
+  "downloadUrl": "https://kiwano.cc/#download",
+  "license": "https://github.com/lightconsen/kiwano/blob/main/LICENSE",
+  "sameAs": ["https://github.com/lightconsen/kiwano"],
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">

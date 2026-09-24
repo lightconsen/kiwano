@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 单页站点只有一个 URL;不写 lastmod——那会像 hero 版本行一样过期,改版时靠 git 历史回溯 -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://kiwano.cc/</loc>
+  </url>
+</urlset>

@@ -107,7 +107,7 @@ B 站再传一份给中文渠道。
 | 5.1 | r/ClaudeAI 主帖(体量最大)                    | `03-reddit.md` A 节 | 标题不带链接;正文开头自报 "oc, open source";**账号要有参与历史**,新号会被判 spam         |
 | 5.2 | r/ChatGPTCoding 变体(与 HN 错开 2~3 天后的第二条) | `03` B 节           | 用"我开源了一个工具"的真诚框架,别广告味                                           |
 | 5.3 | r/selfhosted(可选)                       | `03` C 节           | 视角换成**服务器模式**:install.sh + headless 网关 + `/metrics`,别以桌面 App 开场 |
-| 5.4 | **awesome-selfhosted** 提 PR            | `09` C 节           | 目标是 **`-data` 仓库**(展示仓是生成物,PR/issue 都被拦);用服务器形态投                |
+| 5.4 | ~~awesome-selfhosted 提 PR~~ **暂缓** | `09` C 节 | CONTRIBUTING 要求首次 release 满 4 个月(首 release 2026-09-10)→ **2027-01-10 再投**;另有"LLM 代写投稿封禁"条款,届时条目须手写 |
 
 ---
 
@@ -133,7 +133,7 @@ B 站再传一份给中文渠道。
 9/22  [ ] cc-switch Discussions 帖 + 当天回帖
 9/24 22:00  [ ] Show HN   [ ] X thread   [ ] 前 2 小时守评论
 9/26 20:00  [ ] V2EX「推广」节点
-9/27-28  [ ] Reddit ×2~3   [ ] awesome-selfhosted(-data 仓)
+9/27-28  [ ] Reddit ×2~3   [ ] ~~awesome-selfhosted~~ 暂缓(首 release 未满 4 个月,2027-01-10 再投)
 之后   [ ] 每版一帖   [ ] 周日晚汇总
 ```
 

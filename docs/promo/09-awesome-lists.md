@@ -18,7 +18,7 @@ CONTRIBUTING**。
 | --- | --- | --- | --- | --- |
 | awesome-claude-code | **网页 issue 表单**,不是 PR | ≥14 天(首个 commit 起)且有持续开发 **或** ≥100 star | 首 commit 2026-09-07,持续开发中,0 star → 走 14 天路线 | **2026-09-21** |
 | awesome-tauri | ~~PR~~ | **不再接受应用投稿**(2026-08-24 起) | Kiwano 是桌面应用 → **不投** | — |
-| awesome-selfhosted | PR 到 **`-data` 仓库** | FOSS + 可自托管 + 有许可证 + 持续维护 | GPL-3.0、headless 网关可自托管 | 随时(建议 HN 之后) |
+| awesome-selfhosted | PR 到 **`-data` 仓库** | FOSS + 可自托管 + 有许可证 + 持续维护 + **首次 release 满 4 个月** | GPL-3.0、headless 网关可自托管;首次 release 2026-09-10 | **2027-01-10**(见 C 节) |
 
 ---
 
@@ -108,52 +108,60 @@ Kiwano 本身不属于任何一类。**结论:放弃这个列表,别硬投。**
 
 ---
 
-## C. awesome-selfhosted
+## C. awesome-selfhosted —— **暂缓,最早 2027-01-10**(2026-09-24 读 CONTRIBUTING 修正)
 
 仓库:**提交目标是 `awesome-selfhosted/awesome-selfhosted-data`**
 
-### 规则(原文要点)
+### ❌ 硬门槛:首次 release 满 4 个月
 
-- 展示仓库 `awesome-selfhosted/awesome-selfhosted` 是**只读生成物**:
-  **PR 和 issue 都被模板拦下**,README 是自动生成的,改它没用。
-  所有内容变更都提到 **`awesome-selfhosted-data`**。
-- 条目格式(注意许可证和语言用反引号包住):
+CONTRIBUTING 的标准回复原文:"Any software project you are adding was first
+released **more than 4 months ago**." 违反会被原样模板回复后关单。
 
-```markdown
-- [Name](homepage) - Description. ([Demo](url), [Source Code](url)) `LICENSE` `Language`
-```
+- Kiwano 首次 release:**2026-09-10**(GitHub API 实测)
+- → 最早可投稿:**2027-01-10**(4 个月整点后,按小时计别按日历日提前)
 
-- 描述 **≤250 字符**、以句号结尾、不要营销腔。
-- 必须是**自由开源软件且有明确许可证**;必须**可自托管**、不依赖第三方服务兜底;
-  长期无开发(6~12 个月)会被移出。
-- 维护方跑 CI 查死链和许可证,所以 LICENSE 必须规范可识别(Kiwano 是 GPL-3.0 ✓)。
+### 其他要点(2027-01 投稿前仍然适用,到时重读一遍 CONTRIBUTING)
 
-### Kiwano 的切入点
+- **"Machine/LLM-generated contributions are not allowed and will result in a
+  ban."** —— 投稿时的 yml 条目和 PR 描述必须**自己手写**,不许贴 AI 起草的文本。
+  本文下面的建议条目只能当内容参考,措辞自己来,否则是封禁级风险。
+- 提交方式:在 `software/` 下新建 **`kiwano.yml`**(kebab-case),模板抄
+  `.github/ISSUE_TEMPLATES/addition.md`,删掉注释和未用字段;commit message 写
+  `add Kiwano`;选 "Create a new branch" 再开 PR。
+- tag 必须用**已有 tag**(任何 tag 需 ≥3 个项目引用,新 tag 门槛高),优先找
+  Generative AI / LLM 网关类;找不到就 Miscellaneous。**单页模式下条目只出现在
+  tags 列表的第一个分类**,选第一个要慎重。
+- 描述规则:**避免 "open-source / free / self-hosted" 这类冗余词**(列表本身已隐含);
+  用短句(如 "Minimalist text adventure game" 而非 "A minimalist…");若主打
+  替代品,结尾加 `(alternative to X, Y)`。
+- 描述 **≤250 字符**、以句号结尾。必须是 FOSS + 可自托管;长期无开发(6~12 个月)
+  会被移出。
+- 展示仓库 `awesome-selfhosted` 是只读生成物,PR/issue 都被拦,一切改动去
+  `-data` 仓。
 
-**用服务器形态投,不要用桌面 App 投。** 自托管社区的判断标准是"能不能自己跑起来",
-而 Kiwano 的 headless 形态正好是:
+### Kiwano 的切入点(届时照旧)
+
+**用服务器形态投,不要用桌面 App 投。** "What does not qualify" 里明确排除
+"desktop/mobile/CLI application which relies on a separate server program"——
+所以条目必须以 headless 网关开场:
 
 - 一条命令安装:`curl -fsSL https://hub.kiwano.cc/install.sh | sh`
 - 用户级 systemd 服务,免 root
 - `kiwano` CLI 管 Provider / 路由 / 接管 / 日志 / 导出配置
 - `/health` 与 `/metrics`(Prometheus 文本)可直接接监控
 
-第一段就把"headless 网关 + CLI"放前面,桌面 App 只作为"同一个 crate 的另一个前端"提一句——
-这是 r/selfhosted 和这个列表共同的偏好,顺序写反了会被当成"桌面软件来蹭榜单"。
+桌面 App 只作为"同一个 core crate 的另一个前端"提一句。
 
-### 建议条目(插入时按字母序)
+### 届时的条目骨架(仅内容参考,措辞必须自己重写)
 
-```markdown
-- [Kiwano](https://kiwano.cc/) - Local-first AI gateway that routes coding agents through the providers you already have, with failover strategies and per-request cost metering. ([Source Code](https://github.com/lightconsen/kiwano)) `GPL-3.0` `Rust`
+```yaml
+# 内容要点:local AI gateway; routes coding agents through providers you
+# already have; failover strategies; per-request cost metering; /metrics。
+# 语言 Rust;许可 GPL-3.0;首页 kiwano.cc;源码 github.com/lightconsen/kiwano
 ```
 
-### 投稿前必做
-
-1. 打开 `awesome-selfhosted-data` 的 CONTRIBUTING,确认当前的字段模板与分类名
-   (分类结构时有调整,别照抄本文的猜测)。
-2. 确认要挂的分类:优先找"Generative AI / LLM 网关"或"API 管理"这类既有分类,
-   **不要自己新建分类**。
-3. 确认描述里的链接(kiwano.cc、install.sh)都活着。
+> 旧版这里的 markdown 条目样例已删除——它正是"LLM 代写文本"的形态,2027-01
+> 投稿时按上面要点自己写。
 
 ---
 
@@ -184,7 +192,7 @@ GitHub 上搜 `topic:awesome-list` 加上你的关键词,例如:
 | --- | --- |
 | 即刻 | awesome-tauri 提 PR(无门槛,先落袋) |
 | 2026-09-21 起 | awesome-claude-code 走网页表单提交(14 天门槛已满足) |
-| Show HN 之后 2~3 天 | awesome-selfhosted 提 PR(HN 有热度时更容易被人工过审) |
+| Show HN 之后 2~3 天 | ~~awesome-selfhosted 提 PR~~ **暂缓**——首次 release 不满 4 个月,2027-01-10 再投(见 C 节) |
 | 任意晚些时候 | Product Hunt / AlternativeTo(可选) |
 
 ## 附:提交后别做的事

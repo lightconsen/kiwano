@@ -123,6 +123,23 @@ pub(crate) mod test_support {
         (dir, home)
     }
 
+    /// Goose's config root as `takeover_paths` resolves it on this platform:
+    /// the etcetera strategy lands on `Library/Application Support/Block` on
+    /// macOS and on the XDG config dir elsewhere. The goose tests assert
+    /// against the same root the takeover writes, so this is the one
+    /// definition of it — a hardcoded macOS path passed CI on a Mac and
+    /// failed everywhere else.
+    pub(crate) fn goose_test_root(home: &Path) -> PathBuf {
+        crate::takeover::paths::takeover_paths("goose", home, &no_vars())
+            .expect("goose paths resolve")
+            .into_iter()
+            .next()
+            .expect("goose lists config.yaml first")
+            .parent()
+            .expect("config.yaml sits in the root")
+            .to_path_buf()
+    }
+
     /// Restore with no provider to rebuild from. This is the plain "put my
     /// config back" call; the degradation chain's middle tier is exercised by
     /// the tests that pass a [`ProviderRoute`](crate::takeover::ProviderRoute) explicitly.

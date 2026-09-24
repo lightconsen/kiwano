@@ -280,7 +280,7 @@ mod tests {
     use crate::takeover::disable;
     use crate::takeover::state::{ProviderRoute, RestoreOutcome};
     use crate::takeover::test_support::{
-        no_vars, restore, temp_home, write_codex_config, CODEX_ORIGINAL,
+        goose_test_root, no_vars, restore, temp_home, write_codex_config, CODEX_ORIGINAL,
     };
     use serde_json::Value;
 
@@ -1157,11 +1157,7 @@ models:
     fn goose_takeover_roundtrip_writes_the_three_files() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
-        let root = home
-            .join("Library")
-            .join("Application Support")
-            .join("Block")
-            .join("goose");
+        let root = goose_test_root(&home);
 
         enable(&aux, "goose", "kw-ag-goose-abcd", 8317, &home, &no_vars()).unwrap();
 
@@ -1213,11 +1209,7 @@ models:
     fn goose_takeover_roundtrip_restores_the_users_bytes() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
-        let root = home
-            .join("Library")
-            .join("Application Support")
-            .join("Block")
-            .join("goose");
+        let root = goose_test_root(&home);
         let original =
             "# goose's own settings\nGOOSE_PROVIDER: anthropic\nGOOSE_MODEL: claude-sonnet-4-6\n";
         std::fs::create_dir_all(&root).unwrap();

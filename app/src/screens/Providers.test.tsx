@@ -144,8 +144,20 @@ function renderCodexTab(over: {
   apiMock.listProviders.mockResolvedValue(over.providers);
   apiMock.getAgentRoutes.mockResolvedValue(over.routes);
   apiMock.getSettings.mockResolvedValue(settingsWith(over.codexTakenOver, over.custom));
-  return render(<Providers onAdd={() => {}} onEdit={() => {}} initialAgent="codex" />);
+  // The strip only shows agents the probe found installed (or ones already
+  // routed) — the codex tab needs codex in the detection result to exist.
+  return render(
+    <Providers
+      onAdd={() => {}}
+      onEdit={() => {}}
+      initialAgent="codex"
+      agentDetect={codexInstalled}
+    />,
+  );
 }
+
+/** Detection for the codex-tab tests: codex installed, the rest not. */
+const codexInstalled = [{ agent: "codex", installed: true, path: "/bin/codex" }];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -1330,7 +1342,14 @@ describe("taking an agent over", () => {
     apiMock.listProviders.mockResolvedValue([deepseek()]);
     apiMock.getAgentRoutes.mockResolvedValue([]);
     apiMock.getSettings.mockResolvedValue(settingsWith(false, []));
-    render(<Providers onAdd={() => {}} onEdit={() => {}} initialAgent="codex" />);
+    render(
+      <Providers
+        onAdd={() => {}}
+        onEdit={() => {}}
+        initialAgent="codex"
+        agentDetect={codexInstalled}
+      />,
+    );
 
     await userEvent.setup().click(
       await screen.findByRole("button", { name: en.providers.enableKiwano }),

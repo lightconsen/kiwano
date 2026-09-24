@@ -73,8 +73,11 @@ export function ProviderTable({
       {notTakenOver ? (
         <AgentOnboarding
           agent={seg}
+          // No detection answer yet is no evidence of installation: the
+          // honest default is "not confirmed", which only affects the OAuth
+          // note's visibility.
           installed={
-            agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
+            agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : false
           }
           takenOver={false}
           busy={enabling}
@@ -145,7 +148,7 @@ export function ProviderTable({
               agent={seg}
               kind={custom ? "route" : "takeover"}
               installed={
-                agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : true
+                agentDetect ? (agentDetect.find((d) => d.agent === seg)?.installed ?? false) : false
               }
               takenOver={true}
               busy={enabling}

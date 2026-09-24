@@ -2,7 +2,7 @@
 //
 // The container: it owns the screen's state, the reads and the effects behind
 // it, and composes the pieces that live in `screens/Providers/`.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api/client";
 import { LoadFailed, errText } from "../components/LoadFailed";
@@ -42,7 +42,8 @@ export default function Providers({
 }: {
   onAdd: () => void;
   onEdit: (p: Provider) => void;
-  /** Phase 1 detection result; null = probe unavailable → show every agent */
+  /** Phase 1 detection result; null = probe not answered yet → the strip shows
+      only taken-over and user-defined agents until it does */
   agentDetect?: AgentDetect[] | null;
   /** Phase 2 versions by agent id (arrive async, tooltip only) */
   agentVersions?: Partial<Record<AgentRef, string>>;
@@ -131,10 +132,18 @@ export default function Providers({
     return () => window.clearInterval(t);
   }, []);
 
-  // Adopt a deep-linked segment arriving while mounted (App re-parses the hash)
+  // Adopt a deep-linked segment arriving while mounted (App re-parses the
+  // hash). Only a *change of* initialAgent adopts — the initial value rides
+  // in through the useState initializer above, so reacting to `seg` here
+  // would fight the visibility clip below (an initialAgent the strip cannot
+  // show — say the probe found nothing — would bounce all↔agent forever).
+  const prevInitial = useRef(initialAgent);
   useEffect(() => {
-    if (initialAgent && initialAgent !== seg) setSeg(initialAgent);
-  }, [initialAgent, seg]);
+    if (initialAgent && initialAgent !== prevInitial.current) {
+      prevInitial.current = initialAgent;
+      setSeg(initialAgent);
+    }
+  }, [initialAgent]);
 
   // Returns what it started, so a caller with a spinner can await it — the app's
   // own reload does (`lib/reload.ts`). Nothing else awaits it: the mutations that
@@ -304,17 +313,20 @@ export default function Providers({
     return [all, ...[...builtins, ...custom].sort((a, b) => group(a.id) - group(b.id))];
   }, [customAgents, takenOver]);
 
-  // Only agents that phase 1 detected as installed get a segment; a failed
-  // probe (null) keeps every agent visible — and a user-defined agent always
-  // shows, since it has no installation to detect.
+  // Only agents the probe found installed get a segment, plus the user's own
+  // (which have no installation to detect). `agentDetect === null` is the
+  // probe not having answered — no evidence of installation, and no reason to
+  // show an agent that is probably not on the machine — so until it answers,
+  // the strip is the user's custom agents only. A taken-over agent whose
+  // binary has vanished reads the same way: no requests can be flowing, so
+  // detection, not the takeover state, gates the tab.
   const visibleSegments = useMemo(
     () =>
       segments.filter(
         (s) =>
           s.id === "all" ||
           customAgents.some((a) => a.id === s.id) ||
-          !agentDetect ||
-          agentDetect.find((d) => d.agent === s.id)?.installed,
+          (agentDetect?.find((d) => d.agent === s.id)?.installed ?? false),
       ),
     [segments, customAgents, agentDetect],
   );

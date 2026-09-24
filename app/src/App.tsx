@@ -249,7 +249,9 @@ export default function App() {
   // refresh does the first, the declare dialog's "check again" the second. It is
   // the slowest part of that click by far: a login shell plus one subprocess per
   // agent. `null` is "the probe did not run", which is not the same answer as an
-  // empty list and must not be read as "nothing is installed".
+  // empty list — and it is no evidence of installation either: until the probe
+  // answers, the Apps strip shows only the taken-over and user-defined agents,
+  // so a tool that is not on the machine is never offered for takeover.
   const detectAgents = useCallback(() => {
     return api
       .detectAgents()

@@ -408,6 +408,46 @@ mod tests {
     use crate::vm::Aux;
     use kiwanod::store::Billing;
 
+    /// The takeover reference table in `docs/agent-takeover.md` is the user's
+    /// answer to "what does a takeover write" — and prose is where
+    /// documentation drifts. This pins the table to the registry: every
+    /// built-in agent must have a row there, and every row must name a
+    /// built-in. Adding an agent without adding its row fails here, in CI,
+    /// instead of in a user's trust.
+    #[test]
+    fn the_docs_takeover_table_lists_every_builtin_agent() {
+        let docs =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/agent-takeover.md");
+        let text = std::fs::read_to_string(&docs).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {} — the takeover table must ship with the registry: {e}",
+                docs.display()
+            )
+        });
+        let in_docs: Vec<&str> = text
+            .lines()
+            .filter(|l| l.starts_with("| `"))
+            .filter_map(|l| l.split('|').nth(1))
+            .map(|cell| cell.trim().trim_matches('`'))
+            .collect();
+        assert!(
+            !in_docs.is_empty(),
+            "the takeover table parsed to nothing — check its format"
+        );
+        for (id, _) in AGENTS {
+            assert!(
+                in_docs.contains(&id),
+                "{id} is a built-in agent but has no row in docs/agent-takeover.md"
+            );
+        }
+        for id in in_docs {
+            assert!(
+                is_builtin_agent(id),
+                "docs/agent-takeover.md lists `{id}`, which the registry does not know"
+            );
+        }
+    }
+
     /// A user-defined agent is a route and nothing else: a row, a key and a
     /// strategy. It needs no config file to route — the empty temp home below is
     /// the proof, since a built-in agent with the same binding reads as dormant

@@ -16,6 +16,8 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 
 **30-second demo: https://youtu.be/M0pO79Wlx-s**
 
+**Docs:** [Getting started](docs/getting-started.md) · [Agent takeover](docs/agent-takeover.md) · [Strategies & limits](docs/strategies.md) · [Custom agents](docs/custom-agents.md) · [CLI reference](docs/cli.md) (中文：[快速上手](docs/getting-started.zh-CN.md) · [Agent 接管](docs/agent-takeover.zh-CN.md) · [策略与限额](docs/strategies.zh-CN.md))
+
 ![Kiwano's Apps screen: providers with their bound agents, usage and quota for the day](docs/screenshots/apps.png)
 
 > Captured from the development build with its bundled sample data set.
@@ -23,7 +25,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 ## Features
 
 - **Provider management** — add, edit, switch and delete provider configs. Route with `single`, `failover`, `roundrobin`, `timewindow` or `quota` strategies, each with its own candidate weights and windows. Under any strategy but `single`, a request that fails is replayed against the next candidate instead of being handed back as your problem.
-- **Agent takeover** — connect Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes, Pi, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code and Cline to the local gateway in one click. Each agent's original config is backed up and restored when you switch it off.
+- **Agent takeover** — connect any of **22 built-in agents** to the local gateway in one click: Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes, Pi, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code, Cline, MiMo Code, MiniMax Code, Aider, Continue, Crush, Droid, Goose and ZCode. Each agent's original config is backed up and restored when you switch it off.
 - **Local gateway** — one always-on port, and protocol normalization (anthropic / openai) so an OpenAI-compatible provider can serve Claude Code. Gemini CLI's native API is forwarded as a third protocol, passed through rather than translated, so it reaches Google unchanged while the gateway meters it. Hot-reloads on change; the daemon outlives the GUI, and a stream that stalls is abandoned with an error rather than left to hang.
 - **Usage and cost** — trends for requests and tokens over today, 7, 30 days or all time, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts. Each stat compares the window with the one before it, and the numbers refresh the moment a request lands — no clicking to see what just happened.
 - **Models shelf** — the Kiwano Hub catalog of 24 providers (23 first-party, plus the OpenRouter aggregator), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
@@ -39,7 +41,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 | | Kiwano | cc-switch | LiteLLM / a hosted gateway |
 | --- | --- | --- | --- |
 | Shape | Desktop app + local gateway + CLI | Switches Claude Code's config | Always-on server |
-| Agents covered | 14, taken over in one click and restored | Mainly the Claude Code ecosystem | Only clients you wired up yourself |
+| Agents covered | 22, taken over in one click and restored | Mainly the Claude Code ecosystem | Only clients you wired up yourself |
 | Local-first | Everything on your machine, no telemetry | Local | Keys live on the server |
 | Routing | 5 strategies; a failed request replays against the next candidate | Switches, does not route | Depends on the implementation |
 | Cost metering | Per provider × per agent, with quota rings and alerts | No | Usually |

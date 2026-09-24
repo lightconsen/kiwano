@@ -157,7 +157,10 @@ function renderCodexTab(over: {
 }
 
 /** Detection for the codex-tab tests: codex installed, the rest not. */
-const codexInstalled = [{ agent: "codex", installed: true, path: "/bin/codex" }];
+/** Detection for the codex-tab tests: codex installed, the rest not. */
+const codexInstalled: AgentDetect[] = [
+  { agent: "codex", installed: true, path: "/bin/codex" },
+];
 
 beforeEach(() => {
   vi.clearAllMocks();

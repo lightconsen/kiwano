@@ -120,6 +120,16 @@ section { scroll-margin-top: 76px; }
 .dl-row { margin-top: 34px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
 .dl-note { margin-top: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--mut); letter-spacing: 0.02em; }
 .dl-note b { color: oklch(0.70 0.02 260); font-weight: 500; }
+/* the agents one port serves: logos only, one row (scrolls sideways on
+   narrow screens rather than wrapping — the row is the point) */
+.agents-row {
+  margin-top: 16px; display: flex; justify-content: center; align-items: center;
+  gap: 11px; flex-wrap: nowrap; overflow-x: auto; padding: 2px 16px 4px;
+  scrollbar-width: none;
+}
+.agents-row::-webkit-scrollbar { display: none; }
+.agents-row img { width: 21px; height: 21px; object-fit: contain; opacity: 0.78; flex: none; }
+.agents-row img:hover { opacity: 1; }
 
 /* Hero 截图:窗框 + kiwi 微光 */
 .shot {
@@ -520,6 +530,31 @@ footer { padding: 56px 0 44px; }
       <a class="btn btn-lg" href="#download-linux"><svg class="icon"><use href="#i-linux"/></svg>Linux</a>
     </div>
     <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note">v0.1.10 · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source</p>
+    <!-- every agent the gateway takes over, logos only (names on hover) -->
+    <div class="agents-row rv" style="--d:300ms" aria-label="Supported agents">
+      <img src="assets/agent-logos/claudecode.svg" title="Claude Code" alt="Claude Code">
+      <img src="assets/agent-logos/codex.svg" title="Codex" alt="Codex">
+      <img src="assets/agent-logos/gemini.svg" title="Gemini CLI" alt="Gemini CLI">
+      <img src="assets/agent-logos/grokbuild.svg" title="Grok Build" alt="Grok Build">
+      <img src="assets/agent-logos/claude.svg" title="Claude Desktop" alt="Claude Desktop">
+      <img src="assets/agent-logos/opencode.webp" title="OpenCode" alt="OpenCode">
+      <img src="assets/agent-logos/openclaw.svg" title="OpenClaw" alt="OpenClaw">
+      <img src="assets/agent-logos/hermes.png" title="Hermes" alt="Hermes">
+      <img src="assets/agent-logos/pi.svg" title="Pi" alt="Pi">
+      <img src="assets/agent-logos/workbuddy.svg" title="WorkBuddy" alt="WorkBuddy">
+      <img src="assets/agent-logos/codebuddy.svg" title="CodeBuddy Code" alt="CodeBuddy Code">
+      <img src="assets/agent-logos/kimi.webp" title="Kimi Code CLI" alt="Kimi Code CLI">
+      <img src="assets/agent-logos/qwen.svg" title="Qwen Code" alt="Qwen Code">
+      <img src="assets/agent-logos/cline.svg" title="Cline" alt="Cline">
+      <img src="assets/agent-logos/mimo.svg" title="MiMo Code" alt="MiMo Code">
+      <img src="assets/agent-logos/minimax.svg" title="MiniMax Code" alt="MiniMax Code">
+      <img src="assets/agent-logos/aider.svg" title="Aider" alt="Aider">
+      <img src="assets/agent-logos/continue.svg" title="Continue" alt="Continue">
+      <img src="assets/agent-logos/crush.svg" title="Crush" alt="Crush">
+      <img src="assets/agent-logos/droid.svg" title="Droid" alt="Droid">
+      <img src="assets/agent-logos/goose.svg" title="Goose" alt="Goose">
+      <img src="assets/agent-logos/zcode.svg" title="ZCode" alt="ZCode">
+    </div>
     <figure class="shot rv" style="--d:300ms">
       <img src="assets/app-providers.png" width="2000" height="1300" alt="Kiwano's main screen: the local provider list, showing each provider's bound agents, 7-day usage and quota, and status" fetchpriority="high">
     </figure>

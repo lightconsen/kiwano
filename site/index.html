@@ -46,7 +46,64 @@
   "downloadUrl": "https://kiwano.cc/#download",
   "license": "https://github.com/lightconsen/kiwano/blob/main/LICENSE",
   "sameAs": ["https://github.com/lightconsen/kiwano"],
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "keywords": "AI provider manager, local AI gateway, local-first, provider switching, agent takeover, Claude Code, Codex, Gemini CLI, Grok Build, provider failover, round robin, time window routing, quota cutover, API key management, token usage tracking, cost dashboard, request logs, MCP, cc-switch import, headless CLI, open source"
+}
+</script>
+<!-- FAQPage:问题与答案逐字取自页内可见英文(带 code 标记的只去标签)。
+     Google 的 FAQ 富摘要 2023 年起只对政府/健康站开放,这里的收益在
+     语义理解与 AI 搜索引擎对问答对的抓取,不在富摘要本身。 -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is Kiwano?",
+      "acceptedAnswer": { "@type": "Answer", "text": "A free, open-source, local-first AI provider manager: a desktop app plus a local API gateway that routes your coding agents' requests to any AI provider — nothing goes through the cloud. Runs on macOS, Windows and Linux." }
+    },
+    {
+      "@type": "Question",
+      "name": "Which coding agents does it support?",
+      "acceptedAnswer": { "@type": "Answer", "text": "22 today: Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Cline, Aider, Continue, Crush, Droid, Goose, Pi, Hermes, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code, MiMo Code, MiniMax Code and ZCode. One click points each agent's base_url at the gateway; flipping the switch off restores the original config, anytime." }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the local gateway work?",
+      "acceptedAnswer": { "@type": "Answer", "text": "It is one resident port at 127.0.0.1:8317 that normalizes the Anthropic and OpenAI protocols, routing and metering every request with automatic failover. Agents keep a single configuration — switching providers never touches their config files again." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can one agent use several providers at once?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Bind a set of candidate providers to any agent and pick a strategy: failover (priority order, automatic recovery), roundrobin, timewindow (subscription overnight, pay-as-you-go by day) or quota (spend caps per period). The gateway enforces it per request, effective immediately." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it track token usage and cost?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Every request is metered into a local SQLite database: 7-day trends of requests, tokens, cost and latency, attributed per provider and agent, drillable down to a single request, with CSV export. An optional MCP server lets your agents query their own usage." }
+    },
+    {
+      "@type": "Question",
+      "name": "Do my API keys ever leave my machine?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Keys live in a local database and are never uploaded; requests go direct from your machine to the provider — no cloud relay. The gateway only routes keys it issued itself, so a hand-edited base_url gets a 401, not a leak." }
+    },
+    {
+      "@type": "Question",
+      "name": "I use cc-switch — can I migrate?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes, in one click. Kiwano imports your cc-switch config and brings providers and agent bindings along as-is — and adds what cc-switch does not have: the local gateway, the provider catalog and usage analytics." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can it run headless, on a server?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI does everything the desktop app does: one command installs the client and gateway and registers the gateway as a systemd service (no root; database in ~/.kiwano), then kiwano agents takeover points your agents at it." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Kiwano free?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Completely — no account, works offline. Open source under GPL-3.0-or-later." }
+    }
+  ]
 }
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -472,6 +529,30 @@ section.block { padding: 96px 0 0; }
 .dl-foot { text-align: center; margin-top: 26px; font-size: 13px; color: var(--mut); }
 .dl-foot .dot { display: inline-block; width: 5px; height: 5px; border-radius: 999px; background: var(--kiwi); margin: 0 7px 1px; vertical-align: middle; }
 
+/* ── FAQ:details 原生折叠,加号旋转 45° 即变 ×;无 JS 依赖 ── */
+.grid-faq { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.faq {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  overflow: hidden; transition: border-color .15s;
+}
+.faq:hover { border-color: oklch(0.36 0.02 260 / 0.9); }
+.faq summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px; font-size: 14.5px; font-weight: 600; line-height: 1.45;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq .plus {
+  margin-left: auto; flex: none; width: 22px; height: 22px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--kiwi-soft); color: var(--kiwi);
+  font-family: var(--font-mono); font-size: 14px; line-height: 1;
+  transition: transform .2s;
+}
+.faq[open] summary { border-bottom: 1px solid var(--line); }
+.faq[open] .plus { transform: rotate(45deg); }
+.faq .ans { padding: 14px 18px 16px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.faq .ans code { font-family: var(--font-mono); font-size: 12px; color: oklch(0.72 0.02 260); }
+
 /* ── 隐私承诺 ── */
 .privacy { margin-top: 96px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: oklch(0.09 0.006 260 / 0.8); }
 .privacy-inner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 34px 0; }
@@ -499,7 +580,7 @@ footer { padding: 56px 0 44px; }
 }
 @media (max-width: 640px) {
   .nav-links { display: none; }
-  .grid-feats, .steps, .grid-strat, .dl-grid, .privacy-inner { grid-template-columns: 1fr; }
+  .grid-feats, .steps, .grid-strat, .grid-faq, .dl-grid, .privacy-inner { grid-template-columns: 1fr; }
   .hero { padding-top: 64px; }
   .dl-row .btn { flex: 1 1 100%; }
 }
@@ -536,6 +617,7 @@ footer { padding: 56px 0 44px; }
       <a href="#screens" data-i18n="nav.screens">Screens</a>
       <a href="#how" data-i18n="nav.how">How it works</a>
       <a href="#server" data-i18n="nav.server">Server</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
       <a href="https://github.com/lightconsen/kiwano/blob/main/docs/getting-started.md" data-i18n="nav.docs">Docs</a>
       <a href="#download" data-i18n="nav.download">Download</a>
     </div>
@@ -825,6 +907,55 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
+  <!-- ══ FAQ ══ -->
+  <section class="block" id="faq">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">FAQ</div>
+        <h2 data-i18n="faq.h2">Questions people ask before switching</h2>
+        <p data-i18n="faq.p">The gateway, provider routing and what stays on your machine — in short answers.</p>
+      </div>
+      <div class="grid-faq">
+        <details class="faq rv">
+          <summary><span data-i18n="fq1.t">What is Kiwano?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq1.d">A free, open-source, local-first AI provider manager: a desktop app plus a local API gateway that routes your coding agents' requests to any AI provider — nothing goes through the cloud. Runs on macOS, Windows and Linux.</p>
+        </details>
+        <details class="faq rv" style="--d:60ms">
+          <summary><span data-i18n="fq2.t">Which coding agents does it support?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq2.d">22 today: Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Cline, Aider, Continue, Crush, Droid, Goose, Pi, Hermes, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code, MiMo Code, MiniMax Code and ZCode. One click points each agent's base_url at the gateway; flipping the switch off restores the original config, anytime.</p>
+        </details>
+        <details class="faq rv" style="--d:120ms">
+          <summary><span data-i18n="fq3.t">How does the local gateway work?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq3.d">It is one resident port at <code>127.0.0.1:8317</code> that normalizes the Anthropic and OpenAI protocols, routing and metering every request with automatic failover. Agents keep a single configuration — switching providers never touches their config files again.</p>
+        </details>
+        <details class="faq rv" style="--d:180ms">
+          <summary><span data-i18n="fq4.t">Can one agent use several providers at once?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq4.d">Yes. Bind a set of candidate providers to any agent and pick a strategy: <code>failover</code> (priority order, automatic recovery), <code>roundrobin</code>, <code>timewindow</code> (subscription overnight, pay-as-you-go by day) or <code>quota</code> (spend caps per period). The gateway enforces it per request, effective immediately.</p>
+        </details>
+        <details class="faq rv">
+          <summary><span data-i18n="fq5.t">Does it track token usage and cost?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq5.d">Every request is metered into a local SQLite database: 7-day trends of requests, tokens, cost and latency, attributed per provider and agent, drillable down to a single request, with CSV export. An optional MCP server lets your agents query their own usage.</p>
+        </details>
+        <details class="faq rv" style="--d:60ms">
+          <summary><span data-i18n="fq6.t">Do my API keys ever leave my machine?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq6.d">No. Keys live in a local database and are never uploaded; requests go direct from your machine to the provider — no cloud relay. The gateway only routes keys it issued itself, so a hand-edited base_url gets a 401, not a leak.</p>
+        </details>
+        <details class="faq rv" style="--d:120ms">
+          <summary><span data-i18n="fq7.t">I use cc-switch — can I migrate?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq7.d">Yes, in one click. Kiwano imports your cc-switch config and brings providers and agent bindings along as-is — and adds what cc-switch does not have: the local gateway, the provider catalog and usage analytics.</p>
+        </details>
+        <details class="faq rv" style="--d:180ms">
+          <summary><span data-i18n="fq8.t">Can it run headless, on a server?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq8.d">Yes. The CLI does everything the desktop app does: one command installs the client and gateway and registers the gateway as a systemd service (no root; database in <code>~/.kiwano</code>), then <code>kiwano agents takeover</code> points your agents at it.</p>
+        </details>
+        <details class="faq rv" style="--d:240ms">
+          <summary><span data-i18n="fq9.t">Is Kiwano free?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq9.d">Completely — no account, works offline. Open source under GPL-3.0-or-later.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
   <!-- ══ 隐私承诺 ══ -->
   <div class="privacy">
     <div class="wrap privacy-inner">
@@ -866,6 +997,7 @@ const I18N = {
     "nav.server": "服务器",
     "nav.docs": "文档",
     "nav.download": "下载",
+    "nav.faq": "常见问题",
     "nav.dlbtn": "下载",
     "hero.badge": "本地优先 · API 请求不经过任何云端",
     "hero.h1": "一个入口,管好你的<br>所有 <em>AI 供应商</em>",
@@ -933,6 +1065,26 @@ const I18N = {
     "srv.f1": "无需 root",
     "srv.f2": "systemd 服务",
     "srv.f3": "完整命令参考见文档",
+    "faq.h2": "换过来之前,大家先问这些",
+    "faq.p": "网关、供应商路由、什么留在本机——都用短答案说清。",
+    "fq1.t": "Kiwano 是什么?",
+    "fq1.d": "免费开源、本地优先的 AI 供应商管理器:桌面应用加本地 API 网关,把编码 Agent 的请求路由到任意 AI 供应商——不经过任何云端。支持 macOS、Windows、Linux。",
+    "fq2.t": "支持哪些编码 Agent?",
+    "fq2.d": "目前 22 个:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、ZCode。一键把每个 Agent 的 base_url 指向网关;关掉开关随时还原原始配置。",
+    "fq3.t": "本地网关是怎么工作的?",
+    "fq3.d": "一个常驻端口 <code>127.0.0.1:8317</code>,归一化 Anthropic 与 OpenAI 协议,逐请求路由、计量,故障自动转移。Agent 配置一次到位——之后换供应商不再碰它的配置文件。",
+    "fq4.t": "一个 Agent 能同时用多家供应商吗?",
+    "fq4.d": "可以。给任意 Agent 绑定一组候选供应商并选择策略:<code>failover</code>(按优先级,自动恢复)、<code>roundrobin</code>(轮询)、<code>timewindow</code>(时间窗:深夜走套餐、白天走按量)或 <code>quota</code>(按周期设消费上限)。网关逐请求执行,调整即时生效。",
+    "fq5.t": "会记录 token 用量和费用吗?",
+    "fq5.d": "每个请求都计量进本地 SQLite:请求、token、费用、延迟的 7 天趋势,按供应商与 Agent 归因,可下钻到单次请求,支持 CSV 导出。可选 MCP 让 Agent 查询自己的用量。",
+    "fq6.t": "API Key 会离开我的电脑吗?",
+    "fq6.d": "不会。Key 存于本机数据库,永不上传;请求由本机直连供应商,不经云端中转。网关只路由自己签发的 Key,手改 base_url 只会得到 401,而不是泄露。",
+    "fq7.t": "我在用 cc-switch,能迁移吗?",
+    "fq7.d": "可以,一键导入。Kiwano 读取 cc-switch 配置,供应商与 Agent 绑定关系原样带过来——并加上 cc-switch 没有的:本地网关、供应商目录与用量统计。",
+    "fq8.t": "能在服务器上无桌面运行吗?",
+    "fq8.d": "可以。CLI 能做桌面应用的每一件事:一条命令安装客户端与网关,并注册为 systemd 服务(无需 root;数据库在 <code>~/.kiwano</code>),然后 <code>kiwano agents takeover</code> 把 Agent 指向它。",
+    "fq9.t": "Kiwano 收费吗?",
+    "fq9.d": "完全免费——无账号,离线可用。GPL-3.0-or-later 开源。",
     "pv.1": "API 请求本地直连,不经过任何云端中转",
     "pv.2": "API Key 仅存本机，只有你能读取",
     "pv.3": "无账号体系,离线完整可用",

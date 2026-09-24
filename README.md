@@ -43,7 +43,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 | Shape | Desktop app + local gateway + CLI | Switches Claude Code's config | Always-on server |
 | Agents covered | 22, taken over in one click and restored | Mainly the Claude Code ecosystem | Only clients you wired up yourself |
 | Local-first | Everything on your machine, no telemetry | Local | Keys live on the server |
-| Routing | 5 strategies; a failed request replays against the next candidate | Switches, does not route | Depends on the implementation |
+| Routing | 6 strategies; a failed request replays against the next candidate | Switches, does not route | Depends on the implementation |
 | Cost metering | Per provider × per agent, with quota rings and alerts | No | Usually |
 
 cc-switch answers "which provider am I on"; Kiwano answers "how do I manage every provider and every agent, and what are they costing me". The first is a subset of the second — `kiwano import cc-switch` migrates an existing configuration across, so moving over costs one command.

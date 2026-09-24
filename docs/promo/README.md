@@ -87,7 +87,7 @@ awesome / 列表站穿插在长尾里做。**完整日期表见 `10-launch-runbo
 | 事实 | 值 | 怎么核的 |
 | --- | --- | --- |
 | Hub 目录 Provider 数 | **24**(23 官方 + 1 聚合 OpenRouter) | `curl -s https://hub.kiwano.cc/catalog.json` → `total: 24`;`manifest.json` → `catalog.count: 24` |
-| 接管 Agent 数 | **14**(名单以 README 为准) | README + `crates/core/src/takeover.rs` |
+| 接管 Agent 数 | **22**(名单以 README 为准) | README + `crates/core/src/vm/agents.rs` |
 | 本地网关端口 | `127.0.0.1:8317` | README |
 | 最新版本 / 日期 | v0.1.16 / 2026-09-19 | GitHub Releases API |
 | 仓库 | 2026-09-07 创建,GPL-3.0,0 star | GitHub API |

@@ -17,7 +17,7 @@
 Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你注册一次 Provider,
 就可以一键把 Claude Code、Codex、Gemini CLI、Cline 等十几个 Agent 全部"接管"到这一个
 端口上。网关负责:协议归一(OpenAI Provider 也能喂给 Claude Code)、按策略路由
-(single / failover / roundrobin / timewindow / quota,非 single 策略下失败的请求自动
+(single / failover / roundrobin / timewindow / quota / least-busy,非 single 策略下失败的请求自动
 换下一候选重放)、计量每次请求的花费并记日志。Key 存在只有你能读的本地 SQLite 里,
 请求不经过任何 Kiwano 服务器。同一套也能跑在服务器上:`curl -fsSL https://hub.kiwano.cc/install.sh | sh`。
 
@@ -38,7 +38,7 @@ Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你�
   Hermes、Pi、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、Cline。
   接管时原配置备份,关闭时恢复。
 - 协议归一:anthropic / openai 双向;Gemini 原生 API 作为第三种协议直通放行(只计量不翻译)。
-- 路由策略:single / failover / roundrobin / timewindow / quota。
+- 路由策略:single / failover / roundrobin / timewindow / quota / least-busy。
 - Models shelf:Hub 上的 **24 个 Provider**(23 个官方 + 1 个聚合 OpenRouter),
   离线可用,条件同步(manifest hash 跳过未变更)。
   > 已实测:`curl -s https://hub.kiwano.cc/catalog.json` → `total = 24`,
@@ -67,7 +67,7 @@ Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你�
 | | Kiwano | cc-switch | LiteLLM / 自建托管网关 |
 | --- | --- | --- | --- |
 | 形态 | 桌面 App + 本地网关 + CLI | 只切换 Claude Code 配置 | 服务器常驻服务 |
-| 覆盖 Agent | 14 个,一键接管+还原 | 主要是 Claude Code 生态 | 仅接入了配置的客户端 |
+| 覆盖 Agent | 22 个,一键接管+还原 | 主要是 Claude Code 生态 | 仅接入了配置的客户端 |
 | 本地优先 | 全程本机,零遥测 | 本机 | Key 在服务器 |
 | 路由策略 | 5 种 + 自动重放 | 切换,不路由 | 视实现 |
 | 计量/分析 | 按 provider×agent 归因 + 告警 | 无 | 通常有 |
@@ -79,7 +79,7 @@ Agent、并知道花了多少钱"。** 前者是后者的子集(还提供 import
 
 ## FAQ(评论区/工单预演)
 
-- **和 claude-code-router 比?** 我们聚焦 14 个 Agent 而不只 Claude Code,并且把
+- **和 claude-code-router 比?** 我们聚焦 22 个 Agent 而不只 Claude Code,并且把
   计量、告警、desktop 管理做成一体;ccr 是很有趣的 Claude Code 专用方案。见对比表。
 - **Key 安全吗?** 本地 SQLite,目录 0700/文件 0600;凭证只发给配置的 Provider;
   网关 /metrics 默认哈希 agent 标签,需要时可加 Bearer token 全名鉴权。

@@ -11,7 +11,7 @@
 ```
 Your Claude Code, Codex and Gemini CLI all point at ONE local port now.
 
-Kiwano runs a local-first gateway on 127.0.0.1 and takes over 14 coding
+Kiwano runs a local-first gateway on 127.0.0.1 and takes over 22 coding
 agents in one click. Keys stay in an owner-only local DB. Nothing leaves your
 machine.
 

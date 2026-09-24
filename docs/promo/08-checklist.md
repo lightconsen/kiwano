@@ -7,7 +7,7 @@
 
 - [x] **演示视频** —— **已产出**(2026-09-20):`docs/media/kiwano-demo-30s.mp4`
       (30.3s,H.264 1600×1000,静音轨,+faststart,**1.5 MB**)+ 封面 `kiwano-demo-poster.png`。
-      七段原速硬切:片头 → A LOCAL AGENT GATEWAY → 五种策略/FAILOVER → 成本 +
+      七段原速硬切:片头 → A LOCAL AGENT GATEWAY → 六种策略/FAILOVER → 成本 +
       KEYS NEVER LEAVE → 日志审计 → Settings Features 列表 → 片尾。
       分镜见 `07-demo-script.md`;复录/重剪方法见该文件「成片制作记录」。
       **90s 版本已删除**,30s 是唯一成片,所有渠道统一用它。
@@ -19,7 +19,7 @@
       - `apps.png`(**已重拍**:Apps 全列表,17 providers · 6 agents bound + quota 环。
         旧图页脚写着 "API keys stay in the system keychain",与 README 的 owner-only SQLite
         说法矛盾、且该文案在现代码里已不存在,所以必须换)
-      - `routing.png`(策略下拉:single/failover/roundrobin/timewindow/quota)
+      - `routing.png`(策略下拉:single/failover/roundrobin/timewindow/quota/least-busy)
       - `costs.png`(Dashboard:成本归因 + 7/30 日趋势 + 按 provider/agent 分成)
       - `shelf.png`(Models shelf 全列表 + 分类筛选)
       - `logs.png`(单条请求的完整记录弹窗:脱敏头 + 请求/响应正文 + Copy)
@@ -68,7 +68,7 @@
       - Hub 目录 = **24 个 Provider**(23 官方 + OpenRouter)。已实测
         `curl -s https://hub.kiwano.cc/catalog.json` → `total: 24`。
         材料原先写的 19 是过期数字,已全部改正;README 同步修正。
-      - 接管 Agent = **14 个**(README 的名单为准)。
+      - 接管 Agent = **22 个**(README 的名单为准)。
       - 端口 `127.0.0.1:8317`;最新版 **v0.1.16**(2026-09-19)。
       - Show HN 标题 **≤80 字符**(原稿三条分别是 90 / 87 / 105,全部超限,已换成实测过
         长度的三条,见 `02-show-hn.md`)。

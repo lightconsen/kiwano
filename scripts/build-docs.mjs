@@ -247,18 +247,16 @@ function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// Reciprocal hreflang for pages published in both languages; x-default
-// points at the English page, which is also what an un-matched locale gets.
-function hreflangLinks(doc, page) {
-  if (!page.zhDoc) return "";
-  const en = `${SITE}/docs/${page.slug}/`;
-  const zh = `${SITE}/docs/zh-CN/${page.slug}/`;
-  return `<link rel="alternate" hreflang="en" href="${en}">
-<link rel="alternate" hreflang="zh-CN" href="${zh}">
-<link rel="alternate" hreflang="x-default" href="${en}">`;
+// Reciprocal hreflang for any page pair published in both languages;
+// x-default points at the English URL. Hubs and doc pages call it alike.
+function hreflangBlock(enPath, zhPath) {
+  if (!zhPath) return "";
+  return `<link rel="alternate" hreflang="en" href="${SITE}${enPath}/">
+<link rel="alternate" hreflang="zh-CN" href="${SITE}${zhPath}/">
+<link rel="alternate" hreflang="x-default" href="${SITE}${enPath}/">`;
 }
 
-function head(doc, page, jsonLd) {
+function head(doc, alternates, jsonLd) {
   const locale = doc.lang === "zh-CN" ? "zh_CN" : "en_US";
   const alternate = doc.lang === "zh-CN"
     ? `\n<meta property="og:locale:alternate" content="en_US">`
@@ -268,7 +266,7 @@ function head(doc, page, jsonLd) {
 <title>${esc(doc.title)} — Kiwano Docs</title>
 <meta name="description" content="${esc(doc.description)}">
 <link rel="canonical" href="${SITE}${doc.path}/">
-${hreflangLinks(doc, page)}
+${alternates}
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
 <meta property="og:url" content="${SITE}${doc.path}/">
@@ -298,6 +296,8 @@ function chrome(bodyInner, doc) {
   const items = sidebarSequence(doc.lang)
     .map((d) => `<a href="${d.path}/"${d.path === doc.path ? ' class="on"' : ""}>${esc(d.navTitle)}</a>`)
     .join("\n");
+  // The crumb doubles as the way back to this language's hub.
+  const hub = doc.lang === "zh-CN" ? "/docs/zh-CN/" : "/docs/";
   return `<div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
@@ -307,7 +307,7 @@ function chrome(bodyInner, doc) {
 </div></div>
 <div class="doc">
   <aside class="side">
-    <div class="crumb">Docs</div>
+    <a class="crumb" href="${hub}">Docs</a>
     <nav>${items}</nav>
   </aside>
   <main class="content">
@@ -377,7 +377,7 @@ for (const page of PAGES) {
     const html = `<!DOCTYPE html>
 <html lang="${doc.lang}">
 <head>
-${head(doc, page, breadcrumb(doc))}
+${head(doc, page.zhDoc ? hreflangBlock(`/docs/${page.slug}`, `/docs/zh-CN/${page.slug}`) : "", breadcrumb(doc))}
 </head>
 <body>
 ${chrome(`<h1>${marked.parse(doc.title).replace(/<p>|<\/p>\n?$/g, "")}</h1>
@@ -396,22 +396,13 @@ ${pn}
   }
 }
 
-// ── docs index (the /docs/ hub) ─────────────────────────────────────────────
+// ── docs hubs (/docs/ and /docs/zh-CN/) ─────────────────────────────────────
+// One hub per language. The zh hub lists the zh renders, with the English
+// cli page as a card in place (same fallback rule the sidebar uses), so
+// both hubs catalog the same pages and the landing page's Docs link has a
+// same-language destination in either state.
 
-const hubCards = PAGES.map(
-  (p) => `  <a class="card" href="/docs/${p.slug}/"><h2>${esc(p.en.navTitle)}</h2><p>${esc(p.en.description)}</p></a>`,
-).join("\n");
-
-const zhLinks = PAGES.filter((p) => p.zhDoc)
-  .map((p) => `<a href="/docs/zh-CN/${p.slug}/">${esc(p.zhDoc.navTitle)}</a>`)
-  .join("\n    · ");
-const zhNote = `<p class="gh-note">中文文档：
-    ${zhLinks}
-  </p>`;
-
-const hubTitle = "Kiwano Docs";
-const hubDescription = "Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.";
-const hubCss = `${CSS}
+const HUB_CSS = `${CSS}
 .wrap { max-width: 760px; margin: 0 auto; padding: 48px 28px 90px; }
 .wrap .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); }
 .wrap h1 { margin-top: 12px; font-size: 32px; font-weight: 700; letter-spacing: -0.015em; }
@@ -424,10 +415,42 @@ const hubCss = `${CSS}
 .gh-note { margin-top: 26px; font-size: 12.5px; color: oklch(0.48 0.008 260); }
 .gh-note a { color: var(--kiwi); }`;
 
-const hubHtml = `<!DOCTYPE html>
-<html lang="en">
+const HUBS = [
+  {
+    lang: "en",
+    path: "/docs",
+    title: "Kiwano Docs",
+    description: "Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.",
+    cards: PAGES.map((p) =>
+      `  <a class="card" href="/docs/${p.slug}/"><h2>${esc(p.en.navTitle)}</h2><p>${esc(p.en.description)}</p></a>`),
+    // The en hub surfaces the zh renders by name — discovery for a zh
+    // reader who landed on the English hub.
+    notes: [`  <p class="gh-note">中文文档：
+    ${PAGES.filter((p) => p.zhDoc).map((p) => `<a href="/docs/zh-CN/${p.slug}/">${esc(p.zhDoc.navTitle)}</a>`).join("\n    · ")}
+  </p>`,
+    `  <p class="gh-note">Design and planning notes (contributor-facing) live in
+  <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>`],
+  },
+  {
+    lang: "zh-CN",
+    path: "/docs/zh-CN",
+    title: "Kiwano 文档",
+    description: "安装、Agent 接管、路由策略与完整命令参考——Kiwano 本地网关的中文文档。",
+    cards: PAGES.map((p) => {
+      const d = p.zhDoc ?? p.en;
+      return `  <a class="card" href="${d.path}/"><h2>${esc(d.navTitle)}</h2><p>${esc(d.description)}</p></a>`;
+    }),
+    notes: [`  <p class="gh-note">面向贡献者的设计与规划笔记见
+  <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">GitHub 的 docs/ 目录</a>。</p>`],
+  },
+];
+
+for (const hub of HUBS) {
+  const html = `<!DOCTYPE html>
+<html lang="${hub.lang}">
 <head>
-${head({ title: hubTitle, description: hubDescription, path: "/docs", lang: "en" }, {}, {
+${head({ title: hub.title, description: hub.description, path: hub.path, lang: hub.lang },
+  hreflangBlock("/docs", "/docs/zh-CN"), {
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   itemListElement: [
@@ -435,7 +458,7 @@ ${head({ title: hubTitle, description: hubDescription, path: "/docs", lang: "en"
     { "@type": "ListItem", position: 2, name: "Docs", item: `${SITE}/docs/` },
   ],
 })}
-<style>${hubCss}</style>
+<style>${HUB_CSS}</style>
 </head>
 <body>
 <div class="topbar"><div class="topbar-in">
@@ -447,14 +470,12 @@ ${head({ title: hubTitle, description: hubDescription, path: "/docs", lang: "en"
 </div></div>
 <div class="wrap">
   <div class="crumb">Docs</div>
-  <h1>${hubTitle}</h1>
-  <p>${hubDescription}</p>
+  <h1>${hub.title}</h1>
+  <p>${hub.description}</p>
   <div class="grid">
-${hubCards}
+${hub.cards.join("\n")}
   </div>
-  ${zhNote}
-  <p class="gh-note">Design and planning notes (contributor-facing) live in
-  <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>
+${hub.notes.join("\n")}
 </div>
 <div class="foot"><div class="foot-in">
   <span>© 2026 Kiwano · GPL-3.0-or-later</span>
@@ -463,9 +484,11 @@ ${hubCards}
 </body>
 </html>
 `;
-mkdirSync(SITE_DOCS, { recursive: true });
-writeFileSync(join(SITE_DOCS, "index.html"), hubHtml);
-console.log("build-docs: /docs/ — hub");
+  const dir = join(SITE_DOCS, hub.path.replace("/docs", "").replace(/^\//, ""));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "index.html"), html);
+  console.log(`build-docs: ${hub.path}/ — ${hub.title}`);
+}
 
 // Generated directories no longer in the manifest would still deploy (the
 // whole site/ tree uploads), so remove them rather than warn. Same sweep
@@ -521,6 +544,10 @@ const urls = [
     <loc>${SITE}/docs/</loc>
     <lastmod>${lastCommitDate("docs")}</lastmod>
   </url>`,
+  `  <url>
+    <loc>${SITE}/docs/zh-CN/</loc>
+    <lastmod>${lastCommitDate("docs")}</lastmod>
+  </url>`,
   ...docUrls,
 ];
 
@@ -535,4 +562,4 @@ ${urls.join("\n")}
 </urlset>
 `;
 writeFileSync(join(ROOT, "site", "sitemap.xml"), sitemap);
-console.log(`build-docs: sitemap.xml — ${PAGES.length + PAGES.filter((p) => p.zhDoc).length + 2} urls`);
+console.log(`build-docs: sitemap.xml — ${PAGES.length + PAGES.filter((p) => p.zhDoc).length + 3} urls`);

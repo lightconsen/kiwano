@@ -1,22 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kiwano Docs — Kiwano Docs</title>
-<meta name="description" content="Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.">
-<link rel="canonical" href="https://kiwano.cc/docs/">
+<title>Kiwano 文档 — Kiwano Docs</title>
+<meta name="description" content="安装、Agent 接管、路由策略与完整命令参考——Kiwano 本地网关的中文文档。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-CN/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/">
 <link rel="alternate" hreflang="zh-CN" href="https://kiwano.cc/docs/zh-CN/">
 <link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://kiwano.cc/docs/">
-<meta property="og:title" content="Kiwano Docs">
-<meta property="og:description" content="Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-CN/">
+<meta property="og:title" content="Kiwano 文档">
+<meta property="og:description" content="安装、Agent 接管、路由策略与完整命令参考——Kiwano 本地网关的中文文档。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="en_US">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -220,21 +221,16 @@ code, pre { font-family: var(--font-mono); }
 </div></div>
 <div class="wrap">
   <div class="crumb">Docs</div>
-  <h1>Kiwano Docs</h1>
-  <p>Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.</p>
+  <h1>Kiwano 文档</h1>
+  <p>安装、Agent 接管、路由策略与完整命令参考——Kiwano 本地网关的中文文档。</p>
   <div class="grid">
-  <a class="card" href="/docs/getting-started/"><h2>Getting started</h2><p>Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to…</p></a>
-  <a class="card" href="/docs/agent-takeover/"><h2>Agent takeover</h2><p>Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…</p></a>
-  <a class="card" href="/docs/strategies/"><h2>Strategies and limits</h2><p>Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of…</p></a>
+  <a class="card" href="/docs/zh-CN/getting-started/"><h2>快速上手</h2><p>Kiwano 位于你的编码 Agent 与 AI 供应商之间:供应商注册一次,本地网关跑在 127.0.0.1,所有 Agent 都指向这一个端口。本页从安装带到第一条被计量的 请求。Key 永远不离开你的机器。</p></a>
+  <a class="card" href="/docs/zh-CN/agent-takeover/"><h2>Agent 接管</h2><p>接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。</p></a>
+  <a class="card" href="/docs/zh-CN/strategies/"><h2>策略与限额</h2><p>每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。</p></a>
   <a class="card" href="/docs/cli/"><h2>The kiwano command line</h2><p>kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…</p></a>
   </div>
-  <p class="gh-note">中文文档：
-    <a href="/docs/zh-CN/getting-started/">快速上手</a>
-    · <a href="/docs/zh-CN/agent-takeover/">Agent 接管</a>
-    · <a href="/docs/zh-CN/strategies/">策略与限额</a>
-  </p>
-  <p class="gh-note">Design and planning notes (contributor-facing) live in
-  <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>
+  <p class="gh-note">面向贡献者的设计与规划笔记见
+  <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">GitHub 的 docs/ 目录</a>。</p>
 </div>
 <div class="foot"><div class="foot-in">
   <span>© 2026 Kiwano · GPL-3.0-or-later</span>

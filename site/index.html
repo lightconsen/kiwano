@@ -620,7 +620,7 @@ footer { padding: 56px 0 44px; }
       <a href="#how" data-i18n="nav.how">How it works</a>
       <a href="#server" data-i18n="nav.server">Server</a>
       <a href="#faq" data-i18n="nav.faq">FAQ</a>
-      <a href="/docs/" data-i18n="nav.docs">Docs</a>
+      <a id="docsLink" href="/docs/" data-i18n="nav.docs">Docs</a>
       <a href="#download" data-i18n="nav.download">Download</a>
     </div>
     <div class="nav-cta">
@@ -1123,6 +1123,8 @@ function applyLang(lang) {
   });
   // 按钮显示「可切换到的语言」
   document.getElementById("langBtn").textContent = lang === "zh" ? "EN" : "中文";
+  // 文档链接跟随语言:zh 文档在 /docs/zh-CN/(FAQ 答案里的链接在字典里自带 href)
+  document.getElementById("docsLink").href = lang === "zh" ? "/docs/zh-CN/" : "/docs/";
   localStorage.setItem("kiwano.lang", lang);
 }
 

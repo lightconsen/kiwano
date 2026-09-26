@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Render the user-facing docs (docs/*.md) into site/docs/<slug>/index.html.
+// Render the user-facing docs (docs/*.md) into site/docs/<slug>/index.html,
+// with the zh-CN sources alongside at site/docs/zh-CN/<slug>/.
 //
 // The site keeps its no-build-step property at serve time: this script runs
 // before the Pages upload (site.yml, right after sync-site.mjs) and writes
@@ -13,6 +14,13 @@
 // — written for contributors, in Chinese, citing internal commits — and
 // those stay GitHub-only because the manifest does not name them.
 //
+// A page with a zh-CN source gets both renders and reciprocal hreflang
+// links (plus x-default → English). A page without one — cli.md, for now —
+// publishes English-only with no alternates, which is what Google wants to
+// see rather than alternates pointing at the same URL. The zh sidebar walks
+// the same page order and falls back to the English page where no zh
+// source exists, so a zh reader never dead-ends.
+//
 // The sitemap is regenerated here too: docs pages carry the last commit
 // date of their source markdown (read from git, so it is accurate by
 // construction), while the landing page still carries no lastmod — its only
@@ -21,7 +29,7 @@
 //
 // Usage: node scripts/build-docs.mjs
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,11 +43,12 @@ const SITE = "https://kiwano.cc";
 
 // The published set, in sidebar and prev/next order. slugs equal the source
 // file's basename so relative links between docs (`[x](strategies.md)`)
-// rewrite mechanically.
+// rewrite mechanically. `zh` names the zh-CN source; pages without one are
+// English-only until a translation lands.
 const PAGES = [
-  { slug: "getting-started", file: "getting-started.md" },
-  { slug: "agent-takeover", file: "agent-takeover.md" },
-  { slug: "strategies", file: "strategies.md" },
+  { slug: "getting-started", file: "getting-started.md", zh: "getting-started.zh-CN.md" },
+  { slug: "agent-takeover", file: "agent-takeover.md", zh: "agent-takeover.zh-CN.md" },
+  { slug: "strategies", file: "strategies.md", zh: "strategies.zh-CN.md" },
   { slug: "cli", file: "cli.md" },
 ];
 
@@ -49,15 +58,25 @@ const marked = _marked.marked ?? _marked.default ?? _marked;
 
 // ── link rewriting ──────────────────────────────────────────────────────────
 // Runs on the markdown before parsing. Docs cross-link with bare filenames
-// (`agent-takeover.md`); those become clean /docs/ URLs. A link escaping the
-// docs directory (`../packaging/INSTALL.md`) points at the GitHub blob — the
-// target is contributor-facing and has no rendered home. Anything else
-// relative fails the build: an unrewritten .md link would 404 on the site.
+// (`agent-takeover.md`); those become clean /docs/ URLs — a zh source links
+// to its own language where it exists, to the English page where it does
+// not. A link escaping the docs directory (`../packaging/INSTALL.md`)
+// points at the GitHub blob — the target is contributor-facing and has no
+// rendered home. Anything else relative fails the build: an unrewritten
+// .md link would 404 on the site.
 
-function rewriteLinks(md, fromFile) {
+function rewriteLinks(md, fromFile, lang) {
   return md.replace(/\]\(([^)#\s]+\.md)(#[^)\s]*)?\)/g, (_, target, anchor) => {
     if (target.startsWith("../")) {
       return `](${GITHUB_BLOB}/${target.slice(3)})${anchor ?? ""})`;
+    }
+    // A zh source naming its zh sibling (`agent-takeover.zh-CN.md`) goes to
+    // the zh page outright; any page filename resolves to the canonical
+    // /docs/ URL, upgraded to zh-CN when the reader is in a zh page and a
+    // zh render exists.
+    const zhPage = PAGES.find((p) => p.zh === target);
+    if (zhPage) {
+      return `](/docs/zh-CN/${zhPage.slug}/${anchor ?? ""})`;
     }
     const page = PAGES.find((p) => p.file === target);
     if (!page) {
@@ -65,7 +84,8 @@ function rewriteLinks(md, fromFile) {
         " either publish that page or link its GitHub blob explicitly");
       process.exit(2);
     }
-    return `](/docs/${page.slug}/${anchor ?? ""})`;
+    const useZh = lang === "zh-CN" && page.zh;
+    return `](/docs${useZh ? "/zh-CN" : ""}/${page.slug}/${anchor ?? ""})`;
   });
 }
 
@@ -86,7 +106,9 @@ function stripMd(s) {
 // anywhere in docs/*.md, so this stays the zero-ceremony contract: write a
 // doc the usual way, the metadata follows. Returns the full paragraph too,
 // because a description truncated at ~158 chars reads fine in a SERP snippet
-// and wrong as visible copy under the title.
+// and wrong as visible copy under the title. CJK packs ~3× the characters
+// per visual width; the cap holds anyway — a 158-char zh snippet is long,
+// not short.
 function extractMeta(md) {
   const titleMatch = md.match(/^# (.+)$/m);
   if (!titleMatch) {
@@ -130,8 +152,8 @@ function addHeadingIds(html) {
   });
 }
 
-function renderBody(md, fromFile) {
-  return addHeadingIds(marked.parse(rewriteLinks(md, fromFile), { gfm: true }));
+function renderBody(md, fromFile, lang) {
+  return addHeadingIds(marked.parse(rewriteLinks(md, fromFile, lang), { gfm: true }));
 }
 
 // ── template ────────────────────────────────────────────────────────────────
@@ -221,20 +243,40 @@ code, pre { font-family: var(--font-mono); }
 }
 `;
 
-function head(title, description, path, jsonLd) {
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Reciprocal hreflang for pages published in both languages; x-default
+// points at the English page, which is also what an un-matched locale gets.
+function hreflangLinks(doc, page) {
+  if (!page.zhDoc) return "";
+  const en = `${SITE}/docs/${page.slug}/`;
+  const zh = `${SITE}/docs/zh-CN/${page.slug}/`;
+  return `<link rel="alternate" hreflang="en" href="${en}">
+<link rel="alternate" hreflang="zh-CN" href="${zh}">
+<link rel="alternate" hreflang="x-default" href="${en}">`;
+}
+
+function head(doc, page, jsonLd) {
+  const locale = doc.lang === "zh-CN" ? "zh_CN" : "en_US";
+  const alternate = doc.lang === "zh-CN"
+    ? `\n<meta property="og:locale:alternate" content="en_US">`
+    : "";
   return `<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(title)}</title>
-<meta name="description" content="${esc(description)}">
-<link rel="canonical" href="${SITE}${path}/">
+<title>${esc(doc.title)} — Kiwano Docs</title>
+<meta name="description" content="${esc(doc.description)}">
+<link rel="canonical" href="${SITE}${doc.path}/">
+${hreflangLinks(doc, page)}
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="${SITE}${path}/">
-<meta property="og:title" content="${esc(title)}">
-<meta property="og:description" content="${esc(description)}">
+<meta property="og:url" content="${SITE}${doc.path}/">
+<meta property="og:title" content="${esc(doc.title)}">
+<meta property="og:description" content="${esc(doc.description)}">
 <meta property="og:image" content="${SITE}/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="en_US">
+<meta property="og:locale" content="${locale}">${alternate}
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
 ${HEAD_FONT}
@@ -244,10 +286,18 @@ ${JSON.stringify(jsonLd, null, 2)}
 </script>`;
 }
 
-function chrome(bodyInner, activeSlug) {
-  const items = PAGES.map(
-    (p) => `<a href="/docs/${p.slug}/"${p.slug === activeSlug ? ' class="on"' : ""}>${esc(p.navTitle)}</a>`,
-  ).join("\n");
+// The sidebar walks the page order in the reader's language: the zh render
+// of each page where one exists, the English page otherwise — so a zh
+// reader sees zh titles for the translated pages and is never dead-ended
+// by a page still untranslated.
+function sidebarSequence(lang) {
+  return PAGES.map((p) => (lang === "zh-CN" && p.zhDoc ? p.zhDoc : p.en));
+}
+
+function chrome(bodyInner, doc) {
+  const items = sidebarSequence(doc.lang)
+    .map((d) => `<a href="${d.path}/"${d.path === doc.path ? ' class="on"' : ""}>${esc(d.navTitle)}</a>`)
+    .join("\n");
   return `<div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
@@ -270,18 +320,14 @@ ${bodyInner}
 </div></div>`;
 }
 
-function esc(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function breadcrumb(title, slug) {
+function breadcrumb(doc) {
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Kiwano", item: `${SITE}/` },
       { "@type": "ListItem", position: 2, name: "Docs", item: `${SITE}/docs/` },
-      { "@type": "ListItem", position: 3, name: title, item: `${SITE}/docs/${slug}/` },
+      { "@type": "ListItem", position: 3, name: doc.title, item: `${SITE}${doc.path}/` },
     ],
   };
 }
@@ -290,57 +336,78 @@ function breadcrumb(title, slug) {
 // Two passes: metadata first (the sidebar and prev/next of every page name
 // every other page's title), then rendering.
 
-for (const p of PAGES) {
-  const md = readFileSync(join(DOCS, p.file), "utf8");
+function loadDoc(file, path, lang) {
+  const md = readFileSync(join(DOCS, file), "utf8");
   const { title, para, description, bodyMd } = extractMeta(md);
-  p.title = title;
-  // Sidebar, prev/next and the hub show plain text — an inline-code title
-  // (`kiwano`) reads with stray backticks once escaped.
-  p.navTitle = stripMd(title);
-  p.description = description;
-  p.lede = para;
-  p.md = bodyMd;
+  return {
+    file, path, lang,
+    title,
+    // Sidebar, prev/next and the hub show plain text — an inline-code title
+    // (`kiwano`) reads with stray backticks once escaped.
+    navTitle: stripMd(title),
+    description,
+    lede: para,
+    body: bodyMd,
+  };
 }
 
-for (const p of PAGES) {
-  // Drop the source H1 — the template carries the title (with breadcrumb and
-  // description above the body), so the page does not say its name twice.
-  const body = renderBody(p.md.replace(/^# .+$/m, ""), p.file);
+for (const page of PAGES) {
+  page.en = loadDoc(page.file, `/docs/${page.slug}`, "en");
+  if (page.zh) {
+    page.zhDoc = loadDoc(page.zh, `/docs/zh-CN/${page.slug}`, "zh-CN");
+  }
+}
 
-  const idx = PAGES.indexOf(p);
-  const prev = PAGES[idx - 1];
-  const next = PAGES[idx + 1];
-  const pn = [
-    prev ? `<a class="prev" href="/docs/${prev.slug}/"><div class="dir">← Previous</div><div class="t">${esc(prev.navTitle)}</div></a>` : "<span></span>",
-    next ? `<a class="next" href="/docs/${next.slug}/"><div class="dir">Next →</div><div class="t">${esc(next.navTitle)}</div></a>` : "",
-  ].join("\n");
+for (const page of PAGES) {
+  for (const doc of [page.en, page.zhDoc]) {
+    if (!doc) continue;
 
-  const html = `<!DOCTYPE html>
-<html lang="en">
+    // Prev/next follow the sidebar sequence (the reader's language), so a
+    // zh page chains through the zh renders, with the English cli page as a
+    // first-class stop rather than a gap.
+    const seq = sidebarSequence(doc.lang);
+    const idx = seq.findIndex((d) => d.path === doc.path);
+    const prev = seq[idx - 1];
+    const next = seq[idx + 1];
+    const pn = [
+      prev ? `<a class="prev" href="${prev.path}/"><div class="dir">← Previous</div><div class="t">${esc(prev.navTitle)}</div></a>` : "<span></span>",
+      next ? `<a class="next" href="${next.path}/"><div class="dir">Next →</div><div class="t">${esc(next.navTitle)}</div></a>` : "",
+    ].join("\n");
+
+    const html = `<!DOCTYPE html>
+<html lang="${doc.lang}">
 <head>
-${head(`${p.title} — Kiwano Docs`, p.description, `/docs/${p.slug}`, breadcrumb(p.title, p.slug))}
+${head(doc, page, breadcrumb(doc))}
 </head>
 <body>
-${chrome(`<h1>${marked.parse(p.title).replace(/<p>|<\/p>\n?$/g, "")}</h1>
-<p class="lede">${esc(p.lede)}</p>
-${body}
+${chrome(`<h1>${marked.parse(doc.title).replace(/<p>|<\/p>\n?$/g, "")}</h1>
+<p class="lede">${esc(doc.lede)}</p>
+${renderBody(doc.body, doc.file, doc.lang)}
 <div class="pn-nav">
 ${pn}
-</div>`, p.slug)}
+</div>`, doc)}
 </body>
 </html>
 `;
-  const dir = join(SITE_DOCS, p.slug);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "index.html"), html);
-  console.log(`build-docs: /docs/${p.slug}/ — ${p.title}`);
+    const dir = join(SITE_DOCS, doc.path.replace("/docs/", ""));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "index.html"), html);
+    console.log(`build-docs: ${doc.path}/ — ${doc.title}`);
+  }
 }
 
 // ── docs index (the /docs/ hub) ─────────────────────────────────────────────
 
 const hubCards = PAGES.map(
-  (p) => `  <a class="card" href="/docs/${p.slug}/"><h2>${esc(p.navTitle)}</h2><p>${esc(p.description)}</p></a>`,
+  (p) => `  <a class="card" href="/docs/${p.slug}/"><h2>${esc(p.en.navTitle)}</h2><p>${esc(p.en.description)}</p></a>`,
 ).join("\n");
+
+const zhLinks = PAGES.filter((p) => p.zhDoc)
+  .map((p) => `<a href="/docs/zh-CN/${p.slug}/">${esc(p.zhDoc.navTitle)}</a>`)
+  .join("\n    · ");
+const zhNote = `<p class="gh-note">中文文档：
+    ${zhLinks}
+  </p>`;
 
 const hubTitle = "Kiwano Docs";
 const hubDescription = "Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.";
@@ -360,7 +427,7 @@ const hubCss = `${CSS}
 const hubHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
-${head(hubTitle, hubDescription, "/docs", {
+${head({ title: hubTitle, description: hubDescription, path: "/docs", lang: "en" }, {}, {
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   itemListElement: [
@@ -385,6 +452,7 @@ ${head(hubTitle, hubDescription, "/docs", {
   <div class="grid">
 ${hubCards}
   </div>
+  ${zhNote}
   <p class="gh-note">Design and planning notes (contributor-facing) live in
   <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>
 </div>
@@ -400,11 +468,23 @@ writeFileSync(join(SITE_DOCS, "index.html"), hubHtml);
 console.log("build-docs: /docs/ — hub");
 
 // Generated directories no longer in the manifest would still deploy (the
-// whole site/ tree uploads), so remove them rather than warn.
+// whole site/ tree uploads), so remove them rather than warn. Same sweep
+// inside zh-CN/, which mirrors the manifest's translated subset.
+const topSlugs = [...PAGES.map((p) => p.slug), "zh-CN"];
 for (const entry of readdirSync(SITE_DOCS, { withFileTypes: true })) {
-  if (entry.isDirectory() && !PAGES.some((p) => p.slug === entry.name)) {
+  if (entry.isDirectory() && !topSlugs.includes(entry.name)) {
     rmSync(join(SITE_DOCS, entry.name), { recursive: true });
     console.log(`build-docs: removed stale site/docs/${entry.name}/`);
+  }
+}
+const zhDir = join(SITE_DOCS, "zh-CN");
+if (existsSync(zhDir)) {
+  const zhSlugs = PAGES.filter((p) => p.zhDoc).map((p) => p.slug);
+  for (const entry of readdirSync(zhDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && !zhSlugs.includes(entry.name)) {
+      rmSync(join(zhDir, entry.name), { recursive: true });
+      console.log(`build-docs: removed stale site/docs/zh-CN/${entry.name}/`);
+    }
   }
 }
 
@@ -418,6 +498,21 @@ function lastCommitDate(file) {
   }
 }
 
+const docUrls = PAGES.flatMap((p) => {
+  const en = `  <url>
+    <loc>${SITE}/docs/${p.slug}/</loc>
+    <lastmod>${lastCommitDate(join("docs", p.file))}</lastmod>
+  </url>`;
+  const zh = p.zhDoc
+    ? `
+  <url>
+    <loc>${SITE}/docs/zh-CN/${p.slug}/</loc>
+    <lastmod>${lastCommitDate(join("docs", p.zh))}</lastmod>
+  </url>`
+    : "";
+  return [en + zh];
+});
+
 const urls = [
   `  <url>
     <loc>${SITE}/</loc>
@@ -426,12 +521,7 @@ const urls = [
     <loc>${SITE}/docs/</loc>
     <lastmod>${lastCommitDate("docs")}</lastmod>
   </url>`,
-  ...PAGES.map(
-    (p) => `  <url>
-    <loc>${SITE}/docs/${p.slug}/</loc>
-    <lastmod>${lastCommitDate(join("docs", p.file))}</lastmod>
-  </url>`,
-  ),
+  ...docUrls,
 ];
 
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
@@ -445,4 +535,4 @@ ${urls.join("\n")}
 </urlset>
 `;
 writeFileSync(join(ROOT, "site", "sitemap.xml"), sitemap);
-console.log(`build-docs: sitemap.xml — ${PAGES.length + 2} urls`);
+console.log(`build-docs: sitemap.xml — ${PAGES.length + PAGES.filter((p) => p.zhDoc).length + 2} urls`);

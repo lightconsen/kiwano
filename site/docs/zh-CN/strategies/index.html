@@ -1,22 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Getting started — Kiwano Docs</title>
-<meta name="description" content="Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to…">
-<link rel="canonical" href="https://kiwano.cc/docs/getting-started/">
-<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/getting-started/">
-<link rel="alternate" hreflang="zh-CN" href="https://kiwano.cc/docs/zh-CN/getting-started/">
-<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/getting-started/">
+<title>策略与限额 — Kiwano Docs</title>
+<meta name="description" content="每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-CN/strategies/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/strategies/">
+<link rel="alternate" hreflang="zh-CN" href="https://kiwano.cc/docs/zh-CN/strategies/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/strategies/">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://kiwano.cc/docs/getting-started/">
-<meta property="og:title" content="Getting started">
-<meta property="og:description" content="Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to…">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-CN/strategies/">
+<meta property="og:title" content="策略与限额">
+<meta property="og:description" content="每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="en_US">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -120,8 +121,8 @@ code, pre { font-family: var(--font-mono); }
     {
       "@type": "ListItem",
       "position": 3,
-      "name": "Getting started",
-      "item": "https://kiwano.cc/docs/getting-started/"
+      "name": "策略与限额",
+      "item": "https://kiwano.cc/docs/zh-CN/strategies/"
     }
   ]
 }
@@ -138,93 +139,89 @@ code, pre { font-family: var(--font-mono); }
 <div class="doc">
   <aside class="side">
     <div class="crumb">Docs</div>
-    <nav><a href="/docs/getting-started/" class="on">Getting started</a>
-<a href="/docs/agent-takeover/">Agent takeover</a>
-<a href="/docs/strategies/">Strategies and limits</a>
+    <nav><a href="/docs/zh-CN/getting-started/">快速上手</a>
+<a href="/docs/zh-CN/agent-takeover/">Agent 接管</a>
+<a href="/docs/zh-CN/strategies/" class="on">策略与限额</a>
 <a href="/docs/cli/">The kiwano command line</a></nav>
   </aside>
   <main class="content">
-<h1>Getting started</h1>
-<p class="lede">Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to that one port. This page takes you from install to the first metered request. Keys never leave your machine.</p>
-<h2 id="what-you-need">What you need</h2>
-<ul>
-<li>A provider API key (OpenAI-compatible or Anthropic-compatible endpoint).</li>
-<li>One or more installed coding agents — Claude Code, Codex, Gemini CLI, …
-(all 22 built-ins are listed in <a href="/docs/agent-takeover/">Agent takeover</a>).</li>
-</ul>
-<h2 id="1-install-and-launch">1. Install and launch</h2>
-<p>Download the signed build for your platform from
-<a href="https://github.com/lightconsen/kiwano/releases/latest">Releases</a> (macOS,
-Windows, Linux) or <code>brew install</code> if you use Homebrew. The first launch
-starts the <strong>daemon</strong> — the local gateway — which outlives the GUI window:
-closing the app leaves the gateway serving. A tray icon shows it is up.</p>
-<h2 id="2-register-a-provider">2. Register a provider</h2>
-<p>Open the <strong>Models</strong> shelf (the Hub catalog) and search a vendor — DeepSeek,
-Kimi, Zhipu GLM, OpenRouter, … — or add one manually on the <strong>Apps</strong> screen:</p>
-<ol>
-<li><strong>Add provider</strong> → name, endpoint, API key, and the protocol the endpoint
-speaks (<code>openai</code> or <code>anthropic</code>).</li>
-<li>Optionally set a default model, a billing kind (pay-as-you-go, plan, or
-unlimited) and a spend limit.</li>
-<li>Save. The provider row shows its health the moment anything is measured
-against it.</li>
-</ol>
-<p>Your key is stored in an owner-only local database. Nothing is sent anywhere
-except to the endpoint you named.</p>
-<h2 id="3-take-over-an-agent">3. Take over an agent</h2>
-<p>On the <strong>Apps</strong> screen each supported agent is a card:</p>
-<ul>
-<li>If the agent already has a provider configured, <strong>Enable Kiwano</strong> offers to
-import it — the agent&#39;s upstream stays the same on day one, just routed
-(and metered) through the gateway.</li>
-<li>The takeover switch rewrites the agent&#39;s own config file to point at the
-gateway. The original is backed up first and restored byte-for-byte when
-you switch the takeover off. Nothing else in the agent&#39;s config changes.</li>
-</ul>
-<p>What exactly is rewritten per agent — and the few agents with special
-behavior — is the <a href="/docs/agent-takeover/">Agent takeover</a> table.</p>
-<h2 id="4-verify">4. Verify</h2>
-<p>Send a prompt through the agent (<code>claude &quot;hi&quot;</code>, or any prompt you would
-normally run), then open <strong>Request logs</strong> in Kiwano. You should see the
-request with its attribution (which provider served it), tokens, latency and
-estimated cost. The Dashboard aggregates the same rows by provider, by agent
-and by day.</p>
-<h2 id="5-route-more-than-one-provider">5. Route more than one provider</h2>
-<p>One provider per agent is the <code>single</code> strategy. Bind more candidates to an
-agent&#39;s route and pick a strategy — <code>failover</code>, <code>roundrobin</code>, <code>timewindow</code>,
-<code>quota</code> or <code>least-busy</code> — plus per-agent spend ceilings. See
-<a href="/docs/strategies/">Strategies</a>.</p>
-<h2 id="where-things-live">Where things live</h2>
+<h1>策略与限额</h1>
+<p class="lede">每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。</p>
+<h2 id="六种策略">六种策略</h2>
 <table>
 <thead>
 <tr>
-<th>What</th>
-<th>Where</th>
+<th>策略</th>
+<th>选择逻辑</th>
+<th>说明</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>Providers, routes, usage, backups</td>
-<td>local SQLite (owner-only), via the daemon</td>
+<td><code>single</code></td>
+<td>永远是主供应商。</td>
+<td>默认值。一个供应商,没有重放尾巴——但 Agent 超过自身花费限额时,任何策略(包括 <code>single</code>)都会拒绝。</td>
 </tr>
 <tr>
-<td>Agent configs</td>
-<td>each agent&#39;s own file under <code>$HOME</code> — see the takeover table</td>
+<td><code>failover</code></td>
+<td>按优先级取第一个熔断器可用的候选。</td>
+<td>所有熔断器都断开时,仍会尝试主供应商。429 设置供应商自己声明的短暂暂停;500 计入熔断器。</td>
 </tr>
 <tr>
-<td>Request logs and bodies</td>
-<td>local, retention configurable in Settings</td>
+<td><code>roundrobin</code></td>
+<td>加权轮转——<strong>按会话</strong>。</td>
+<td>一段对话保持其供应商,让它已付费的上游 prompt cache 继续命中;新会话按权重挑选;只有粘住的候选不可用时才重新分配。</td>
+</tr>
+<tr>
+<td><code>timewindow</code></td>
+<td>本地 <code>HH:MM</code> 窗口(支持跨午夜)包含当前时间的候选。</td>
+<td>无命中时回退主供应商。会话粘性与 <code>roundrobin</code> 相同。</td>
+</tr>
+<tr>
+<td><code>quota</code></td>
+<td>主供应商当日用量(请求数或 token 数,读自用量聚合)超过策略配置里的阈值后,沉到备份——即 failover 语义。</td>
+<td>同样的会话粘性:切换发生在<em>下一段</em>对话。</td>
+</tr>
+<tr>
+<td><code>least-busy</code></td>
+<td>熔断器可用、当前在途请求数最少的候选。</td>
+<td>会话先排干(与其他粘性策略一致);优先级顺序打破平局。</td>
 </tr>
 </tbody></table>
-<h2 id="uninstalling-switching-off">Uninstalling / switching off</h2>
-<p>Switch the takeover off per agent (config restored from backup) or delete a
-provider (its next candidate is promoted automatically). The daemon can be
-stopped from the tray; no agent is left pointing at a dead port — a takeover
-you remove is restored, and one whose backup is gone is degraded to the
-agent&#39;s own defaults rather than a loopback URL.</p>
+<p>两条跨策略成立的性质:</p>
+<ul>
+<li><strong>一段对话保持其供应商。</strong> 在粘性策略(<code>roundrobin</code>、<code>timewindow</code>、
+<code>quota</code>)下,切换落在<em>下一段</em>对话;已在运行的对话在原地结束,而不是
+重建一个它的供应商已经收过费的 prompt cache。不带会话标识的请求照旧
+重新挑选。</li>
+<li><strong>失败被重放,而不是被退回。</strong> 除 <code>single</code> 外的任何策略,中途失败的
+请求会沿队列对下一个候选重放,而不是作为错误交还给你的 Agent。</li>
+</ul>
+<h2 id="花费限额-agent-限额">花费限额(Agent 限额)</h2>
+<p>每个 Agent 可以按周期设限额——<code>day</code>、<code>weekly</code>、<code>monthly</code>、<code>yearly</code> 或
+<code>all</code>——每个限额由数额和单位组成:请求数(<code>requests</code>)、万 token 块
+(<code>wan_tokens</code>),或一个 <strong>ISO 货币代码</strong>。</p>
+<p>币种规则是刻意的:限额以该 Agent 的供应商实际计费的币种计,而不是你的
+显示偏好币种。供应商用别的币种计费时,它的花费先按 Hub 汇率<em>折算</em>再计入
+限额——限额本身永不折算。到达限额后,该 Agent 的新请求被拒绝,理由在 UI
+可见,任何策略下都一样。</p>
+<h2 id="用量数字从哪来">用量数字从哪来</h2>
+<ul>
+<li><strong>计量用量</strong>来自网关自己的请求记账——每条请求的 token 与成本,归属到
+服务它的供应商。</li>
+<li><strong>订阅计划配额</strong>(发布&quot;你的计划用了多少&quot;的订阅)通过<em>plan query</em> 从
+供应商自己的端点读取。少数目录条目自带查询模板(Kimi、智谱个人与团队、
+MiniMax、ZenMux、OpenCode Go、火山引擎);结果缓存五分钟,可强制刷新。
+一个供应商可以<em>按计划计费</em>却不支持 plan query——查询模板才是配额环
+有意义的前提。</li>
+</ul>
+<h2 id="成本显示-以及唯一发生折算的地方">成本显示,以及唯一发生折算的地方</h2>
+<p>成本按各供应商计费的币种记录,并在所有地方按该币种显示——唯独
+<strong>Dashboard</strong> 使用你的偏好显示币种,由 Hub 汇率完成折算。供应商自己的
+行永远不会显示折算后的数字;行上是 ¥,就意味着供应商以 ¥ 计费。</p>
 
 <div class="pn-nav">
-<span></span>
-<a class="next" href="/docs/agent-takeover/"><div class="dir">Next →</div><div class="t">Agent takeover</div></a>
+<a class="prev" href="/docs/zh-CN/agent-takeover/"><div class="dir">← Previous</div><div class="t">Agent 接管</div></a>
+<a class="next" href="/docs/cli/"><div class="dir">Next →</div><div class="t">The kiwano command line</div></a>
 </div>
   </main>
 </div>

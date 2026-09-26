@@ -1,22 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agent takeover — Kiwano Docs</title>
-<meta name="description" content="Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…">
-<link rel="canonical" href="https://kiwano.cc/docs/agent-takeover/">
+<title>Agent 接管 — Kiwano Docs</title>
+<meta name="description" content="接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-CN/agent-takeover/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/agent-takeover/">
 <link rel="alternate" hreflang="zh-CN" href="https://kiwano.cc/docs/zh-CN/agent-takeover/">
 <link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/agent-takeover/">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://kiwano.cc/docs/agent-takeover/">
-<meta property="og:title" content="Agent takeover">
-<meta property="og:description" content="Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-CN/agent-takeover/">
+<meta property="og:title" content="Agent 接管">
+<meta property="og:description" content="接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="en_US">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -120,8 +121,8 @@ code, pre { font-family: var(--font-mono); }
     {
       "@type": "ListItem",
       "position": 3,
-      "name": "Agent takeover",
-      "item": "https://kiwano.cc/docs/agent-takeover/"
+      "name": "Agent 接管",
+      "item": "https://kiwano.cc/docs/zh-CN/agent-takeover/"
     }
   ]
 }
@@ -138,205 +139,197 @@ code, pre { font-family: var(--font-mono); }
 <div class="doc">
   <aside class="side">
     <div class="crumb">Docs</div>
-    <nav><a href="/docs/getting-started/">Getting started</a>
-<a href="/docs/agent-takeover/" class="on">Agent takeover</a>
-<a href="/docs/strategies/">Strategies and limits</a>
+    <nav><a href="/docs/zh-CN/getting-started/">快速上手</a>
+<a href="/docs/zh-CN/agent-takeover/" class="on">Agent 接管</a>
+<a href="/docs/zh-CN/strategies/">策略与限额</a>
 <a href="/docs/cli/">The kiwano command line</a></nav>
   </aside>
   <main class="content">
-<h1>Agent takeover</h1>
-<p class="lede">Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original backed up first and restored byte-for-byte when you switch the takeover off. No proxy binary is injected, no environment variables are exported on your behalf — the agent reads its usual config and finds the gateway there.</p>
-<p>This page is the per-agent reference: what file each takeover writes, in
-which mode, and the behavior worth knowing. The agent set and these paths are
-pinned by a consistency test (<code>docs</code> table ↔ built-in registry), so this page
-cannot silently drift from what a build does.</p>
-<h2 id="the-three-modes">The three modes</h2>
+<h1>Agent 接管</h1>
+<p class="lede">接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。</p>
+<p>本页是按 Agent 的参考:每个接管写哪些文件、用什么模式、哪些行为值得知道。
+Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册表),本页不会
+与某个构建的行为悄悄漂移。</p>
+<h2 id="三种模式">三种模式</h2>
 <ul>
-<li><strong>Additive</strong> — the agent&#39;s config holds a provider list; the takeover
-upserts a <code>kiwano-gateway</code> entry and selects it. Your own providers stay.</li>
-<li><strong>Exclusive</strong> — the agent&#39;s config is one provider slot; the takeover
-overwrites it. Restore puts your bytes back.</li>
-<li><strong>Replaces the selected slot</strong> (Cline only) — the selection names a provider
-id, so the takeover rewrites the slot that id points at rather than adding
-a second entry.</li>
+<li><strong>Additive(增量)</strong>——Agent 配置里是供应商列表;接管 upsert 一条
+<code>kiwano-gateway</code> 条目并选中它。你自己的供应商原样保留。</li>
+<li><strong>Exclusive(独占)</strong>——配置就是一个供应商槽位;接管直接改写。还原时
+把你的字节放回去。</li>
+<li><strong>替换选中槽位</strong>(仅 Cline)——其选择器指向一个供应商 id,接管改写的
+是该 id 指向的槽位,而不是在旁边加第二条。</li>
 </ul>
-<h2 id="the-agents">The agents</h2>
+<h2 id="agent-一览">Agent 一览</h2>
 <table>
 <thead>
 <tr>
 <th>Agent</th>
-<th>Config file(s) rewritten</th>
-<th>Mode</th>
-<th>Worth knowing</th>
+<th>被改写的配置</th>
+<th>模式</th>
+<th>值得知道</th>
 </tr>
 </thead>
 <tbody><tr>
 <td><code>claude</code></td>
 <td><code>~/.claude/settings.json</code></td>
-<td>exclusive</td>
-<td><code>CLAUDE_CONFIG_DIR</code> moves the whole profile.</td>
+<td>独占</td>
+<td><code>CLAUDE_CONFIG_DIR</code> 会搬动整个 profile。</td>
 </tr>
 <tr>
 <td><code>codex</code></td>
 <td><code>~/.codex/config.toml</code> + <code>auth.json</code></td>
-<td>exclusive</td>
-<td><code>CODEX_HOME</code> honored. Both files rewritten together; refuses a missing <code>config.toml</code> — run Codex once first.</td>
+<td>独占</td>
+<td>认 <code>CODEX_HOME</code>。两文件一起改写;<code>config.toml</code> 缺失时拒绝——先跑一次 Codex。</td>
 </tr>
 <tr>
 <td><code>gemini</code></td>
 <td><code>~/.gemini/.env</code></td>
-<td>exclusive</td>
-<td>Missing file is created; comments in it are preserved.</td>
+<td>独占</td>
+<td>文件缺失会创建;其中的注释保留。</td>
 </tr>
 <tr>
 <td><code>grokbuild</code></td>
 <td><code>~/.grok/config.toml</code></td>
-<td>exclusive</td>
-<td>Refuses the official xAI login config — set up a custom model first.</td>
+<td>独占</td>
+<td>拒绝官方 xAI 登录的配置——先配好自定义模型。</td>
 </tr>
 <tr>
 <td><code>claude-desktop</code></td>
-<td>two <code>claude_desktop_config.json</code> + configLibrary profile + <code>_meta.json</code></td>
-<td>exclusive</td>
-<td>macOS only; flips deployment mode to 3p and writes a gateway profile.</td>
+<td>两份 <code>claude_desktop_config.json</code> + configLibrary profile + <code>_meta.json</code></td>
+<td>独占</td>
+<td>仅 macOS;把部署模式切到 3p 并写入网关 profile。</td>
 </tr>
 <tr>
 <td><code>opencode</code></td>
 <td><code>~/.config/opencode/opencode.json</code></td>
-<td>additive</td>
-<td>XDG rules (<code>XDG_CONFIG_HOME</code>).</td>
+<td>增量</td>
+<td>走 XDG 规则(<code>XDG_CONFIG_HOME</code>)。</td>
 </tr>
 <tr>
 <td><code>openclaw</code></td>
 <td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
-<td>additive</td>
-<td>The catalogue file declares the session-affinity flag the main config&#39;s validator rejects.</td>
+<td>增量</td>
+<td>目录文件承载主配置校验器不接受的会话亲和标志。</td>
 </tr>
 <tr>
 <td><code>hermes</code></td>
 <td><code>~/.hermes/config.yaml</code></td>
-<td>additive</td>
-<td><code>HERMES_HOME</code> honored.</td>
+<td>增量</td>
+<td>认 <code>HERMES_HOME</code>。</td>
 </tr>
 <tr>
 <td><code>pi</code></td>
 <td><code>~/.pi/agent/models.json</code> + <code>settings.json</code></td>
-<td>additive</td>
-<td>The settings file carries the selection.</td>
+<td>增量</td>
+<td>选择写在 settings 里。</td>
 </tr>
 <tr>
 <td><code>workbuddy</code></td>
 <td><code>~/.workbuddy/models.json</code></td>
-<td>additive</td>
-<td><code>WORKBUDDY_CONFIG_DIR</code> honored.</td>
+<td>增量</td>
+<td>认 <code>WORKBUDDY_CONFIG_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>codebuddy</code></td>
 <td><code>~/.codebuddy/models.json</code></td>
-<td>additive</td>
-<td><code>CODEBUDDY_CONFIG_DIR</code> honored.</td>
+<td>增量</td>
+<td>认 <code>CODEBUDDY_CONFIG_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>kimi</code></td>
 <td><code>~/.kimi-code/config.toml</code></td>
-<td>additive</td>
-<td><code>KIMI_CODE_HOME</code> honored; the legacy <code>~/.kimi</code> is read when the successor is absent.</td>
+<td>增量</td>
+<td>认 <code>KIMI_CODE_HOME</code>;后继版缺席时读旧版 <code>~/.kimi</code>。</td>
 </tr>
 <tr>
 <td><code>qwen</code></td>
 <td><code>~/.qwen/settings.json</code></td>
-<td>additive</td>
-<td><code>QWEN_HOME</code> honored.</td>
+<td>增量</td>
+<td>认 <code>QWEN_HOME</code>。</td>
 </tr>
 <tr>
 <td><code>cline</code></td>
 <td><code>~/.cline/data/settings/providers.json</code></td>
-<td>replaces the selected slot</td>
-<td><code>CLINE_PROVIDER_SETTINGS_PATH</code> / <code>CLINE_DATA_DIR</code> / <code>CLINE_DIR</code> honored, in that order.</td>
+<td>替换选中槽位</td>
+<td>依次认 <code>CLINE_PROVIDER_SETTINGS_PATH</code> / <code>CLINE_DATA_DIR</code> / <code>CLINE_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>mimo</code></td>
 <td><code>~/.config/mimocode/mimocode.jsonc</code></td>
-<td>additive</td>
-<td>XDG rules.</td>
+<td>增量</td>
+<td>走 XDG 规则。</td>
 </tr>
 <tr>
 <td><code>mcode</code></td>
 <td><code>~/.minimax/config.yaml</code></td>
-<td>additive</td>
-<td><code>MCODE_CONFIG_DIR</code> honored.</td>
+<td>增量</td>
+<td>认 <code>MCODE_CONFIG_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>aider</code></td>
 <td><code>~/.aider.conf.yml</code></td>
-<td>exclusive</td>
-<td>Three global fields, not a provider list. The model gets an <code>openai/</code> prefix to force LiteLLM&#39;s OpenAI-compatible route; the model id itself reaches the upstream verbatim. <code>AIDER_CONFIG</code> is deliberately not honored.</td>
+<td>独占</td>
+<td>三个全局字段,不是供应商列表。模型加 <code>openai/</code> 前缀强制走 LiteLLM 的 OpenAI 兼容路由;模型 id 本身原样到达上游。<code>AIDER_CONFIG</code> 刻意不认。</td>
 </tr>
 <tr>
 <td><code>continue</code></td>
 <td><code>~/.continue/config.yaml</code></td>
-<td>additive</td>
-<td>The gateway model is inserted at the head of <code>models</code> with <code>roles: [chat]</code> — Continue&#39;s documented default is &quot;first model for the role&quot;.</td>
+<td>增量</td>
+<td>网关模型插到 <code>models</code> 头部并限定 <code>roles: [chat]</code>——Continue 的文档化默认是&quot;该角色的第一个模型&quot;。</td>
 </tr>
 <tr>
 <td><code>crush</code></td>
 <td><code>~/.config/crush/crush.json</code></td>
-<td>additive</td>
-<td>Fills the <code>models.large</code> slot its own <code>model large</code> command persists; the <code>small</code> slot is untouched.</td>
+<td>增量</td>
+<td>填它自己 <code>model large</code> 命令持久化的 <code>models.large</code> 槽;<code>small</code> 槽不动。</td>
 </tr>
 <tr>
 <td><code>droid</code></td>
 <td><code>~/.factory/settings.json</code></td>
-<td>additive</td>
-<td>Prepends a <code>customModels</code> entry and sets the default <code>model</code>. Refused when org policy sets <code>allowCustomModels: false</code>.</td>
+<td>增量</td>
+<td>在 <code>customModels</code> 头部插入条目并设默认 <code>model</code>。组织策略 <code>allowCustomModels: false</code> 时拒绝接管。</td>
 </tr>
 <tr>
 <td><code>goose</code></td>
-<td><code>&lt;goose config root&gt;/config.yaml</code> + <code>custom_providers/kiwano-gateway.json</code> + <code>kiwano-gateway.key</code></td>
-<td>additive</td>
-<td>macOS root is <code>~/Library/Application Support/Block/goose</code> (not <code>~/.config/goose</code>); Linux follows XDG. The key reaches goose through the provider&#39;s <code>auth.command</code> (<code>/bin/cat</code> of the key file), because goose&#39;s keyring-based secret store is not file-reachable. First-takeover import: none — the key lives in the keyring.</td>
+<td><code>&lt;goose 配置根&gt;/config.yaml</code> + <code>custom_providers/kiwano-gateway.json</code> + <code>kiwano-gateway.key</code></td>
+<td>增量</td>
+<td>macOS 根目录是 <code>~/Library/Application Support/Block/goose</code>(不是 <code>~/.config/goose</code>);Linux 走 XDG。key 通过供应商的 <code>auth.command</code>(<code>/bin/cat</code> key 文件)送达,因为 goose 的 keyring 秘密存储不读文件。首次导入:无——key 在 keyring 里。</td>
 </tr>
 <tr>
 <td><code>zcode</code></td>
 <td><code>~/.zcode/v2/provider_config.json</code></td>
-<td>additive</td>
-<td>The native registry shared between the ZCode CLI and Desktop — a takeover affects both. <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code> is honored; <code>ZCODE_DATA_BASE_DIR</code> is not.</td>
+<td>增量</td>
+<td>ZCode CLI 与 Desktop 共享的原生注册表——接管同时影响两端。认 <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>;不认 <code>ZCODE_DATA_BASE_DIR</code>。</td>
 </tr>
 </tbody></table>
-<h2 id="environment-variables">Environment variables</h2>
-<p>A takeover resolves paths through the user&#39;s <strong>login shell</strong> environment (a
-GUI app cannot see what rc files export otherwise). A variable that is set to
-a <em>relative</em> path is refused rather than guessed at.</p>
-<p>Honored: <code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>, <code>XDG_CONFIG_HOME</code> (opencode,
-mimo, crush; goose on Linux), <code>HERMES_HOME</code>, <code>WORKBUDDY_CONFIG_DIR</code>,
-<code>CODEBUDDY_CONFIG_DIR</code>, <code>QWEN_HOME</code>, <code>KIMI_CODE_HOME</code> (+ legacy
-<code>KIMI_SHARE_DIR</code>), <code>CLINE_PROVIDER_SETTINGS_PATH</code>, <code>CLINE_DATA_DIR</code>,
-<code>CLINE_DIR</code>, <code>MCODE_CONFIG_DIR</code>, <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>.</p>
-<p>Deliberately not honored: <code>AIDER_CONFIG</code> (aider v1.24 does not read it when
-loading), <code>GOOSE_PATH_ROOT</code> and <code>ZCODE_DATA_BASE_DIR</code> (relocating a whole
-tree would split files a takeover writes together), <code>OPENCODE_CONFIG</code> /
-<code>OPENCODE_CONFIG_DIR</code> and the OpenClaw state overrides (they do not move the
-file a takeover has to write).</p>
-<h2 id="first-takeover-import">First-takeover import</h2>
-<p>When an agent already has a custom endpoint configured, enabling the takeover
-offers to import it: the same base URL and key become a registered provider
-bound to the agent, so day one routes the same upstream. Import never
-re-imports a loopback endpoint (that is the gateway itself, post-takeover),
-and it reads nothing where no plaintext key exists — official-subscription
-logins (Claude OAuth, Codex ChatGPT) and goose&#39;s keyring extract nothing, and
-the onboarding guide offers manual entry instead.</p>
-<h2 id="restore-semantics">Restore semantics</h2>
-<p>Switching a takeover off: the backed-up originals are written back byte for
-byte (files the takeover created are removed). If the backup is gone — or it
-was captured while the config was already ours — the route is rebuilt from
-the provider the gateway serves the agent; failing that, our route is
-stripped from the live config so the agent is never left pointing at a
-loopback port nothing listens on. The strip is surgical: only rows/values
-that are ours are removed.</p>
+<h2 id="环境变量">环境变量</h2>
+<p>接管通过用户的<strong>登录 shell</strong>环境解析路径(GUI 应用本来也看不见 rc 文件
+导出的东西)。变量被设成<em>相对</em>路径时直接拒绝,而不是猜。</p>
+<p>认: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、
+mimo、crush;Linux 上的 goose)、<code>HERMES_HOME</code>、<code>WORKBUDDY_CONFIG_DIR</code>、
+<code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>(及旧版
+<code>KIMI_SHARE_DIR</code>)、<code>CLINE_PROVIDER_SETTINGS_PATH</code>、<code>CLINE_DATA_DIR</code>、
+<code>CLINE_DIR</code>、<code>MCODE_CONFIG_DIR</code>、<code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>。</p>
+<p>刻意不认: <code>AIDER_CONFIG</code>(aider v1.24 加载时不读它)、<code>GOOSE_PATH_ROOT</code>
+和 <code>ZCODE_DATA_BASE_DIR</code>(搬整棵树会把接管要一起写的文件拆散)、
+<code>OPENCODE_CONFIG</code> / <code>OPENCODE_CONFIG_DIR</code> 和 OpenClaw 的状态覆盖(它们
+不会搬走接管要写的那个文件)。</p>
+<h2 id="首次接管的导入">首次接管的导入</h2>
+<p>Agent 已配置过自定义端点时,开启接管会提议导入:同一 base URL 和 key 变成
+一条绑定到该 Agent 的供应商,第一天路由的还是同一个上游。导入永不把
+loopback 端点当成上游(那是接管后的网关自己),也读不出不存在的明文
+key——官方订阅登录(Claude OAuth、Codex ChatGPT)和 goose 的 keyring 什么
+都取不出来,引导改为手动录入。</p>
+<h2 id="还原语义">还原语义</h2>
+<p>关闭接管:备份的原件按字节写回(接管创建的文件被删除)。备份丢失——或
+备份是在配置本已指向我们时抓的——则用网关为该 Agent 服务的供应商重建
+路由;再不行,就把我们的路由从活配置里<strong>剥离</strong>,保证 Agent 不会被留在
+指向无人监听的 loopback 端口。剥离是外科手术式的:只删属于我们的
+行/值。</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/getting-started/"><div class="dir">← Previous</div><div class="t">Getting started</div></a>
-<a class="next" href="/docs/strategies/"><div class="dir">Next →</div><div class="t">Strategies and limits</div></a>
+<a class="prev" href="/docs/zh-CN/getting-started/"><div class="dir">← Previous</div><div class="t">快速上手</div></a>
+<a class="next" href="/docs/zh-CN/strategies/"><div class="dir">Next →</div><div class="t">策略与限额</div></a>
 </div>
   </main>
 </div>

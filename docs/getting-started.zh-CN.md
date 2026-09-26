@@ -22,7 +22,7 @@ Kiwano 位于你的编码 Agent 与 AI 供应商之间:供应商注册一次,本
 在 **Models** 货架(Hub 目录)里搜索供应商——DeepSeek、Kimi、智谱 GLM、
 OpenRouter……——或在 **Apps** 屏手动添加:
 
-![Models 货架:Hub 目录,按类别归档,含协议、计费与价格](screenshots/shelf.png)
+![Models 货架:Hub 目录,按类别归档,含协议、计费与价格](screenshots/shelf.webp)
 
 *Models 货架——Hub 目录:官方、聚合、第三方、免费四类供应商,计费与价格透明。*
 
@@ -38,7 +38,7 @@ Key 保存在仅限当前用户读取的本地数据库里。除了你填写的�
 
 **Apps** 屏上每个受支持的 Agent 都是一张卡片:
 
-![Apps 屏:供应商列表,带绑定的 Agent、7 天用量与配额、状态](screenshots/apps.png)
+![Apps 屏:供应商列表,带绑定的 Agent、7 天用量与配额、状态](screenshots/apps.webp)
 
 *Apps 屏——供应商与绑定的 Agent 一目了然;用量、配额与健康状态就在行上。*
 
@@ -56,7 +56,7 @@ Key 保存在仅限当前用户读取的本地数据库里。除了你填写的�
 **Request logs**:应能看到这条请求,带归属(哪个供应商服务的)、token、
 延迟和估算成本。Dashboard 会把同样的行按供应商、按 Agent、按天聚合。
 
-![Dashboard:统计块、用量趋势、按供应商与 Agent 归因、请求日志](screenshots/costs.png)
+![Dashboard:统计块、用量趋势、按供应商与 Agent 归因、请求日志](screenshots/costs.webp)
 
 *Dashboard——7 天趋势按供应商与 Agent 归因;下方日志行可展开单次请求。*
 

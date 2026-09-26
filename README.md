@@ -18,7 +18,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 
 **Website:** [kiwano.cc](https://kiwano.cc) · **Docs:** [Getting started](docs/getting-started.md) · [Agent takeover](docs/agent-takeover.md) · [Strategies & limits](docs/strategies.md) · [Custom agents](docs/custom-agents.md) · [CLI reference](docs/cli.md) (中文：[快速上手](docs/getting-started.zh-CN.md) · [Agent 接管](docs/agent-takeover.zh-CN.md) · [策略与限额](docs/strategies.zh-CN.md))
 
-![Kiwano's Apps screen: providers with their bound agents, usage and quota for the day](docs/screenshots/apps.png)
+![Kiwano's Apps screen: providers with their bound agents, usage and quota for the day](docs/screenshots/apps.webp)
 
 > Captured from the development build with its bundled sample data set.
 

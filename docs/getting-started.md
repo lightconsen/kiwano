@@ -24,7 +24,7 @@ closing the app leaves the gateway serving. A tray icon shows it is up.
 Open the **Models** shelf (the Hub catalog) and search a vendor — DeepSeek,
 Kimi, Zhipu GLM, OpenRouter, … — or add one manually on the **Apps** screen:
 
-![The Models shelf: the Hub catalog, filed by tier, with protocol, billing and price](screenshots/shelf.png)
+![The Models shelf: the Hub catalog, filed by tier, with protocol, billing and price](screenshots/shelf.webp)
 
 *The Models shelf — the Hub catalog: official, aggregator, third-party and
 free-tier providers with their billing and prices.*
@@ -43,7 +43,7 @@ except to the endpoint you named.
 
 On the **Apps** screen each supported agent is a card:
 
-![The Apps screen: the provider list with bound agents, usage and quota, and status](screenshots/apps.png)
+![The Apps screen: the provider list with bound agents, usage and quota, and status](screenshots/apps.webp)
 
 *The Apps screen — providers with their bound agents; usage, quota and health
 live on the row.*
@@ -66,7 +66,7 @@ request with its attribution (which provider served it), tokens, latency and
 estimated cost. The Dashboard aggregates the same rows by provider, by agent
 and by day.
 
-![The Dashboard: stat tiles, usage trend, attribution by provider and agent, and the request log](screenshots/costs.png)
+![The Dashboard: stat tiles, usage trend, attribution by provider and agent, and the request log](screenshots/costs.webp)
 
 *The Dashboard — 7-day trends attributed per provider and agent; the log rows
 below open into the full request.*

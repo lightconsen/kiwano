@@ -5,7 +5,7 @@ to it. A **strategy** decides which candidate serves the next request; the
 rest of the queue is the replay order if that attempt fails mid-flight. This
 page covers the strategies, the spend ceilings, and how plan usage is read.
 
-![A route bound to Claude Code: the ordered candidate queue with primary and standbys, and the strategy picker](screenshots/routing.png)
+![A route bound to Claude Code: the ordered candidate queue with primary and standbys, and the strategy picker](screenshots/routing.webp)
 
 *A route bound to Claude Code — the primary, its standbys in replay order,
 and the strategy picker above.*

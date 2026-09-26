@@ -793,7 +793,7 @@ footer { padding: 56px 0 44px; }
         </div>
         <div class="feat rv" style="--d:60ms">
           <div class="sh"><span class="tag">roundrobin</span><h3 data-i18n="st2.t">Round robin</h3></div>
-          <p data-i18n="st2.d">Requests rotate across candidates, spreading usage and load so no single provider gets overwhelmed.</p>
+          <p data-i18n="st2.d">Weighted rotation, per session: a session keeps its provider, so the prompt cache it already paid for keeps hitting; new sessions spread across candidates by weight.</p>
           <div class="diag" aria-hidden="true">
             <span class="pn on rr-a" style="left:16%"><i></i>A</span>
             <span class="pn rr-b" style="left:48%"><i></i>B</span>
@@ -1038,7 +1038,7 @@ const I18N = {
     "st1.t": "故障转移",
     "st1.d": "按优先级排好候选队列:主供应商故障或超时,自动切到下一家;恢复后流量自动回主路。",
     "st2.t": "轮询分发",
-    "st2.d": "请求在候选供应商之间轮流分配,把用量和压力摊到多家,谁也不至于超载。",
+    "st2.d": "按会话加权轮换:一个会话粘住一家供应商,已付费的 prompt cache 持续命中;新会话按权重摊到各家,谁也不至于超载。",
     "st3.t": "时间窗",
     "st3.d": "为每家候选设定本地时段:深夜走套餐、白天走按量;跨零点窗口自动回绕,无匹配时落到兜底候选。",
     "st4.t": "配额切换",

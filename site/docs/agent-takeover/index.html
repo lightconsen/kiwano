@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent takeover — Kiwano Docs</title>
+<meta name="description" content="Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…">
+<link rel="canonical" href="https://kiwano.cc/docs/agent-takeover/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/agent-takeover/">
+<meta property="og:title" content="Agent takeover — Kiwano Docs">
+<meta property="og:description" content="Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Agent takeover",
+      "item": "https://kiwano.cc/docs/agent-takeover/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <div class="crumb">Docs</div>
+    <nav><a href="/docs/getting-started/">Getting started</a>
+<a href="/docs/agent-takeover/" class="on">Agent takeover</a>
+<a href="/docs/strategies/">Strategies and limits</a>
+<a href="/docs/cli/">The kiwano command line</a></nav>
+  </aside>
+  <main class="content">
+<h1>Agent takeover</h1>
+<p class="lede">Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original backed up first and restored byte-for-byte when you switch the takeover off. No proxy binary is injected, no environment variables are exported on your behalf — the agent reads its usual config and finds the gateway there.</p>
+<p>This page is the per-agent reference: what file each takeover writes, in
+which mode, and the behavior worth knowing. The agent set and these paths are
+pinned by a consistency test (<code>docs</code> table ↔ built-in registry), so this page
+cannot silently drift from what a build does.</p>
+<h2 id="the-three-modes">The three modes</h2>
+<ul>
+<li><strong>Additive</strong> — the agent&#39;s config holds a provider list; the takeover
+upserts a <code>kiwano-gateway</code> entry and selects it. Your own providers stay.</li>
+<li><strong>Exclusive</strong> — the agent&#39;s config is one provider slot; the takeover
+overwrites it. Restore puts your bytes back.</li>
+<li><strong>Replaces the selected slot</strong> (Cline only) — the selection names a provider
+id, so the takeover rewrites the slot that id points at rather than adding
+a second entry.</li>
+</ul>
+<h2 id="the-agents">The agents</h2>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Config file(s) rewritten</th>
+<th>Mode</th>
+<th>Worth knowing</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>claude</code></td>
+<td><code>~/.claude/settings.json</code></td>
+<td>exclusive</td>
+<td><code>CLAUDE_CONFIG_DIR</code> moves the whole profile.</td>
+</tr>
+<tr>
+<td><code>codex</code></td>
+<td><code>~/.codex/config.toml</code> + <code>auth.json</code></td>
+<td>exclusive</td>
+<td><code>CODEX_HOME</code> honored. Both files rewritten together; refuses a missing <code>config.toml</code> — run Codex once first.</td>
+</tr>
+<tr>
+<td><code>gemini</code></td>
+<td><code>~/.gemini/.env</code></td>
+<td>exclusive</td>
+<td>Missing file is created; comments in it are preserved.</td>
+</tr>
+<tr>
+<td><code>grokbuild</code></td>
+<td><code>~/.grok/config.toml</code></td>
+<td>exclusive</td>
+<td>Refuses the official xAI login config — set up a custom model first.</td>
+</tr>
+<tr>
+<td><code>claude-desktop</code></td>
+<td>two <code>claude_desktop_config.json</code> + configLibrary profile + <code>_meta.json</code></td>
+<td>exclusive</td>
+<td>macOS only; flips deployment mode to 3p and writes a gateway profile.</td>
+</tr>
+<tr>
+<td><code>opencode</code></td>
+<td><code>~/.config/opencode/opencode.json</code></td>
+<td>additive</td>
+<td>XDG rules (<code>XDG_CONFIG_HOME</code>).</td>
+</tr>
+<tr>
+<td><code>openclaw</code></td>
+<td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
+<td>additive</td>
+<td>The catalogue file declares the session-affinity flag the main config&#39;s validator rejects.</td>
+</tr>
+<tr>
+<td><code>hermes</code></td>
+<td><code>~/.hermes/config.yaml</code></td>
+<td>additive</td>
+<td><code>HERMES_HOME</code> honored.</td>
+</tr>
+<tr>
+<td><code>pi</code></td>
+<td><code>~/.pi/agent/models.json</code> + <code>settings.json</code></td>
+<td>additive</td>
+<td>The settings file carries the selection.</td>
+</tr>
+<tr>
+<td><code>workbuddy</code></td>
+<td><code>~/.workbuddy/models.json</code></td>
+<td>additive</td>
+<td><code>WORKBUDDY_CONFIG_DIR</code> honored.</td>
+</tr>
+<tr>
+<td><code>codebuddy</code></td>
+<td><code>~/.codebuddy/models.json</code></td>
+<td>additive</td>
+<td><code>CODEBUDDY_CONFIG_DIR</code> honored.</td>
+</tr>
+<tr>
+<td><code>kimi</code></td>
+<td><code>~/.kimi-code/config.toml</code></td>
+<td>additive</td>
+<td><code>KIMI_CODE_HOME</code> honored; the legacy <code>~/.kimi</code> is read when the successor is absent.</td>
+</tr>
+<tr>
+<td><code>qwen</code></td>
+<td><code>~/.qwen/settings.json</code></td>
+<td>additive</td>
+<td><code>QWEN_HOME</code> honored.</td>
+</tr>
+<tr>
+<td><code>cline</code></td>
+<td><code>~/.cline/data/settings/providers.json</code></td>
+<td>replaces the selected slot</td>
+<td><code>CLINE_PROVIDER_SETTINGS_PATH</code> / <code>CLINE_DATA_DIR</code> / <code>CLINE_DIR</code> honored, in that order.</td>
+</tr>
+<tr>
+<td><code>mimo</code></td>
+<td><code>~/.config/mimocode/mimocode.jsonc</code></td>
+<td>additive</td>
+<td>XDG rules.</td>
+</tr>
+<tr>
+<td><code>mcode</code></td>
+<td><code>~/.minimax/config.yaml</code></td>
+<td>additive</td>
+<td><code>MCODE_CONFIG_DIR</code> honored.</td>
+</tr>
+<tr>
+<td><code>aider</code></td>
+<td><code>~/.aider.conf.yml</code></td>
+<td>exclusive</td>
+<td>Three global fields, not a provider list. The model gets an <code>openai/</code> prefix to force LiteLLM&#39;s OpenAI-compatible route; the model id itself reaches the upstream verbatim. <code>AIDER_CONFIG</code> is deliberately not honored.</td>
+</tr>
+<tr>
+<td><code>continue</code></td>
+<td><code>~/.continue/config.yaml</code></td>
+<td>additive</td>
+<td>The gateway model is inserted at the head of <code>models</code> with <code>roles: [chat]</code> — Continue&#39;s documented default is &quot;first model for the role&quot;.</td>
+</tr>
+<tr>
+<td><code>crush</code></td>
+<td><code>~/.config/crush/crush.json</code></td>
+<td>additive</td>
+<td>Fills the <code>models.large</code> slot its own <code>model large</code> command persists; the <code>small</code> slot is untouched.</td>
+</tr>
+<tr>
+<td><code>droid</code></td>
+<td><code>~/.factory/settings.json</code></td>
+<td>additive</td>
+<td>Prepends a <code>customModels</code> entry and sets the default <code>model</code>. Refused when org policy sets <code>allowCustomModels: false</code>.</td>
+</tr>
+<tr>
+<td><code>goose</code></td>
+<td><code>&lt;goose config root&gt;/config.yaml</code> + <code>custom_providers/kiwano-gateway.json</code> + <code>kiwano-gateway.key</code></td>
+<td>additive</td>
+<td>macOS root is <code>~/Library/Application Support/Block/goose</code> (not <code>~/.config/goose</code>); Linux follows XDG. The key reaches goose through the provider&#39;s <code>auth.command</code> (<code>/bin/cat</code> of the key file), because goose&#39;s keyring-based secret store is not file-reachable. First-takeover import: none — the key lives in the keyring.</td>
+</tr>
+<tr>
+<td><code>zcode</code></td>
+<td><code>~/.zcode/v2/provider_config.json</code></td>
+<td>additive</td>
+<td>The native registry shared between the ZCode CLI and Desktop — a takeover affects both. <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code> is honored; <code>ZCODE_DATA_BASE_DIR</code> is not.</td>
+</tr>
+</tbody></table>
+<h2 id="environment-variables">Environment variables</h2>
+<p>A takeover resolves paths through the user&#39;s <strong>login shell</strong> environment (a
+GUI app cannot see what rc files export otherwise). A variable that is set to
+a <em>relative</em> path is refused rather than guessed at.</p>
+<p>Honored: <code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>, <code>XDG_CONFIG_HOME</code> (opencode,
+mimo, crush; goose on Linux), <code>HERMES_HOME</code>, <code>WORKBUDDY_CONFIG_DIR</code>,
+<code>CODEBUDDY_CONFIG_DIR</code>, <code>QWEN_HOME</code>, <code>KIMI_CODE_HOME</code> (+ legacy
+<code>KIMI_SHARE_DIR</code>), <code>CLINE_PROVIDER_SETTINGS_PATH</code>, <code>CLINE_DATA_DIR</code>,
+<code>CLINE_DIR</code>, <code>MCODE_CONFIG_DIR</code>, <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>.</p>
+<p>Deliberately not honored: <code>AIDER_CONFIG</code> (aider v1.24 does not read it when
+loading), <code>GOOSE_PATH_ROOT</code> and <code>ZCODE_DATA_BASE_DIR</code> (relocating a whole
+tree would split files a takeover writes together), <code>OPENCODE_CONFIG</code> /
+<code>OPENCODE_CONFIG_DIR</code> and the OpenClaw state overrides (they do not move the
+file a takeover has to write).</p>
+<h2 id="first-takeover-import">First-takeover import</h2>
+<p>When an agent already has a custom endpoint configured, enabling the takeover
+offers to import it: the same base URL and key become a registered provider
+bound to the agent, so day one routes the same upstream. Import never
+re-imports a loopback endpoint (that is the gateway itself, post-takeover),
+and it reads nothing where no plaintext key exists — official-subscription
+logins (Claude OAuth, Codex ChatGPT) and goose&#39;s keyring extract nothing, and
+the onboarding guide offers manual entry instead.</p>
+<h2 id="restore-semantics">Restore semantics</h2>
+<p>Switching a takeover off: the backed-up originals are written back byte for
+byte (files the takeover created are removed). If the backup is gone — or it
+was captured while the config was already ours — the route is rebuilt from
+the provider the gateway serves the agent; failing that, our route is
+stripped from the live config so the agent is never left pointing at a
+loopback port nothing listens on. The strip is surgical: only rows/values
+that are ours are removed.</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/getting-started/"><div class="dir">← Previous</div><div class="t">Getting started</div></a>
+<a class="next" href="/docs/strategies/"><div class="dir">Next →</div><div class="t">Strategies and limits</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

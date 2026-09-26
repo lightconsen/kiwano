@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strategies and limits — Kiwano Docs</title>
+<meta name="description" content="Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of…">
+<link rel="canonical" href="https://kiwano.cc/docs/strategies/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/strategies/">
+<meta property="og:title" content="Strategies and limits — Kiwano Docs">
+<meta property="og:description" content="Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Strategies and limits",
+      "item": "https://kiwano.cc/docs/strategies/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <div class="crumb">Docs</div>
+    <nav><a href="/docs/getting-started/">Getting started</a>
+<a href="/docs/agent-takeover/">Agent takeover</a>
+<a href="/docs/strategies/" class="on">Strategies and limits</a>
+<a href="/docs/cli/">The kiwano command line</a></nav>
+  </aside>
+  <main class="content">
+<h1>Strategies and limits</h1>
+<p class="lede">Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of the queue is the replay order if that attempt fails mid-flight. This page covers the strategies, the spend ceilings, and how plan usage is read.</p>
+<h2 id="the-six-strategies">The six strategies</h2>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Picks</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>single</code></td>
+<td>The primary, always.</td>
+<td>The default. One provider, no replay tail — but an agent over its own spend ceiling is refused under every strategy, <code>single</code> included.</td>
+</tr>
+<tr>
+<td><code>failover</code></td>
+<td>The first breaker-available candidate in priority order.</td>
+<td>When every breaker is open, the primary is tried anyway. A 429 sets the short pause the provider named; a 500 counts toward the breaker.</td>
+</tr>
+<tr>
+<td><code>roundrobin</code></td>
+<td>Weighted rotation — <strong>per session</strong>.</td>
+<td>A conversation keeps its provider so the upstream prompt cache it already paid for keeps being hit; new sessions pick by weight; a session is reassigned only when its sticky candidate goes unavailable.</td>
+</tr>
+<tr>
+<td><code>timewindow</code></td>
+<td>The candidate whose local <code>HH:MM</code> window (windows may cross midnight) contains now.</td>
+<td>Falls back to the primary when nothing matches. Same session stickiness as <code>roundrobin</code>.</td>
+</tr>
+<tr>
+<td><code>quota</code></td>
+<td>The primary until its same-day usage (requests or tokens, read from the usage aggregates) passes the threshold in the strategy config, then the backups, failover-style.</td>
+<td>Same session stickiness: a switch applies to the <em>next</em> conversation.</td>
+</tr>
+<tr>
+<td><code>least-busy</code></td>
+<td>The breaker-available candidate with the fewest requests currently in flight.</td>
+<td>Sessions drain first (like the other sticky strategies); priority order breaks ties.</td>
+</tr>
+</tbody></table>
+<p>Two properties hold across all of them:</p>
+<ul>
+<li><strong>A conversation keeps its provider.</strong> Under the sticky strategies
+(<code>roundrobin</code>, <code>timewindow</code>, <code>quota</code>) a switch lands on the <em>next</em>
+conversation; one already running finishes where it is, instead of
+rebuilding a prompt cache its provider has already charged for. Requests
+that name no session are chosen afresh.</li>
+<li><strong>Failures are replayed, not returned.</strong> Under any strategy but <code>single</code>,
+a request that fails is replayed against the next candidate in the queue
+instead of being handed back to your agent as an error.</li>
+</ul>
+<h2 id="spend-ceilings-agent-limits">Spend ceilings (agent limits)</h2>
+<p>An agent can carry ceilings per period — <code>day</code>, <code>weekly</code>, <code>monthly</code>,
+<code>yearly</code> or <code>all</code> — each with a limit and a unit: request counts
+(<code>requests</code>), ten-thousand-token blocks (<code>wan_tokens</code>), or an <strong>ISO currency
+code</strong>.</p>
+<p>The currency rule is deliberate: a limit is denominated in a currency the
+agent&#39;s providers actually bill in, never in your display preference. When a
+provider bills in another currency, its spending is converted at the Hub&#39;s
+exchange rates <em>before</em> it counts toward the ceiling — the ceiling itself is
+never converted. Reaching a ceiling refuses new requests for that agent with
+a clear reason (visibility in the UI), under every strategy.</p>
+<h2 id="where-the-usage-numbers-come-from">Where the usage numbers come from</h2>
+<ul>
+<li><strong>Metered usage</strong> is read from the gateway&#39;s own request accounting —
+tokens and cost per request, attributed to the provider that served it.</li>
+<li><strong>Plan quotas</strong> (subscription plans that publish &quot;how much of your plan you
+have used&quot;) are read from the vendor&#39;s own endpoint via <em>plan queries</em>. A
+handful of catalog entries ship a query template (Kimi, Zhipu personal and
+team, MiniMax, ZenMux, OpenCode Go, Volcengine); results are cached for
+five minutes and force-refreshable. A provider can be <em>billed</em> like a plan
+without supporting a plan query — the query template is what makes the
+quota ring meaningful.</li>
+</ul>
+<h2 id="cost-display-and-the-one-place-conversion-happens">Cost display, and the one place conversion happens</h2>
+<p>Costs are recorded in the currency each provider bills in, and they are
+displayed in that currency everywhere — except the <strong>Dashboard</strong>, where your
+preferred display currency applies and the Hub&#39;s exchange rates do the
+conversion. A provider&#39;s own row never shows you a converted number; if a
+row says ¥, the vendor bills in ¥.</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/agent-takeover/"><div class="dir">← Previous</div><div class="t">Agent takeover</div></a>
+<a class="next" href="/docs/cli/"><div class="dir">Next →</div><div class="t">The kiwano command line</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

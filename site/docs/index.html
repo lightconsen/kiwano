@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kiwano Docs</title>
+<meta name="description" content="Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.">
+<link rel="canonical" href="https://kiwano.cc/docs/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/">
+<meta property="og:title" content="Kiwano Docs">
+<meta property="og:description" content="Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    }
+  ]
+}
+</script>
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+
+.wrap { max-width: 760px; margin: 0 auto; padding: 48px 28px 90px; }
+.wrap .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); }
+.wrap h1 { margin-top: 12px; font-size: 32px; font-weight: 700; letter-spacing: -0.015em; }
+.wrap > p { margin-top: 10px; color: var(--mut); font-size: 15px; }
+.grid { margin-top: 34px; display: grid; gap: 12px; }
+.card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 18px 20px; transition: border-color .15s; }
+.card:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.card h2 { font-size: 16px; font-weight: 600; }
+.card p { margin-top: 6px; font-size: 13.5px; color: var(--mut); }
+.gh-note { margin-top: 26px; font-size: 12.5px; color: oklch(0.48 0.008 260); }
+.gh-note a { color: var(--kiwi); }</style>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</div></div>
+<div class="wrap">
+  <div class="crumb">Docs</div>
+  <h1>Kiwano Docs</h1>
+  <p>Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.</p>
+  <div class="grid">
+  <a class="card" href="/docs/getting-started/"><h2>Getting started</h2><p>Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to…</p></a>
+  <a class="card" href="/docs/agent-takeover/"><h2>Agent takeover</h2><p>Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…</p></a>
+  <a class="card" href="/docs/strategies/"><h2>Strategies and limits</h2><p>Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of…</p></a>
+  <a class="card" href="/docs/cli/"><h2>The kiwano command line</h2><p>kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…</p></a>
+  </div>
+  <p class="gh-note">Design and planning notes (contributor-facing) live in
+  <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

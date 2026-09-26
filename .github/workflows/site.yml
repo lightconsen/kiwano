@@ -1,8 +1,8 @@
 # Deploy the static marketing site (site/) to GitHub Pages.
-# Still no build step for the page itself — one file, served as written. The
-# one thing that runs is `scripts/sync-site.mjs`, which copies the version and
-# the licence name out of `app/package.json` before the upload so the deployed
-# page cannot advertise a release or a licence the project has moved past.
+# No build step at serve time — pages are served as written. Two things run
+# before the upload, both writing git-tracked output: `scripts/sync-site.mjs`
+# copies the version and the licence name out of `app/package.json`, and
+# `scripts/build-docs.mjs` renders docs/*.md into site/docs/ plus the sitemap.
 #
 # `app/package.json` is in the trigger list for that reason: a release bumps it,
 # and without this the site would keep its old version until something else
@@ -19,7 +19,10 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "docs/*.md"
       - "scripts/sync-site.mjs"
+      - "scripts/build-docs.mjs"
+      - "scripts/vendor/**"
       - "app/package.json"
       - ".github/workflows/site.yml"
   workflow_dispatch:
@@ -54,6 +57,12 @@ jobs:
       # deployed site is current whatever the committed file happens to say.
       - name: Stamp version and licence from app/package.json
         run: node scripts/sync-site.mjs
+
+      # docs/*.md render into site/docs/ as plain HTML (git-tracked, so the
+      # served site stays what was committed); the sitemap is regenerated
+      # with them, lastmod read from each page's git history.
+      - name: Render docs pages and sitemap
+        run: node scripts/build-docs.mjs
 
       - uses: actions/configure-pages@v6
 

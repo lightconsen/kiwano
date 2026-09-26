@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The `kiwano` command line — Kiwano Docs</title>
+<meta name="description" content="kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…">
+<link rel="canonical" href="https://kiwano.cc/docs/cli/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/cli/">
+<meta property="og:title" content="The `kiwano` command line — Kiwano Docs">
+<meta property="og:description" content="kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "The `kiwano` command line",
+      "item": "https://kiwano.cc/docs/cli/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <div class="crumb">Docs</div>
+    <nav><a href="/docs/getting-started/">Getting started</a>
+<a href="/docs/agent-takeover/">Agent takeover</a>
+<a href="/docs/strategies/">Strategies and limits</a>
+<a href="/docs/cli/" class="on">The kiwano command line</a></nav>
+  </aside>
+  <main class="content">
+<h1>The <code>kiwano</code> command line</h1>
+<p class="lede">kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's admin plane for status and hot reload, so it works on a host with no display at all.</p>
+<p>It shares its implementation with the app rather than reimplementing it: every
+command in this document is a call into <code>kiwano-core</code>, the crate the desktop app
+also links. A provider added here is the same row, written the same way, as one
+added there.</p>
+<h2 id="installing">Installing</h2>
+<p>On a Linux or macOS server, one command does the whole thing — binaries,
+checksum verification, and the gateway registered as a service for your user:</p>
+<pre><code class="language-sh">curl -fsSL https://hub.kiwano.cc/install.sh | sh
+</code></pre>
+<p>It needs no root, and that is deliberate rather than convenient: <code>agents takeover</code> rewrites an agent&#39;s config under its own <code>$HOME</code>, so the CLI and the
+agent must be the same account. See <a href="https://github.com/lightconsen/kiwano/blob/main/packaging/INSTALL.md"><code>packaging/INSTALL.md</code></a>)
+for what it does step by step, and for the machine-wide alternative.</p>
+<h2 id="globals">Globals</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--db &lt;PATH&gt;</code></td>
+<td>The SQLite file. Default <code>~/.kiwano/kiwano.db</code>, or <code>KIWANO_DB_PATH</code></td>
+</tr>
+<tr>
+<td><code>--admin-socket &lt;TARGET&gt;</code></td>
+<td>Where the gateway&#39;s admin plane is: a socket path on unix, a pipe name on Windows. Default: <code>admin.sock</code> beside the database, or <code>KIWANO_ADMIN_SOCKET</code></td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Machine-readable output on stdout</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>Suppress informational notes</td>
+</tr>
+<tr>
+<td><code>--no-reload</code></td>
+<td>Do not ask a running gateway to reload after a change</td>
+</tr>
+<tr>
+<td><code>--data-port &lt;PORT&gt;</code></td>
+<td>The port an agent&#39;s config is pointed at when it is taken over. Default 8317, or <code>KIWANO_DATA_PORT</code></td>
+</tr>
+<tr>
+<td><code>--home &lt;PATH&gt;</code></td>
+<td>The root agent config files live under. Default <code>$HOME</code></td>
+</tr>
+</tbody></table>
+<p>Globals are position-independent: <code>kiwano --json providers list</code> and
+<code>kiwano providers list --json</code> are the same command.</p>
+<h2 id="output-and-exit-codes">Output and exit codes</h2>
+<p><strong>stdout carries the payload and nothing else.</strong> Under <code>--json</code> that is exactly
+one JSON document, so <code>kiwano --json providers list | jq</code> works. Diagnostics —
+the note after a route reload, warnings, errors — go to stderr, <em>including</em>
+under <code>--json</code>.</p>
+<p>Listings come out as tables, and the columns of numbers (request counts, token
+counts, costs, latencies) are aligned to their right edge so they can be read by
+magnitude:</p>
+<pre><code>+-------------------------+----------+--------+------------------+---------+---------------------------+
+| ID                      | NAME     | PROTO  | ENDPOINT         | BILLING | AGENTS                    |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+| api-deepseek-com-271eb4 | DeepSeek | openai | api.deepseek.com | payg    | codex*,demo-route-00b40a* |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+</code></pre>
+<p>A table is laid out to fit the terminal it is printed to: the widest columns
+give up space, down to a floor of six characters, and cells that no longer fit
+are elided with <code>…</code>. When the output is not a terminal — a pipe, a file — there
+is no width to fit, so the table is written whole; set <code>COLUMNS</code> to say one
+yourself (<code>COLUMNS=100 kiwano providers list</code>), which is also how a script gets
+the narrow layout deliberately.</p>
+<p>Errors are <strong>not</strong> emitted as a JSON object on stdout. Putting one there would
+make a partially-successful pipeline ambiguous about which document it was
+reading, and the exit code already carries the answer:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>0</code></td>
+<td>Success</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>The answer is &quot;no&quot; — <code>status</code> with the gateway down. Not a failure: the store was read fine, there is simply no gateway to report on</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Usage or validation error (clap&#39;s own parse failures use this too)</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>Runtime error: store, IO, admin plane, network</td>
+</tr>
+</tbody></table>
+<h2 id="command-reference">Command reference</h2>
+<p>Run <code>kiwano &lt;command&gt; --help</code> for the full flag list. The map below is the
+shape, not every flag.</p>
+<h3 id="status">Status</h3>
+<pre><code>kiwano status              gateway, store, today&#39;s totals, and the blocked list
+kiwano reload              ask a running gateway to rebuild its route table
+kiwano gateway start       start one, adopting an already-running gateway
+kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
+kiwano gateway restart     stop and start
+</code></pre>
+<p><code>status</code> includes the providers the gateway is currently <strong>refusing to route
+to</strong>, with its reason — <code>capped-1  1.00 of 1.00 requests this period</code>. That is
+derived state which exists only while the gateway runs, so this is the only
+place a shell can see it, and it is usually the answer to &quot;why is nothing
+routing&quot;.</p>
+<p>On a systemd host, use <code>systemctl restart kiwanod</code> instead of the
+<code>gateway</code> subcommands — see INSTALL.md.</p>
+<h3 id="providers">Providers</h3>
+<pre><code>kiwano providers list [--agent AGENT]
+kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
+                     [--billing plan|payg|unl] [--limit N --unit U] [--reset R]
+                     [--bind AGENT]...
+kiwano providers edit &lt;ID&gt; [any of the above]
+kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing single strategy
+kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
+kiwano providers remove &lt;ID&gt;
+kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers probe latency|endpoint|models
+</code></pre>
+<p>Both <code>add</code> and <code>edit</code> also take the forwarding and quota options:</p>
+<pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
+--retries N                    same-provider attempts before failover (0–5)
+--header &#39;Name: value&#39;         repeatable; merged after credential injection,
+                               so these can override the injected credentials
+--endpoint-extra PROTO=URL     repeatable; the same vendor on another protocol
+--plan-limit-5h PCT            plan: share of the five-hour window
+--plan-limit-weekly PCT        plan: share of the weekly window
+--plan-query JSON              {&quot;template&quot;:&quot;kimi&quot;,&quot;fields&quot;:{…}} — this is what
+                               `providers quota` reads
+</code></pre>
+<p><code>edit</code> additionally takes <code>--no-headers</code> and <code>--clear-plan-query</code>.</p>
+<p><code>providers edit</code> keeps the provider&#39;s <strong>id</strong>, which is why it exists: bindings,
+rotating keys and usage rows all reference it, so remove-and-add is a different
+operation. Only the flags you give are changed; everything else is carried over
+from the stored row.</p>
+<p>That carry-over is load-bearing for <code>--timeout</code>, <code>--retries</code>, <code>--header</code>,
+<code>--endpoint-extra</code> and <code>--plan-limit-*</code>: each is <em>part</em> of an object the
+underlying API recomputes as a whole, so an edit that names one still sends the
+others. Renaming a provider does not clear its timeout.</p>
+<p>Clearing is always explicit — <code>--no-headers</code>, <code>--clear-plan-query</code> — because an
+absent flag means keep. <code>--key</code> works the same way: omitting it keeps the stored
+key, it does not blank it.</p>
+<p><code>--plan-limit-*</code> is refused unless the provider is a plan (the underlying layer
+silently drops the value otherwise, and a flag that does nothing is worse than
+one that refuses). <code>--plan-query</code> is what makes <code>providers quota</code> able to ask
+anything at all.</p>
+<p><code>--unit</code> says what a <code>--limit</code> counts: <code>requests</code>, <code>wan_tokens</code>, or a currency the
+Hub publishes a rate for. That last one is checked rather than stored, and exits 2
+with the currencies it does know: a limit is measured against costs priced in other
+currencies, and one without a rate would be added to them at 1:1. A machine that
+has never synced has no table at all, and takes <code>USD</code> and <code>CNY</code> — the two the Hub
+publishes rates against.</p>
+<h3 id="rotating-keys">Rotating keys</h3>
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
+kiwano keys remove &lt;KEY_ID&gt;
+</code></pre>
+<p>Rotating keys are tried after the provider&#39;s primary key, per request.</p>
+<h3 id="agents">Agents</h3>
+<pre><code>kiwano agents detect                    which agents are installed
+kiwano agents versions                  version strings (slow: one subprocess each)
+kiwano agents takeover &lt;AGENT&gt;          route it through the gateway, backing up its config
+kiwano agents restore &lt;AGENT&gt;           put the original config back
+kiwano agents list                      built-in and user-defined agents, with keys
+kiwano agents add --name NAME [--note TEXT] [--protocol P]
+                                        define your own agent: a named route with its own key
+kiwano agents remove &lt;ID&gt;               delete it and its key (its usage history stays)
+</code></pre>
+<p><code>takeover</code> is the command that makes a server usable. It imports the provider
+the agent is currently configured with, mints the agent&#39;s placeholder key, and
+rewrites the agent&#39;s own config to point at the gateway. The key matters: the
+data plane only routes keys it issued itself and refuses anything else with a
+401, so pointing an agent at the gateway by hand does not work.</p>
+<p>It prints the placeholder key, because that is the one part of the result that
+is invisible from outside.</p>
+<p><code>takeover</code> writes under <code>--home</code>, so run it as the user whose config you mean —
+or pass <code>--home</code> explicitly for a service account.</p>
+<p><code>agents add</code> is the other way to get a route: an agent Kiwano cannot detect and
+does not rewrite anything for. You get a name, an id, a key and a strategy to
+bind providers to — nothing on disk changes, so point a client at the gateway
+with the printed key. <code>agents list</code> prints <code>-</code> for the key of an agent that has
+none yet, and <code>--json</code> carries every field on the row.</p>
+<p><code>--protocol</code> records what that agent&#39;s clients speak: <code>anthropic</code>, <code>openai</code> or
+<code>gemini</code>. Omitting it means the agent does not say, which is a different answer
+from any of the three and is what <code>agents list</code> shows as <code>-</code>. It is a <strong>label</strong> —
+nothing routes, converts or validates by it; the wire format of a request is
+decided by the path it arrives on.</p>
+<h3 id="routes">Routes</h3>
+<pre><code>kiwano routes list
+kiwano routes strategy &lt;AGENT&gt; single|failover|roundrobin|timewindow|quota
+                               [--limit N --unit requests|tokens]
+kiwano routes reorder &lt;AGENT&gt; &lt;PROVIDER_ID&gt;...
+kiwano routes apply --from SOURCE --to TARGET
+kiwano routes binding add|remove &lt;AGENT&gt; &lt;PROVIDER_ID&gt;
+kiwano routes binding set &lt;AGENT&gt; &lt;PROVIDER_ID&gt; [--weight N] [--window HH:MM-HH:MM] [--no-window]
+</code></pre>
+<p><code>routes reorder</code> takes the candidate order as arguments: the order you write
+them in becomes priority 0, 1, 2…</p>
+<p>The quota payload is validated by the gateway&#39;s own parser, so a config the CLI
+writes cannot be one the engine would silently reinterpret. <code>--limit</code> on a
+strategy that ignores one is rejected rather than accepted as a no-op.</p>
+<h3 id="usage-and-logs">Usage and logs</h3>
+<pre><code>kiwano usage [--days N] [--agent AGENT] [--provider ID]
+kiwano dashboard [--window today|7d|30d|all] [--provider ID] [--agent AGENT]
+kiwano insights [--days N] [--agent AGENT]
+kiwano alerts [--mark-notified]
+
+kiwano logs list [--agent A] [--provider P] [--status ok|error]
+                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+kiwano logs show &lt;ID&gt;
+kiwano logs export --out PATH [same filters] [--include-bodies]
+kiwano logs clear --yes
+kiwano logs dir
+</code></pre>
+<p><code>--from</code> is inclusive and <code>--to</code> exclusive, matching the store&#39;s half-open
+range.</p>
+<p><code>insights</code> is the one-page report about <em>how</em> the tokens are being spent: a
+per-agent scorecard (cache hit rate, session context growth, reasoning share,
+retries), rule findings tagged <code>cache</code> / <code>bloat</code> / <code>retry</code> / <code>overhead</code>, and
+the sessions whose context grew the most. Every finding carries the
+<code>request_logs</code> ids behind it — reopen one with <code>kiwano logs show &lt;ID&gt;</code> — and
+everything is computed locally from the log: bodies are sampled to measure
+the fixed tools/system payload, but they never leave this machine, and no
+amounts appear anywhere (cost is the dashboard&#39;s job). The global <code>--json</code>
+flag yields the same report for machine consumption.</p>
+<p><code>alerts</code> is <strong>read-only by default</strong>. The dedup key it would otherwise write is
+the same one the desktop app consults before raising a notification, so a
+scripted poll would silently swallow the alert you were waiting for. Pass
+<code>--mark-notified</code> if you genuinely want the CLI to take over delivery.</p>
+<p><code>logs clear</code> requires <code>--yes</code>: the app confirms with a dialog, and a flag is the
+equivalent for a shell with no TTY.</p>
+<h3 id="settings-config-and-catalog">Settings, config and catalog</h3>
+<pre><code>kiwano settings get
+kiwano settings set --key KEY=VALUE [--key ...] [--patch JSON]
+
+kiwano config export --out PATH [--include-keys]
+kiwano config import --file PATH
+kiwano import cc-switch
+
+kiwano catalog list [--tag official|aggregate|third|free] [--search QUERY]
+kiwano catalog sync
+kiwano catalog currency
+</code></pre>
+<p>Values to <code>settings set</code> are parsed as JSON when they parse, so
+<code>--key cost_alert=false</code> is a boolean and <code>--key log_retention_days=30</code> a
+number.</p>
+<p><code>config export --include-keys</code> writes live credentials and the file is created
+owner-only (<code>0600</code>) for that reason. <code>config export</code> without the flag is safe to
+keep in version control; the two round-trip through <code>config import</code>, which
+merges by name and endpoint rather than overwriting.</p>
+<p><code>import cc-switch</code> reads <code>~/.cc-switch/cc-switch.db</code> (the v3.20+ SQLite, opened
+for reading) or the older <code>~/.cc-switch/config.json</code>, and writes only to
+Kiwano&#39;s own database. Nothing under <code>~/.cc-switch</code> is modified or deleted, so
+the two can sit side by side while you decide.</p>
+<p>It maps all eight apps it knows — claude, claude-desktop, codex, grokbuild,
+opencode, openclaw, hermes and pi — onto the agent of the same name, and
+whichever provider was <em>current</em> in cc-switch becomes that agent&#39;s primary
+binding, so what migrates is the configuration you were actually running rather
+than a list of candidates to pick from again.</p>
+<p>It is safe to run again, and safe to run next to a Kiwano you have already
+been using. A provider already here for the same endpoint and protocol — one
+you hand-added, or an earlier run&#39;s import — is <em>reused</em> rather than added a
+second time, and its name, key and billing are left alone: the import only
+fills in what was never there. An agent that already has a route is left on
+it; only an agent with no route yet is imported onto, so a re-run can never
+move an agent back onto something you have since switched it away from.</p>
+<p>Two cases are reported instead of guessed at. cc-switch&#39;s <code>gemini</code> rows are
+skipped: they target Gemini CLI, their settings are Gemini-shaped, and this
+gateway speaks no protocol to import them as. A provider with no base URL or no
+key is listed as skipped rather than created empty. Every skip carries its
+reason.</p>
+<p><code>catalog list</code> reads the Hub cache and nothing else — there is no bundled copy, so
+a machine that has never synced lists nothing rather than a stale catalog. Run
+<code>catalog sync</code> first; that is what a fresh server should do before adding anything
+from the shelf, and after it the cache serves offline like any other.</p>
+<p><strong>There is no <code>catalog add</code>.</strong> The shelf&#39;s one-click &quot;Add&quot; opens the provider
+form prefilled from the entry — it does not call an API of its own, so the
+capability is <code>providers add</code>, and the values come from <code>catalog list --json</code>:</p>
+<pre><code class="language-sh">kiwano catalog list --json --search deepseek
+kiwano providers add --name DeepSeek --endpoint https://api.deepseek.com/anthropic \
+    --protocol anthropic --billing payg --limit 50 --unit CNY --bind claude
+</code></pre>
+<p>The prefilling rules (a <code>payg</code> limit of 50, and the agent prebind some catalog
+entries carry) live in the app&#39;s form, not in a shared layer. If that mapping
+moves into <code>kiwano-core</code> later, this becomes a one-command shortcut — until
+then it is a convenience the CLI does without, not a capability it lacks.</p>
+<p>What the CLI <em>does</em> record is which entry a provider corresponds to, since that
+is what prices its requests at the entry&#39;s own published rates. It is inferred
+from the endpoint rather than asked for: <code>providers add</code> links the provider when
+its endpoint names exactly one entry, and <code>catalog sync</code> does the same for
+providers that have no link yet. Nothing is guessed — an endpoint that matches
+no entry, or more than one (two entries sharing a host), stays unlinked and is
+priced at the general rate.</p>
+<h2 id="how-this-maps-onto-the-app">How this maps onto the app</h2>
+<p>Every user-facing capability of the desktop app is reachable here except the
+inherently graphical ones (tray, window, theme, notifications, i18n, in-app
+self-update).</p>
+<table>
+<thead>
+<tr>
+<th>App capability</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Gateway status + today&#39;s totals</td>
+<td><code>status</code></td>
+</tr>
+<tr>
+<td>Provider list / add / edit / delete</td>
+<td><code>providers list|add|edit|remove</code></td>
+</tr>
+<tr>
+<td>Make a provider current</td>
+<td><code>providers enable</code>, <code>providers use</code></td>
+</tr>
+<tr>
+<td>Latency / endpoint / model probes</td>
+<td><code>providers probe …</code></td>
+</tr>
+<tr>
+<td>Plan quota rings</td>
+<td><code>providers quota</code></td>
+</tr>
+<tr>
+<td>Rotating API keys</td>
+<td><code>keys list|add|remove</code></td>
+</tr>
+<tr>
+<td>Agent routes + strategy</td>
+<td><code>routes list</code>, <code>routes strategy</code></td>
+</tr>
+<tr>
+<td>Candidate order, weights, time windows</td>
+<td><code>routes reorder</code>, <code>routes binding …</code></td>
+</tr>
+<tr>
+<td>Copy a route between agents</td>
+<td><code>routes apply</code></td>
+</tr>
+<tr>
+<td>Agent detection and versions</td>
+<td><code>agents detect</code>, <code>agents versions</code></td>
+</tr>
+<tr>
+<td>Takeover / restore</td>
+<td><code>agents takeover</code>, <code>agents restore</code></td>
+</tr>
+<tr>
+<td>Your own agents (named routes)</td>
+<td><code>agents list|add|remove</code></td>
+</tr>
+<tr>
+<td>Usage totals</td>
+<td><code>usage</code></td>
+</tr>
+<tr>
+<td>Dashboard trends</td>
+<td><code>dashboard</code></td>
+</tr>
+<tr>
+<td>Usage alerts</td>
+<td><code>alerts</code></td>
+</tr>
+<tr>
+<td>Request logs, detail, CSV export, clear</td>
+<td><code>logs …</code></td>
+</tr>
+<tr>
+<td>Log file location</td>
+<td><code>logs dir</code></td>
+</tr>
+<tr>
+<td>Settings</td>
+<td><code>settings get|set</code></td>
+</tr>
+<tr>
+<td>Config export / import</td>
+<td><code>config export|import</code></td>
+</tr>
+<tr>
+<td>cc-switch migration</td>
+<td><code>import cc-switch</code></td>
+</tr>
+<tr>
+<td>Catalog shelf + Hub sync + currencies</td>
+<td><code>catalog list|sync|currency</code></td>
+</tr>
+<tr>
+<td>Daemon lifecycle</td>
+<td><code>gateway start|stop|restart</code></td>
+</tr>
+</tbody></table>
+<p>Not covered anywhere: the update check, the update download, and the progress
+event stream. Those are properties of the desktop app&#39;s installer, and the
+server bundle is updated by installing a new one.</p>
+<h2 id="migrating-from-kiwano-cli">Migrating from <code>kiwano-cli</code></h2>
+<p><code>kiwano-cli</code> is gone and there is no alias. Everything it did is under <code>kiwano</code>,
+with two differences worth knowing:</p>
+<ol>
+<li><p><strong>The billing vocabulary is the app&#39;s.</strong> <code>--billing plan|payg|unl</code> is
+canonical; <code>subscription|metered|unlimited</code> still parse as aliases. For a
+<strong>plan</strong> provider, <code>--limit</code>, <code>--unit</code> and <code>--reset</code> are now rejected — a
+plan&#39;s quota comes from its plan query, and those flags used to write columns
+the app never reads.</p>
+</li>
+<li><p><strong><code>--json</code> output is a single document on stdout.</strong> Diagnostics moved to
+stderr, which fixes mutating commands: <code>kiwano-cli --json providers add … | jq</code> could not parse before, because the reload note was printed to stdout
+after the JSON.</p>
+</li>
+</ol>
+<p>Subcommands that moved:</p>
+<table>
+<thead>
+<tr>
+<th>Was</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kiwano-cli status</code></td>
+<td><code>kiwano status</code></td>
+</tr>
+<tr>
+<td><code>kiwano-cli providers use &lt;ID&gt; --agent A</code></td>
+<td><code>kiwano providers use &lt;ID&gt; --agent A</code> (unchanged)</td>
+</tr>
+<tr>
+<td><code>kiwano-cli keys list|add|remove</code></td>
+<td><code>kiwano keys list|add|remove</code> (unchanged)</td>
+</tr>
+<tr>
+<td><code>kiwano-cli usage --days N</code></td>
+<td><code>kiwano usage --days N</code> (unchanged)</td>
+</tr>
+</tbody></table>
+<p>The exit codes are new but the important one is unchanged in spirit: <code>status</code>
+still exits <code>1</code> when the gateway is down.</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/strategies/"><div class="dir">← Previous</div><div class="t">Strategies and limits</div></a>
+
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

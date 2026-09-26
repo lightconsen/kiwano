@@ -80,6 +80,15 @@ code, pre { font-family: var(--font-mono); }
 .content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
 .content blockquote p { margin: 4px 0; }
 .content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
 
 .pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
 .pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
@@ -147,6 +156,8 @@ code, pre { font-family: var(--font-mono); }
   <main class="content">
 <h1>策略与限额</h1>
 <p class="lede">每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/routing.png" alt="绑定到 Claude Code 的路由:有序候选队列,主供应商与备选,以及策略选择器"></p>
+<p><em>绑定到 Claude Code 的路由——主供应商、作为重放顺序的备选,以及上方的策略选择器。</em></p>
 <h2 id="六种策略">六种策略</h2>
 <table>
 <thead>

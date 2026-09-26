@@ -79,6 +79,15 @@ code, pre { font-family: var(--font-mono); }
 .content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
 .content blockquote p { margin: 4px 0; }
 .content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
 
 .pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
 .pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }

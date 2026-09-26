@@ -66,7 +66,7 @@ const marked = _marked.marked ?? _marked.default ?? _marked;
 // .md link would 404 on the site.
 
 function rewriteLinks(md, fromFile, lang) {
-  return md.replace(/\]\(([^)#\s]+\.md)(#[^)\s]*)?\)/g, (_, target, anchor) => {
+  let out = md.replace(/\]\(([^)#\s]+\.md)(#[^)\s]*)?\)/g, (_, target, anchor) => {
     if (target.startsWith("../")) {
       return `](${GITHUB_BLOB}/${target.slice(3)})${anchor ?? ""})`;
     }
@@ -87,6 +87,18 @@ function rewriteLinks(md, fromFile, lang) {
     const useZh = lang === "zh-CN" && page.zh;
     return `](/docs${useZh ? "/zh-CN" : ""}/${page.slug}/${anchor ?? ""})`;
   });
+  // Relative assets (the screenshots under docs/screenshots/) serve from the
+  // rendered tree, which build-docs copies below.
+  out = out.replace(/\]\(([^)#\s]+\.(?:png|jpe?g|webp|gif|svg|mp4))\)/g, (_, asset) =>
+    asset.startsWith("/") ? `](${asset})` : `](/docs/${asset})`);
+  // Fail-closed: any remaining relative target would 404 in production.
+  for (const m of out.matchAll(/\]\(([^)\s]+)\)/g)) {
+    if (!/^(https?:|\/|#|mailto:)/.test(m[1])) {
+      console.error(`build-docs: ${fromFile} has unresolvable relative link '${m[1]}'`);
+      process.exit(2);
+    }
+  }
+  return out;
 }
 
 // ── markdown → fragments ────────────────────────────────────────────────────
@@ -153,7 +165,9 @@ function addHeadingIds(html) {
 }
 
 function renderBody(md, fromFile, lang) {
-  return addHeadingIds(marked.parse(rewriteLinks(md, fromFile, lang), { gfm: true }));
+  const html = addHeadingIds(marked.parse(rewriteLinks(md, fromFile, lang), { gfm: true }));
+  // Docs images all sit below the fold; load them lazily.
+  return html.replace(/<img /g, '<img loading="lazy" decoding="async" ');
 }
 
 // ── template ────────────────────────────────────────────────────────────────
@@ -221,6 +235,15 @@ code, pre { font-family: var(--font-mono); }
 .content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
 .content blockquote p { margin: 4px 0; }
 .content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
 
 .pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
 .pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
@@ -490,10 +513,27 @@ ${hub.notes.join("\n")}
   console.log(`build-docs: ${hub.path}/ — ${hub.title}`);
 }
 
+// Screenshots the docs reference copy into the rendered tree; only media
+// travels (the source dir also carries working files), and stale outputs are
+// removed so a deleted screenshot cannot linger on the site.
+const SHOTS = join(DOCS, "screenshots");
+const OUT_SHOTS = join(SITE_DOCS, "screenshots");
+mkdirSync(OUT_SHOTS, { recursive: true });
+const MEDIA = /\.(png|jpe?g|webp|gif|svg|mp4)$/;
+for (const f of readdirSync(SHOTS)) {
+  if (MEDIA.test(f)) writeFileSync(join(OUT_SHOTS, f), readFileSync(join(SHOTS, f)));
+}
+for (const f of readdirSync(OUT_SHOTS)) {
+  if (!existsSync(join(SHOTS, f))) {
+    rmSync(join(OUT_SHOTS, f));
+    console.log(`build-docs: removed stale site/docs/screenshots/${f}`);
+  }
+}
+
 // Generated directories no longer in the manifest would still deploy (the
 // whole site/ tree uploads), so remove them rather than warn. Same sweep
 // inside zh-CN/, which mirrors the manifest's translated subset.
-const topSlugs = [...PAGES.map((p) => p.slug), "zh-CN"];
+const topSlugs = [...PAGES.map((p) => p.slug), "zh-CN", "screenshots"];
 for (const entry of readdirSync(SITE_DOCS, { withFileTypes: true })) {
   if (entry.isDirectory() && !topSlugs.includes(entry.name)) {
     rmSync(join(SITE_DOCS, entry.name), { recursive: true });

@@ -79,6 +79,15 @@ code, pre { font-family: var(--font-mono); }
 .content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
 .content blockquote p { margin: 4px 0; }
 .content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
 
 .pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
 .pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
@@ -161,6 +170,9 @@ closing the app leaves the gateway serving. A tray icon shows it is up.</p>
 <h2 id="2-register-a-provider">2. Register a provider</h2>
 <p>Open the <strong>Models</strong> shelf (the Hub catalog) and search a vendor — DeepSeek,
 Kimi, Zhipu GLM, OpenRouter, … — or add one manually on the <strong>Apps</strong> screen:</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/shelf.png" alt="The Models shelf: the Hub catalog, filed by tier, with protocol, billing and price"></p>
+<p><em>The Models shelf — the Hub catalog: official, aggregator, third-party and
+free-tier providers with their billing and prices.</em></p>
 <ol>
 <li><strong>Add provider</strong> → name, endpoint, API key, and the protocol the endpoint
 speaks (<code>openai</code> or <code>anthropic</code>).</li>
@@ -173,6 +185,9 @@ against it.</li>
 except to the endpoint you named.</p>
 <h2 id="3-take-over-an-agent">3. Take over an agent</h2>
 <p>On the <strong>Apps</strong> screen each supported agent is a card:</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/apps.png" alt="The Apps screen: the provider list with bound agents, usage and quota, and status"></p>
+<p><em>The Apps screen — providers with their bound agents; usage, quota and health
+live on the row.</em></p>
 <ul>
 <li>If the agent already has a provider configured, <strong>Enable Kiwano</strong> offers to
 import it — the agent&#39;s upstream stays the same on day one, just routed
@@ -189,6 +204,9 @@ normally run), then open <strong>Request logs</strong> in Kiwano. You should see
 request with its attribution (which provider served it), tokens, latency and
 estimated cost. The Dashboard aggregates the same rows by provider, by agent
 and by day.</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/costs.png" alt="The Dashboard: stat tiles, usage trend, attribution by provider and agent, and the request log"></p>
+<p><em>The Dashboard — 7-day trends attributed per provider and agent; the log rows
+below open into the full request.</em></p>
 <h2 id="5-route-more-than-one-provider">5. Route more than one provider</h2>
 <p>One provider per agent is the <code>single</code> strategy. Bind more candidates to an
 agent&#39;s route and pick a strategy — <code>failover</code>, <code>roundrobin</code>, <code>timewindow</code>,

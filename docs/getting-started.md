@@ -24,6 +24,11 @@ closing the app leaves the gateway serving. A tray icon shows it is up.
 Open the **Models** shelf (the Hub catalog) and search a vendor — DeepSeek,
 Kimi, Zhipu GLM, OpenRouter, … — or add one manually on the **Apps** screen:
 
+![The Models shelf: the Hub catalog, filed by tier, with protocol, billing and price](screenshots/shelf.png)
+
+*The Models shelf — the Hub catalog: official, aggregator, third-party and
+free-tier providers with their billing and prices.*
+
 1. **Add provider** → name, endpoint, API key, and the protocol the endpoint
    speaks (`openai` or `anthropic`).
 2. Optionally set a default model, a billing kind (pay-as-you-go, plan, or
@@ -37,6 +42,11 @@ except to the endpoint you named.
 ## 3. Take over an agent
 
 On the **Apps** screen each supported agent is a card:
+
+![The Apps screen: the provider list with bound agents, usage and quota, and status](screenshots/apps.png)
+
+*The Apps screen — providers with their bound agents; usage, quota and health
+live on the row.*
 
 - If the agent already has a provider configured, **Enable Kiwano** offers to
   import it — the agent's upstream stays the same on day one, just routed
@@ -55,6 +65,11 @@ normally run), then open **Request logs** in Kiwano. You should see the
 request with its attribution (which provider served it), tokens, latency and
 estimated cost. The Dashboard aggregates the same rows by provider, by agent
 and by day.
+
+![The Dashboard: stat tiles, usage trend, attribution by provider and agent, and the request log](screenshots/costs.png)
+
+*The Dashboard — 7-day trends attributed per provider and agent; the log rows
+below open into the full request.*
 
 ## 5. Route more than one provider
 

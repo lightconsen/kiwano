@@ -17,7 +17,64 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
-## [0.2.4] - 2026-09-23
+## [0.2.5] - 2026-09-27
+
+### Added
+
+- **Six more agents taken over: Aider, Continue, Crush, Droid, Goose and
+  ZCode** — sixteen built-ins become twenty-two, each detected, rewritten to
+  route through the gateway, and restored byte for byte when the takeover is
+  switched off. The ones with a story: **Aider** is the first exclusive-switch
+  agent since Grok Build — three global fields in `~/.aider.conf.yml`, not a
+  provider list — and the model id rides an `openai/` prefix that forces
+  LiteLLM's OpenAI-compatible route (LiteLLM strips it before forwarding, so
+  the id arrives upstream verbatim). **Goose** resolves its config root
+  through its own strategy (on macOS `~/Library/Application
+  Support/Block/goose`, not the `~/.config/goose` its docs show) and has no
+  literal-key field: the key rides an `auth: {command, args}` hook, because
+  goose resolves custom-provider keys through its keyring and a key written
+  to `secrets.yaml` is invisible to everyone whose keyring holds a goose
+  blob. **ZCode** keeps one provider registry between its CLI and Desktop
+  (`~/.zcode/v2/provider_config.json`), so one takeover affects both. **Continue**'s
+  gateway entry is unshifted to the head of `models` scoped to
+  `roles: [chat]` — its documented default is first-of-role, and the
+  autocomplete and embed models stay the user's. **Crush** fills the
+  `models.large` slot (`crush model large`'s own persistence) and must write
+  all ten fields catwalk's model type requires, or Crush refuses the config.
+  **Droid** refuses honestly when org policy sets `allowCustomModels: false` —
+  writing a model the tool pretends does not exist would be a takeover in
+  name only.
+
+- **Template endpoints compose at add time.** The Hub (v67) publishes eight
+  providers — Azure AI Foundry, Azure OpenAI, Bedrock, Cloudflare Workers AI,
+  Databricks, OCI, SAP AI Core and watsonx — whose endpoint URL carries
+  `{placeholder}` holes: a region, a resource name, an account id. The add
+  dialog turns such a row into one input per placeholder, named by it, with
+  the composed URL as a live preview underneath, and the probe, the model
+  fetch and the save all unlock only when no hole is left. The saved provider
+  holds the composed URL and nothing else — the gateway, metering and edit
+  never see a template. With this, all eight become addable from the shelf
+  for the first time.
+
+### Fixed
+
+- An agent the machine does not have never shows an **Enable Kiwano** tab:
+  display follows detection, so a probe that has not answered (or failed)
+  shows the custom agents only, and a taken-over agent whose binary has
+  vanished reads the same way — no requests are flowing, so detection, not
+  the takeover state, gates the tab.
+- The declare menu knows MiMo Code's and MiniMax Code's logos.
+
+### Docs
+
+- The reference moved onto the site: **kiwano.cc/docs** serves getting
+  started, agent takeover, strategies and the CLI reference in English and
+  中文, rendered from `docs/*.md` by CI with reciprocal hreflang. The landing
+  page gained a FAQ, and its strategy copy now says what the gateway does —
+  roundrobin rotates per session, so a conversation keeps the prompt cache it
+  already paid for.
+
+
 
 ### Added
 

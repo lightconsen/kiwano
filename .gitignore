@@ -44,3 +44,5 @@ apple/
 
 docs/media/*.mp4
 .env
+# Screenshot working files (capture scratch, never shipped)
+.shots/

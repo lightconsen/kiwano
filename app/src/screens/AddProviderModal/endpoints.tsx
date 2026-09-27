@@ -47,7 +47,15 @@ function TemplateParamInputs({
           />
         ))}
       </div>
-      <div className="mt-1 truncate font-mono text-[10.5px]" aria-hidden>
+      {/* The composed URL, truncated rather than wide: this line is the one
+          that blew the modal's min-content out in WKWebView (the Dialog
+          already clips its own overflow, but a row wider than the dialog
+          pushed everything left of it out instead). max-w-0 + flex-1 lets
+          the line shrink to the row's remaining space; truncate cuts the
+          overflow. The full URL stays readable — it ends with the tail the
+          user would match against their provider's docs, and the inputs
+          above carry the part that changes. */}
+      <div className="mt-1 max-w-0 flex-1 truncate font-mono text-[10.5px]" aria-hidden>
         {template.split(/(\{[a-z][a-z0-9-]*\})/g).map((seg, i) =>
           /^\{[a-z][a-z0-9-]*\}$/.test(seg) ? (
             <span key={i} style={{ color: "var(--kiwi)" }}>

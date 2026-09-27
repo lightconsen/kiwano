@@ -47,6 +47,7 @@ export const addProvider = {
   fetching: "获取中…",
   errorNoKey: "请先填写 API Key —— 提供商会拒绝匿名的模型列表请求",
   errorNoModels: "该端点未返回任何模型",
+  errorTemplate: "先补全端点参数——URL 里还有未填的占位符",
   modelIdPlaceholder: "模型 ID",
 
   // ── Billing ──

@@ -13,7 +13,54 @@ import {
 } from "@/components/ui/select";
 import { api } from "../../api/client";
 import { useT } from "../../i18n";
+import {
+  endpointParams,
+  hasUnfilledParams,
+  isTemplateEndpoint,
+} from "../../lib/endpoint-template";
 import type { CatalogEntry, ProbeReport, Protocol, Provider } from "../../api/types";
+
+/** A template row's editors: one input per {placeholder} in the published
+    URL, with the composed endpoint under them — filled segments read like the
+    URL they will become, unfilled holes glow kiwi. The template itself is
+    never an editable input: it is not text the user owns, it is a shape. */
+function TemplateParamInputs({
+  template,
+  params,
+  onParam,
+}: {
+  template: string;
+  params: Record<string, string>;
+  onParam: (name: string, value: string) => void;
+}) {
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-1.5">
+        {endpointParams(template).map((name) => (
+          <Input
+            key={name}
+            className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+            value={params[name] ?? ""}
+            placeholder={name}
+            aria-label={name}
+            onChange={(e) => onParam(name, e.target.value)}
+          />
+        ))}
+      </div>
+      <div className="mt-1 truncate font-mono text-[10.5px]" aria-hidden>
+        {template.split(/(\{[a-z][a-z0-9-]*\})/g).map((seg, i) =>
+          /^\{[a-z][a-z0-9-]*\}$/.test(seg) ? (
+            <span key={i} style={{ color: "var(--kiwi)" }}>
+              {params[seg.slice(1, -1)]?.trim() || seg}
+            </span>
+          ) : (
+            <span key={i}>{seg}</span>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function probeColor(verdict: ProbeReport["verdict"]): string {
   return verdict === "ok" || verdict === "auth" ? "var(--kiwi)" : "var(--red)";
@@ -46,6 +93,8 @@ export function EndpointsSection({
   mode,
   shelf,
   testAlt,
+  templateParams,
+  onTemplateParam,
 }: {
   protocol: Protocol;
   setProtocol: (p: Protocol) => void;
@@ -73,6 +122,13 @@ export function EndpointsSection({
   shelf: CatalogEntry | null;
   /** The container's own test of one additional endpoint, by row index */
   testAlt: (i: number) => void;
+  /** Values typed into template placeholders, keyed by placeholder name —
+      shared across rows, because the same name in two URLs is the same fact
+      about the user's account (both Bedrock-style URLs read one region). */
+  templateParams: Record<string, string>;
+  /** One placeholder filled: the container recomposes every template row it
+      is on (endpoint state keeps the composed URL, so save needs no change). */
+  onTemplateParam: (name: string, value: string) => void;
 }) {
   const t = useT();
   const protocolLabel = (id: string) =>
@@ -129,6 +185,17 @@ export function EndpointsSection({
   const nextFreeProtocol = (): Protocol =>
     protocolOptions.find((p) => !supportedProtocols.has(p.id))?.id ?? protocol;
 
+  /** A catalog-owned row that is a template: the entry's URL for this row, as
+      published. Read from the entry, not from the composed state — a filled-in
+      endpoint stops carrying placeholders, and the row must not flip shape
+      under the user's last keystroke. */
+  const shelfTemplateFor = (rowProtocol: Protocol): string | null => {
+    if (!fromEntry || !shelf) return null;
+    const declared =
+      rowProtocol === protocol ? shelf.endpoint : shelf.endpoints?.find((x) => x.protocol === rowProtocol)?.endpoint;
+    return declared && isTemplateEndpoint(declared) ? declared : null;
+  };
+
   return (
     <div>
       <Label className="text-[11px] font-medium text-mut">
@@ -147,24 +214,34 @@ export function EndpointsSection({
             // The verdict was for the old protocol's endpoint call shape
             setProbe(null);
           })}
-          <Input
-            className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
-            value={endpoint}
-            readOnly={fromEntry}
-            aria-label={t("addProvider.endpointUrl")}
-            onChange={(e) => {
-              setEndpoint(e.target.value);
-              setProbe(null);
-              // The fetched list belongs to the old endpoint
-              setFetchedModels(null);
-              setFetchError(null);
-            }}
-          />
+          {(() => {
+            const template = shelfTemplateFor(protocol);
+            if (template) {
+              return (
+                <TemplateParamInputs template={template} params={templateParams} onParam={onTemplateParam} />
+              );
+            }
+            return (
+              <Input
+                className="h-8 min-w-0 flex-1 bg-bg font-mono text-[12px] dark:bg-bg"
+                value={endpoint}
+                readOnly={fromEntry}
+                aria-label={t("addProvider.endpointUrl")}
+                onChange={(e) => {
+                  setEndpoint(e.target.value);
+                  setProbe(null);
+                  // The fetched list belongs to the old endpoint
+                  setFetchedModels(null);
+                  setFetchError(null);
+                }}
+              />
+            );
+          })()}
           <Button
             variant="outline"
             size="sm"
             className="h-8 flex-none gap-1 px-2.5 text-[11px]"
-            disabled={testing}
+            disabled={testing || hasUnfilledParams(endpoint, templateParams)}
             onClick={async () => {
               setTesting(true);
               try {
@@ -189,7 +266,9 @@ export function EndpointsSection({
             )}
           </Button>
         </div>
-        {altEndpoints.map((r, i) => (
+        {altEndpoints.map((r, i) => {
+          const altTemplate = shelfTemplateFor(r.protocol);
+          return (
           <div key={i} className="flex items-center gap-1.5">
             {protocolField(r.protocol, (p) => {
               setAltEndpoints((rs) =>
@@ -203,29 +282,33 @@ export function EndpointsSection({
               });
             })}
             <span className="min-w-0 flex-1">
-              <Input
-                className="h-8 w-full bg-bg font-mono text-[12px] dark:bg-bg"
-                value={r.endpoint}
-                readOnly={fromEntry}
-                aria-label={t("addProvider.endpointUrl")}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setAltEndpoints((rs) =>
-                    rs.map((x, j) => (j === i ? { ...x, endpoint: value } : x)),
-                  );
-                  setAltProbes((m) => {
-                    const next = { ...m };
-                    delete next[i];
-                    return next;
-                  });
-                }}
-              />
+              {altTemplate ? (
+                <TemplateParamInputs template={altTemplate} params={templateParams} onParam={onTemplateParam} />
+              ) : (
+                <Input
+                  className="h-8 w-full bg-bg font-mono text-[12px] dark:bg-bg"
+                  value={r.endpoint}
+                  readOnly={fromEntry}
+                  aria-label={t("addProvider.endpointUrl")}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setAltEndpoints((rs) =>
+                      rs.map((x, j) => (j === i ? { ...x, endpoint: value } : x)),
+                    );
+                    setAltProbes((m) => {
+                      const next = { ...m };
+                      delete next[i];
+                      return next;
+                    });
+                  }}
+                />
+              )}
             </span>
             <Button
               variant="outline"
               size="sm"
               className="h-8 flex-none gap-1 px-2.5 text-[11px]"
-              disabled={!r.endpoint.trim() || altTesting[i]}
+              disabled={!r.endpoint.trim() || altTesting[i] || hasUnfilledParams(r.endpoint, templateParams)}
               onClick={() => testAlt(i)}
             >
               <Gauge className="h-3 w-3" />
@@ -258,7 +341,8 @@ export function EndpointsSection({
               </Button>
             )}
           </div>
-        ))}
+          );
+        })}
         {/* A provider typed in by hand declares its own endpoints: one row
             per protocol it answers on. A catalog entry has already said
             which those are, so the button is not there while it owns the

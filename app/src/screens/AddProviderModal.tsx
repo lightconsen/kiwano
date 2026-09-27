@@ -20,6 +20,11 @@ import {
   type Provider,
 } from "../api/types";
 import { useHubUrl } from "../lib/hub";
+import {
+  hasUnfilledParams,
+  instantiateEndpoint,
+  isTemplateEndpoint,
+} from "../lib/endpoint-template";
 import { AdvancedSection } from "./AddProviderModal/advanced";
 import { AgentBinding } from "./AddProviderModal/binding";
 import { BillingSection } from "./AddProviderModal/billing";
@@ -81,6 +86,12 @@ export default function AddProviderModal({
   // Additional per-protocol endpoints (one provider serves agents speaking
   // other protocols natively, e.g. Qianfan openai + anthropic)
   const [altEndpoints, setAltEndpoints] = useState<{ protocol: Protocol; endpoint: string }[]>([]);
+  // Template placeholder values (Hub v67: an endpoints[].endpoint URL may
+  // carry {region}-style holes the user fills at add time). Keyed by
+  // placeholder name and shared across rows — the same name in two URLs is
+  // one fact about the user's account. The endpoint states hold the composed
+  // URL, so the save path never learns templates existed.
+  const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
   const [altProbes, setAltProbes] = useState<Record<number, ProbeReport | null>>({});
   const [altTesting, setAltTesting] = useState<Record<number, boolean>>({});
   const [model, setModel] = useState("");
@@ -172,6 +183,7 @@ export default function AddProviderModal({
     setApiKey("");
     setEndpoint(e.endpoint);
     setAltEndpoints((e.endpoints ?? []).map((x) => ({ protocol: x.protocol, endpoint: x.endpoint })));
+    setTemplateParams({});
     setAltProbes({});
     setModel(e.models[0] ?? "");
     setBilling(e.billing);
@@ -217,6 +229,11 @@ export default function AddProviderModal({
   // surfaces as an inline error instead of a doomed request.
   const fetchModels = async () => {
     if (fetching || !endpoint.trim()) return;
+    // A template with holes is not an endpoint: nothing productive to fetch.
+    if (hasUnfilledParams(endpoint, templateParams)) {
+      setFetchError(t("addProvider.errorTemplate"));
+      return;
+    }
     // Blank is only a blocker when there is nothing to fall back on: the edit
     // form never holds the stored key, and the backend uses it when the endpoint
     // is one this provider already answers on.
@@ -238,6 +255,32 @@ export default function AddProviderModal({
     } finally {
       setFetching(false);
     }
+  };
+
+  /** One template placeholder filled: recompose every row carrying a
+      placeholder — the same name in another row is the same value — and
+      invalidate the verdicts and the model list, which belonged to the old
+      URL. The templates come from the entry, never from the endpoint state:
+      the state is the composed URL, which stops carrying placeholders after
+      the first value lands and would silently stop tracking the rest. */
+  const onTemplateParam = (name: string, value: string) => {
+    const next = { ...templateParams, [name]: value };
+    setTemplateParams(next);
+    if (!shelf) return;
+    if (isTemplateEndpoint(shelf.endpoint)) {
+      setEndpoint(instantiateEndpoint(shelf.endpoint, next));
+    }
+    setAltEndpoints((rows) =>
+      rows.map((r) => {
+        const template = shelf.endpoints?.find((x) => x.protocol === r.protocol)?.endpoint;
+        return template && isTemplateEndpoint(template)
+          ? { ...r, endpoint: instantiateEndpoint(template, next) }
+          : r;
+      }),
+    );
+    setProbe(null);
+    setFetchedModels(null);
+    setFetchError(null);
   };
 
   const testAlt = async (i: number) => {
@@ -282,6 +325,7 @@ export default function AddProviderModal({
       setApiKey(""); // leave empty = keep the existing key
       setEndpoint(edit.endpoint);
       setAltEndpoints((edit.endpoints ?? []).map((x) => ({ protocol: x.protocol, endpoint: x.endpoint })));
+      setTemplateParams({}); // an edit holds the user's own, concrete rows
       setAltProbes({});
       // What the add form collected and used to throw away: persisted since v14,
       // so an edit shows the model that was chosen rather than an empty box.
@@ -328,6 +372,7 @@ export default function AddProviderModal({
       setApiKey("");
       setEndpoint("");
       setAltEndpoints([]);
+      setTemplateParams({});
       setModel("");
       setBilling("payg");
       setLimitValue("");
@@ -443,9 +488,16 @@ export default function AddProviderModal({
   );
 
   // An invalid ceiling is refused rather than dropped: see `invalidPct`.
+  // A template row with holes is refused too — the URL still glowing is not
+  // an endpoint, and the probe that would catch it is disabled for exactly
+  // that reason, so the save button is the last gate standing.
+  const templateIncomplete =
+    hasUnfilledParams(endpoint, templateParams) ||
+    altEndpoints.some((r) => hasUnfilledParams(r.endpoint, templateParams));
   const canSave =
     name.trim() !== "" &&
     endpoint.trim() !== "" &&
+    !templateIncomplete &&
     // `both` is a question, not a mode: the row cannot hold it (the backend
     // refuses it by name), so the form does not offer to save it.
     billing !== "both" &&
@@ -729,6 +781,8 @@ export default function AddProviderModal({
               mode={mode}
               shelf={shelf}
               testAlt={testAlt}
+              templateParams={templateParams}
+              onTemplateParam={onTemplateParam}
             />
 
             <ModelSection

@@ -52,6 +52,7 @@ export const addProvider = {
   fetching: "Fetching…",
   errorNoKey: "Enter the API key first — providers reject anonymous model lists",
   errorNoModels: "The endpoint returned no models",
+  errorTemplate: "Complete the endpoint parameters first — the URL still has unfilled placeholders",
   modelIdPlaceholder: "model-id",
 
   // ── Billing ──

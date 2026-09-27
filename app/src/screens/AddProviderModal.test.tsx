@@ -364,4 +364,42 @@ describe("adding a provider from the catalog", () => {
     // is what the block above it used to repeat as a pair of lit badges.
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
   });
+
+  it("composes a template endpoint from the values the user fills in", async () => {
+    // Hub v67: a template entry publishes its URL with {placeholder} holes —
+    // the row becomes one input per placeholder, and only the composed URL
+    // may reach the backend.
+    const template: CatalogEntry = {
+      ...entry,
+      id: "bedrock",
+      name: "Amazon Bedrock",
+      endpoint: "https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
+    };
+    apiMock.listCatalog.mockResolvedValue({ entries: [template], total: 1 });
+    const user = userEvent.setup();
+    render(
+      <AddProviderModal
+        open
+        preset={template}
+        edit={null}
+        preferredCurrency="CNY"
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+    expect(await screen.findByLabelText(en.addProvider.name)).toHaveValue("Amazon Bedrock");
+    // The row is the placeholder editors, not the read-only URL input: the
+    // template is a shape, not text the user owns.
+    expect(screen.queryByLabelText(en.addProvider.endpointUrl)).toBeNull();
+    const region = screen.getByLabelText("region");
+
+    // The save gate: with the hole still glowing there is nothing to save —
+    // the probe is disabled for the same reason, so save is the last gate.
+    expect(screen.getByRole("button", { name: en.addProvider.saveEnable })).toBeDisabled();
+
+    await user.type(region, "eu-west-1");
+    const payload = await savedPayload(user);
+    expect(payload.endpoint).toBe("https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1");
+  });
 });

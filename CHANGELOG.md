@@ -17,6 +17,21 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.6] - 2026-09-27
+
+### Fixed
+
+- **The template-endpoint add dialog no longer shreds itself.** The composed
+  URL preview under the placeholder inputs carried no width constraint, so in
+  the app's WebView the row's min-content was the full template URL — which
+  propagated past the dialog's overflow clip and shoved everything left of
+  the endpoint row (the entry chip, the name, the API key, the protocol
+  badge) out past the window edge. Adding Bedrock, Azure Foundry or any of
+  the other six template providers was unreadable; every other provider was
+  unaffected because only their rows render a preview. The preview now
+  shrinks to the space left over and truncates — the parameters live in the
+  inputs above, and the URL tail that matters stays visible.
+
 ## [0.2.5] - 2026-09-27
 
 ### Added

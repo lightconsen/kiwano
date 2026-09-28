@@ -1,0 +1,21 @@
+// Dev-build override, merged over tauri.conf.json by the CLI's `--config`
+// flag — only scripts/dev-isolated.sh passes it, so CI and release builds
+// never see this file. (The CLI auto-merges only tauri.<platform>.conf.json
+// files; this name is deliberately not one of them.)
+//
+// The only thing it changes is the icon: the dev icon set is the shipping
+// icon with an amber DEV ribbon, so a dev instance is marked in the tray
+// and anywhere the bundle icon appears. The window title is untouched —
+// Overlay + hiddenTitle never shows it, and array-valued config merges
+// replace whole arrays, which would duplicate the window block for nothing.
+{
+  "bundle": {
+    "icon": [
+      "icons-dev/32x32.png",
+      "icons-dev/128x128.png",
+      "icons-dev/128x128@2x.png",
+      "icons-dev/icon.icns",
+      "icons-dev/icon.ico"
+    ]
+  }
+}

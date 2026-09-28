@@ -356,6 +356,19 @@ export default function App() {
             </button>
           ))}
         </nav>
+        {/* Dev-build marker: compiled out of release bundles entirely
+            (import.meta.env.DEV is a build-time constant — vite dev serves
+            true, `pnpm build` bakes false), so the installed app can never
+            wear it. Amber, the caution colour: this window does not share
+            the installed app's database, gateway port or admin socket. */}
+        {import.meta.env.DEV && (
+          <span
+            className="ml-auto select-none rounded-md px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.12em]"
+            style={{ color: "var(--amber)", background: "var(--amber-soft)", border: "1px solid var(--amber)" }}
+          >
+            DEV
+          </span>
+        )}
       </header>
 
       <UpdateBanner />

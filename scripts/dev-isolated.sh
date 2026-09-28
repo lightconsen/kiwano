@@ -37,4 +37,6 @@ fi
 
 export KIWANO_DB_PATH="$KIWANO_DEV_DB" KIWANO_DATA_PORT="$KIWANO_DEV_PORT"
 echo "dev-isolated: db=$KIWANO_DEV_DB · gateway :$KIWANO_DEV_PORT (the installed app is untouched)"
-exec pnpm -C app tauri dev
+# The DEV ribbon on the tray icon comes from tauri.dev.conf.json — merged over
+# the shipping config here and only here, so release builds never carry it.
+exec pnpm -C app tauri dev --config src-tauri/tauri.dev.conf.json

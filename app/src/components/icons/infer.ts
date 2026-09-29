@@ -63,14 +63,37 @@ const RULES: [string, string][] = [
   ["github", "github"],
 ];
 
+/**
+ * Hosts whose *port* names the brand, because the host is the machine itself.
+ * A provider on `localhost:11434` is Ollama by default port — the local
+ * servers are the one case a host-name rule cannot reach, since every one of
+ * them is "localhost". Only ports that a vendor ships as its own default
+ * belong here: 8000 and 8080 are everybody's, and guessing there would put a
+ * brand on a row that has nothing to do with it.
+ */
+const LOOPBACK_PORTS: [string, string][] = [["11434", "ollama"]];
+
+/** `localhost`, `127.0.0.1`, `::1`, or a name that resolves within the machine
+    as far as a URL can say. */
+function isLoopback(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
 export function iconForEndpoint(endpoint: string): string | null {
-  const host = endpoint
+  const authority = endpoint
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, "")
-    .split("/")[0]
-    .split(":")[0];
+    .split("/")[0];
+  const host = authority.split(":")[0];
   if (!host) return null;
+  if (isLoopback(host)) {
+    // `host:port`, with IPv6 in brackets — the port is the only signal here.
+    const port = authority.match(/:(\d+)$/)?.[1];
+    for (const [needle, icon] of LOOPBACK_PORTS) {
+      if (port === needle && hasIcon(icon)) return icon;
+    }
+  }
   for (const [needle, icon] of RULES) {
     if (host.includes(needle) && hasIcon(icon)) return icon;
   }

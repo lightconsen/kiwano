@@ -68,6 +68,13 @@ function simulateOutage(): void {
   }
 }
 
+declare global {
+  interface Window {
+    /** The recorder's faster tick, in ms; unset in the shipped demo. */
+    __KIWANO_DEMO_TICK_MS__?: number;
+  }
+}
+
 let timer: number | undefined;
 let outageTimer: number | undefined;
 let paused = false;
@@ -93,7 +100,12 @@ export function startSimulation(): void {
   // is watching. One request every few seconds is enough for the counters and
   // rings to read as live — and each tick costs the visitor a screen re-read, so
   // the cadence *is* the CPU budget.
-  const REQUEST_MS = 5_000;
+  //
+  // The one caller that wants it faster is the recorder (`scripts/record-demo-gif.js`),
+  // which sets this global before the page loads so a short clip still shows the
+  // numbers moving. Nothing in the site sets it, so the shipped demo runs at the
+  // default.
+  const REQUEST_MS = Number(window.__KIWANO_DEMO_TICK_MS__) > 0 ? Number(window.__KIWANO_DEMO_TICK_MS__) : 5_000;
   timer = window.setInterval(() => {
     if (paused || document.hidden) return;
     simulateRequest();

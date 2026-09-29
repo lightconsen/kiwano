@@ -101,7 +101,14 @@ export function SegmentStrip({
         >
           <Plus className="h-3.5 w-3.5" />
         </MenuTrigger>
-        <MenuContent className={declarable.length > 6 ? "min-w-[23rem]" : undefined}>
+        {/* `align="start"`: the menu hangs from the button's left edge, so the
+            two-column list grows into the empty space to its right instead of
+            away from it — anchored at the end it would run off under the
+            provider table it opens over. */}
+        <MenuContent
+          align="start"
+          className={declarable.length > 6 ? "min-w-[23rem]" : undefined}
+        >
           <MenuItem onClick={() => setNewAgent(true)}>
             <Plus className="h-3.5 w-3.5 text-mut" />
             {t("providers.newAgent")}

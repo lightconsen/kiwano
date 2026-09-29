@@ -10,7 +10,8 @@
 
 //! Gateway takeover transforms for the agents whose config this app writes an
 //! entry into: opencode, openclaw, hermes, pi, omp, workbuddy, codebuddy, kimi,
-//! qwen, cline, mimo, mcode, continue, crush, droid, goose and zcode.
+//! qwen, cline, mimo, mcode, continue, crush, droid, goose, zcode and
+//! commandcode.
 //!
 //! All but cline are additive: their configs hold many providers and select
 //! one, so "takeover" means upsert a gateway entry pointing at the local
@@ -43,6 +44,7 @@
 pub mod aider;
 pub mod cline;
 pub mod codebuddy;
+pub mod commandcode;
 pub mod crush;
 pub mod droid;
 // `continue` is a reserved word: the module keeps the agent id via a raw
@@ -70,6 +72,11 @@ pub mod zcode;
 pub use aider::{read_aider_current, upsert_aider_gateway};
 pub use cline::{read_cline_current, upsert_cline_gateway};
 pub use codebuddy::upsert_codebuddy_models_gateway;
+pub use commandcode::{
+    commandcode_key_file_content, commandcode_key_reference, commandcode_model_id,
+    read_commandcode_selected_model, select_commandcode_gateway, upsert_commandcode_providers,
+    COMMANDCODE_KEY_FILE,
+};
 pub use crush::{read_crush_current, upsert_crush_gateway};
 pub use droid::{read_droid_current, upsert_droid_gateway};
 pub use gateway::GATEWAY_PROVIDER_ID;

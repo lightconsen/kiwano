@@ -15,6 +15,7 @@ export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   hermes: "hermes",
   pi: "pi",
   omp: "omp",
+  commandcode: "commandcode",
   workbuddy: "workbuddy",
   codebuddy: "codebuddy",
   kimi: "kimi",

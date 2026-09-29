@@ -19,6 +19,7 @@ export type AgentId =
   | "hermes"
   | "pi"
   | "omp"
+  | "commandcode"
   | "workbuddy"
   | "codebuddy"
   | "mimo"
@@ -80,6 +81,7 @@ export const ADDITIVE_AGENTS: AgentId[] = [
   "hermes",
   "pi",
   "omp",
+  "commandcode",
   "workbuddy",
   "codebuddy",
   "kimi",
@@ -104,6 +106,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "hermes", label: "Hermes", chip_char: "H", chip_color: "#8B5CF6" },
   { id: "pi", label: "Pi", chip_char: "P", chip_color: "#DB2777" },
   { id: "omp", label: "oh-my-pi", chip_char: "O", chip_color: "#EC4899" },
+  { id: "commandcode", label: "Command Code", chip_char: "C", chip_color: "#111827", chip_border: true },
   { id: "workbuddy", label: "WorkBuddy", chip_char: "W", chip_color: "#0052D9" },
   { id: "codebuddy", label: "CodeBuddy Code", chip_char: "B", chip_color: "#0EA5E9" },
   { id: "kimi", label: "Kimi Code CLI", chip_char: "K", chip_color: "#1783FF" },

@@ -36,6 +36,7 @@ cannot silently drift from what a build does.
 | `hermes` | `~/.hermes/config.yaml` | additive | `HERMES_HOME` honored. |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | additive | The settings file carries the selection. |
 | `omp` | `~/.omp/agent/config.yml` + `models.yml` | additive | Both `.yml` and `.yaml` spellings are honored, probed per file. The provider entry declares the model the role selection names, with `authHeader: true` — without it omp resolves the placeholder key but never sends it. Refused while a legacy `models.json` is present and no YAML exists: writing the YAML first would stop omp from ever migrating it. YAML is re-serialized (comments are restored byte-for-byte on disable). |
+| `commandcode` | `~/.commandcode/settings.json` + `providers.json` + `kiwano-gateway.key` | additive | The key is a `!` command reference reading Kiwano's key file — Command Code refuses a pasted raw secret, and a keyless entry would be answered 401. Command Code still wants its own sign-in (`cmd login`) even for models through the gateway. |
 | `workbuddy` | `~/.workbuddy/models.json` | additive | `WORKBUDDY_CONFIG_DIR` honored. |
 | `codebuddy` | `~/.codebuddy/models.json` | additive | `CODEBUDDY_CONFIG_DIR` honored. |
 | `kimi` | `~/.kimi-code/config.toml` | additive | `KIMI_CODE_HOME` honored; the legacy `~/.kimi` is read when the successor is absent. |

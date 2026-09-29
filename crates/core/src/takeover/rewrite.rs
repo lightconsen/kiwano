@@ -98,7 +98,7 @@ pub(crate) fn rewrite(
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
         "opencode" | "openclaw" | "hermes" | "pi" | "omp" | "workbuddy" | "codebuddy" | "qwen"
-        | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" => {
+        | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" | "commandcode" => {
             additive_rewrite(agent, path, original, target, key, now, sibling_config)
         }
         // goose's three files are one endpoint split across formats, each by
@@ -213,6 +213,29 @@ fn additive_rewrite(
         "omp" => {
             let model_id = kiwano_adapters::gateway_takeover::omp_model_id(original);
             kiwano_adapters::gateway_takeover::select_omp_gateway(original, &model_id)
+        }
+        // Command Code's three files: the selection, the provider table (which
+        // declares the model the selection names and reads its key from a file
+        // Kiwano owns), and that key file itself.
+        "commandcode" if path.ends_with("providers.json") => {
+            let key_file = std::path::Path::new(path)
+                .parent()
+                .map(|root| root.join(kiwano_adapters::gateway_takeover::COMMANDCODE_KEY_FILE))
+                .ok_or("providers.json has no parent directory")?;
+            let model_settings = sibling_config.unwrap_or("");
+            kiwano_adapters::gateway_takeover::upsert_commandcode_providers(
+                original,
+                model_settings,
+                target,
+                &key_file.to_string_lossy(),
+            )
+        }
+        "commandcode" if path.ends_with(".key") => {
+            Ok(kiwano_adapters::gateway_takeover::commandcode_key_file_content(key))
+        }
+        "commandcode" => {
+            let model_id = kiwano_adapters::gateway_takeover::commandcode_model_id(original);
+            kiwano_adapters::gateway_takeover::select_commandcode_gateway(original, &model_id)
         }
         // WorkBuddy's model list is a bare array; CodeBuddy's is an object with
         // a picker list beside it. Both name their provider by URL per model

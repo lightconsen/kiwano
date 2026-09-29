@@ -178,6 +178,19 @@ pub(crate) fn takeover_paths(
         // No relocation variable: the docs name none, and the aider stance is
         // to write the documented location rather than guess.
         "omp" => Ok(vec![omp_file(home, "config")?, omp_models_file(home)?]),
+        // Command Code: the selection (settings.json), the provider table
+        // (providers.json), and the key file the provider's credential
+        // reference reads. No relocation variable — the docs name none. The
+        // settings file comes first: the provider block declares the model
+        // that file selects.
+        "commandcode" => {
+            let root = home.join(".commandcode");
+            Ok(vec![
+                root.join("settings.json"),
+                root.join("providers.json"),
+                root.join(kiwano_adapters::gateway_takeover::COMMANDCODE_KEY_FILE),
+            ])
+        }
         // Goose resolves its root through the etcetera app-strategy rules
         // (top-level domain "Block", app "goose"): on macOS that is
         // ~/Library/Application Support/Block/goose — *not* the ~/.config/goose

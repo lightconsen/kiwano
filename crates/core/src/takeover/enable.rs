@@ -89,6 +89,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "goose"
                         | "zcode"
                         | "omp"
+                        | "commandcode"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -184,6 +185,16 @@ fn compute_rewrites(
     // omp's provider table declares the model the role selection names, and
     // that selection is the primary file — so the table is rewritten against
     // the selection's original content, the same ride-along as goose's.
+    // Command Code's provider block declares the model its settings select, so
+    // it is rewritten against the settings file's original content.
+    let commandcode_settings = if agent == "commandcode" {
+        originals
+            .iter()
+            .find(|f| f.path.ends_with("settings.json"))
+            .map(|f| f.content.as_str())
+    } else {
+        None
+    };
     let omp_config = if agent == "omp" {
         originals
             .iter()
@@ -204,7 +215,10 @@ fn compute_rewrites(
                     &target,
                     placeholder_key,
                     &now,
-                    openclaw_config.or(goose_selection).or(omp_config),
+                    openclaw_config
+                        .or(goose_selection)
+                        .or(omp_config)
+                        .or(commandcode_settings),
                 )?,
             ))
         })
@@ -261,6 +275,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // omp's `api: openai-completions` is handed to the same client, which
         // appends the route to the version root.
         "omp" => "/v1",
+        // Command Code's provider block carries `api: openai-completions` and
+        // its baseURL goes to that same client, route appended.
+        "commandcode" => "/v1",
         // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
         // append nothing, so the route has to be in the URL we write.
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
@@ -1365,6 +1382,12 @@ models:
             // writes.
             ("omp", ".omp/agent/config.yml"),
             ("omp", ".omp/agent/models.yml"),
+            // All three of Command Code's files: the selection, the provider
+            // table, and the key file the provider's credential reference
+            // reads.
+            ("commandcode", ".commandcode/settings.json"),
+            ("commandcode", ".commandcode/providers.json"),
+            ("commandcode", ".commandcode/kiwano-gateway.key"),
         ] {
             let (_dir, home) = temp_home();
             let aux = Aux::open_in_memory().unwrap();
@@ -1507,6 +1530,66 @@ models:
             models
         );
         assert!(aux.load_takeover_backup("omp").is_none());
+    }
+
+    #[test]
+    fn commandcode_takeover_roundtrip_writes_all_three_files() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".commandcode");
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings = r#"{"theme":"dark","model":"deepseek/pro","modelProvider":"deepseek"}"#;
+        let providers = r#"{"provider":{"mine":{"name":"Mine"}}}"#;
+        std::fs::write(dir.join("settings.json"), settings).unwrap();
+        std::fs::write(dir.join("providers.json"), providers).unwrap();
+
+        enable(
+            &aux,
+            "commandcode",
+            "kw-ag-cmd-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+
+        let s: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(s["model"], "kiwano-gateway/pro");
+        assert_eq!(s["modelProvider"], "kiwano-gateway");
+        assert_eq!(s["theme"], "dark");
+
+        let p: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("providers.json")).unwrap())
+                .unwrap();
+        let ours = &p["provider"]["kiwano-gateway"];
+        assert_eq!(ours["baseURL"], "http://127.0.0.1:8317/v1");
+        // The key is a reference to Kiwano's own file — Command Code refuses a
+        // literal, and a keyless entry would be answered 401.
+        let reference = ours["apiKey"].as_str().unwrap();
+        assert!(reference.starts_with('!'), "{reference}");
+        assert!(reference.contains("kiwano-gateway.key"), "{reference}");
+        assert_eq!(ours["models"]["pro"]["name"], "pro");
+        assert_eq!(p["provider"]["mine"]["name"], "Mine");
+        // The key file itself, which is what the reference reads.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("kiwano-gateway.key")).unwrap(),
+            "kw-ag-cmd-abcd\n"
+        );
+
+        restore(&aux, "commandcode", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+            settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("providers.json")).unwrap(),
+            providers
+        );
+        // The key file was not there before, so restore removes it.
+        assert!(!dir.join("kiwano-gateway.key").exists());
+        assert!(aux.load_takeover_backup("commandcode").is_none());
     }
 
     /// A legacy `models.json` with no YAML beside it is refused: our write

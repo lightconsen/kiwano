@@ -154,6 +154,7 @@ pub(crate) mod test_support {
                 // lives in models.yml, which is what the live-evidence scan
                 // reads.
                 "omp" => ".omp/agent/models.yml",
+                "commandcode" => ".commandcode/settings.json",
                 "mimo" => ".config/mimocode/mimocode.jsonc",
                 "mcode" => ".minimax/config.yaml",
                 "aider" => ".aider.conf.yml",

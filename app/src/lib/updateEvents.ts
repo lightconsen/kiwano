@@ -13,7 +13,16 @@ const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
 /** Subscribe to a backend signal; returns an unsubscribe function. */
 function subscribe(event: string, cb: (payload: string) => void): () => void {
-  if (!inTauri) return () => {};
+  if (!inTauri) {
+    // A browser build has no backend to signal it — and one browser build is
+    // shipped on purpose: the site's live demo (src/demo), where a simulator
+    // stands in for the gateway. It dispatches the same event names, so the
+    // screens' subscriptions work there unchanged.
+    const name = `kiwano:${event}`;
+    const handler = (e: Event) => cb((e as CustomEvent<string>).detail ?? "");
+    window.addEventListener(name, handler);
+    return () => window.removeEventListener(name, handler);
+  }
   let unlisten: (() => void) | null = null;
   let disposed = false;
   listen<string>(event, (e) => cb(e?.payload ?? ""))

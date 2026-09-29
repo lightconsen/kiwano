@@ -6,6 +6,17 @@ import type { ConfigShareReport, FooterStats, KiwanoApi, UpdateInfo, UpdateProgr
 import { delay } from "../delay";
 import { providers } from "../providers";
 
+/** The footer's counters, held as one mutable object rather than rebuilt per
+    call: the site's demo moves them (`src/demo/simulate.ts`) so the status bar
+    reads like a machine that is doing something, and a fresh literal each time
+    would drop every edit on the floor. */
+export const footerStats: FooterStats = {
+  today_requests: 1284,
+  today_tokens: 1_900_000,
+  hub_synced: true,
+  version: "v0.1.2",
+};
+
 export const appApi: Pick<
   KiwanoApi,
   | "exportConfig"
@@ -28,12 +39,7 @@ export const appApi: Pick<
 
   async getFooterStats(): Promise<FooterStats> {
     await delay();
-    return {
-      today_requests: 1284,
-      today_tokens: 1_900_000,
-      hub_synced: true,
-      version: "v0.1.2",
-    };
+    return { ...footerStats };
   },
 
   async checkAppUpdate(): Promise<UpdateInfo | null> {

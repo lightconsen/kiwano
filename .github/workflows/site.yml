@@ -4,6 +4,12 @@
 # copies the version and the licence name out of `app/package.json`, and
 # `scripts/build-docs.mjs` renders docs/*.md into site/docs/ plus the sitemap.
 #
+# site/demo/ is git-tracked for the same reason and is *not* built here: it is
+# the app compiled for the browser (node scripts/build-demo.mjs), which would
+# mean a full pnpm install and the app's toolchain in this workflow. Rebuild it
+# locally whenever anything under app/src/ changes — otherwise the embedded
+# demo drifts from the app it claims to be.
+#
 # `app/package.json` is in the trigger list for that reason: a release bumps it,
 # and without this the site would keep its old version until something else
 # under `site/` happened to change. PRs never deploy. Site URL:

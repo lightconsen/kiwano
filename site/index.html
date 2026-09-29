@@ -233,6 +233,15 @@ section { scroll-margin-top: 76px; }
   background: oklch(0.15 0.008 260);
 }
 .shot img { width: 100%; }
+/* The live demo: the same frame, with the app's own window inside it. The host
+   is empty until the script fills it, so the still above is what a visitor
+   without script sees. */
+.shot-live-host { position: absolute; inset: 0; }
+.shot-live-host iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+.shot-live .shot-live-host { opacity: 0; transition: opacity .4s ease-out; }
+.shot-live.is-live .shot-live-host { opacity: 1; }
+.demo-note { margin: 14px auto 0; max-width: 980px; font-size: 12.5px; color: var(--mut); }
+.demo-note a { color: var(--kiwi); }
 .shot::after { content: ""; position: absolute; inset: 0; border-radius: 14px; box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06); pointer-events: none; }
 
 /* ── 区块标题 ── */
@@ -685,9 +694,15 @@ footer { padding: 56px 0 44px; }
       <img src="assets/agent-logos/hanaagent.svg" title="HanaAgent" alt="HanaAgent">
       <img src="assets/agent-logos/zcode.svg" title="ZCode" alt="ZCode">
     </div>
-    <figure class="shot rv" style="--d:300ms">
+    <figure class="shot shot-live rv" style="--d:300ms" id="demo">
       <img src="assets/app-providers.webp" width="1600" height="1040" alt="Kiwano's main screen: the local provider list, showing each provider's bound agents, 7-day usage and quota, and status" fetchpriority="high">
+      <!-- The app itself, built from app/ for the browser and framed at the
+           window it opens at. Swapped in by script once the frame is in view,
+           so a visitor with no JavaScript keeps the still and nobody pays for
+           the demo before reaching it. -->
+      <div class="shot-live-host" data-demo-src="/demo/"></div>
     </figure>
+    <p class="demo-note rv" style="--d:340ms" data-i18n="demo.note">Live demo — sample data, running in your browser. <a href="#download">Download Kiwano</a> to point it at your own providers.</p>
   </div>
 </header>
 
@@ -1105,6 +1120,7 @@ const I18N = {
     "pv.2": "API Key 仅存本机，只有你能读取",
     "pv.3": "无账号体系,离线完整可用",
     "foot.note": "部分模块移植自 cc-switch(MIT),声明见 THIRD-PARTY-NOTICES",
+    "demo.note": "实时演示——示例数据,在你的浏览器里跑。<a href=\"#download\">下载 Kiwano</a> 接入你自己的供应商。",
     "title": "Kiwano — 本地优先的 AI Provider 管理器",
   },
 };
@@ -1194,6 +1210,29 @@ const io = new IntersectionObserver(
   { threshold: 0.12 },
 );
 document.querySelectorAll(".rv").forEach((el) => io.observe(el));
+
+// 实时演示:滚到可见时再把 app 装进 iframe。放在这里而不是首屏,是因为它是
+// 一个完整的 React 应用(几百 KB),而首屏只需要那张静态图——没有 JS 的访客
+// 就一直看那张图。
+const liveHost = document.querySelector(".shot-live-host");
+if (liveHost) {
+  const loadDemo = () => {
+    const frame = document.createElement("iframe");
+    frame.title = "Kiwano, running in your browser";
+    frame.loading = "lazy";
+    // 不加 sandbox:它会把 iframe 变成独立源,而 ES 模块与样式表在同源策略下
+    // 加载,独立源里会被 CORS 直接挡掉(实测:整个演示白屏)。内容是我们自己
+    // 的静态页面,与父页同源,本来就没有需要隔离的第三方代码。
+    frame.src = liveHost.dataset.demoSrc;
+    frame.addEventListener("load", () => document.querySelector(".shot-live")?.classList.add("is-live"));
+    liveHost.appendChild(frame);
+  };
+  const demoIo = new IntersectionObserver(
+    (entries) => entries.forEach((e) => { if (e.isIntersecting) { demoIo.disconnect(); loadDemo(); } }),
+    { rootMargin: "400px" },
+  );
+  demoIo.observe(liveHost);
+}
 </script>
 </body>
 </html>

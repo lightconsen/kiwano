@@ -11,10 +11,12 @@
 // not load it), playwright, ffmpeg. Usage:
 //
 //   python3 -m http.server 8899 --directory site &
-//   node scripts/record-demo-gif.js            # → site/assets/demo.gif
+//   node scripts/record-demo-gif.js            # → site/assets/demo.gif + .mp4
 //
-// Env: DEMO_URL (default http://127.0.0.1:8899/demo/), OUT (default
-// site/assets/demo.gif), WIDTH (default 900).
+// It writes the two artifacts the repo keeps, from one recording: the GIF
+// (720px, 8fps — small enough to embed) and an MP4 of the same pass, a tenth
+// of the size, for anywhere that takes video. Env: DEMO_URL (default
+// http://127.0.0.1:8899/demo/), OUT (default site/assets/demo.gif).
 
 const path = require("path");
 const fs = require("fs");
@@ -25,9 +27,9 @@ const { chromium } = require(process.env.PLAYWRIGHT ||
 
 const BASE = process.env.DEMO_URL || "http://127.0.0.1:8899/demo/";
 const OUT = path.resolve(process.env.OUT || "site/assets/demo.gif");
-const WIDTH = Number(process.env.WIDTH || 820);
+const WIDTH = Number(process.env.WIDTH || 720);
 const VIEW = { width: 1000, height: 650 }; // the app's own window
-const FPS = 10;
+const FPS = 8;
 
 /** The fake cursor: a dot that eases to wherever the next click will land. */
 const CURSOR_CSS = `
@@ -165,6 +167,27 @@ async function main() {
     OUT,
   ]);
   console.log("wrote:", OUT, (fs.statSync(OUT).size / 1024 / 1024).toFixed(1), "MB");
+
+  // The same pass as video: every platform takes MP4 and re-encodes a GIF into
+  // something worse, so this is what goes wherever a clip can be uploaded.
+  // Height is even because H.264 requires it, and 650/1000 scales to exactly
+  // 468 at this width.
+  const mp4 = OUT.replace(/\.gif$/, ".mp4");
+  execFileSync("ffmpeg", [
+    "-y",
+    "-i",
+    video,
+    "-vf",
+    `scale=${WIDTH}:${Math.round((WIDTH * VIEW.height) / VIEW.width / 2) * 2}`,
+    "-movflags",
+    "+faststart",
+    "-pix_fmt",
+    "yuv420p",
+    "-crf",
+    "24",
+    mp4,
+  ]);
+  console.log("wrote:", mp4, (fs.statSync(mp4).size / 1024 / 1024).toFixed(1), "MB");
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 

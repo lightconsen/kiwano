@@ -1216,6 +1216,7 @@ document.querySelectorAll(".rv").forEach((el) => io.observe(el));
 // 就一直看那张图。
 const liveHost = document.querySelector(".shot-live-host");
 if (liveHost) {
+  const fig = document.querySelector(".shot-live");
   const loadDemo = () => {
     const frame = document.createElement("iframe");
     frame.title = "Kiwano, running in your browser";
@@ -1226,6 +1227,15 @@ if (liveHost) {
     frame.src = liveHost.dataset.demoSrc;
     frame.addEventListener("load", () => document.querySelector(".shot-live")?.classList.add("is-live"));
     liveHost.appendChild(frame);
+
+    // 滚出视口就告诉演示暂停:它在跑一个真实的 React 应用,没人看的时候不该
+    // 每秒重渲染一次。用 '*' 是因为同源判断由接收方做(receiver 会校验 origin)。
+    const tell = (visible) => frame.contentWindow?.postMessage({ type: "kiwano-demo", visible }, window.location.origin);
+    const liveIo = new IntersectionObserver(
+      (entries) => entries.forEach((e) => tell(e.isIntersecting)),
+      { threshold: 0 },
+    );
+    liveIo.observe(fig);
   };
   const demoIo = new IntersectionObserver(
     (entries) => entries.forEach((e) => { if (e.isIntersecting) { demoIo.disconnect(); loadDemo(); } }),

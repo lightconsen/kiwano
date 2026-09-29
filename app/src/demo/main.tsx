@@ -19,11 +19,16 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "../index.css";
 import App from "../App";
-import { startSimulation } from "./simulate";
+import { useDemoDataset } from "./dataset";
+import { setPaused, startSimulation } from "./simulate";
 
 // The window the desktop app opens at, and the size the screens are laid out
 // for — the demo frame is that window, not a responsive impression of it.
 document.documentElement.dataset.demo = "true";
+
+// The dataset first: the screens must mount against the trimmed fixture, not
+// re-render into it a frame later.
+useDemoDataset();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -32,3 +37,11 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 );
 
 startSimulation();
+
+// The landing page frames this page, so it is also the one that knows whether
+// anyone is looking at it: it posts as the frame enters and leaves the viewport.
+window.addEventListener("message", (e) => {
+  if (e.origin !== window.location.origin) return;
+  if (e.data?.type !== "kiwano-demo") return;
+  setPaused(!e.data.visible);
+});

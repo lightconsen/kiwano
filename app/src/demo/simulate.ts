@@ -69,30 +69,46 @@ function simulateOutage(): void {
 }
 
 let timer: number | undefined;
+let outageTimer: number | undefined;
+let paused = false;
 
 /**
- * Start the traffic. Requests land every `REQUEST_MS`, with a spread so the
- * screen does not tick like a metronome, and an outage sweep every ~20 s.
+ * Stop and start the traffic as the frame comes and goes. The landing page owns
+ * the frame, so it owns this: an embedded demo that has been scrolled past is a
+ * page nobody is looking at, and a page nobody is looking at should not be
+ * re-rendering a screen every few seconds. (A direct visit to /demo/ never
+ * pauses — nobody is there to say otherwise.)
+ */
+export function setPaused(next: boolean): void {
+  paused = next;
+}
+
+/**
+ * Start the traffic: one request every `REQUEST_MS`, and a row's health flipping
+ * about once a minute.
  */
 export function startSimulation(): void {
   stopSimulation();
-  const REQUEST_MS = 1_400;
+  // Slow on purpose: this is a page someone scrolls past, not a dashboard anyone
+  // is watching. One request every few seconds is enough for the counters and
+  // rings to read as live — and each tick costs the visitor a screen re-read, so
+  // the cadence *is* the CPU budget.
+  const REQUEST_MS = 5_000;
   timer = window.setInterval(() => {
-    // A frame nobody can see costs nothing to skip — an embedded demo left in a
-    // background tab should be idle, not busy.
-    if (document.hidden) return;
-    // One to three requests per beat: enough that the counters and rings move
-    // while a visitor is looking at them.
-    const bursts = 1 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < bursts; i += 1) simulateRequest();
+    if (paused || document.hidden) return;
+    simulateRequest();
     publishUsageTick();
   }, REQUEST_MS);
-  window.setInterval(() => {
-    if (!document.hidden) simulateOutage();
-  }, 20_000);
+  outageTimer = window.setInterval(() => {
+    if (paused || document.hidden) return;
+    simulateOutage();
+    publishUsageTick();
+  }, 60_000);
 }
 
 export function stopSimulation(): void {
   if (timer !== undefined) window.clearInterval(timer);
+  if (outageTimer !== undefined) window.clearInterval(outageTimer);
   timer = undefined;
+  outageTimer = undefined;
 }

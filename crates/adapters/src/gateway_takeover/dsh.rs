@@ -54,13 +54,11 @@ struct PatchList {
 /// The id of a `- id: x` line, and whether the line's trailing comment marks
 /// the entry as ours. Only the two indentations dsh emits are recognized.
 fn parse_id_line(line: &str) -> Option<(String, bool)> {
-    let rest = if let Some(r) = line.strip_prefix("- ") {
-        r
-    } else if let Some(r) = line.strip_prefix("  ") {
-        r
-    } else {
-        return None;
-    };
+    // Only the two indentations dsh emits start an entry line; anything else
+    // is not an id line at all.
+    let rest = line
+        .strip_prefix("- ")
+        .or_else(|| line.strip_prefix("  "))?;
     let rest = rest.strip_prefix("id:")?;
     let (value, comment) = match rest.split_once('#') {
         Some((v, c)) => (v, Some(c)),

@@ -29,6 +29,7 @@ export const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[]
   { id: "pi", icon: "pi" },
   { id: "omp", icon: "omp" },
   { id: "commandcode", icon: "commandcode" },
+  { id: "dsh", icon: "deepseek" },
   { id: "workbuddy", icon: "workbuddy" },
   { id: "codebuddy", icon: "codebuddy" },
   { id: "kimi", icon: "kimi" },

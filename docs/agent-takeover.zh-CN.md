@@ -31,6 +31,7 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 | `hermes` | `~/.hermes/config.yaml` | 增量 | 认 `HERMES_HOME`。 |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | 增量 | 选择写在 settings 里。 |
 | `omp` | `~/.omp/agent/config.yml` + `models.yml` | 增量 | `.yml` 与 `.yaml` 两种拼写都认,逐文件探测。供应商条目声明角色选择里命名的模型,并带 `authHeader: true`——没有它 omp 会解析出占位 key 却不发送。当存在旧版 `models.json` 且没有 YAML 时拒绝:先写 YAML 会让 omp 永远不再迁移它。YAML 会重排版(关闭接管时逐字节还原)。 |
+| `dsh` | `$DSH_HOME/profiles/*/cordis.patch.yml` + `$DSH_HOME/.env` | 增量 | 认 `DSH_HOME`(默认 `~/.dsh`)。改写 `llm-deepseek` 那一行的 `baseURL` 与 `apiKeyEnv`——key 本身写在 `.env` 里——其余行一律不动,用户选定的模型仍是他的。两种情形拒绝:机器上只有 dsh < 0.1.5 的 `config.yaml`(升级后先跑一次 dsh);dsh 自己的 `settings.yaml` 为那一行钉了端点或密钥——dsh 按请求用 settings 覆盖补丁列表,那样接管会什么都没路由。接管之后新建的 profile 不会被补,重跑一次接管即可。 |
 | `commandcode` | `~/.commandcode/settings.json` + `providers.json` + `kiwano-gateway.key` | 增量 | key 是 `!` 命令引用,读取 Kiwano 自己的 key 文件——Command Code 拒收直接粘贴的明文密钥,而无 key 的条目会被网关 401。即使走网关,Command Code 仍要求它自己的登录(`cmd login`)。 |
 | `workbuddy` | `~/.workbuddy/models.json` | 增量 | 认 `WORKBUDDY_CONFIG_DIR`。 |
 | `codebuddy` | `~/.codebuddy/models.json` | 增量 | 认 `CODEBUDDY_CONFIG_DIR`。 |

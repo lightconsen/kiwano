@@ -278,6 +278,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // Command Code's provider block carries `api: openai-completions` and
         // its baseURL goes to that same client, route appended.
         "commandcode" => "/v1",
+        // dsh's row hands `baseURL` to its OpenAI-shaped DeepSeek adapter,
+        // which appends the route to the version root.
+        "dsh" => "/v1",
         // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
         // append nothing, so the route has to be in the URL we write.
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
@@ -1530,6 +1533,120 @@ models:
             models
         );
         assert!(aux.load_takeover_backup("omp").is_none());
+    }
+
+    #[test]
+    fn dsh_takeover_roundtrip_writes_every_profile_and_the_env() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".dsh");
+        for profile in ["desktop", "web"] {
+            let d = dir.join("profiles").join(profile);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(
+                d.join("cordis.patch.yml"),
+                format!("# {profile} patches\n- id: my-own-row\n  config:\n    thing: !!js process.env.THING ?? undefined\n"),
+            )
+            .unwrap();
+        }
+        let env_original = "# dsh's own\nDEEPSEEK_API_KEY=sk-real\n";
+        std::fs::write(dir.join(".env"), env_original).unwrap();
+
+        enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap();
+
+        for profile in ["web", "desktop"] {
+            let text = std::fs::read_to_string(
+                dir.join("profiles").join(profile).join("cordis.patch.yml"),
+            )
+            .unwrap();
+            assert!(
+                text.contains("- id: llm-deepseek # kiwano-gateway\n"),
+                "{profile}: {text}"
+            );
+            assert!(
+                text.contains("    baseURL: http://127.0.0.1:8317/v1\n"),
+                "{profile}"
+            );
+            assert!(
+                text.contains("    apiKeyEnv: KIWANO_GATEWAY_KEY\n"),
+                "{profile}"
+            );
+            // The user's own row keeps its bytes, `!!js` expression and all.
+            assert!(text.contains("    thing: !!js process.env.THING ?? undefined\n"));
+        }
+        let env = std::fs::read_to_string(dir.join(".env")).unwrap();
+        assert!(env.contains("KIWANO_GATEWAY_KEY=kw-ag-dsh-abcd\n"));
+        assert!(env.contains("DEEPSEEK_API_KEY=sk-real\n"));
+        // The key file is what the live-evidence scan finds.
+        assert_eq!(
+            crate::takeover::state::live_placeholder_key("dsh", &home, &no_vars()).as_deref(),
+            Some("kw-ag-dsh-abcd")
+        );
+
+        restore(&aux, "dsh", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".env")).unwrap(),
+            env_original
+        );
+        for profile in ["web", "desktop"] {
+            assert_eq!(
+                std::fs::read_to_string(dir.join("profiles").join(profile).join("cordis.patch.yml"))
+                    .unwrap(),
+                format!("# {profile} patches\n- id: my-own-row\n  config:\n    thing: !!js process.env.THING ?? undefined\n")
+            );
+        }
+        assert!(aux.load_takeover_backup("dsh").is_none());
+    }
+
+    /// A machine with no profile patch yet: dsh has never run, so there is
+    /// nothing to point at the gateway.
+    #[test]
+    fn dsh_takeover_refuses_a_machine_without_a_profile_patch() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+
+        let err = enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap_err();
+        assert!(
+            err.contains("not found — run dsh at least once before takeover"),
+            "{err}"
+        );
+    }
+
+    /// dsh < 0.1.5 kept one `config.yaml` whose rows are a different schema —
+    /// refused rather than mis-written.
+    #[test]
+    fn dsh_takeover_refuses_a_legacy_config() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".dsh");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.yaml"), "[]\n").unwrap();
+
+        let err = enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap_err();
+        assert!(err.contains("dsh < 0.1.5's config"), "{err}");
+    }
+
+    /// Settings win over the patch list, so a takeover under them would report
+    /// success and route nothing.
+    #[test]
+    fn dsh_takeover_refuses_when_settings_pin_the_endpoint() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".dsh");
+        std::fs::create_dir_all(dir.join("profiles").join("web")).unwrap();
+        std::fs::write(
+            dir.join("profiles").join("web").join("cordis.patch.yml"),
+            "[]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("settings.yaml"),
+            "llm-deepseek:\n  baseURL: https://api.deepseek.com\n",
+        )
+        .unwrap();
+
+        let err = enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap_err();
+        assert!(err.contains("sets its own DeepSeek"), "{err}");
     }
 
     #[test]

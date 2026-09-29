@@ -98,9 +98,8 @@ pub(crate) fn rewrite(
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
         "opencode" | "openclaw" | "hermes" | "pi" | "omp" | "workbuddy" | "codebuddy" | "qwen"
-        | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" | "commandcode" => {
-            additive_rewrite(agent, path, original, target, key, now, sibling_config)
-        }
+        | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" | "commandcode"
+        | "dsh" => additive_rewrite(agent, path, original, target, key, now, sibling_config),
         // goose's three files are one endpoint split across formats, each by
         // its own path: the selection (YAML), the provider definition (JSON,
         // whose auth.command needs the key file's absolute path — derived from
@@ -237,6 +236,13 @@ fn additive_rewrite(
             let model_id = kiwano_adapters::gateway_takeover::commandcode_model_id(original);
             kiwano_adapters::gateway_takeover::select_commandcode_gateway(original, &model_id)
         }
+        // dsh: the patch list takes the endpoint and the credential's *name*,
+        // the `.env` beside it the key itself. The row is edited as lines
+        // (see the adapter for why a YAML round-trip is not an option).
+        "dsh" if path.ends_with(".env") => {
+            kiwano_adapters::gateway_takeover::upsert_dsh_env(original, key)
+        }
+        "dsh" => kiwano_adapters::gateway_takeover::upsert_dsh_patch_row(original, target),
         // WorkBuddy's model list is a bare array; CodeBuddy's is an object with
         // a picker list beside it. Both name their provider by URL per model
         // row, so the transforms take over one row rather than adding a second

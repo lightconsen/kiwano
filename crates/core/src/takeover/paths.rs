@@ -191,6 +191,15 @@ pub(crate) fn takeover_paths(
                 root.join(kiwano_adapters::gateway_takeover::COMMANDCODE_KEY_FILE),
             ])
         }
+        // DeepSeek Harness. `DSH_HOME` moves the whole tree. Every profile's
+        // patch list is a file a takeover has to write (each is a start-up
+        // surface of its own), and the `.env` beside them carries the key the
+        // row names. Two refusals, both because the alternative is a takeover
+        // that reports success and routes nothing: a machine that still has
+        // only dsh < 0.1.5's single `config.yaml` (whose rows are a different
+        // schema), and one whose own `settings.yaml` pins an endpoint or key
+        // for the row we rewrite — dsh resolves settings over the patch list.
+        "dsh" => dsh_paths(vars, home),
         // Goose resolves its root through the etcetera app-strategy rules
         // (top-level domain "Block", app "goose"): on macOS that is
         // ~/Library/Application Support/Block/goose — *not* the ~/.config/goose
@@ -310,6 +319,64 @@ fn omp_models_file(home: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// dsh's profile patch lists, then its `.env`. The lists are discovered rather
+/// than named: dsh initializes one per profile it is started with, so a
+/// takeover writes them all — missing a profile would leave that surface on the
+/// real upstream. `web` sorts first only for a stable order in the backup.
+fn dsh_paths(vars: &ShellVars, home: &Path) -> Result<Vec<PathBuf>, String> {
+    let dir = config_dir(vars, "DSH_HOME", ".dsh", home)?;
+    let mut files = dsh_profile_patches(&dir);
+    if files.is_empty() {
+        let legacy = dir.join(kiwano_adapters::gateway_takeover::DSH_LEGACY_CONFIG);
+        if legacy.exists() {
+            return Err(format!(
+                "{} is dsh < 0.1.5's config — its per-profile patch layer does not exist yet. \
+                 Update dsh, run it once, then retry.",
+                legacy.display()
+            ));
+        }
+        // Nothing to write yet: this is the path dsh's own profile
+        // initialization creates, so `enable` refuses it with the "run dsh at
+        // least once" message rather than a takeover into thin air.
+        files.push(dir.join("profiles").join("web").join("cordis.patch.yml"));
+    }
+    let settings = dir.join("settings.yaml");
+    if let Ok(text) = std::fs::read_to_string(&settings) {
+        if let Some(key) = kiwano_adapters::gateway_takeover::dsh_settings_conflict(&text) {
+            return Err(format!(
+                "{} sets its own DeepSeek `{key}` for the {} row, which dsh resolves over the \
+                 profile patch — clear it in dsh's Models page, then retry.",
+                settings.display(),
+                kiwano_adapters::gateway_takeover::DSH_ROW_ID
+            ));
+        }
+    }
+    files.push(dir.join(".env"));
+    Ok(files)
+}
+
+/// Every `<DSH_HOME>/profiles/*/cordis.patch.yml`, `web` first.
+fn dsh_profile_patches(dir: &Path) -> Vec<PathBuf> {
+    let profiles = dir.join("profiles");
+    let Ok(entries) = std::fs::read_dir(&profiles) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path().join("cordis.patch.yml"))
+        .filter(|p| p.is_file())
+        .collect();
+    found.sort_by_key(|p| {
+        let profile = p
+            .parent()
+            .and_then(|d| d.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        (profile != "web", profile)
+    });
+    found
+}
+
 /// Goose's three files, rooted at the config root both platform arms resolve:
 /// the selection, the provider definition (goose reads its custom providers
 /// from `custom_providers/`), and the key file the provider's auth.command
@@ -404,6 +471,7 @@ pub const CONFIG_DIR_VARS: &[&str] = &[
     "CLINE_DATA_DIR",
     "CLINE_DIR",
     "MCODE_CONFIG_DIR",
+    "DSH_HOME",
 ];
 
 /// The config root an agent resolves for itself: the environment variable that
@@ -638,6 +706,108 @@ mod tests {
     }
 
     /// The three agents a variable can move, and what it moves them to.
+    #[test]
+    fn omp_probes_each_yaml_spelling_and_refuses_a_legacy_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = abs_dir(&tmp, "home");
+        let home = home.as_path();
+        let vars = ShellVars::default();
+        let agent = home.join(".omp").join("agent");
+
+        // Nothing on disk: the `.yml` spelling a fresh install writes.
+        assert_eq!(
+            takeover_paths("omp", home, &vars).unwrap(),
+            vec![agent.join("config.yml"), agent.join("models.yml")]
+        );
+
+        // The two files are probed independently — a user can have one of each.
+        std::fs::create_dir_all(&agent).unwrap();
+        std::fs::write(agent.join("config.yaml"), "theme: dark\n").unwrap();
+        std::fs::write(agent.join("models.yaml"), "providers: {}\n").unwrap();
+        assert_eq!(
+            takeover_paths("omp", home, &vars).unwrap(),
+            vec![agent.join("config.yaml"), agent.join("models.yaml")]
+        );
+
+        // A legacy models.json with no YAML beside it is refused: our write
+        // would stop omp from ever migrating it.
+        std::fs::remove_file(agent.join("models.yaml")).unwrap();
+        std::fs::write(agent.join("models.json"), "{}").unwrap();
+        let err = takeover_paths("omp", home, &vars).unwrap_err();
+        assert!(err.contains("pre-YAML provider file"), "{err}");
+    }
+
+    #[test]
+    fn dsh_takes_every_profile_web_first_and_refuses_the_old_config() {
+        let _guards = EnvGuard::set("DSH_HOME", None);
+        let tmp = tempfile::tempdir().unwrap();
+        let home = abs_dir(&tmp, "home");
+        let home = home.as_path();
+        let vars = ShellVars::default();
+        let dir = home.join(".dsh");
+
+        // No profiles at all: the path dsh's own initialization creates, so
+        // `enable` refuses with "run dsh at least once" rather than writing
+        // into thin air.
+        assert_eq!(
+            takeover_paths("dsh", home, &vars).unwrap(),
+            vec![
+                dir.join("profiles").join("web").join("cordis.patch.yml"),
+                dir.join(".env")
+            ]
+        );
+
+        // Every profile is a start-up surface of its own, so every one is
+        // written — web first, for a stable backup.
+        for profile in ["desktop", "web", "headless"] {
+            std::fs::create_dir_all(dir.join("profiles").join(profile)).unwrap();
+            std::fs::write(
+                dir.join("profiles").join(profile).join("cordis.patch.yml"),
+                "[]\n",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            takeover_paths("dsh", home, &vars).unwrap(),
+            vec![
+                dir.join("profiles").join("web").join("cordis.patch.yml"),
+                dir.join("profiles")
+                    .join("desktop")
+                    .join("cordis.patch.yml"),
+                dir.join("profiles")
+                    .join("headless")
+                    .join("cordis.patch.yml"),
+                dir.join(".env")
+            ]
+        );
+
+        // dsh < 0.1.5's single config is a different schema: refused, with the
+        // way out in the message.
+        let legacy = abs_dir(&tmp, "legacy-home");
+        std::fs::create_dir_all(legacy.join(".dsh")).unwrap();
+        std::fs::write(legacy.join(".dsh").join("config.yaml"), "[]\n").unwrap();
+        let err = takeover_paths("dsh", legacy.as_path(), &vars).unwrap_err();
+        assert!(err.contains("dsh < 0.1.5's config"), "{err}");
+
+        // DSH_HOME moves the whole tree, the profile scan included.
+        let moved = abs_dir(&tmp, "dsh-home");
+        std::fs::create_dir_all(moved.join("profiles").join("web")).unwrap();
+        std::fs::write(
+            moved.join("profiles").join("web").join("cordis.patch.yml"),
+            "[]\n",
+        )
+        .unwrap();
+        let vars =
+            ShellVars::from([("DSH_HOME".to_string(), moved.to_string_lossy().into_owned())]);
+        assert_eq!(
+            takeover_paths("dsh", home, &vars).unwrap(),
+            vec![
+                moved.join("profiles").join("web").join("cordis.patch.yml"),
+                moved.join(".env")
+            ]
+        );
+    }
+
     #[test]
     fn a_config_root_variable_moves_the_files_it_names() {
         let _guards = (

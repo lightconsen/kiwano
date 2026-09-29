@@ -155,6 +155,9 @@ pub(crate) mod test_support {
                 // reads.
                 "omp" => ".omp/agent/models.yml",
                 "commandcode" => ".commandcode/settings.json",
+                // The .env, not a profile patch: the placeholder key we write
+                // lives there, and that is what the live-evidence scan reads.
+                "dsh" => ".dsh/.env",
                 "mimo" => ".config/mimocode/mimocode.jsonc",
                 "mcode" => ".minimax/config.yaml",
                 "aider" => ".aider.conf.yml",

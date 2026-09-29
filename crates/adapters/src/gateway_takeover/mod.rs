@@ -10,7 +10,7 @@
 
 //! Gateway takeover transforms for the agents whose config this app writes an
 //! entry into: opencode, openclaw, hermes, pi, omp, workbuddy, codebuddy, kimi,
-//! qwen, cline, mimo, mcode, continue, crush, droid, goose, zcode and
+//! qwen, cline, mimo, mcode, continue, crush, droid, dsh, goose, zcode and
 //! commandcode.
 //!
 //! All but cline are additive: their configs hold many providers and select
@@ -47,6 +47,7 @@ pub mod codebuddy;
 pub mod commandcode;
 pub mod crush;
 pub mod droid;
+pub mod dsh;
 // `continue` is a reserved word: the module keeps the agent id via a raw
 // identifier, and every caller touches the re-export below.
 pub mod r#continue;
@@ -79,6 +80,10 @@ pub use commandcode::{
 };
 pub use crush::{read_crush_current, upsert_crush_gateway};
 pub use droid::{read_droid_current, upsert_droid_gateway};
+pub use dsh::{
+    dsh_settings_conflict, upsert_dsh_env, upsert_dsh_patch_row, DSH_KEY_ENV, DSH_LEGACY_CONFIG,
+    DSH_ROW_ID,
+};
 pub use gateway::GATEWAY_PROVIDER_ID;
 pub use goose::{
     build_goose_provider_json, goose_key_file_content, goose_model_id, read_goose_selected_model,

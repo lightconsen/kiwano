@@ -58,6 +58,7 @@ const CLI_AGENTS: &[(&str, &str)] = &[
     ("pi", "pi"),
     ("omp", "omp"),
     ("commandcode", "command-code"),
+    ("dsh", "dsh"),
     ("codebuddy", "codebuddy"),
     ("kimi", "kimi"),
     ("qwen", "qwen"),

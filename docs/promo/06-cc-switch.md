@@ -22,7 +22,7 @@ project that was built *on top of* cc-switch's approach (selected agent-config
 adapter modules are ported from this repo, MIT, credited in THIRD-PARTY-NOTICES).
 
 Kiwano is a local-first AI provider manager: a desktop app + local gateway on
-127.0.0.1 that takes over 22 coding agents (Claude Code, Codex, Gemini
+127.0.0.1 that takes over 25 coding agents (Claude Code, Codex, Gemini
 CLI, Cline, ...) with one click, routes request-by-request across providers by
 strategy (failover / roundrobin / timewindow / quota / least-busy), and meters real
 per-request cost per agent × provider.
@@ -59,7 +59,7 @@ MIT code this project stands on.
 中署名致谢)。
 
 Kiwano 是一个本地优先的 AI Provider 管理器:桌面应用 + 跑在本机 127.0.0.1 的
-网关,一键接管 22 个编码 agent(Claude Code、Codex、Gemini CLI、Cline……),
+网关,一键接管 25 个编码 agent(Claude Code、Codex、Gemini CLI、Cline……),
 按策略(failover / roundrobin / timewindow / quota / least-busy)逐请求在多个 Provider 之间
 路由,并按 agent × provider 计量每一笔真实成本。
 

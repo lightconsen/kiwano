@@ -79,6 +79,21 @@ awesome / 列表站穿插在长尾里做。**完整日期表见 `10-launch-runbo
   Windows 的推广里避重就轻。
 - **Discussions 建 `#show-and-tell` 频道**(GitHub 网页人工操作)。
 
+## 日常推文(每个 commit 一条)
+
+发布期之外的持续宣传不走 `04-x-thread.md` 那种编排好的 thread,而是**每个
+commit 顺手出一条单帖**:Claude Code 里已配好——
+
+- `.claude/hooks/tweet-after-commit.sh`:任何含 `git commit` 的 Bash 调用跑完
+  后,把「写一条推文」的指令交回给模型(失败的 commit 会跳过);
+- `.claude/skills/tweet/SKILL.md`:`/tweet` 手动生成,也可指定 commit 范围
+  重新生成,规则与 hook 完全一致。
+
+规则:英文、单帖 ≤280 字符、不带链接(X 会压降带链接的传播)、最多 1~2 个
+tag(`#ClaudeCode` `#Codex` `#AIcoding` `#opensource`)、版本号只在发布类
+commit 出现。**只起草,不发布**——帖子里不出现未验证的能力,措辞底线见
+`04-x-thread.md` 与 skill 里的 "What to avoid"。
+
 可选优化:样例货架是 9 条 fixture、线上 Hub 是 24 家,`shelf.png` 与文案数字
 对不上;介意就把 fixture 补齐再重拍(复拍脚本见 `08-checklist.md` A 节)。
 
@@ -87,7 +102,7 @@ awesome / 列表站穿插在长尾里做。**完整日期表见 `10-launch-runbo
 | 事实 | 值 | 怎么核的 |
 | --- | --- | --- |
 | Hub 目录 Provider 数 | **24**(23 官方 + 1 聚合 OpenRouter) | `curl -s https://hub.kiwano.cc/catalog.json` → `total: 24`;`manifest.json` → `catalog.count: 24` |
-| 接管 Agent 数 | **22**(名单以 README 为准) | README + `crates/core/src/vm/agents.rs` |
+| 接管 Agent 数 | **25**(名单以 README 为准) | README + `crates/core/src/vm/agents.rs` |
 | 本地网关端口 | `127.0.0.1:8317` | README |
 | 最新版本 / 日期 | v0.1.16 / 2026-09-19 | GitHub Releases API |
 | 仓库 | 2026-09-07 创建,GPL-3.0,0 star | GitHub API |

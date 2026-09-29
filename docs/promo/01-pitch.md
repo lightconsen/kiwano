@@ -67,7 +67,7 @@ Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你�
 | | Kiwano | cc-switch | LiteLLM / 自建托管网关 |
 | --- | --- | --- | --- |
 | 形态 | 桌面 App + 本地网关 + CLI | 只切换 Claude Code 配置 | 服务器常驻服务 |
-| 覆盖 Agent | 22 个,一键接管+还原 | 主要是 Claude Code 生态 | 仅接入了配置的客户端 |
+| 覆盖 Agent | 25 个,一键接管+还原 | 主要是 Claude Code 生态 | 仅接入了配置的客户端 |
 | 本地优先 | 全程本机,零遥测 | 本机 | Key 在服务器 |
 | 路由策略 | 5 种 + 自动重放 | 切换,不路由 | 视实现 |
 | 计量/分析 | 按 provider×agent 归因 + 告警 | 无 | 通常有 |
@@ -79,7 +79,7 @@ Agent、并知道花了多少钱"。** 前者是后者的子集(还提供 import
 
 ## FAQ(评论区/工单预演)
 
-- **和 claude-code-router 比?** 我们聚焦 22 个 Agent 而不只 Claude Code,并且把
+- **和 claude-code-router 比?** 我们聚焦 25 个 Agent 而不只 Claude Code,并且把
   计量、告警、desktop 管理做成一体;ccr 是很有趣的 Claude Code 专用方案。见对比表。
 - **Key 安全吗?** 本地 SQLite,目录 0700/文件 0600;凭证只发给配置的 Provider;
   网关 /metrics 默认哈希 agent 标签,需要时可加 Bearer token 全名鉴权。

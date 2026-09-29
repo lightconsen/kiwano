@@ -22,7 +22,7 @@ I'm building Kiwano, a local gateway so all my agent configs share one port — 
 ```
 I got tired of juggling `~/.claude/settings.json` vs Codex vs Gemini CLI, and of
 never knowing what a session actually cost. So I wrote Kiwano: a desktop app
-that runs one local gateway on 127.0.0.1 and takes over 22 agents (Claude
+that runs one local gateway on 127.0.0.1 and takes over 25 agents (Claude
 Code, Codex, Gemini CLI, Grok Build, Cline, Kimi/Qwen Code, Claude Desktop, …)
 in one click — originals backed up, restored when you switch off.
 
@@ -66,7 +66,7 @@ Show and tell: a local gateway that routes Claude Code, Codex and Cline through 
 - 开头换成:"I spend ~$400/mo across providers and never knew the split. So I
   built a local gateway that meters every request per agent per provider."
 - 条目标题换成 `What problem it actually solves:`
-  1. One port for every agent (22 agents takeover, originals restored)
+  1. One port for every agent (25 agents takeover, originals restored)
   2. Failed requests replay against the next candidate under any strategy but `single`
   3. Cost split by agent and provider, with a forecast before you blow the budget
   4. 24 providers in a sync-once, work-offline models shelf

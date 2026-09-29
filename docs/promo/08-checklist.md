@@ -68,7 +68,7 @@
       - Hub 目录 = **24 个 Provider**(23 官方 + OpenRouter)。已实测
         `curl -s https://hub.kiwano.cc/catalog.json` → `total: 24`。
         材料原先写的 19 是过期数字,已全部改正;README 同步修正。
-      - 接管 Agent = **22 个**(README 的名单为准)。
+      - 接管 Agent = **25 个**(README 的名单为准)。
       - 端口 `127.0.0.1:8317`;最新版 **v0.1.16**(2026-09-19)。
       - Show HN 标题 **≤80 字符**(原稿三条分别是 90 / 87 / 105,全部超限,已换成实测过
         长度的三条,见 `02-show-hn.md`)。

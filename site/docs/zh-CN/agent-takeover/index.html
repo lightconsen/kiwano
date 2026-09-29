@@ -245,6 +245,12 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 <td>认 <code>DSH_HOME</code>(默认 <code>~/.dsh</code>)。改写 <code>llm-deepseek</code> 那一行的 <code>baseURL</code> 与 <code>apiKeyEnv</code>——key 本身写在 <code>.env</code> 里——其余行一律不动,用户选定的模型仍是他的。两种情形拒绝:机器上只有 dsh &lt; 0.1.5 的 <code>config.yaml</code>(升级后先跑一次 dsh);dsh 自己的 <code>settings.yaml</code> 为那一行钉了端点或密钥——dsh 按请求用 settings 覆盖补丁列表,那样接管会什么都没路由。接管之后新建的 profile 不会被补,重跑一次接管即可。</td>
 </tr>
 <tr>
+<td><code>hanaagent</code></td>
+<td><code>$HANA_HOME/provider-catalog.json</code> + <code>$HANA_HOME/agents/*/config.yaml</code></td>
+<td>增量</td>
+<td>认 <code>HANA_HOME</code>(默认 <code>~/.hanako</code>)。目录文件承载端点,并声明各 agent 选用的模型 id;每个 agent 的 <code>api.provider</code> 指向它,模型选择不动。所有 agent(人格)都会被改写,不会有谁还留在真实上游。HanaAgent 跑过一次之前拒绝——目录文件从那时才存在,而且不能抢在它自己从 <code>added-models.yaml</code> 迁移之前。目录里 <code>deletedProviders</code> 名单上的本 id 会被摘掉,否则应用会把这条藏起来。</td>
+</tr>
+<tr>
 <td><code>commandcode</code></td>
 <td><code>~/.commandcode/settings.json</code> + <code>providers.json</code> + <code>kiwano-gateway.key</code></td>
 <td>增量</td>

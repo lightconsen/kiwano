@@ -25,7 +25,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 ## Features
 
 - **Provider management** — add, edit, switch and delete provider configs. Route with `single`, `failover`, `roundrobin`, `timewindow` or `quota` strategies, each with its own candidate weights and windows. Under any strategy but `single`, a request that fails is replayed against the next candidate instead of being handed back as your problem.
-- **Agent takeover** — connect any of **25 built-in agents** to the local gateway in one click: Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes, Pi, oh-my-pi, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code, Cline, MiMo Code, MiniMax Code, Aider, Continue, Crush, Droid, DeepSeek Harness, Command Code, Goose and ZCode. Each agent's original config is backed up and restored when you switch it off.
+- **Agent takeover** — connect any of **26 built-in agents** to the local gateway in one click: Claude Code, Codex, Gemini CLI, Grok Build, Claude Desktop, OpenCode, OpenClaw, Hermes, Pi, oh-my-pi, WorkBuddy, CodeBuddy Code, Kimi Code CLI, Qwen Code, Cline, MiMo Code, MiniMax Code, Aider, Continue, Crush, Droid, DeepSeek Harness, Command Code, HanaAgent, Goose and ZCode. Each agent's original config is backed up and restored when you switch it off.
 - **Local gateway** — one always-on port, and protocol normalization (anthropic / openai) so an OpenAI-compatible provider can serve Claude Code. Gemini CLI's native API is forwarded as a third protocol, passed through rather than translated, so it reaches Google unchanged while the gateway meters it. Hot-reloads on change; the daemon outlives the GUI, and a stream that stalls is abandoned with an error rather than left to hang.
 - **Usage and cost** — trends for requests and tokens over today, 7, 30 days or all time, attributed per provider and per agent, with quota rings for metered plans and per-period cost alerts. Each stat compares the window with the one before it, and the numbers refresh the moment a request lands — no clicking to see what just happened.
 - **Models shelf** — the Kiwano Hub catalog of 24 providers (23 first-party, plus the OpenRouter aggregator), with live search and one-click add. It syncs conditionally: a manifest hash skips the download when nothing changed, and what it fetched is cached locally, so the shelf keeps working offline once it has synced.
@@ -41,7 +41,7 @@ Your keys stay on your machine, in an owner-only local database. Requests never 
 | | Kiwano | cc-switch | LiteLLM / a hosted gateway |
 | --- | --- | --- | --- |
 | Shape | Desktop app + local gateway + CLI | Switches Claude Code's config | Always-on server |
-| Agents covered | 25, taken over in one click and restored | Mainly the Claude Code ecosystem | Only clients you wired up yourself |
+| Agents covered | 26, taken over in one click and restored | Mainly the Claude Code ecosystem | Only clients you wired up yourself |
 | Local-first | Everything on your machine, no telemetry | Local | Keys live on the server |
 | Routing | 6 strategies; a failed request replays against the next candidate | Switches, does not route | Depends on the implementation |
 | Cost metering | Per provider × per agent, with quota rings and alerts | No | Usually |

@@ -233,6 +233,24 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 <td>选择写在 settings 里。</td>
 </tr>
 <tr>
+<td><code>omp</code></td>
+<td><code>~/.omp/agent/config.yml</code> + <code>models.yml</code></td>
+<td>增量</td>
+<td><code>.yml</code> 与 <code>.yaml</code> 两种拼写都认,逐文件探测。供应商条目声明角色选择里命名的模型,并带 <code>authHeader: true</code>——没有它 omp 会解析出占位 key 却不发送。当存在旧版 <code>models.json</code> 且没有 YAML 时拒绝:先写 YAML 会让 omp 永远不再迁移它。YAML 会重排版(关闭接管时逐字节还原)。</td>
+</tr>
+<tr>
+<td><code>dsh</code></td>
+<td><code>$DSH_HOME/profiles/*/cordis.patch.yml</code> + <code>$DSH_HOME/.env</code></td>
+<td>增量</td>
+<td>认 <code>DSH_HOME</code>(默认 <code>~/.dsh</code>)。改写 <code>llm-deepseek</code> 那一行的 <code>baseURL</code> 与 <code>apiKeyEnv</code>——key 本身写在 <code>.env</code> 里——其余行一律不动,用户选定的模型仍是他的。两种情形拒绝:机器上只有 dsh &lt; 0.1.5 的 <code>config.yaml</code>(升级后先跑一次 dsh);dsh 自己的 <code>settings.yaml</code> 为那一行钉了端点或密钥——dsh 按请求用 settings 覆盖补丁列表,那样接管会什么都没路由。接管之后新建的 profile 不会被补,重跑一次接管即可。</td>
+</tr>
+<tr>
+<td><code>commandcode</code></td>
+<td><code>~/.commandcode/settings.json</code> + <code>providers.json</code> + <code>kiwano-gateway.key</code></td>
+<td>增量</td>
+<td>key 是 <code>!</code> 命令引用,读取 Kiwano 自己的 key 文件——Command Code 拒收直接粘贴的明文密钥,而无 key 的条目会被网关 401。即使走网关,Command Code 仍要求它自己的登录(<code>cmd login</code>)。</td>
+</tr>
+<tr>
 <td><code>workbuddy</code></td>
 <td><code>~/.workbuddy/models.json</code></td>
 <td>增量</td>

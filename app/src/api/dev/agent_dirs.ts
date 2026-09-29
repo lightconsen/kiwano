@@ -15,7 +15,7 @@ export const declaredDirs: Partial<Record<AgentId, string>> = {};
 
 /// The name an agent's CLI installs as; a couple of registry ids differ.
 export const binaryFor = (id: AgentId): string =>
-  id === "grokbuild" ? "grok" : id === "claude-desktop" ? "claude" : id;
+  id === "grokbuild" ? "grok" : id === "claude-desktop" ? "claude" : id === "commandcode" ? "command-code" : id;
 
 /// What a declaration reports back. The real backend runs the executable and
 /// returns what it printed; the fixture has no filesystem to run, so every

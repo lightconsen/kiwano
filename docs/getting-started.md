@@ -9,7 +9,7 @@ request. Keys never leave your machine.
 
 - A provider API key (OpenAI-compatible or Anthropic-compatible endpoint).
 - One or more installed coding agents — Claude Code, Codex, Gemini CLI, …
-  (all 22 built-ins are listed in [Agent takeover](agent-takeover.md)).
+  (all 25 built-ins are listed in [Agent takeover](agent-takeover.md)).
 
 ## 1. Install and launch
 

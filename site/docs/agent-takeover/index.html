@@ -234,6 +234,24 @@ a second entry.</li>
 <td>The settings file carries the selection.</td>
 </tr>
 <tr>
+<td><code>omp</code></td>
+<td><code>~/.omp/agent/config.yml</code> + <code>models.yml</code></td>
+<td>additive</td>
+<td>Both <code>.yml</code> and <code>.yaml</code> spellings are honored, probed per file. The provider entry declares the model the role selection names, with <code>authHeader: true</code> — without it omp resolves the placeholder key but never sends it. Refused while a legacy <code>models.json</code> is present and no YAML exists: writing the YAML first would stop omp from ever migrating it. YAML is re-serialized (comments are restored byte-for-byte on disable).</td>
+</tr>
+<tr>
+<td><code>dsh</code></td>
+<td><code>$DSH_HOME/profiles/*/cordis.patch.yml</code> + <code>$DSH_HOME/.env</code></td>
+<td>additive</td>
+<td><code>DSH_HOME</code> honored (default <code>~/.dsh</code>). Rewrites the <code>llm-deepseek</code> row&#39;s <code>baseURL</code> and <code>apiKeyEnv</code> — the key itself goes in the <code>.env</code> — and touches no other row, so the model the user selected stays theirs. Refused when the machine still has only dsh &lt; 0.1.5&#39;s <code>config.yaml</code> (run dsh once after updating), and when dsh&#39;s own <code>settings.yaml</code> pins an endpoint or key for that row: dsh resolves settings over the patch list, so the takeover would route nothing. A profile created after a takeover is not patched — re-run the takeover.</td>
+</tr>
+<tr>
+<td><code>commandcode</code></td>
+<td><code>~/.commandcode/settings.json</code> + <code>providers.json</code> + <code>kiwano-gateway.key</code></td>
+<td>additive</td>
+<td>The key is a <code>!</code> command reference reading Kiwano&#39;s key file — Command Code refuses a pasted raw secret, and a keyless entry would be answered 401. Command Code still wants its own sign-in (<code>cmd login</code>) even for models through the gateway.</td>
+</tr>
+<tr>
 <td><code>workbuddy</code></td>
 <td><code>~/.workbuddy/models.json</code></td>
 <td>additive</td>

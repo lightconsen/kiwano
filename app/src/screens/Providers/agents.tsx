@@ -12,7 +12,7 @@ import { type AgentId, type AgentRef } from "../../api/types";
 // Built-ins with no command-line tool to point at: a directory declaration
 // cannot make either of them appear, so they are left out of that menu. The
 // same two are the ones missing from `CLI_AGENTS` on the Rust side.
-export const NO_CLI_AGENTS: AgentId[] = ["claude-desktop", "workbuddy"];
+export const NO_CLI_AGENTS: AgentId[] = ["claude-desktop", "workbuddy", "hanaagent"];
 
 // Agent filter segments — each renders the agent's brand logo (ported with
 // the cc-switch icon set, see components/icons). Hover shows the full name.
@@ -30,6 +30,7 @@ export const SEGMENTS: { id: AgentRef | "all"; icon?: string; label?: string }[]
   { id: "omp", icon: "omp" },
   { id: "commandcode", icon: "commandcode" },
   { id: "dsh", icon: "deepseek" },
+  { id: "hanaagent", icon: "hanaagent" },
   { id: "workbuddy", icon: "workbuddy" },
   { id: "codebuddy", icon: "codebuddy" },
   { id: "kimi", icon: "kimi" },

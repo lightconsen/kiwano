@@ -158,6 +158,9 @@ pub(crate) mod test_support {
                 // The .env, not a profile patch: the placeholder key we write
                 // lives there, and that is what the live-evidence scan reads.
                 "dsh" => ".dsh/.env",
+                // The catalogue: it is what carries the placeholder key, and
+                // therefore what the live-evidence scan reads.
+                "hanaagent" => ".hanako/provider-catalog.json",
                 "mimo" => ".config/mimocode/mimocode.jsonc",
                 "mcode" => ".minimax/config.yaml",
                 "aider" => ".aider.conf.yml",

@@ -19,6 +19,7 @@ export const iconMetadata: Record<string, IconMetadata> = {
   omp: { name: "omp", displayName: "oh-my-pi", defaultColor: "currentColor" },
   commandcode: { name: "commandcode", displayName: "Command Code", defaultColor: "currentColor" },
   dsh: { name: "dsh", displayName: "DeepSeek Harness", defaultColor: "#4D6BFE" },
+  hanaagent: { name: "hanaagent", displayName: "HanaAgent", defaultColor: "#E11D48" },
   aider: { name: "aider", displayName: "Aider", defaultColor: "#01FFB9" },
   "a6api": { name: "a6api", displayName: "A6API", defaultColor: "#3B82F6" },
   "aicodewith": { name: "aicodewith", displayName: "AICodeWith", defaultColor: "#3A3B40" },

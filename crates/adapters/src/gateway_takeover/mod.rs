@@ -53,6 +53,7 @@ pub mod dsh;
 pub mod r#continue;
 pub mod gateway;
 pub mod goose;
+pub mod hanaagent;
 pub mod hermes;
 pub mod json;
 pub mod kimi;
@@ -88,6 +89,10 @@ pub use gateway::GATEWAY_PROVIDER_ID;
 pub use goose::{
     build_goose_provider_json, goose_key_file_content, goose_model_id, read_goose_selected_model,
     upsert_goose_config,
+};
+pub use hanaagent::{
+    hana_declared_models, select_hana_agent, upsert_hana_catalog, HANA_AGENTS_DIR,
+    HANA_CATALOG_FILE,
 };
 pub use hermes::upsert_hermes_gateway;
 pub use kimi::upsert_kimi_gateway;

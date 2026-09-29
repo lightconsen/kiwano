@@ -17,6 +17,7 @@ export const AGENT_ICON: Partial<Record<AgentMeta["id"], string>> = {
   omp: "omp",
   commandcode: "commandcode",
   dsh: "deepseek",
+  hanaagent: "hanaagent",
   workbuddy: "workbuddy",
   codebuddy: "codebuddy",
   kimi: "kimi",

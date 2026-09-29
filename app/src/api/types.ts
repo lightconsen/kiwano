@@ -21,6 +21,7 @@ export type AgentId =
   | "omp"
   | "commandcode"
   | "dsh"
+  | "hanaagent"
   | "workbuddy"
   | "codebuddy"
   | "mimo"
@@ -84,6 +85,7 @@ export const ADDITIVE_AGENTS: AgentId[] = [
   "omp",
   "commandcode",
   "dsh",
+  "hanaagent",
   "workbuddy",
   "codebuddy",
   "kimi",
@@ -110,6 +112,7 @@ export const AGENTS: AgentMeta[] = [
   { id: "omp", label: "oh-my-pi", chip_char: "O", chip_color: "#EC4899" },
   { id: "commandcode", label: "Command Code", chip_char: "C", chip_color: "#111827", chip_border: true },
   { id: "dsh", label: "DeepSeek Harness", chip_char: "D", chip_color: "#4D6BFE" },
+  { id: "hanaagent", label: "HanaAgent", chip_char: "H", chip_color: "#E11D48" },
   { id: "workbuddy", label: "WorkBuddy", chip_char: "W", chip_color: "#0052D9" },
   { id: "codebuddy", label: "CodeBuddy Code", chip_char: "B", chip_color: "#0EA5E9" },
   { id: "kimi", label: "Kimi Code CLI", chip_char: "K", chip_color: "#1783FF" },

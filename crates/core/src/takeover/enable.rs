@@ -185,6 +185,25 @@ fn compute_rewrites(
     // omp's provider table declares the model the role selection names, and
     // that selection is the primary file — so the table is rewritten against
     // the selection's original content, the same ride-along as goose's.
+    // HanaAgent's catalogue has to declare every model its agents select, and
+    // those selections are spread across the per-agent configs — so this is the
+    // one ride-along that is not a single file: the ids are gathered here and
+    // handed over newline-joined.
+    let hana_models = if agent == "hanaagent" {
+        let ids: Vec<String> = originals
+            .iter()
+            .filter(|f| f.path.ends_with("config.yaml"))
+            .flat_map(|f| kiwano_adapters::gateway_takeover::hana_declared_models(&f.content))
+            .fold(Vec::new(), |mut acc, id| {
+                if !acc.contains(&id) {
+                    acc.push(id);
+                }
+                acc
+            });
+        Some(ids.join("\n"))
+    } else {
+        None
+    };
     // Command Code's provider block declares the model its settings select, so
     // it is rewritten against the settings file's original content.
     let commandcode_settings = if agent == "commandcode" {
@@ -218,7 +237,8 @@ fn compute_rewrites(
                     openclaw_config
                         .or(goose_selection)
                         .or(omp_config)
-                        .or(commandcode_settings),
+                        .or(commandcode_settings)
+                        .or(hana_models.as_deref()),
                 )?,
             ))
         })
@@ -281,6 +301,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // dsh's row hands `baseURL` to its OpenAI-shaped DeepSeek adapter,
         // which appends the route to the version root.
         "dsh" => "/v1",
+        // HanaAgent's catalog entry declares `api: openai-completions`, the
+        // same client, route appended to the version root.
+        "hanaagent" => "/v1",
         // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
         // append nothing, so the route has to be in the URL we write.
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
@@ -1533,6 +1556,103 @@ models:
             models
         );
         assert!(aux.load_takeover_backup("omp").is_none());
+    }
+
+    #[test]
+    fn hanaagent_takeover_roundtrip_writes_the_catalog_and_every_agent() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let root = home.join(".hanako");
+        let catalog = r#"{"providers":{"deepseek":{"api_key":"sk-real","base_url":"https://api.deepseek.com"}},"meta":{"deletedProviders":["kiwano-gateway"]}}"#;
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("provider-catalog.json"), catalog).unwrap();
+        let mut configs = Vec::new();
+        for (name, model) in [("hana", "deepseek-chat"), ("butter", "deepseek-reasoner")] {
+            let dir = root.join("agents").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            let text = format!(
+                "agent:\n  name: {name}\napi:\n  provider: deepseek\nmodels:\n  chat: {model}\n"
+            );
+            std::fs::write(dir.join("config.yaml"), text.clone()).unwrap();
+            configs.push((name, text));
+        }
+
+        enable(
+            &aux,
+            "hanaagent",
+            "kw-ag-hanaagent-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+
+        let cat: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("provider-catalog.json")).unwrap(),
+        )
+        .unwrap();
+        let ours = &cat["providers"]["kiwano-gateway"];
+        // The catalogue entry carries the endpoint; HanaAgent's OpenAI-shaped
+        // client appends the route, so the version root is what goes in.
+        assert_eq!(ours["base_url"], "http://127.0.0.1:8317/v1");
+        assert_eq!(ours["api_key"], "kw-ag-hanaagent-abcd");
+        assert_eq!(ours["api"], "openai-completions");
+        // Every agent's selection is declared, or the app cannot resolve it.
+        // (Order follows the agents' file order, which is by name.)
+        let declared: Vec<&str> = ours["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap())
+            .collect();
+        assert_eq!(declared.len(), 2);
+        assert!(declared.contains(&"deepseek-chat"), "{declared:?}");
+        assert!(declared.contains(&"deepseek-reasoner"), "{declared:?}");
+        assert_eq!(cat["providers"]["deepseek"]["api_key"], "sk-real");
+        assert_eq!(cat["meta"]["deletedProviders"], serde_json::json!([]));
+
+        for (name, _) in &configs {
+            let cfg: serde_yaml::Value = serde_yaml::from_str(
+                &std::fs::read_to_string(root.join("agents").join(name).join("config.yaml"))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(cfg["api"]["provider"], "kiwano-gateway", "{name}");
+            assert_eq!(cfg["agent"]["name"], *name);
+        }
+
+        restore(&aux, "hanaagent", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("provider-catalog.json")).unwrap(),
+            catalog
+        );
+        for (name, text) in &configs {
+            assert_eq!(
+                std::fs::read_to_string(root.join("agents").join(name).join("config.yaml"))
+                    .unwrap(),
+                *text
+            );
+        }
+        assert!(aux.load_takeover_backup("hanaagent").is_none());
+    }
+
+    /// A machine where HanaAgent has never run: there is no catalog to write
+    /// and no agent config to select through.
+    #[test]
+    fn hanaagent_takeover_refuses_a_machine_without_a_catalog() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+
+        let err = enable(
+            &aux,
+            "hanaagent",
+            "kw-ag-hanaagent-abcd",
+            8317,
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
+        assert!(err.contains("start HanaAgent once"), "{err}");
     }
 
     #[test]

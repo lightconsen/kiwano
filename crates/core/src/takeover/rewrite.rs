@@ -99,7 +99,9 @@ pub(crate) fn rewrite(
         // pre-existing provider entries survive (adapters::gateway_takeover)
         "opencode" | "openclaw" | "hermes" | "pi" | "omp" | "workbuddy" | "codebuddy" | "qwen"
         | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" | "commandcode"
-        | "dsh" => additive_rewrite(agent, path, original, target, key, now, sibling_config),
+        | "dsh" | "hanaagent" => {
+            additive_rewrite(agent, path, original, target, key, now, sibling_config)
+        }
         // goose's three files are one endpoint split across formats, each by
         // its own path: the selection (YAML), the provider definition (JSON,
         // whose auth.command needs the key file's absolute path — derived from
@@ -243,6 +245,18 @@ fn additive_rewrite(
             kiwano_adapters::gateway_takeover::upsert_dsh_env(original, key)
         }
         "dsh" => kiwano_adapters::gateway_takeover::upsert_dsh_patch_row(original, target),
+        // HanaAgent's catalog carries the endpoint and the models its agents
+        // select; those selections live in the per-agent configs, which arrive
+        // as a newline-joined id list in `sibling_config` (see compute_rewrites).
+        "hanaagent" if path.ends_with("provider-catalog.json") => {
+            kiwano_adapters::gateway_takeover::upsert_hana_catalog(
+                original,
+                target,
+                key,
+                sibling_config.unwrap_or(""),
+            )
+        }
+        "hanaagent" => kiwano_adapters::gateway_takeover::select_hana_agent(original),
         // WorkBuddy's model list is a bare array; CodeBuddy's is an object with
         // a picker list beside it. Both name their provider by URL per model
         // row, so the transforms take over one row rather than adding a second

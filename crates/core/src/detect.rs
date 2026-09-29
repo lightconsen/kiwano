@@ -132,6 +132,11 @@ pub fn detect_agents(home: &Path, manual: &BTreeMap<String, PathBuf>) -> Vec<Age
         installed: workbuddy_installed(home),
         path: None,
     });
+    vms.push(AgentDetectVm {
+        agent: "hanaagent".into(),
+        installed: hanaagent_installed(home),
+        path: None,
+    });
     vms
 }
 
@@ -159,6 +164,10 @@ pub fn probe_agent_versions(
     });
     vms.push(AgentVersionVm {
         agent: "workbuddy".into(),
+        version: None,
+    });
+    vms.push(AgentVersionVm {
+        agent: "hanaagent".into(),
         version: None,
     });
     vms
@@ -1100,6 +1109,22 @@ fn workbuddy_installed(home: &Path) -> bool {
     {
         false
     }
+}
+
+/// HanaAgent is a desktop app with no CLI of its own, so the marker is its
+/// data root: `HANA_HOME`, else `~/.hanako`. That root only exists once the app
+/// has run — which is also the takeover's own precondition (it writes the
+/// provider catalog on first run), so a "not installed" verdict here and a
+/// refusal there agree about the same machine.
+fn hanaagent_installed(home: &Path) -> bool {
+    // A relative override is not resolved, for the reason workbuddy's is not:
+    // it would name a directory under *our* working directory, and an
+    // installation reported from a file there is a claim about a place the app
+    // never reads.
+    kiwano_adapters::config::env_dir("HANA_HOME")
+        .absolute()
+        .unwrap_or_else(|| home.join(".hanako"))
+        .is_dir()
 }
 
 #[cfg(test)]

@@ -200,6 +200,11 @@ pub(crate) fn takeover_paths(
         // schema), and one whose own `settings.yaml` pins an endpoint or key
         // for the row we rewrite — dsh resolves settings over the patch list.
         "dsh" => dsh_paths(vars, home),
+        // HanaAgent (OpenHanako), a desktop app: `HANA_HOME` moves the tree.
+        // The provider definitions live in one global catalog, the selection in
+        // each agent's own config.yaml — and every agent is a start-up surface
+        // of its own, so all of them are written (the dsh profiles stance).
+        "hanaagent" => hana_paths(vars, home),
         // Goose resolves its root through the etcetera app-strategy rules
         // (top-level domain "Block", app "goose"): on macOS that is
         // ~/Library/Application Support/Block/goose — *not* the ~/.config/goose
@@ -374,6 +379,46 @@ fn dsh_profile_patches(dir: &Path) -> Vec<PathBuf> {
             .unwrap_or_default();
         (profile != "web", profile)
     });
+    found
+}
+
+/// HanaAgent's files: the global provider catalog first (it is what carries
+/// the endpoint), then every agent's config.yaml, sorted for a stable backup.
+///
+/// Two refusals, both against writing a takeover nothing would read: a machine
+/// where the catalog does not exist yet (HanaAgent writes it on its first run,
+/// and the app's own migration from `added-models.yaml` happens there too), and
+/// one with no agent config at all — there would be no selection to point at
+/// the gateway.
+fn hana_paths(vars: &ShellVars, home: &Path) -> Result<Vec<PathBuf>, String> {
+    let root = config_dir(vars, "HANA_HOME", ".hanako", home)?;
+    let catalog = root.join(kiwano_adapters::gateway_takeover::HANA_CATALOG_FILE);
+    let agents = hana_agent_configs(&root);
+    if !catalog.is_file() || agents.is_empty() {
+        return Err(format!(
+            "{} is not there yet — start HanaAgent once (it writes its provider catalog on \
+             first run), then retry.",
+            root.display()
+        ));
+    }
+    let mut files = vec![catalog];
+    files.extend(agents);
+    Ok(files)
+}
+
+/// Every `<HANA_HOME>/agents/*/config.yaml`, in name order.
+fn hana_agent_configs(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) =
+        std::fs::read_dir(root.join(kiwano_adapters::gateway_takeover::HANA_AGENTS_DIR))
+    else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path().join("config.yaml"))
+        .filter(|p| p.is_file())
+        .collect();
+    found.sort();
     found
 }
 
@@ -804,6 +849,72 @@ mod tests {
             vec![
                 moved.join("profiles").join("web").join("cordis.patch.yml"),
                 moved.join(".env")
+            ]
+        );
+    }
+
+    #[test]
+    fn hanaagent_takes_the_catalog_then_every_agent_and_refuses_an_empty_machine() {
+        let _guards = EnvGuard::set("HANA_HOME", None);
+        let tmp = tempfile::tempdir().unwrap();
+        let home = abs_dir(&tmp, "home");
+        let home = home.as_path();
+        let vars = ShellVars::default();
+        let root = home.join(".hanako");
+
+        // HanaAgent has never run: nothing to write.
+        let err = takeover_paths("hanaagent", home, &vars).unwrap_err();
+        assert!(err.contains("start HanaAgent once"), "{err}");
+
+        // A catalogue with no agent beside it is the same answer — there would
+        // be no selection to point at the gateway.
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("provider-catalog.json"), "{}").unwrap();
+        assert!(takeover_paths("hanaagent", home, &vars).is_err());
+
+        std::fs::create_dir_all(root.join("agents").join("butter")).unwrap();
+        std::fs::create_dir_all(root.join("agents").join("hana")).unwrap();
+        std::fs::write(
+            root.join("agents").join("hana").join("config.yaml"),
+            "api: {}\n",
+        )
+        .unwrap();
+        // A directory without a config is not an agent.
+        std::fs::write(root.join("agents").join("butter").join("notes.md"), "x").unwrap();
+        std::fs::write(
+            root.join("agents").join("butter").join("config.yaml"),
+            "api: {}\n",
+        )
+        .unwrap();
+
+        // The catalogue first, then the agents in name order.
+        assert_eq!(
+            takeover_paths("hanaagent", home, &vars).unwrap(),
+            vec![
+                root.join("provider-catalog.json"),
+                root.join("agents").join("butter").join("config.yaml"),
+                root.join("agents").join("hana").join("config.yaml"),
+            ]
+        );
+
+        // HANA_HOME moves the whole tree.
+        let moved = abs_dir(&tmp, "hana-home");
+        std::fs::create_dir_all(moved.join("agents").join("hana")).unwrap();
+        std::fs::write(moved.join("provider-catalog.json"), "{}").unwrap();
+        std::fs::write(
+            moved.join("agents").join("hana").join("config.yaml"),
+            "api: {}\n",
+        )
+        .unwrap();
+        let vars = ShellVars::from([(
+            "HANA_HOME".to_string(),
+            moved.to_string_lossy().into_owned(),
+        )]);
+        assert_eq!(
+            takeover_paths("hanaagent", home, &vars).unwrap(),
+            vec![
+                moved.join("provider-catalog.json"),
+                moved.join("agents").join("hana").join("config.yaml"),
             ]
         );
     }

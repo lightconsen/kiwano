@@ -580,11 +580,18 @@ mod tests {
         );
         assert_eq!(paths("grokbuild"), vec![at_home(".grok/config.toml")]);
 
-        // Every built-in resolves to at least one file — except the one whose
-        // takeover is macOS-only. `claude-desktop` comes back empty elsewhere by
-        // design, and the row renders nothing for it rather than a path that does
-        // not exist.
-        for t in vm.takeovers.iter().filter(|t| t.agent != "claude-desktop") {
+        // Every built-in resolves to at least one file — except the two whose
+        // files exist only under conditions this machine may not meet.
+        // `claude-desktop`'s takeover is macOS-only, and `hanaagent`'s provider
+        // catalog is written by the app on its first run: until then there is
+        // no file to point at, and the row renders nothing rather than a path
+        // that does not exist (the takeover refuses, with the way out in the
+        // message).
+        for t in vm
+            .takeovers
+            .iter()
+            .filter(|t| t.agent != "claude-desktop" && t.agent != "hanaagent")
+        {
             assert!(!t.config_paths.is_empty(), "{} has no files", t.agent);
         }
         let desktop = vm

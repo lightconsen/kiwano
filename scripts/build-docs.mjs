@@ -326,6 +326,7 @@ function chrome(bodyInner, doc) {
   <div class="top-links">
     <a href="/">kiwano.cc</a>
     <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
   </div>
 </div></div>
 <div class="doc">
@@ -489,6 +490,7 @@ ${head({ title: hub.title, description: hub.description, path: hub.path, lang: h
   <div class="top-links">
     <a href="/">kiwano.cc</a>
     <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
   </div>
 </div></div>
 <div class="wrap">

@@ -18,7 +18,7 @@
 // Usage: node scripts/build-demo.mjs
 
 import { execFileSync } from "node:child_process";
-import { readdirSync, renameSync, statSync } from "node:fs";
+import { cpSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,13 @@ execFileSync("pnpm", ["-C", "app", "build:demo"], { cwd: ROOT, stdio: "inherit" 
 
 const emitted = path.join(OUT, "demo.html");
 renameSync(emitted, path.join(OUT, "index.html"));
+
+// The demo's own Hub: the four brand marks its shelf rows resolve their logo
+// against (see app/src/demo/dataset.ts). Vite only fingerprints what the code
+// imports, and these are fetched by URL at runtime, so they come across by hand.
+const HUB_LOGS = path.join(OUT, "hub", "logos");
+rmSync(path.join(OUT, "hub"), { recursive: true, force: true });
+cpSync(path.join(ROOT, "app", "src", "demo", "hub", "logos"), HUB_LOGS, { recursive: true });
 
 let bytes = 0;
 let files = 0;

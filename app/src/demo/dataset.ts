@@ -12,10 +12,12 @@
 // screen: the screens keep reading exactly what they read in the app, and this
 // module is the only thing that knows the demo is smaller than the fixture.
 
-import type { AgentId } from "../api/types";
+import type { AgentId, CatalogEntry } from "../api/types";
 import { AGENTS } from "../api/types";
 import { providers } from "../api/dev/providers";
+import { catalog } from "../api/dev/catalog";
 import { NOT_INSTALLED_AGENTS } from "../api/dev/agent_dirs";
+import { settings } from "../api/dev/settings";
 
 /** How many provider rows the demo keeps — the four the fixture opens with
     (a metered plan, a request-count plan, a disabled row, a local one), which
@@ -24,6 +26,24 @@ const PROVIDERS = 4;
 
 /** The agents a visitor sees taken over, in the order the strip shows them. */
 const AGENTS_ON_SHOW: AgentId[] = ["claude", "codex", "gemini", "crush"];
+
+/**
+ * The Models shelf, trimmed to the providers the demo actually has: a catalogue
+ * entry the demo never adds is a row about somebody else's product, and the
+ * shelf reads better as the short list of what is on the machine.
+ */
+const CATALOG_ON_SHOW = ["deepseek", "kimi", "zhipu-glm", "ollama"] as const;
+
+/**
+ * The demo's own Hub, for the one asset the shelf asks it for.
+ *
+ * A catalogue row's logo is a *hub-relative* path — `Shelf/Row.tsx` resolves it
+ * against the configured `hub_url` — so a row offline would fall back to a
+ * letter in a coloured square. The demo ships the four marks it needs under
+ * /demo/hub/logos/ and points hub_url at that folder, which keeps the resolution
+ * path in the screens identical to the app's instead of special-casing them.
+ */
+const DEMO_HUB = "hub/catalog.json";
 
 /**
  * Cut the fixture down to size. Exported as a function rather than done at
@@ -41,4 +61,18 @@ export function useDemoDataset(): void {
   const shown = new Set<string>(AGENTS_ON_SHOW);
   const hidden = AGENTS.map((a) => a.id as AgentId).filter((id) => !shown.has(id));
   NOT_INSTALLED_AGENTS.splice(0, NOT_INSTALLED_AGENTS.length, ...hidden);
+
+  // Point the shelf's logo resolution at the demo's own folder (see DEMO_HUB).
+  settings.hub_url = new URL(`${import.meta.env.BASE_URL}${DEMO_HUB}`, window.location.origin).toString();
+
+  const shownCatalogs = new Set<string>(CATALOG_ON_SHOW);
+  const kept: CatalogEntry[] = [];
+  for (const entry of catalog) {
+    if (!shownCatalogs.has(entry.id)) continue;
+    // `logos/<entry id>` — the filenames the demo's hub folder carries, with
+    // GLM's mark filed under the name the catalogue gives that entry.
+    entry.logo = `logos/${entry.id === "zhipu-glm" ? "zhipu" : entry.id}.${entry.id === "kimi" ? "webp" : "svg"}`;
+    kept.push(entry);
+  }
+  catalog.splice(0, catalog.length, ...kept);
 }

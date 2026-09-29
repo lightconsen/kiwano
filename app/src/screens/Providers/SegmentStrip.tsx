@@ -101,7 +101,7 @@ export function SegmentStrip({
         >
           <Plus className="h-3.5 w-3.5" />
         </MenuTrigger>
-        <MenuContent>
+        <MenuContent className={declarable.length > 6 ? "min-w-[23rem]" : undefined}>
           <MenuItem onClick={() => setNewAgent(true)}>
             <Plus className="h-3.5 w-3.5 text-mut" />
             {t("providers.newAgent")}
@@ -110,23 +110,40 @@ export function SegmentStrip({
             <>
               <MenuSeparator />
               <MenuLabel>{t("providers.notDetected")}</MenuLabel>
-              {declarable.map((a) => (
-                <MenuItem key={a.id} onClick={() => setDeclaring(a)}>
-                  {a.icon ? (
-                    <span aria-hidden className="inline-flex shrink-0">
-                      <ProviderLogo icon={a.icon} name={a.label} size={14} />
-                    </span>
-                  ) : (
-                    <span className="h-3.5 w-3.5 shrink-0" />
-                  )}
-                  <span className="min-w-0 truncate">{a.label}</span>
-                  {a.declared && (
-                    <span className="ml-auto shrink-0 text-[10.5px] text-mut">
-                      {t("providers.alreadyDeclared")}
-                    </span>
-                  )}
-                </MenuItem>
-              ))}
+              {/* Two columns once the roster outgrows a single one: the list is
+                  every built-in the probe could not find, and at two dozen
+                  agents a single column runs past the window. Every cell keeps
+                  the one-row shape (`icon · label · badge`), so the grid only
+                  changes how many fit, not what a row says. */}
+              <div
+                className={
+                  declarable.length > 6
+                    ? "grid grid-cols-2 gap-x-1"
+                    : "grid grid-cols-1"
+                }
+              >
+                {declarable.map((a) => (
+                  <MenuItem
+                    key={a.id}
+                    className={declarable.length > 6 ? "min-w-0" : undefined}
+                    onClick={() => setDeclaring(a)}
+                  >
+                    {a.icon ? (
+                      <span aria-hidden className="inline-flex shrink-0">
+                        <ProviderLogo icon={a.icon} name={a.label} size={14} />
+                      </span>
+                    ) : (
+                      <span className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <span className="min-w-0 truncate">{a.label}</span>
+                    {a.declared && (
+                      <span className="ml-auto shrink-0 text-[10.5px] text-mut">
+                        {t("providers.alreadyDeclared")}
+                      </span>
+                    )}
+                  </MenuItem>
+                ))}
+              </div>
             </>
           )}
         </MenuContent>

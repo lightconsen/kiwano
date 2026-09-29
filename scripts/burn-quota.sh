@@ -26,7 +26,8 @@
 #
 # Built-in agents (their known single-shot modes):
 #   claude · codex · gemini · qwen · opencode · kimi · crush · droid ·
-#   goose · aider · codebuddy · mimo · mcode · copilot · cursor · pi · omp
+#   goose · aider · codebuddy · mimo · mcode · copilot · cursor · pi · omp ·
+#   dsh
 #   (GUI/IDE-only agents — claude-desktop, continue, workbuddy — have no
 #   headless mode to drive; the same BURN_CMD escape hatch covers anything
 #   whose flags drift from the built-ins, and agents with no single-shot
@@ -96,6 +97,9 @@ copilot) CMD=(copilot -p --allow-all-tools "{prompt}") ;;
 cursor) CMD=(cursor-agent -p "{prompt}") ;;
 pi) CMD=(pi "{prompt}") ;;
 omp) CMD=(omp "{prompt}") ;;
+# The headless profile runs one task, prints the last assistant text and
+# exits; launcher flags must precede the task, so --profile comes first.
+dsh) CMD=(dsh --profile headless "{prompt}") ;;
 "")
     echo "usage: $0 <agent> [rounds]  (see the header of this script for the built-in list, or BURN_CMD=...)" >&2
     exit 1

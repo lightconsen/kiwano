@@ -150,6 +150,10 @@ pub(crate) mod test_support {
                 "openclaw" => ".openclaw/openclaw.json",
                 "hermes" => ".hermes/config.yaml",
                 "pi" => ".pi/agent/settings.json",
+                // The provider table, not the role selection: the key we write
+                // lives in models.yml, which is what the live-evidence scan
+                // reads.
+                "omp" => ".omp/agent/models.yml",
                 "mimo" => ".config/mimocode/mimocode.jsonc",
                 "mcode" => ".minimax/config.yaml",
                 "aider" => ".aider.conf.yml",

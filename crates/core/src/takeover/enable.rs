@@ -88,6 +88,7 @@ fn read_originals(agent: &str, paths: &[PathBuf]) -> Result<Vec<BackupFile>, Str
                         | "droid"
                         | "goose"
                         | "zcode"
+                        | "omp"
                 ) || p.ends_with("auth.json")
                     || p.ends_with(".env") =>
             {
@@ -180,6 +181,17 @@ fn compute_rewrites(
     } else {
         None
     };
+    // omp's provider table declares the model the role selection names, and
+    // that selection is the primary file — so the table is rewritten against
+    // the selection's original content, the same ride-along as goose's.
+    let omp_config = if agent == "omp" {
+        originals
+            .iter()
+            .find(|f| f.path.ends_with("config.yml") || f.path.ends_with("config.yaml"))
+            .map(|f| f.content.as_str())
+    } else {
+        None
+    };
     originals
         .iter()
         .map(|original| {
@@ -192,7 +204,7 @@ fn compute_rewrites(
                     &target,
                     placeholder_key,
                     &now,
-                    openclaw_config.or(goose_selection),
+                    openclaw_config.or(goose_selection).or(omp_config),
                 )?,
             ))
         })
@@ -246,6 +258,9 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         // `/chat/completions` — without the version segment here, every
         // request lands on an unrouted path and the data plane 404s it.
         "openclaw" | "hermes" => "/v1",
+        // omp's `api: openai-completions` is handed to the same client, which
+        // appends the route to the version root.
+        "omp" => "/v1",
         // WorkBuddy and CodeBuddy take a full endpoint per model entry — they
         // append nothing, so the route has to be in the URL we write.
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
@@ -1346,6 +1361,10 @@ models:
             // catalogue the session-affinity declaration lives in.
             ("openclaw", ".openclaw/openclaw.json"),
             ("openclaw", ".openclaw/agents/main/agent/models.json"),
+            // Both of omp's files, at the `.yml` spelling a fresh install
+            // writes.
+            ("omp", ".omp/agent/config.yml"),
+            ("omp", ".omp/agent/models.yml"),
         ] {
             let (_dir, home) = temp_home();
             let aux = Aux::open_in_memory().unwrap();
@@ -1439,6 +1458,70 @@ models:
 
         let report = restore(&aux, "cline", &home).unwrap();
         assert_eq!(report.outcome, RestoreOutcome::NotTakenOver);
+    }
+
+    #[test]
+    fn omp_takeover_roundtrip_writes_both_files_and_keeps_the_model() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".omp").join("agent");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = "modelRoles:\n  default: openrouter/deepseek-chat\n  smol: openai/gpt-6-mini\ntheme: dark\n";
+        let models =
+            "providers:\n  mine:\n    baseUrl: https://openrouter.ai/api/v1\n    apiKey: literal\n";
+        std::fs::write(dir.join("config.yml"), config).unwrap();
+        std::fs::write(dir.join("models.yml"), models).unwrap();
+
+        enable(&aux, "omp", "kw-ag-omp-abcd", 8317, &home, &no_vars()).unwrap();
+
+        let cfg: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(dir.join("config.yml")).unwrap())
+                .unwrap();
+        // The provider prefix is swapped, the model id is not.
+        assert_eq!(cfg["modelRoles"]["default"], "kiwano-gateway/deepseek-chat");
+        assert_eq!(cfg["modelRoles"]["smol"], "openai/gpt-6-mini");
+        assert_eq!(cfg["theme"], "dark");
+
+        let tbl: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(dir.join("models.yml")).unwrap())
+                .unwrap();
+        let ours = &tbl["providers"]["kiwano-gateway"];
+        // omp hands this base to an OpenAI-completions client, which appends
+        // only the route — so the version root has to be in what we write.
+        assert_eq!(ours["baseUrl"], "http://127.0.0.1:8317/v1");
+        assert_eq!(ours["apiKey"], "kw-ag-omp-abcd");
+        assert_eq!(ours["authHeader"], true);
+        assert_eq!(ours["models"][0]["id"], "deepseek-chat");
+        assert_eq!(
+            tbl["providers"]["mine"]["baseUrl"],
+            "https://openrouter.ai/api/v1"
+        );
+
+        restore(&aux, "omp", &home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.yml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("models.yml")).unwrap(),
+            models
+        );
+        assert!(aux.load_takeover_backup("omp").is_none());
+    }
+
+    /// A legacy `models.json` with no YAML beside it is refused: our write
+    /// would create the YAML and stop omp from ever migrating the JSON.
+    #[test]
+    fn omp_takeover_refuses_a_legacy_models_json() {
+        let (_dir, home) = temp_home();
+        let aux = Aux::open_in_memory().unwrap();
+        let dir = home.join(".omp").join("agent");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("models.json"), r#"{"providers":{}}"#).unwrap();
+
+        let err = enable(&aux, "omp", "kw-ag-omp-abcd", 8317, &home, &no_vars()).unwrap_err();
+        assert!(err.contains("pre-YAML provider file"), "{err}");
+        assert!(!dir.join("models.yml").exists());
     }
 
     #[test]

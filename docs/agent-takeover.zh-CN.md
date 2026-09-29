@@ -30,6 +30,7 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 | `openclaw` | `~/.openclaw/openclaw.json` + `agents/<id>/agent/models.json` | 增量 | 目录文件承载主配置校验器不接受的会话亲和标志。 |
 | `hermes` | `~/.hermes/config.yaml` | 增量 | 认 `HERMES_HOME`。 |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | 增量 | 选择写在 settings 里。 |
+| `omp` | `~/.omp/agent/config.yml` + `models.yml` | 增量 | `.yml` 与 `.yaml` 两种拼写都认,逐文件探测。供应商条目声明角色选择里命名的模型,并带 `authHeader: true`——没有它 omp 会解析出占位 key 却不发送。当存在旧版 `models.json` 且没有 YAML 时拒绝:先写 YAML 会让 omp 永远不再迁移它。YAML 会重排版(关闭接管时逐字节还原)。 |
 | `workbuddy` | `~/.workbuddy/models.json` | 增量 | 认 `WORKBUDDY_CONFIG_DIR`。 |
 | `codebuddy` | `~/.codebuddy/models.json` | 增量 | 认 `CODEBUDDY_CONFIG_DIR`。 |
 | `kimi` | `~/.kimi-code/config.toml` | 增量 | 认 `KIMI_CODE_HOME`;后继版缺席时读旧版 `~/.kimi`。 |

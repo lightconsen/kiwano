@@ -172,6 +172,12 @@ pub(crate) fn takeover_paths(
         // docs name no relocation variable, only the legacy config.json it
         // merges behind this one.
         "droid" => Ok(vec![home.join(".factory").join("settings.json")]),
+        // oh-my-pi: two files, the role selection and the provider table, each
+        // spelled `.yml` with a `.yaml` fallback that is probed independently
+        // (omp reads them independently too, so a user can have one of each).
+        // No relocation variable: the docs name none, and the aider stance is
+        // to write the documented location rather than guess.
+        "omp" => Ok(vec![omp_file(home, "config")?, omp_models_file(home)?]),
         // Goose resolves its root through the etcetera app-strategy rules
         // (top-level domain "Block", app "goose"): on macOS that is
         // ~/Library/Application Support/Block/goose — *not* the ~/.config/goose
@@ -257,6 +263,38 @@ fn claude_desktop_paths(home: &Path) -> Vec<PathBuf> {
         )),
         threep.join("configLibrary").join("_meta.json"),
     ]
+}
+
+/// One of omp's two files: `.yml` when it is there, else `.yaml` when *that* is
+/// there, else `.yml` — the spelling a fresh install writes, and the one omp's
+/// own migration produces.
+fn omp_file(home: &Path, stem: &str) -> Result<PathBuf, String> {
+    let dir = home.join(".omp").join("agent");
+    let yml = dir.join(format!("{stem}.yml"));
+    if yml.exists() {
+        return Ok(yml);
+    }
+    let yaml = dir.join(format!("{stem}.yaml"));
+    Ok(if yaml.exists() { yaml } else { yml })
+}
+
+/// omp's provider table, with one refusal the config file does not need: omp
+/// migrates a legacy `models.json` to YAML *only while no YAML exists*, so a
+/// takeover that created `models.yml` first would stop that migration for good
+/// — and the user's providers would then be split across two files omp never
+/// merges. Refusing is the only outcome that does not silently strand them.
+fn omp_models_file(home: &Path) -> Result<PathBuf, String> {
+    let path = omp_file(home, "models")?;
+    let legacy = home.join(".omp").join("agent").join("models.json");
+    if !path.exists() && legacy.exists() {
+        return Err(format!(
+            "{} is omp's pre-YAML provider file — writing {} now would stop omp from ever \
+             migrating it. Run omp once (it moves models.json to models.yml), then retry.",
+            legacy.display(),
+            path.display()
+        ));
+    }
+    Ok(path)
 }
 
 /// Goose's three files, rooted at the config root both platform arms resolve:

@@ -35,6 +35,7 @@ cannot silently drift from what a build does.
 | `openclaw` | `~/.openclaw/openclaw.json` + `agents/<id>/agent/models.json` | additive | The catalogue file declares the session-affinity flag the main config's validator rejects. |
 | `hermes` | `~/.hermes/config.yaml` | additive | `HERMES_HOME` honored. |
 | `pi` | `~/.pi/agent/models.json` + `settings.json` | additive | The settings file carries the selection. |
+| `omp` | `~/.omp/agent/config.yml` + `models.yml` | additive | Both `.yml` and `.yaml` spellings are honored, probed per file. The provider entry declares the model the role selection names, with `authHeader: true` — without it omp resolves the placeholder key but never sends it. Refused while a legacy `models.json` is present and no YAML exists: writing the YAML first would stop omp from ever migrating it. YAML is re-serialized (comments are restored byte-for-byte on disable). |
 | `workbuddy` | `~/.workbuddy/models.json` | additive | `WORKBUDDY_CONFIG_DIR` honored. |
 | `codebuddy` | `~/.codebuddy/models.json` | additive | `CODEBUDDY_CONFIG_DIR` honored. |
 | `kimi` | `~/.kimi-code/config.toml` | additive | `KIMI_CODE_HOME` honored; the legacy `~/.kimi` is read when the successor is absent. |

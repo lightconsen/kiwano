@@ -9,7 +9,7 @@
 // pipeline is the sole writer and serializes file access itself.
 
 //! Gateway takeover transforms for the agents whose config this app writes an
-//! entry into: opencode, openclaw, hermes, pi, workbuddy, codebuddy, kimi,
+//! entry into: opencode, openclaw, hermes, pi, omp, workbuddy, codebuddy, kimi,
 //! qwen, cline, mimo, mcode, continue, crush, droid, goose and zcode.
 //!
 //! All but cline are additive: their configs hold many providers and select
@@ -56,6 +56,7 @@ pub mod kimi;
 pub mod mcode;
 pub mod mimo;
 pub mod model_list;
+pub mod omp;
 pub mod openclaw;
 pub mod opencode;
 pub mod pi;
@@ -81,6 +82,9 @@ pub use kimi::upsert_kimi_gateway;
 pub use mcode::{read_mcode_current, upsert_mcode_gateway};
 pub use mimo::{read_mimo_current, upsert_mimo_gateway};
 pub use model_list::GATEWAY_VENDOR;
+pub use omp::{
+    omp_model_id, read_omp_selected_model, select_omp_gateway, upsert_omp_models_gateway,
+};
 pub use openclaw::{upsert_openclaw_gateway, upsert_openclaw_models_json};
 pub use opencode::upsert_opencode_gateway;
 pub use pi::{select_pi_gateway, upsert_pi_models_gateway};

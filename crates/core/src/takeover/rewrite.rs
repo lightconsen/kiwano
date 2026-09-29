@@ -97,8 +97,8 @@ pub(crate) fn rewrite(
         "claude-desktop" => claude_desktop_rewrite(path, original, target, key),
         // additive agents: upsert a gateway provider entry and select it;
         // pre-existing provider entries survive (adapters::gateway_takeover)
-        "opencode" | "openclaw" | "hermes" | "pi" | "workbuddy" | "codebuddy" | "qwen" | "kimi"
-        | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" => {
+        "opencode" | "openclaw" | "hermes" | "pi" | "omp" | "workbuddy" | "codebuddy" | "qwen"
+        | "kimi" | "cline" | "mimo" | "mcode" | "continue" | "crush" | "droid" => {
             additive_rewrite(agent, path, original, target, key, now, sibling_config)
         }
         // goose's three files are one endpoint split across formats, each by
@@ -197,6 +197,23 @@ fn additive_rewrite(
             kiwano_adapters::gateway_takeover::upsert_pi_models_gateway(original, target, key)
         }
         "pi" => kiwano_adapters::gateway_takeover::select_pi_gateway(original),
+        // omp splits the same two jobs across two YAML files, and both sides
+        // need the same model id: the provider table declares it, the role
+        // selection names it. The selection's *original* content arrives as
+        // `sibling_config` (see compute_rewrites), because that is what says
+        // what the user was on.
+        "omp" if path.ends_with("models.yml") || path.ends_with("models.yaml") => {
+            kiwano_adapters::gateway_takeover::upsert_omp_models_gateway(
+                original,
+                sibling_config.unwrap_or(""),
+                target,
+                key,
+            )
+        }
+        "omp" => {
+            let model_id = kiwano_adapters::gateway_takeover::omp_model_id(original);
+            kiwano_adapters::gateway_takeover::select_omp_gateway(original, &model_id)
+        }
         // WorkBuddy's model list is a bare array; CodeBuddy's is an object with
         // a picker list beside it. Both name their provider by URL per model
         // row, so the transforms take over one row rather than adding a second

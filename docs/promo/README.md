@@ -82,12 +82,15 @@ awesome / 列表站穿插在长尾里做。**完整日期表见 `10-launch-runbo
 ## 日常推文(每个 commit 一条)
 
 发布期之外的持续宣传不走 `04-x-thread.md` 那种编排好的 thread,而是**每个
-commit 顺手出一条单帖**:Claude Code 里已配好——
+commit 顺手出一条单帖**:
 
-- `.claude/hooks/tweet-after-commit.sh`:任何含 `git commit` 的 Bash 调用跑完
-  后,把「写一条推文」的指令交回给模型(失败的 commit 会跳过);
-- `.claude/skills/tweet/SKILL.md`:`/tweet` 手动生成,也可指定 commit 范围
-  重新生成,规则与 hook 完全一致。
+- `.claude/skills/tweet/SKILL.md`(仓库内,已提交):`/tweet` 生成,可指定
+  commit 范围重新生成,也是全部规则的出处;
+- 维护者本机的 PostToolUse hook(`~/.claude/hooks/tweet-after-commit.sh`,
+  **个人配置、不进仓库**):任何含 `git commit` 的 Bash 调用跑完后自动把
+  「写一条推文」交回给模型。放在个人配置是刻意的 —— 贡献者 commit 自己的
+  修复时,不该被别人的工作流塞一条推广任务。换机器时的装配方法写在
+  SKILL.md 顶部的注释里。
 
 规则:英文、单帖 ≤280 字符、不带链接(X 会压降带链接的传播)、最多 1~2 个
 tag(`#ClaudeCode` `#Codex` `#AIcoding` `#opensource`)、版本号只在发布类

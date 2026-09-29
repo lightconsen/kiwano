@@ -1,5 +1,13 @@
 *.local.md
 
+# Claude Code: the skill is the project's (committed, inert unless invoked);
+# the settings beside it are whoever is working here — their permissions,
+# worktree preferences and hooks. Those are ignored by name rather than by
+# directory, because `.claude/settings.json` and `.claude/skills/` are meant
+# to be shared when a project has them.
+.claude/settings.local.json
+.claude/worktrees/
+
 # Node / Vite
 node_modules
 dist

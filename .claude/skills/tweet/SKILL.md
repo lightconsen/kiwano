@@ -3,6 +3,19 @@ name: tweet
 description: Draft one promotional tweet for a Kiwano commit — the latest one by default, or a range/ref you name. Use after committing, when asked for a tweet/post about recent work, or to re-draft one that missed.
 ---
 
+<!-- The automatic half of this flow is personal, not project, config: the
+     maintainer's ~/.claude/hooks/tweet-after-commit.sh fires on `git commit`
+     and points back here. To set that up on another machine, put that script
+     in ~/.claude/hooks/ and register it as a PostToolUse hook on Bash in
+     ~/.claude/settings.json (or a project's settings.local.json):
+
+       {"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command",
+         "command":"sh \"$HOME/.claude/hooks/tweet-after-commit.sh\""}]}]}}
+
+     It stays silent unless the checkout carries this file, so it is harmless
+     in other repositories. Contributors get no hook, which is the point: a
+     commit is not an occasion to hand someone else's session a promo task. -->
+
 # Draft a promotional tweet for a commit
 
 One English post, ≤280 characters, ready to paste into X. The reader is a

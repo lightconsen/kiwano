@@ -17,6 +17,54 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.7] - 2026-09-29
+
+### Added
+
+- **Four more agents taken over: oh-my-pi, DeepSeek Harness, Command Code and
+  HanaAgent** — twenty-two built-ins become twenty-six. Each one needed the
+  gateway's rules applied to its own config format rather than a new mechanism,
+  which is what the four have in common:
+  - **oh-my-pi** keeps its selection in `config.yml` and its providers in
+    `models.yml`; the entry declares `authHeader: true` because omp otherwise
+    resolves the placeholder key and never sends it — and a request with no key
+    is one the gateway refuses.
+  - **DeepSeek Harness** boots from shipped rows and applies a per-profile patch
+    list, so the endpoint is a row rather than a provider table: the `llm-deepseek`
+    row gets the gateway's address and a credential name, the key itself goes in
+    `~/.dsh/.env`, and the model the user selected is not touched. The list is
+    edited as lines, because it is a live-reloaded layer full of comments and
+    `!!js` expressions. Refused on a machine still on dsh < 0.1.5, and when dsh's
+    own settings pin that row's endpoint — dsh resolves settings over the patch
+    list, so the takeover would have routed nothing.
+  - **Command Code** takes its `apiKey` only as a reference (a pasted raw secret
+    is refused), so the key reaches it as a command reading a file Kiwano owns —
+    the same mechanism Goose needs for its keyring.
+  - **HanaAgent** keeps provider definitions in one global catalogue and each
+    agent's selection in its own `config.yaml`; every agent is rewritten, and the
+    catalogue declares the model ids they select. Refused until HanaAgent has run
+    once, since the catalogue only exists from then.
+
+- **A local server's brand mark now comes from its port.** The Apps row infers a
+  provider's mark from its endpoint host, which cannot reach the local servers —
+  every one of them is `localhost`. Ollama on its own default port (11434) was
+  therefore a letter avatar while the same vendor on a hostname got its mark.
+  Only ports a vendor ships as its own default are claimed; everything else keeps
+  the letter avatar, which is the honest answer for an endpoint nothing knows.
+
+- **The landing page's hero shot is the app itself, running.** The screenshot at
+  the top of kiwano.cc is now the real application — the same screens, the same
+  components — compiled for the browser over sample data, interactive, with the
+  counters and quota rings moving. It loads only once a visitor scrolls to it,
+  and pauses when it leaves the viewport; a visitor without JavaScript keeps the
+  still image.
+
+### Changed
+
+- **The agent menu in the Apps screen reads in two columns** once the list
+  outgrows one, and hangs from the "+" button's left edge — anchored at the end
+  it grew leftwards, over the provider table it opens above.
+
 ## [0.2.6] - 2026-09-27
 
 ### Fixed

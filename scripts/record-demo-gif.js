@@ -28,7 +28,7 @@ const { chromium } = require(process.env.PLAYWRIGHT ||
 const BASE = process.env.DEMO_URL || "http://127.0.0.1:8899/demo/";
 const OUT = path.resolve(process.env.OUT || "site/assets/demo.gif");
 const WIDTH = Number(process.env.WIDTH || 720);
-const VIEW = { width: 1000, height: 650 }; // the app's own window
+const VIEW = { width: 900, height: 600 }; // the app's own window
 const FPS = 8;
 
 /** The fake cursor: a dot that eases to wherever the next click will land. */

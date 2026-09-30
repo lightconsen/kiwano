@@ -62,7 +62,7 @@ export const PROTO_STYLE: Record<Protocol, React.CSSProperties> = {
   gemini: { background: "var(--indigo-soft)", color: "var(--indigo)" },
 };
 
-/** One letter per protocol. The column is 17% of a 1000px window for what is
+/** One letter per protocol. The column is 17% of a 900px window for what is
     usually one or two words, while the price column beside it is the one that
     truncates — and a protocol set of a few is a set a letter can name.
 

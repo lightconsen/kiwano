@@ -334,10 +334,10 @@ section.block { padding: 96px 0 0; }
   border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85);
   overflow: hidden;
   display: grid;
-  grid-template-columns: 1fr auto 1.35fr;
+  grid-template-columns: 1fr auto 1.45fr;
   align-items: center;
-  padding: 0 16px;
-  column-gap: 34px;
+  padding: 0 20px 0 20px;
+  column-gap: 60px;
 }
 /* 左:发起请求的 Agent */
 .agent-chip {
@@ -381,7 +381,8 @@ section.block { padding: 96px 0 0; }
   fill: none; stroke: var(--kiwi); stroke-width: 2.5; stroke-linecap: round;
   filter: drop-shadow(0 0 4px oklch(0.8 0.19 132 / 0.8));
 }
-.flow-main  { stroke-dasharray: 26 var(--len); }
+.flow-main  { stroke-dasharray: 40 var(--len); }
+
 .flow-leg2  { stroke-dasharray: 20 var(--len); }
 
 /* failover:A 故障转红,流量改走 B 的线,A 恢复后回 A */
@@ -398,24 +399,26 @@ section.block { padding: 96px 0 0; }
 }
 /* 两条腿的流量:第一段 agent→hub 常走;第二段 hub→命中者,故障时换路径。
    failover 的 keyframes 直接换 dashoffset 目标:0-40% 爬 A 线,40-86% 爬 B 线。 */
-.fa-f1 { animation: 8s fa-f1 infinite; }
+.fa-f1 {
+  animation: fa-f1 4s linear infinite;
+}
 @keyframes fa-f1 {
-  0%   { stroke-dashoffset: 0; opacity: 0; }
-  4%   { opacity: 1; }
-  90%  { stroke-dashoffset: calc(-1 * var(--len) - 26); opacity: 1; }
-  100% { stroke-dashoffset: calc(-1 * var(--len) - 26); opacity: 1; }
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: calc(-1 * var(--len) - 26); }
 }
-.fa-f2a { animation: 8s fa-f2a infinite; }
-.fa-f2b { animation: 8s fa-f2b infinite; }
-@keyframes fa-f2a {
-  0%, 36%  { stroke-dashoffset: 0; opacity: 0; }
-  42%, 62% { opacity: 1; stroke-dashoffset: calc(-1 * var(--len) - 20); }
-  100%     { opacity: 0; stroke-dashoffset: calc(-1 * var(--len) - 20); }
+.fa-f2a { animation: fa-f2a-run 0.4s linear infinite, fa-f2a-vis 8s linear infinite; }
+.fa-f2b { animation: fa-f2b-run 0.4s linear infinite, fa-f2b-vis 8s linear infinite; }
+@keyframes fa-f2a-vis {
+
+  0%, 36%  {  opacity: 0; }
+  42%, 62% { opacity: 1;  }
+  100%     { opacity: 0;  }
 }
-@keyframes fa-f2b {
-  0%, 46%  { stroke-dashoffset: 0; opacity: 0; }
-  52%, 82% { opacity: 1; stroke-dashoffset: calc(-1 * var(--len) - 20); }
-  100%     { opacity: 0; stroke-dashoffset: calc(-1 * var(--len) - 20); }
+@keyframes fa-f2b-vis {
+
+  0%, 46%  {  opacity: 0; }
+  52%, 82% { opacity: 1;  }
+  100%     { opacity: 0;  }
 }
 
 /* roundrobin:流量轮流走三条线,命中的线亮起、logo 边同名亮 */
@@ -442,8 +445,8 @@ section.block { padding: 96px 0 0; }
 @keyframes rr-f {
   0%   { stroke-dashoffset: 0; opacity: 0; }
   3%   { opacity: 1; }
-  96%  { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 1; }
-  100% { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 1; }
+  97%  { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 1; }
+  100% { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 0; }
 }
 /* 命中谁的线亮:keyframes 与流量到达时刻同步(线全程常亮太吵,只在
    流量经过时亮) */
@@ -492,17 +495,19 @@ section.block { padding: 96px 0 0; }
 @keyframes tw-cur { 0% { left: 0%; } 100% { left: 100%; } }
 /* timewindow 的流量同样走两腿,周期内只在当前窗口的线上 */
 .tw-f1 { animation: 8s fa-f1 infinite; }
-.tw-f2a { animation: 8s tw-f2a infinite; }
-.tw-f2b { animation: 8s tw-f2b infinite; }
-@keyframes tw-f2a {
-  0%, 36%  { stroke-dashoffset: 0; opacity: 0; }
-  42%, 88% { opacity: 1; stroke-dashoffset: calc(-1 * var(--len) - 20); }
-  100%     { opacity: 0; stroke-dashoffset: calc(-1 * var(--len) - 20); }
+.tw-f2a { animation: tw-f2a-run 0.4s linear infinite, tw-f2a-vis 8s linear infinite; }
+.tw-f2b { animation: tw-f2b-run 0.4s linear infinite, tw-f2b-vis 8s linear infinite; }
+@keyframes tw-f2a-vis {
+
+  0%, 36%  {  opacity: 0; }
+  42%, 88% { opacity: 1;  }
+  100%     { opacity: 0;  }
 }
-@keyframes tw-f2b {
-  0%, 46%  { stroke-dashoffset: 0; opacity: 0; }
-  52%, 88% { opacity: 1; stroke-dashoffset: calc(-1 * var(--len) - 20); }
-  100%     { opacity: 0; stroke-dashoffset: calc(-1 * var(--len) - 20); }
+@keyframes tw-f2b-vis {
+
+  0%, 46%  {  opacity: 0; }
+  52%, 88% { opacity: 1;  }
+  100%     { opacity: 0;  }
 }
 
 /* quota:A 的配额环注满转 amber,流量改走 B 的线,周期复位后回 A */
@@ -1354,7 +1359,40 @@ function drawStrategyWires() {
       f.style.strokeDasharray = `20 ${len}`;
     });
   });
+  writeFlowKeyframes();
 }
+
+// 每条 leg1 的"往"程动画写成专属 keyframes——距离写死为该路径的像素长。
+// (含 var() 的 keyframes 在 Chrome 对 stroke-dashoffset 不插值,只能离散跳,
+// 所以不能共用一条带变量的动画。leg2 的 keyframes 是"到达点"语义,跳变
+// 无妨,继续共用。)
+function writeFlowKeyframes() {
+  let css = "";
+  document.querySelectorAll(".grid-strat .diag").forEach((fig, i) => {
+    const leg1 = fig.querySelector('[data-flow="leg1"]');
+    if (leg1) {
+      const len = Math.ceil(leg1.getTotalLength()) + 40;
+      css += `@keyframes flow-leg1-${i} { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -${len}px; } }\n`;
+      leg1.style.animationName = `flow-leg1-${i}`;
+      leg1.style.animationDuration = "0.4s";
+    }
+    // leg2 的行进层:每条可能的命中路径一条,0.4s 走完自身——与 leg1 同速。
+    fig.querySelectorAll(".flow[data-flow^='leg2']").forEach((f, j) => {
+      const len = Math.ceil(f.getTotalLength()) + 20;
+      css += `@keyframes leg2-run-${i}-${j} { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -${len}px; } }\n`;
+      f.style.animationName = `leg2-run-${i}-${j}, ${f.classList.contains("fa-f2a") ? "fa-f2a-vis" : f.classList.contains("fa-f2b") ? "fa-f2b-vis" : f.classList.contains("tw-f2a") ? "tw-f2a-vis" : f.classList.contains("tw-f2b") ? "tw-f2b-vis" : "fa-f2a-vis"}`;
+      f.style.animationDuration = "0.4s, 8s";
+    });
+  });
+  document.getElementById("flow-kf")?.remove();
+  if (css) {
+    const st = document.createElement("style");
+    st.id = "flow-kf";
+    st.textContent = css;
+    document.head.appendChild(st);
+  }
+}
+window.addEventListener("resize", drawStrategyWires);
 drawStrategyWires();
 
 // 实时演示:滚到可见时再把 app 装进 iframe。放在这里而不是首屏,是因为它是

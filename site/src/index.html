@@ -337,6 +337,7 @@
               <path class="wire" data-wire="a"/>
               <path class="wire" data-wire="b"/>
               <path class="wire" data-wire="c"/>
+              <path class="wire" data-wire="d"/>
               <path class="flow" data-flow="leg1"/>
               <path class="flow" data-flow="leg2a"/>
               <path class="flow" data-flow="leg2b"/>
@@ -355,13 +356,13 @@
           <p data-i18n="st2.d">Weighted rotation, per session: a session keeps its provider, so the prompt cache it already paid for keeps hitting; new sessions spread across candidates by weight.</p>
           <div class="diag" data-strategy="roundrobin" aria-hidden="true">
             <svg class="wires" aria-hidden="true">
-              <path class="wire rr-w1" data-wire="a"/>
-              <path class="wire rr-w2" data-wire="b"/>
-              <path class="wire rr-w3" data-wire="c"/>
-              <path class="flow" data-flow="leg1"/>
-              <path class="flow" data-flow="leg2a"/>
-              <path class="flow" data-flow="leg2b"/>
-              <path class="flow" data-flow="leg2c"/>
+              <path class="wire" data-wire="a"/>
+              <path class="wire ws1" data-wire="b"/>
+              <path class="wire ws2" data-wire="c"/>
+              <path class="wire ws3" data-wire="d"/>
+              <path class="flow s1" data-flow="stream"/>
+              <path class="flow s2" data-flow="stream"/>
+              <path class="flow s3" data-flow="stream"/>
             </svg>
             <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
             <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
@@ -379,6 +380,7 @@
             <svg class="wires" aria-hidden="true">
               <path class="wire" data-wire="a"/>
               <path class="wire" data-wire="b"/>
+              <path class="wire" data-wire="c"/>
               <path class="flow" data-flow="leg1"/>
               <path class="flow" data-flow="leg2a"/>
               <path class="flow" data-flow="leg2b"/>
@@ -402,6 +404,7 @@
             <svg class="wires" aria-hidden="true">
               <path class="wire" data-wire="a"/>
               <path class="wire" data-wire="b"/>
+              <path class="wire" data-wire="c"/>
               <path class="flow" data-flow="leg1"/>
               <path class="flow" data-flow="leg2a"/>
               <path class="flow" data-flow="leg2b"/>

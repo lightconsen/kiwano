@@ -267,11 +267,15 @@ section.block { padding: 96px 0 0; }
 }
 .wire.hot { stroke: oklch(0.8 0.19 132 / 0.9); }
 /* 流量:沿路径流动的亮段。行程、速度与可见窗口都由 main.ts 按实测路径长
-   生成(见那里的 LEG2_SCHEDULE)——这里只管外观。 */
+   生成(见那里的 LEG2_SCHEDULE)——这里只管外观。光晕跟着自身的颜色走,
+   所以 roundrobin 的三条流(下面 s1/s2/s3)各自发光,不用各写一条滤镜。 */
 .flow {
-  fill: none; stroke: var(--kiwi); stroke-width: 2.5; stroke-linecap: round;
-  filter: drop-shadow(0 0 4px oklch(0.8 0.19 132 / 0.8));
+  fill: none; stroke: var(--kiwi); color: var(--kiwi); stroke-width: 2.5; stroke-linecap: round;
+  filter: drop-shadow(0 0 4px color-mix(in oklab, currentColor 80%, transparent));
 }
+/* roundrobin:三条流各一色——绿是主色,蓝与琥珀是同一套 token 里的 accent */
+.flow.s2 { stroke: var(--blue); color: var(--blue); }
+.flow.s3 { stroke: var(--amber); color: var(--amber); }
 
 /* failover:A 故障转红,流量改走 B 的线,A 恢复后回 A */
 .fa-a { animation: 8s fa-a-n infinite; }
@@ -288,45 +292,12 @@ section.block { padding: 96px 0 0; }
 /* 流量走哪条腿、何时走,由 main.ts 按实测路径长生成(LEG2_SCHEDULE):
    前 40% 只服务 A;A 变红那一拍起改走 B。 */
 
-/* roundrobin:流量轮流走三条线,命中的线亮起、logo 边同名亮 */
-.rr-a, .rr-b, .rr-c { color: var(--mut); }
-.rr-a { animation: 8s rr-n1 infinite; }
-.rr-b { animation: 8s rr-n2 infinite; }
-.rr-c { animation: 8s rr-n3 infinite; }
-/* 每家的名字与线都在自己那一轮亮——与 main.ts 里三条腿的窗口同一拍 */
-@keyframes rr-n1 {
-  0%, 1% { color: var(--mut); }
-  3%, 30% { color: var(--ink); }
-  33%, 100% { color: var(--mut); }
-}
-@keyframes rr-n2 {
-  0%, 33% { color: var(--mut); }
-  35%, 63% { color: var(--ink); }
-  66%, 100% { color: var(--mut); }
-}
-@keyframes rr-n3 {
-  0%, 66% { color: var(--mut); }
-  68%, 97% { color: var(--ink); }
-  100% { color: var(--mut); }
-}
-.rr-w1 { animation: 8s rr-w1 infinite; }
-.rr-w2 { animation: 8s rr-w2 infinite; }
-.rr-w3 { animation: 8s rr-w3 infinite; }
-@keyframes rr-w1 {
-  0%, 1% { stroke: oklch(0.5 0.02 260 / 0.35); }
-  3%, 30% { stroke: oklch(0.8 0.19 132 / 0.9); }
-  33%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
-}
-@keyframes rr-w2 {
-  0%, 33% { stroke: oklch(0.5 0.02 260 / 0.35); }
-  35%, 63% { stroke: oklch(0.8 0.19 132 / 0.9); }
-  66%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
-}
-@keyframes rr-w3 {
-  0%, 66% { stroke: oklch(0.5 0.02 260 / 0.35); }
-  68%, 97% { stroke: oklch(0.8 0.19 132 / 0.9); }
-  100% { stroke: oklch(0.5 0.02 260 / 0.35); }
-}
+/* roundrobin:三条流同时在跑,三家就都算在服务——没有轮流高亮这回事了。
+   每条 standby 线染上跑在它上面的那条流的淡色,颜色把"线"和"流"绑在一起。 */
+.rr-a, .rr-b, .rr-c { color: var(--ink); }
+.wire.ws1 { stroke: color-mix(in oklab, var(--kiwi) 35%, transparent); }
+.wire.ws2 { stroke: color-mix(in oklab, var(--blue) 35%, transparent); }
+.wire.ws3 { stroke: color-mix(in oklab, var(--amber) 35%, transparent); }
 
 /* timewindow:时间游标扫过 24h 轴(Provider 列下方),进入哪个窗口哪家亮 */
 .tw-a { animation: 8s tw-a-n infinite; }

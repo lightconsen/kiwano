@@ -132,12 +132,11 @@ const FADE = 1;         // % 的淡入淡出:切换不硬切,窗口仍不重叠
 // 一家在服务;切换点落在"当前这家退场"的那一拍上——failover 变红、timewindow
 // 扫过窗口、quota 触顶。这些数字与 styles.css 里 provider 名字的颜色、配额环
 // 是同一个故事钟,改要一起改。
+// (roundrobin 不在这张表里:它的三条流同时跑、各一色,见下面的 stream。)
 const LEG2_SCHEDULE: Record<string, Record<string, [number, number]>> = {
   failover: { leg2a: [0, 40], leg2b: [41, 100] },
   timewindow: { leg2a: [0, 33], leg2b: [34, 100] },
   quota: { leg2a: [0, 42], leg2b: [43, 100] },
-  // 轮询:三条线轮流接流量,各占约一角;轮到谁谁的线亮(rr-w*)
-  roundrobin: { leg2a: [0, 32], leg2b: [34, 65], leg2c: [67, 100] },
 };
 const LEG2_INDEX: Record<string, number> = { a: 0, b: 1, c: 2 };
 
@@ -162,6 +161,10 @@ function drawStrategyWires(): boolean {
     const rows = [...fig.querySelectorAll(".provs .pn")].map(c);
     const path = (x1: number, y1: number, x2: number, y2: number) =>
       `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+    // 全程一条:agent→hub→provider,中途正好穿过 hub —— roundrobin 的三条流
+    // 走这条,看得到"同一批请求被网关摊到三家"。
+    const route = (x1: number, y1: number, mx: number, my: number, x2: number, y2: number) =>
+      path(x1, y1, mx, my) + path(mx, my, x2, y2).replace(/^M [^C]+/, "");
 
     // 几何指纹:列宽或任一 logo 的位置动了才重画
     const geom = [ax, ay, hx, hy, ...rows.flat()].map((n) => Math.round(n)).join(",");
@@ -169,21 +172,44 @@ function drawStrategyWires(): boolean {
     fig.dataset.flowGeom = geom;
     changed = true;
 
-    // 三条暗光路:agent→hub、hub→每个 provider。
+    // 暗光路:第 0 条是 agent→hub,第 k 条(k≥1)接 rows[k-1] 那家——守卫得看
+    // rows[k-1];看 rows[k] 会把最后一条 provider 线永远判成"没人可接"。
     svg.querySelectorAll<SVGPathElement>(".wire").forEach((w, k) => {
-      if (!rows[k]) { w.style.display = "none"; return; }
+      if (k > 0 && !rows[k - 1]) { w.style.display = "none"; return; }
+      w.style.display = "";
       w.setAttribute("d", k === 0
         ? path(ax, ay, hx, hy)
         : path(hx, hy, rows[k - 1][0], rows[k - 1][1]));
       w.style.setProperty("--len", String(Math.ceil(w.getTotalLength()) + 2));
     });
 
-    // 流量:leg1 沿 agent→hub 常走;leg2x 沿 hub→第 x 条 provider 线,可见窗口
-    // 由排期表决定——同一时刻只有一家在服务。
+    // 流量。三种路径:
+    //   leg1   agent→hub,常走
+    //   leg2x  hub→第 x 家,可见窗口由排期表决定——同一时刻只有一家在服务
+    //   stream agent→hub→第 n 家,整条同时跑(roundrobin:三条各一色,并发)
     const schedule = LEG2_SCHEDULE[fig.dataset.strategy ?? ""] ?? {};
     let css = "";
+
+    const streams = [...svg.querySelectorAll<SVGPathElement>('.flow[data-flow="stream"]')];
+    streams.forEach((f, k) => {
+      const target = rows[k];
+      if (!target) { f.style.display = "none"; return; }
+      // 起点沿 agent 这一侧上下错开,三条流在 chip 边上就是三条并行的线,到 hub
+      // 汇合后再各走各家;相位各错开三分之一个周期,三条亮段就不会叠成一坨,
+      // 一眼看得出是同一批请求被摊到三家。
+      const oy = (k - (streams.length - 1) / 2) * 11;
+      f.setAttribute("d", route(ax, ay + oy, hx, hy, target[0], target[1]));
+      const len = Math.ceil(f.getTotalLength());
+      const dur = (len + DASH) / FLOW_SPEED;
+      f.style.strokeDasharray = `${DASH} ${len}`;
+      css += `@keyframes flow-run-${i}-s${k} { from { stroke-dashoffset: ${DASH}px; } to { stroke-dashoffset: ${-len}px; } }\n`;
+      f.style.animation = `flow-run-${i}-s${k} ${dur.toFixed(3)}s linear infinite`;
+      f.style.animationDelay = `${(-k * dur / streams.length).toFixed(3)}s`;
+    });
+
     svg.querySelectorAll<SVGPathElement>(".flow").forEach((f) => {
       const kind = f.dataset.flow!;
+      if (kind === "stream") return; // 上面已经画过
       const target = kind === "leg1"
         ? [ax, ay] as [number, number]
         : rows[LEG2_INDEX[kind.slice(-1)] ?? 0];

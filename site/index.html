@@ -536,6 +536,10 @@ section.block { padding: 96px 0 0; }
   transition: border-color .15s;
 }
 .dl-card:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+/* The download counter under the section head: one line, mono figure. Hidden
+   until the fetch lands — the page never shows a number it cannot back. */
+.dl-count { margin-top: 14px; font-size: 12.5px; color: var(--mut); }
+.dl-count b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); font-size: 13px; }
 .dl-os { display: flex; align-items: center; gap: 11px; }
 .dl-os .icon { width: 26px; height: 26px; color: var(--ink); }
 .dl-os h3 { font-size: 17px; font-weight: 600; }
@@ -873,6 +877,9 @@ footer { padding: 56px 0 44px; }
         <div class="kicker">Download</div>
         <h2 data-i18n="dl.h2">Download Kiwano</h2>
         <p data-i18n="dl.p">Free, no account, works offline. Pick your platform:</p>
+        <!-- The count is fetched; without it this line stays hidden, so a static
+             or offline render of the page never shows a stale figure. -->
+        <p class="dl-count" id="dlCount" data-i18n="dl.count" data-en="Installer downloads so far: <b>{n}</b> — downloads, not installs." hidden></p>
       </div>
       <div class="dl-grid">
         <div class="dl-card rv" id="download-mac">
@@ -1130,18 +1137,24 @@ const I18N = {
     "pv.3": "无账号体系,离线完整可用",
     "foot.note": "部分模块移植自 cc-switch(MIT),声明见 THIRD-PARTY-NOTICES",
     "demo.note": "实时演示——示例数据,在你的浏览器里跑。<a href=\"#download\">下载 Kiwano</a> 接入你自己的供应商。",
+    "dl.count": "已有 <b>{n}</b> 次安装器下载——只是下载次数,不是安装数。",
     "title": "Kiwano — 本地优先的 AI Provider 管理器",
   },
 };
 
-// 应用语言:en 还原 HTML 内联文案,zh 从字典取(先缓存原文,来回切不丢)
+// 应用语言:en 还原 HTML 内联文案,zh 从字典取(先缓存原文,来回切不丢)。
+// 已带 data-en 的元素(如下载计数行的 {n} 模板)不缓存 innerHTML——它们
+// 的模板写在属性里,初始 innerHTML 是空的,缓存会把它抹掉。
 document.querySelectorAll("[data-i18n]").forEach((el) => {
-  el.dataset.en = el.innerHTML;
+  if (el.dataset.en === undefined) el.dataset.en = el.innerHTML;
 });
 // 属性型文案(aria-label/title 同 key):与文本同一字典,同一处切换
 document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
   el.dataset.enAria = el.getAttribute("aria-label");
 });
+// 下载计数:site/data/hub-stats.json 由每周的 hub-stats 工作流刷新并随站点
+// 部署,取到后填进下载节;取不到就保持隐藏——页面不显示一个它无法佐证的数字。
+let dlCountValue = null;
 function applyLang(lang) {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.title = lang === "zh" ? I18N.zh.title : "Kiwano — Local-first AI Provider Manager";
@@ -1153,6 +1166,12 @@ function applyLang(lang) {
       el.innerHTML = el.dataset.en;
     }
   });
+  // 计数行带着已取到的数字走一遍,否则切语言会把 {n} 原样写回去。
+  const countEl = document.getElementById("dlCount");
+  if (countEl && !countEl.hidden && dlCountValue !== null) {
+    countEl.innerHTML =
+      (lang === "zh" ? I18N.zh["dl.count"] : countEl.dataset.en).replace("{n}", dlCountValue.toLocaleString("en-US"));
+  }
   document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
     const v = lang === "zh" ? I18N.zh[el.dataset.i18nAria] : el.dataset.enAria;
     if (v !== undefined) {
@@ -1219,6 +1238,22 @@ const io = new IntersectionObserver(
   { threshold: 0.12 },
 );
 document.querySelectorAll(".rv").forEach((el) => io.observe(el));
+
+// 下载计数:site/data/hub-stats.json 由每周的 hub-stats 工作流刷新并随站点
+// 部署。取不到就保持隐藏——页面不显示一个它无法佐证的数字。
+fetch("/data/hub-stats.json", { headers: { accept: "application/json" } })
+  .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+  .then((stats) => {
+    const n = stats?.totals?.estimate_minus_ci_floor;
+    if (!Number.isFinite(n)) return;
+    dlCountValue = n;
+    const el = document.getElementById("dlCount");
+    const lang = document.documentElement.lang === "zh-CN" ? "zh" : "en";
+    const tpl = lang === "zh" ? I18N.zh["dl.count"] : el.dataset.en;
+    el.innerHTML = tpl.replace("{n}", n.toLocaleString("en-US"));
+    el.hidden = false;
+  })
+  .catch(() => {});
 
 // 实时演示:滚到可见时再把 app 装进 iframe。放在这里而不是首屏,是因为它是
 // 一个完整的 React 应用(几百 KB),而首屏只需要那张静态图——没有 JS 的访客

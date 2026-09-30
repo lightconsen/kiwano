@@ -354,9 +354,11 @@ section.block { padding: 96px 0 0; }
 /* 中:Kiwano —— 只有 logo,无外框 */
 .hub { position: relative; z-index: 2; width: 34px; height: 34px; }
 .hub img { width: 34px; height: 34px; border-radius: 8px; display: block; }
-/* 右:Provider 垂直一列,logo + 名字 */
+/* 右:Provider 垂直一列,logo + 名字。整列贴往右侧(列宽收缩到内容,
+   justify-self 推到格尾),列内各行仍左对齐,logo 垂直成列。 */
 .provs {
   display: grid; gap: 14px; align-content: center; justify-items: start;
+  justify-self: end;
   position: relative; z-index: 2;
 }
 .pn {

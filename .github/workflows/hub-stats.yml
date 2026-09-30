@@ -1,0 +1,57 @@
+# Refresh site/data/hub-stats.json — the honest install numbers the Hub can
+# offer, which are GitHub's installer download counts with the CI mirror's own
+# fetches called out rather than hidden. Weekly, because installer downloads
+# move at the pace of releases, not hours; and on demand, for a fresh number
+# before a post goes out.
+#
+# What this deliberately does not claim: that downloads are installs, or that
+# anything here measures usage. The Hub serves no telemetry, and the updater's
+# latest.json request count — the closest thing to a live-install signal —
+# lives in Cloudflare's analytics, behind a credential this repo does not hold.
+# If that ever changes, it is a product decision first and a workflow second.
+#
+# The output is committed, so the deployed site can read it as a static file,
+# and the diff between runs *is* the trend line.
+
+name: Hub stats
+
+on:
+  schedule:
+    # Weekly, Monday 08:14 UTC — off the hour marks every other job loves.
+    - cron: "14 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hub-stats
+  cancel-in-progress: false
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Collect installer download counts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/hub_stats.py
+
+      - name: Commit if anything moved
+        run: |
+          git config user.name "kiwano-stats"
+          git config user.email "stats@kiwano.cc"
+          if git diff --quiet site/data/hub-stats.json; then
+            echo "no change since last week"
+            exit 0
+          fi
+          git add site/data/hub-stats.json
+          git commit -m "📊 stats: refresh hub installer download counts"
+          git push

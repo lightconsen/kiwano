@@ -1,0 +1,138 @@
+{
+  "generated_at": "2026-09-30T01:13:26+00:00",
+  "source": "github-release-assets",
+  "note": "installer downloads summed over 21 releases. Every release's mirror-verification step fetches each asset once (~5 per release), so the honest count is the sum minus that floor. Downloads are not installs: retries, abandoned downloads and install.sh users are all invisible here.",
+  "releases": [
+    {
+      "tag": "v0.2.7",
+      "published": "2026-09-29T16:04:15Z",
+      "installer_downloads": 11,
+      "estimate_minus_ci_floor": 6
+    },
+    {
+      "tag": "v0.2.6",
+      "published": "2026-09-27T11:01:59Z",
+      "installer_downloads": 10,
+      "estimate_minus_ci_floor": 5
+    },
+    {
+      "tag": "v0.2.5",
+      "published": "2026-09-27T04:54:40Z",
+      "installer_downloads": 9,
+      "estimate_minus_ci_floor": 4
+    },
+    {
+      "tag": "v0.2.4",
+      "published": "2026-09-23T02:50:43Z",
+      "installer_downloads": 19,
+      "estimate_minus_ci_floor": 14
+    },
+    {
+      "tag": "v0.2.3",
+      "published": "2026-09-21T10:41:59Z",
+      "installer_downloads": 9,
+      "estimate_minus_ci_floor": 4
+    },
+    {
+      "tag": "v0.2.2",
+      "published": "2026-09-21T02:11:23Z",
+      "installer_downloads": 35,
+      "estimate_minus_ci_floor": 30
+    },
+    {
+      "tag": "v0.2.1",
+      "published": "2026-09-20T07:51:17Z",
+      "installer_downloads": 9,
+      "estimate_minus_ci_floor": 4
+    },
+    {
+      "tag": "v0.2.0",
+      "published": "2026-09-20T06:23:43Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.16",
+      "published": "2026-09-19T17:56:55Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.15",
+      "published": "2026-09-17T13:28:38Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.14",
+      "published": "2026-09-17T07:14:10Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.13",
+      "published": "2026-09-16T04:32:50Z",
+      "installer_downloads": 5,
+      "estimate_minus_ci_floor": 0
+    },
+    {
+      "tag": "v0.1.12",
+      "published": "2026-09-15T23:54:01Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.11",
+      "published": "2026-09-15T11:55:23Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.10",
+      "published": "2026-09-15T10:15:13Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.7",
+      "published": "2026-09-11T04:40:19Z",
+      "installer_downloads": 0,
+      "estimate_minus_ci_floor": 0
+    },
+    {
+      "tag": "v0.1.6",
+      "published": "2026-09-11T02:07:47Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    },
+    {
+      "tag": "v0.1.5",
+      "published": "2026-09-10T14:14:48Z",
+      "installer_downloads": 0,
+      "estimate_minus_ci_floor": 0
+    },
+    {
+      "tag": "v0.1.4",
+      "published": "2026-09-10T13:00:41Z",
+      "installer_downloads": 0,
+      "estimate_minus_ci_floor": 0
+    },
+    {
+      "tag": "v0.1.3",
+      "published": "2026-09-10T12:29:11Z",
+      "installer_downloads": 0,
+      "estimate_minus_ci_floor": 0
+    },
+    {
+      "tag": "v0.1.2",
+      "published": "2026-09-10T11:50:19Z",
+      "installer_downloads": 7,
+      "estimate_minus_ci_floor": 2
+    }
+  ],
+  "totals": {
+    "installer_downloads": 170,
+    "ci_noise_floor": 105,
+    "estimate_minus_ci_floor": 65
+  }
+}

@@ -141,6 +141,7 @@ export const providers = {
   addAgent: "添加",
   alreadyDeclared: "已添加",
   editAgentName: "编辑 Agent 名称",
+  editAgentNote: "编辑备注",
   agentName: "名称",
   agentNamePlaceholder: "长任务",
   agentNote: "备注",

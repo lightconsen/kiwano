@@ -179,6 +179,7 @@ export const providers = {
   addAgent: "Add agent",
   alreadyDeclared: "Added",
   editAgentName: "Edit agent name",
+  editAgentNote: "Edit the note",
   agentName: "Name",
   agentNamePlaceholder: "Long tasks",
   agentNote: "Note",

@@ -467,9 +467,23 @@ export default function Providers({
           setNewAgent={setNewAgent}
           setDeclaring={setDeclaring}
         />
-        <span className="ml-1.5 text-[11.5px] text-mut">
-          {t("providers.counts", { providers: providers.length, agents: agentsBound })}
-        </span>
+        {/* One line of "what this page is", and only one: the All tab counts
+            both kinds of row it shows, an agent tab names the agent it is
+            about. Same slot, same reason — the strip says which tab you are
+            on, and this says what that tab holds. */}
+        {seg === "all" ? (
+          <span className="ml-1.5 text-[11.5px] text-mut">
+            {t("providers.counts", { providers: providers.length, agents: agentsBound })}
+          </span>
+        ) : (
+          <AgentTabTitle
+            seg={seg}
+            custom={custom}
+            takenOver={takenOver}
+            setAccessOpen={setAccessOpen}
+            setAgentSettingsOpen={setAgentSettingsOpen}
+          />
+        )}
         {loadErr && (
           <span
             className="ml-1.5 text-[11px]"
@@ -487,15 +501,6 @@ export default function Providers({
           onAdd={onAdd}
         />
       </div>
-
-      <AgentTabTitle
-        seg={seg}
-        custom={custom}
-        takenOver={takenOver}
-        configPaths={configPaths}
-        setAccessOpen={setAccessOpen}
-        setAgentSettingsOpen={setAgentSettingsOpen}
-      />
 
       <ProviderTable
         seg={seg}
@@ -584,6 +589,7 @@ export default function Providers({
         <AccessDialog
           agent={custom.id}
           label={custom.label}
+          note={custom.note}
           keyName={custom.placeholder_key}
           protocol={custom.protocol}
           listen={listen}
@@ -594,9 +600,14 @@ export default function Providers({
           onDelete={() => onDeleteAgent(custom.id)}
           // The update replaces all three of the agent's own fields, so each
           // control below sends the two it is not changing back unchanged —
-          // the note and the protocol here, the name and the note there.
+          // the note and the protocol here, the name and the protocol there,
+          // the name and the note in the third.
           onRenamed={async (label) => {
             await api.updateCustomAgent(custom.id, label, custom.note, custom.protocol);
+            refetch();
+          }}
+          onNoteChanged={async (note) => {
+            await api.updateCustomAgent(custom.id, custom.label, note, custom.protocol);
             refetch();
           }}
           onProtocolChanged={async (protocol) => {

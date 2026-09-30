@@ -278,8 +278,10 @@ describe("a user-defined agent", () => {
 
     // The tab names the agent: the strip shows a letter avatar, so a page with
     // no name on it is one you have to identify from the highlight over there.
+    // The name is the whole of what the header adds — the note is a fact about
+    // the agent, and it is read where the agent's other facts are.
     expect(await screen.findByText(longTasks.label)).toBeInTheDocument();
-    expect(screen.getByText(longTasks.note!)).toBeInTheDocument();
+    expect(screen.queryByText(longTasks.note!)).toBeNull();
     // Its candidate is a row like any agent's…
     expect(screen.getByLabelText(en.providers.removeFromRouteAria)).toBeInTheDocument();
     // …and there is nothing to enable: a route has no config to take over.
@@ -457,6 +459,71 @@ describe("a user-defined agent", () => {
         longTasks.label,
         longTasks.note,
         "anthropic",
+      ),
+    );
+  });
+
+  it("shows the note it was defined with, and lets it be rewritten", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    apiMock.updateCustomAgent.mockResolvedValue(longTasks);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+    await user.click(
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", longTasks.label)),
+    );
+    const dialog = screen.getByRole("dialog");
+    // The note is read where the agent's other facts are: the header names the
+    // agent and stops there.
+    expect(within(dialog).getByText(longTasks.note!)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: en.providers.editAgentNote }));
+    const field = within(dialog).getByRole("textbox", { name: en.providers.agentNote });
+    await user.clear(field);
+    await user.type(field, "batch at night");
+    await user.click(within(dialog).getByRole("button", { name: en.common.save }));
+
+    // The name and the protocol travel back unchanged: the update replaces all
+    // three of the agent's own fields.
+    await waitFor(() =>
+      expect(apiMock.updateCustomAgent).toHaveBeenCalledWith(
+        longTasks.id,
+        longTasks.label,
+        "batch at night",
+        longTasks.protocol,
+      ),
+    );
+  });
+
+  it("takes an emptied note as a cleared one, not as a refusal", async () => {
+    const user = userEvent.setup();
+    apiMock.listProviders.mockResolvedValue([deepseek()]);
+    apiMock.getAgentRoutes.mockResolvedValue([customRoute(["deepseek"])]);
+    apiMock.getSettings.mockResolvedValue(settingsWith(true, [longTasks]));
+    apiMock.updateCustomAgent.mockResolvedValue(longTasks);
+    render(<Providers onAdd={() => {}} onEdit={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: longTasks.label }));
+    await user.click(
+      screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", longTasks.label)),
+    );
+    const dialog = screen.getByRole("dialog");
+
+    await user.click(within(dialog).getByRole("button", { name: en.providers.editAgentNote }));
+    await user.clear(within(dialog).getByRole("textbox", { name: en.providers.agentNote }));
+    await user.click(within(dialog).getByRole("button", { name: en.common.save }));
+
+    // A blank field is a save — the note is optional, so taking it off has to
+    // be possible from the same row that shows it.
+    await waitFor(() =>
+      expect(apiMock.updateCustomAgent).toHaveBeenCalledWith(
+        longTasks.id,
+        longTasks.label,
+        null,
+        longTasks.protocol,
       ),
     );
   });
@@ -1365,16 +1432,18 @@ describe("taking an agent over", () => {
 });
 
 describe("a built-in agent's own row", () => {
-  it("names the agent and the files a takeover would rewrite", async () => {
+  it("names the agent and nothing else — the files are behind the icon", async () => {
     renderCodexTab({
       providers: [deepseek()],
       routes: [codexRoute(["deepseek"])],
       codexTakenOver: true,
     });
 
-    // Codex keeps two files; the row shows the first and counts the rest, and
-    // the dialog below lists them all.
-    expect(await screen.findByText("~/.codex/config.toml +1")).toBeInTheDocument();
+    // The name, and the way in to everything else. Codex keeps two files and
+    // the dialog behind the icon lists them; the header does not.
+    expect(await screen.findByText("Codex")).toBeInTheDocument();
+    expect(screen.queryByText("~/.codex/config.toml +1")).toBeNull();
+    expect(screen.queryByText(/~\//)).toBeNull();
     expect(
       screen.getByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
     ).toBeInTheDocument();
@@ -1500,9 +1569,9 @@ describe("a built-in agent's own row", () => {
       screen.queryByLabelText(en.providers.agentSettingsFor.replace("{agent}", "Codex")),
     ).toBeNull();
 
-    // A user-defined agent has no config file behind it, so its tab has no name +
-    // path row. Its gear is still there — that is where its settings live — and
-    // opens the credentials rather than a file list.
+    // A user-defined agent has no config file behind it, so its header has no
+    // path after the name. Its gear is still there — that is where its settings
+    // live — and opens the credentials rather than a file list.
     await user.click(await screen.findByRole("button", { name: longTasks.label }));
     expect(screen.queryByText(/~\//)).toBeNull();
     await user.click(

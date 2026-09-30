@@ -10,6 +10,7 @@
   --kiwi: oklch(0.80 0.19 132);
   --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
   --kiwi-dim: oklch(0.55 0.14 132);
+  --amber: oklch(0.82 0.1 80);
   --blue: oklch(0.72 0.13 245);
   --radius: 12px;
   --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
@@ -210,8 +211,9 @@ section.block { padding: 96px 0 0; }
 .copy-btn.copied .i-check { display: block; }
 
 /* ── 策略示意动画:左边 Agent,中间 Kiwano(仅 logo),右边 Provider 垂直一列。
-   常态:三方的连线常亮但暗(待机的光路);流量:沿线流过的亮段,命中谁的线
-   谁亮。8s 主循环;reduced-motion 时全部静止在初始态。 ── */
+   常态:三方的连线常亮但暗(待机的光路);流量:沿线流过的亮段——任何时刻
+   只有一家在服务,名字、线和流量一起换手(排期在 main.ts 的 LEG2_SCHEDULE)。
+   8s 主循环;reduced-motion 时全部静止在初始态。 ── */
 .grid-strat { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .st-head { text-align: center; margin: 62px auto 34px; max-width: 560px; }
 .st-head h3 { margin-top: 12px; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
@@ -264,16 +266,12 @@ section.block { padding: 96px 0 0; }
   transition: stroke .4s;
 }
 .wire.hot { stroke: oklch(0.8 0.19 132 / 0.9); }
-/* 流量:沿路径流动的亮段。--len 是该路径的总长(JS 量好写上);
-   两个动画:跑段(dashoffset 从 -len 到 0,即亮段从头爬到尾)与命中的
-   时刻同步由同一 keyframes 周期控制。 */
+/* 流量:沿路径流动的亮段。行程、速度与可见窗口都由 main.ts 按实测路径长
+   生成(见那里的 LEG2_SCHEDULE)——这里只管外观。 */
 .flow {
   fill: none; stroke: var(--kiwi); stroke-width: 2.5; stroke-linecap: round;
   filter: drop-shadow(0 0 4px oklch(0.8 0.19 132 / 0.8));
 }
-.flow-main  { stroke-dasharray: 40 var(--len); }
-
-.flow-leg2  { stroke-dasharray: 20 var(--len); }
 
 /* failover:A 故障转红,流量改走 B 的线,A 恢复后回 A */
 .fa-a { animation: 8s fa-a-n infinite; }
@@ -284,79 +282,50 @@ section.block { padding: 96px 0 0; }
   86%, 100% { color: var(--ink); }
 }
 @keyframes fa-b-n {
-  0%, 57%  { color: var(--mut); }
-  58%, 100% { color: var(--ink); }
+  0%, 40% { color: var(--mut); }
+  41%, 100% { color: var(--ink); }
 }
-/* 两条腿的流量:第一段 agent→hub 常走;第二段 hub→命中者,故障时换路径。
-   failover 的 keyframes 直接换 dashoffset 目标:0-40% 爬 A 线,40-86% 爬 B 线。 */
-.fa-f1 {
-  animation: fa-f1 4s linear infinite;
-}
-@keyframes fa-f1 {
-  0%   { stroke-dashoffset: 0; }
-  100% { stroke-dashoffset: calc(-1 * var(--len) - 26); }
-}
-.fa-f2a { animation: fa-f2a-run 0.4s linear infinite, fa-f2a-vis 8s linear infinite; }
-.fa-f2b { animation: fa-f2b-run 0.4s linear infinite, fa-f2b-vis 8s linear infinite; }
-@keyframes fa-f2a-vis {
-
-  0%, 36%  {  opacity: 0; }
-  42%, 62% { opacity: 1;  }
-  100%     { opacity: 0;  }
-}
-@keyframes fa-f2b-vis {
-
-  0%, 46%  {  opacity: 0; }
-  52%, 82% { opacity: 1;  }
-  100%     { opacity: 0;  }
-}
+/* 流量走哪条腿、何时走,由 main.ts 按实测路径长生成(LEG2_SCHEDULE):
+   前 40% 只服务 A;A 变红那一拍起改走 B。 */
 
 /* roundrobin:流量轮流走三条线,命中的线亮起、logo 边同名亮 */
 .rr-a, .rr-b, .rr-c { color: var(--mut); }
 .rr-a { animation: 8s rr-n1 infinite; }
 .rr-b { animation: 8s rr-n2 infinite; }
 .rr-c { animation: 8s rr-n3 infinite; }
+/* 每家的名字与线都在自己那一轮亮——与 main.ts 里三条腿的窗口同一拍 */
 @keyframes rr-n1 {
-  0%, 12% { color: var(--mut); }
-  16%, 26% { color: var(--ink); }
-  30%, 100% { color: var(--mut); }
+  0%, 1% { color: var(--mut); }
+  3%, 30% { color: var(--ink); }
+  33%, 100% { color: var(--mut); }
 }
 @keyframes rr-n2 {
-  0%, 38% { color: var(--mut); }
-  42%, 52% { color: var(--ink); }
-  56%, 100% { color: var(--mut); }
+  0%, 33% { color: var(--mut); }
+  35%, 63% { color: var(--ink); }
+  66%, 100% { color: var(--mut); }
 }
 @keyframes rr-n3 {
-  0%, 58% { color: var(--mut); }
-  62%, 72% { color: var(--ink); }
-  76%, 100% { color: var(--mut); }
+  0%, 66% { color: var(--mut); }
+  68%, 97% { color: var(--ink); }
+  100% { color: var(--mut); }
 }
-.rr-f { animation: 8s rr-f infinite; }
-@keyframes rr-f {
-  0%   { stroke-dashoffset: 0; opacity: 0; }
-  3%   { opacity: 1; }
-  97%  { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 1; }
-  100% { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 0; }
-}
-/* 命中谁的线亮:keyframes 与流量到达时刻同步(线全程常亮太吵,只在
-   流量经过时亮) */
 .rr-w1 { animation: 8s rr-w1 infinite; }
 .rr-w2 { animation: 8s rr-w2 infinite; }
 .rr-w3 { animation: 8s rr-w3 infinite; }
 @keyframes rr-w1 {
-  0%, 13% { stroke: oklch(0.5 0.02 260 / 0.35); }
-  17%, 30% { stroke: oklch(0.8 0.19 132 / 0.9); }
-  34%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  0%, 1% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  3%, 30% { stroke: oklch(0.8 0.19 132 / 0.9); }
+  33%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
 }
 @keyframes rr-w2 {
-  0%, 35% { stroke: oklch(0.5 0.02 260 / 0.35); }
-  39%, 52% { stroke: oklch(0.8 0.19 132 / 0.9); }
-  56%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  0%, 33% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  35%, 63% { stroke: oklch(0.8 0.19 132 / 0.9); }
+  66%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
 }
 @keyframes rr-w3 {
-  0%, 57% { stroke: oklch(0.5 0.02 260 / 0.35); }
-  61%, 74% { stroke: oklch(0.8 0.19 132 / 0.9); }
-  78%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  0%, 66% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  68%, 97% { stroke: oklch(0.8 0.19 132 / 0.9); }
+  100% { stroke: oklch(0.5 0.02 260 / 0.35); }
 }
 
 /* timewindow:时间游标扫过 24h 轴(Provider 列下方),进入哪个窗口哪家亮 */
@@ -383,34 +352,18 @@ section.block { padding: 96px 0 0; }
 }
 .tw-lab { position: absolute; bottom: -15px; font-family: var(--font-mono); font-size: 9px; color: var(--mut); }
 @keyframes tw-cur { 0% { left: 0%; } 100% { left: 100%; } }
-/* timewindow 的流量同样走两腿,周期内只在当前窗口的线上 */
-.tw-f1 { animation: 8s fa-f1 infinite; }
-.tw-f2a { animation: tw-f2a-run 0.4s linear infinite, tw-f2a-vis 8s linear infinite; }
-.tw-f2b { animation: tw-f2b-run 0.4s linear infinite, tw-f2b-vis 8s linear infinite; }
-@keyframes tw-f2a-vis {
-
-  0%, 36%  {  opacity: 0; }
-  42%, 88% { opacity: 1;  }
-  100%     { opacity: 0;  }
-}
-@keyframes tw-f2b-vis {
-
-  0%, 46%  {  opacity: 0; }
-  52%, 88% { opacity: 1;  }
-  100%     { opacity: 0;  }
-}
 
 /* quota:A 的配额环注满转 amber,流量改走 B 的线,周期复位后回 A */
 .qa-a { animation: 8s qa-a-n infinite; }
 .qa-b { animation: 8s qa-b-n infinite; }
 @keyframes qa-a-n {
   0%, 41%  { color: var(--ink); }
-  42%, 74% { color: oklch(0.82 0.1 80); }
+  42%, 74% { color: var(--amber); }
   75%, 100% { color: var(--ink); }
 }
 @keyframes qa-b-n {
-  0%, 49%  { color: var(--mut); }
-  50%, 100% { color: var(--ink); }
+  0%, 41%  { color: var(--mut); }
+  42%, 100% { color: var(--ink); }
 }
 .qring { width: 16px; height: 16px; transform: rotate(-90deg); flex: none; }
 .qbg { fill: none; stroke: oklch(0.32 0.014 260); stroke-width: 3.5; }
@@ -425,13 +378,13 @@ section.block { padding: 96px 0 0; }
   42%, 74% { stroke-dashoffset: 0; stroke: var(--amber); }
   100% { stroke-dashoffset: 100; stroke: var(--kiwi); }
 }
-.q-f1 { animation: 8s fa-f1 infinite; }
-.q-f2a { animation: 8s fa-f2a infinite; }
-.q-f2b { animation: 8s fa-f2b infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   .diag .flow, .diag .wire, .diag .qfg, .diag .tw-cursor,
   .diag .pn, .diag .hub, .diag .agent-chip { animation: none !important; }
+  /* 动画关掉后所有腿都是 opacity 1——那读起来像"流量同时给所有家"。静止帧
+     取排期表的第一拍:agent→hub 常走,只有第一家在用。 */
+  .diag .flow[data-flow^="leg2"]:not([data-flow="leg2a"]):not([data-flow="leg2"]) { opacity: 0; }
 }
 
 /* ── 下载区 ── */

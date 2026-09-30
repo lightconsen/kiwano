@@ -332,14 +332,14 @@
         <div class="feat rv">
           <div class="sh"><span class="tag">failover</span><h3 data-i18n="st1.t">Failover</h3></div>
           <p data-i18n="st1.d">Candidates ranked by priority: if the primary fails or times out, traffic moves to the next in line, and returns once it recovers.</p>
-          <div class="diag" aria-hidden="true">
+          <div class="diag" data-strategy="failover" aria-hidden="true">
             <svg class="wires" aria-hidden="true">
               <path class="wire" data-wire="a"/>
               <path class="wire" data-wire="b"/>
               <path class="wire" data-wire="c"/>
-              <path class="flow flow-main fa-f1" data-flow="leg1"/>
-              <path class="flow fa-f2a" data-flow="leg2a"/>
-              <path class="flow fa-f2b" data-flow="leg2b"/>
+              <path class="flow" data-flow="leg1"/>
+              <path class="flow" data-flow="leg2a"/>
+              <path class="flow" data-flow="leg2b"/>
             </svg>
             <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
             <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
@@ -353,13 +353,15 @@
         <div class="feat rv" style="--d:60ms">
           <div class="sh"><span class="tag">roundrobin</span><h3 data-i18n="st2.t">Round robin</h3></div>
           <p data-i18n="st2.d">Weighted rotation, per session: a session keeps its provider, so the prompt cache it already paid for keeps hitting; new sessions spread across candidates by weight.</p>
-          <div class="diag" aria-hidden="true">
+          <div class="diag" data-strategy="roundrobin" aria-hidden="true">
             <svg class="wires" aria-hidden="true">
               <path class="wire rr-w1" data-wire="a"/>
               <path class="wire rr-w2" data-wire="b"/>
               <path class="wire rr-w3" data-wire="c"/>
-              <path class="flow flow-main rr-f" data-flow="leg1"/>
-              <path class="flow rr-f" data-flow="leg2"/>
+              <path class="flow" data-flow="leg1"/>
+              <path class="flow" data-flow="leg2a"/>
+              <path class="flow" data-flow="leg2b"/>
+              <path class="flow" data-flow="leg2c"/>
             </svg>
             <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
             <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
@@ -373,13 +375,13 @@
         <div class="feat rv">
           <div class="sh"><span class="tag">timewindow</span><h3 data-i18n="st3.t">Time window</h3></div>
           <p data-i18n="st3.d">Give each candidate a local time window — subscription plan overnight, pay-as-you-go by day. Windows past midnight wrap; unmatched times fall back.</p>
-          <div class="diag" aria-hidden="true">
+          <div class="diag" data-strategy="timewindow" aria-hidden="true">
             <svg class="wires" aria-hidden="true">
               <path class="wire" data-wire="a"/>
               <path class="wire" data-wire="b"/>
-              <path class="flow flow-main tw-f1" data-flow="leg1"/>
-              <path class="flow tw-f2a" data-flow="leg2a"/>
-              <path class="flow tw-f2b" data-flow="leg2b"/>
+              <path class="flow" data-flow="leg1"/>
+              <path class="flow" data-flow="leg2a"/>
+              <path class="flow" data-flow="leg2b"/>
             </svg>
             <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
             <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
@@ -396,13 +398,13 @@
         <div class="feat rv" style="--d:60ms">
           <div class="sh"><span class="tag">quota</span><h3 data-i18n="st4.t">Quota cutover</h3></div>
           <p data-i18n="st4.d">Set spend or request caps per candidate; on hitting a cap traffic moves to the next, and caps reset each period — spend stays in control.</p>
-          <div class="diag" aria-hidden="true">
+          <div class="diag" data-strategy="quota" aria-hidden="true">
             <svg class="wires" aria-hidden="true">
               <path class="wire" data-wire="a"/>
               <path class="wire" data-wire="b"/>
-              <path class="flow flow-main q-f1" data-flow="leg1"/>
-              <path class="flow q-f2a" data-flow="leg2a"/>
-              <path class="flow q-f2b" data-flow="leg2b"/>
+              <path class="flow" data-flow="leg1"/>
+              <path class="flow" data-flow="leg2a"/>
+              <path class="flow" data-flow="leg2b"/>
             </svg>
             <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
             <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>

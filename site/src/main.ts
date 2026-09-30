@@ -115,11 +115,40 @@ fetch("/data/hub-stats.json", { headers: { accept: "application/json" } })
   })
   .catch(() => {});
 
-// 策略示意图的请求点:路标坐标不写死——三个列的布局交给网格,坐标在这里
-// 量出来写到 .rq 的 CSS 变量上。resize 不重测:示意图宽度固定在两列网格里,
-// 而 keyframes 引用的是变量,量一次就够。
-function drawStrategyWires() {
-  document.querySelectorAll<HTMLElement>(".grid-strat .diag").forEach((fig) => {
+// ── 策略示意:光路与流量 ──────────────────────────────────────────────
+// 坐标不写死——三个列的布局交给网格,坐标在这里量出来。每条路径两层动画:
+// 行进层(亮段沿路径爬行)与可见窗口(hub→Provider 这一腿何时在服务,见
+// LEG2_SCHEDULE)。两层都由这里生成成 px/百分比写死的 keyframes:含 var()
+// 的 keyframes 在 Chrome 对 stroke-dashoffset 不插值(只能离散跳),而窗口
+// 百分比若留在 CSS 里就会和路径长度脱钩——布局一改,流量出现的时刻和它爬到
+// Provider 的时刻就对不上(2026-09-30 前正是如此:hub→Provider 要等到周期
+// 过了六成才亮,前段四张图全是死路)。
+
+const FLOW_SPEED = 480; // px/s,两腿共用:请求过 hub 时视觉速度不变
+const DASH = 20;        // 亮段长度,也是 dasharray 的 dash
+const FADE = 1;         // % 的淡入淡出:切换不硬切,窗口仍不重叠
+
+// 谁在服务:hub→Provider 这一腿的排期,单位是 8s 周期的百分比。任何时刻只有
+// 一家在服务;切换点落在"当前这家退场"的那一拍上——failover 变红、timewindow
+// 扫过窗口、quota 触顶。这些数字与 styles.css 里 provider 名字的颜色、配额环
+// 是同一个故事钟,改要一起改。
+const LEG2_SCHEDULE: Record<string, Record<string, [number, number]>> = {
+  failover: { leg2a: [0, 40], leg2b: [41, 100] },
+  timewindow: { leg2a: [0, 33], leg2b: [34, 100] },
+  quota: { leg2a: [0, 42], leg2b: [43, 100] },
+  // 轮询:三条线轮流接流量,各占约一角;轮到谁谁的线亮(rr-w*)
+  roundrobin: { leg2a: [0, 32], leg2b: [34, 65], leg2c: [67, 100] },
+};
+const LEG2_INDEX: Record<string, number> = { a: 0, b: 1, c: 2 };
+
+// 每张图生成的 keyframes 文本,按图下标缓存。resize 只在几何真的变了时才重写:
+// 重设 animationName 会把 8s 的故事钟拨回 0,视口高度一点抖动就让整页动画跳帧
+// (旧实现每次 resize 都重建 style 元素,正是这个毛病)。
+const flowCss = new Map<number, string>();
+
+function drawStrategyWires(): boolean {
+  let changed = false;
+  document.querySelectorAll<HTMLElement>(".grid-strat .diag").forEach((fig, i) => {
     const svg = fig.querySelector("svg.wires");
     if (!svg) return;
     const r = fig.getBoundingClientRect();
@@ -133,60 +162,63 @@ function drawStrategyWires() {
     const rows = [...fig.querySelectorAll(".provs .pn")].map(c);
     const path = (x1: number, y1: number, x2: number, y2: number) =>
       `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+
+    // 几何指纹:列宽或任一 logo 的位置动了才重画
+    const geom = [ax, ay, hx, hy, ...rows.flat()].map((n) => Math.round(n)).join(",");
+    if (fig.dataset.flowGeom === geom) return;
+    fig.dataset.flowGeom = geom;
+    changed = true;
+
     // 三条暗光路:agent→hub、hub→每个 provider。
-    svg.querySelectorAll<SVGPathElement>(".wire").forEach((w, i) => {
-      if (!rows[i]) { w.style.display = "none"; return; }
-      w.setAttribute("d", i === 0
+    svg.querySelectorAll<SVGPathElement>(".wire").forEach((w, k) => {
+      if (!rows[k]) { w.style.display = "none"; return; }
+      w.setAttribute("d", k === 0
         ? path(ax, ay, hx, hy)
-        : path(hx, hy, rows[i - 1][0], rows[i - 1][1]));
-      const len = Math.ceil(w.getTotalLength()) + 2;
-      w.style.setProperty("--len", String(len));
+        : path(hx, hy, rows[k - 1][0], rows[k - 1][1]));
+      w.style.setProperty("--len", String(Math.ceil(w.getTotalLength()) + 2));
     });
-    // 流量:leg1 沿 agent→hub;leg2 沿 hub→命中的 provider(每个可能的命中者
-    // 一条 path,配对各自的 keyframes)。
+
+    // 流量:leg1 沿 agent→hub 常走;leg2x 沿 hub→第 x 条 provider 线,可见窗口
+    // 由排期表决定——同一时刻只有一家在服务。
+    const schedule = LEG2_SCHEDULE[fig.dataset.strategy ?? ""] ?? {};
+    let css = "";
     svg.querySelectorAll<SVGPathElement>(".flow").forEach((f) => {
       const kind = f.dataset.flow!;
-      if (kind === "leg1") {
-        f.setAttribute("d", path(ax, ay, hx, hy));
-      } else {
-        // leg2a / leg2b:第几条 provider 线。roundrobin 只有一条 leg2,交由
-        // rr-f 的多段 keyframes 在三条线间换 —— 那需要每帧换 d,退而求其次:
-        // rr 的 leg2 用一条"hub→中线"的合成路径近似,命中的线靠 wire 亮起表达。
-        const idx = kind.endsWith("b") ? 1 : 0;
-        const target = rows[idx] || rows[0];
-        if (!target) { f.style.display = "none"; return; }
-        f.setAttribute("d", path(hx, hy, target[0], target[1]));
-      }
-      const len = Math.ceil(f.getTotalLength()) + 2;
-      f.style.setProperty("--len", String(len));
-      f.style.strokeDasharray = `20 ${len}`;
-    });
-  });
-  writeFlowKeyframes();
-}
+      const target = kind === "leg1"
+        ? [ax, ay] as [number, number]
+        : rows[LEG2_INDEX[kind.slice(-1)] ?? 0];
+      if (!target) { f.style.display = "none"; return; }
+      f.setAttribute("d", kind === "leg1"
+        ? path(ax, ay, hx, hy)
+        : path(hx, hy, target[0], target[1]));
 
-// 每条 leg1 的"往"程动画写成专属 keyframes——距离写死为该路径的像素长。
-// (含 var() 的 keyframes 在 Chrome 对 stroke-dashoffset 不插值,只能离散跳,
-// 所以不能共用一条带变量的动画。leg2 的 keyframes 是"到达点"语义,跳变
-// 无妨,继续共用。)
-function writeFlowKeyframes() {
-  let css = "";
-  document.querySelectorAll<HTMLElement>(".grid-strat .diag").forEach((fig, i) => {
-    const leg1 = fig.querySelector('[data-flow="leg1"]');
-    if (leg1) {
-      const len = Math.ceil((leg1 as SVGPathElement).getTotalLength()) + 40;
-      css += `@keyframes flow-leg1-${i} { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -${len}px; } }\n`;
-      leg1.style.animationName = `flow-leg1-${i}`;
-      leg1.style.animationDuration = "0.4s";
-    }
-    // leg2 的行进层:每条可能的命中路径一条,0.4s 走完自身——与 leg1 同速。
-    fig.querySelectorAll<SVGPathElement>(".flow[data-flow^='leg2']").forEach((f, j) => {
-      const len = Math.ceil(f.getTotalLength()) + 20;
-      css += `@keyframes leg2-run-${i}-${j} { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -${len}px; } }\n`;
-      f.style.animationName = `leg2-run-${i}-${j}, ${f.classList.contains("fa-f2a") ? "fa-f2a-vis" : f.classList.contains("fa-f2b") ? "fa-f2b-vis" : f.classList.contains("tw-f2a") ? "tw-f2a-vis" : f.classList.contains("tw-f2b") ? "tw-f2b-vis" : "fa-f2a-vis"}`;
-      f.style.animationDuration = "0.4s, 8s";
+      const len = Math.ceil(f.getTotalLength());
+      f.style.strokeDasharray = `${DASH} ${len}`;
+      // 行进层:一个周期恰好走完 dash + 路径长 = dasharray 的图案周期,接缝处
+      // 严丝合缝(多走一截会在每个循环末端抖一下)。速度两腿一致,长度决定耗时。
+      css += `@keyframes flow-run-${i}-${kind} { from { stroke-dashoffset: ${DASH}px; } to { stroke-dashoffset: ${-len}px; } }\n`;
+      const parts = [`flow-run-${i}-${kind} ${(len + DASH) / FLOW_SPEED}s linear infinite`];
+
+      // 可见窗口(只有第二腿有):窗口之外整条线是暗的,读到的就是"现在是谁在服务"。
+      const win = schedule[kind];
+      if (win) {
+        const [from, to] = win;
+        const head = from > 0
+          ? `0%, ${from}% { opacity: 0; } ${Math.min(from + FADE, to)}% { opacity: 1; } `
+          : `0% { opacity: 1; } `;
+        const tail = to < 100
+          ? `${Math.max(to - FADE, from)}% { opacity: 1; } ${to}%, 100% { opacity: 0; }`
+          : `100% { opacity: 1; }`;
+        css += `@keyframes flow-vis-${i}-${kind} { ${head}${tail} }\n`;
+        parts.push(`flow-vis-${i}-${kind} 8s linear infinite`);
+      }
+      f.style.animation = parts.join(", ");
     });
+    flowCss.set(i, css);
   });
+
+  if (!changed) return false;
+  const css = [...flowCss.entries()].sort((a, b) => a[0] - b[0]).map(([, text]) => text).join("");
   document.getElementById("flow-kf")?.remove();
   if (css) {
     const st = document.createElement("style");
@@ -194,6 +226,7 @@ function writeFlowKeyframes() {
     st.textContent = css;
     document.head.appendChild(st);
   }
+  return true;
 }
 window.addEventListener("resize", drawStrategyWires);
 drawStrategyWires();

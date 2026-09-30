@@ -53,7 +53,7 @@ const PAGES = [
 ];
 
 const require_ = createRequire(import.meta.url);
-const _marked = require_(join(ROOT, "scripts", "vendor", "marked.min.js"));
+const _marked = require_(join(ROOT, "scripts", "vendor", "marked.min.cjs"));
 const marked = _marked.marked ?? _marked.default ?? _marked;
 
 // ── link rewriting ──────────────────────────────────────────────────────────

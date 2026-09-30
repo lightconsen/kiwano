@@ -1,5 +1,9 @@
 // Records a ~90s Kiwano demo video from the real dev build + built-in sample data.
 // Subtitles and a fake cursor are injected into the page, so no post-editing is needed.
+//
+// `.cjs`, not `.js`: the root package.json is `"type": "module"` for the
+// scripts/*.mjs tooling, and this file is CommonJS — under the .js extension
+// node reads it as ESM and `require` is not defined.
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");

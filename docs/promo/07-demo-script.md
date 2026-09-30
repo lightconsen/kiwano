@@ -67,7 +67,7 @@
 ```bash
 # 1) 重录(需要 dev server 在 :1420)
 cd app && node node_modules/vite/bin/vite.js --port 1420 --strictPort &
-node scripts/record-demo-video.js        # 会打印每条字幕的精确时间戳,如 CAP 40.7s | FAILOVER: …
+node scripts/record-demo-video.cjs        # 会打印每条字幕的精确时间戳,如 CAP 40.7s | FAILOVER: …
 
 # 2) 从 webm 按时间戳 trim+concat 直出 30s mp4(改时间戳即可重剪)
 ffmpeg -i /tmp/kiwano-video/kiwano-demo-90s.webm \
@@ -94,7 +94,7 @@ ffmpeg -i /tmp/kiwano-video/kiwano-demo-90s.webm \
 1. 起前端 dev server(`app/` 下 `vite --port 1420`,纯浏览器模式走内置样例数据);
 2. Playwright 以 `recordVideo` 开 1600×1000 上下文,并 `addInitScript` 向页面注入三样东西:
    全屏片头/片尾遮罩、底部字幕条(`__kwCap`)、跟随鼠标的圆点光标 —— **字幕是录进去的,不用剪辑**;
-3. `scripts/record-demo-video.js` 按本文件的时间轴驱动交互(导航、搜索、展开策略下拉、点开日志弹窗),
+3. `scripts/record-demo-video.cjs` 按本文件的时间轴驱动交互(导航、搜索、展开策略下拉、点开日志弹窗),
    每段 hold 由 `PACE=1.6` 拉长,总长落在 ~92s;
 4. 产出 webm(VP8),再转 H.264:`ffmpeg -i in.webm -c:v libx264 -crf 20 -pix_fmt yuv420p
    -movflags +faststart -f lavfi -i anullsrc -c:a aac -shortest out.mp4`。
@@ -103,7 +103,7 @@ ffmpeg -i /tmp/kiwano-video/kiwano-demo-90s.webm \
 
 ```bash
 cd app && node node_modules/vite/bin/vite.js --port 1420 --strictPort &   # 先起 dev server
-node scripts/record-demo-video.js          # 需要 playwright + Chromium(本机已备)
+node scripts/record-demo-video.cjs          # 需要 playwright + Chromium(本机已备)
 # 转 mp4 用任意带 libx264 的 ffmpeg;本机静态版在
 # /tmp/ffbin/darwin_arm64/ffmpeg(临时),或 brew install ffmpeg
 ```
@@ -120,4 +120,4 @@ node scripts/record-demo-video.js          # 需要 playwright + Chromium(本机
   没有 systemd,也没有真实 API key —— **终端画面不造假**,这两个镜头留给真机实拍
   (任何 Linux 服务器上 `asciinema` 或系统录屏,拍完拼在片尾即可);
 - 字幕条刻意避开与画面对不上的数字(样例货架 9 条 vs 线上 Hub 24 家),宁可少写不写错;
-- 字幕停留、镜头长度由 `PACE` 一个系数控制,想出 60s 短版:`PACE=1.05 node scripts/record-demo-video.js`。
+- 字幕停留、镜头长度由 `PACE` 一个系数控制,想出 60s 短版:`PACE=1.05 node scripts/record-demo-video.cjs`。

@@ -11,7 +11,11 @@
 // not load it), playwright, ffmpeg. Usage:
 //
 //   python3 -m http.server 8899 --directory site &
-//   node scripts/record-demo-gif.js            # → site/assets/demo.gif + .mp4
+//   node scripts/record-demo-gif.cjs           # → site/assets/demo.gif + .mp4
+//
+// `.cjs`, not `.js`: the root package.json is `"type": "module"` for the
+// scripts/*.mjs tooling, and this file is CommonJS — under the .js extension
+// node reads it as ESM and `require` is not defined.
 //
 // It writes the two artifacts the repo keeps, from one recording: the GIF
 // (720px, 8fps — small enough to embed) and an MP4 of the same pass, a tenth
@@ -170,8 +174,8 @@ async function main() {
 
   // The same pass as video: every platform takes MP4 and re-encodes a GIF into
   // something worse, so this is what goes wherever a clip can be uploaded.
-  // Height is even because H.264 requires it, and 650/1000 scales to exactly
-  // 468 at this width.
+  // Height is even because H.264 requires it, and 600/900 scales to exactly
+  // 480 at this width.
   const mp4 = OUT.replace(/\.gif$/, ".mp4");
   execFileSync("ffmpeg", [
     "-y",

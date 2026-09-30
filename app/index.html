@@ -20,7 +20,34 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <!-- The splash is plain HTML/CSS inside #root: the webview paints it as
+         soon as it parses the page, before any bundle executes, and React
+         replaces it on mount. Without it the window shows a blank void for
+         the seconds the bundle, the first settings read and the agent probe
+         take — a white flash on a dark app. The colours are duplicated here
+         rather than tokenized because index.css has not loaded yet; if the
+         palette changes, change it here too. -->
+    <div id="root">
+      <div id="splash" aria-hidden="true">
+        <img src="/kiwano-logo.svg" alt="" width="72" height="72" />
+      </div>
+    </div>
+    <style>
+      /* Both themes get their own bg, so a light-theme user's splash is light. */
+      #splash {
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: oklch(0.15 0.008 260);
+      }
+      html:not(.dark) #splash { background: oklch(0.99 0.003 260); }
+      #splash img { opacity: 0.55; animation: splash-pulse 1.6s ease-in-out infinite; }
+      @keyframes splash-pulse {
+        0%, 100% { opacity: 0.35; transform: scale(0.97); }
+        50% { opacity: 0.85; transform: scale(1); }
+      }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

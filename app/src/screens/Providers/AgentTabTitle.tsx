@@ -39,17 +39,20 @@ export function AgentTabTitle({
         // is behind the icon, which also keeps a destructive control out of the
         // row you click around in.
         //
-        // `flex-1`: it lives in the header now, where it shares the row with
-        // the strip and the buttons, and the icon follows the name rather than
-        // the far edge.
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        // `shrink-0`: it lives in the header now, where it shares the row with
+        // the strip and the buttons — and the strip is the one that gives way
+        // (it already scrolls). Left shrinkable it lost that contest outright:
+        // at a dozen-odd installed agents the strip takes the whole row and the
+        // name collapses to nothing, leaving an orphaned gear. The name is
+        // bounded instead, so a long one cannot push the buttons off either.
+        <div className="flex shrink-0 items-center gap-1.5">
           <ProviderLogo
             char={agentMeta(seg).chip_char}
             color={agentMeta(seg).chip_color}
             name={custom.label}
             size={18}
           />
-          <span className="truncate text-[13px] font-semibold">{custom.label}</span>
+          <span className="max-w-[180px] truncate text-[13px] font-semibold">{custom.label}</span>
           <Button
             variant="ghost"
             size="sm"
@@ -69,7 +72,7 @@ export function AgentTabTitle({
           rewrote is what the icon behind the name opens onto, not something the
           header repeats. */}
       {!custom && seg !== "all" && (takenOver?.has(seg) ?? false) && (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <ProviderLogo
             icon={SEGMENT_ICON[seg]}
             char={agentMeta(seg).chip_char}
@@ -77,7 +80,9 @@ export function AgentTabTitle({
             name={agentMeta(seg).label}
             size={18}
           />
-          <span className="truncate text-[13px] font-semibold">{agentMeta(seg).label}</span>
+          <span className="max-w-[180px] truncate text-[13px] font-semibold">
+            {agentMeta(seg).label}
+          </span>
           <Button
             variant="ghost"
             size="sm"

@@ -1,0 +1,515 @@
+/* ── Design tokens:与桌面端 src/index.css 同源;页面底色按需求改为纯黑 ── */
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --kiwi-dim: oklch(0.55 0.14 132);
+  --blue: oklch(0.72 0.13 245);
+  --radius: 12px;
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: oklch(0.80 0.19 132 / 0.28); }
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; height: auto; }
+.mono { font-family: var(--font-mono); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
+section { scroll-margin-top: 76px; }
+.icon { width: 18px; height: 18px; flex: none; }
+
+/* ── 顶部导航 ── */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  border-bottom: 1px solid var(--line);
+  background: oklch(0 0 0 / 0.72);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.nav-inner { display: flex; align-items: center; gap: 28px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15.5px; letter-spacing: 0.01em; }
+.brand img { width: 24px; height: 24px; border-radius: 7px; }
+.nav-links { display: flex; gap: 4px; }
+.nav-links a {
+  padding: 7px 12px; border-radius: 8px;
+  font-size: 13.5px; color: var(--mut); transition: color .15s, background .15s;
+}
+.nav-links a:hover { color: var(--ink); background: var(--surface2); }
+.nav-cta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+/* Same height as the row it sits in (the icon-only buttons stretch to it too),
+   which a text button got from its line box and this one cannot. */
+.btn-lang { align-self: stretch; padding: 0 12px; }
+/* Flags are 3:2, and taller than the glyphs around them: the box is what has to
+   match the row, the artwork inside keeps its proportions. */
+.btn-lang .icon { width: 19px; height: 13px; border-radius: 2px; }
+
+/* ── 按钮 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  padding: 9px 16px; font-size: 13.5px; font-weight: 500; font-family: var(--font-sans);
+  color: var(--ink); background: var(--surface2);
+  cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.btn:hover { border-color: oklch(0.42 0.03 132 / 0.8); background: oklch(0.24 0.012 260 / 0.7); }
+.btn:active { transform: scale(0.98); }
+.btn-primary {
+  background: var(--kiwi); border-color: var(--kiwi); color: oklch(0.18 0.03 132); font-weight: 600;
+}
+.btn-primary:hover { background: var(--kiwi); border-color: var(--kiwi); filter: brightness(1.08); }
+.btn-lg { padding: 12px 22px; font-size: 15px; border-radius: 12px; }
+.btn-gh { display: inline-flex; align-items: center; gap: 7px; }
+.btn-gh .icon { width: 16px; height: 16px; }
+/* An icon-only variant of the same button: square and stretched to the row's
+   height, so it sits beside GitHub without widening or denting the CTA row —
+   the label lives in aria-label/title. */
+.btn-icon { padding: 0; width: 42px; align-self: stretch; }
+.btn-icon .icon { width: 15px; height: 15px; }
+
+/* ── Hero ── */
+.hero { padding: 92px 0 0; text-align: center; position: relative; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: -40% -20% auto; height: 130%;
+  background: radial-gradient(46% 42% at 50% 18%, oklch(0.80 0.19 132 / 0.09), transparent 70%);
+  pointer-events: none;
+}
+.badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid oklch(0.55 0.14 132 / 0.4); background: var(--kiwi-soft);
+  border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: var(--kiwi); font-weight: 500;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--kiwi); box-shadow: 0 0 6px oklch(0.8 0.19 132 / 0.55); }
+.hero h1 {
+  margin: 26px auto 0; max-width: 760px;
+  font-size: clamp(34px, 5.4vw, 54px); font-weight: 700; line-height: 1.18; letter-spacing: -0.02em;
+}
+.hero h1 em { font-style: normal; color: var(--kiwi); }
+.hero .sub {
+  margin: 20px auto 0; max-width: 640px; color: var(--mut); font-size: 16.5px; line-height: 1.75;
+}
+.hero .sub strong { color: var(--ink); font-weight: 500; }
+.dl-row { margin-top: 34px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.dl-note { margin-top: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--mut); letter-spacing: 0.02em; }
+.dl-note b { color: oklch(0.70 0.02 260); font-weight: 500; }
+/* the agents one port serves: logos only, one row (scrolls sideways on
+   narrow screens rather than wrapping — the row is the point) */
+.agents-row {
+  margin-top: 16px; display: flex; justify-content: center; align-items: center;
+  gap: 11px; flex-wrap: nowrap; overflow-x: auto; padding: 2px 16px 4px;
+  scrollbar-width: none;
+}
+.agents-row::-webkit-scrollbar { display: none; }
+.agents-row img { width: 21px; height: 21px; object-fit: contain; opacity: 0.78; flex: none; }
+.agents-row img:hover { opacity: 1; }
+
+/* Hero 截图:窗框 + kiwi 微光 */
+.shot {
+  position: relative; margin: 56px auto 0; max-width: 980px;
+  border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.9), 0 0 90px -30px oklch(0.80 0.19 132 / 0.22);
+  background: oklch(0.15 0.008 260);
+}
+.shot img { width: 100%; }
+/* The live demo: the same frame, with the app's own window inside it. The host
+   is empty until the script fills it, so the still above is what a visitor
+   without script sees. */
+.shot-live-host { position: absolute; inset: 0; }
+.shot-live-host iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+.shot-live .shot-live-host { opacity: 0; transition: opacity .4s ease-out; }
+.shot-live.is-live .shot-live-host { opacity: 1; }
+.demo-note { margin: 14px auto 0; max-width: 980px; font-size: 12.5px; color: var(--mut); }
+.demo-note a { color: var(--kiwi); }
+.shot::after { content: ""; position: absolute; inset: 0; border-radius: 14px; box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06); pointer-events: none; }
+
+/* ── 区块标题 ── */
+.sec-head { text-align: center; max-width: 620px; margin: 0 auto 52px; }
+.sec-head .kicker {
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.18em;
+  color: var(--kiwi); text-transform: uppercase;
+}
+.sec-head h2 { margin-top: 12px; font-size: clamp(26px, 3.4vw, 34px); font-weight: 700; letter-spacing: -0.015em; }
+.sec-head p { margin-top: 14px; color: var(--mut); font-size: 15px; }
+section.block { padding: 96px 0 0; }
+
+/* ── 特性卡片 ── */
+.grid-feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.feat {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: 22px 20px 20px; transition: border-color .15s, background .15s;
+}
+.feat:hover { border-color: oklch(0.36 0.02 260 / 0.9); background: oklch(0.165 0.008 260 / 0.6); }
+.feat .fi {
+  width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+  background: var(--kiwi-soft); color: var(--kiwi); margin-bottom: 14px;
+}
+.feat h3 { font-size: 15px; font-weight: 600; }
+.feat p { margin-top: 7px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.feat p code { font-family: var(--font-mono); font-size: 12px; color: oklch(0.72 0.02 260); }
+
+/* ── 界面展示 ── */
+.cap { display: flex; align-items: baseline; gap: 12px; margin: 14px 2px 0; }
+.tag {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  color: var(--kiwi); border: 1px solid oklch(0.55 0.14 132 / 0.4); background: var(--kiwi-soft);
+  padding: 2px 8px; border-radius: 5px; flex: none;
+}
+.cap p { font-size: 13px; color: var(--mut); }
+
+/* ── 工作原理 ── */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.step {
+  position: relative; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: 22px 20px;
+}
+.step .no {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--kiwi);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.step .no::after { content: ""; width: 26px; height: 1px; background: oklch(0.55 0.14 132 / 0.55); }
+.step h3 { margin-top: 12px; font-size: 15.5px; font-weight: 600; }
+.step p { margin-top: 7px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.step p code {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi);
+  background: var(--kiwi-soft); padding: 1px 6px; border-radius: 5px;
+}
+/* A copyable command: the code takes the row and scrolls if narrow, the
+   button sits at its right. Copied feedback is the icon itself — copy swaps
+   to a check for a beat, then back; no layout move, same as the app's. */
+.step p.cmd { display: flex; align-items: center; gap: 6px; }
+.step p.cmd code {
+  flex: 1; min-width: 0; white-space: nowrap; overflow-x: auto;
+  scrollbar-width: none;
+}
+.copy-btn {
+  flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--mut); cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.copy-btn:hover { color: var(--ink); background: var(--kiwi-soft); }
+.copy-btn .icon { width: 14px; height: 14px; }
+.copy-btn .i-check { display: none; }
+.copy-btn.copied { color: var(--kiwi); }
+.copy-btn.copied .i-copy { display: none; }
+.copy-btn.copied .i-check { display: block; }
+
+/* ── 策略示意动画:左边 Agent,中间 Kiwano(仅 logo),右边 Provider 垂直一列。
+   常态:三方的连线常亮但暗(待机的光路);流量:沿线流过的亮段,命中谁的线
+   谁亮。8s 主循环;reduced-motion 时全部静止在初始态。 ── */
+.grid-strat { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.st-head { text-align: center; margin: 62px auto 34px; max-width: 560px; }
+.st-head h3 { margin-top: 12px; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+.st-head p { margin-top: 8px; color: var(--mut); font-size: 13.5px; }
+.sh { display: flex; align-items: center; gap: 10px; }
+.diag {
+  position: relative; height: 176px; margin-top: 16px;
+  border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85);
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr auto 1.45fr;
+  align-items: center;
+  padding: 0 20px 0 20px;
+  column-gap: 60px;
+}
+/* 左:发起请求的 Agent */
+.agent-chip {
+  position: relative; z-index: 2;
+  justify-self: start;
+  display: flex; align-items: center; gap: 7px; padding: 7px 12px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface2);
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink);
+}
+.agent-chip svg { width: 14px; height: 14px; color: var(--mut); }
+/* 中:Kiwano —— 只有 logo,无外框 */
+.hub { position: relative; z-index: 2; width: 34px; height: 34px; }
+.hub img { width: 34px; height: 34px; border-radius: 8px; display: block; }
+/* 右:Provider 垂直一列,logo + 名字 */
+.provs {
+  display: grid; gap: 14px; align-content: center; justify-items: start;
+  position: relative; z-index: 2;
+}
+.pn {
+  display: flex; align-items: center; gap: 8px; padding: 5px 11px 5px 6px;
+  border-radius: 8px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--mut);
+  transition: color .4s;
+}
+.pn img, .pn .plogo-fallback { width: 18px !important; height: 18px !important; border-radius: 4px; display: block; flex: none; }
+.pn .plogo-fallback {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface2); font-size: 9px; border: 1px solid var(--line-strong);
+}
+/* 光路:SVG 连线层,绝对铺满示意区 */
+.wires { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; }
+.wire {
+  fill: none; stroke: oklch(0.5 0.02 260 / 0.35); stroke-width: 1.5;
+  transition: stroke .4s;
+}
+.wire.hot { stroke: oklch(0.8 0.19 132 / 0.9); }
+/* 流量:沿路径流动的亮段。--len 是该路径的总长(JS 量好写上);
+   两个动画:跑段(dashoffset 从 -len 到 0,即亮段从头爬到尾)与命中的
+   时刻同步由同一 keyframes 周期控制。 */
+.flow {
+  fill: none; stroke: var(--kiwi); stroke-width: 2.5; stroke-linecap: round;
+  filter: drop-shadow(0 0 4px oklch(0.8 0.19 132 / 0.8));
+}
+.flow-main  { stroke-dasharray: 40 var(--len); }
+
+.flow-leg2  { stroke-dasharray: 20 var(--len); }
+
+/* failover:A 故障转红,流量改走 B 的线,A 恢复后回 A */
+.fa-a { animation: 8s fa-a-n infinite; }
+.fa-b { animation: 8s fa-b-n infinite; }
+@keyframes fa-a-n {
+  0%, 39%  { color: var(--ink); }
+  40%, 85% { color: oklch(0.75 0.1 25); }
+  86%, 100% { color: var(--ink); }
+}
+@keyframes fa-b-n {
+  0%, 57%  { color: var(--mut); }
+  58%, 100% { color: var(--ink); }
+}
+/* 两条腿的流量:第一段 agent→hub 常走;第二段 hub→命中者,故障时换路径。
+   failover 的 keyframes 直接换 dashoffset 目标:0-40% 爬 A 线,40-86% 爬 B 线。 */
+.fa-f1 {
+  animation: fa-f1 4s linear infinite;
+}
+@keyframes fa-f1 {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: calc(-1 * var(--len) - 26); }
+}
+.fa-f2a { animation: fa-f2a-run 0.4s linear infinite, fa-f2a-vis 8s linear infinite; }
+.fa-f2b { animation: fa-f2b-run 0.4s linear infinite, fa-f2b-vis 8s linear infinite; }
+@keyframes fa-f2a-vis {
+
+  0%, 36%  {  opacity: 0; }
+  42%, 62% { opacity: 1;  }
+  100%     { opacity: 0;  }
+}
+@keyframes fa-f2b-vis {
+
+  0%, 46%  {  opacity: 0; }
+  52%, 82% { opacity: 1;  }
+  100%     { opacity: 0;  }
+}
+
+/* roundrobin:流量轮流走三条线,命中的线亮起、logo 边同名亮 */
+.rr-a, .rr-b, .rr-c { color: var(--mut); }
+.rr-a { animation: 8s rr-n1 infinite; }
+.rr-b { animation: 8s rr-n2 infinite; }
+.rr-c { animation: 8s rr-n3 infinite; }
+@keyframes rr-n1 {
+  0%, 12% { color: var(--mut); }
+  16%, 26% { color: var(--ink); }
+  30%, 100% { color: var(--mut); }
+}
+@keyframes rr-n2 {
+  0%, 38% { color: var(--mut); }
+  42%, 52% { color: var(--ink); }
+  56%, 100% { color: var(--mut); }
+}
+@keyframes rr-n3 {
+  0%, 58% { color: var(--mut); }
+  62%, 72% { color: var(--ink); }
+  76%, 100% { color: var(--mut); }
+}
+.rr-f { animation: 8s rr-f infinite; }
+@keyframes rr-f {
+  0%   { stroke-dashoffset: 0; opacity: 0; }
+  3%   { opacity: 1; }
+  97%  { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 1; }
+  100% { stroke-dashoffset: calc(-3 * var(--len) - 60); opacity: 0; }
+}
+/* 命中谁的线亮:keyframes 与流量到达时刻同步(线全程常亮太吵,只在
+   流量经过时亮) */
+.rr-w1 { animation: 8s rr-w1 infinite; }
+.rr-w2 { animation: 8s rr-w2 infinite; }
+.rr-w3 { animation: 8s rr-w3 infinite; }
+@keyframes rr-w1 {
+  0%, 13% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  17%, 30% { stroke: oklch(0.8 0.19 132 / 0.9); }
+  34%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
+}
+@keyframes rr-w2 {
+  0%, 35% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  39%, 52% { stroke: oklch(0.8 0.19 132 / 0.9); }
+  56%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
+}
+@keyframes rr-w3 {
+  0%, 57% { stroke: oklch(0.5 0.02 260 / 0.35); }
+  61%, 74% { stroke: oklch(0.8 0.19 132 / 0.9); }
+  78%, 100% { stroke: oklch(0.5 0.02 260 / 0.35); }
+}
+
+/* timewindow:时间游标扫过 24h 轴(Provider 列下方),进入哪个窗口哪家亮 */
+.tw-a { animation: 8s tw-a-n infinite; }
+.tw-b { animation: 8s tw-b-n infinite; }
+@keyframes tw-a-n {
+  0%, 32% { color: var(--ink); }
+  33%, 100% { color: var(--mut); }
+}
+@keyframes tw-b-n {
+  0%, 33% { color: var(--mut); }
+  34%, 100% { color: var(--ink); }
+}
+.tw-bar {
+  position: absolute; left: 0; right: 0; bottom: -6px; height: 10px;
+  border: 1px solid var(--line); border-radius: 5px; background: var(--surface2); overflow: hidden;
+}
+.tw-s1 { position: absolute; left: 0; top: 0; bottom: 0; width: 33.4%; background: oklch(0.72 0.13 245 / 0.3); }
+.tw-s2 { position: absolute; left: 33.4%; top: 0; bottom: 0; right: 0; background: oklch(0.8 0.19 132 / 0.2); }
+.tw-cursor {
+  position: absolute; top: -6px; height: 22px; width: 2px; margin-left: -1px;
+  background: oklch(0.93 0.005 260 / 0.6); border-radius: 1px; left: 50%;
+  animation: 8s tw-cur linear infinite;
+}
+.tw-lab { position: absolute; bottom: -15px; font-family: var(--font-mono); font-size: 9px; color: var(--mut); }
+@keyframes tw-cur { 0% { left: 0%; } 100% { left: 100%; } }
+/* timewindow 的流量同样走两腿,周期内只在当前窗口的线上 */
+.tw-f1 { animation: 8s fa-f1 infinite; }
+.tw-f2a { animation: tw-f2a-run 0.4s linear infinite, tw-f2a-vis 8s linear infinite; }
+.tw-f2b { animation: tw-f2b-run 0.4s linear infinite, tw-f2b-vis 8s linear infinite; }
+@keyframes tw-f2a-vis {
+
+  0%, 36%  {  opacity: 0; }
+  42%, 88% { opacity: 1;  }
+  100%     { opacity: 0;  }
+}
+@keyframes tw-f2b-vis {
+
+  0%, 46%  {  opacity: 0; }
+  52%, 88% { opacity: 1;  }
+  100%     { opacity: 0;  }
+}
+
+/* quota:A 的配额环注满转 amber,流量改走 B 的线,周期复位后回 A */
+.qa-a { animation: 8s qa-a-n infinite; }
+.qa-b { animation: 8s qa-b-n infinite; }
+@keyframes qa-a-n {
+  0%, 41%  { color: var(--ink); }
+  42%, 74% { color: oklch(0.82 0.1 80); }
+  75%, 100% { color: var(--ink); }
+}
+@keyframes qa-b-n {
+  0%, 49%  { color: var(--mut); }
+  50%, 100% { color: var(--ink); }
+}
+.qring { width: 16px; height: 16px; transform: rotate(-90deg); flex: none; }
+.qbg { fill: none; stroke: oklch(0.32 0.014 260); stroke-width: 3.5; }
+.qfg {
+  fill: none; stroke: var(--kiwi); stroke-width: 3.5; stroke-linecap: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100;
+  animation: 8s q-ring infinite;
+}
+@keyframes q-ring {
+  0%   { stroke-dashoffset: 100; stroke: var(--kiwi); }
+  26%  { stroke-dashoffset: 0;   stroke: var(--kiwi); }
+  42%, 74% { stroke-dashoffset: 0; stroke: var(--amber); }
+  100% { stroke-dashoffset: 100; stroke: var(--kiwi); }
+}
+.q-f1 { animation: 8s fa-f1 infinite; }
+.q-f2a { animation: 8s fa-f2a infinite; }
+.q-f2b { animation: 8s fa-f2b infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .diag .flow, .diag .wire, .diag .qfg, .diag .tw-cursor,
+  .diag .pn, .diag .hub, .diag .agent-chip { animation: none !important; }
+}
+
+/* ── 下载区 ── */
+.dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.dl-card {
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+  padding: 26px 24px; display: flex; flex-direction: column;
+  transition: border-color .15s;
+}
+.dl-card:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+/* The download counter under the section head: one line, mono figure. Hidden
+   until the fetch lands — the page never shows a number it cannot back. */
+.dl-count { margin-top: 14px; font-size: 12.5px; color: var(--mut); }
+.dl-count b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); font-size: 13px; }
+.dl-os { display: flex; align-items: center; gap: 11px; }
+.dl-os .icon { width: 26px; height: 26px; color: var(--ink); }
+.dl-os h3 { font-size: 17px; font-weight: 600; }
+.dl-req { margin-top: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--mut); letter-spacing: 0.03em; }
+.dl-card .btns { margin-top: 20px; display: flex; flex-direction: column; gap: 9px; }
+.dl-card .btn { justify-content: space-between; padding: 11px 15px; }
+.dl-card .btn .fmt { font-family: var(--font-mono); font-size: 10.5px; color: oklch(0.62 0.01 260); font-weight: 400; }
+.dl-card .btn-primary .fmt { color: oklch(0.30 0.05 132); }
+.dl-card .dl-warn { margin-top: 11px; font-size: 11.5px; line-height: 1.5; color: oklch(0.74 0.12 80); }
+.dl-foot { text-align: center; margin-top: 26px; font-size: 13px; color: var(--mut); }
+.dl-foot .dot { display: inline-block; width: 5px; height: 5px; border-radius: 999px; background: var(--kiwi); margin: 0 7px 1px; vertical-align: middle; }
+
+/* ── FAQ:details 原生折叠,加号旋转 45° 即变 ×;无 JS 依赖 ── */
+.grid-faq { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.faq {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  overflow: hidden; transition: border-color .15s;
+}
+.faq:hover { border-color: oklch(0.36 0.02 260 / 0.9); }
+.faq summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px; font-size: 14.5px; font-weight: 600; line-height: 1.45;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq .plus {
+  margin-left: auto; flex: none; width: 22px; height: 22px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--kiwi-soft); color: var(--kiwi);
+  font-family: var(--font-mono); font-size: 14px; line-height: 1;
+  transition: transform .2s;
+}
+.faq[open] summary { border-bottom: 1px solid var(--line); }
+.faq[open] .plus { transform: rotate(45deg); }
+.faq .ans { padding: 14px 18px 16px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.faq .ans code { font-family: var(--font-mono); font-size: 12px; color: oklch(0.72 0.02 260); }
+.faq .ans a { color: var(--kiwi); }
+.faq .ans a:hover { text-decoration: underline; }
+
+/* ── 隐私承诺 ── */
+.privacy { margin-top: 96px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: oklch(0.09 0.006 260 / 0.8); }
+.privacy-inner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 34px 0; }
+.priv { display: flex; align-items: center; gap: 13px; justify-content: center; }
+.priv .icon { color: var(--kiwi); width: 19px; height: 19px; }
+.priv span { font-size: 13.5px; color: oklch(0.72 0.015 260); }
+
+/* ── 页脚 ── */
+footer { padding: 56px 0 44px; }
+.foot-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.foot-slogan { margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi-dim); letter-spacing: 0.04em; }
+.foot-links { display: flex; gap: 20px; font-size: 13px; color: var(--mut); }
+.foot-links a:hover { color: var(--ink); }
+.foot-bottom { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: 12px; color: oklch(0.48 0.008 260); }
+
+/* ── 进场动画:400ms ease-out [Y+18→0, α0→1],尊重系统减弱动态 ── */
+@media (prefers-reduced-motion: no-preference) {
+  .rv { opacity: 0; transform: translateY(18px); transition: opacity .45s ease-out, transform .45s ease-out; transition-delay: var(--d, 0ms); }
+  .rv.in { opacity: 1; transform: none; }
+}
+
+/* ── 响应式 ── */
+@media (max-width: 920px) {
+  .grid-feats, .steps, .dl-grid, .privacy-inner { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .grid-feats, .steps, .grid-strat, .grid-faq, .dl-grid, .privacy-inner { grid-template-columns: 1fr; }
+  .hero { padding-top: 64px; }
+  .dl-row .btn { flex: 1 1 100%; }
+}

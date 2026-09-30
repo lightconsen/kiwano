@@ -1,8 +1,13 @@
 # Deploy the static marketing site (site/) to GitHub Pages.
-# No build step at serve time — pages are served as written. Two things run
-# before the upload, both writing git-tracked output: `scripts/sync-site.mjs`
-# copies the version and the licence name out of `app/package.json`, and
+# No build step at serve time — pages are served as written. Three things run
+# before the upload: `scripts/sync-site.mjs` copies the version and the licence
+# name out of `app/package.json` into the page's sources (site/src/),
+# `scripts/build-site.mjs` rebuilds site/index.html from those sources (the
+# committed file is a build output, same convention as site/demo/), and
 # `scripts/build-docs.mjs` renders docs/*.md into site/docs/ plus the sitemap.
+#
+# The site build needs exactly one dependency (esbuild, at the repo root) —
+# deliberately not the app's toolchain.
 #
 # site/demo/ is git-tracked for the same reason and is *not* built here: it is
 # the app compiled for the browser (node scripts/build-demo.mjs), which would
@@ -27,8 +32,11 @@ on:
       - "site/**"
       - "docs/*.md"
       - "scripts/sync-site.mjs"
+      - "scripts/build-site.mjs"
       - "scripts/build-docs.mjs"
       - "scripts/vendor/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - "app/package.json"
       - ".github/workflows/site.yml"
   workflow_dispatch:
@@ -57,12 +65,25 @@ jobs:
         with:
           node-version: 24
 
+      # The landing page is built in CI now: site/index.html is a committed
+      # build output (same convention as site/demo/), generated from site/src/
+      # by scripts/build-site.mjs. esbuild is the only dep and lives at the
+      # repo root, so the install is one package, not the app's toolchain.
+      - name: Install esbuild (site build tooling)
+        run: |
+          npm install -g pnpm@10.24.0
+          pnpm install --frozen-lockfile
+
       # The page carries the release version and the licence name, both copied
       # from `package.json` — and both had gone stale, the licence by two
-      # releases. Stamp them from the source of truth before the upload, so the
-      # deployed site is current whatever the committed file happens to say.
+      # releases. Stamp them into the SOURCES (site/src/) from the source of
+      # truth, then rebuild the page, so the deployed site is current whatever
+      # the committed files happen to say.
       - name: Stamp version and licence from app/package.json
         run: node scripts/sync-site.mjs
+
+      - name: Build the landing page from site/src
+        run: node scripts/build-site.mjs
 
       # docs/*.md render into site/docs/ as plain HTML (git-tracked, so the
       # served site stays what was committed); the sitemap is regenerated

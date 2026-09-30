@@ -1,0 +1,14 @@
+{
+  "name": "kiwano-root",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "description": "Tooling deps for scripts/*.mjs (the app's own deps live in app/)",
+  "scripts": {
+    "sync:site": "node scripts/sync-site.mjs",
+    "build:site": "node scripts/build-site.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10"
+  }
+}

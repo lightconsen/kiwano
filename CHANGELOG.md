@@ -17,6 +17,69 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.8] - 2026-09-30
+
+### Added
+
+- **An agent's note is written where it is read.** A user-defined agent takes
+  an optional note when it is created — what the route is for — and until now
+  that note could only be set in the dialog that creates it: it was shown on
+  the agent's tab, and nothing could change it afterwards. It is now the second
+  row of the agent's own dialog, on the same terms as its name: read as text,
+  edited behind a pencil, saved explicitly. One difference, because it is
+  optional: an emptied field saves as a cleared note rather than being refused.
+
+- **The download section counts installer downloads, and says what that is.**
+  A weekly job sums GitHub's installer download counts — with the release
+  workflow's own fetches called out as a floor rather than quietly folded in,
+  because a raw sum reads as a user count and it is not one. The line reads
+  "downloads, not installs" over the number, and there is no estimate of
+  installs anywhere: the one signal that would count them lives behind a
+  credential this project does not hold.
+
+### Changed
+
+- **The window opens at 900×600** — the floor the screens were checked against,
+  now the size it starts at. It still grows; it no longer shrinks, since the
+  default is the minimum. Everything that quoted the old size follows it: the
+  landing page's copy in both languages, the design notes, the demo's framing,
+  and the screenshots and clip, which are new renders rather than the old ones
+  at a different shape.
+
+- **The landing page's strategy diagrams read as a gateway.** They were drawn
+  as a bus with hand-tuned animation offsets, which after a re-layout told the
+  wrong story: traffic left the hub late in the cycle and lit paths toward a
+  provider that was not the one being served. Both legs are now generated from
+  the measured geometry — one provider served at a time, from the cycle's first
+  frame — and weighted round-robin, which spreads sessions rather than taking
+  turns per request, shows three streams running at once with each provider's
+  line connected to the hub.
+
+- **An agent's tab names the agent and stops there.** The tab used to spend two
+  rows on its own identity: the shared header, and a row under it carrying the
+  agent's mark, its name, and the note (or the first config file a takeover
+  rewrites, plus a count of the rest). The header now carries the agent's mark
+  and name in the slot the All-agents tab uses for its counts, the icon onto
+  everything else sits beside it, and the extra row is gone — those facts are
+  read in the dialog that acts on them. A built-in that has not been taken over
+  still shows nothing there.
+
+### Fixed
+
+- **Launch is dark from the first instant, not white.** Between the window
+  appearing and React's first commit the webview had nothing to paint, so macOS
+  showed a white rectangle for a second or three on every launch — reported on
+  the installed build. The window's native background is now the theme colour,
+  and the page carries a logo splash in plain HTML that the webview paints
+  before the bundle has even loaded.
+
+- **An agent's name keeps its place in the header.** Moving that name into the
+  header put it in a contest it loses: the segment strip beside it is a scroll
+  container, so it takes whatever it can, and with the dozen-odd segments a real
+  install produces the name collapsed to zero width — an orphaned icon and no
+  name at all. The name holds its size now, and the strip is the one that gives
+  way, which is what it was built to do.
+
 ## [0.2.7] - 2026-09-29
 
 ### Added

@@ -119,9 +119,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Tauri system dependencies (Linux)
+        if: runner.os == 'Linux'
+        # Bounded and retrying. An apt mirror that stalls used to hang here
+        # until the job's budget was gone — the v0.2.8 release spent all 45
+        # minutes in this step and was killed without building anything.
+        # Failing in ten minutes beats hanging for forty-five: a red run can
+        # be re-run, and it says which mirror was slow.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          APT="timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          $APT update
+          $APT install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       # Version pinned in rust-toolchain.toml — keep the two in sync.
       - uses: dtolnay/rust-toolchain@master
@@ -286,8 +293,9 @@ jobs:
       - name: Install Tauri system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          APT="timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          $APT update
+          $APT install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       # The Linux leg builds on 22.04 on purpose: a GNU binary runs on its
       # build glibc or newer, never older, so the newest-LTS runner was
@@ -1044,7 +1052,10 @@ jobs:
       # that fails here on a missing tool is exactly as broken as one that
       # fails on a bad signature.
       - name: Install minisign (for manifest signature verification)
-        run: sudo apt-get update && sudo apt-get install -y minisign
+        run: |
+          APT="timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          $APT update
+          $APT install -y minisign
 
       - name: Download the merged updater manifest
         env:

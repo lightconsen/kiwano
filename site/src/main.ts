@@ -271,7 +271,34 @@ if (liveHost) {
     // 加载,独立源里会被 CORS 直接挡掉(实测:整个演示白屏)。内容是我们自己
     // 的静态页面,与父页同源,本来就没有需要隔离的第三方代码。
     frame.src = liveHost.dataset.demoSrc!;
-    frame.addEventListener("load", () => document.querySelector(".shot-live")?.classList.add("is-live"));
+    // 换上去的时机不能只听 `load`。iframe 里只要有一个外部脚本永远不返回,
+    // 它的 load 事件就永远不触发——Cloudflare 在边缘注入的
+    // static.cloudflareinsights.com 信标正是这种脚本,而从中国大陆访问它会
+    // 直接超时。结果是:演示其实已经跑起来、已经画出来了,父页却一直把
+    // .shot-live-host 留在 opacity: 0,访客看到的还是那张静态图,而 demo 在
+    // 后面空转。所以三个信号取先到的:`load`(最准)、iframe 内部真的画出
+    // 东西了(同源,可以看 contentDocument)、以及兜底计时器——兜底是为了
+    // 万一它哪天不再同源,那时前一个信号会失效。
+    const painted = () => {
+      try {
+        const root = frame.contentDocument?.getElementById("root");
+        return !!root && root.childElementCount > 0;
+      } catch {
+        return false; // 不同源:contentDocument 不可读,交给兜底
+      }
+    };
+    let shown = false;
+    const show = () => {
+      if (shown) return;
+      shown = true;
+      window.clearInterval(poll);
+      document.querySelector(".shot-live")?.classList.add("is-live");
+    };
+    const poll = window.setInterval(() => {
+      if (painted()) show();
+    }, 200);
+    frame.addEventListener("load", show);
+    window.setTimeout(show, 8000);
     liveHost.appendChild(frame);
 
     // 滚出视口就告诉演示暂停:它在跑一个真实的 React 应用,没人看的时候不该

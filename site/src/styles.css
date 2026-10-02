@@ -143,6 +143,12 @@ section { scroll-margin-top: 76px; }
    narrow screens rather than wrapping — the row is the point) */
 .agents-row {
   margin-top: 16px; display: flex; justify-content: center; align-items: center;
+  /* 装不下时按 start 对齐。`center` 配 `overflow-x: auto` 是个陷阱:居中会把
+     溢出量摊到两端,而滚动容器到不了负偏移,于是左边的几个 logo 既看不到也
+     滚不回来——768 和 390 上被切掉的正是 Claude Code、Codex、Gemini 这几个
+     最该看见的。`safe` 在装得下时仍然居中,所以宽屏的观感不变。上一行是给不
+     认 `safe` 的浏览器留的回退,行为与现在一致而不是更差。 */
+  justify-content: safe center;
   gap: 11px; flex-wrap: nowrap; overflow-x: auto; padding: 2px 16px 4px;
   scrollbar-width: none;
 }

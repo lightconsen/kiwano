@@ -1,6 +1,6 @@
 // ── 页面交互逻辑。英文源在模板 index.html 里;这里只负责语言切换、复制、
 //    进场动画、下载计数、策略示意连线与实时演示的懒加载。 ──
-import { I18N } from "./i18n";
+import { DEFAULT_LOCALE, LOCALES, LOCALE_IDS, type Locale } from "./i18n";
 
 // 应用语言:en 还原模板内联文案,zh 从字典取(先缓存原文,来回切不丢)。
 // 已带 data-en 的元素(如下载计数行的 {n} 模板)不缓存 innerHTML——它们
@@ -9,50 +9,65 @@ document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
   if (el.dataset.en === undefined) el.dataset.en = el.innerHTML;
 });
 // 属性型文案(aria-label/title 同 key):与文本同一字典,同一处切换
-document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+document.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach((el) => {
   el.dataset.enAria = el.getAttribute("aria-label") ?? "";
 });
 // 下载计数:site/data/hub-stats.json 由每周的 hub-stats 工作流刷新并随站点
 // 部署,取到后填进下载节;取不到就保持隐藏——页面不显示一个它无法佐证的数字。
 let dlCountValue: number | null = null;
-function applyLang(lang: "en" | "zh") {
-  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
-  document.title = lang === "zh" ? I18N.zh.title : "Kiwano — Local-first AI Provider Manager";
+
+/** 当前语言。切换器、握手、复制按钮都问它,不再各自判字符串。 */
+let locale: Locale = DEFAULT_LOCALE;
+
+/** 把页面切到某一门语言。
+ *
+ * 每一处文案都走同一条路:字典里**有就拿覆盖,没有就回到模板里的英文**。这一
+ * 条同时管住了两件事——英文永远在(模板即英文源),以及一门只翻了一半的语言
+ * 是「部分是英文」而不是空白或串行。 */
+function applyLang(next: Locale) {
+  locale = next;
+  const meta = LOCALES[next];
+  const dict = meta.dict;
+  const text = (key: string, fallback: string | undefined) => dict?.[key] ?? fallback;
+
+  document.documentElement.lang = meta.tag;
+  document.title = meta.title;
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
-    if (lang === "zh") {
-      const v = I18N.zh[el.dataset.i18n!];
-      if (v !== undefined) el.innerHTML = v;
-    } else {
-      el.innerHTML = el.dataset.en!;
-    }
+    el.innerHTML = text(el.dataset.i18n!, el.dataset.en) ?? "";
   });
   // 计数行带着已取到的数字走一遍,否则切语言会把 {n} 原样写回去。
   const countEl = document.getElementById("dlCount");
   if (countEl && !countEl.hidden && dlCountValue !== null) {
-    countEl.innerHTML =
-      (lang === "zh" ? I18N.zh["dl.count"] : countEl.dataset.en!).replace("{n}", dlCountValue.toLocaleString("en-US"));
+    countEl.innerHTML = (text("dl.count", countEl.dataset.en) ?? "").replace(
+      "{n}",
+      dlCountValue.toLocaleString("en-US"),
+    );
   }
   document.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach((el) => {
-    const v = lang === "zh" ? I18N.zh[el.dataset.i18nAria!] : el.dataset.enAria;
+    const v = text(el.dataset.i18nAria!, el.dataset.enAria);
     if (v !== undefined) {
       el.setAttribute("aria-label", v);
       el.title = v;
     }
   });
-  // 按钮显示「可切换到的语言」的国旗(emoji 旗在 Windows 上不渲染,所以是内联 SVG)
-  document.getElementById("langFlag")!.setAttribute("href", lang === "zh" ? "#i-flag-gb" : "#i-flag-cn");
-  // 文档链接跟随语言:zh 文档在 /docs/zh-CN/(FAQ 答案里的链接在字典里自带 href)
-  document.getElementById("docsLink")!.href = lang === "zh" ? "/docs/zh-CN/" : "/docs/";
-  localStorage.setItem("kiwano.lang", lang);
+  // 切换器上的图标画的是**按下去会去哪一门**,不是当前语言 —— 这是个动作按钮,
+  // 旗子就是它的宾语(原实现的注释与行为都是如此,泛化时别弄反)。emoji 旗在
+  // Windows 上不渲染,所以是内联 SVG。
+  const target = LOCALE_IDS[(LOCALE_IDS.indexOf(locale) + 1) % LOCALE_IDS.length];
+  document.getElementById("langFlag")!.setAttribute("href", LOCALES[target].flag);
+  // 文档链接跟随语言:zh 文档在 /docs/zh-CN/,没有翻译文档的语言指回 /docs/
+  // (FAQ 答案里的链接在字典里自带 href)。
+  document.getElementById("docsLink")!.setAttribute("href", meta.docs);
+  localStorage.setItem("kiwano.lang", next);
   // 演示里跑的是真应用,它有自己的一套语言(设置里的 `language`,默认跟随浏览器)
   // —— 于是英文页面上可能嵌着一个中文演示。页面这一侧是权威:语言一变就告诉
   // 它一声,它按同一门语言重画。
   tellDemoLang();
 }
 
-/** 页面当前的语言,取值和写进 <html lang> 的那一个。 */
-function siteLang(): "en" | "zh-CN" {
-  return document.documentElement.lang === "zh-CN" ? "zh-CN" : "en";
+/** 认一门语言:不认识的(旧值、手工改过的 localStorage)回到默认那门。 */
+function asLocale(value: string | null): Locale {
+  return LOCALE_IDS.includes(value as Locale) ? (value as Locale) : DEFAULT_LOCALE;
 }
 
 /** 把页面当前的语言推给演示。
@@ -65,24 +80,33 @@ function siteLang(): "en" | "zh-CN" {
 function tellDemoLang(): void {
   document
     .querySelector<HTMLIFrameElement>(".shot-live-host iframe")
-    ?.contentWindow?.postMessage({ type: "kiwano-demo", lang: siteLang() }, window.location.origin);
+    ?.contentWindow?.postMessage(
+      { type: "kiwano-demo", lang: LOCALES[locale].tag },
+      window.location.origin,
+    );
 }
 
-// 恢复上次选择(默认英文,即模板原文)
+// 恢复上次选择。没存过就不写 —— 首次到访的页面保持"没有偏好"这个状态,而不是
+// 顺手把默认那门语言记成用户的选择。
 const saved = localStorage.getItem("kiwano.lang");
-if (saved === "zh") applyLang("zh");
+if (saved !== null) applyLang(asLocale(saved));
+
+/** 切换器。
+ *
+ * 两门语言时,一个按钮翻到另一门是最快的(现在就是这一种);再多就得给菜单,
+ * 否则要按 N 次才轮到想要的那门 —— 那一步等真加了第三门语言再做,现在只把
+ * 选择写成"从表里挑下一门",所以按下去的行为与从前完全一致。 */
 document.getElementById("langBtn")!.addEventListener("click", () => {
-  applyLang(document.documentElement.lang === "zh-CN" ? "en" : "zh");
+  const i = LOCALE_IDS.indexOf(locale);
+  applyLang(LOCALE_IDS[(i + 1) % LOCALE_IDS.length]);
 });
 
 // 复制按钮:icon 即状态——平时是 copy,落成 check 一拍半再换回。
 // Clipboard API 需要安全上下文;file:// 与旧 webview 走 execCommand 兜底。
 document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
   const text = btn.dataset.copy!;
-  const label = () =>
-    document.documentElement.lang === "zh-CN" ? I18N.zh["srv.copied"] : "Copied";
-  const restore = () =>
-    document.documentElement.lang === "zh-CN" ? I18N.zh["srv.copy"] : btn.dataset.enAria!;
+  const label = () => LOCALES[locale].dict?.["srv.copied"] ?? "Copied";
+  const restore = () => LOCALES[locale].dict?.["srv.copy"] ?? btn.dataset.enAria!;
   btn.addEventListener("click", () => {
     const done = () => {
       btn.classList.add("copied");
@@ -130,8 +154,7 @@ fetch("/data/hub-stats.json", { headers: { accept: "application/json" } })
     if (!Number.isFinite(n as number)) return;
     dlCountValue = n as number;
     const el = document.getElementById("dlCount")!;
-    const lang = document.documentElement.lang === "zh-CN" ? "zh" : "en";
-    const tpl = lang === "zh" ? I18N.zh["dl.count"] : el.dataset.en!;
+    const tpl = LOCALES[locale].dict?.["dl.count"] ?? el.dataset.en!;
     el.innerHTML = tpl.replace("{n}", (n as number).toLocaleString("en-US"));
     el.hidden = false;
   })
@@ -303,7 +326,7 @@ if (liveHost && window.matchMedia(`(min-width: ${LIVE_DEMO_MIN_WIDTH}px)`).match
     // 的静态页面,与父页同源,本来就没有需要隔离的第三方代码。
     // 语言随 src 一起进去:访客多半先在顶部切好语言再滚下来,那时演示还没建,
     // postMessage 那条路是空的。
-    frame.src = `${liveHost.dataset.demoSrc}?lang=${siteLang()}`;
+    frame.src = `${liveHost.dataset.demoSrc}?lang=${LOCALES[locale].tag}`;
     // 换上去的时机不能只听 `load`。iframe 里只要有一个外部脚本永远不返回,
     // 它的 load 事件就永远不触发——Cloudflare 在边缘注入的
     // static.cloudflareinsights.com 信标正是这种脚本,而从中国大陆访问它会

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,7 +8,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // carries whatever the sources had at build time. The site workflow chains
 // sync-site → build-site before the upload, so the deployed page is current.
 const TEMPLATE = join(ROOT, "site", "src", "index.html");
-const I18N = join(ROOT, "site", "src", "i18n.ts");
+const I18N_DIR = join(ROOT, "site", "src", "i18n");
 const check = process.argv.includes("--check");
 
 const pkg = JSON.parse(readFileSync(join(ROOT, "app", "package.json"), "utf8"));
@@ -20,18 +20,29 @@ if (!version || !license) {
 
 // 1. The release line. Anchored on the platform list that follows it rather
 //    than on `v<semver>` alone, so a version mentioned in prose elsewhere is
-//    not caught by accident. Appears twice in the sources: the template's own
-//    default text (what a reader without JS sees) and the zh dictionary entry
-//    in i18n.ts — both must match, both get stamped.
+//    not caught by accident. It lives once per language: the template's own
+//    default text (what a reader without JS sees) and one entry per dictionary
+//    — every one of them gets stamped, which is why the dictionary list below
+//    is read off the directory rather than named: a new language adds a file,
+//    and a file nobody stamped would sit at the old version forever, quietly.
 const RELEASE_LINE = /v\d+\.\d+\.\d+(?= · <b>macOS 12\+<\/b>)/g;
 // 2. The licence link's text, found by its target: the anchor that points at
 //    the LICENSE file. Its text is the SPDX identifier, verbatim. Lives in the
 //    template only (the footer is not translated).
 const LICENSE_LINK = /(<a href="[^"]*\/LICENSE"[^>]*>)([^<]*)(<\/a>)/g;
 
+// index.ts is the locale table, not a dictionary: it carries no copy of its own
+// and so no release line, and asking it for one would trip the check below —
+// which is how this list came to be written. Every other file in there is one
+// language's overlay, and every one of them must be stamped.
+const DICTIONARIES = readdirSync(I18N_DIR)
+  .filter((f) => f.endsWith(".ts") && f !== "index.ts")
+  .sort()
+  .map((f) => ({ path: join(I18N_DIR, f), label: `i18n/${f}`, transforms: ["release"] }));
+
 const TARGETS = [
   { path: TEMPLATE, label: "template", transforms: ["release", "license"] },
-  { path: I18N, label: "i18n.ts", transforms: ["release"] },
+  ...DICTIONARIES,
 ];
 
 const edits = [];

@@ -46,16 +46,26 @@ function applyLang(lang: "en" | "zh") {
   localStorage.setItem("kiwano.lang", lang);
   // 演示里跑的是真应用,它有自己的一套语言(设置里的 `language`,默认跟随浏览器)
   // —— 于是英文页面上可能嵌着一个中文演示。页面这一侧是权威:语言一变就告诉
-  // 它一声,它按同一门语言重画。(iframe 还没建时这里什么也不会发生,那种情况
-  // 由 loadDemo 在 src 上带 ?lang= 处理。)
-  document
-    .querySelector<HTMLIFrameElement>(".shot-live-host iframe")
-    ?.contentWindow?.postMessage({ type: "kiwano-demo", lang: siteLang() }, window.location.origin);
+  // 它一声,它按同一门语言重画。
+  tellDemoLang();
 }
 
 /** 页面当前的语言,取值和写进 <html lang> 的那一个。 */
 function siteLang(): "en" | "zh-CN" {
   return document.documentElement.lang === "zh-CN" ? "zh-CN" : "en";
+}
+
+/** 把页面当前的语言推给演示。
+ *
+ * 两个时刻都要推,因为访客可以在这两个时刻切语言:切换的那一刻(applyLang),
+ * 以及演示真正活过来的那一刻——它是个 886 KB 的应用,切在它加载途中时,这条
+ * 消息会落在它的监听器注册之前(实测:线上切在加载中,演示一直是英文;等它就
+ * 绪再切就对了)。演示起来时再推一次,把那种情况补上,顺带让"没切过"的情形
+ * 也幂等无害。iframe 还没建时什么也不会发生。 */
+function tellDemoLang(): void {
+  document
+    .querySelector<HTMLIFrameElement>(".shot-live-host iframe")
+    ?.contentWindow?.postMessage({ type: "kiwano-demo", lang: siteLang() }, window.location.origin);
 }
 
 // 恢复上次选择(默认英文,即模板原文)
@@ -316,6 +326,9 @@ if (liveHost && window.matchMedia(`(min-width: ${LIVE_DEMO_MIN_WIDTH}px)`).match
       shown = true;
       window.clearInterval(poll);
       document.querySelector(".shot-live")?.classList.add("is-live");
+      // 演示活了:此刻它的监听器一定在(已经挂载/画出来了),把页面当前的语言
+      // 补推一次——加载途中切的那一次会丢。
+      tellDemoLang();
     };
     const poll = window.setInterval(() => {
       if (painted()) show();

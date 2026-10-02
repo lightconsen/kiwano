@@ -1,0 +1,22 @@
+export const common = {
+  languageSystem: "跟隨系統",
+  language: "語言",
+
+  cancel: "取消",
+  save: "儲存",
+  close: "關閉",
+  done: "完成",
+  edit: "編輯",
+  remove: "移除",
+  delete: "刪除",
+  add: "新增",
+  refresh: "重新整理",
+  retry: "重試",
+  loadFailed: "無法讀取此畫面的資料",
+  loading: "載入中…",
+  none: "—",
+  enabled: "已啟用",
+  disabled: "已停用",
+  copy: "複製",
+  copied: "已複製",
+};

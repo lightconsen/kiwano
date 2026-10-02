@@ -14,19 +14,29 @@
 // outlives a component, and the language must outlive every screen.
 import { useEffect, useState } from "react";
 import { en, type Messages } from "./en";
+import { ja } from "./ja";
 import { zhHans } from "./zh-Hans";
+import { zhHant } from "./zh-Hant";
 import type { KeyPath, Params } from "./types";
 
-/** What `AppSettings.language` holds: a preference, not necessarily a locale. */
-export const LANGUAGE_PREFS = ["system", "en", "zh-Hans"] as const;
-export type LanguagePref = (typeof LANGUAGE_PREFS)[number];
+/** The locales we ship a dictionary for. This is the list everything else is
+    derived from: the preference values, the dictionaries, the labels, and what
+    `resolveLocale` will accept from the settings row or from a stored value. */
+export const LOCALES = ["en", "zh-Hans", "zh-Hant", "ja"] as const;
+export type Locale = (typeof LOCALES)[number];
 
-/** A locale we actually ship a dictionary for. */
-export type Locale = Exclude<LanguagePref, "system">;
+/** What `AppSettings.language` holds: a preference, not necessarily a locale. */
+export const LANGUAGE_PREFS = ["system", ...LOCALES] as const;
+export type LanguagePref = (typeof LANGUAGE_PREFS)[number];
 
 /** Every shipped locale's dictionary. Exported for the tests, which check each
     one against `en` for the keys and placeholders a translation can drop. */
-export const DICTIONARIES: Record<Locale, Messages> = { en, "zh-Hans": zhHans };
+export const DICTIONARIES: Record<Locale, Messages> = {
+  en,
+  "zh-Hans": zhHans,
+  "zh-Hant": zhHant,
+  ja,
+};
 
 /** What the language select shows. The label is a language's own name for
     itself, so it is not translated — a reader looking for their language
@@ -35,26 +45,41 @@ export const LANGUAGE_LABELS: Record<LanguagePref, string> = {
   system: "", // filled by `languageLabel` below, which needs the current locale
   en: "English",
   "zh-Hans": "简体中文",
+  "zh-Hant": "繁體中文",
+  ja: "日本語",
 };
 
-/** Preferences written by an older build, read back as today's id.
+/** Preferences written by an older build, or by hand, read back as today's id.
  *
  * 0.2.8 and earlier stored `"zh-CN"`; the id became `zh-Hans` when the UI
  * gained a Traditional Chinese dictionary, because `zh-CN` names a region
  * where script is what actually differs. Anything stored then has to keep
  * working — a preference is written once and read for the life of the
- * install, and there is no migration for a value the user chose.
- */
+ * install, and there is no migration for a value the user chose — so the
+ * region tags a person might have typed are accepted too. */
 const LEGACY_PREFS: Record<string, Locale> = {
   "zh-CN": "zh-Hans",
-  zh: "zh-Hans",
   "zh-SG": "zh-Hans",
-  "zh-Hans": "zh-Hans",
+  "zh-TW": "zh-Hant",
+  "zh-HK": "zh-Hant",
+  "zh-MO": "zh-Hant",
+  zh: "zh-Hans",
 };
 
-/** A BCP-47 tag from the webview → a locale we ship. */
+/** A BCP-47 tag from the webview → a locale we ship.
+ *
+ * Script before region: `zh-Hant`, `zh-TW`, `zh-HK` and `zh-MO` are all
+ * Traditional, while `zh`, `zh-Hans`, `zh-CN` and `zh-SG` are Simplified —
+ * which is why the ids name the script. A tag we do not ship falls through to
+ * English rather than to the nearest relative: a half-understood language is
+ * worse than a familiar one. */
 function localeFromTag(tag: string): Locale {
-  return tag.toLowerCase().startsWith("zh") ? "zh-Hans" : "en";
+  const t = tag.toLowerCase();
+  if (t.startsWith("ja")) return "ja";
+  if (t.startsWith("zh")) {
+    return t.includes("hant") || /-(tw|hk|mo)\b/.test(t) ? "zh-Hant" : "zh-Hans";
+  }
+  return "en";
 }
 
 /** Turn a stored preference into a locale we have a dictionary for.
@@ -64,7 +89,13 @@ function localeFromTag(tag: string): Locale {
  * reflects the OS setting on every platform Tauri targets, so this needs no
  * extra plugin. */
 export function resolveLocale(pref: string | null | undefined): Locale {
-  if (pref && pref in LEGACY_PREFS) return LEGACY_PREFS[pref];
+  if (pref) {
+    // The shipped ids first: this is what the settings row writes back, and a
+    // value we ship must resolve to itself whatever it is and whoever is
+    // browsing — the fallback below is for other people's tags, not ours.
+    if ((LOCALES as readonly string[]).includes(pref)) return pref as Locale;
+    if (pref in LEGACY_PREFS) return LEGACY_PREFS[pref];
+  }
   const tag =
     typeof navigator !== "undefined" && navigator.language ? navigator.language : "en";
   return localeFromTag(tag);

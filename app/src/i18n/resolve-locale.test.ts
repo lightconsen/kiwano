@@ -36,12 +36,36 @@ describe("resolveLocale", () => {
     expect(resolveLocale("system")).toBe("zh-Hans");
     expect(resolveLocale(null)).toBe("zh-Hans");
     expect(resolveLocale(undefined)).toBe("zh-Hans");
-    withSystemLanguage("zh-TW");
-    expect(resolveLocale("system")).toBe("zh-Hans"); // until a Traditional dictionary ships
     withSystemLanguage("en-GB");
     expect(resolveLocale("system")).toBe("en");
+  });
+
+  it("splits Chinese by script, not by region", () => {
+    // Traditional and Simplified differ in script, so the tags that name one
+    // are what decide: a Hong Kong or Macau system is Traditional, a Singapore
+    // one Simplified, and neither is named "zh-TW".
+    for (const tag of ["zh-TW", "zh-HK", "zh-MO", "zh-Hant", "zh-Hant-TW"]) {
+      withSystemLanguage(tag);
+      expect(resolveLocale("system"), tag).toBe("zh-Hant");
+    }
+    for (const tag of ["zh", "zh-CN", "zh-SG", "zh-Hans"]) {
+      withSystemLanguage(tag);
+      expect(resolveLocale("system"), tag).toBe("zh-Hans");
+    }
+  });
+
+  it("takes Japanese, and anything we do not ship as English", () => {
+    withSystemLanguage("ja");
+    expect(resolveLocale("system")).toBe("ja");
+    withSystemLanguage("ja-JP");
+    expect(resolveLocale("system")).toBe("ja");
     withSystemLanguage("de");
     expect(resolveLocale("system")).toBe("en");
+  });
+
+  it("takes today's ids as the setting it was given", () => {
+    expect(resolveLocale("zh-Hant")).toBe("zh-Hant");
+    expect(resolveLocale("ja")).toBe("ja");
   });
 
   it("sends an empty preference to the system language, not to English", () => {

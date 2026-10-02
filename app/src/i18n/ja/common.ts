@@ -1,0 +1,22 @@
+export const common = {
+  languageSystem: "システムに従う",
+  language: "言語",
+
+  cancel: "キャンセル",
+  save: "保存",
+  close: "閉じる",
+  done: "完了",
+  edit: "編集",
+  remove: "取り除く",
+  delete: "削除",
+  add: "追加",
+  refresh: "更新",
+  retry: "再試行",
+  loadFailed: "この画面のデータを読み込めませんでした",
+  loading: "読み込み中…",
+  none: "—",
+  enabled: "有効",
+  disabled: "無効",
+  copy: "コピー",
+  copied: "コピーしました",
+};

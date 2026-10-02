@@ -150,7 +150,10 @@ function drawStrategyWires(): boolean {
   document.querySelectorAll<HTMLElement>(".grid-strat .diag").forEach((fig, i) => {
     const svg = fig.querySelector("svg.wires");
     if (!svg) return;
-    const r = fig.getBoundingClientRect();
+    // 坐标原点取画布而不是卡片:窄屏时卡片是滚动容器,几何要按内容自己的框来
+    // 量,否则一滚动连线就错位。宽屏两者同框,取值不变。
+    const canvas = fig.querySelector<HTMLElement>(".diag-canvas") ?? fig;
+    const r = canvas.getBoundingClientRect();
     svg.setAttribute("viewBox", `0 0 ${Math.round(r.width)} ${Math.round(r.height)}`);
     const c = (el: Element) => {
       const b = el.getBoundingClientRect();
@@ -260,8 +263,14 @@ drawStrategyWires();
 // 实时演示:滚到可见时再把 app 装进 iframe。放在这里而不是首屏,是因为它是
 // 一个完整的 React 应用(几百 KB),而首屏只需要那张静态图——没有 JS 的访客
 // 就一直看那张图。
+//
+// 窄屏不装:演示是桌面应用的 900×600 窗口,塞进手机的 330px 只会渲染出一张
+// 读不了的界面(实测:横幅折成四行、provider 行被裁、状态栏压住内容),而那
+// 886 KB 的 JS 是要用流量下的。窄屏留静态图,文案换成 .demo-note-narrow,
+// 想去玩的人从那里新开一个标签页。
+const LIVE_DEMO_MIN_WIDTH = 720;
 const liveHost = document.querySelector<HTMLElement>(".shot-live-host");
-if (liveHost) {
+if (liveHost && window.matchMedia(`(min-width: ${LIVE_DEMO_MIN_WIDTH}px)`).matches) {
   const fig = document.querySelector(".shot-live");
   const loadDemo = () => {
     const frame = document.createElement("iframe");
@@ -315,4 +324,27 @@ if (liveHost) {
     { rootMargin: "400px" },
   );
   demoIo.observe(liveHost);
+}
+
+// 窄屏的导航菜单。开合状态放在按钮的 aria-expanded 上,面板只认 .open——两个
+// 读的是同一件事,不会各说各话。点链接就收起来(锚点跳转之后菜单还杵在那儿
+// 是移动端最常见的毛病),Esc 也收,转回宽屏时更要收:否则菜单会以展开的样子
+// 留在桌面端。
+const navBurger = document.getElementById("navBurger");
+const navPanel = document.getElementById("navPanel");
+if (navBurger && navPanel) {
+  const setMenu = (open: boolean) => {
+    navPanel.classList.toggle("open", open);
+    navBurger.setAttribute("aria-expanded", String(open));
+  };
+  navBurger.addEventListener("click", () => setMenu(navBurger.getAttribute("aria-expanded") !== "true"));
+  navPanel.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("a")) setMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setMenu(false);
+  });
+  window.matchMedia("(min-width: 1081px)").addEventListener("change", (e) => {
+    if (e.matches) setMenu(false);
+  });
 }

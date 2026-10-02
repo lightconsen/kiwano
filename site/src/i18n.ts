@@ -102,6 +102,7 @@ export const I18N: Record<"zh", Record<string, string>> = {
     "pv.3": "无账号体系,离线完整可用",
     "foot.note": "部分模块移植自 cc-switch(MIT),声明见 THIRD-PARTY-NOTICES",
     "demo.note": "实时演示——示例数据,在你的浏览器里跑。<a href=\"#download\">下载 Kiwano</a> 接入你自己的供应商。",
+    "demo.narrow": "实时演示需要更宽的屏幕——应用窗口是 900×600。<a href=\"/demo/\" target=\"_blank\" rel=\"noopener\">在新标签页里打开</a>。",
     "dl.count": "已有 <b>{n}</b> 次安装器下载——只是下载次数,不是安装数。",
     "title": "Kiwano — 本地优先的 AI Provider 管理器",
   },

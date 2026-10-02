@@ -145,6 +145,11 @@
 <nav class="nav">
   <div class="wrap nav-inner">
     <a class="brand" href="#top"><img src="assets/kiwano-logo.svg" alt="">Kiwano</a>
+    <!-- 窄屏的导航入口:链接与两个社交按钮都在面板里,顶栏只留 logo、菜单、
+         语言和下载——那四样在 390px 上刚好放得下,多一个就会被切断。 -->
+    <button class="nav-burger" id="navBurger" type="button" aria-label="Menu" aria-expanded="false" aria-controls="navPanel">
+      <span></span><span></span><span></span>
+    </button>
     <div class="nav-links">
       <a href="#features" data-i18n="nav.features">Features</a>
       <a href="#screens" data-i18n="nav.screens">Screens</a>
@@ -166,6 +171,26 @@
       </a>
       <a class="btn btn-primary" href="#download">
         <svg class="icon"><use href="#i-download"/></svg><span data-i18n="nav.dlbtn">Download</span>
+      </a>
+    </div>
+  </div>
+  <!-- 窄屏展开的菜单。链接是同一组,重复一份而不是搬过来:桌面端那条要留在
+       原地,而 i18n 是按 [data-i18n] 扫的,两份都会跟着语言走。两个社交按钮
+       只在窄屏被顶栏让出来,就收在这里,免得它们从页面上消失。 -->
+  <div class="nav-panel" id="navPanel">
+    <div class="wrap">
+      <a href="#features" data-i18n="nav.features">Features</a>
+      <a href="#screens" data-i18n="nav.screens">Screens</a>
+      <a href="#how" data-i18n="nav.how">How it works</a>
+      <a href="#server" data-i18n="nav.server">Server</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
+      <a href="/docs/" data-i18n="nav.docs">Docs</a>
+      <a href="#download" data-i18n="nav.download">Download</a>
+      <a class="btn btn-gh" href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">
+        <svg class="icon"><use href="#i-github"/></svg>GitHub
+      </a>
+      <a class="btn btn-gh" href="https://x.com/kiwano_cc" target="_blank" rel="noopener">
+        <svg class="icon"><use href="#i-x"/></svg>X
       </a>
     </div>
   </div>
@@ -220,7 +245,11 @@
            the demo before reaching it. -->
       <div class="shot-live-host" data-demo-src="/demo/"></div>
     </figure>
-    <p class="demo-note rv" style="--d:340ms" data-i18n="demo.note">Live demo — sample data, running in your browser. <a href="#download">Download Kiwano</a> to point it at your own providers.</p>
+    <!-- 窄屏下这里是一张静态图:900×600 的桌面窗口塞进 330px 只会变成一张读不
+         了的界面,而下载它的代价是 886 KB。所以窄屏换成另一句文案,并把演示
+         交给新标签页——两段各自带 data-i18n,JS 按语言各翻各的。 -->
+    <p class="demo-note rv demo-note-wide" style="--d:340ms" data-i18n="demo.note">Live demo — sample data, running in your browser. <a href="#download">Download Kiwano</a> to point it at your own providers.</p>
+    <p class="demo-note rv demo-note-narrow" style="--d:340ms" data-i18n="demo.narrow">The live demo wants a wider screen — the app's window is 900×600. <a href="/demo/" target="_blank" rel="noopener">Open it in its own tab</a>.</p>
   </div>
 </header>
 
@@ -333,21 +362,24 @@
           <div class="sh"><span class="tag">failover</span><h3 data-i18n="st1.t">Failover</h3></div>
           <p data-i18n="st1.d">Candidates ranked by priority: if the primary fails or times out, traffic moves to the next in line, and returns once it recovers.</p>
           <div class="diag" data-strategy="failover" aria-hidden="true">
-            <svg class="wires" aria-hidden="true">
-              <path class="wire" data-wire="a"/>
-              <path class="wire" data-wire="b"/>
-              <path class="wire" data-wire="c"/>
-              <path class="wire" data-wire="d"/>
-              <path class="flow" data-flow="leg1"/>
-              <path class="flow" data-flow="leg2a"/>
-              <path class="flow" data-flow="leg2b"/>
-            </svg>
-            <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
-            <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
-            <div class="provs">
-              <span class="pn fa-a"><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
-              <span class="pn fa-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
-              <span class="pn"><img src="assets/agent-logos/openai.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;C&lt;/span&gt;'">OpenAI</span>
+            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            <div class="diag-canvas">
+              <svg class="wires" aria-hidden="true">
+                <path class="wire" data-wire="a"/>
+                <path class="wire" data-wire="b"/>
+                <path class="wire" data-wire="c"/>
+                <path class="wire" data-wire="d"/>
+                <path class="flow" data-flow="leg1"/>
+                <path class="flow" data-flow="leg2a"/>
+                <path class="flow" data-flow="leg2b"/>
+              </svg>
+              <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
+              <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
+              <div class="provs">
+                <span class="pn fa-a"><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
+                <span class="pn fa-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
+                <span class="pn"><img src="assets/agent-logos/openai.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;C&lt;/span&gt;'">OpenAI</span>
+              </div>
             </div>
           </div>
         </div>
@@ -355,21 +387,24 @@
           <div class="sh"><span class="tag">roundrobin</span><h3 data-i18n="st2.t">Round robin</h3></div>
           <p data-i18n="st2.d">Weighted rotation, per session: a session keeps its provider, so the prompt cache it already paid for keeps hitting; new sessions spread across candidates by weight.</p>
           <div class="diag" data-strategy="roundrobin" aria-hidden="true">
-            <svg class="wires" aria-hidden="true">
-              <path class="wire" data-wire="a"/>
-              <path class="wire ws1" data-wire="b"/>
-              <path class="wire ws2" data-wire="c"/>
-              <path class="wire ws3" data-wire="d"/>
-              <path class="flow s1" data-flow="stream"/>
-              <path class="flow s2" data-flow="stream"/>
-              <path class="flow s3" data-flow="stream"/>
-            </svg>
-            <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
-            <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
-            <div class="provs">
-              <span class="pn rr-a"><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
-              <span class="pn rr-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
-              <span class="pn rr-c"><img src="assets/agent-logos/openai.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;C&lt;/span&gt;'">OpenAI</span>
+            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            <div class="diag-canvas">
+              <svg class="wires" aria-hidden="true">
+                <path class="wire" data-wire="a"/>
+                <path class="wire ws1" data-wire="b"/>
+                <path class="wire ws2" data-wire="c"/>
+                <path class="wire ws3" data-wire="d"/>
+                <path class="flow s1" data-flow="stream"/>
+                <path class="flow s2" data-flow="stream"/>
+                <path class="flow s3" data-flow="stream"/>
+              </svg>
+              <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
+              <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
+              <div class="provs">
+                <span class="pn rr-a"><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
+                <span class="pn rr-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
+                <span class="pn rr-c"><img src="assets/agent-logos/openai.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;C&lt;/span&gt;'">OpenAI</span>
+              </div>
             </div>
           </div>
         </div>
@@ -377,23 +412,26 @@
           <div class="sh"><span class="tag">timewindow</span><h3 data-i18n="st3.t">Time window</h3></div>
           <p data-i18n="st3.d">Give each candidate a local time window — subscription plan overnight, pay-as-you-go by day. Windows past midnight wrap; unmatched times fall back.</p>
           <div class="diag" data-strategy="timewindow" aria-hidden="true">
-            <svg class="wires" aria-hidden="true">
-              <path class="wire" data-wire="a"/>
-              <path class="wire" data-wire="b"/>
-              <path class="wire" data-wire="c"/>
-              <path class="flow" data-flow="leg1"/>
-              <path class="flow" data-flow="leg2a"/>
-              <path class="flow" data-flow="leg2b"/>
-            </svg>
-            <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
-            <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
-            <div class="provs" style="padding-bottom: 30px">
-              <span class="pn tw-a"><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
-              <span class="pn tw-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
-              <div class="tw-bar"><span class="tw-s1"></span><span class="tw-s2"></span><span class="tw-cursor"></span></div>
-              <span class="tw-lab" style="left:0">00:00</span>
-              <span class="tw-lab" style="left:32%">08:00</span>
-              <span class="tw-lab" style="right:0">24:00</span>
+            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            <div class="diag-canvas">
+              <svg class="wires" aria-hidden="true">
+                <path class="wire" data-wire="a"/>
+                <path class="wire" data-wire="b"/>
+                <path class="wire" data-wire="c"/>
+                <path class="flow" data-flow="leg1"/>
+                <path class="flow" data-flow="leg2a"/>
+                <path class="flow" data-flow="leg2b"/>
+              </svg>
+              <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
+              <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
+              <div class="provs" style="padding-bottom: 30px">
+                <span class="pn tw-a"><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
+                <span class="pn tw-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
+                <div class="tw-bar"><span class="tw-s1"></span><span class="tw-s2"></span><span class="tw-cursor"></span></div>
+                <span class="tw-lab" style="left:0">00:00</span>
+                <span class="tw-lab" style="left:32%">08:00</span>
+                <span class="tw-lab" style="right:0">24:00</span>
+              </div>
             </div>
           </div>
         </div>
@@ -401,19 +439,22 @@
           <div class="sh"><span class="tag">quota</span><h3 data-i18n="st4.t">Quota cutover</h3></div>
           <p data-i18n="st4.d">Set spend or request caps per candidate; on hitting a cap traffic moves to the next, and caps reset each period — spend stays in control.</p>
           <div class="diag" data-strategy="quota" aria-hidden="true">
-            <svg class="wires" aria-hidden="true">
-              <path class="wire" data-wire="a"/>
-              <path class="wire" data-wire="b"/>
-              <path class="wire" data-wire="c"/>
-              <path class="flow" data-flow="leg1"/>
-              <path class="flow" data-flow="leg2a"/>
-              <path class="flow" data-flow="leg2b"/>
-            </svg>
-            <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
-            <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
-            <div class="provs">
-              <span class="pn qa-a"><span class="qring-wrap"><svg class="qring" viewBox="0 0 20 20"><circle class="qbg" cx="10" cy="10" r="8"/><circle class="qfg" cx="10" cy="10" r="8" pathLength="100"/></svg></span><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
-              <span class="pn qa-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
+            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            <div class="diag-canvas">
+              <svg class="wires" aria-hidden="true">
+                <path class="wire" data-wire="a"/>
+                <path class="wire" data-wire="b"/>
+                <path class="wire" data-wire="c"/>
+                <path class="flow" data-flow="leg1"/>
+                <path class="flow" data-flow="leg2a"/>
+                <path class="flow" data-flow="leg2b"/>
+              </svg>
+              <span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>agent</span>
+              <div class="hub"><img src="assets/kiwano-logo.svg" alt="" /></div>
+              <div class="provs">
+                <span class="pn qa-a"><span class="qring-wrap"><svg class="qring" viewBox="0 0 20 20"><circle class="qbg" cx="10" cy="10" r="8"/><circle class="qfg" cx="10" cy="10" r="8" pathLength="100"/></svg></span><img src="assets/agent-logos/deepseek.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;A&lt;/span&gt;'">DeepSeek</span>
+                <span class="pn qa-b"><img src="assets/agent-logos/glm.svg" alt="" onerror="this.outerHTML='&lt;span class=&quot;plogo-fallback&quot;&gt;B&lt;/span&gt;'">GLM</span>
+              </div>
             </div>
           </div>
         </div>

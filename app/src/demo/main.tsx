@@ -19,6 +19,8 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "../index.css";
 import App from "../App";
+import { resolveLocale, setLocale } from "../i18n";
+import { settings } from "../api/dev/settings";
 import { useDemoDataset } from "./dataset";
 import { setPaused, startSimulation } from "./simulate";
 
@@ -26,9 +28,30 @@ import { setPaused, startSimulation } from "./simulate";
 // for — the demo frame is that window, not a responsive impression of it.
 document.documentElement.dataset.demo = "true";
 
+/** Adopt the framing page's language.
+ *
+ * The real app decides its own — a settings preference that defaults to the
+ * browser's — which is right for someone who installed it and wrong for a
+ * demo framed by a page that has its own language switch: an English page
+ * could be showing a Chinese demo, or the reverse.
+ *
+ * Two ways in, because the visitor can switch at two different times: the
+ * query string, for a demo created after they chose (the usual case — the
+ * header is at the top, the frame loads further down), and a message, for a
+ * switch made while the demo is already running. Both land on the same two
+ * things: the fixture, so the app's Settings screen agrees with its own UI,
+ * and the i18n runtime, which is what repaints. */
+function adoptLanguage(pref: unknown) {
+  if (pref !== "en" && pref !== "zh-CN") return;
+  settings.language = pref;
+  setLocale(resolveLocale(pref));
+}
+
 // The dataset first: the screens must mount against the trimmed fixture, not
-// re-render into it a frame later.
+// re-render into it a frame later — and before the first paint, so nothing
+// flashes in the browser's language on its way to the page's.
 useDemoDataset();
+adoptLanguage(new URLSearchParams(window.location.search).get("lang"));
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -40,8 +63,10 @@ startSimulation();
 
 // The landing page frames this page, so it is also the one that knows whether
 // anyone is looking at it: it posts as the frame enters and leaves the viewport.
+// Each field is applied only when present — the two are sent independently.
 window.addEventListener("message", (e) => {
   if (e.origin !== window.location.origin) return;
   if (e.data?.type !== "kiwano-demo") return;
-  setPaused(!e.data.visible);
+  if (typeof e.data.visible === "boolean") setPaused(!e.data.visible);
+  if (typeof e.data.lang === "string") adoptLanguage(e.data.lang);
 });

@@ -44,6 +44,18 @@ function applyLang(lang: "en" | "zh") {
   // 文档链接跟随语言:zh 文档在 /docs/zh-CN/(FAQ 答案里的链接在字典里自带 href)
   document.getElementById("docsLink")!.href = lang === "zh" ? "/docs/zh-CN/" : "/docs/";
   localStorage.setItem("kiwano.lang", lang);
+  // 演示里跑的是真应用,它有自己的一套语言(设置里的 `language`,默认跟随浏览器)
+  // —— 于是英文页面上可能嵌着一个中文演示。页面这一侧是权威:语言一变就告诉
+  // 它一声,它按同一门语言重画。(iframe 还没建时这里什么也不会发生,那种情况
+  // 由 loadDemo 在 src 上带 ?lang= 处理。)
+  document
+    .querySelector<HTMLIFrameElement>(".shot-live-host iframe")
+    ?.contentWindow?.postMessage({ type: "kiwano-demo", lang: siteLang() }, window.location.origin);
+}
+
+/** 页面当前的语言,取值和写进 <html lang> 的那一个。 */
+function siteLang(): "en" | "zh-CN" {
+  return document.documentElement.lang === "zh-CN" ? "zh-CN" : "en";
 }
 
 // 恢复上次选择(默认英文,即模板原文)
@@ -279,7 +291,9 @@ if (liveHost && window.matchMedia(`(min-width: ${LIVE_DEMO_MIN_WIDTH}px)`).match
     // 不加 sandbox:它会把 iframe 变成独立源,而 ES 模块与样式表在同源策略下
     // 加载,独立源里会被 CORS 直接挡掉(实测:整个演示白屏)。内容是我们自己
     // 的静态页面,与父页同源,本来就没有需要隔离的第三方代码。
-    frame.src = liveHost.dataset.demoSrc!;
+    // 语言随 src 一起进去:访客多半先在顶部切好语言再滚下来,那时演示还没建,
+    // postMessage 那条路是空的。
+    frame.src = `${liveHost.dataset.demoSrc}?lang=${siteLang()}`;
     // 换上去的时机不能只听 `load`。iframe 里只要有一个外部脚本永远不返回,
     // 它的 load 事件就永远不触发——Cloudflare 在边缘注入的
     // static.cloudflareinsights.com 信标正是这种脚本,而从中国大陆访问它会

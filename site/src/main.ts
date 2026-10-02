@@ -50,11 +50,11 @@ function applyLang(next: Locale) {
       el.title = v;
     }
   });
-  // 切换器上的图标画的是**按下去会去哪一门**,不是当前语言 —— 这是个动作按钮,
-  // 旗子就是它的宾语(原实现的注释与行为都是如此,泛化时别弄反)。emoji 旗在
-  // Windows 上不渲染,所以是内联 SVG。
-  const target = LOCALE_IDS[(LOCALE_IDS.indexOf(locale) + 1) % LOCALE_IDS.length];
-  document.getElementById("langFlag")!.setAttribute("href", LOCALES[target].flag);
+  // 切换器菜单里把当前这门标出来。菜单本身由 loc 一次生成(buildLangMenu),
+  // 这里只负责挪动那个"选中"的记号。
+  for (const item of document.querySelectorAll<HTMLElement>("[data-locale]")) {
+    item.setAttribute("aria-current", item.dataset.locale === next ? "true" : "false");
+  }
   // 文档链接跟随语言:中文文档在 /docs/zh-Hans/,没有翻译文档的语言指回 /docs/
   // (FAQ 答案里的链接在字典里自带 href)。
   document.getElementById("docsLink")!.setAttribute("href", meta.docs);
@@ -91,15 +91,51 @@ function tellDemoLang(): void {
 const saved = localStorage.getItem("kiwano.lang");
 if (saved !== null) applyLang(asLocale(saved));
 
-/** 切换器。
- *
- * 两门语言时,一个按钮翻到另一门是最快的(现在就是这一种);再多就得给菜单,
- * 否则要按 N 次才轮到想要的那门 —— 那一步等真加了第三门语言再做,现在只把
- * 选择写成"从表里挑下一门",所以按下去的行为与从前完全一致。 */
-document.getElementById("langBtn")!.addEventListener("click", () => {
-  const i = LOCALE_IDS.indexOf(locale);
-  applyLang(LOCALE_IDS[(i + 1) % LOCALE_IDS.length]);
+// ── 切换器:一个地球按钮 + 一张菜单 ────────────────────────────────────────
+// 菜单项从语言表生成,所以加一门语言不用碰 HTML:表里多一条,菜单里多一行。
+// 每项写该语言自己的名字(English / 简体中文 / 繁體中文 / 日本語)—— 找自己语
+// 言的人认得它,而国旗做不到这一点(语言不是国家)。
+const langBtn = document.getElementById("langBtn")!;
+const langMenu = document.createElement("div");
+langMenu.className = "lang-menu";
+langMenu.setAttribute("role", "menu");
+langMenu.hidden = true;
+for (const id of LOCALE_IDS) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.setAttribute("role", "menuitem");
+  item.dataset.locale = id;
+  item.textContent = LOCALES[id].label;
+  item.addEventListener("click", () => {
+    applyLang(id);
+    setLangMenu(false);
+  });
+  langMenu.appendChild(item);
+}
+langBtn.parentElement!.appendChild(langMenu);
+
+// 开合状态记在这里而不是读回 `hidden`:`hidden` 在 DOM 类型上是
+// `boolean | "until-found"`,读回来再取反既绕又容易被类型挡住。
+let langOpen = false;
+const setLangMenu = (open: boolean) => {
+  langOpen = open;
+  langMenu.hidden = !open;
+  langBtn.setAttribute("aria-expanded", String(open));
+};
+langBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setLangMenu(!langOpen);
 });
+// 点别处、按 Esc 都收起;点菜单内部不关(菜单项自己处理完再关)。
+langMenu.addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("click", () => setLangMenu(false));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") setLangMenu(false);
+});
+// 应用启动时先把当前语言标出来(applyLang 只在切换时才动 aria-current)。
+for (const item of langMenu.querySelectorAll<HTMLElement>("[data-locale]")) {
+  item.setAttribute("aria-current", item.dataset.locale === locale ? "true" : "false");
+}
 
 // 复制按钮:icon 即状态——平时是 copy,落成 check 一拍半再换回。
 // Clipboard API 需要安全上下文;file:// 与旧 webview 走 execCommand 兜底。

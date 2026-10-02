@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>はじめに — Kiwano Docs</title>
+<meta name="description" content="Kiwano はコーディングエージェントと AI プロバイダーの間に位置します。プロバイダーを 一度登録すれば、ローカルゲートウェイが 127.0.0.1 で動き、すべてのエージェントは その 1 つのポートに接続します。本ページでは、インストールから最初の計測対象リクエスト…">
+<link rel="canonical" href="https://kiwano.cc/docs/ja/getting-started/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/getting-started/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/getting-started/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/getting-started/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/getting-started/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/getting-started/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/ja/getting-started/">
+<meta property="og:title" content="はじめに">
+<meta property="og:description" content="Kiwano はコーディングエージェントと AI プロバイダーの間に位置します。プロバイダーを 一度登録すれば、ローカルゲートウェイが 127.0.0.1 で動き、すべてのエージェントは その 1 つのポートに接続します。本ページでは、インストールから最初の計測対象リクエスト…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "はじめに",
+      "item": "https://kiwano.cc/docs/ja/getting-started/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/ja/">Docs</a>
+    <nav><a href="/docs/ja/getting-started/" class="on">はじめに</a>
+<a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>
+<a href="/docs/ja/strategies/">ストラテジーと上限</a>
+<a href="/docs/ja/cli/">kiwano コマンドライン</a></nav>
+  </aside>
+  <main class="content">
+<h1>はじめに</h1>
+<p class="lede">Kiwano はコーディングエージェントと AI プロバイダーの間に位置します。プロバイダーを 一度登録すれば、ローカルゲートウェイが 127.0.0.1 で動き、すべてのエージェントは その 1 つのポートに接続します。本ページでは、インストールから最初の計測対象リクエスト までを説明します。キーがマシンの外に出ることはありません。</p>
+<h2 id="必要">必要なもの</h2>
+<ul>
+<li>プロバイダーの API キー（OpenAI 互換または Anthropic 互換のエンドポイント）。</li>
+<li>インストール済みのコーディングエージェントが 1 つ以上 — Claude Code、Codex、
+Gemini CLI など（組み込みの 26個はすべて
+<a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>に一覧があります）。</li>
+</ul>
+<h2 id="1-起動">1. インストールと起動</h2>
+<p><a href="https://github.com/lightconsen/kiwano/releases/latest">Releases</a> から自分の
+プラットフォーム向けの署名済みビルド（macOS、Windows、Linux）をダウンロードします。
+Homebrew を使っているなら <code>brew install</code> でもかまいません。初回起動で <strong>デーモン</strong>
+——ローカルゲートウェイ——が立ち上がります。デーモンは GUI ウィンドウより長生きし、
+アプリを閉じてもゲートウェイは動き続けます。トレイアイコンが稼働を示します。</p>
+<h2 id="2-登録">2. プロバイダーの登録</h2>
+<p><strong>モデル</strong>のカタログ（Hub カタログ）を開いてベンダーを検索します — DeepSeek、
+Kimi、Zhipu GLM、OpenRouter など。あるいは <strong>アプリ</strong>画面で手動で追加します:</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/shelf.webp" alt="モデルのカタログ:Hub カタログをティア別に整理し、プロトコル・課金・価格を添えたもの"></p>
+<p><em>モデルのカタログ——Hub カタログ。公式・アグリゲーター・サードパーティ・無料枠の
+プロバイダーを、課金と価格つきで示します。</em></p>
+<ol>
+<li><strong>プロバイダーを追加</strong> → 名前、エンドポイント、API キー、そのエンドポイントが話す
+プロトコル（<code>openai</code> または <code>anthropic</code>）。</li>
+<li>任意で、既定のモデル、課金の種類（従量課金、プラン、無制限）と支出上限を設定します。</li>
+<li>保存します。何かがそのプロバイダーに対して計測された時点で、行にヘルスが表示されます。</li>
+</ol>
+<p>キーは所有者限定のローカルデータベースに保存されます。データは、あなたが指定した
+エンドポイント以外のどこにも送信されません。</p>
+<h2 id="3-引-継">3. エージェントの引き継ぎ</h2>
+<p><strong>アプリ</strong>画面では、対応しているエージェントがそれぞれ 1 枚のカードです:</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/apps.webp" alt="アプリ画面:プロバイダー一覧に紐付いたエージェント、使用量とクォータ、状態"></p>
+<p><em>アプリ画面——プロバイダーと、そこに紐付いたエージェント。使用量・クォータ・
+ヘルスは行に表示されます。</em></p>
+<ul>
+<li>そのエージェントがすでにプロバイダーを設定済みなら、<strong>Kiwano を有効にする</strong>が
+その取り込みを提案します — 初日から上流はそのままで、経路だけがゲートウェイ経由
+（そして計測対象）になります。</li>
+<li>引き継ぎスイッチは、エージェント自身の設定ファイルを書き換えてゲートウェイを
+指させます。元のファイルは先にバックアップされ、引き継ぎを切るとバイト単位で
+復元されます。エージェントの設定の他の部分は一切変わりません。</li>
+</ul>
+<p>エージェントごとに何が書き換わるか、特殊な挙動を持つ少数のエージェントについては
+<a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>の表を参照してください。</p>
+<h2 id="4-動作確認">4. 動作確認</h2>
+<p>エージェントからプロンプトを送り（<code>claude &quot;hi&quot;</code>、あるいは普段使うプロンプトで）、
+Kiwano の<strong>リクエストログ</strong>を開きます。リクエストが、その帰属（どのプロバイダーが
+処理したか）、トークン、レイテンシ、推定コストとともに表示されるはずです。
+ダッシュボードは同じ行をプロバイダー別、エージェント別、日別に集計します。</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/costs.webp" alt="ダッシュボード:統計タイル、使用量の推移、プロバイダー別・エージェント別の帰属、リクエストログ"></p>
+<p><em>ダッシュボード——7日間の推移をプロバイダー別・エージェント別に帰属。下のログ行は
+展開すると 1 件のリクエスト全体を表示します。</em></p>
+<h2 id="5-複数">5. 複数プロバイダーのルーティング</h2>
+<p>1 エージェントに 1 プロバイダーが <code>single</code> ストラテジーです。エージェントのルートに
+候補を複数バインドし、ストラテジー — <code>failover</code>、<code>roundrobin</code>、<code>timewindow</code>、
+<code>quota</code>、<code>least-busy</code> — と、エージェントごとの支出上限を選びます。
+<a href="/docs/ja/strategies/">ストラテジー</a>を参照してください。</p>
+<h2 id="保存場所">データの保存場所</h2>
+<table>
+<thead>
+<tr>
+<th>内容</th>
+<th>場所</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>プロバイダー、ルート、使用量、バックアップ</td>
+<td>ローカル SQLite（所有者限定）。デーモン経由で読み書き</td>
+</tr>
+<tr>
+<td>エージェントの設定</td>
+<td>各エージェント自身の <code>$HOME</code> 配下のファイル——引き継ぎの表を参照</td>
+</tr>
+<tr>
+<td>リクエストログと本文</td>
+<td>ローカル。保存期間は設定で変更可能</td>
+</tr>
+</tbody></table>
+<h2 id="無効化">アンインストール / 無効化</h2>
+<p>エージェントごとに引き継ぎを切る（設定はバックアップから復元されます）か、
+プロバイダーを削除します（次の候補が自動的に昇格します）。デーモンはトレイから
+停止できます。死んだポートを指したままになるエージェントはありません — 外した
+引き継ぎは復元され、バックアップが失われている場合は、ループバック URL ではなく
+エージェント自身の既定に降格します。</p>
+
+<div class="pn-nav">
+<span></span>
+<a class="next" href="/docs/ja/agent-takeover/"><div class="dir">Next →</div><div class="t">エージェントの引き継ぎ</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

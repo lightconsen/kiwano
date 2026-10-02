@@ -25,12 +25,28 @@
     <lastmod>2026-10-02</lastmod>
   </url>
   <url>
+    <loc>https://kiwano.cc/docs/zh-Hant/getting-started/</loc>
+    <lastmod></lastmod>
+  </url>
+  <url>
+    <loc>https://kiwano.cc/docs/ja/getting-started/</loc>
+    <lastmod></lastmod>
+  </url>
+  <url>
     <loc>https://kiwano.cc/docs/agent-takeover/</loc>
     <lastmod>2026-09-29</lastmod>
   </url>
   <url>
     <loc>https://kiwano.cc/docs/zh-Hans/agent-takeover/</loc>
     <lastmod>2026-10-02</lastmod>
+  </url>
+  <url>
+    <loc>https://kiwano.cc/docs/zh-Hant/agent-takeover/</loc>
+    <lastmod></lastmod>
+  </url>
+  <url>
+    <loc>https://kiwano.cc/docs/ja/agent-takeover/</loc>
+    <lastmod></lastmod>
   </url>
   <url>
     <loc>https://kiwano.cc/docs/strategies/</loc>
@@ -41,7 +57,23 @@
     <lastmod>2026-10-02</lastmod>
   </url>
   <url>
+    <loc>https://kiwano.cc/docs/zh-Hant/strategies/</loc>
+    <lastmod></lastmod>
+  </url>
+  <url>
+    <loc>https://kiwano.cc/docs/ja/strategies/</loc>
+    <lastmod></lastmod>
+  </url>
+  <url>
     <loc>https://kiwano.cc/docs/cli/</loc>
     <lastmod>2026-09-20</lastmod>
+  </url>
+  <url>
+    <loc>https://kiwano.cc/docs/zh-Hant/cli/</loc>
+    <lastmod></lastmod>
+  </url>
+  <url>
+    <loc>https://kiwano.cc/docs/ja/cli/</loc>
+    <lastmod></lastmod>
   </url>
 </urlset>

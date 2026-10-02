@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>エージェントの引き継ぎ — Kiwano Docs</title>
+<meta name="description" content="引き継ぎは、エージェントがローカルゲートウェイ経由でルーティングされるようにする 仕組みです。Kiwano は、エージェントの $HOME 配下にあるそのエージェント自身の 設定ファイルを書き換えます。元のファイルは先にバックアップし、引き継ぎを切ると…">
+<link rel="canonical" href="https://kiwano.cc/docs/ja/agent-takeover/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/agent-takeover/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/agent-takeover/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/agent-takeover/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/agent-takeover/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/agent-takeover/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/ja/agent-takeover/">
+<meta property="og:title" content="エージェントの引き継ぎ">
+<meta property="og:description" content="引き継ぎは、エージェントがローカルゲートウェイ経由でルーティングされるようにする 仕組みです。Kiwano は、エージェントの $HOME 配下にあるそのエージェント自身の 設定ファイルを書き換えます。元のファイルは先にバックアップし、引き継ぎを切ると…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "エージェントの引き継ぎ",
+      "item": "https://kiwano.cc/docs/ja/agent-takeover/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/ja/">Docs</a>
+    <nav><a href="/docs/ja/getting-started/">はじめに</a>
+<a href="/docs/ja/agent-takeover/" class="on">エージェントの引き継ぎ</a>
+<a href="/docs/ja/strategies/">ストラテジーと上限</a>
+<a href="/docs/ja/cli/">kiwano コマンドライン</a></nav>
+  </aside>
+  <main class="content">
+<h1>エージェントの引き継ぎ</h1>
+<p class="lede">引き継ぎは、エージェントがローカルゲートウェイ経由でルーティングされるようにする 仕組みです。Kiwano は、エージェントの $HOME 配下にあるそのエージェント自身の 設定ファイルを書き換えます。元のファイルは先にバックアップし、引き継ぎを切ると バイト単位で復元します。プロキシのバイナリは注入せず、環境変数を代わりに export する こともありません — エージェントは普段どおり自分の設定を読み、そこにゲートウェイが あるのを見つけます。</p>
+<p>本ページはエージェントごとのリファレンスです。各引き継ぎが書き込むファイル、その
+モード、知っておくべき挙動をまとめます。エージェントの集合とこれらのパスは一貫性
+テスト（docs の表 ↔ 組み込みレジストリ）で固定されているため、本ページがビルドの
+挙動から黙ってずれることはありません。</p>
+<h2 id="3">3 つのモード</h2>
+<ul>
+<li><strong>追加型</strong> — エージェントの設定がプロバイダー一覧を持つ場合、引き継ぎは
+<code>kiwano-gateway</code> エントリを upsert して選択します。自分のプロバイダーはそのまま
+残ります。</li>
+<li><strong>排他型</strong> — エージェントの設定がプロバイダーのスロット 1 つだけの場合、引き継ぎは
+それを上書きします。復元はあなたのバイトを書き戻します。</li>
+<li><strong>選択中スロットの置き換え</strong>（Cline のみ） — 選択が指すのはプロバイダー id なので、
+引き継ぎは 2 つ目のエントリを足すのではなく、その id が指すスロットを書き換えます。</li>
+</ul>
+<h2 id="一覧">エージェント一覧</h2>
+<table>
+<thead>
+<tr>
+<th>エージェント</th>
+<th>書き換える設定ファイル</th>
+<th>モード</th>
+<th>知っておくべきこと</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>claude</code></td>
+<td><code>~/.claude/settings.json</code></td>
+<td>排他型</td>
+<td><code>CLAUDE_CONFIG_DIR</code> はプロファイル全体を移動させます。</td>
+</tr>
+<tr>
+<td><code>codex</code></td>
+<td><code>~/.codex/config.toml</code> + <code>auth.json</code></td>
+<td>排他型</td>
+<td><code>CODEX_HOME</code> を認識します。両ファイルをまとめて書き換えます。<code>config.toml</code> が無い場合は拒否します — 先に Codex を一度実行してください。</td>
+</tr>
+<tr>
+<td><code>gemini</code></td>
+<td><code>~/.gemini/.env</code></td>
+<td>排他型</td>
+<td>ファイルが無ければ作成します。中のコメントは保持されます。</td>
+</tr>
+<tr>
+<td><code>grokbuild</code></td>
+<td><code>~/.grok/config.toml</code></td>
+<td>排他型</td>
+<td>公式 xAI ログインの設定は拒否します — 先にカスタムモデルを設定してください。</td>
+</tr>
+<tr>
+<td><code>claude-desktop</code></td>
+<td>2 つの <code>claude_desktop_config.json</code> + configLibrary プロファイル + <code>_meta.json</code></td>
+<td>排他型</td>
+<td>macOS のみ。デプロイモードを 3p に切り替え、ゲートウェイのプロファイルを書き込みます。</td>
+</tr>
+<tr>
+<td><code>opencode</code></td>
+<td><code>~/.config/opencode/opencode.json</code></td>
+<td>追加型</td>
+<td>XDG の規則に従います（<code>XDG_CONFIG_HOME</code>）。</td>
+</tr>
+<tr>
+<td><code>openclaw</code></td>
+<td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
+<td>追加型</td>
+<td>カタログファイルが、メイン設定のバリデータでは弾かれるセッション親和のフラグを宣言します。</td>
+</tr>
+<tr>
+<td><code>hermes</code></td>
+<td><code>~/.hermes/config.yaml</code></td>
+<td>追加型</td>
+<td><code>HERMES_HOME</code> を認識します。</td>
+</tr>
+<tr>
+<td><code>pi</code></td>
+<td><code>~/.pi/agent/models.json</code> + <code>settings.json</code></td>
+<td>追加型</td>
+<td>選択は settings ファイルが保持します。</td>
+</tr>
+<tr>
+<td><code>omp</code></td>
+<td><code>~/.omp/agent/config.yml</code> + <code>models.yml</code></td>
+<td>追加型</td>
+<td><code>.yml</code> と <code>.yaml</code> の両方の綴りを認識し、ファイルごとに探査します。プロバイダーエントリはロール選択が指すモデルを宣言し、<code>authHeader: true</code> を付けます — これが無いと omp はプレースホルダーキーを解決はするものの送信しません。旧来の <code>models.json</code> があって YAML が無い間は拒否します。先に YAML を書いてしまうと、omp がそれを二度と移行しなくなるためです。YAML は再シリアライズされます（無効化時にはコメントがバイト単位で復元されます）。</td>
+</tr>
+<tr>
+<td><code>dsh</code></td>
+<td><code>$DSH_HOME/profiles/*/cordis.patch.yml</code> + <code>$DSH_HOME/.env</code></td>
+<td>追加型</td>
+<td><code>DSH_HOME</code> を認識します（既定は <code>~/.dsh</code>）。<code>llm-deepseek</code> 行の <code>baseURL</code> と <code>apiKeyEnv</code> を書き換え（キー自体は <code>.env</code> に入ります）、他の行には触れないので、ユーザーが選んだモデルはそのまま残ります。マシンにまだ dsh &lt; 0.1.5 の <code>config.yaml</code> しか無い場合は拒否します（更新後に dsh を一度実行してください）。また、dsh 自身の <code>settings.yaml</code> がその行のエンドポイントやキーを固定している場合も拒否します — dsh はパッチ一覧より settings を優先して解決するため、引き継ぎでは何もルーティングされません。引き継ぎ後に作成したプロファイルはパッチされません — 引き継ぎをやり直してください。</td>
+</tr>
+<tr>
+<td><code>hanaagent</code></td>
+<td><code>$HANA_HOME/provider-catalog.json</code> + <code>$HANA_HOME/agents/*/config.yaml</code></td>
+<td>追加型</td>
+<td><code>HANA_HOME</code> を認識します（既定は <code>~/.hanako</code>）。カタログのエントリがエンドポイントを持ち、各エージェントが選ぶモデル id を宣言します。各エージェントの <code>api.provider</code> はそこを指し、モデルはそのままです。すべてのエージェント（ペルソナ）を書き換えるので、どれも実際の上流には残りません。HanaAgent が一度動くまでは拒否します — カタログはそれ以降にしか存在せず、<code>added-models.yaml</code> からの自身の移行を追い越してはならないためです。カタログの <code>deletedProviders</code> に載っている id はそこから外されます。さもないとアプリがそのエントリを隠してしまいます。</td>
+</tr>
+<tr>
+<td><code>commandcode</code></td>
+<td><code>~/.commandcode/settings.json</code> + <code>providers.json</code> + <code>kiwano-gateway.key</code></td>
+<td>追加型</td>
+<td>キーは Kiwano のキーファイルを読む <code>!</code> コマンド参照です — Command Code は貼り付けた生のシークレットを拒否し、キーの無いエントリは 401 で返されます。ゲートウェイ経由のモデルでも、Command Code は独自のサインイン（<code>cmd login</code>）を要求します。</td>
+</tr>
+<tr>
+<td><code>workbuddy</code></td>
+<td><code>~/.workbuddy/models.json</code></td>
+<td>追加型</td>
+<td><code>WORKBUDDY_CONFIG_DIR</code> を認識します。</td>
+</tr>
+<tr>
+<td><code>codebuddy</code></td>
+<td><code>~/.codebuddy/models.json</code></td>
+<td>追加型</td>
+<td><code>CODEBUDDY_CONFIG_DIR</code> を認識します。</td>
+</tr>
+<tr>
+<td><code>kimi</code></td>
+<td><code>~/.kimi-code/config.toml</code></td>
+<td>追加型</td>
+<td><code>KIMI_CODE_HOME</code> を認識します。後継版が無い場合は旧来の <code>~/.kimi</code> を読みます。</td>
+</tr>
+<tr>
+<td><code>qwen</code></td>
+<td><code>~/.qwen/settings.json</code></td>
+<td>追加型</td>
+<td><code>QWEN_HOME</code> を認識します。</td>
+</tr>
+<tr>
+<td><code>cline</code></td>
+<td><code>~/.cline/data/settings/providers.json</code></td>
+<td>選択中スロットの置き換え</td>
+<td><code>CLINE_PROVIDER_SETTINGS_PATH</code> / <code>CLINE_DATA_DIR</code> / <code>CLINE_DIR</code> をこの順で認識します。</td>
+</tr>
+<tr>
+<td><code>mimo</code></td>
+<td><code>~/.config/mimocode/mimocode.jsonc</code></td>
+<td>追加型</td>
+<td>XDG の規則に従います。</td>
+</tr>
+<tr>
+<td><code>mcode</code></td>
+<td><code>~/.minimax/config.yaml</code></td>
+<td>追加型</td>
+<td><code>MCODE_CONFIG_DIR</code> を認識します。</td>
+</tr>
+<tr>
+<td><code>aider</code></td>
+<td><code>~/.aider.conf.yml</code></td>
+<td>排他型</td>
+<td>プロバイダー一覧ではなく 3 つのグローバルフィールドです。モデルには <code>openai/</code> を付けて LiteLLM の OpenAI 互換ルートを強制します。モデル id 自体はそのまま上流に届きます。<code>AIDER_CONFIG</code> は意図的に認識しません。</td>
+</tr>
+<tr>
+<td><code>continue</code></td>
+<td><code>~/.continue/config.yaml</code></td>
+<td>追加型</td>
+<td>ゲートウェイのモデルは <code>roles: [chat]</code> を付けて <code>models</code> の先頭に挿入されます — Continue のドキュメント上の既定は「そのロールの最初のモデル」です。</td>
+</tr>
+<tr>
+<td><code>crush</code></td>
+<td><code>~/.config/crush/crush.json</code></td>
+<td>追加型</td>
+<td>自身の <code>model large</code> コマンドが永続化する <code>models.large</code> スロットを埋めます。<code>small</code> スロットには触れません。</td>
+</tr>
+<tr>
+<td><code>droid</code></td>
+<td><code>~/.factory/settings.json</code></td>
+<td>追加型</td>
+<td><code>customModels</code> の先頭にエントリを追加し、既定の <code>model</code> を設定します。組織ポリシーが <code>allowCustomModels: false</code> を設定している場合は拒否します。</td>
+</tr>
+<tr>
+<td><code>goose</code></td>
+<td><code>&lt;goose config root&gt;/config.yaml</code> + <code>custom_providers/kiwano-gateway.json</code> + <code>kiwano-gateway.key</code></td>
+<td>追加型</td>
+<td>macOS のルートは <code>~/Library/Application Support/Block/goose</code> です（<code>~/.config/goose</code> ではありません）。Linux は XDG に従います。キーはプロバイダーの <code>auth.command</code>（キーファイルの <code>/bin/cat</code>）を通って goose に届きます。goose のキーチェーンベースのシークレットストアはファイルから読めないためです。初回引き継ぎの取り込み: なし — キーはキーチェーンにあります。</td>
+</tr>
+<tr>
+<td><code>zcode</code></td>
+<td><code>~/.zcode/v2/provider_config.json</code></td>
+<td>追加型</td>
+<td>ZCode CLI と Desktop が共有するネイティブレジストリです — 引き継ぎは両方に影響します。<code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code> を認識し、<code>ZCODE_DATA_BASE_DIR</code> は認識しません。</td>
+</tr>
+</tbody></table>
+<h2 id="環境変数">環境変数</h2>
+<p>引き継ぎはユーザーの<strong>ログインシェル</strong>の環境を通してパスを解決します（GUI アプリは
+rc ファイルが export した内容をそもそも見られません）。<em>相対</em>パスが設定されている
+変数は、推測せず拒否します。</p>
+<p>認識する: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>（opencode、mimo、
+crush、Linux の goose）、<code>HERMES_HOME</code>、<code>WORKBUDDY_CONFIG_DIR</code>、
+<code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>（および旧来の
+<code>KIMI_SHARE_DIR</code>）、<code>CLINE_PROVIDER_SETTINGS_PATH</code>、<code>CLINE_DATA_DIR</code>、
+<code>CLINE_DIR</code>、<code>MCODE_CONFIG_DIR</code>、<code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>。</p>
+<p>意図的に認識しない: <code>AIDER_CONFIG</code>（aider v1.24 は読み込み時に読まない）、
+<code>GOOSE_PATH_ROOT</code> と <code>ZCODE_DATA_BASE_DIR</code>（ツリー全体を移すと、引き継ぎが
+まとめて書き込むファイルが分断される）、<code>OPENCODE_CONFIG</code> / <code>OPENCODE_CONFIG_DIR</code>
+と OpenClaw の状態オーバーライド（引き継ぎが書き込むべきファイルを動かさない）。</p>
+<h2 id="初回引-継-取-込">初回引き継ぎの取り込み</h2>
+<p>エージェントにすでにカスタムエンドポイントが設定されている場合、引き継ぎを有効に
+するとその取り込みを提案します。同じ base URL とキーが、そのエージェントに紐付いた
+プロバイダーとして登録され、初日から同じ上流がルーティングされます。取り込みは
+ループバックのエンドポイント（引き継ぎ後のゲートウェイ自身）を二度取り込むことは
+なく、平文のキーが存在しない場所からは何も読み出しません — 公式プランのログイン
+（Claude OAuth、Codex ChatGPT）と goose のキーチェーンからは何も取り出せないため、
+オンボーディングガイドは手動入力を促します。</p>
+<h2 id="復元-意味">復元の意味</h2>
+<p>引き継ぎを切ると、バックアップした元のファイルがバイト単位で書き戻されます
+（引き継ぎが作成したファイルは削除されます）。バックアップが失われている場合 —
+またはバックアップが、設定がすでに Kiwano のものだった時点で取得されていた場合 — は、
+ゲートウェイがそのエージェントに提供しているプロバイダーを基にルートを再構築します。
+それもできない場合は、Kiwano のルートを稼働中の設定から取り除き、誰も listen して
+いないループバックポートを指したままになるエージェントが生じないようにします。
+取り除きは外科手術的で、Kiwano に属する行や値だけを削除します。</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/ja/getting-started/"><div class="dir">← Previous</div><div class="t">はじめに</div></a>
+<a class="next" href="/docs/ja/strategies/"><div class="dir">Next →</div><div class="t">ストラテジーと上限</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

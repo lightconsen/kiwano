@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-Hans">
+<html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent 接管 — Kiwano Docs</title>
-<meta name="description" content="接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。">
-<link rel="canonical" href="https://kiwano.cc/docs/zh-Hans/agent-takeover/">
+<meta name="description" content="接管是讓 Agent 走本機閘道的方式:Kiwano 改寫 Agent 自己在其 $HOME 下的設定檔,改寫前先備份,關閉接管時按位元組還原。不注入代理二進位檔,不 替你匯出環境變數——Agent 照常讀自己的設定,發現閘道就在那裡。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-Hant/agent-takeover/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/agent-takeover/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/agent-takeover/">
 <link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/agent-takeover/">
@@ -13,14 +13,14 @@
 <link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/agent-takeover/">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://kiwano.cc/docs/zh-Hans/agent-takeover/">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-Hant/agent-takeover/">
 <meta property="og:title" content="Agent 接管">
-<meta property="og:description" content="接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。">
+<meta property="og:description" content="接管是讓 Agent 走本機閘道的方式:Kiwano 改寫 Agent 自己在其 $HOME 下的設定檔,改寫前先備份,關閉接管時按位元組還原。不注入代理二進位檔,不 替你匯出環境變數——Agent 照常讀自己的設定,發現閘道就在那裡。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="zh_CN">
+<meta property="og:locale" content="zh_TW">
 <meta property="og:locale:alternate" content="en_US">
-<meta property="og:locale:alternate" content="zh_TW">
+<meta property="og:locale:alternate" content="zh_CN">
 <meta property="og:locale:alternate" content="ja_JP">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
@@ -135,7 +135,7 @@ code, pre { font-family: var(--font-mono); }
       "@type": "ListItem",
       "position": 3,
       "name": "Agent 接管",
-      "item": "https://kiwano.cc/docs/zh-Hans/agent-takeover/"
+      "item": "https://kiwano.cc/docs/zh-Hant/agent-takeover/"
     }
   ]
 }
@@ -152,33 +152,33 @@ code, pre { font-family: var(--font-mono); }
 </div></div>
 <div class="doc">
   <aside class="side">
-    <a class="crumb" href="/docs/zh-Hans/">Docs</a>
-    <nav><a href="/docs/zh-Hans/getting-started/">快速上手</a>
-<a href="/docs/zh-Hans/agent-takeover/" class="on">Agent 接管</a>
-<a href="/docs/zh-Hans/strategies/">策略与限额</a>
-<a href="/docs/cli/">The kiwano command line</a></nav>
+    <a class="crumb" href="/docs/zh-Hant/">Docs</a>
+    <nav><a href="/docs/zh-Hant/getting-started/">快速上手</a>
+<a href="/docs/zh-Hant/agent-takeover/" class="on">Agent 接管</a>
+<a href="/docs/zh-Hant/strategies/">策略與限額</a>
+<a href="/docs/zh-Hant/cli/">kiwano 命令列</a></nav>
   </aside>
   <main class="content">
 <h1>Agent 接管</h1>
-<p class="lede">接管是让 Agent 走本地网关的方式:Kiwano 改写 Agent 自己在其 $HOME 下的配置文件,改写前先备份,关闭接管时按字节还原。不注入代理二进制,不替 你导出环境变量——Agent 照常读自己的配置,发现网关就在那里。</p>
-<p>本页是按 Agent 的参考:每个接管写哪些文件、用什么模式、哪些行为值得知道。
-Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册表),本页不会
-与某个构建的行为悄悄漂移。</p>
-<h2 id="三种模式">三种模式</h2>
+<p class="lede">接管是讓 Agent 走本機閘道的方式:Kiwano 改寫 Agent 自己在其 $HOME 下的設定檔,改寫前先備份,關閉接管時按位元組還原。不注入代理二進位檔,不 替你匯出環境變數——Agent 照常讀自己的設定,發現閘道就在那裡。</p>
+<p>本頁是按 Agent 的參考:每個接管寫哪些檔案、用什麼模式、哪些行為值得知道。
+Agent 集合與這些路徑由一致性測試釘住(docs 表格 ↔ 內建登錄表),本頁不會
+與某個建置的行為悄悄漂移。</p>
+<h2 id="三種模式">三種模式</h2>
 <ul>
-<li><strong>Additive(增量)</strong>——Agent 配置里是供应商列表;接管 upsert 一条
-<code>kiwano-gateway</code> 条目并选中它。你自己的供应商原样保留。</li>
-<li><strong>Exclusive(独占)</strong>——配置就是一个供应商槽位;接管直接改写。还原时
-把你的字节放回去。</li>
-<li><strong>替换选中槽位</strong>(仅 Cline)——其选择器指向一个供应商 id,接管改写的
-是该 id 指向的槽位,而不是在旁边加第二条。</li>
+<li><strong>Additive(增補)</strong>——Agent 設定裡是供應商清單;接管 upsert 一條
+<code>kiwano-gateway</code> 條目並選中它。你自己的供應商原樣保留。</li>
+<li><strong>Exclusive(獨佔)</strong>——設定就是一個供應商槽位;接管直接改寫。還原時
+把你的位元組放回去。</li>
+<li><strong>取代選中的槽位</strong>(僅 Cline)——其選擇器指向一個供應商 id,接管改寫的
+是該 id 指向的槽位,而不是在旁邊加第二條。</li>
 </ul>
-<h2 id="agent-一览">Agent 一览</h2>
+<h2 id="agent-一覽">Agent 一覽</h2>
 <table>
 <thead>
 <tr>
 <th>Agent</th>
-<th>被改写的配置</th>
+<th>被改寫的設定檔</th>
 <th>模式</th>
 <th>值得知道</th>
 </tr>
@@ -186,188 +186,188 @@ Agent 集合与这些路径由一致性测试钉住(docs 表格 ↔ 内置注册
 <tbody><tr>
 <td><code>claude</code></td>
 <td><code>~/.claude/settings.json</code></td>
-<td>独占</td>
-<td><code>CLAUDE_CONFIG_DIR</code> 会搬动整个 profile。</td>
+<td>獨佔</td>
+<td><code>CLAUDE_CONFIG_DIR</code> 會搬動整個 profile。</td>
 </tr>
 <tr>
 <td><code>codex</code></td>
 <td><code>~/.codex/config.toml</code> + <code>auth.json</code></td>
-<td>独占</td>
-<td>认 <code>CODEX_HOME</code>。两文件一起改写;<code>config.toml</code> 缺失时拒绝——先跑一次 Codex。</td>
+<td>獨佔</td>
+<td>認 <code>CODEX_HOME</code>。兩個檔案一起改寫;<code>config.toml</code> 缺失時拒絕——先跑一次 Codex。</td>
 </tr>
 <tr>
 <td><code>gemini</code></td>
 <td><code>~/.gemini/.env</code></td>
-<td>独占</td>
-<td>文件缺失会创建;其中的注释保留。</td>
+<td>獨佔</td>
+<td>檔案缺失時會建立;其中的註解保留。</td>
 </tr>
 <tr>
 <td><code>grokbuild</code></td>
 <td><code>~/.grok/config.toml</code></td>
-<td>独占</td>
-<td>拒绝官方 xAI 登录的配置——先配好自定义模型。</td>
+<td>獨佔</td>
+<td>拒絕官方 xAI 登入的設定——先設好自訂模型。</td>
 </tr>
 <tr>
 <td><code>claude-desktop</code></td>
-<td>两份 <code>claude_desktop_config.json</code> + configLibrary profile + <code>_meta.json</code></td>
-<td>独占</td>
-<td>仅 macOS;把部署模式切到 3p 并写入网关 profile。</td>
+<td>兩份 <code>claude_desktop_config.json</code> + configLibrary profile + <code>_meta.json</code></td>
+<td>獨佔</td>
+<td>僅 macOS;把部署模式切到 3p 並寫入閘道 profile。</td>
 </tr>
 <tr>
 <td><code>opencode</code></td>
 <td><code>~/.config/opencode/opencode.json</code></td>
-<td>增量</td>
-<td>走 XDG 规则(<code>XDG_CONFIG_HOME</code>)。</td>
+<td>增補</td>
+<td>走 XDG 規則(<code>XDG_CONFIG_HOME</code>)。</td>
 </tr>
 <tr>
 <td><code>openclaw</code></td>
 <td><code>~/.openclaw/openclaw.json</code> + <code>agents/&lt;id&gt;/agent/models.json</code></td>
-<td>增量</td>
-<td>目录文件承载主配置校验器不接受的会话亲和标志。</td>
+<td>增補</td>
+<td>目錄檔承載主設定驗證器不接受的工作階段親和旗標。</td>
 </tr>
 <tr>
 <td><code>hermes</code></td>
 <td><code>~/.hermes/config.yaml</code></td>
-<td>增量</td>
-<td>认 <code>HERMES_HOME</code>。</td>
+<td>增補</td>
+<td>認 <code>HERMES_HOME</code>。</td>
 </tr>
 <tr>
 <td><code>pi</code></td>
 <td><code>~/.pi/agent/models.json</code> + <code>settings.json</code></td>
-<td>增量</td>
-<td>选择写在 settings 里。</td>
+<td>增補</td>
+<td>選擇寫在 settings 裡。</td>
 </tr>
 <tr>
 <td><code>omp</code></td>
 <td><code>~/.omp/agent/config.yml</code> + <code>models.yml</code></td>
-<td>增量</td>
-<td><code>.yml</code> 与 <code>.yaml</code> 两种拼写都认,逐文件探测。供应商条目声明角色选择里命名的模型,并带 <code>authHeader: true</code>——没有它 omp 会解析出占位 key 却不发送。当存在旧版 <code>models.json</code> 且没有 YAML 时拒绝:先写 YAML 会让 omp 永远不再迁移它。YAML 会重排版(关闭接管时逐字节还原)。</td>
+<td>增補</td>
+<td><code>.yml</code> 與 <code>.yaml</code> 兩種拼法都認,逐檔偵測。供應商條目宣告角色選擇裡命名的模型,並帶 <code>authHeader: true</code>——沒有它 omp 會解析出佔位 Key 卻不送出。當存在舊版 <code>models.json</code> 且沒有 YAML 時拒絕:先寫 YAML 會讓 omp 永遠不再移轉它。YAML 會重新序列化(關閉接管時逐位元組還原)。</td>
 </tr>
 <tr>
 <td><code>dsh</code></td>
 <td><code>$DSH_HOME/profiles/*/cordis.patch.yml</code> + <code>$DSH_HOME/.env</code></td>
-<td>增量</td>
-<td>认 <code>DSH_HOME</code>(默认 <code>~/.dsh</code>)。改写 <code>llm-deepseek</code> 那一行的 <code>baseURL</code> 与 <code>apiKeyEnv</code>——key 本身写在 <code>.env</code> 里——其余行一律不动,用户选定的模型仍是他的。两种情形拒绝:机器上只有 dsh &lt; 0.1.5 的 <code>config.yaml</code>(升级后先跑一次 dsh);dsh 自己的 <code>settings.yaml</code> 为那一行钉了端点或密钥——dsh 按请求用 settings 覆盖补丁列表,那样接管会什么都没路由。接管之后新建的 profile 不会被补,重跑一次接管即可。</td>
+<td>增補</td>
+<td>認 <code>DSH_HOME</code>(預設 <code>~/.dsh</code>)。改寫 <code>llm-deepseek</code> 那一列的 <code>baseURL</code> 與 <code>apiKeyEnv</code>——Key 本身寫在 <code>.env</code> 裡——其餘列一律不動,使用者選定的模型仍是他的。兩種情形拒絕:機器上只有 dsh &lt; 0.1.5 的 <code>config.yaml</code>(更新後先跑一次 dsh);dsh 自己的 <code>settings.yaml</code> 為那一列釘了端點或金鑰——dsh 解析時以 settings 覆蓋補丁清單,那樣接管會什麼都路由不到。接管之後新建的 profile 不會被補,重跑一次接管即可。</td>
 </tr>
 <tr>
 <td><code>hanaagent</code></td>
 <td><code>$HANA_HOME/provider-catalog.json</code> + <code>$HANA_HOME/agents/*/config.yaml</code></td>
-<td>增量</td>
-<td>认 <code>HANA_HOME</code>(默认 <code>~/.hanako</code>)。目录文件承载端点,并声明各 agent 选用的模型 id;每个 agent 的 <code>api.provider</code> 指向它,模型选择不动。所有 agent(人格)都会被改写,不会有谁还留在真实上游。HanaAgent 跑过一次之前拒绝——目录文件从那时才存在,而且不能抢在它自己从 <code>added-models.yaml</code> 迁移之前。目录里 <code>deletedProviders</code> 名单上的本 id 会被摘掉,否则应用会把这条藏起来。</td>
+<td>增補</td>
+<td>認 <code>HANA_HOME</code>(預設 <code>~/.hanako</code>)。目錄條目承載端點,並宣告各 agent 選用的模型 id;每個 agent 的 <code>api.provider</code> 指向它,模型選擇不動。所有 agent(人格)都會被改寫,不會有誰還留在真實上游。HanaAgent 跑過一次之前拒絕——目錄從那時才存在,而且不能搶在它自己從 <code>added-models.yaml</code> 移轉之前。目錄裡 <code>deletedProviders</code> 名單上的本 id 會被摘掉,否則應用程式會把這條藏起來。</td>
 </tr>
 <tr>
 <td><code>commandcode</code></td>
 <td><code>~/.commandcode/settings.json</code> + <code>providers.json</code> + <code>kiwano-gateway.key</code></td>
-<td>增量</td>
-<td>key 是 <code>!</code> 命令引用,读取 Kiwano 自己的 key 文件——Command Code 拒收直接粘贴的明文密钥,而无 key 的条目会被网关 401。即使走网关,Command Code 仍要求它自己的登录(<code>cmd login</code>)。</td>
+<td>增補</td>
+<td>Key 是 <code>!</code> 命令參考,讀取 Kiwano 自己的 Key 檔——Command Code 拒收直接貼上的明文密鑰,而無 Key 的條目會被閘道以 401 回覆。即使走閘道,Command Code 仍要求它自己的登入(<code>cmd login</code>)。</td>
 </tr>
 <tr>
 <td><code>workbuddy</code></td>
 <td><code>~/.workbuddy/models.json</code></td>
-<td>增量</td>
-<td>认 <code>WORKBUDDY_CONFIG_DIR</code>。</td>
+<td>增補</td>
+<td>認 <code>WORKBUDDY_CONFIG_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>codebuddy</code></td>
 <td><code>~/.codebuddy/models.json</code></td>
-<td>增量</td>
-<td>认 <code>CODEBUDDY_CONFIG_DIR</code>。</td>
+<td>增補</td>
+<td>認 <code>CODEBUDDY_CONFIG_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>kimi</code></td>
 <td><code>~/.kimi-code/config.toml</code></td>
-<td>增量</td>
-<td>认 <code>KIMI_CODE_HOME</code>;后继版缺席时读旧版 <code>~/.kimi</code>。</td>
+<td>增補</td>
+<td>認 <code>KIMI_CODE_HOME</code>;後繼版本缺席時讀舊版 <code>~/.kimi</code>。</td>
 </tr>
 <tr>
 <td><code>qwen</code></td>
 <td><code>~/.qwen/settings.json</code></td>
-<td>增量</td>
-<td>认 <code>QWEN_HOME</code>。</td>
+<td>增補</td>
+<td>認 <code>QWEN_HOME</code>。</td>
 </tr>
 <tr>
 <td><code>cline</code></td>
 <td><code>~/.cline/data/settings/providers.json</code></td>
-<td>替换选中槽位</td>
-<td>依次认 <code>CLINE_PROVIDER_SETTINGS_PATH</code> / <code>CLINE_DATA_DIR</code> / <code>CLINE_DIR</code>。</td>
+<td>取代選中的槽位</td>
+<td>依序認 <code>CLINE_PROVIDER_SETTINGS_PATH</code> / <code>CLINE_DATA_DIR</code> / <code>CLINE_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>mimo</code></td>
 <td><code>~/.config/mimocode/mimocode.jsonc</code></td>
-<td>增量</td>
-<td>走 XDG 规则。</td>
+<td>增補</td>
+<td>走 XDG 規則。</td>
 </tr>
 <tr>
 <td><code>mcode</code></td>
 <td><code>~/.minimax/config.yaml</code></td>
-<td>增量</td>
-<td>认 <code>MCODE_CONFIG_DIR</code>。</td>
+<td>增補</td>
+<td>認 <code>MCODE_CONFIG_DIR</code>。</td>
 </tr>
 <tr>
 <td><code>aider</code></td>
 <td><code>~/.aider.conf.yml</code></td>
-<td>独占</td>
-<td>三个全局字段,不是供应商列表。模型加 <code>openai/</code> 前缀强制走 LiteLLM 的 OpenAI 兼容路由;模型 id 本身原样到达上游。<code>AIDER_CONFIG</code> 刻意不认。</td>
+<td>獨佔</td>
+<td>三個全域欄位,不是供應商清單。模型加 <code>openai/</code> 前綴強制走 LiteLLM 的 OpenAI 相容路由;模型 id 本身原樣到達上游。<code>AIDER_CONFIG</code> 刻意不認。</td>
 </tr>
 <tr>
 <td><code>continue</code></td>
 <td><code>~/.continue/config.yaml</code></td>
-<td>增量</td>
-<td>网关模型插到 <code>models</code> 头部并限定 <code>roles: [chat]</code>——Continue 的文档化默认是&quot;该角色的第一个模型&quot;。</td>
+<td>增補</td>
+<td>閘道模型插到 <code>models</code> 開頭並限定 <code>roles: [chat]</code>——Continue 的文件化預設是「該角色的第一個模型」。</td>
 </tr>
 <tr>
 <td><code>crush</code></td>
 <td><code>~/.config/crush/crush.json</code></td>
-<td>增量</td>
-<td>填它自己 <code>model large</code> 命令持久化的 <code>models.large</code> 槽;<code>small</code> 槽不动。</td>
+<td>增補</td>
+<td>填它自己 <code>model large</code> 命令持久化的 <code>models.large</code> 槽;<code>small</code> 槽不動。</td>
 </tr>
 <tr>
 <td><code>droid</code></td>
 <td><code>~/.factory/settings.json</code></td>
-<td>增量</td>
-<td>在 <code>customModels</code> 头部插入条目并设默认 <code>model</code>。组织策略 <code>allowCustomModels: false</code> 时拒绝接管。</td>
+<td>增補</td>
+<td>在 <code>customModels</code> 開頭插入條目並設預設 <code>model</code>。組織政策 <code>allowCustomModels: false</code> 時拒絕接管。</td>
 </tr>
 <tr>
 <td><code>goose</code></td>
-<td><code>&lt;goose 配置根&gt;/config.yaml</code> + <code>custom_providers/kiwano-gateway.json</code> + <code>kiwano-gateway.key</code></td>
-<td>增量</td>
-<td>macOS 根目录是 <code>~/Library/Application Support/Block/goose</code>(不是 <code>~/.config/goose</code>);Linux 走 XDG。key 通过供应商的 <code>auth.command</code>(<code>/bin/cat</code> key 文件)送达,因为 goose 的 keyring 秘密存储不读文件。首次导入:无——key 在 keyring 里。</td>
+<td><code>&lt;goose 設定根&gt;/config.yaml</code> + <code>custom_providers/kiwano-gateway.json</code> + <code>kiwano-gateway.key</code></td>
+<td>增補</td>
+<td>macOS 根目錄是 <code>~/Library/Application Support/Block/goose</code>(不是 <code>~/.config/goose</code>);Linux 走 XDG。Key 透過供應商的 <code>auth.command</code>(<code>/bin/cat</code> Key 檔)送達,因為 goose 的鑰匙圈密鑰儲存不是檔案可及的。首次匯入:無——Key 就在鑰匙圈裡。</td>
 </tr>
 <tr>
 <td><code>zcode</code></td>
 <td><code>~/.zcode/v2/provider_config.json</code></td>
-<td>增量</td>
-<td>ZCode CLI 与 Desktop 共享的原生注册表——接管同时影响两端。认 <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>;不认 <code>ZCODE_DATA_BASE_DIR</code>。</td>
+<td>增補</td>
+<td>ZCode CLI 與 Desktop 共享的原生登錄表——接管同時影響兩端。認 <code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>;不認 <code>ZCODE_DATA_BASE_DIR</code>。</td>
 </tr>
 </tbody></table>
-<h2 id="环境变量">环境变量</h2>
-<p>接管通过用户的<strong>登录 shell</strong>环境解析路径(GUI 应用本来也看不见 rc 文件
-导出的东西)。变量被设成<em>相对</em>路径时直接拒绝,而不是猜。</p>
-<p>认: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、
+<h2 id="環境變數">環境變數</h2>
+<p>接管透過使用者的<strong>登入 shell</strong> 環境解析路徑(GUI 應用程式本來也看不見 rc
+檔匯出的東西)。變數被設成<em>相對</em>路徑時直接拒絕,而不是猜。</p>
+<p>認: <code>CLAUDE_CONFIG_DIR</code>、<code>CODEX_HOME</code>、<code>XDG_CONFIG_HOME</code>(opencode、
 mimo、crush;Linux 上的 goose)、<code>HERMES_HOME</code>、<code>WORKBUDDY_CONFIG_DIR</code>、
-<code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>(及旧版
+<code>CODEBUDDY_CONFIG_DIR</code>、<code>QWEN_HOME</code>、<code>KIMI_CODE_HOME</code>(及舊版
 <code>KIMI_SHARE_DIR</code>)、<code>CLINE_PROVIDER_SETTINGS_PATH</code>、<code>CLINE_DATA_DIR</code>、
 <code>CLINE_DIR</code>、<code>MCODE_CONFIG_DIR</code>、<code>ZCODE_PERSONAL_PROVIDER_CONFIG_FILE</code>。</p>
-<p>刻意不认: <code>AIDER_CONFIG</code>(aider v1.24 加载时不读它)、<code>GOOSE_PATH_ROOT</code>
-和 <code>ZCODE_DATA_BASE_DIR</code>(搬整棵树会把接管要一起写的文件拆散)、
-<code>OPENCODE_CONFIG</code> / <code>OPENCODE_CONFIG_DIR</code> 和 OpenClaw 的状态覆盖(它们
-不会搬走接管要写的那个文件)。</p>
-<h2 id="首次接管的导入">首次接管的导入</h2>
-<p>Agent 已配置过自定义端点时,开启接管会提议导入:同一 base URL 和 key 变成
-一条绑定到该 Agent 的供应商,第一天路由的还是同一个上游。导入永不把
-loopback 端点当成上游(那是接管后的网关自己),也读不出不存在的明文
-key——官方订阅登录(Claude OAuth、Codex ChatGPT)和 goose 的 keyring 什么
-都取不出来,引导改为手动录入。</p>
-<h2 id="还原语义">还原语义</h2>
-<p>关闭接管:备份的原件按字节写回(接管创建的文件被删除)。备份丢失——或
-备份是在配置本已指向我们时抓的——则用网关为该 Agent 服务的供应商重建
-路由;再不行,就把我们的路由从活配置里<strong>剥离</strong>,保证 Agent 不会被留在
-指向无人监听的 loopback 端口。剥离是外科手术式的:只删属于我们的
-行/值。</p>
+<p>刻意不認: <code>AIDER_CONFIG</code>(aider v1.24 載入時不讀它)、<code>GOOSE_PATH_ROOT</code>
+和 <code>ZCODE_DATA_BASE_DIR</code>(搬整棵樹會把接管要一起寫的檔案拆散)、
+<code>OPENCODE_CONFIG</code> / <code>OPENCODE_CONFIG_DIR</code> 和 OpenClaw 的狀態覆寫(它們
+不會搬走接管要寫的那個檔案)。</p>
+<h2 id="首次接管的匯入">首次接管的匯入</h2>
+<p>Agent 已設定過自訂端點時,開啟接管會提議匯入:同一 base URL 和 Key 變成
+一條綁定到該 Agent 的供應商,第一天路由的還是同一個上游。匯入永不把
+loopback 端點當成上游(那是接管後的閘道自己),也讀不出不存在的明文
+Key——官方訂閱登入(Claude OAuth、Codex ChatGPT)和 goose 的鑰匙圈什麼
+都取不出來,引導改為手動輸入。</p>
+<h2 id="還原語意">還原語意</h2>
+<p>關閉接管:備份的原件按位元組寫回(接管建立的檔案被刪除)。備份遺失——
+或備份是在設定本已指向我們時抓的——則用閘道為該 Agent 服務的供應商重建
+路由;再不行,就把我們的路由從現行設定裡<strong>剝離</strong>,保證 Agent 不會被留在
+指向無人監聽的 loopback 連接埠。剝離是外科手術式的:只刪屬於我們的
+列/值。</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/zh-Hans/getting-started/"><div class="dir">← Previous</div><div class="t">快速上手</div></a>
-<a class="next" href="/docs/zh-Hans/strategies/"><div class="dir">Next →</div><div class="t">策略与限额</div></a>
+<a class="prev" href="/docs/zh-Hant/getting-started/"><div class="dir">← Previous</div><div class="t">快速上手</div></a>
+<a class="next" href="/docs/zh-Hant/strategies/"><div class="dir">Next →</div><div class="t">策略與限額</div></a>
 </div>
   </main>
 </div>

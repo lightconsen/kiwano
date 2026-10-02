@@ -41,15 +41,74 @@ const SITE_DOCS = join(ROOT, "site", "docs");
 const GITHUB_BLOB = "https://github.com/lightconsen/kiwano/blob/main";
 const SITE = "https://kiwano.cc";
 
+// The languages the docs are published in, English first — it is the source,
+// the fallback for a page nobody has translated, and the x-default target.
+// Adding a language means adding it here and dropping `<page>.<locale>.md`
+// files beside the English ones: a page translated into one language renders
+// in that language alone, and the others fall back to English for it.
+const LOCALES = ["en", "zh-Hans", "zh-Hant", "ja"];
+
+/** Each language's name, in its own language — the hub and the language
+    switch show these, so a reader looking for 日本語 recognises it whatever
+    the page is currently in. */
+const LOCALE_LABEL = { en: "English", "zh-Hans": "简体中文", "zh-Hant": "繁體中文", ja: "日本語" };
+
+/** `<html lang>` gets the locale id; OG wants a region, so Traditional is
+    `zh_TW` and Japanese `ja_JP`. */
+const LOCALE_TAG = { en: "en", "zh-Hans": "zh-Hans", "zh-Hant": "zh-Hant", ja: "ja" };
+const LOCALE_OG = { en: "en_US", "zh-Hans": "zh_CN", "zh-Hant": "zh_TW", ja: "ja_JP" };
+
+/** `/docs/` for English, `/docs/<locale>/` otherwise. No trailing slash: the
+    caller adds one when it means a directory, and the paths are also used as
+    file paths and canonical URLs, where a doubled slash shows up in the page. */
+const docsPath = (locale, slug = "") =>
+  `/docs${locale === "en" ? "" : `/${locale}`}${slug ? `/${slug}` : ""}`;
+
 // The published set, in sidebar and prev/next order. slugs equal the source
 // file's basename so relative links between docs (`[x](strategies.md)`)
-// rewrite mechanically. `zh` names the zh-Hans source; pages without one are
-// English-only until a translation lands.
+// rewrite mechanically. `translated` names the localized sources: a language
+// absent from it simply has no page here, and its readers get the English one.
 const PAGES = [
-  { slug: "getting-started", file: "getting-started.md", zh: "getting-started.zh-Hans.md" },
-  { slug: "agent-takeover", file: "agent-takeover.md", zh: "agent-takeover.zh-Hans.md" },
-  { slug: "strategies", file: "strategies.md", zh: "strategies.zh-Hans.md" },
-  { slug: "cli", file: "cli.md" },
+  {
+    slug: "getting-started",
+    file: "getting-started.md",
+    translated: {
+      "zh-Hans": "getting-started.zh-Hans.md",
+      "zh-Hant": "getting-started.zh-Hant.md",
+      ja: "getting-started.ja.md",
+    },
+  },
+  {
+    slug: "agent-takeover",
+    file: "agent-takeover.md",
+    translated: {
+      "zh-Hans": "agent-takeover.zh-Hans.md",
+      "zh-Hant": "agent-takeover.zh-Hant.md",
+      ja: "agent-takeover.ja.md",
+    },
+  },
+  {
+    slug: "strategies",
+    file: "strategies.md",
+    translated: {
+      "zh-Hans": "strategies.zh-Hans.md",
+      "zh-Hant": "strategies.zh-Hant.md",
+      ja: "strategies.ja.md",
+    },
+  },
+  {
+    slug: "cli",
+    file: "cli.md",
+    // The command reference: the commands themselves stay English (the CLI
+    // is English-only), but the prose around them translates like any other
+    // page. A language whose file is not on disk simply does not appear here
+    // — the loader checks, so a gap publishes as the English page.
+    translated: {
+      "zh-Hans": "cli.zh-Hans.md",
+      "zh-Hant": "cli.zh-Hant.md",
+      ja: "cli.ja.md",
+    },
+  },
 ];
 
 const require_ = createRequire(import.meta.url);
@@ -70,13 +129,18 @@ function rewriteLinks(md, fromFile, lang) {
     if (target.startsWith("../")) {
       return `](${GITHUB_BLOB}/${target.slice(3)})${anchor ?? ""})`;
     }
-    // A zh source naming its zh sibling (`agent-takeover.zh-Hans.md`) goes to
-    // the zh page outright; any page filename resolves to the canonical
-    // /docs/ URL, upgraded to zh-Hans when the reader is in a zh page and a
-    // zh render exists.
-    const zhPage = PAGES.find((p) => p.zh === target);
-    if (zhPage) {
-      return `](/docs/zh-Hans/${zhPage.slug}/${anchor ?? ""})`;
+    // A translated source naming its sibling in the same language
+    // (`agent-takeover.ja.md`) goes to that page outright; a bare English
+    // filename resolves to the reader's language when the page exists in it,
+    // and to English otherwise — the same fallback the sidebar uses, so a
+    // link and the menu beside it never disagree.
+    const named = PAGES.find((p) => p.translated[lang] === target);
+    if (named) return `](${docsPath(lang, named.slug)}/${anchor ?? ""})`;
+    const other = LOCALES.filter((l) => l !== "en").find((l) =>
+      PAGES.some((p) => p.translated[l] === target));
+    if (other) {
+      const page = PAGES.find((p) => p.translated[other] === target);
+      return `](${docsPath(other, page.slug)}/${anchor ?? ""})`;
     }
     const page = PAGES.find((p) => p.file === target);
     if (!page) {
@@ -84,8 +148,7 @@ function rewriteLinks(md, fromFile, lang) {
         " either publish that page or link its GitHub blob explicitly");
       process.exit(2);
     }
-    const useZh = lang === "zh-Hans" && page.zh;
-    return `](/docs${useZh ? "/zh-Hans" : ""}/${page.slug}/${anchor ?? ""})`;
+    return `](${docsPath(page.docs[lang] ? lang : "en", page.slug)}/${anchor ?? ""})`;
   });
   // Relative assets (the screenshots under docs/screenshots/) serve from the
   // rendered tree, which build-docs copies below.
@@ -270,20 +333,22 @@ function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// Reciprocal hreflang for any page pair published in both languages;
+// Reciprocal hreflang across every language a path is published in;
 // x-default points at the English URL. Hubs and doc pages call it alike.
-function hreflangBlock(enPath, zhPath) {
-  if (!zhPath) return "";
-  return `<link rel="alternate" hreflang="en" href="${SITE}${enPath}/">
-<link rel="alternate" hreflang="zh-Hans" href="${SITE}${zhPath}/">
-<link rel="alternate" hreflang="x-default" href="${SITE}${enPath}/">`;
+// One language alone is not an alternate set — it is just the page.
+function hreflangBlock(paths) {
+  const langs = LOCALES.filter((l) => paths[l]);
+  if (langs.length < 2) return "";
+  const lines = langs.map((l) => `<link rel="alternate" hreflang="${LOCALE_TAG[l]}" href="${SITE}${paths[l]}/">`);
+  lines.push(`<link rel="alternate" hreflang="x-default" href="${SITE}${paths.en}/">`);
+  return lines.join("\n");
 }
 
 function head(doc, alternates, jsonLd) {
-  const locale = doc.lang === "zh-Hans" ? "zh_CN" : "en_US";
-  const alternate = doc.lang === "zh-Hans"
-    ? `\n<meta property="og:locale:alternate" content="en_US">`
-    : "";
+  const locale = LOCALE_OG[doc.lang];
+  const alternate = LOCALES.filter((l) => l !== doc.lang && doc.published.includes(l))
+    .map((l) => `\n<meta property="og:locale:alternate" content="${LOCALE_OG[l]}">`)
+    .join("");
   return `<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(doc.title)} — Kiwano Docs</title>
@@ -307,12 +372,12 @@ ${JSON.stringify(jsonLd, null, 2)}
 </script>`;
 }
 
-// The sidebar walks the page order in the reader's language: the zh render
-// of each page where one exists, the English page otherwise — so a zh
-// reader sees zh titles for the translated pages and is never dead-ended
-// by a page still untranslated.
+// The sidebar walks the page order in the reader's language: that language's
+// render of each page where one exists, the English page otherwise — so a
+// reader sees translated titles for what is translated and is never
+// dead-ended by a page that is not.
 function sidebarSequence(lang) {
-  return PAGES.map((p) => (lang === "zh-Hans" && p.zhDoc ? p.zhDoc : p.en));
+  return PAGES.map((p) => p.docs[lang] ?? p.docs.en);
 }
 
 function chrome(bodyInner, doc) {
@@ -320,7 +385,7 @@ function chrome(bodyInner, doc) {
     .map((d) => `<a href="${d.path}/"${d.path === doc.path ? ' class="on"' : ""}>${esc(d.navTitle)}</a>`)
     .join("\n");
   // The crumb doubles as the way back to this language's hub.
-  const hub = doc.lang === "zh-Hans" ? "/docs/zh-Hans/" : "/docs/";
+  const hub = `${docsPath(doc.lang)}/`;
   return `<div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
@@ -360,11 +425,11 @@ function breadcrumb(doc) {
 // Two passes: metadata first (the sidebar and prev/next of every page name
 // every other page's title), then rendering.
 
-function loadDoc(file, path, lang) {
+function loadDoc(file, path, lang, published) {
   const md = readFileSync(join(DOCS, file), "utf8");
   const { title, para, description, bodyMd } = extractMeta(md);
   return {
-    file, path, lang,
+    file, path, lang, published,
     title,
     // Sidebar, prev/next and the hub show plain text — an inline-code title
     // (`kiwano`) reads with stray backticks once escaped.
@@ -376,14 +441,24 @@ function loadDoc(file, path, lang) {
 }
 
 for (const page of PAGES) {
-  page.en = loadDoc(page.file, `/docs/${page.slug}`, "en");
-  if (page.zh) {
-    page.zhDoc = loadDoc(page.zh, `/docs/zh-Hans/${page.slug}`, "zh-Hans");
+  page.docs = {};
+  // Which languages this page is actually published in: English always, plus
+  // every translation whose file is on disk. Read from the filesystem rather
+  // than assumed from the manifest, so a source that has not landed yet (or
+  // one that was deleted) cannot produce a page with no content behind it.
+  const available = ["en", ...LOCALES.filter((l) => l !== "en" && page.translated[l] && existsSync(join(DOCS, page.translated[l])))];
+  for (const locale of available) {
+    page.docs[locale] = loadDoc(
+      locale === "en" ? page.file : page.translated[locale],
+      docsPath(locale, page.slug),
+      locale,
+      available,
+    );
   }
 }
 
 for (const page of PAGES) {
-  for (const doc of [page.en, page.zhDoc]) {
+  for (const doc of Object.values(page.docs)) {
     if (!doc) continue;
 
     // Prev/next follow the sidebar sequence (the reader's language), so a
@@ -401,7 +476,7 @@ for (const page of PAGES) {
     const html = `<!DOCTYPE html>
 <html lang="${doc.lang}">
 <head>
-${head(doc, page.zhDoc ? hreflangBlock(`/docs/${page.slug}`, `/docs/zh-Hans/${page.slug}`) : "", breadcrumb(doc))}
+${head(doc, hreflangBlock(Object.fromEntries(Object.entries(page.docs).map(([l, d]) => [l, d.path]))), breadcrumb(doc))}
 </head>
 <body>
 ${chrome(`<h1>${marked.parse(doc.title).replace(/<p>|<\/p>\n?$/g, "")}</h1>
@@ -439,42 +514,74 @@ const HUB_CSS = `${CSS}
 .gh-note { margin-top: 26px; font-size: 12.5px; color: oklch(0.48 0.008 260); }
 .gh-note a { color: var(--kiwi); }`;
 
-const HUBS = [
-  {
-    lang: "en",
-    path: "/docs",
+/** Hub copy per language. The title and description are the language's own —
+    a hub is a page a reader is meant to read, not a list of links. */
+const HUB_COPY = {
+  en: {
     title: "Kiwano Docs",
-    description: "Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.",
-    cards: PAGES.map((p) =>
-      `  <a class="card" href="/docs/${p.slug}/"><h2>${esc(p.en.navTitle)}</h2><p>${esc(p.en.description)}</p></a>`),
-    // The en hub surfaces the zh renders by name — discovery for a zh
-    // reader who landed on the English hub.
-    notes: [`  <p class="gh-note">中文文档：
-    ${PAGES.filter((p) => p.zhDoc).map((p) => `<a href="/docs/zh-Hans/${p.slug}/">${esc(p.zhDoc.navTitle)}</a>`).join("\n    · ")}
-  </p>`,
-    `  <p class="gh-note">Design and planning notes (contributor-facing) live in
-  <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>`],
+    description:
+      "Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.",
+    contributor:
+      'Design and planning notes (contributor-facing) live in <a href="' + GITHUB_BLOB + '/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.',
   },
-  {
-    lang: "zh-Hans",
-    path: "/docs/zh-Hans",
+  "zh-Hans": {
     title: "Kiwano 文档",
     description: "安装、Agent 接管、路由策略与完整命令参考——Kiwano 本地网关的中文文档。",
+    contributor:
+      '面向贡献者的设计与规划笔记见 <a href="' + GITHUB_BLOB + '/docs" target="_blank" rel="noopener">GitHub 的 docs/ 目录</a>。',
+  },
+  "zh-Hant": {
+    title: "Kiwano 文件",
+    description: "安裝、Agent 接管、路由策略與完整指令參考——Kiwano 本機閘道的繁體中文文件。",
+    contributor:
+      '面向貢獻者的設計與規劃筆記見 <a href="' + GITHUB_BLOB + '/docs" target="_blank" rel="noopener">GitHub 的 docs/ 目錄</a>。',
+  },
+  ja: {
+    title: "Kiwano ドキュメント",
+    description:
+      "インストール、Agent の引き継ぎ、ルーティングストラテジー、コマンドリファレンス——Kiwano ローカルゲートウェイの日本語ドキュメント。",
+    contributor:
+      '設計・計画のメモ（コントリビューター向け）は <a href="' + GITHUB_BLOB + '/docs" target="_blank" rel="noopener">GitHub の docs/</a> にあります。',
+  },
+};
+
+// One hub per language that has at least one translated page, plus English.
+// A hub lists that language's renders, falling back to the English page where
+// a page is not translated — the same rule the sidebar follows, so the two
+// never disagree about what exists.
+const HUBS = ["en", ...LOCALES.filter((l) => l !== "en" && PAGES.some((p) => p.docs[l]))].map((locale) => {
+  const copy = HUB_COPY[locale];
+  const others = LOCALES.filter((l) => l !== locale && PAGES.some((p) => p.docs[l]));
+  return {
+    lang: locale,
+    path: docsPath(locale),
+    title: copy.title,
+    description: copy.description,
+    locale,
     cards: PAGES.map((p) => {
-      const d = p.zhDoc ?? p.en;
+      const d = p.docs[locale] ?? p.docs.en;
       return `  <a class="card" href="${d.path}/"><h2>${esc(d.navTitle)}</h2><p>${esc(d.description)}</p></a>`;
     }),
-    notes: [`  <p class="gh-note">面向贡献者的设计与规划笔记见
-  <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">GitHub 的 docs/ 目录</a>。</p>`],
-  },
-];
+    notes: [
+      // Discovery for a reader who landed on the wrong language's hub: the
+      // other languages, by their own names, linking to their hubs.
+      others.length
+        ? `  <p class="gh-note">${others.map((l) => `<a href="${docsPath(l)}/">${LOCALE_LABEL[l]}</a>`).join(" · ")}</p>`
+        : "",
+      `  <p class="gh-note">${copy.contributor}</p>`,
+    ].filter(Boolean),
+  };
+});
 
 for (const hub of HUBS) {
   const html = `<!DOCTYPE html>
 <html lang="${hub.lang}">
 <head>
-${head({ title: hub.title, description: hub.description, path: hub.path, lang: hub.lang },
-  hreflangBlock("/docs", "/docs/zh-Hans"), {
+${head(
+  { title: hub.title, description: hub.description, path: hub.path, lang: hub.lang,
+    published: LOCALES.filter((l) => HUBS.some((h) => h.locale === l)) },
+  hreflangBlock(Object.fromEntries(HUBS.map((h) => [h.locale, h.path]))),
+  {
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   itemListElement: [
@@ -535,20 +642,21 @@ for (const f of readdirSync(OUT_SHOTS)) {
 // Generated directories no longer in the manifest would still deploy (the
 // whole site/ tree uploads), so remove them rather than warn. Same sweep
 // inside zh-Hans/, which mirrors the manifest's translated subset.
-const topSlugs = [...PAGES.map((p) => p.slug), "zh-Hans", "screenshots"];
+const topSlugs = [...PAGES.map((p) => p.slug), ...LOCALES.filter((l) => l !== "en"), "screenshots"];
 for (const entry of readdirSync(SITE_DOCS, { withFileTypes: true })) {
   if (entry.isDirectory() && !topSlugs.includes(entry.name)) {
     rmSync(join(SITE_DOCS, entry.name), { recursive: true });
     console.log(`build-docs: removed stale site/docs/${entry.name}/`);
   }
 }
-const zhDir = join(SITE_DOCS, "zh-Hans");
-if (existsSync(zhDir)) {
-  const zhSlugs = PAGES.filter((p) => p.zhDoc).map((p) => p.slug);
-  for (const entry of readdirSync(zhDir, { withFileTypes: true })) {
-    if (entry.isDirectory() && !zhSlugs.includes(entry.name)) {
-      rmSync(join(zhDir, entry.name), { recursive: true });
-      console.log(`build-docs: removed stale site/docs/zh-Hans/${entry.name}/`);
+for (const locale of LOCALES.filter((l) => l !== "en")) {
+  const dir = join(SITE_DOCS, locale);
+  if (!existsSync(dir)) continue;
+  const live = PAGES.filter((p) => p.docs[locale]).map((p) => p.slug);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && !live.includes(entry.name)) {
+      rmSync(join(dir, entry.name), { recursive: true });
+      console.log(`build-docs: removed stale site/docs/${locale}/${entry.name}/`);
     }
   }
 }
@@ -564,7 +672,7 @@ if (existsSync(zhDir)) {
 const LEGACY_ZH_PATH = "zh-CN";
 const legacyDir = join(SITE_DOCS, LEGACY_ZH_PATH);
 rmSync(legacyDir, { recursive: true, force: true });
-for (const page of PAGES.filter((p) => p.zhDoc)) {
+for (const page of PAGES.filter((p) => p.docs["zh-Hans"])) {
   const dir = join(legacyDir, page.slug);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -602,7 +710,7 @@ writeFileSync(
 </html>
 `,
 );
-console.log(`build-docs: site/docs/${LEGACY_ZH_PATH}/ — ${PAGES.filter((p) => p.zhDoc).length + 1} redirect page(s)`);
+console.log(`build-docs: site/docs/${LEGACY_ZH_PATH}/ — ${PAGES.filter((p) => p.docs["zh-Hans"]).length + 1} redirect page(s)`);
 
 // ── sitemap ─────────────────────────────────────────────────────────────────
 
@@ -614,20 +722,12 @@ function lastCommitDate(file) {
   }
 }
 
-const docUrls = PAGES.flatMap((p) => {
-  const en = `  <url>
-    <loc>${SITE}/docs/${p.slug}/</loc>
-    <lastmod>${lastCommitDate(join("docs", p.file))}</lastmod>
-  </url>`;
-  const zh = p.zhDoc
-    ? `
-  <url>
-    <loc>${SITE}/docs/zh-Hans/${p.slug}/</loc>
-    <lastmod>${lastCommitDate(join("docs", p.zh))}</lastmod>
-  </url>`
-    : "";
-  return [en + zh];
-});
+const docUrls = PAGES.flatMap((p) =>
+  Object.entries(p.docs).map(([locale, d]) => `  <url>
+    <loc>${SITE}${d.path}/</loc>
+    <lastmod>${lastCommitDate(join("docs", locale === "en" ? p.file : p.translated[locale]))}</lastmod>
+  </url>`),
+);
 
 const urls = [
   `  <url>
@@ -655,4 +755,4 @@ ${urls.join("\n")}
 </urlset>
 `;
 writeFileSync(join(ROOT, "site", "sitemap.xml"), sitemap);
-console.log(`build-docs: sitemap.xml — ${PAGES.length + PAGES.filter((p) => p.zhDoc).length + 3} urls`);
+console.log(`build-docs: sitemap.xml — ${urls.length} urls`);

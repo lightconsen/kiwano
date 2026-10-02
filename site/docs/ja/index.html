@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kiwano Docs — Kiwano Docs</title>
-<meta name="description" content="Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.">
-<link rel="canonical" href="https://kiwano.cc/docs/">
+<title>Kiwano ドキュメント — Kiwano Docs</title>
+<meta name="description" content="インストール、Agent の引き継ぎ、ルーティングストラテジー、コマンドリファレンス——Kiwano ローカルゲートウェイの日本語ドキュメント。">
+<link rel="canonical" href="https://kiwano.cc/docs/ja/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/">
 <link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/">
@@ -13,15 +13,15 @@
 <link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://kiwano.cc/docs/">
-<meta property="og:title" content="Kiwano Docs">
-<meta property="og:description" content="Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.">
+<meta property="og:url" content="https://kiwano.cc/docs/ja/">
+<meta property="og:title" content="Kiwano ドキュメント">
+<meta property="og:description" content="インストール、Agent の引き継ぎ、ルーティングストラテジー、コマンドリファレンス——Kiwano ローカルゲートウェイの日本語ドキュメント。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="en_US">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
 <meta property="og:locale:alternate" content="zh_CN">
 <meta property="og:locale:alternate" content="zh_TW">
-<meta property="og:locale:alternate" content="ja_JP">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -244,16 +244,16 @@ code, pre { font-family: var(--font-mono); }
 </div></div>
 <div class="wrap">
   <div class="crumb">Docs</div>
-  <h1>Kiwano Docs</h1>
-  <p>Setup, agent takeover, routing strategies and the full command reference for the Kiwano local gateway.</p>
+  <h1>Kiwano ドキュメント</h1>
+  <p>インストール、Agent の引き継ぎ、ルーティングストラテジー、コマンドリファレンス——Kiwano ローカルゲートウェイの日本語ドキュメント。</p>
   <div class="grid">
-  <a class="card" href="/docs/getting-started/"><h2>Getting started</h2><p>Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to…</p></a>
-  <a class="card" href="/docs/agent-takeover/"><h2>Agent takeover</h2><p>Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…</p></a>
-  <a class="card" href="/docs/strategies/"><h2>Strategies and limits</h2><p>Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of…</p></a>
-  <a class="card" href="/docs/cli/"><h2>The kiwano command line</h2><p>kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…</p></a>
+  <a class="card" href="/docs/ja/getting-started/"><h2>はじめに</h2><p>Kiwano はコーディングエージェントと AI プロバイダーの間に位置します。プロバイダーを 一度登録すれば、ローカルゲートウェイが 127.0.0.1 で動き、すべてのエージェントは その 1 つのポートに接続します。本ページでは、インストールから最初の計測対象リクエスト…</p></a>
+  <a class="card" href="/docs/ja/agent-takeover/"><h2>エージェントの引き継ぎ</h2><p>引き継ぎは、エージェントがローカルゲートウェイ経由でルーティングされるようにする 仕組みです。Kiwano は、エージェントの $HOME 配下にあるそのエージェント自身の 設定ファイルを書き換えます。元のファイルは先にバックアップし、引き継ぎを切ると…</p></a>
+  <a class="card" href="/docs/ja/strategies/"><h2>ストラテジーと上限</h2><p>すべてのエージェントは、順序づけられた候補キュー — そこに紐付いたプロバイダー — を通ってルーティングされます。ストラテジーは次のリクエストをどの候補が処理する かを決め、キューの残りはその試行が途中で失敗したときの再実行順序になります。…</p></a>
+  <a class="card" href="/docs/ja/cli/"><h2>kiwano コマンドライン</h2><p>kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。</p></a>
   </div>
-  <p class="gh-note"><a href="/docs/zh-Hans/">简体中文</a> · <a href="/docs/zh-Hant/">繁體中文</a> · <a href="/docs/ja/">日本語</a></p>
-  <p class="gh-note">Design and planning notes (contributor-facing) live in <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>
+  <p class="gh-note"><a href="/docs/">English</a> · <a href="/docs/zh-Hans/">简体中文</a> · <a href="/docs/zh-Hant/">繁體中文</a></p>
+  <p class="gh-note">設計・計画のメモ（コントリビューター向け）は <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">GitHub の docs/</a> にあります。</p>
 </div>
 <div class="foot"><div class="foot-in">
   <span>© 2026 Kiwano · GPL-3.0-or-later</span>

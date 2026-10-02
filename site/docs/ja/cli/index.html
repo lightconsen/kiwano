@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>`kiwano` コマンドライン — Kiwano Docs</title>
+<meta name="description" content="kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。">
+<link rel="canonical" href="https://kiwano.cc/docs/ja/cli/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/cli/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/cli/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/cli/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/cli/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/ja/cli/">
+<meta property="og:title" content="`kiwano` コマンドライン">
+<meta property="og:description" content="kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "`kiwano` コマンドライン",
+      "item": "https://kiwano.cc/docs/ja/cli/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/ja/">Docs</a>
+    <nav><a href="/docs/ja/getting-started/">はじめに</a>
+<a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>
+<a href="/docs/ja/strategies/">ストラテジーと上限</a>
+<a href="/docs/ja/cli/" class="on">kiwano コマンドライン</a></nav>
+  </aside>
+  <main class="content">
+<h1><code>kiwano</code> コマンドライン</h1>
+<p class="lede">kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。</p>
+<p>再実装するのではなく、アプリと実装を共有しています。本書のすべてのコマンドは、
+デスクトップアプリもリンクしているクレート <code>kiwano-core</code> への呼び出しです。ここで
+追加したプロバイダーは、あちらで追加したものと同じ行として、同じ方法で書き込まれます。</p>
+<h2 id="section">インストール</h2>
+<p>Linux または macOS のサーバーでは、1 つのコマンドで完了します — バイナリ、チェックサム
+検証、そしてあなたのユーザー用のサービスとしてのゲートウェイ登録:</p>
+<pre><code class="language-sh">curl -fsSL https://hub.kiwano.cc/install.sh | sh
+</code></pre>
+<p>root は不要です。これは便利だからではなく意図的です。<code>agents takeover</code> はエージェント
+の設定をそのエージェント自身の <code>$HOME</code> 配下で書き換えるため、CLI とエージェントは同じ
+アカウントでなければなりません。手順の詳細とマシン全体に適用する代替手段は
+<a href="https://github.com/lightconsen/kiwano/blob/main/packaging/INSTALL.md"><code>packaging/INSTALL.md</code></a>) を参照してください。</p>
+<h2 id="section-2">グローバル</h2>
+<table>
+<thead>
+<tr>
+<th>フラグ</th>
+<th>意味</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--db &lt;PATH&gt;</code></td>
+<td>SQLite ファイル。既定は <code>~/.kiwano/kiwano.db</code>、または <code>KIWANO_DB_PATH</code></td>
+</tr>
+<tr>
+<td><code>--admin-socket &lt;TARGET&gt;</code></td>
+<td>ゲートウェイの管理プレーンの場所。unix ではソケットパス、Windows ではパイプ名。既定はデータベースの隣の <code>admin.sock</code>、または <code>KIWANO_ADMIN_SOCKET</code></td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>stdout に機械可読な出力</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>情報メッセージを抑制</td>
+</tr>
+<tr>
+<td><code>--no-reload</code></td>
+<td>変更後に稼働中のゲートウェイへリロードを要求しない</td>
+</tr>
+<tr>
+<td><code>--data-port &lt;PORT&gt;</code></td>
+<td>エージェントを引き継ぐ際に、その設定が指す先のポート。既定は 8317、または <code>KIWANO_DATA_PORT</code></td>
+</tr>
+<tr>
+<td><code>--home &lt;PATH&gt;</code></td>
+<td>エージェントの設定ファイルが置かれるルート。既定は <code>$HOME</code></td>
+</tr>
+</tbody></table>
+<p>グローバルは位置に依存しません。<code>kiwano --json providers list</code> と
+<code>kiwano providers list --json</code> は同じコマンドです。</p>
+<h2 id="出力-終了">出力と終了コード</h2>
+<p><strong>stdout に出るのはペイロードだけです。</strong> <code>--json</code> ではそれはちょうど 1 つの JSON
+ドキュメントなので、<code>kiwano --json providers list | jq</code> が動きます。診断 — ルート
+リロード後の通知、警告、エラー — は stderr に出ます。<code>--json</code> のときも同様です。</p>
+<p>一覧は表として出力され、数値の列（リクエスト数、トークン数、コスト、レイテンシ）は
+大きさで読めるよう右端に揃えられます:</p>
+<pre><code>+-------------------------+----------+--------+------------------+---------+---------------------------+
+| ID                      | NAME     | PROTO  | ENDPOINT         | BILLING | AGENTS                    |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+| api-deepseek-com-271eb4 | DeepSeek | openai | api.deepseek.com | payg    | codex*,demo-route-00b40a* |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+</code></pre>
+<p>表は出力先の端末に合わせてレイアウトされます。最も幅の広い列から順に余地を譲り、
+最小 6 文字まで縮み、それでも収まらないセルは <code>…</code> で省略されます。出力が端末でない
+場合 — パイプやファイル — は合わせる幅が無いため、表は全体が書き出されます。
+<code>COLUMNS</code> を設定して自分で幅を指定できます（<code>COLUMNS=100 kiwano providers list</code>）。
+スクリプトが意図的に狭いレイアウトを得るのもこの方法です。</p>
+<p>エラーは stdout に JSON オブジェクトとして<strong>出力されません</strong>。そうしてしまうと、
+部分的に成功したパイプラインが、どちらのドキュメントを読んでいたのか曖昧になります。
+答えは終了コードがすでに示しています:</p>
+<table>
+<thead>
+<tr>
+<th>コード</th>
+<th>意味</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>0</code></td>
+<td>成功</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>答えが「いいえ」 — ゲートウェイが停止中の <code>status</code>。失敗ではありません。ストアは正常に読めており、報告すべきゲートウェイが無いだけです</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>使い方または検証エラー（clap 自身のパース失敗もこれを使います）</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>実行時エラー: ストア、IO、管理プレーン、ネットワーク</td>
+</tr>
+</tbody></table>
+<h2 id="section-3">コマンドリファレンス</h2>
+<p>完全なフラグ一覧は <code>kiwano &lt;command&gt; --help</code> を実行してください。以下は全体の形を
+示すもので、すべてのフラグではありません。</p>
+<h3 id="section-4">ステータス</h3>
+<pre><code>kiwano status              gateway, store, today&#39;s totals, and the blocked list
+kiwano reload              ask a running gateway to rebuild its route table
+kiwano gateway start       start one, adopting an already-running gateway
+kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
+kiwano gateway restart     stop and start
+</code></pre>
+<p><code>status</code> には、ゲートウェイが現在<strong>ルーティングを拒否している</strong>プロバイダーとその
+理由が含まれます — <code>capped-1  1.00 of 1.00 requests this period</code>。これはゲートウェイの
+稼働中にのみ存在する派生状態なので、シェルから見られるのはここだけです。多くの場合、
+「なぜ何もルーティングされないのか」の答えがこれです。</p>
+<p>systemd のホストでは、<code>gateway</code> サブコマンドの代わりに <code>systemctl restart kiwanod</code> を
+使ってください — INSTALL.md を参照。</p>
+<h3 id="section-5">プロバイダー</h3>
+<pre><code>kiwano providers list [--agent AGENT]
+kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
+                     [--billing plan|payg|unl] [--limit N --unit U] [--reset R]
+                     [--bind AGENT]...
+kiwano providers edit &lt;ID&gt; [any of the above]
+kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing single strategy
+kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
+kiwano providers remove &lt;ID&gt;
+kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers probe latency|endpoint|models
+</code></pre>
+<p><code>add</code> と <code>edit</code> はどちらも、転送とクォータのオプションを取ります:</p>
+<pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
+--retries N                    same-provider attempts before failover (0–5)
+--header &#39;Name: value&#39;         repeatable; merged after credential injection,
+                               so these can override the injected credentials
+--endpoint-extra PROTO=URL     repeatable; the same vendor on another protocol
+--plan-limit-5h PCT            plan: share of the five-hour window
+--plan-limit-weekly PCT        plan: share of the weekly window
+--plan-query JSON              {&quot;template&quot;:&quot;kimi&quot;,&quot;fields&quot;:{…}} — this is what
+                               `providers quota` reads
+</code></pre>
+<p><code>edit</code> はさらに <code>--no-headers</code> と <code>--clear-plan-query</code> を取ります。</p>
+<p><code>providers edit</code> がプロバイダーの <strong>id</strong> を保つのは、まさにそれが存在理由だからです。
+バインディング、ローテーションするキー、使用量の行がすべて id を参照するため、削除して
+再追加するのは別の操作になります。変更されるのは指定したフラグだけで、それ以外は
+保存済みの行から引き継がれます。</p>
+<p>この引き継ぎは <code>--timeout</code>、<code>--retries</code>、<code>--header</code>、<code>--endpoint-extra</code>、
+<code>--plan-limit-*</code> では重要です。これらはそれぞれ、基盤の API が全体として再計算する
+オブジェクトの<em>一部</em>なので、1 つだけ指定した編集でも他はそのまま送られます。
+プロバイダーの名前を変えてもタイムアウトは消えません。</p>
+<p>クリアは常に明示的です — <code>--no-headers</code>、<code>--clear-plan-query</code> — フラグが無いことは
+「維持」を意味するためです。<code>--key</code> も同じで、省略すると保存済みのキーが維持され、
+空にはなりません。</p>
+<p><code>--plan-limit-*</code> はプロバイダーがプランでない限り拒否されます（基盤の層が値をおとなしく
+捨ててしまうためですし、何もしないフラグは拒否するフラグより悪いからです）。
+<code>--plan-query</code> があって初めて <code>providers quota</code> は何かを問い合わせられます。</p>
+<p><code>--unit</code> は <code>--limit</code> が何を数えるかを示します。<code>requests</code>、<code>wan_tokens</code>、または Hub が
+レートを公表している通貨です。最後のものは保存されるのではなく検査されます。知らない
+通貨を渡すと、知っている通貨を挙げて終了コード 2 で終わります。上限は他の通貨で
+価格付けされたコストに対して測られるため、レートの無い通貨は 1:1 で加算されてしまう
+からです。一度も同期していないマシンには表がまったく無く、<code>USD</code> と <code>CNY</code> を受け付け
+ます — Hub がレートを公表している 2 つです。</p>
+<h3 id="section-6">キーのローテーション</h3>
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
+kiwano keys remove &lt;KEY_ID&gt;
+</code></pre>
+<p>ローテーションするキーは、リクエストごとにプロバイダーのプライマリキーの後に試されます。</p>
+<h3 id="section-7">エージェント</h3>
+<pre><code>kiwano agents detect                    which agents are installed
+kiwano agents versions                  version strings (slow: one subprocess each)
+kiwano agents takeover &lt;AGENT&gt;          route it through the gateway, backing up its config
+kiwano agents restore &lt;AGENT&gt;           put the original config back
+kiwano agents list                      built-in and user-defined agents, with keys
+kiwano agents add --name NAME [--note TEXT] [--protocol P]
+                                        define your own agent: a named route with its own key
+kiwano agents remove &lt;ID&gt;               delete it and its key (its usage history stays)
+</code></pre>
+<p><code>takeover</code> はサーバーを使えるようにするコマンドです。エージェントが現在設定している
+プロバイダーを取り込み、そのエージェントのプレースホルダーキーを発行し、エージェント
+自身の設定を書き換えてゲートウェイを指させます。キーは重要です。データプレーンは自分が
+発行したキーだけをルーティングし、それ以外は 401 で拒否するため、手でエージェントを
+ゲートウェイに向けても動きません。</p>
+<p>プレースホルダーキーを出力します。これは結果のうち、外から見えない唯一の部分だからです。</p>
+<p><code>takeover</code> は <code>--home</code> の下に書き込むので、設定を意図したユーザーとして実行してください。
+サービスアカウントに対しては <code>--home</code> を明示的に渡してください。</p>
+<p><code>agents add</code> はルートを得るもう 1 つの方法です。Kiwano が検出できず、何も書き換えない
+エージェントです。名前、id、キー、そしてプロバイダーを紐付けるストラテジーが手に入ります
+— ディスク上の何も変わりません。出力されたキーを使ってクライアントをゲートウェイに
+向けてください。<code>agents list</code> はまだキーの無いエージェントのキーとして <code>-</code> を出力し、
+<code>--json</code> は行のすべてのフィールドを含みます。</p>
+<p><code>--protocol</code> はそのエージェントのクライアントが話すプロトコルを記録します:
+<code>anthropic</code>、<code>openai</code>、<code>gemini</code>。省略すると、エージェントは何も言わないという意味に
+なり、3 つのどれとも異なる答えです。<code>agents list</code> では <code>-</code> と表示されます。これは
+<strong>ラベル</strong>です — これによってルーティング、変換、検証が行われることはありません。
+リクエストのワイヤ形式は、それが届いたパスで決まります。</p>
+<h3 id="section-8">ルート</h3>
+<pre><code>kiwano routes list
+kiwano routes strategy &lt;AGENT&gt; single|failover|roundrobin|timewindow|quota
+                               [--limit N --unit requests|tokens]
+kiwano routes reorder &lt;AGENT&gt; &lt;PROVIDER_ID&gt;...
+kiwano routes apply --from SOURCE --to TARGET
+kiwano routes binding add|remove &lt;AGENT&gt; &lt;PROVIDER_ID&gt;
+kiwano routes binding set &lt;AGENT&gt; &lt;PROVIDER_ID&gt; [--weight N] [--window HH:MM-HH:MM] [--no-window]
+</code></pre>
+<p><code>routes reorder</code> は候補の順序を引数に取ります。書いた順が優先度 0、1、2… になります。</p>
+<p>クォータのペイロードはゲートウェイ自身のパーサーで検証されるため、CLI が書いた設定を
+エンジンが黙って別解釈することはありません。無視するストラテジーに対する <code>--limit</code> は、
+無操作として受け入れられるのではなく拒否されます。</p>
+<h3 id="使用量">使用量とログ</h3>
+<pre><code>kiwano usage [--days N] [--agent AGENT] [--provider ID]
+kiwano dashboard [--window today|7d|30d|all] [--provider ID] [--agent AGENT]
+kiwano insights [--days N] [--agent AGENT]
+kiwano alerts [--mark-notified]
+
+kiwano logs list [--agent A] [--provider P] [--status ok|error]
+                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+kiwano logs show &lt;ID&gt;
+kiwano logs export --out PATH [same filters] [--include-bodies]
+kiwano logs clear --yes
+kiwano logs dir
+</code></pre>
+<p><code>--from</code> は境界を含み、<code>--to</code> は含みません。ストアの半開区間に対応しています。</p>
+<p><code>insights</code> は、トークンが<em>どのように</em>使われているかについての 1 ページのレポートです。
+エージェントごとのスコアカード（キャッシュヒット率、セッションコンテキストの増加、
+推論の割合、リトライ）、<code>cache</code> / <code>bloat</code> / <code>retry</code> / <code>overhead</code> のタグが付いたルール
+検出、そしてコンテキストが最も増えたセッションをまとめます。どの検出も、その背後にある
+<code>request_logs</code> の id を伴います — <code>kiwano logs show &lt;ID&gt;</code> で 1 件を開き直せます — そして
+すべてはログからローカルに計算されます。本文は固定のツール／システムペイロードを測る
+ためにサンプリングされますが、このマシンから出ることはありません。金額もどこにも
+現れません（コストはダッシュボードの役目です）。グローバルの <code>--json</code> フラグは同じ
+レポートを機械可読な形で出力します。</p>
+<p><code>alerts</code> は<strong>既定では読み取り専用</strong>です。そうでなければ書き込まれる重複排除キーは、
+デスクトップアプリが通知を出す前に参照するものと同じなので、スクリプトによるポーリング
+は、あなたが待っていたアラートを黙って飲み込んでしまいます。CLI に配信を任せたい場合
+だけ <code>--mark-notified</code> を渡してください。</p>
+<p><code>logs clear</code> は <code>--yes</code> を必要とします。アプリはダイアログで確認し、TTY の無いシェルでは
+フラグがその相当物です。</p>
+<h3 id="設定-構成">設定・構成・カタログ</h3>
+<pre><code>kiwano settings get
+kiwano settings set --key KEY=VALUE [--key ...] [--patch JSON]
+
+kiwano config export --out PATH [--include-keys]
+kiwano config import --file PATH
+kiwano import cc-switch
+
+kiwano catalog list [--tag official|aggregate|third|free] [--search QUERY]
+kiwano catalog sync
+kiwano catalog currency
+</code></pre>
+<p><code>settings set</code> への値は、パースできるときは JSON としてパースされます。したがって
+<code>--key cost_alert=false</code> はブール値、<code>--key log_retention_days=30</code> は数値になります。</p>
+<p><code>config export --include-keys</code> は有効なクレデンシャルを書き出すため、ファイルは所有者
+限定（<code>0600</code>）で作成されます。フラグ無しの <code>config export</code> はバージョン管理に
+置いても安全です。両者は <code>config import</code> で往復でき、上書きではなく名前とエンドポイント
+でマージされます。</p>
+<p><code>import cc-switch</code> は <code>~/.cc-switch/cc-switch.db</code>（v3.20 以降の SQLite。読み取り用に
+開く）または古い <code>~/.cc-switch/config.json</code> を読み、Kiwano 自身のデータベースにだけ
+書き込みます。<code>~/.cc-switch</code> 配下は変更も削除もされないので、判断している間も両者を
+並べて置けます。</p>
+<p>知っている 8 つのアプリ — claude、claude-desktop、codex、grokbuild、opencode、
+openclaw、hermes、pi — を同名のエージェントに対応付け、cc-switch で<em>現在</em>使われていた
+プロバイダーがそのエージェントのプライマリバインディングになります。つまり移行される
+のは、候補の一覧から選び直すのではなく、実際に動かしていた構成です。</p>
+<p>もう一度実行しても安全で、すでに使っている Kiwano の隣でも安全に実行できます。同じ
+エンドポイントとプロトコルで既にあるプロバイダー — 手で追加したものか、以前の実行で
+取り込んだもの — は、二度追加されるのではなく<em>再利用</em>され、名前、キー、課金はそのまま
+です。取り込みは、もともと無かったものだけを埋めます。すでにルートを持つエージェントは
+そのままにされ、まだルートの無いエージェントにだけ取り込みます。そのため再実行で
+エージェントを、いったん切り替えた先から元へ戻してしまうことはありません。</p>
+<p>2 つのケースは推測せず、報告されます。cc-switch の <code>gemini</code> の行はスキップします。
+対象は Gemini CLI で、設定は Gemini の形をしており、このゲートウェイにはそれらを
+取り込めるプロトコルがありません。base URL かキーが無いプロバイダーは、空で作成される
+のではなくスキップとして一覧されます。どのスキップも理由を伴います。</p>
+<p><code>catalog list</code> は Hub のキャッシュだけを読み、それ以外は読みません — 同梱のコピーは
+無いので、一度も同期していないマシンは古いカタログではなく何も一覧しません。先に
+<code>catalog sync</code> を実行してください。何かをカタログから追加する前に新しいサーバーが
+すべきはこれで、その後はキャッシュが他のものと同様にオフラインで機能します。</p>
+<p><strong><code>catalog add</code> はありません。</strong> カタログのワンクリック「追加」は、エントリを埋めた
+状態でプロバイダーフォームを開くだけで、独自の API を呼びません。したがって機能としては
+<code>providers add</code> であり、値は <code>catalog list --json</code> から取ります:</p>
+<pre><code class="language-sh">kiwano catalog list --json --search deepseek
+kiwano providers add --name DeepSeek --endpoint https://api.deepseek.com/anthropic \
+    --protocol anthropic --billing payg --limit 50 --unit CNY --bind claude
+</code></pre>
+<p>事前入力の規則（<code>payg</code> の上限 50、および一部のカタログエントリが持つエージェントの
+事前バインド）はアプリのフォームにあり、共有レイヤーにはありません。この対応付けが
+後に <code>kiwano-core</code> に移れば、これは 1 コマンドのショートカットになります。それまでは、
+CLI が意図的に持たない便宜であって、欠いている機能ではありません。</p>
+<p>CLI が実際に記録するのは、あるプロバイダーがどのエントリに対応するかです。それに
+よって、そのエントリ自身の公表レートでリクエストの価格が決まるからです。これは尋ねる
+のではなくエンドポイントから推測されます。<code>providers add</code> はエンドポイントがちょうど
+1 つのエントリを指すときにプロバイダーをリンクし、<code>catalog sync</code> はまだリンクの無い
+プロバイダーに対して同じことをします。推測はしません — どのエントリにも一致しない、
+または複数（同じホストを共有する 2 つのエントリ）に一致するエンドポイントは、リンク
+されないまま一般レートで価格付けされます。</p>
+<h2 id="対応">アプリとの対応</h2>
+<p>デスクトップアプリのユーザー向け機能は、本質的にグラフィカルなもの（トレイ、ウィンドウ、
+テーマ、通知、i18n、アプリ内セルフアップデート）を除いて、すべてここから到達できます。</p>
+<table>
+<thead>
+<tr>
+<th>アプリの機能</th>
+<th>コマンド</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ゲートウェイの状態 + 今日の合計</td>
+<td><code>status</code></td>
+</tr>
+<tr>
+<td>プロバイダーの一覧 / 追加 / 編集 / 削除</td>
+<td><code>providers list|add|edit|remove</code></td>
+</tr>
+<tr>
+<td>プロバイダーをカレントにする</td>
+<td><code>providers enable</code>, <code>providers use</code></td>
+</tr>
+<tr>
+<td>レイテンシ / エンドポイント / モデルのプローブ</td>
+<td><code>providers probe …</code></td>
+</tr>
+<tr>
+<td>プランクォータのリング</td>
+<td><code>providers quota</code></td>
+</tr>
+<tr>
+<td>ローテーションする API キー</td>
+<td><code>keys list|add|remove</code></td>
+</tr>
+<tr>
+<td>エージェントのルート + ストラテジー</td>
+<td><code>routes list</code>, <code>routes strategy</code></td>
+</tr>
+<tr>
+<td>候補の順序、重み、時間帯</td>
+<td><code>routes reorder</code>, <code>routes binding …</code></td>
+</tr>
+<tr>
+<td>エージェント間のルートのコピー</td>
+<td><code>routes apply</code></td>
+</tr>
+<tr>
+<td>エージェントの検出とバージョン</td>
+<td><code>agents detect</code>, <code>agents versions</code></td>
+</tr>
+<tr>
+<td>引き継ぎ / 復元</td>
+<td><code>agents takeover</code>, <code>agents restore</code></td>
+</tr>
+<tr>
+<td>自分のエージェント（名前付きルート）</td>
+<td><code>agents list|add|remove</code></td>
+</tr>
+<tr>
+<td>使用量の合計</td>
+<td><code>usage</code></td>
+</tr>
+<tr>
+<td>ダッシュボードの推移</td>
+<td><code>dashboard</code></td>
+</tr>
+<tr>
+<td>使用量のアラート</td>
+<td><code>alerts</code></td>
+</tr>
+<tr>
+<td>リクエストログ、詳細、CSV エクスポート、クリア</td>
+<td><code>logs …</code></td>
+</tr>
+<tr>
+<td>ログファイルの場所</td>
+<td><code>logs dir</code></td>
+</tr>
+<tr>
+<td>設定</td>
+<td><code>settings get|set</code></td>
+</tr>
+<tr>
+<td>構成のエクスポート / インポート</td>
+<td><code>config export|import</code></td>
+</tr>
+<tr>
+<td>cc-switch からの移行</td>
+<td><code>import cc-switch</code></td>
+</tr>
+<tr>
+<td>カタログ + Hub 同期 + 通貨</td>
+<td><code>catalog list|sync|currency</code></td>
+</tr>
+<tr>
+<td>デーモンのライフサイクル</td>
+<td><code>gateway start|stop|restart</code></td>
+</tr>
+</tbody></table>
+<p>どこにも無いもの: アップデートの確認、アップデートのダウンロード、進捗イベントの
+ストリームです。これらはデスクトップアプリのインストーラーの性質であり、サーバー
+バンドルは新しいものをインストールして更新します。</p>
+<h2 id="kiwano-cli-移行"><code>kiwano-cli</code> からの移行</h2>
+<p><code>kiwano-cli</code> は無くなり、エイリアスもありません。それが行っていたことはすべて
+<code>kiwano</code> の下にありますが、知っておくべき 2 つの違いがあります:</p>
+<ol>
+<li><p><strong>課金の語彙はアプリのものです。</strong> <code>--billing plan|payg|unl</code> が正で、
+<code>subscription|metered|unlimited</code> は今もエイリアスとしてパースされます。<strong>プラン</strong>の
+プロバイダーでは、<code>--limit</code>、<code>--unit</code>、<code>--reset</code> は拒否されるようになりました —
+プランのクォータはプランクエリから来るもので、これらのフラグはかつてアプリが
+読まない列に書き込んでいました。</p>
+</li>
+<li><p><strong><code>--json</code> の出力は stdout 上の単一ドキュメントです。</strong> 診断は stderr に移り、
+これが変更系コマンドを直しました。以前は <code>kiwano-cli --json providers add … | jq</code>
+がパースできませんでした。リロードの通知が JSON の後に stdout へ出力されていた
+ためです。</p>
+</li>
+</ol>
+<p>移動したサブコマンド:</p>
+<table>
+<thead>
+<tr>
+<th>旧</th>
+<th>新</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kiwano-cli status</code></td>
+<td><code>kiwano status</code></td>
+</tr>
+<tr>
+<td><code>kiwano-cli providers use &lt;ID&gt; --agent A</code></td>
+<td><code>kiwano providers use &lt;ID&gt; --agent A</code>（変更なし）</td>
+</tr>
+<tr>
+<td><code>kiwano-cli keys list|add|remove</code></td>
+<td><code>kiwano keys list|add|remove</code>（変更なし）</td>
+</tr>
+<tr>
+<td><code>kiwano-cli usage --days N</code></td>
+<td><code>kiwano usage --days N</code>（変更なし）</td>
+</tr>
+</tbody></table>
+<p>終了コードは新しくなりましたが、重要なものは趣旨としては変わっていません。
+ゲートウェイが停止しているとき、<code>status</code> は今も <code>1</code> で終了します。</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/ja/strategies/"><div class="dir">← Previous</div><div class="t">ストラテジーと上限</div></a>
+
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-Hans">
+<html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>策略与限额 — Kiwano Docs</title>
-<meta name="description" content="每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。">
-<link rel="canonical" href="https://kiwano.cc/docs/zh-Hans/strategies/">
+<title>策略與限額 — Kiwano Docs</title>
+<meta name="description" content="每個 Agent 的路由是一個有序候選佇列——綁定到它的供應商們。策略決定 下一個請求由哪個候選服務;佇列的其餘部分是本次嘗試中途失敗時的重放順序。 本頁涵蓋策略、花費限額,以及方案用量的讀取方式。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-Hant/strategies/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/strategies/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/strategies/">
 <link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/strategies/">
@@ -13,14 +13,14 @@
 <link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/strategies/">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://kiwano.cc/docs/zh-Hans/strategies/">
-<meta property="og:title" content="策略与限额">
-<meta property="og:description" content="每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-Hant/strategies/">
+<meta property="og:title" content="策略與限額">
+<meta property="og:description" content="每個 Agent 的路由是一個有序候選佇列——綁定到它的供應商們。策略決定 下一個請求由哪個候選服務;佇列的其餘部分是本次嘗試中途失敗時的重放順序。 本頁涵蓋策略、花費限額,以及方案用量的讀取方式。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
-<meta property="og:locale" content="zh_CN">
+<meta property="og:locale" content="zh_TW">
 <meta property="og:locale:alternate" content="en_US">
-<meta property="og:locale:alternate" content="zh_TW">
+<meta property="og:locale:alternate" content="zh_CN">
 <meta property="og:locale:alternate" content="ja_JP">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
@@ -134,8 +134,8 @@ code, pre { font-family: var(--font-mono); }
     {
       "@type": "ListItem",
       "position": 3,
-      "name": "策略与限额",
-      "item": "https://kiwano.cc/docs/zh-Hans/strategies/"
+      "name": "策略與限額",
+      "item": "https://kiwano.cc/docs/zh-Hant/strategies/"
     }
   ]
 }
@@ -152,92 +152,92 @@ code, pre { font-family: var(--font-mono); }
 </div></div>
 <div class="doc">
   <aside class="side">
-    <a class="crumb" href="/docs/zh-Hans/">Docs</a>
-    <nav><a href="/docs/zh-Hans/getting-started/">快速上手</a>
-<a href="/docs/zh-Hans/agent-takeover/">Agent 接管</a>
-<a href="/docs/zh-Hans/strategies/" class="on">策略与限额</a>
-<a href="/docs/cli/">The kiwano command line</a></nav>
+    <a class="crumb" href="/docs/zh-Hant/">Docs</a>
+    <nav><a href="/docs/zh-Hant/getting-started/">快速上手</a>
+<a href="/docs/zh-Hant/agent-takeover/">Agent 接管</a>
+<a href="/docs/zh-Hant/strategies/" class="on">策略與限額</a>
+<a href="/docs/zh-Hant/cli/">kiwano 命令列</a></nav>
   </aside>
   <main class="content">
-<h1>策略与限额</h1>
-<p class="lede">每个 Agent 的路由是一个有序候选队列——绑定到它的供应商们。策略决定 下一个请求由哪个候选服务;队列的其余部分是本次尝试中途失败时的重放顺序。 本页覆盖策略、花费限额,以及订阅计划的用量读取。</p>
-<p><img loading="lazy" decoding="async" src="/docs/screenshots/routing.webp" alt="绑定到 Claude Code 的路由:有序候选队列,主供应商与备选,以及策略选择器"></p>
-<p><em>绑定到 Claude Code 的路由——主供应商、作为重放顺序的备选,以及上方的策略选择器。</em></p>
-<h2 id="六种策略">六种策略</h2>
+<h1>策略與限額</h1>
+<p class="lede">每個 Agent 的路由是一個有序候選佇列——綁定到它的供應商們。策略決定 下一個請求由哪個候選服務;佇列的其餘部分是本次嘗試中途失敗時的重放順序。 本頁涵蓋策略、花費限額,以及方案用量的讀取方式。</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/routing.webp" alt="綁定到 Claude Code 的路由:有序候選佇列,主用與備用,以及策略選擇器"></p>
+<p><em>綁定到 Claude Code 的路由——主用、作為重放順序的備用,以及上方的策略選擇器。</em></p>
+<h2 id="六種策略">六種策略</h2>
 <table>
 <thead>
 <tr>
 <th>策略</th>
-<th>选择逻辑</th>
-<th>说明</th>
+<th>選擇邏輯</th>
+<th>說明</th>
 </tr>
 </thead>
 <tbody><tr>
 <td><code>single</code></td>
-<td>永远是主供应商。</td>
-<td>默认值。一个供应商,没有重放尾巴——但 Agent 超过自身花费限额时,任何策略(包括 <code>single</code>)都会拒绝。</td>
+<td>永遠是主用。</td>
+<td>預設值。一個供應商,沒有重放尾巴——但 Agent 超過自身花費限額時,任何策略(包括 <code>single</code>)都會拒絕。</td>
 </tr>
 <tr>
 <td><code>failover</code></td>
-<td>按优先级取第一个熔断器可用的候选。</td>
-<td>所有熔断器都断开时,仍会尝试主供应商。429 设置供应商自己声明的短暂暂停;500 计入熔断器。</td>
+<td>依優先順序取第一個斷路器可用的候選。</td>
+<td>所有斷路器都斷開時,仍會嘗試主用。429 設定供應商自己聲明的短暫暫停;500 計入斷路器。</td>
 </tr>
 <tr>
 <td><code>roundrobin</code></td>
-<td>加权轮转——<strong>按会话</strong>。</td>
-<td>一段对话保持其供应商,让它已付费的上游 prompt cache 继续命中;新会话按权重挑选;只有粘住的候选不可用时才重新分配。</td>
+<td>加權輪轉——<strong>依工作階段</strong>。</td>
+<td>一段對話保持其供應商,讓它已付費的上游 prompt 快取繼續命中;新工作階段依權重挑選;只有黏著的候選不可用時才重新分配。</td>
 </tr>
 <tr>
 <td><code>timewindow</code></td>
-<td>本地 <code>HH:MM</code> 窗口(支持跨午夜)包含当前时间的候选。</td>
-<td>无命中时回退主供应商。会话粘性与 <code>roundrobin</code> 相同。</td>
+<td>本機 <code>HH:MM</code> 時間窗(可跨午夜)包含當前時間的候選。</td>
+<td>無命中時回退主用。工作階段黏性與 <code>roundrobin</code> 相同。</td>
 </tr>
 <tr>
 <td><code>quota</code></td>
-<td>主供应商当日用量(请求数或 token 数,读自用量聚合)超过策略配置里的阈值后,沉到备份——即 failover 语义。</td>
-<td>同样的会话粘性:切换发生在<em>下一段</em>对话。</td>
+<td>主用當日用量(請求數或 token 數,讀自用量聚合)超過策略設定裡的門檻後,沉到備用——即 failover 語意。</td>
+<td>同樣的工作階段黏性:切換發生在<em>下一段</em>對話。</td>
 </tr>
 <tr>
 <td><code>least-busy</code></td>
-<td>熔断器可用、当前在途请求数最少的候选。</td>
-<td>会话先排干(与其他粘性策略一致);优先级顺序打破平局。</td>
+<td>斷路器可用、目前在途請求數最少的候選。</td>
+<td>工作階段先排乾(與其他黏性策略一致);優先順序打破平局。</td>
 </tr>
 </tbody></table>
-<p>两条跨策略成立的性质:</p>
+<p>兩條跨策略成立的性質:</p>
 <ul>
-<li><strong>一段对话保持其供应商。</strong> 在粘性策略(<code>roundrobin</code>、<code>timewindow</code>、
-<code>quota</code>)下,切换落在<em>下一段</em>对话;已在运行的对话在原地结束,而不是
-重建一个它的供应商已经收过费的 prompt cache。不带会话标识的请求照旧
-重新挑选。</li>
-<li><strong>失败被重放,而不是被退回。</strong> 除 <code>single</code> 外的任何策略,中途失败的
-请求会沿队列对下一个候选重放,而不是作为错误交还给你的 Agent。</li>
+<li><strong>一段對話保持其供應商。</strong> 在黏性策略(<code>roundrobin</code>、<code>timewindow</code>、
+<code>quota</code>)下,切換落在<em>下一段</em>對話;已在執行的對話在原地結束,而不是
+重建一個它的供應商已經收過費的 prompt 快取。不帶工作階段識別的請求
+照舊重新挑選。</li>
+<li><strong>失敗被重放,而不是被退回。</strong> 除 <code>single</code> 外的任何策略,中途失敗的
+請求會沿佇列對下一個候選重放,而不是作為錯誤交還給你的 Agent。</li>
 </ul>
-<h2 id="花费限额-agent-限额">花费限额(Agent 限额)</h2>
-<p>每个 Agent 可以按周期设限额——<code>day</code>、<code>weekly</code>、<code>monthly</code>、<code>yearly</code> 或
-<code>all</code>——每个限额由数额和单位组成:请求数(<code>requests</code>)、万 token 块
-(<code>wan_tokens</code>),或一个 <strong>ISO 货币代码</strong>。</p>
-<p>币种规则是刻意的:限额以该 Agent 的供应商实际计费的币种计,而不是你的
-显示偏好币种。供应商用别的币种计费时,它的花费先按 Hub 汇率<em>折算</em>再计入
-限额——限额本身永不折算。到达限额后,该 Agent 的新请求被拒绝,理由在 UI
-可见,任何策略下都一样。</p>
-<h2 id="用量数字从哪来">用量数字从哪来</h2>
+<h2 id="花費限額-agent-限額">花費限額(Agent 限額)</h2>
+<p>每個 Agent 可以按週期設限額——<code>day</code>、<code>weekly</code>、<code>monthly</code>、<code>yearly</code> 或
+<code>all</code>——每個限額由數額和單位組成:請求數(<code>requests</code>)、萬 token 區塊
+(<code>wan_tokens</code>),或一個 <strong>ISO 貨幣代碼</strong>。</p>
+<p>貨幣規則是刻意的:限額以該 Agent 的供應商實際計費的貨幣計,而不是你的
+顯示偏好貨幣。供應商以別的貨幣計費時,它的花費先按 Hub 匯率<em>換算</em>再計入
+限額——限額本身永不換算。到達限額後,該 Agent 的新請求被拒絕,理由在 UI
+可見,任何策略下都一樣。</p>
+<h2 id="用量數字從哪來">用量數字從哪來</h2>
 <ul>
-<li><strong>计量用量</strong>来自网关自己的请求记账——每条请求的 token 与成本,归属到
-服务它的供应商。</li>
-<li><strong>订阅计划配额</strong>(发布&quot;你的计划用了多少&quot;的订阅)通过<em>plan query</em> 从
-供应商自己的端点读取。少数目录条目自带查询模板(Kimi、智谱个人与团队、
-MiniMax、ZenMux、OpenCode Go、火山引擎);结果缓存五分钟,可强制刷新。
-一个供应商可以<em>按计划计费</em>却不支持 plan query——查询模板才是配额环
-有意义的前提。</li>
+<li><strong>計量用量</strong>來自閘道自己的請求記帳——每條請求的 token 與成本,歸屬到
+服務它的供應商。</li>
+<li><strong>方案配額</strong>(發布「你的方案用了多少」的訂閱)透過<em>plan query</em> 從
+供應商自己的端點讀取。少數目錄條目內建查詢範本(Kimi、智譜個人與團隊、
+MiniMax、ZenMux、OpenCode Go、火山引擎);結果快取五分鐘,可強制重新
+整理。一個供應商可以<em>按方案計費</em>卻不支援 plan query——查詢範本才是
+配額環有意義的前提。</li>
 </ul>
-<h2 id="成本显示-以及唯一发生折算的地方">成本显示,以及唯一发生折算的地方</h2>
-<p>成本按各供应商计费的币种记录,并在所有地方按该币种显示——唯独
-<strong>Dashboard</strong> 使用你的偏好显示币种,由 Hub 汇率完成折算。供应商自己的
-行永远不会显示折算后的数字;行上是 ¥,就意味着供应商以 ¥ 计费。</p>
+<h2 id="成本顯示-以及唯一發生換算的地方">成本顯示,以及唯一發生換算的地方</h2>
+<p>成本按各供應商計費的貨幣記錄,並在所有地方按該貨幣顯示——唯獨
+<strong>Dashboard</strong> 使用你的偏好顯示貨幣,由 Hub 匯率完成換算。供應商自己的
+列永遠不會顯示換算後的數字;列上是 ¥,就意味著供應商以 ¥ 計費。</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/zh-Hans/agent-takeover/"><div class="dir">← Previous</div><div class="t">Agent 接管</div></a>
-<a class="next" href="/docs/cli/"><div class="dir">Next →</div><div class="t">The kiwano command line</div></a>
+<a class="prev" href="/docs/zh-Hant/agent-takeover/"><div class="dir">← Previous</div><div class="t">Agent 接管</div></a>
+<a class="next" href="/docs/zh-Hant/cli/"><div class="dir">Next →</div><div class="t">kiwano 命令列</div></a>
 </div>
   </main>
 </div>

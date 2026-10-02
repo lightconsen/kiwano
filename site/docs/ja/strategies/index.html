@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ストラテジーと上限 — Kiwano Docs</title>
+<meta name="description" content="すべてのエージェントは、順序づけられた候補キュー — そこに紐付いたプロバイダー — を通ってルーティングされます。ストラテジーは次のリクエストをどの候補が処理する かを決め、キューの残りはその試行が途中で失敗したときの再実行順序になります。…">
+<link rel="canonical" href="https://kiwano.cc/docs/ja/strategies/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/strategies/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/strategies/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/strategies/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/strategies/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/strategies/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/ja/strategies/">
+<meta property="og:title" content="ストラテジーと上限">
+<meta property="og:description" content="すべてのエージェントは、順序づけられた候補キュー — そこに紐付いたプロバイダー — を通ってルーティングされます。ストラテジーは次のリクエストをどの候補が処理する かを決め、キューの残りはその試行が途中で失敗したときの再実行順序になります。…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "ストラテジーと上限",
+      "item": "https://kiwano.cc/docs/ja/strategies/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/ja/">Docs</a>
+    <nav><a href="/docs/ja/getting-started/">はじめに</a>
+<a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>
+<a href="/docs/ja/strategies/" class="on">ストラテジーと上限</a>
+<a href="/docs/ja/cli/">kiwano コマンドライン</a></nav>
+  </aside>
+  <main class="content">
+<h1>ストラテジーと上限</h1>
+<p class="lede">すべてのエージェントは、順序づけられた候補キュー — そこに紐付いたプロバイダー — を通ってルーティングされます。ストラテジーは次のリクエストをどの候補が処理する かを決め、キューの残りはその試行が途中で失敗したときの再実行順序になります。 本ページではストラテジー、支出上限、プラン使用量の読み取り方を説明します。</p>
+<p><img loading="lazy" decoding="async" src="/docs/screenshots/routing.webp" alt="Claude Code に紐付いたルート:プライマリとスタンバイからなる順序づけられた候補キュー、およびストラテジー選択 UI"></p>
+<p><em>Claude Code に紐付いたルート — プライマリ、再実行順に並んだスタンバイ、その上の
+ストラテジー選択 UI。</em></p>
+<h2 id="6">6 つのストラテジー</h2>
+<table>
+<thead>
+<tr>
+<th>ストラテジー</th>
+<th>選ぶもの</th>
+<th>補足</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>single</code></td>
+<td>常にプライマリ。</td>
+<td>既定値。プロバイダー 1 つ、再実行の末尾なし — ただし、エージェントが自身の支出上限を超えている場合は、<code>single</code> を含むどのストラテジーでも拒否されます。</td>
+</tr>
+<tr>
+<td><code>failover</code></td>
+<td>優先順で最初の、ブレーカーが使用可能な候補。</td>
+<td>すべてのブレーカーが開いているときは、それでもプライマリを試します。429 はプロバイダーが示した短い待機を設定し、500 はブレーカーに数えられます。</td>
+</tr>
+<tr>
+<td><code>roundrobin</code></td>
+<td>重み付きのローテーション — <strong>セッション単位</strong>。</td>
+<td>会話はプロバイダーを保持し、すでに支払い済みの上流 prompt cache が引き続きヒットします。新しいセッションは重みで選ばれ、セッションが再割り当てされるのは、固定された候補が使用不能になったときだけです。</td>
+</tr>
+<tr>
+<td><code>timewindow</code></td>
+<td>ローカルの <code>HH:MM</code> の時間帯（日付をまたぐこともある）が現在を含む候補。</td>
+<td>どれも一致しないときはプライマリにフォールバックします。セッションの固定は <code>roundrobin</code> と同じです。</td>
+</tr>
+<tr>
+<td><code>quota</code></td>
+<td>同日の使用量（リクエスト数またはトークン数。使用量の集計から読み取る）がストラテジー設定のしきい値を超えるまではプライマリ、その後はバックアップへ、フェイルオーバー方式で。</td>
+<td>セッションの固定は同じです。切り替えは<em>次の</em>会話に適用されます。</td>
+</tr>
+<tr>
+<td><code>least-busy</code></td>
+<td>ブレーカーが使用可能な候補のうち、現在進行中のリクエストが最も少ないもの。</td>
+<td>実行中のセッションは先に終わらせます（他の固定型ストラテジーと同様）。同数の場合は優先順で決まります。</td>
+</tr>
+</tbody></table>
+<p>すべてに共通する 2 つの性質があります:</p>
+<ul>
+<li><strong>会話はプロバイダーを保持します。</strong> 固定型ストラテジー（<code>roundrobin</code>、
+<code>timewindow</code>、<code>quota</code>）では、切り替えは<em>次の</em>会話で起こります。すでに走っている
+会話はその場で終わり、プロバイダーがすでに課金した prompt cache を作り直すことは
+ありません。セッションを指定しないリクエストは新たに選ばれます。</li>
+<li><strong>失敗は返されず、再実行されます。</strong> <code>single</code> 以外のどのストラテジーでも、失敗した
+リクエストはエラーとしてエージェントに返されるのではなく、キューの次の候補に対して
+再実行されます。</li>
+</ul>
+<h2 id="支出上限-上限">支出上限（エージェントの上限）</h2>
+<p>エージェントは期間ごとの上限 — <code>day</code>、<code>weekly</code>、<code>monthly</code>、<code>yearly</code>、<code>all</code> — を
+持てます。各上限は数値と単位からなります。単位はリクエスト数（<code>requests</code>）、
+1万トークンのブロック（<code>wan_tokens</code>）、または <strong>ISO 通貨コード</strong>です。</p>
+<p>通貨の規則は意図的なものです。上限は、そのエージェントのプロバイダーが実際に請求する
+通貨で建てられ、あなたの表示設定の通貨では建てられません。プロバイダーが別の通貨で
+請求する場合、その支出は Hub の為替レートで換算されてから上限に算入されます — 上限
+自体が換算されることはありません。上限に達すると、そのエージェントの新しいリクエスト
+は、どのストラテジーでも、明確な理由とともに拒否されます（UI で確認できます）。</p>
+<h2 id="使用量-数値-出">使用量の数値の出どころ</h2>
+<ul>
+<li><strong>計測された使用量</strong>は、ゲートウェイ自身のリクエスト会計 — リクエストごとの
+トークンとコスト — から読み取り、処理したプロバイダーに帰属させます。</li>
+<li><strong>プランクォータ</strong>（「プランをどれだけ使ったか」を公表するサブスクリプション）は、
+<em>プランクエリ</em>を通じてベンダー自身のエンドポイントから読み取ります。一部の
+カタログエントリはクエリテンプレートを同梱しています（Kimi、Zhipu の個人・
+チーム、MiniMax、ZenMux、OpenCode Go、Volcengine）。結果は 5分間キャッシュされ、
+強制更新できます。プロバイダーがプランとして<em>課金</em>されていても、プランクエリに
+対応しているとは限りません — クォータリングが意味を持つのは、クエリテンプレートが
+あってこそです。</li>
+</ul>
+<h2 id="表示-換算-起-唯一-場所">コスト表示と、換算が起きる唯一の場所</h2>
+<p>コストは各プロバイダーが請求する通貨で記録され、どこでもその通貨で表示されます —
+例外は<strong>ダッシュボード</strong>で、ここではあなたの表示通貨設定が適用され、Hub の為替
+レートが換算を行います。プロバイダー自身の行に換算後の数値が出ることはありません。
+行に ¥ とあれば、そのベンダーは ¥ で請求しています。</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/ja/agent-takeover/"><div class="dir">← Previous</div><div class="t">エージェントの引き継ぎ</div></a>
+<a class="next" href="/docs/ja/cli/"><div class="dir">Next →</div><div class="t">kiwano コマンドライン</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

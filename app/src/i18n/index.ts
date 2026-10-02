@@ -14,17 +14,19 @@
 // outlives a component, and the language must outlive every screen.
 import { useEffect, useState } from "react";
 import { en, type Messages } from "./en";
-import { zhCN } from "./zh-CN";
+import { zhHans } from "./zh-Hans";
 import type { KeyPath, Params } from "./types";
 
 /** What `AppSettings.language` holds: a preference, not necessarily a locale. */
-export const LANGUAGE_PREFS = ["system", "en", "zh-CN"] as const;
+export const LANGUAGE_PREFS = ["system", "en", "zh-Hans"] as const;
 export type LanguagePref = (typeof LANGUAGE_PREFS)[number];
 
 /** A locale we actually ship a dictionary for. */
 export type Locale = Exclude<LanguagePref, "system">;
 
-const DICTIONARIES: Record<Locale, Messages> = { en, "zh-CN": zhCN };
+/** Every shipped locale's dictionary. Exported for the tests, which check each
+    one against `en` for the keys and placeholders a translation can drop. */
+export const DICTIONARIES: Record<Locale, Messages> = { en, "zh-Hans": zhHans };
 
 /** What the language select shows. The label is a language's own name for
     itself, so it is not translated — a reader looking for their language
@@ -32,23 +34,40 @@ const DICTIONARIES: Record<Locale, Messages> = { en, "zh-CN": zhCN };
 export const LANGUAGE_LABELS: Record<LanguagePref, string> = {
   system: "", // filled by `languageLabel` below, which needs the current locale
   en: "English",
-  "zh-CN": "简体中文",
+  "zh-Hans": "简体中文",
 };
+
+/** Preferences written by an older build, read back as today's id.
+ *
+ * 0.2.8 and earlier stored `"zh-CN"`; the id became `zh-Hans` when the UI
+ * gained a Traditional Chinese dictionary, because `zh-CN` names a region
+ * where script is what actually differs. Anything stored then has to keep
+ * working — a preference is written once and read for the life of the
+ * install, and there is no migration for a value the user chose.
+ */
+const LEGACY_PREFS: Record<string, Locale> = {
+  "zh-CN": "zh-Hans",
+  zh: "zh-Hans",
+  "zh-SG": "zh-Hans",
+  "zh-Hans": "zh-Hans",
+};
+
+/** A BCP-47 tag from the webview → a locale we ship. */
+function localeFromTag(tag: string): Locale {
+  return tag.toLowerCase().startsWith("zh") ? "zh-Hans" : "en";
+}
 
 /** Turn a stored preference into a locale we have a dictionary for.
  *
  * `"system"` — and anything unrecognised, including the empty string a fresh
  * install may carry — resolves from the webview's `navigator.language`. That
  * reflects the OS setting on every platform Tauri targets, so this needs no
- * extra plugin. A preference naming a locale we do not ship falls back the same
- * way rather than to English, so a user whose OS is Chinese is not dropped into
- * English because of a typo in the settings row.
- */
+ * extra plugin. */
 export function resolveLocale(pref: string | null | undefined): Locale {
-  if (pref === "en" || pref === "zh-CN") return pref;
+  if (pref && pref in LEGACY_PREFS) return LEGACY_PREFS[pref];
   const tag =
     typeof navigator !== "undefined" && navigator.language ? navigator.language : "en";
-  return tag.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  return localeFromTag(tag);
 }
 
 let current: Locale = "en";

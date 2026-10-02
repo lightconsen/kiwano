@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import { en } from "./en";
-import { zhCN } from "./zh-CN";
+import { DICTIONARIES, type Locale } from "./index";
 
 type Leaves = Map<string, string>;
 
@@ -36,40 +36,52 @@ function placeholders(message: string): Set<string> {
   return new Set(message.match(/\{[a-zA-Z0-9_]+\}/g) ?? []);
 }
 
+/** 除英文外的每一门语言,连着它的 id —— 失败信息里要指出是哪一门。 */
+const translated: [Locale, Leaves][] = (Object.keys(DICTIONARIES) as Locale[])
+  .filter((l) => l !== "en")
+  .map((l) => [l, leaves(DICTIONARIES[l])]);
+
 const english = leaves(en);
-const chinese = leaves(zhCN);
 
 /** Keep a failure's message readable: forty paths say less than the first ten. */
 const head = (paths: string[]) => paths.slice(0, 10);
 
 describe("the dictionaries", () => {
   it("hold the same keys", () => {
-    const missing = head([...english.keys()].filter((k) => !chinese.has(k)));
-    const extra = head([...chinese.keys()].filter((k) => !english.has(k)));
-    expect({ missing, extra }).toEqual({ missing: [], extra: [] });
+    const problems: string[] = [];
+    for (const [locale, dict] of translated) {
+      for (const k of english.keys()) if (!dict.has(k)) problems.push(`${locale} missing ${k}`);
+      for (const k of dict.keys()) if (!english.has(k)) problems.push(`${locale} extra ${k}`);
+    }
+    expect(head(problems)).toEqual([]);
   });
 
   it("substitute the same placeholders", () => {
     const mismatched: string[] = [];
-    for (const [key, message] of english) {
-      const translated = chinese.get(key);
-      if (translated === undefined) continue; // the key-set test reports it
-      const want = placeholders(message);
-      const got = placeholders(translated);
-      const same = want.size === got.size && [...want].every((p) => got.has(p));
-      if (!same) {
-        mismatched.push(`${key}: ${[...want].join(",") || "none"} vs ${[...got].join(",") || "none"}`);
+    for (const [locale, dict] of translated) {
+      for (const [key, message] of english) {
+        const text = dict.get(key);
+        if (text === undefined) continue; // the key-set test reports it
+        const want = placeholders(message);
+        const got = placeholders(text);
+        const same = want.size === got.size && [...want].every((p) => got.has(p));
+        if (!same) {
+          mismatched.push(
+            `${locale} ${key}: ${[...want].join(",") || "none"} vs ${[...got].join(",") || "none"}`,
+          );
+        }
       }
     }
     expect(head(mismatched)).toEqual([]);
   });
 
   it("carry no empty message", () => {
-    const empty = head(
-      [...english, ...chinese]
-        .filter(([, message]) => message.trim() === "")
-        .map(([key, message]) => `${key}: ${JSON.stringify(message)}`),
-    );
-    expect(empty).toEqual([]);
+    const empty: string[] = [];
+    for (const [locale, dict] of [["en", english], ...translated] as [Locale, Leaves][]) {
+      for (const [key, message] of dict) {
+        if (message.trim() === "") empty.push(`${locale} ${key}: ${JSON.stringify(message)}`);
+      }
+    }
+    expect(head(empty)).toEqual([]);
   });
 });

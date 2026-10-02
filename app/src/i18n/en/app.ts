@@ -1,5 +1,5 @@
 // Keys for app. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 export const app = {
   /** The top nav. Keys rather than labels: the array is module-level and
       `t()` is a hook, so the label is resolved at render. */

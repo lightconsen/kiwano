@@ -1,5 +1,5 @@
 // Keys for logs. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 //
 // Deliberately absent: the clipboard payload `fmtLogText` builds and the
 // values `fmtTime`/`fmtBytes`/`fmtThroughput` produce. The payload is a

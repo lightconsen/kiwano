@@ -8,7 +8,7 @@ Kiwano 位于你的编码 Agent 与 AI 供应商之间:供应商注册一次,本
 
 - 一个供应商 API Key(OpenAI 兼容或 Anthropic 兼容端点)。
 - 一个或多个已安装的编码 Agent——Claude Code、Codex、Gemini CLI……
-  (全部 26 个内置 Agent 见 [Agent 接管](agent-takeover.zh-CN.md))。
+  (全部 26 个内置 Agent 见 [Agent 接管](agent-takeover.zh-Hans.md))。
 
 ## 1. 安装并启动
 
@@ -48,7 +48,7 @@ Key 保存在仅限当前用户读取的本地数据库里。除了你填写的�
   关闭接管时按字节还原。Agent 的其它配置一概不动。
 
 每个 Agent 具体改写哪些文件、哪些行为特殊,见
-[Agent 接管](agent-takeover.zh-CN.md)的表。
+[Agent 接管](agent-takeover.zh-Hans.md)的表。
 
 ## 4. 验证
 
@@ -64,7 +64,7 @@ Key 保存在仅限当前用户读取的本地数据库里。除了你填写的�
 
 一个 Agent 绑一个供应商是 `single` 策略。给 Agent 的路由多绑几个候选,
 再选一个策略——`failover`、`roundrobin`、`timewindow`、`quota` 或
-`least-busy`——并设置按 Agent 的花费限额。见[策略与限额](strategies.zh-CN.md)。
+`least-busy`——并设置按 Agent 的花费限额。见[策略与限额](strategies.zh-Hans.md)。
 
 ## 数据都在哪
 

@@ -1,5 +1,5 @@
 // Keys for dashboard. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 //
 // The `WINDOWS` ids ("today"/"7d"/"30d") are what the backend filters on and
 // are not here — only their labels are.

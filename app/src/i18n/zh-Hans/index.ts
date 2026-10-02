@@ -12,7 +12,7 @@ import { dashboard } from "./dashboard";
 import { shelf } from "./shelf";
 import { strategy } from "./strategy";
 
-export const zhCN = {
+export const zhHans = {
   common,
   app,
   settings,

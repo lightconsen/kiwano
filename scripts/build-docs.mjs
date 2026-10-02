@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Render the user-facing docs (docs/*.md) into site/docs/<slug>/index.html,
-// with the zh-CN sources alongside at site/docs/zh-CN/<slug>/.
+// with the zh-Hans sources alongside at site/docs/zh-Hans/<slug>/.
 //
 // The site keeps its no-build-step property at serve time: this script runs
 // before the Pages upload (site.yml, right after sync-site.mjs) and writes
@@ -14,7 +14,7 @@
 // — written for contributors, in Chinese, citing internal commits — and
 // those stay GitHub-only because the manifest does not name them.
 //
-// A page with a zh-CN source gets both renders and reciprocal hreflang
+// A page with a zh-Hans source gets both renders and reciprocal hreflang
 // links (plus x-default → English). A page without one — cli.md, for now —
 // publishes English-only with no alternates, which is what Google wants to
 // see rather than alternates pointing at the same URL. The zh sidebar walks
@@ -43,12 +43,12 @@ const SITE = "https://kiwano.cc";
 
 // The published set, in sidebar and prev/next order. slugs equal the source
 // file's basename so relative links between docs (`[x](strategies.md)`)
-// rewrite mechanically. `zh` names the zh-CN source; pages without one are
+// rewrite mechanically. `zh` names the zh-Hans source; pages without one are
 // English-only until a translation lands.
 const PAGES = [
-  { slug: "getting-started", file: "getting-started.md", zh: "getting-started.zh-CN.md" },
-  { slug: "agent-takeover", file: "agent-takeover.md", zh: "agent-takeover.zh-CN.md" },
-  { slug: "strategies", file: "strategies.md", zh: "strategies.zh-CN.md" },
+  { slug: "getting-started", file: "getting-started.md", zh: "getting-started.zh-Hans.md" },
+  { slug: "agent-takeover", file: "agent-takeover.md", zh: "agent-takeover.zh-Hans.md" },
+  { slug: "strategies", file: "strategies.md", zh: "strategies.zh-Hans.md" },
   { slug: "cli", file: "cli.md" },
 ];
 
@@ -70,13 +70,13 @@ function rewriteLinks(md, fromFile, lang) {
     if (target.startsWith("../")) {
       return `](${GITHUB_BLOB}/${target.slice(3)})${anchor ?? ""})`;
     }
-    // A zh source naming its zh sibling (`agent-takeover.zh-CN.md`) goes to
+    // A zh source naming its zh sibling (`agent-takeover.zh-Hans.md`) goes to
     // the zh page outright; any page filename resolves to the canonical
-    // /docs/ URL, upgraded to zh-CN when the reader is in a zh page and a
+    // /docs/ URL, upgraded to zh-Hans when the reader is in a zh page and a
     // zh render exists.
     const zhPage = PAGES.find((p) => p.zh === target);
     if (zhPage) {
-      return `](/docs/zh-CN/${zhPage.slug}/${anchor ?? ""})`;
+      return `](/docs/zh-Hans/${zhPage.slug}/${anchor ?? ""})`;
     }
     const page = PAGES.find((p) => p.file === target);
     if (!page) {
@@ -84,8 +84,8 @@ function rewriteLinks(md, fromFile, lang) {
         " either publish that page or link its GitHub blob explicitly");
       process.exit(2);
     }
-    const useZh = lang === "zh-CN" && page.zh;
-    return `](/docs${useZh ? "/zh-CN" : ""}/${page.slug}/${anchor ?? ""})`;
+    const useZh = lang === "zh-Hans" && page.zh;
+    return `](/docs${useZh ? "/zh-Hans" : ""}/${page.slug}/${anchor ?? ""})`;
   });
   // Relative assets (the screenshots under docs/screenshots/) serve from the
   // rendered tree, which build-docs copies below.
@@ -275,13 +275,13 @@ function esc(s) {
 function hreflangBlock(enPath, zhPath) {
   if (!zhPath) return "";
   return `<link rel="alternate" hreflang="en" href="${SITE}${enPath}/">
-<link rel="alternate" hreflang="zh-CN" href="${SITE}${zhPath}/">
+<link rel="alternate" hreflang="zh-Hans" href="${SITE}${zhPath}/">
 <link rel="alternate" hreflang="x-default" href="${SITE}${enPath}/">`;
 }
 
 function head(doc, alternates, jsonLd) {
-  const locale = doc.lang === "zh-CN" ? "zh_CN" : "en_US";
-  const alternate = doc.lang === "zh-CN"
+  const locale = doc.lang === "zh-Hans" ? "zh_CN" : "en_US";
+  const alternate = doc.lang === "zh-Hans"
     ? `\n<meta property="og:locale:alternate" content="en_US">`
     : "";
   return `<meta charset="UTF-8">
@@ -312,7 +312,7 @@ ${JSON.stringify(jsonLd, null, 2)}
 // reader sees zh titles for the translated pages and is never dead-ended
 // by a page still untranslated.
 function sidebarSequence(lang) {
-  return PAGES.map((p) => (lang === "zh-CN" && p.zhDoc ? p.zhDoc : p.en));
+  return PAGES.map((p) => (lang === "zh-Hans" && p.zhDoc ? p.zhDoc : p.en));
 }
 
 function chrome(bodyInner, doc) {
@@ -320,7 +320,7 @@ function chrome(bodyInner, doc) {
     .map((d) => `<a href="${d.path}/"${d.path === doc.path ? ' class="on"' : ""}>${esc(d.navTitle)}</a>`)
     .join("\n");
   // The crumb doubles as the way back to this language's hub.
-  const hub = doc.lang === "zh-CN" ? "/docs/zh-CN/" : "/docs/";
+  const hub = doc.lang === "zh-Hans" ? "/docs/zh-Hans/" : "/docs/";
   return `<div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
@@ -378,7 +378,7 @@ function loadDoc(file, path, lang) {
 for (const page of PAGES) {
   page.en = loadDoc(page.file, `/docs/${page.slug}`, "en");
   if (page.zh) {
-    page.zhDoc = loadDoc(page.zh, `/docs/zh-CN/${page.slug}`, "zh-CN");
+    page.zhDoc = loadDoc(page.zh, `/docs/zh-Hans/${page.slug}`, "zh-Hans");
   }
 }
 
@@ -401,7 +401,7 @@ for (const page of PAGES) {
     const html = `<!DOCTYPE html>
 <html lang="${doc.lang}">
 <head>
-${head(doc, page.zhDoc ? hreflangBlock(`/docs/${page.slug}`, `/docs/zh-CN/${page.slug}`) : "", breadcrumb(doc))}
+${head(doc, page.zhDoc ? hreflangBlock(`/docs/${page.slug}`, `/docs/zh-Hans/${page.slug}`) : "", breadcrumb(doc))}
 </head>
 <body>
 ${chrome(`<h1>${marked.parse(doc.title).replace(/<p>|<\/p>\n?$/g, "")}</h1>
@@ -420,7 +420,7 @@ ${pn}
   }
 }
 
-// ── docs hubs (/docs/ and /docs/zh-CN/) ─────────────────────────────────────
+// ── docs hubs (/docs/ and /docs/zh-Hans/) ─────────────────────────────────────
 // One hub per language. The zh hub lists the zh renders, with the English
 // cli page as a card in place (same fallback rule the sidebar uses), so
 // both hubs catalog the same pages and the landing page's Docs link has a
@@ -450,14 +450,14 @@ const HUBS = [
     // The en hub surfaces the zh renders by name — discovery for a zh
     // reader who landed on the English hub.
     notes: [`  <p class="gh-note">中文文档：
-    ${PAGES.filter((p) => p.zhDoc).map((p) => `<a href="/docs/zh-CN/${p.slug}/">${esc(p.zhDoc.navTitle)}</a>`).join("\n    · ")}
+    ${PAGES.filter((p) => p.zhDoc).map((p) => `<a href="/docs/zh-Hans/${p.slug}/">${esc(p.zhDoc.navTitle)}</a>`).join("\n    · ")}
   </p>`,
     `  <p class="gh-note">Design and planning notes (contributor-facing) live in
   <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>`],
   },
   {
-    lang: "zh-CN",
-    path: "/docs/zh-CN",
+    lang: "zh-Hans",
+    path: "/docs/zh-Hans",
     title: "Kiwano 文档",
     description: "安装、Agent 接管、路由策略与完整命令参考——Kiwano 本地网关的中文文档。",
     cards: PAGES.map((p) => {
@@ -474,7 +474,7 @@ for (const hub of HUBS) {
 <html lang="${hub.lang}">
 <head>
 ${head({ title: hub.title, description: hub.description, path: hub.path, lang: hub.lang },
-  hreflangBlock("/docs", "/docs/zh-CN"), {
+  hreflangBlock("/docs", "/docs/zh-Hans"), {
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   itemListElement: [
@@ -534,24 +534,75 @@ for (const f of readdirSync(OUT_SHOTS)) {
 
 // Generated directories no longer in the manifest would still deploy (the
 // whole site/ tree uploads), so remove them rather than warn. Same sweep
-// inside zh-CN/, which mirrors the manifest's translated subset.
-const topSlugs = [...PAGES.map((p) => p.slug), "zh-CN", "screenshots"];
+// inside zh-Hans/, which mirrors the manifest's translated subset.
+const topSlugs = [...PAGES.map((p) => p.slug), "zh-Hans", "screenshots"];
 for (const entry of readdirSync(SITE_DOCS, { withFileTypes: true })) {
   if (entry.isDirectory() && !topSlugs.includes(entry.name)) {
     rmSync(join(SITE_DOCS, entry.name), { recursive: true });
     console.log(`build-docs: removed stale site/docs/${entry.name}/`);
   }
 }
-const zhDir = join(SITE_DOCS, "zh-CN");
+const zhDir = join(SITE_DOCS, "zh-Hans");
 if (existsSync(zhDir)) {
   const zhSlugs = PAGES.filter((p) => p.zhDoc).map((p) => p.slug);
   for (const entry of readdirSync(zhDir, { withFileTypes: true })) {
     if (entry.isDirectory() && !zhSlugs.includes(entry.name)) {
       rmSync(join(zhDir, entry.name), { recursive: true });
-      console.log(`build-docs: removed stale site/docs/zh-CN/${entry.name}/`);
+      console.log(`build-docs: removed stale site/docs/zh-Hans/${entry.name}/`);
     }
   }
 }
+
+// ── 旧中文路径的别名 ────────────────────────────────────────────────────────
+// 简体中文的 id 从 `zh-CN` 改成 `zh-Hans` 时(2026-10-02),文档 URL 跟着改了。
+// /docs/zh-CN/ 在改之前是线上且被收录过的,所以那条路径继续给一个跳转页——
+// 页面级 meta refresh 加上 canonical,指向新地址,并被排除在 sitemap 之外
+// (sitemap 由 PAGES 生成,这个目录不在其中,天然不列)。
+//
+// 写在清扫之后:`zh-CN` 不在 topSlugs 里,清扫会把它当残留删掉——每次构建
+// 都由这里重建,所以顺序反了就等于没写。
+const LEGACY_ZH_PATH = "zh-CN";
+const legacyDir = join(SITE_DOCS, LEGACY_ZH_PATH);
+rmSync(legacyDir, { recursive: true, force: true });
+for (const page of PAGES.filter((p) => p.zhDoc)) {
+  const dir = join(legacyDir, page.slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "index.html"),
+    `<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <title>跳转中 — Kiwano 文档</title>
+    <link rel="canonical" href="${SITE}/docs/zh-Hans/${page.slug}/">
+    <meta http-equiv="refresh" content="0; url=/docs/zh-Hans/${page.slug}/">
+    <meta name="robots" content="noindex">
+  </head>
+  <body>
+    <p>这个页面的地址已改为 <a href="/docs/zh-Hans/${page.slug}/">/docs/zh-Hans/${page.slug}/</a>。</p>
+  </body>
+</html>
+`,
+  );
+}
+writeFileSync(
+  join(legacyDir, "index.html"),
+  `<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <title>跳转中 — Kiwano 文档</title>
+    <link rel="canonical" href="${SITE}/docs/zh-Hans/">
+    <meta http-equiv="refresh" content="0; url=/docs/zh-Hans/">
+    <meta name="robots" content="noindex">
+  </head>
+  <body>
+    <p>文档的地址已改为 <a href="/docs/zh-Hans/">/docs/zh-Hans/</a>。</p>
+  </body>
+</html>
+`,
+);
+console.log(`build-docs: site/docs/${LEGACY_ZH_PATH}/ — ${PAGES.filter((p) => p.zhDoc).length + 1} redirect page(s)`);
 
 // ── sitemap ─────────────────────────────────────────────────────────────────
 
@@ -571,7 +622,7 @@ const docUrls = PAGES.flatMap((p) => {
   const zh = p.zhDoc
     ? `
   <url>
-    <loc>${SITE}/docs/zh-CN/${p.slug}/</loc>
+    <loc>${SITE}/docs/zh-Hans/${p.slug}/</loc>
     <lastmod>${lastCommitDate(join("docs", p.zh))}</lastmod>
   </url>`
     : "";
@@ -587,7 +638,7 @@ const urls = [
     <lastmod>${lastCommitDate("docs")}</lastmod>
   </url>`,
   `  <url>
-    <loc>${SITE}/docs/zh-CN/</loc>
+    <loc>${SITE}/docs/zh-Hans/</loc>
     <lastmod>${lastCommitDate("docs")}</lastmod>
   </url>`,
   ...docUrls,

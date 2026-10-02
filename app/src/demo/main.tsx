@@ -19,7 +19,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "../index.css";
 import App from "../App";
-import { resolveLocale, setLocale } from "../i18n";
+import { DICTIONARIES, resolveLocale, setLocale } from "../i18n";
 import { settings } from "../api/dev/settings";
 import { useDemoDataset } from "./dataset";
 import { setPaused, startSimulation } from "./simulate";
@@ -42,9 +42,13 @@ document.documentElement.dataset.demo = "true";
  * things: the fixture, so the app's Settings screen agrees with its own UI,
  * and the i18n runtime, which is what repaints. */
 function adoptLanguage(pref: unknown) {
-  if (pref !== "en" && pref !== "zh-CN") return;
-  settings.language = pref;
-  setLocale(resolveLocale(pref));
+  // 页面发来的是它自己的语言 id,只认应用真的 ship 了的那几门(`DICTIONARIES`
+  // 的键):页面先加了新语言而应用还没有时,这道闸就是"页面是日文、里面还是英
+  // 文"不会发生的原因。别的值一律不理,演示保持自己的语言。
+  if (typeof pref !== "string" || !(pref in DICTIONARIES)) return;
+  const locale = resolveLocale(pref);
+  settings.language = locale;
+  setLocale(locale);
 }
 
 // The dataset first: the screens must mount against the trimmed fixture, not

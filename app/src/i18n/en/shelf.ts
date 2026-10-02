@@ -1,5 +1,5 @@
 // Keys for shelf. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 //
 // The four module-level label maps in Shelf.tsx (chips, billing, probe
 // verdicts, columns) hold these keys rather than display text, because a

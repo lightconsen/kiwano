@@ -1,10 +1,10 @@
 // Keys for strategy. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 //
 // The strategy *ids* (`single`, `failover`, `roundrobin`, `timewindow`,
 // `quota`) are sent to the backend and are never translated — only the labels
 // and hints below are. The candidate counts are explicit one/other keys
-// because there is no plural engine; zh-CN renders both the same way.
+// because there is no plural engine; Chinese renders both the same way.
 export const strategy = {
   // ── Strategy labels ──
   single: "Single primary",

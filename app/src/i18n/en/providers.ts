@@ -1,5 +1,5 @@
 // Keys for providers. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 //
 // Several of these messages are assembled at the call site from optional
 // fragments (the usage tooltip joins a 5h and a weekly bound with " · ", the

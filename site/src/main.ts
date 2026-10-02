@@ -55,7 +55,7 @@ function applyLang(next: Locale) {
   // Windows 上不渲染,所以是内联 SVG。
   const target = LOCALE_IDS[(LOCALE_IDS.indexOf(locale) + 1) % LOCALE_IDS.length];
   document.getElementById("langFlag")!.setAttribute("href", LOCALES[target].flag);
-  // 文档链接跟随语言:zh 文档在 /docs/zh-CN/,没有翻译文档的语言指回 /docs/
+  // 文档链接跟随语言:中文文档在 /docs/zh-Hans/,没有翻译文档的语言指回 /docs/
   // (FAQ 答案里的链接在字典里自带 href)。
   document.getElementById("docsLink")!.setAttribute("href", meta.docs);
   localStorage.setItem("kiwano.lang", next);

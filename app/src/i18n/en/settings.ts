@@ -1,5 +1,5 @@
 // Keys for settings. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 export const settings = {
   general: "General",
   displayCurrency: "Display currency",

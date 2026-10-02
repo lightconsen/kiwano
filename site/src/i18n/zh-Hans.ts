@@ -1,10 +1,10 @@
-// 简体中文的覆盖层。键与模板里的 data-i18n / data-i18n-aria 一一对应;含 HTML 的
+// 简体中文(zh-Hans)的覆盖层。键与模板里的 data-i18n / data-i18n-aria 一一对应;含 HTML 的
 // 节点(标记/加粗/链接)按 innerHTML 整段写入,与模板原文同构。
 //
 // 英文不在这里 —— 它在模板 index.html 里,运行时快照进每个元素的 data-en(见
 // main.ts)。所以这个对象只是一层"覆盖":少一个键就是那一处保持英文,而不是
 // 留空或串到别的语言。
-export const zh: Record<string, string> = {
+export const zhHans: Record<string, string> = {
   "nav.features": "特性",
   "nav.screens": "界面",
   "nav.how": "工作原理",
@@ -84,11 +84,11 @@ export const zh: Record<string, string> = {
   "fq1.t": "Kiwano 是什么?",
   "fq1.d": "免费开源、本地优先的 AI 供应商管理器:桌面应用加本地 API 网关,把编码 Agent 的请求路由到任意 AI 供应商——不经过任何云端。支持 macOS、Windows、Linux。",
   "fq2.t": "支持哪些编码 Agent?",
-  "fq2.d": "目前 26 个:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/zh-CN/agent-takeover/\">一键把每个 Agent 的 base_url 指向网关</a>;关掉开关随时还原原始配置。",
+  "fq2.d": "目前 26 个:Claude Code、Codex、Gemini CLI、Grok Build、Claude Desktop、OpenCode、OpenClaw、Cline、Aider、Continue、Crush、Droid、Goose、Pi、oh-my-pi、Hermes、WorkBuddy、CodeBuddy Code、Kimi Code CLI、Qwen Code、MiMo Code、MiniMax Code、DeepSeek Harness、Command Code、HanaAgent、ZCode。<a href=\"/docs/zh-Hans/agent-takeover/\">一键把每个 Agent 的 base_url 指向网关</a>;关掉开关随时还原原始配置。",
   "fq3.t": "本地网关是怎么工作的?",
   "fq3.d": "一个常驻端口 <code>127.0.0.1:8317</code>,归一化 Anthropic 与 OpenAI 协议,逐请求路由、计量,故障自动转移。Agent 配置一次到位——之后换供应商不再碰它的配置文件。",
   "fq4.t": "一个 Agent 能同时用多家供应商吗?",
-  "fq4.d": "可以。<a href=\"/docs/zh-CN/strategies/\">给任意 Agent 绑定一组候选供应商并选择策略</a>:<code>failover</code>(按优先级,自动恢复)、<code>roundrobin</code>(轮询)、<code>timewindow</code>(时间窗:深夜走套餐、白天走按量)或 <code>quota</code>(按周期设消费上限)。网关逐请求执行,调整即时生效。",
+  "fq4.d": "可以。<a href=\"/docs/zh-Hans/strategies/\">给任意 Agent 绑定一组候选供应商并选择策略</a>:<code>failover</code>(按优先级,自动恢复)、<code>roundrobin</code>(轮询)、<code>timewindow</code>(时间窗:深夜走套餐、白天走按量)或 <code>quota</code>(按周期设消费上限)。网关逐请求执行,调整即时生效。",
   "fq5.t": "会记录 token 用量和费用吗?",
   "fq5.d": "每个请求都计量进本地 SQLite:请求、token、费用、延迟的 7 天趋势,按供应商与 Agent 归因,可下钻到单次请求,支持 CSV 导出。可选 MCP 让 Agent 查询自己的用量。",
   "fq6.t": "API Key 会离开我的电脑吗?",
@@ -96,7 +96,7 @@ export const zh: Record<string, string> = {
   "fq7.t": "我在用 cc-switch,能迁移吗?",
   "fq7.d": "可以,一键导入。Kiwano 读取 cc-switch 配置,供应商与 Agent 绑定关系原样带过来——并加上 cc-switch 没有的:本地网关、供应商目录与用量统计。",
   "fq8.t": "能在服务器上无桌面运行吗?",
-  "fq8.d": "可以。<a href=\"/docs/zh-CN/cli/\">CLI 能做桌面应用的每一件事</a>:一条命令安装客户端与网关,并注册为 systemd 服务(无需 root;数据库在 <code>~/.kiwano</code>),然后 <code>kiwano agents takeover</code> 把 Agent 指向它。",
+  "fq8.d": "可以。<a href=\"/docs/zh-Hans/cli/\">CLI 能做桌面应用的每一件事</a>:一条命令安装客户端与网关,并注册为 systemd 服务(无需 root;数据库在 <code>~/.kiwano</code>),然后 <code>kiwano agents takeover</code> 把 Agent 指向它。",
   "fq9.t": "Kiwano 收费吗?",
   "fq9.d": "完全免费——无账号,离线可用。GPL-3.0-or-later 开源。",
   "pv.1": "API 请求本地直连,不经过任何云端中转",

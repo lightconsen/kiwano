@@ -4,9 +4,9 @@
 //
 // 英文没有字典:模板 index.html 本身就是英文,每个元素的内容在运行时快照进
 // data-en。所以一门语言的字典是一层覆盖,少一个键就是那一处保持英文。
-import { zh } from "./zh";
+import { zhHans } from "./zh-Hans";
 
-export type Locale = "en" | "zh";
+export type Locale = "en" | "zh-Hans";
 
 export interface LocaleMeta {
   /** `<html lang>` 的值。也是发给演示的应用侧 locale id —— 演示会拿它去认自己
@@ -34,13 +34,13 @@ export const LOCALES: Record<Locale, LocaleMeta> = {
     flag: "#i-flag-gb",
     docs: "/docs/",
   },
-  zh: {
-    tag: "zh-CN",
+  "zh-Hans": {
+    tag: "zh-Hans",
     title: "Kiwano — 本地优先的 AI Provider 管理器",
     label: "简体中文",
     flag: "#i-flag-cn",
-    docs: "/docs/zh-CN/",
-    dict: zh,
+    docs: "/docs/zh-Hans/",
+    dict: zhHans,
   },
 };
 

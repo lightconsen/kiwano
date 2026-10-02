@@ -1,5 +1,5 @@
 // Keys for addProvider. English is the source of truth for the key set;
-// the zh-CN file must match this shape exactly (see ../types.ts).
+// every other locale's file must match this shape exactly (see ../types.ts).
 //
 // Protocol and billing names (OpenAI / Anthropic, Plan / Pay as
 // you go) are terms of art and stay close to their English form; the helper

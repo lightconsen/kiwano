@@ -91,6 +91,17 @@ jobs:
       - name: Render docs pages and sitemap
         run: node scripts/build-docs.mjs
 
+      # 源目录留在上传里,整棵树就成了公开网页:kiwano.cc/src/index.html 曾经
+      # 可访问,而且它是**模板原件**——CSS/JS 的占位符没被替换,所以那是一个没
+      # 样式、没脚本的页面,和首页重复着一份同样的文案。/src/main.ts、/src/
+      # styles.css 同样可下载。它不是敏感信息(仓库本来就公开),但一个坏页面
+      # 与一份重复内容是两件不该发生的事。
+      #
+      # 所以上传前摘掉它。上面三步已经把它编译成产物了,这一步在它们之后、上传
+      # 之前,留下的 site/ 仍然自洽(本地那份带 src,只有部署时剥掉)。
+      - name: Drop the sources from the upload
+        run: rm -rf site/src
+
       - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v5

@@ -105,7 +105,7 @@ export const zhHant: Record<string, string> = {
   "pv.1": "API 請求本機直連,不經過任何雲端中轉",
   "pv.2": "API Key 僅存本機,只有你能讀取",
   "pv.3": "無帳號體系,離線完整可用",
-  "foot.note": "部分模組移植自 cc-switch(MIT),聲明見 THIRD-PARTY-NOTICES",
+  "foot.note": "用 <svg class=\"icon\"><use href=\"#i-heart\"/></svg> 打造",
   "demo.note": "即時演示——範例資料,在你的瀏覽器裡跑。<a href=\"#download\">下載 Kiwano</a> 接上你自己的供應商。",
   "demo.narrow": "即時演示需要更寬的螢幕——應用視窗是 900×600。<a href=\"/demo/\" target=\"_blank\" rel=\"noopener\">在新分頁開啟</a>。",
   "dl.count": "已有 <b>{n}</b> 次安裝器下載——只是下載次數,不是安裝數。",

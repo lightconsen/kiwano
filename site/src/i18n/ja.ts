@@ -107,7 +107,7 @@ export const ja: Record<string, string> = {
   "pv.1": "API リクエストはローカルから直接送信され、クラウドを経由しません",
   "pv.2": "API キーはこのマシンにのみ保存され、読めるのはあなただけです",
   "pv.3": "アカウント不要、オフラインでも完全に動作します",
-  "foot.note": "一部のモジュールは cc-switch(MIT)から移植しています。表示は THIRD-PARTY-NOTICES を参照してください",
+  "foot.note": "<svg class=\"icon\"><use href=\"#i-heart\"/></svg> を込めて作りました",
   "demo.note": "ライブデモ——サンプルデータで、あなたのブラウザ上で動作しています。<a href=\"#download\">Kiwano をダウンロード</a>して、自分のプロバイダーを接続してください。",
   "demo.narrow": "ライブデモにはもっと広い画面が必要です——アプリのウィンドウは 900×600 です。<a href=\"/demo/\" target=\"_blank\" rel=\"noopener\">新しいタブで開く</a>。",
   "dl.count": "これまでに <b>{n}</b> 回インストーラーがダウンロードされています——ダウンロード数であって、インストール数ではありません。",

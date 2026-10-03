@@ -494,6 +494,10 @@ footer { padding: 56px 0 44px; }
 .foot-links { display: flex; gap: 20px; font-size: 13px; color: var(--mut); }
 .foot-links a:hover { color: var(--ink); }
 .foot-bottom { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: 12px; color: oklch(0.48 0.008 260); }
+/* 页脚那颗心:尺寸跟着 11px 的小字走,颜色用品牌绿(页面上唯一的强调色),
+   与文字基线对齐 —— 它是一句话里的一个词,不是一枚图标。 */
+.foot-love { display: inline-flex; align-items: center; gap: 3px; }
+.foot-love .icon { width: 11px; height: 11px; color: var(--kiwi); }
 
 /* ── 进场动画:400ms ease-out [Y+18→0, α0→1],尊重系统减弱动态 ── */
 @media (prefers-reduced-motion: no-preference) {

@@ -1,15 +1,5 @@
 <!DOCTYPE html>
-<!-- Kiwano 落地页 — 源模板,纯黑 dark mode,设计 token 与桌面端一致(见 design/design.md §3)。
-     中英双语:默认英文,页内即英文源,data-i18n 节点由 main.ts 的字典切换,选择存 localStorage。
 
-     本文件是构建输入,不是部署产物:scripts/build-site.mjs 把 <style>/<script>
-     里的占位标记换成 styles.css 与打包后的 main.ts,产物写到
-     site/index.html(随仓提交,Pages 原样发布)。改文案、结构、样式,
-     改这里与 site/src/ 下的文件;site/index.html 不要手改。
-
-     版本号与许可证名不在这里维护:两者都是 package.json 已有的值,由
-     scripts/sync-site.mjs 写进本模板,CI 在上传前会再执行一次,所以线上
-     不会过期。改这两处请改 package.json,不要手改本文件。 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -18,8 +8,7 @@
 <meta name="description" content="Discover, compare and switch AI providers locally. Connect Claude Code, Codex and Grok Build to a local gateway in one click — nothing leaves your machine.">
 <link rel="canonical" href="https://kiwano.cc/">
 <meta name="theme-color" content="#000000">
-<!-- Open Graph / Twitter:爬虫不执行 JS,卡片全部取自这里的静态值;
-     og:image 必须是绝对地址,相对路径在各家分享器里都拿不到图 -->
+
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://kiwano.cc/">
 <meta property="og:site_name" content="Kiwano">
@@ -36,7 +25,7 @@
 <meta name="twitter:description" content="Discover, compare and switch providers, take over your coding agents in one click; every request stays local, and your keys are never uploaded.">
 <meta name="twitter:image" content="https://kiwano.cc/assets/app-providers.png">
 <link rel="icon" type="image/svg+xml" href="assets/kiwano-logo.svg">
-<!-- 结构化数据:不写 softwareVersion——那会像 hero 版本行一样过期,而 sync-site 只盖得到它 -->
+
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -53,9 +42,7 @@
   "keywords": "AI provider manager, local AI gateway, local-first, provider switching, agent takeover, Claude Code, Codex, Gemini CLI, Grok Build, provider failover, round robin, time window routing, quota cutover, API key management, token usage tracking, cost dashboard, request logs, MCP, cc-switch import, headless CLI, open source"
 }
 </script>
-<!-- FAQPage:问题与答案逐字取自页内可见英文(带 code 标记的只去标签)。
-     Google 的 FAQ 富摘要 2023 年起只对政府/健康站开放,这里的收益在
-     语义理解与 AI 搜索引擎对问答对的抓取,不在富摘要本身。 -->
+
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -113,7 +100,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* ── Design tokens:与桌面端 src/index.css 同源;页面底色按需求改为纯黑 ── */
+
 :root {
   --bg: #000;
   --surface: oklch(0.145 0.008 260 / 0.55);
@@ -150,7 +137,7 @@ img { display: block; max-width: 100%; height: auto; }
 section { scroll-margin-top: 76px; }
 .icon { width: 18px; height: 18px; flex: none; }
 
-/* ── 顶部导航 ── */
+
 .nav {
   position: sticky; top: 0; z-index: 100;
   border-bottom: 1px solid var(--line);
@@ -168,8 +155,7 @@ section { scroll-margin-top: 76px; }
 }
 .nav-links a:hover { color: var(--ink); background: var(--surface2); }
 .nav-cta { position: relative; margin-left: auto; display: flex; align-items: center; gap: 10px; }
-/* 窄屏的菜单开关。三根线用 span 画,颜色跟着 currentColor 走,和旁边那些
-   图标按钮一样在 hover 时亮起来。 */
+
 .nav-burger {
   display: none; flex-direction: column; justify-content: center; gap: 4px;
   width: 40px; height: 40px; padding: 0 9px; flex: none;
@@ -180,11 +166,11 @@ section { scroll-margin-top: 76px; }
 .nav-burger[aria-expanded="true"] span:nth-child(1) { transform: translateY(5.5px) rotate(45deg); }
 .nav-burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
 .nav-burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-5.5px) rotate(-45deg); }
-/* 展开的菜单:贴着顶栏往下掉一整条,窄屏才有。 */
+
 .nav-panel {
   display: none; position: absolute; left: 0; right: 0; top: 100%;
   border-bottom: 1px solid var(--line);
-  /* 不透明:菜单要能读,而它正好落在首屏那几行大字上。 */
+  
   background: oklch(0.12 0.008 260);
   backdrop-filter: blur(14px) saturate(1.3);
   -webkit-backdrop-filter: blur(14px) saturate(1.3);
@@ -193,16 +179,15 @@ section { scroll-margin-top: 76px; }
 .nav-panel .wrap { display: flex; flex-direction: column; padding-top: 8px; padding-bottom: 14px; gap: 2px; }
 .nav-panel a { padding: 12px 4px; font-size: 15px; color: var(--mut); border-bottom: 1px solid var(--line); }
 .nav-panel a:hover { color: var(--ink); }
-/* 搬进菜单的两个社交按钮:它们是按钮,不该长成菜单项的样子。 */
+
 .nav-panel a.btn {
   margin-top: 12px; padding: 10px 16px; font-size: 13.5px; color: var(--ink);
   border: 1px solid var(--line-strong); border-bottom-width: 1px; justify-content: center;
 }
 .nav-panel a.btn + a.btn { margin-top: 8px; }
-/* Same height as the row it sits in (the icon-only buttons stretch to it too),
-   which a text button got from its line box and this one cannot. */
+
 .btn-lang { align-self: stretch; padding: 0 12px; }
-/* 语言菜单:挂在地球按钮下、右对齐,宽度按最长那条语言名(繁體中文)。 */
+
 .lang-menu {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
   min-width: 132px; padding: 5px;
@@ -219,11 +204,9 @@ section { scroll-margin-top: 76px; }
 .lang-menu button:hover { background: var(--surface2); color: var(--ink); }
 .lang-menu button[aria-current="true"] { color: var(--kiwi); font-weight: 600; }
 .lang-menu button[aria-current="true"]::after { content: " ✓"; }
-/* 这里曾有一条 19×13 —— 那是给国旗的 3:2 比例写的:盒子跟着行高走,里面的画
-   保持自己的比例。换成语标(方形的文/A)之后它只做一件事:把图标压扁。删掉,
-   回落到 .icon 的 18×18。 */
 
-/* ── 按钮 ── */
+
+
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid var(--line-strong); border-radius: 10px;
@@ -240,13 +223,11 @@ section { scroll-margin-top: 76px; }
 .btn-lg { padding: 12px 22px; font-size: 15px; border-radius: 12px; }
 .btn-gh { display: inline-flex; align-items: center; gap: 7px; }
 .btn-gh .icon { width: 16px; height: 16px; }
-/* An icon-only variant of the same button: square and stretched to the row's
-   height, so it sits beside GitHub without widening or denting the CTA row —
-   the label lives in aria-label/title. */
+
 .btn-icon { padding: 0; width: 42px; align-self: stretch; }
 .btn-icon .icon { width: 15px; height: 15px; }
 
-/* ── Hero ── */
+
 .hero { padding: 92px 0 0; text-align: center; position: relative; overflow: hidden; }
 .hero::before {
   content: ""; position: absolute; inset: -40% -20% auto; height: 130%;
@@ -271,23 +252,16 @@ section { scroll-margin-top: 76px; }
 .dl-row { margin-top: 34px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
 .dl-note { margin-top: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--mut); letter-spacing: 0.02em; }
 .dl-note b { color: oklch(0.70 0.02 260); font-weight: 500; }
-/* 版本胶囊:这一行里唯一一件"新闻"而不是"参数"的东西(发布/正式发布/リリース),
-   所以给它整行唯一的彩色底。形状与首屏那枚 .badge 同源(kiwi-soft 底 + 999px
-   圆角),字号沿用这一行的 11.5px,不为了醒目去撑大行高。 */
+
 .dl-ver {
   display: inline-flex; align-items: center;
   padding: 2px 9px; border-radius: 999px;
   background: var(--kiwi-soft); color: var(--kiwi); font-weight: 600;
 }
-/* the agents one port serves: logos only, one row (scrolls sideways on
-   narrow screens rather than wrapping — the row is the point) */
+
 .agents-row {
   margin-top: 16px; display: flex; justify-content: center; align-items: center;
-  /* 装不下时按 start 对齐。`center` 配 `overflow-x: auto` 是个陷阱:居中会把
-     溢出量摊到两端,而滚动容器到不了负偏移,于是左边的几个 logo 既看不到也
-     滚不回来——768 和 390 上被切掉的正是 Claude Code、Codex、Gemini 这几个
-     最该看见的。`safe` 在装得下时仍然居中,所以宽屏的观感不变。上一行是给不
-     认 `safe` 的浏览器留的回退,行为与现在一致而不是更差。 */
+  
   justify-content: safe center;
   gap: 11px; flex-wrap: nowrap; overflow-x: auto; padding: 2px 16px 4px;
   scrollbar-width: none;
@@ -296,7 +270,7 @@ section { scroll-margin-top: 76px; }
 .agents-row img { width: 21px; height: 21px; object-fit: contain; opacity: 0.78; flex: none; }
 .agents-row img:hover { opacity: 1; }
 
-/* Hero 截图:窗框 + kiwi 微光 */
+
 .shot {
   position: relative; margin: 56px auto 0; max-width: 980px;
   border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden;
@@ -304,21 +278,18 @@ section { scroll-margin-top: 76px; }
   background: oklch(0.15 0.008 260);
 }
 .shot img { width: 100%; }
-/* The live demo: the same frame, with the app's own window inside it. The host
-   is empty until the script fills it, so the still above is what a visitor
-   without script sees. */
+
 .shot-live-host { position: absolute; inset: 0; }
 .shot-live-host iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
 .shot-live .shot-live-host { opacity: 0; transition: opacity .4s ease-out; }
 .shot-live.is-live .shot-live-host { opacity: 1; }
 .demo-note { margin: 14px auto 0; max-width: 980px; font-size: 12.5px; color: var(--mut); }
 .demo-note a { color: var(--kiwi); }
-/* 演示的两套文案:宽屏说"正在你的浏览器里跑",窄屏说它要更宽的屏幕、并给一个
-   新标签页的入口(见 main.ts 里那道 720px 的闸)。 */
+
 .demo-note-narrow { display: none; }
 .shot::after { content: ""; position: absolute; inset: 0; border-radius: 14px; box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06); pointer-events: none; }
 
-/* ── 区块标题 ── */
+
 .sec-head { text-align: center; max-width: 620px; margin: 0 auto 52px; }
 .sec-head .kicker {
   font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.18em;
@@ -328,7 +299,7 @@ section { scroll-margin-top: 76px; }
 .sec-head p { margin-top: 14px; color: var(--mut); font-size: 15px; }
 section.block { padding: 96px 0 0; }
 
-/* ── 特性卡片 ── */
+
 .grid-feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .feat {
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -343,7 +314,7 @@ section.block { padding: 96px 0 0; }
 .feat p { margin-top: 7px; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
 .feat p code { font-family: var(--font-mono); font-size: 12px; color: oklch(0.72 0.02 260); }
 
-/* ── 界面展示 ── */
+
 .cap { display: flex; align-items: baseline; gap: 12px; margin: 14px 2px 0; }
 .tag {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
@@ -352,7 +323,7 @@ section.block { padding: 96px 0 0; }
 }
 .cap p { font-size: 13px; color: var(--mut); }
 
-/* ── 工作原理 ── */
+
 .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .step {
   position: relative; border: 1px solid var(--line); border-radius: var(--radius);
@@ -369,9 +340,7 @@ section.block { padding: 96px 0 0; }
   font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi);
   background: var(--kiwi-soft); padding: 1px 6px; border-radius: 5px;
 }
-/* A copyable command: the code takes the row and scrolls if narrow, the
-   button sits at its right. Copied feedback is the icon itself — copy swaps
-   to a check for a beat, then back; no layout move, same as the app's. */
+
 .step p.cmd { display: flex; align-items: center; gap: 6px; }
 .step p.cmd code {
   flex: 1; min-width: 0; white-space: nowrap; overflow-x: auto;
@@ -390,10 +359,7 @@ section.block { padding: 96px 0 0; }
 .copy-btn.copied .i-copy { display: none; }
 .copy-btn.copied .i-check { display: block; }
 
-/* ── 策略示意动画:左边 Agent,中间 Kiwano(仅 logo),右边 Provider 垂直一列。
-   常态:三方的连线常亮但暗(待机的光路);流量:沿线流过的亮段——任何时刻
-   只有一家在服务,名字、线和流量一起换手(排期在 main.ts 的 LEG2_SCHEDULE)。
-   8s 主循环;reduced-motion 时全部静止在初始态。 ── */
+
 .grid-strat { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .st-head { text-align: center; margin: 62px auto 34px; max-width: 560px; }
 .st-head h3 { margin-top: 12px; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
@@ -404,10 +370,7 @@ section.block { padding: 96px 0 0; }
   border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85);
   overflow: hidden;
 }
-/* 示意图本体。它自己是一个固定宽度的画布,卡片在窄屏滚动的是它——滚动容器和
-   被滚动的内容必须是两层,否则连线层(absolute inset:0)会停在原地而内容滑走。
-   布局从 .diag 搬到这里,是因为滚动容器不能同时承担网格:一滚,测出来的几何
-   就跟着变。 */
+
 .diag-canvas {
   height: 100%;
   display: grid;
@@ -416,7 +379,7 @@ section.block { padding: 96px 0 0; }
   padding: 0 20px;
   column-gap: 60px;
 }
-/* 左:发起请求的 Agent */
+
 .agent-chip {
   position: relative; z-index: 2;
   justify-self: start;
@@ -425,11 +388,10 @@ section.block { padding: 96px 0 0; }
   font-family: var(--font-mono); font-size: 11px; color: var(--ink);
 }
 .agent-chip svg { width: 14px; height: 14px; color: var(--mut); }
-/* 中:Kiwano —— 只有 logo,无外框 */
+
 .hub { position: relative; z-index: 2; width: 34px; height: 34px; }
 .hub img { width: 34px; height: 34px; border-radius: 8px; display: block; }
-/* 右:Provider 垂直一列,logo + 名字。整列贴往右侧(列宽收缩到内容,
-   justify-self 推到格尾),列内各行仍左对齐,logo 垂直成列。 */
+
 .provs {
   display: grid; gap: 14px; align-content: center; justify-items: start;
   justify-self: end;
@@ -446,25 +408,23 @@ section.block { padding: 96px 0 0; }
   display: flex; align-items: center; justify-content: center;
   background: var(--surface2); font-size: 9px; border: 1px solid var(--line-strong);
 }
-/* 光路:SVG 连线层,绝对铺满示意区 */
+
 .wires { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; }
 .wire {
   fill: none; stroke: oklch(0.5 0.02 260 / 0.35); stroke-width: 1.5;
   transition: stroke .4s;
 }
 .wire.hot { stroke: oklch(0.8 0.19 132 / 0.9); }
-/* 流量:沿路径流动的亮段。行程、速度与可见窗口都由 main.ts 按实测路径长
-   生成(见那里的 LEG2_SCHEDULE)——这里只管外观。光晕跟着自身的颜色走,
-   所以 roundrobin 的三条流(下面 s1/s2/s3)各自发光,不用各写一条滤镜。 */
+
 .flow {
   fill: none; stroke: var(--kiwi); color: var(--kiwi); stroke-width: 2.5; stroke-linecap: round;
   filter: drop-shadow(0 0 4px color-mix(in oklab, currentColor 80%, transparent));
 }
-/* roundrobin:三条流各一色——绿是主色,蓝与琥珀是同一套 token 里的 accent */
+
 .flow.s2 { stroke: var(--blue); color: var(--blue); }
 .flow.s3 { stroke: var(--amber); color: var(--amber); }
 
-/* failover:A 故障转红,流量改走 B 的线,A 恢复后回 A */
+
 .fa-a { animation: 8s fa-a-n infinite; }
 .fa-b { animation: 8s fa-b-n infinite; }
 @keyframes fa-a-n {
@@ -476,17 +436,15 @@ section.block { padding: 96px 0 0; }
   0%, 40% { color: var(--mut); }
   41%, 100% { color: var(--ink); }
 }
-/* 流量走哪条腿、何时走,由 main.ts 按实测路径长生成(LEG2_SCHEDULE):
-   前 40% 只服务 A;A 变红那一拍起改走 B。 */
 
-/* roundrobin:三条流同时在跑,三家就都算在服务——没有轮流高亮这回事了。
-   每条 standby 线染上跑在它上面的那条流的淡色,颜色把"线"和"流"绑在一起。 */
+
+
 .rr-a, .rr-b, .rr-c { color: var(--ink); }
 .wire.ws1 { stroke: color-mix(in oklab, var(--kiwi) 35%, transparent); }
 .wire.ws2 { stroke: color-mix(in oklab, var(--blue) 35%, transparent); }
 .wire.ws3 { stroke: color-mix(in oklab, var(--amber) 35%, transparent); }
 
-/* timewindow:时间游标扫过 24h 轴(Provider 列下方),进入哪个窗口哪家亮 */
+
 .tw-a { animation: 8s tw-a-n infinite; }
 .tw-b { animation: 8s tw-b-n infinite; }
 @keyframes tw-a-n {
@@ -511,7 +469,7 @@ section.block { padding: 96px 0 0; }
 .tw-lab { position: absolute; bottom: -15px; font-family: var(--font-mono); font-size: 9px; color: var(--mut); }
 @keyframes tw-cur { 0% { left: 0%; } 100% { left: 100%; } }
 
-/* quota:A 的配额环注满转 amber,流量改走 B 的线,周期复位后回 A */
+
 .qa-a { animation: 8s qa-a-n infinite; }
 .qa-b { animation: 8s qa-b-n infinite; }
 @keyframes qa-a-n {
@@ -540,12 +498,11 @@ section.block { padding: 96px 0 0; }
 @media (prefers-reduced-motion: reduce) {
   .diag .flow, .diag .wire, .diag .qfg, .diag .tw-cursor,
   .diag .pn, .diag .hub, .diag .agent-chip { animation: none !important; }
-  /* 动画关掉后所有腿都是 opacity 1——那读起来像"流量同时给所有家"。静止帧
-     取排期表的第一拍:agent→hub 常走,只有第一家在用。 */
+  
   .diag .flow[data-flow^="leg2"]:not([data-flow="leg2a"]):not([data-flow="leg2"]) { opacity: 0; }
 }
 
-/* ── 下载区 ── */
+
 .dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .dl-card {
   border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
@@ -553,8 +510,7 @@ section.block { padding: 96px 0 0; }
   transition: border-color .15s;
 }
 .dl-card:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
-/* The download counter under the section head: one line, mono figure. Hidden
-   until the fetch lands — the page never shows a number it cannot back. */
+
 .dl-count { margin-top: 14px; font-size: 12.5px; color: var(--mut); }
 .dl-count b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); font-size: 13px; }
 .dl-os { display: flex; align-items: center; gap: 11px; }
@@ -569,7 +525,7 @@ section.block { padding: 96px 0 0; }
 .dl-foot { text-align: center; margin-top: 26px; font-size: 13px; color: var(--mut); }
 .dl-foot .dot { display: inline-block; width: 5px; height: 5px; border-radius: 999px; background: var(--kiwi); margin: 0 7px 1px; vertical-align: middle; }
 
-/* ── FAQ:details 原生折叠,加号旋转 45° 即变 ×;无 JS 依赖 ── */
+
 .grid-faq { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 .faq {
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
@@ -595,14 +551,14 @@ section.block { padding: 96px 0 0; }
 .faq .ans a { color: var(--kiwi); }
 .faq .ans a:hover { text-decoration: underline; }
 
-/* ── 隐私承诺 ── */
+
 .privacy { margin-top: 96px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: oklch(0.09 0.006 260 / 0.8); }
 .privacy-inner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 34px 0; }
 .priv { display: flex; align-items: center; gap: 13px; justify-content: center; }
 .priv .icon { color: var(--kiwi); width: 19px; height: 19px; }
 .priv span { font-size: 13.5px; color: oklch(0.72 0.015 260); }
 
-/* ── 页脚 ── */
+
 footer { padding: 56px 0 44px; }
 .foot-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .foot-slogan { margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--kiwi-dim); letter-spacing: 0.04em; }
@@ -610,52 +566,39 @@ footer { padding: 56px 0 44px; }
 .foot-links a:hover { color: var(--ink); }
 .foot-bottom { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: 12px; color: oklch(0.48 0.008 260); }
 
-/* ── 进场动画:400ms ease-out [Y+18→0, α0→1],尊重系统减弱动态 ── */
+
 @media (prefers-reduced-motion: no-preference) {
   .rv { opacity: 0; transform: translateY(18px); transition: opacity .45s ease-out, transform .45s ease-out; transition-delay: var(--d, 0ms); }
   .rv.in { opacity: 1; transform: none; }
 }
 
-/* ── 响应式 ── */
-/* 导航折叠的断点是量出来的,不是猜的:顶栏(品牌 90 + 七个链接 547 + 控件 292
-   + 两处间距 56 + 两侧留白 56)合计需要 1041px,英文下最长。原实现到 640 才收
-   链接,于是 641–1040 这一整段——768、820、900、1024 这些常见宽度——顶栏都在
-   横向溢出,下载按钮被推出屏幕。留 40px 余量后收在 1080。 */
+
+
 @media (max-width: 1080px) {
   .nav-links { display: none; }
   .nav-burger { display: flex; }
   .nav-panel.open { display: block; }
 }
-/* `minmax(0, 1fr)` 而不是 `1fr`:`1fr` 的最小值是 min-content,于是"装不下就
-   换行/自己滚"的内容会把整条轨道顶宽——安装命令那条 nowrap 的 curl 就是这
-   样把 steps 撑到 415px,而视口只有 390。0 让它老老实实等于容器宽,内部的
-   命令块照原设计自己横滑。 */
+
 @media (max-width: 920px) {
   .grid-feats, .steps, .dl-grid, .privacy-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  /* 示意图要一列:两列时每格只有 349px,而图形本身的最小宽度是 370px(实测),
-     于是卡片被撑出网格、整页横向溢出。它比别的卡片宽,是因为它里面是横向的
-     三段式示意,不是一段文字。 */
+  
   .grid-strat { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
-  /* 顶栏那四样(logo、菜单、语言、下载)在 390px 上刚好放得下;GitHub 与 X
-     是第五、第六样,会把下载按钮推出屏幕(实测溢出 76px),所以它们让位到
-     菜单里,而不是从页面上消失。 */
+  
   .nav-cta .btn-gh { display: none; }
   .nav-inner { gap: 12px; }
   .grid-feats, .steps, .grid-strat, .grid-faq, .dl-grid, .privacy-inner { grid-template-columns: minmax(0, 1fr); }
   .hero { padding-top: 64px; }
   .dl-row .btn { flex: 1 1 100%; }
-  /* 示意图:窄屏先把间距挤紧到刚好放得下——省掉的两处间距(列间距、两侧内边)
-     正好是原来溢出的量,而 provider 名字是这张图最有信息量的部分,不该一上来
-     就被切掉。真放不下时(名字更长)由 .diag 横滑兜底,图形比例两种情况下都
-     不变,而原来的写法是整段被视口切掉(卡片实测 396px,视口只有 334px)。 */
+  
   .diag { overflow-x: auto; }
   .diag-canvas { min-width: 0; column-gap: 16px; padding: 0 8px; }
   .pn { font-size: 10.5px; gap: 6px; padding: 4px 6px 4px 4px; }
   .agent-chip { padding: 6px 9px; font-size: 10px; }
 }
-/* 720px 以下不加载实时演示(见 main.ts),文案随之换成窄屏那一版。 */
+
 @media (max-width: 719px) {
   .demo-note-wide { display: none; }
   .demo-note-narrow { display: block; }
@@ -664,7 +607,7 @@ footer { padding: 56px 0 44px; }
 </head>
 <body>
 
-<!-- SVG 雪碧图:线性图标为 lucide(ISC),品牌标为 simple-icons(CC0) -->
+
 <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
   <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol>
   <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="m2 22 3-3"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m18 3-4 4h6l-4 4"/></symbol>
@@ -678,7 +621,7 @@ footer { padding: 56px 0 44px; }
   <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
   <symbol id="i-wifioff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
-  <!-- Lucide 的 languages(文/A 那个字符)。和 app 里用的是同一套图标(lucide-react),所以两边的语言入口看着是同一个形状。 -->
+  
   <symbol id="i-languages" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></symbol>
   <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
@@ -687,12 +630,11 @@ footer { padding: 56px 0 44px; }
   <symbol id="i-linux" viewBox="0 0 24 24" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 0 0-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 0 0-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139zm.529 3.405h.013c.213 0 .396.062.584.198.19.135.33.332.438.533.105.259.158.459.166.724 0-.02.006-.04.006-.06v.105a.086.086 0 0 1-.004-.021l-.004-.024a1.807 1.807 0 0 1-.15.706.953.953 0 0 1-.213.335.71.71 0 0 0-.088-.042c-.104-.045-.198-.064-.284-.133a1.312 1.312 0 0 0-.22-.066c.05-.06.146-.133.183-.198.053-.128.082-.264.088-.402v-.02a1.21 1.21 0 0 0-.061-.4c-.045-.134-.101-.2-.183-.333-.084-.066-.167-.132-.267-.132h-.016c-.093 0-.176.03-.262.132a.8.8 0 0 0-.205.334 1.18 1.18 0 0 0-.09.4v.019c.002.089.008.179.02.267-.193-.067-.438-.135-.607-.202a1.635 1.635 0 0 1-.018-.2v-.02a1.772 1.772 0 0 1 .15-.768c.082-.22.232-.406.43-.533a.985.985 0 0 1 .594-.2zm-2.962.059h.036c.142 0 .27.048.399.135.146.129.264.288.344.465.09.199.14.4.153.667v.004c.007.134.006.2-.002.266v.08c-.03.007-.056.018-.083.024-.152.055-.274.135-.393.2.012-.09.013-.18.003-.267v-.015c-.012-.133-.04-.2-.082-.333a.613.613 0 0 0-.166-.267.248.248 0 0 0-.183-.064h-.021c-.071.006-.13.04-.186.132a.552.552 0 0 0-.12.27.944.944 0 0 0-.023.33v.015c.012.135.037.2.08.334.046.134.098.2.166.268.01.009.02.018.034.024-.07.057-.117.07-.176.136a.304.304 0 0 1-.131.068 2.62 2.62 0 0 1-.275-.402 1.772 1.772 0 0 1-.155-.667 1.759 1.759 0 0 1 .08-.668 1.43 1.43 0 0 1 .283-.535c.128-.133.26-.2.418-.2zm1.37 1.706c.332 0 .733.065 1.216.399.293.2.523.269 1.052.468h.003c.255.136.405.266.478.399v-.131a.571.571 0 0 1 .016.47c-.123.31-.516.643-1.063.842v.002c-.268.135-.501.333-.775.465-.276.135-.588.292-1.012.267a1.139 1.139 0 0 1-.448-.067 3.566 3.566 0 0 1-.322-.198c-.195-.135-.363-.332-.612-.465v-.005h-.005c-.4-.246-.616-.512-.686-.71-.07-.268-.005-.47.193-.6.224-.135.38-.271.483-.336.104-.074.143-.102.176-.131h.002v-.003c.169-.202.436-.47.839-.601a2.914 2.914 0 0 1 .466-.065zm2.8 2.142c.358 1.417 1.196 3.475 1.735 4.473.286.534.855 1.659 1.102 3.024.156-.005.33.018.513.064.646-1.671-.546-3.467-1.089-3.966-.22-.2-.232-.335-.123-.335.59.534 1.365 1.572 1.646 2.757.13.535.16 1.104.021 1.67.067.028.135.06.205.067 1.032.534 1.413.938 1.23 1.537v-.043c-.06-.003-.12 0-.18 0h-.016c.151-.467-.182-.825-1.065-1.224-.915-.4-1.646-.336-1.77.465-.008.043-.013.066-.018.135-.068.023-.139.053-.209.064-.43.268-.662.669-.793 1.187-.13.533-.17 1.156-.205 1.869v.003c-.02.334-.17.838-.319 1.35-1.5 1.072-3.58 1.538-5.348.334a2.645 2.645 0 0 0-.402-.533 1.45 1.45 0 0 0-.275-.333c.182 0 .338-.03.465-.067a.615.615 0 0 0 .314-.334c.108-.267 0-.697-.345-1.163-.345-.467-.931-.995-1.788-1.521-.63-.4-.986-.87-1.15-1.396-.165-.534-.143-1.085-.015-1.645.245-1.07.873-2.11 1.274-2.763.107-.065.037.135-.408.974-.396.751-1.14 2.497-.122 3.854a8.123 8.123 0 0 1 .647-2.876c.564-1.278 1.743-3.504 1.836-5.268.048.036.217.135.289.202.218.133.38.333.59.465.21.201.477.335.876.335.039.003.075.006.11.006.412 0 .73-.134.997-.268.29-.134.52-.334.74-.4h.005c.467-.135.835-.402 1.044-.7zm2.185 8.958c.037.6.343 1.245.882 1.377.588.134 1.434-.333 1.791-.765l.211-.01c.315-.007.577.01.847.268l.003.003c.208.199.305.53.391.876.085.4.154.78.409 1.066.486.527.645.906.636 1.14l.003-.007v.018l-.003-.012c-.015.262-.185.396-.498.595-.63.401-1.746.712-2.457 1.57-.618.737-1.37 1.14-2.036 1.191-.664.053-1.237-.2-1.574-.898l-.005-.003c-.21-.4-.12-1.025.056-1.69.176-.668.428-1.344.463-1.897.037-.714.076-1.335.195-1.814.12-.465.308-.797.641-.984l.045-.022zm-10.814.049h.01c.053 0 .105.005.157.014.376.055.706.333 1.023.752l.91 1.664.003.003c.243.533.754 1.064 1.189 1.637.434.598.77 1.131.729 1.57v.006c-.057.744-.48 1.148-1.125 1.294-.645.135-1.52.002-2.395-.464-.968-.536-2.118-.469-2.857-.602-.369-.066-.61-.2-.723-.4-.11-.2-.113-.602.123-1.23v-.004l.002-.003c.117-.334.03-.752-.027-1.118-.055-.401-.083-.71.043-.94.16-.334.396-.4.69-.533.294-.135.64-.202.915-.47h.002v-.002c.256-.268.445-.601.668-.838.19-.201.38-.336.663-.336zm7.159-9.074c-.435.201-.945.535-1.488.535-.542 0-.97-.267-1.28-.466-.154-.134-.28-.268-.373-.335-.164-.134-.144-.333-.074-.333.109.016.129.134.199.2.096.066.215.2.36.333.292.2.68.467 1.167.467.485 0 1.053-.267 1.398-.466.195-.135.445-.334.648-.467.156-.136.149-.267.279-.267.128.016.034.134-.147.332a8.097 8.097 0 0 1-.69.468zm-1.082-1.583v.02c-.006-.02.013-.042.029-.05.074-.043.18-.027.26.004.063 0 .16.067.15.135-.006.049-.085.066-.135.066-.055 0-.092-.043-.141-.068-.052-.018-.146-.008-.163-.065zm-.551 0c-.02.058-.113.049-.166.066-.047.025-.086.068-.14.068-.05 0-.13-.02-.136-.068-.01-.066.088-.133.15-.133.08-.031.184-.047.259-.005.019.009.036.03.03.05v.02h.003z"/></symbol>
 </svg>
 
-<!-- ══ 导航 ══ -->
+
 <nav class="nav">
   <div class="wrap nav-inner">
     <a class="brand" href="#top"><img src="assets/kiwano-logo.svg" alt="">Kiwano</a>
-    <!-- 窄屏的导航入口:链接与两个社交按钮都在面板里,顶栏只留 logo、菜单、
-         语言和下载——那四样在 390px 上刚好放得下,多一个就会被切断。 -->
+    
     <button class="nav-burger" id="navBurger" type="button" aria-label="Menu" aria-expanded="false" aria-controls="navPanel">
       <span></span><span></span><span></span>
     </button>
@@ -706,8 +648,7 @@ footer { padding: 56px 0 44px; }
       <a href="#download" data-i18n="nav.download">Download</a>
     </div>
     <div class="nav-cta">
-      <!-- 语言切换:一个地球图标 + 一张按语言清单生成的菜单(main.ts 填)。四门
-           语言时,菜单比"按一下翻到下一门"更直接 —— 想找哪门就点哪门。 -->
+      
       <button class="btn btn-lang" id="langBtn" type="button" aria-label="Change language" aria-haspopup="menu" aria-expanded="false" title="Change language">
         <svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg>
       </button>
@@ -722,9 +663,7 @@ footer { padding: 56px 0 44px; }
       </a>
     </div>
   </div>
-  <!-- 窄屏展开的菜单。链接是同一组,重复一份而不是搬过来:桌面端那条要留在
-       原地,而 i18n 是按 [data-i18n] 扫的,两份都会跟着语言走。两个社交按钮
-       只在窄屏被顶栏让出来,就收在这里,免得它们从页面上消失。 -->
+  
   <div class="nav-panel" id="navPanel">
     <div class="wrap">
       <a href="#features" data-i18n="nav.features">Features</a>
@@ -744,7 +683,7 @@ footer { padding: 56px 0 44px; }
   </div>
 </nav>
 
-<!-- ══ Hero ══ -->
+
 <header class="hero" id="top">
   <div class="wrap">
     <span class="badge rv"><span class="dot"></span><span data-i18n="hero.badge">Local-first · API requests never touch the cloud</span></span>
@@ -756,7 +695,7 @@ footer { padding: 56px 0 44px; }
       <a class="btn btn-lg" href="#download-linux"><svg class="icon"><use href="#i-linux"/></svg>Linux</a>
     </div>
     <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note"><span class="dl-ver">🎉 v0.2.9 just released</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source</p>
-    <!-- every agent the gateway takes over, logos only (names on hover) -->
+    
     <div class="agents-row rv" style="--d:300ms" aria-label="Supported agents">
       <img src="assets/agent-logos/claudecode.svg" title="Claude Code" alt="Claude Code">
       <img src="assets/agent-logos/codex.svg" title="Codex" alt="Codex">
@@ -787,22 +726,17 @@ footer { padding: 56px 0 44px; }
     </div>
     <figure class="shot shot-live rv" style="--d:300ms" id="demo">
       <img src="assets/app-providers.webp" width="1440" height="960" alt="Kiwano's main screen: the local provider list, showing each provider's bound agents, 7-day usage and quota, and status" fetchpriority="high">
-      <!-- The app itself, built from app/ for the browser and framed at the
-           window it opens at. Swapped in by script once the frame is in view,
-           so a visitor with no JavaScript keeps the still and nobody pays for
-           the demo before reaching it. -->
+      
       <div class="shot-live-host" data-demo-src="/demo/"></div>
     </figure>
-    <!-- 窄屏下这里是一张静态图:900×600 的桌面窗口塞进 330px 只会变成一张读不
-         了的界面,而下载它的代价是 886 KB。所以窄屏换成另一句文案,并把演示
-         交给新标签页——两段各自带 data-i18n,JS 按语言各翻各的。 -->
+    
     <p class="demo-note rv demo-note-wide" style="--d:340ms" data-i18n="demo.note">Live demo — sample data, running in your browser. <a href="#download">Download Kiwano</a> to point it at your own providers.</p>
     <p class="demo-note rv demo-note-narrow" style="--d:340ms" data-i18n="demo.narrow">The live demo wants a wider screen — the app's window is 900×600. <a href="/demo/" target="_blank" rel="noopener">Open it in its own tab</a>.</p>
   </div>
 </header>
 
 <main>
-  <!-- ══ 特性 ══ -->
+  
   <section class="block" id="features">
     <div class="wrap">
       <div class="sec-head rv">
@@ -855,7 +789,7 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
-  <!-- ══ 界面 ══ -->
+  
   <section class="block" id="screens">
     <div class="wrap">
       <div class="sec-head rv">
@@ -873,7 +807,7 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
-  <!-- ══ 工作原理 ══ -->
+  
   <section class="block" id="how">
     <div class="wrap">
       <div class="sec-head rv">
@@ -899,7 +833,7 @@ footer { padding: 56px 0 44px; }
         </div>
       </div>
 
-      <!-- 策略子区块:四种路由策略 + 动效示意(纯 CSS 循环动画) -->
+      
       <div class="st-head rv">
         <span class="tag">strategies</span>
         <h3 data-i18n="st.h">Four routing strategies, bad days included</h3>
@@ -910,7 +844,7 @@ footer { padding: 56px 0 44px; }
           <div class="sh"><span class="tag">failover</span><h3 data-i18n="st1.t">Failover</h3></div>
           <p data-i18n="st1.d">Candidates ranked by priority: if the primary fails or times out, traffic moves to the next in line, and returns once it recovers.</p>
           <div class="diag" data-strategy="failover" aria-hidden="true">
-            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            
             <div class="diag-canvas">
               <svg class="wires" aria-hidden="true">
                 <path class="wire" data-wire="a"/>
@@ -935,7 +869,7 @@ footer { padding: 56px 0 44px; }
           <div class="sh"><span class="tag">roundrobin</span><h3 data-i18n="st2.t">Round robin</h3></div>
           <p data-i18n="st2.d">Weighted rotation, per session: a session keeps its provider, so the prompt cache it already paid for keeps hitting; new sessions spread across candidates by weight.</p>
           <div class="diag" data-strategy="roundrobin" aria-hidden="true">
-            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            
             <div class="diag-canvas">
               <svg class="wires" aria-hidden="true">
                 <path class="wire" data-wire="a"/>
@@ -960,7 +894,7 @@ footer { padding: 56px 0 44px; }
           <div class="sh"><span class="tag">timewindow</span><h3 data-i18n="st3.t">Time window</h3></div>
           <p data-i18n="st3.d">Give each candidate a local time window — subscription plan overnight, pay-as-you-go by day. Windows past midnight wrap; unmatched times fall back.</p>
           <div class="diag" data-strategy="timewindow" aria-hidden="true">
-            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            
             <div class="diag-canvas">
               <svg class="wires" aria-hidden="true">
                 <path class="wire" data-wire="a"/>
@@ -987,7 +921,7 @@ footer { padding: 56px 0 44px; }
           <div class="sh"><span class="tag">quota</span><h3 data-i18n="st4.t">Quota cutover</h3></div>
           <p data-i18n="st4.d">Set spend or request caps per candidate; on hitting a cap traffic moves to the next, and caps reset each period — spend stays in control.</p>
           <div class="diag" data-strategy="quota" aria-hidden="true">
-            <!-- 固定宽度的画布:窄屏滚动的是它,连线层在里面所以跟着一起动。 -->
+            
             <div class="diag-canvas">
               <svg class="wires" aria-hidden="true">
                 <path class="wire" data-wire="a"/>
@@ -1010,15 +944,14 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
-  <!-- ══ 下载 ══ -->
+  
   <section class="block" id="download">
     <div class="wrap">
       <div class="sec-head rv">
         <div class="kicker">Download</div>
         <h2 data-i18n="dl.h2">Download Kiwano</h2>
         <p data-i18n="dl.p">Free, no account, works offline. Pick your platform:</p>
-        <!-- The count is fetched; without it this line stays hidden, so a static
-             or offline render of the page never shows a stale figure. -->
+        
         <p class="dl-count" id="dlCount" data-i18n="dl.count" data-en="Installer downloads so far: <b>{n}</b> — downloads, not installs." hidden></p>
       </div>
       <div class="dl-grid">
@@ -1059,7 +992,7 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
-  <!-- ══ 服务器 / CLI ══ -->
+  
   <section class="block" id="server">
     <div class="wrap">
       <div class="sec-head rv">
@@ -1093,7 +1026,7 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
-  <!-- ══ FAQ ══ -->
+  
   <section class="block" id="faq">
     <div class="wrap">
       <div class="sec-head rv">
@@ -1142,7 +1075,7 @@ footer { padding: 56px 0 44px; }
     </div>
   </section>
 
-  <!-- ══ 隐私承诺 ══ -->
+  
   <div class="privacy">
     <div class="wrap privacy-inner">
       <div class="priv rv"><svg class="icon"><use href="#i-shield"/></svg><span data-i18n="pv.1">API requests go direct from your machine — no cloud relay</span></div>
@@ -1151,7 +1084,7 @@ footer { padding: 56px 0 44px; }
     </div>
   </div>
 
-  <!-- ══ 页脚 ══ -->
+  
   <footer>
     <div class="wrap">
       <div class="foot-top">

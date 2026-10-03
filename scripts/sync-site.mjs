@@ -25,7 +25,13 @@ if (!version || !license) {
 //    — every one of them gets stamped, which is why the dictionary list below
 //    is read off the directory rather than named: a new language adds a file,
 //    and a file nobody stamped would sit at the old version forever, quietly.
-const RELEASE_LINE = /v\d+\.\d+\.\d+(?= · <b>macOS 12\+<\/b>)/g;
+// The anchor is what follows the version, and it now has a word between the two
+// that differs per language (`just released` / `正式发布` / `正式發布` /
+// `リリース`), so the lookahead allows one such clause: anything that is not a
+// separator or a line break, then the platform list. It matched the older
+// `v0.2.9 · <b>macOS 12+` too — the clause is allowed to be empty — which is
+// what makes the change backward compatible with a line nobody has reworded.
+const RELEASE_LINE = /v\d+\.\d+\.\d+(?=[^·\n]* · <b>macOS 12\+<\/b>)/g;
 // 2. The licence link's text, found by its target: the anchor that points at
 //    the LICENSE file. Its text is the SPDX identifier, verbatim. Lives in the
 //    template only (the footer is not translated).

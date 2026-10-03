@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>`kiwano` 命令行 — Kiwano Docs</title>
+<meta name="description" content="kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它读写的是应用和网关 共用的同一个 SQLite 存储,并通过网关的管理平面获取状态与热重载,所以在完全 没有显示器的机器上也能用。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-Hans/cli/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/cli/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/cli/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/cli/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/cli/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/cli/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-Hans/cli/">
+<meta property="og:title" content="`kiwano` 命令行">
+<meta property="og:description" content="kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它读写的是应用和网关 共用的同一个 SQLite 存储,并通过网关的管理平面获取状态与热重载,所以在完全 没有显示器的机器上也能用。">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta property="og:locale:alternate" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "`kiwano` 命令行",
+      "item": "https://kiwano.cc/docs/zh-Hans/cli/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/zh-Hans/">Docs</a>
+    <nav><a href="/docs/zh-Hans/getting-started/">快速上手</a>
+<a href="/docs/zh-Hans/agent-takeover/">Agent 接管</a>
+<a href="/docs/zh-Hans/strategies/">策略与限额</a>
+<a href="/docs/zh-Hans/cli/" class="on">kiwano 命令行</a></nav>
+  </aside>
+  <main class="content">
+<h1><code>kiwano</code> 命令行</h1>
+<p class="lede">kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它读写的是应用和网关 共用的同一个 SQLite 存储,并通过网关的管理平面获取状态与热重载,所以在完全 没有显示器的机器上也能用。</p>
+<p>它与应用共用同一份实现,而不是重新实现一遍:本文档里的每条命令都是对
+<code>kiwano-core</code> 的一次调用,桌面应用链接的也是同一个 crate。在这里添加的供应商,
+和在那里添加的是同一行,写法也相同。</p>
+<h2 id="安装">安装</h2>
+<p>在 Linux 或 macOS 服务器上,一条命令就能做完所有事——二进制文件、校验和验证,
+以及把网关注册为你的用户服务:</p>
+<pre><code class="language-sh">curl -fsSL https://hub.kiwano.cc/install.sh | sh
+</code></pre>
+<p>它不需要 root,这是刻意为之,而不是图方便:<code>agents takeover</code> 会改写 Agent 在它
+自己 <code>$HOME</code> 下的配置,所以 CLI 和 Agent 必须是同一个账号。它一步一步做了什么,
+以及全机器范围的替代做法,见
+<a href="https://github.com/lightconsen/kiwano/blob/main/packaging/INSTALL.md"><code>packaging/INSTALL.md</code></a>)。</p>
+<h2 id="全局选项">全局选项</h2>
+<table>
+<thead>
+<tr>
+<th>标志</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--db &lt;PATH&gt;</code></td>
+<td>SQLite 文件。默认 <code>~/.kiwano/kiwano.db</code>,或 <code>KIWANO_DB_PATH</code></td>
+</tr>
+<tr>
+<td><code>--admin-socket &lt;TARGET&gt;</code></td>
+<td>网关管理平面的位置:unix 上是 socket 路径,Windows 上是 pipe 名称。默认:数据库旁边的 <code>admin.sock</code>,或 <code>KIWANO_ADMIN_SOCKET</code></td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>stdout 上的机器可读输出</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>抑制信息性提示</td>
+</tr>
+<tr>
+<td><code>--no-reload</code></td>
+<td>变更后不要求运行中的网关重载</td>
+</tr>
+<tr>
+<td><code>--data-port &lt;PORT&gt;</code></td>
+<td>接管 Agent 时,其配置被指向的端口。默认 8317,或 <code>KIWANO_DATA_PORT</code></td>
+</tr>
+<tr>
+<td><code>--home &lt;PATH&gt;</code></td>
+<td>Agent 配置文件所在的根目录。默认 <code>$HOME</code></td>
+</tr>
+</tbody></table>
+<p>全局选项与位置无关:<code>kiwano --json providers list</code> 和
+<code>kiwano providers list --json</code> 是同一条命令。</p>
+<h2 id="输出与退出码">输出与退出码</h2>
+<p><strong>stdout 只承载有效载荷,别无其他。</strong> 在 <code>--json</code> 下,那正好是一份 JSON 文档,
+所以 <code>kiwano --json providers list | jq</code> 能用。诊断信息——路由重载后的提示、
+警告、错误——一律走 stderr,<em>包括</em>在 <code>--json</code> 之下。</p>
+<p>列表以表格输出,数字列(请求数、token 数、成本、延迟)右对齐,方便按数量级
+阅读:</p>
+<pre><code>+-------------------------+----------+--------+------------------+---------+---------------------------+
+| ID                      | NAME     | PROTO  | ENDPOINT         | BILLING | AGENTS                    |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+| api-deepseek-com-271eb4 | DeepSeek | openai | api.deepseek.com | payg    | codex*,demo-route-00b40a* |
++-------------------------+----------+--------+------------------+---------+---------------------------+
+</code></pre>
+<p>表格会按照它输出到的终端来排版:最宽的列先让出空间,最多缩到六个字符的下限,
+放不下的单元格用 <code>…</code> 省略。当输出不是终端——管道、文件——没有宽度可适配,
+表格就完整写出;可以自己用 <code>COLUMNS</code> 指定宽度(<code>COLUMNS=100 kiwano providers list</code>),脚本也能借此刻意取得窄版布局。</p>
+<p>错误<strong>不会</strong>以 JSON 对象的形式输出到 stdout。放一个进去,会让部分成功的管道
+无从判断它读的是哪份文档,而退出码已经给出了答案:</p>
+<table>
+<thead>
+<tr>
+<th>代码</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>0</code></td>
+<td>成功</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>答案是「否」——网关已停止时的 <code>status</code>。这不算失败:存储读取正常,只是没有网关可报告</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>用法或校验错误(clap 自己的解析失败也用这个)</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>运行时错误:存储、IO、管理平面、网络</td>
+</tr>
+</tbody></table>
+<h2 id="命令参考">命令参考</h2>
+<p>完整的标志列表请运行 <code>kiwano &lt;command&gt; --help</code>。下面的地图是轮廓,不是每个
+标志。</p>
+<h3 id="状态">状态</h3>
+<pre><code>kiwano status              gateway, store, today&#39;s totals, and the blocked list
+kiwano reload              ask a running gateway to rebuild its route table
+kiwano gateway start       start one, adopting an already-running gateway
+kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
+kiwano gateway restart     stop and start
+</code></pre>
+<p><code>status</code> 会列出网关当前<strong>拒绝路由到</strong>的供应商及其原因——
+<code>capped-1  1.00 of 1.00 requests this period</code>。那是派生状态,只在网关运行时
+存在,所以这是 shell 唯一能看到它的地方,通常也就是「为什么什么都没在路由」
+的答案。</p>
+<p>在 systemd 主机上,请用 <code>systemctl restart kiwanod</code> 代替 <code>gateway</code> 子命令——
+见 INSTALL.md。</p>
+<h3 id="供应商">供应商</h3>
+<pre><code>kiwano providers list [--agent AGENT]
+kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
+                     [--billing plan|payg|unl] [--limit N --unit U] [--reset R]
+                     [--bind AGENT]...
+kiwano providers edit &lt;ID&gt; [any of the above]
+kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing single strategy
+kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
+kiwano providers remove &lt;ID&gt;
+kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers probe latency|endpoint|models
+</code></pre>
+<p><code>add</code> 和 <code>edit</code> 也都接受转发与配额选项:</p>
+<pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
+--retries N                    same-provider attempts before failover (0–5)
+--header &#39;Name: value&#39;         repeatable; merged after credential injection,
+                               so these can override the injected credentials
+--endpoint-extra PROTO=URL     repeatable; the same vendor on another protocol
+--plan-limit-5h PCT            plan: share of the five-hour window
+--plan-limit-weekly PCT        plan: share of the weekly window
+--plan-query JSON              {&quot;template&quot;:&quot;kimi&quot;,&quot;fields&quot;:{…}} — this is what
+                               `providers quota` reads
+</code></pre>
+<p><code>edit</code> 另外接受 <code>--no-headers</code> 和 <code>--clear-plan-query</code>。</p>
+<p><code>providers edit</code> 会保留供应商的 <strong>id</strong>,这正是它存在的理由:绑定、轮换密钥和
+用量行都引用它,所以「先删后加」是另一回事。只有你给出的标志会被修改;其余
+一切都会从已存储的那一行沿用过来。</p>
+<p>这套沿用对 <code>--timeout</code>、<code>--retries</code>、<code>--header</code>、<code>--endpoint-extra</code> 和
+<code>--plan-limit-*</code> 至关重要:每一个都是底层 API 会整体重算的对象的<em>一部分</em>,所以
+只指定其中一个的编辑,仍会把其余的一起送出。重命名供应商不会清掉它的
+timeout。</p>
+<p>清除一律要明说——<code>--no-headers</code>、<code>--clear-plan-query</code>——因为没给的标志意味着
+保留。<code>--key</code> 同理:省略它会保留已存储的密钥,而不是把它清空。</p>
+<p>除非供应商是套餐,否则 <code>--plan-limit-*</code> 会被拒绝(否则底层会默默丢弃这个值,
+而一个什么都不做的标志比一个会拒绝的标志更糟)。<code>--plan-query</code> 才是
+<code>providers quota</code> 能问到任何东西的前提。</p>
+<p><code>--unit</code> 说明 <code>--limit</code> 计数的是什么:<code>requests</code>、<code>wan_tokens</code>,或 Hub 公布了
+汇率的某种货币。最后一种只做检查而不存储,遇到不认识的就以退出码 2 结束,并
+列出它认识的货币:限额要用来与以其他货币计价的成本比较,没有汇率的限额会被
+按 1:1 并入其中。从未同步过的机器完全没有汇率表,只接受 <code>USD</code> 和 <code>CNY</code>——
+Hub 公布汇率所参照的两种货币。</p>
+<h3 id="轮换密钥">轮换密钥</h3>
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
+kiwano keys remove &lt;KEY_ID&gt;
+</code></pre>
+<p>轮换密钥会在供应商的主密钥之后尝试,按每个请求逐一进行。</p>
+<h3 id="agent">Agent</h3>
+<pre><code>kiwano agents detect                    which agents are installed
+kiwano agents versions                  version strings (slow: one subprocess each)
+kiwano agents takeover &lt;AGENT&gt;          route it through the gateway, backing up its config
+kiwano agents restore &lt;AGENT&gt;           put the original config back
+kiwano agents list                      built-in and user-defined agents, with keys
+kiwano agents add --name NAME [--note TEXT] [--protocol P]
+                                        define your own agent: a named route with its own key
+kiwano agents remove &lt;ID&gt;               delete it and its key (its usage history stays)
+</code></pre>
+<p><code>takeover</code> 是让服务器变得可用的命令。它会导入 Agent 当前配置的供应商、签发该
+Agent 的占位密钥,并改写 Agent 自己的配置以指向网关。密钥很关键:数据平面只
+路由它自己签发的密钥,其他的一律以 401 拒绝,所以手动把 Agent 指向网关是行不
+通的。</p>
+<p>它会打印占位密钥,因为那是结果中唯一从外部看不见的部分。</p>
+<p><code>takeover</code> 写入 <code>--home</code> 之下,所以请以你要改其配置的那个用户身份运行——或者
+为服务账号显式传入 <code>--home</code>。</p>
+<p><code>agents add</code> 是取得路由的另一条路:一个 Kiwano 检测不到、也不会为它改写任何
+东西的 Agent。你会得到一个名称、一个 id、一个密钥,以及一个可绑定供应商的
+策略——磁盘上什么都不会变,所以请用打印出的密钥把客户端指向网关。
+<code>agents list</code> 对还没有密钥的 Agent 会打印 <code>-</code>,而 <code>--json</code> 会带出该行上的
+每一个字段。</p>
+<p><code>--protocol</code> 记录该 Agent 的客户端说的是什么:<code>anthropic</code>、<code>openai</code> 或
+<code>gemini</code>。省略它意味着该 Agent 不作表态,这是与三者都不同的另一个答案,
+<code>agents list</code> 会显示为 <code>-</code>。它是一个<strong>标签</strong>——没有任何路由、转换或校验依赖
+它;请求的线上格式由它到达的路径决定。</p>
+<h3 id="路由">路由</h3>
+<pre><code>kiwano routes list
+kiwano routes strategy &lt;AGENT&gt; single|failover|roundrobin|timewindow|quota
+                               [--limit N --unit requests|tokens]
+kiwano routes reorder &lt;AGENT&gt; &lt;PROVIDER_ID&gt;...
+kiwano routes apply --from SOURCE --to TARGET
+kiwano routes binding add|remove &lt;AGENT&gt; &lt;PROVIDER_ID&gt;
+kiwano routes binding set &lt;AGENT&gt; &lt;PROVIDER_ID&gt; [--weight N] [--window HH:MM-HH:MM] [--no-window]
+</code></pre>
+<p><code>routes reorder</code> 以参数决定候选顺序:你写下的顺序就成为优先级 0、1、2……</p>
+<p>配额载荷由网关自己的解析器校验,所以 CLI 写出的配置不会是引擎会默默重新解释
+的那种。在不理会 <code>--limit</code> 的策略上加 <code>--limit</code>,会被拒绝,而不是当作无操作
+接受。</p>
+<h3 id="用量与日志">用量与日志</h3>
+<pre><code>kiwano usage [--days N] [--agent AGENT] [--provider ID]
+kiwano dashboard [--window today|7d|30d|all] [--provider ID] [--agent AGENT]
+kiwano insights [--days N] [--agent AGENT]
+kiwano alerts [--mark-notified]
+
+kiwano logs list [--agent A] [--provider P] [--status ok|error]
+                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+kiwano logs show &lt;ID&gt;
+kiwano logs export --out PATH [same filters] [--include-bodies]
+kiwano logs clear --yes
+kiwano logs dir
+</code></pre>
+<p><code>--from</code> 为包含、<code>--to</code> 为排除,与存储的半开区间一致。</p>
+<p><code>insights</code> 是一页式的报告,说明 token <em>如何</em>被花掉:每个 Agent 的记分卡(缓存
+命中率、会话上下文增长、推理占比、重试)、标上 <code>cache</code> / <code>bloat</code> / <code>retry</code> /
+<code>overhead</code> 的规则发现,以及上下文增长最多的那些会话。每一项发现都带着它背后
+的 <code>request_logs</code> id——用 <code>kiwano logs show &lt;ID&gt;</code> 重新打开其中一条——而且全部
+都在本地从日志计算:请求体会被抽样以测量固定的 tools/system 载荷,但它们从不
+离开这台机器,任何地方都不会出现金额(成本是仪表盘的事)。全局 <code>--json</code> 标志
+会输出同一份报告供机器使用。</p>
+<p><code>alerts</code> 默认<strong>只读</strong>。它原本会写入的去重键,正是桌面应用在发出通知前查询的
+那一个,所以脚本化的轮询会默默吞掉你正在等的那条告警。如果你确实想让 CLI
+接手投递,请传入 <code>--mark-notified</code>。</p>
+<p><code>logs clear</code> 需要 <code>--yes</code>:应用用对话框确认,而对没有 TTY 的 shell 来说,标志
+就是对等的做法。</p>
+<h3 id="设置-配置与目录">设置、配置与目录</h3>
+<pre><code>kiwano settings get
+kiwano settings set --key KEY=VALUE [--key ...] [--patch JSON]
+
+kiwano config export --out PATH [--include-keys]
+kiwano config import --file PATH
+kiwano import cc-switch
+
+kiwano catalog list [--tag official|aggregate|third|free] [--search QUERY]
+kiwano catalog sync
+kiwano catalog currency
+</code></pre>
+<p><code>settings set</code> 的值只要能解析成 JSON 就会按 JSON 解析,所以
+<code>--key cost_alert=false</code> 是布尔值,<code>--key log_retention_days=30</code> 是数字。</p>
+<p><code>config export --include-keys</code> 会写出正在使用的凭证,因此该文件以仅限属主
+(<code>0600</code>)的方式创建。不带该标志的 <code>config export</code> 可以放心放进版本控制;两者
+都能经由 <code>config import</code> 往返,导入时按名称和端点合并,而不是覆盖。</p>
+<p><code>import cc-switch</code> 读取 <code>~/.cc-switch/cc-switch.db</code>(v3.20+ 的 SQLite,以只读
+方式打开)或较旧的 <code>~/.cc-switch/config.json</code>,并且只写入 Kiwano 自己的数据
+库。<code>~/.cc-switch</code> 下的任何东西都不会被修改或删除,所以在做决定期间,两者可以
+并存。</p>
+<p>它把它认识的全部八个应用——claude、claude-desktop、codex、grokbuild、
+opencode、openclaw、hermes 和 pi——映射到同名的 Agent,而 cc-switch 里<em>当前</em>
+的那个供应商会成为该 Agent 的主绑定,所以迁移过来的是你实际在用的配置,而不是
+一份要你重新挑选的候选列表。</p>
+<p>重复运行是安全的,在已经用着的 Kiwano 旁边运行也安全。如果这里已经有相同端点
+和协议的供应商——你手动添加的,或之前某次导入的——会被<em>复用</em>而不是再添加一条,
+而且它的名称、密钥和计费都不动:导入只补上原本没有的东西。已经有路由的 Agent
+会留在原路由上;只有还没有路由的 Agent 会被导入,所以重跑绝不会把 Agent 搬回
+你后来已经切走的东西上。</p>
+<p>有两种情况会被报告出来,而不是擅自猜测。cc-switch 的 <code>gemini</code> 行会被跳过:它们
+的目标是 Gemini CLI,其设置是 Gemini 的形状,而本网关没有可将它们导入的协议。
+没有 base URL 或没有密钥的供应商会被列为跳过,而不是创建成空的。每一次跳过都
+附上原因。</p>
+<p><code>catalog list</code> 只读 Hub 缓存,别的什么都不读——没有内置副本,所以从未同步过的
+机器列出来的是空的,而不是过期的目录。请先运行 <code>catalog sync</code>;全新的服务器在
+从货架添加任何东西之前就该这么做,之后缓存便能像其他缓存一样离线供应。</p>
+<p><strong>没有 <code>catalog add</code>。</strong> 货架上的一键「添加」会打开用该条目预填的供应商表单——
+它不调用自己的 API,所以这项能力就是 <code>providers add</code>,而值来自
+<code>catalog list --json</code>:</p>
+<pre><code class="language-sh">kiwano catalog list --json --search deepseek
+kiwano providers add --name DeepSeek --endpoint https://api.deepseek.com/anthropic \
+    --protocol anthropic --billing payg --limit 50 --unit CNY --bind claude
+</code></pre>
+<p>预填规则(<code>payg</code> 限额 50,以及某些目录条目自带的 Agent 预绑定)存在于应用的
+表单里,不在共用的层里。如果那套映射日后移进 <code>kiwano-core</code>,这就会变成一条命令
+的捷径——在那之前,它是 CLI 没有的一项便利,而不是它欠缺的能力。</p>
+<p>CLI <em>确实</em>会记录的是供应商对应哪个条目,因为那决定了它的请求要按该条目自己
+公布的价格计价。这是从端点推断出来的,而不是询问得来的:<code>providers add</code> 在端点
+恰好对应一个条目时链接该供应商,<code>catalog sync</code> 也对还没有链接的供应商做同样的
+事。不做任何猜测——匹配不到任何条目、或匹配到多个条目(两个条目共用一个主机)
+的端点会保持未链接,并按一般价格计价。</p>
+<h2 id="与应用的对应关系">与应用的对应关系</h2>
+<p>桌面应用里每一项面向用户的能力在这里都能到达,除了本质上是图形的那几项(托盘、
+窗口、主题、通知、i18n、应用内自我更新)。</p>
+<table>
+<thead>
+<tr>
+<th>应用能力</th>
+<th>命令</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>网关状态 + 今日总计</td>
+<td><code>status</code></td>
+</tr>
+<tr>
+<td>供应商列表 / 添加 / 编辑 / 删除</td>
+<td><code>providers list|add|edit|remove</code></td>
+</tr>
+<tr>
+<td>把供应商设为当前</td>
+<td><code>providers enable</code>, <code>providers use</code></td>
+</tr>
+<tr>
+<td>延迟 / 端点 / 模型探测</td>
+<td><code>providers probe …</code></td>
+</tr>
+<tr>
+<td>套餐配额环</td>
+<td><code>providers quota</code></td>
+</tr>
+<tr>
+<td>轮换 API 密钥</td>
+<td><code>keys list|add|remove</code></td>
+</tr>
+<tr>
+<td>Agent 路由 + 策略</td>
+<td><code>routes list</code>, <code>routes strategy</code></td>
+</tr>
+<tr>
+<td>候选顺序、权重、时间窗</td>
+<td><code>routes reorder</code>, <code>routes binding …</code></td>
+</tr>
+<tr>
+<td>在 Agent 之间复制路由</td>
+<td><code>routes apply</code></td>
+</tr>
+<tr>
+<td>Agent 检测与版本</td>
+<td><code>agents detect</code>, <code>agents versions</code></td>
+</tr>
+<tr>
+<td>接管 / 还原</td>
+<td><code>agents takeover</code>, <code>agents restore</code></td>
+</tr>
+<tr>
+<td>你自己的 Agent(具名路由)</td>
+<td><code>agents list|add|remove</code></td>
+</tr>
+<tr>
+<td>用量总计</td>
+<td><code>usage</code></td>
+</tr>
+<tr>
+<td>仪表盘趋势</td>
+<td><code>dashboard</code></td>
+</tr>
+<tr>
+<td>用量告警</td>
+<td><code>alerts</code></td>
+</tr>
+<tr>
+<td>请求日志、明细、CSV 导出、清除</td>
+<td><code>logs …</code></td>
+</tr>
+<tr>
+<td>日志文件位置</td>
+<td><code>logs dir</code></td>
+</tr>
+<tr>
+<td>设置</td>
+<td><code>settings get|set</code></td>
+</tr>
+<tr>
+<td>配置导出 / 导入</td>
+<td><code>config export|import</code></td>
+</tr>
+<tr>
+<td>cc-switch 迁移</td>
+<td><code>import cc-switch</code></td>
+</tr>
+<tr>
+<td>目录货架 + Hub 同步 + 货币</td>
+<td><code>catalog list|sync|currency</code></td>
+</tr>
+<tr>
+<td>守护进程生命周期</td>
+<td><code>gateway start|stop|restart</code></td>
+</tr>
+</tbody></table>
+<p>完全没有涵盖的:更新检查、更新下载,以及进度事件流。那些是桌面应用安装程序的
+属性,而服务器套件是通过安装一个新的来更新。</p>
+<h2 id="从-kiwano-cli-迁移">从 <code>kiwano-cli</code> 迁移</h2>
+<p><code>kiwano-cli</code> 已经移除,也没有别名。它做过的一切都在 <code>kiwano</code> 之下,有两个值得
+知道的差异:</p>
+<ol>
+<li><p><strong>计费词汇以应用为准。</strong> <code>--billing plan|payg|unl</code> 是规范写法;
+<code>subscription|metered|unlimited</code> 仍能解析为别名。对<strong>套餐</strong>供应商,
+<code>--limit</code>、<code>--unit</code> 和 <code>--reset</code> 现在会被拒绝——套餐的配额来自它的
+plan query,而那些标志过去会写入应用从不读取的列。</p>
+</li>
+<li><p><strong><code>--json</code> 输出是 stdout 上的单份文档。</strong> 诊断信息移到了 stderr,这修好了
+会改变状态的命令:<code>kiwano-cli --json providers add … | jq</code> 以前无法解析,
+因为重载提示被打印在 JSON 之后的 stdout 上。</p>
+</li>
+</ol>
+<p>搬迁的子命令:</p>
+<table>
+<thead>
+<tr>
+<th>原本</th>
+<th>现在</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kiwano-cli status</code></td>
+<td><code>kiwano status</code></td>
+</tr>
+<tr>
+<td><code>kiwano-cli providers use &lt;ID&gt; --agent A</code></td>
+<td><code>kiwano providers use &lt;ID&gt; --agent A</code> (unchanged)</td>
+</tr>
+<tr>
+<td><code>kiwano-cli keys list|add|remove</code></td>
+<td><code>kiwano keys list|add|remove</code> (unchanged)</td>
+</tr>
+<tr>
+<td><code>kiwano-cli usage --days N</code></td>
+<td><code>kiwano usage --days N</code> (unchanged)</td>
+</tr>
+</tbody></table>
+<p>退出码是新的,但重要的那个在精神上没变:网关停止时,<code>status</code> 仍以 <code>1</code> 退出。</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/zh-Hans/strategies/"><div class="dir">← Previous</div><div class="t">策略与限额</div></a>
+
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

@@ -104,9 +104,9 @@ section { scroll-margin-top: 76px; }
 .lang-menu button:hover { background: var(--surface2); color: var(--ink); }
 .lang-menu button[aria-current="true"] { color: var(--kiwi); font-weight: 600; }
 .lang-menu button[aria-current="true"]::after { content: " ✓"; }
-/* Flags are 3:2, and taller than the glyphs around them: the box is what has to
-   match the row, the artwork inside keeps its proportions. */
-.btn-lang .icon { width: 19px; height: 13px; border-radius: 2px; }
+/* 这里曾有一条 19×13 —— 那是给国旗的 3:2 比例写的:盒子跟着行高走,里面的画
+   保持自己的比例。换成语标(方形的文/A)之后它只做一件事:把图标压扁。删掉,
+   回落到 .icon 的 18×18。 */
 
 /* ── 按钮 ── */
 .btn {

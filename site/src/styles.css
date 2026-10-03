@@ -11,6 +11,9 @@
   --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
   --kiwi-dim: oklch(0.55 0.14 132);
   --amber: oklch(0.82 0.1 80);
+  /* 与应用深色主题同一个红(src/index.css),页脚那颗心用它 —— 站点本来只有
+     绿/琥珀/蓝三色,而心是红的才读得出来。 */
+  --red: oklch(0.65 0.2 25);
   --blue: oklch(0.72 0.13 245);
   --radius: 12px;
   --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
@@ -497,7 +500,7 @@ footer { padding: 56px 0 44px; }
 /* 页脚那颗心:尺寸跟着 11px 的小字走,颜色用品牌绿(页面上唯一的强调色),
    与文字基线对齐 —— 它是一句话里的一个词,不是一枚图标。 */
 .foot-love { display: inline-flex; align-items: center; gap: 3px; }
-.foot-love .icon { width: 11px; height: 11px; color: var(--kiwi); }
+.foot-love .icon { width: 11px; height: 11px; color: var(--red); }
 
 /* ── 进场动画:400ms ease-out [Y+18→0, α0→1],尊重系统减弱动态 ── */
 @media (prefers-reduced-motion: no-preference) {

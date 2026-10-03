@@ -17,6 +17,38 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.10] - 2026-10-04
+
+### Added
+
+- **The update says which step it is on, and how fast.** Downloading an update
+  used to show a percentage that had no time to move and then restart the app,
+  which read as one long nothing: an installer is ~12 MB, so on a fast link the
+  transfer is a second or two, and the work *after* it — verify the signature,
+  unpack, replace the bundle, relaunch — emitted no progress at all, because
+  nothing was watching that boundary. Three things changed. The updater now
+  reports its phases, so the row says **Installing…** and **Restarting…** for
+  the stretch that was silent. It reports bytes and speed — `6.2 / 12.3 MB ·
+  5.8 MB/s` — because twenty chunk events over two seconds refill a small bar
+  about twice, while a byte count moves on every one and still means something
+  when the transfer is over before a percentage could. And the bar is drawn only
+  when there is a length to draw it against: a bar pinned at 0% is what a
+  stalled transfer looks like, so a server that sends no `Content-Length` gets
+  the byte count and no bar rather than a frozen one. The banner carries the
+  same numbers, since that is where the click happens.
+
+### Changed
+
+- **The landing page states things rather than citing them.** The release line
+  leads with the release — the version sits in a pill of its own, saying
+  "just released" in each language — and the footer reads `Built with ♥` where
+  it used to carry a licence note about which project parts were ported from.
+  That note was in the wrong place: the attribution that matters travels in the
+  headers of the ported files and in `THIRD-PARTY-NOTICES`, both of which are
+  unchanged. The page also ships without its comments now, which is 6 KB less
+  over the wire — 16% of what a visitor downloads, because the comments are
+  mostly Chinese and gzip barely helps with that.
+
 ## [0.2.9] - 2026-10-03
 
 ### Added

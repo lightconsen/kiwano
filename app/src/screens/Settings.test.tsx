@@ -7,11 +7,12 @@
 // and the way over, so that is what this file asserts.
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/i18n/en";
 import type { AppSettings } from "@/api/types";
 
+import { startUpdateInstall } from "../lib/updateInstall";
 import Settings from "./Settings";
 
 const { apiMock } = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const { apiMock } = vi.hoisted(() => ({
     openLogFolder: vi.fn(),
     checkAppUpdate: vi.fn(),
     downloadAndInstallAppUpdate: vi.fn(),
+    onUpdateProgress: vi.fn(),
   },
 }));
 
@@ -254,5 +256,60 @@ describe("the streaming timeouts", () => {
     await waitFor(() =>
       expect(apiMock.updateSettings).toHaveBeenCalledWith({ stream_idle_secs: 0 }),
     );
+  });
+});
+
+describe("the update row while a transfer runs", () => {
+  // The install state is module-level and subscribes once for the app's
+  // lifetime — that is the whole point of `lib/updateInstall` — so the emitter
+  // is captured here rather than per test: a second `startUpdateInstall` is
+  // ignored by design, and a test that waited for it would wait forever.
+  let emit: ((p: unknown) => void) | null = null;
+  beforeAll(async () => {
+    apiMock.onUpdateProgress.mockImplementation(async (cb: (p: unknown) => void) => {
+      emit = cb;
+      return () => {};
+    });
+    // Never resolves: every test below is inside a transfer that is running.
+    apiMock.downloadAndInstallAppUpdate.mockReturnValue(new Promise(() => {}));
+    startUpdateInstall();
+    await waitFor(() => expect(emit).not.toBeNull());
+  });
+
+  const fire = (events: Array<Record<string, unknown>>) => {
+    for (const e of events) emit!(e);
+  };
+
+  it("says what the installer is doing, which the download phase cannot", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    render(<Settings />);
+    fire([{ phase: "installing", downloaded: 12_300_000, total: 12_300_000 }]);
+
+    // The verify/unpack/replace step is the part that used to pass in silence —
+    // no event, no label, nothing between the last chunk and the relaunch.
+    expect(await screen.findByText(en.settings.installing)).toBeInTheDocument();
+    // Nothing is downloading, so there is no length to draw a bar against.
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("shows bytes instead of a bar when the server sent no length", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    render(<Settings />);
+    fire([{ phase: "downloading", downloaded: 3_000_000, total: null }]);
+
+    // A bar pinned at 0% is what a stalled transfer looks like: the row reports
+    // the bytes it has instead, and draws no bar at all.
+    expect(await screen.findByText(/3 MB/)).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("shows bytes, percent and speed while the length is known", async () => {
+    apiMock.getSettings.mockResolvedValue(settingsWith(true));
+    render(<Settings />);
+    fire([{ phase: "downloading", downloaded: 6_150_000, total: 12_300_000 }]);
+
+    const bar = await screen.findByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBe("50");
+    expect(screen.getByText(/6.2 MB \/ 12.3 MB/)).toBeInTheDocument();
   });
 });

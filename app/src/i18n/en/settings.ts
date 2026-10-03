@@ -96,6 +96,10 @@ export const settings = {
   autoCheckUpdatesNote: "Silent check at startup",
   updates: "Updates",
   downloading: "Downloading…",
+  /** After the last byte: verify, unpack, replace the bundle. */
+  installing: "Installing…",
+  /** The relaunch, which is the last thing before the window closes. */
+  restarting: "Restarting…",
   /** The About row's inline version, "v0.1.7 available". */
   versionAvailable: "v{version} available",
   /** The banner's standalone headline, which names the app. */

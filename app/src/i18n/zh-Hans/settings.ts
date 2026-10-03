@@ -83,6 +83,8 @@ export const settings = {
   autoCheckUpdatesNote: "启动时静默检查",
   updates: "更新",
   downloading: "下载中…",
+  installing: "安装中…",
+  restarting: "重启中…",
   versionAvailable: "v{version} 可用",
   updateAvailable: "Kiwano {version} 已发布",
   retryDownload: "重试下载",

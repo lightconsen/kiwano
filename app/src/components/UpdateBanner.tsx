@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { fmtMB } from "../lib/format";
 import { api } from "../api/client";
 import { useT } from "../i18n";
 import { onUpdateAvailable } from "../lib/updateEvents";
@@ -71,7 +72,13 @@ export function UpdateBanner() {
         }}
       >
         {install.installing
-          ? t("settings.downloading")
+          ? install.phase === "downloading"
+            ? install.total !== null
+              ? `${Math.round((install.downloaded / install.total) * 100)}% · ${fmtMB(install.downloaded)}`
+              : fmtMB(install.downloaded)
+            : install.phase === "installing"
+              ? t("settings.installing")
+              : t("settings.restarting")
           : install.err
             ? t("settings.retryDownload")
             : t("settings.downloadInstall")}

@@ -917,6 +917,10 @@ export interface UpdateInfo {
 
 /** Download progress payload */
 export interface UpdateProgress {
+  /** Which step the transfer is in. The download is the only one with a
+      meaningful length — the rest are the verify/unpack/replace that used to
+      pass with no events at all. */
+  phase?: "downloading" | "installing" | "restarting";
   downloaded: number;
   total: number | null;
 }

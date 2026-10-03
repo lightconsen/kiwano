@@ -86,6 +86,8 @@ export const settings = {
   autoCheckUpdatesNote: "起動時にサイレントで確認します",
   updates: "更新",
   downloading: "ダウンロード中…",
+  installing: "インストール中…",
+  restarting: "再起動中…",
   versionAvailable: "v{version} が利用可能",
   updateAvailable: "Kiwano {version} が利用可能です",
   retryDownload: "ダウンロードを再試行",

@@ -23,9 +23,21 @@ pub struct UpdateInfoVm {
     pub pub_date: Option<i64>,
 }
 
-/// Download progress payload emitted as `update-progress`.
+/// Transfer state, emitted as `update-progress`.
+///
+/// The steps after the download are the reason this exists. `download_and_install`
+/// hands the bytes to `verify_signature` and then to `install`, which unpacks a
+/// ~12 MB payload and replaces the bundle — seconds of work that emitted nothing
+/// at all, so the UI's last event was the final chunk and the next thing anyone
+/// saw was the app relaunching. The empty `on_download_finish` closure is
+/// exactly that boundary, and the install's return is the other.
 #[derive(Serialize, Clone)]
 pub struct UpdateProgressVm {
+    pub phase: &'static str,
+    /// Bytes so far, and the total from `Content-Length` when the server sent
+    /// one. Meaningless outside `downloading` — the UI draws no bar for the
+    /// other phases — but carried as the final value rather than as zero, so a
+    /// reader of the event stream cannot mistake it for a fresh start.
     pub downloaded: u64,
     pub total: Option<u64>,
 }
@@ -60,22 +72,56 @@ pub async fn download_and_install_app_update(app: AppHandle) -> Result<(), Strin
         .ok_or_else(|| "no update available".to_string())?;
 
     let handle = app.clone();
+    // The byte count the chunks report is needed by two closures and by the
+    // code after the await, and each `move` takes ownership — so one clone per
+    // reader. It exists only to label the later phases with the size that was
+    // actually transferred.
+    let seen = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let seen_for_chunk = seen.clone();
+    let seen_for_finish = seen.clone();
+    let finish_handle = app.clone();
     update
         .download_and_install(
             move |downloaded, total| {
+                seen_for_chunk.store(downloaded as u64, std::sync::atomic::Ordering::Relaxed);
                 let _ = handle.emit(
                     "update-progress",
                     UpdateProgressVm {
+                        phase: "downloading",
                         downloaded: downloaded as u64,
                         total,
                     },
                 );
             },
-            || {},
+            move || {
+                // The plugin calls this after the last byte and before it
+                // verifies the signature and installs — the start of the part
+                // that used to be silent.
+                let done = seen_for_finish.load(std::sync::atomic::Ordering::Relaxed);
+                let _ = finish_handle.emit(
+                    "update-progress",
+                    UpdateProgressVm {
+                        phase: "installing",
+                        downloaded: done,
+                        total: Some(done),
+                    },
+                );
+            },
         )
         .await
         .map_err(|e| e.to_string())?;
 
+    // Installed. The relaunch is next and there is nothing left to report but
+    // that, which is still better than the window disappearing unexplained.
+    let done = seen.load(std::sync::atomic::Ordering::Relaxed);
+    let _ = app.emit(
+        "update-progress",
+        UpdateProgressVm {
+            phase: "restarting",
+            downloaded: done,
+            total: Some(done),
+        },
+    );
     relaunch(&app);
     Ok(())
 }

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
+import { fmtMB } from "../lib/format";
 import { useReload } from "../lib/reload";
 import { applyTheme } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
@@ -579,17 +580,39 @@ export default function Settings() {
                   answer either way. */}
               {install.installing ? (
                 <>
-                  <span
-                    className="h-1 w-24 overflow-hidden rounded-full"
-                    style={{ background: "var(--surface2)" }}
-                  >
+                  {/* The bar is drawn only while the download has a length to
+                      draw it against. `progress: null` means the server sent no
+                      Content-Length, and a bar pinned at 0% is what a stalled
+                      transfer looks like — the bytes beside it are the honest
+                      indicator then. The later phases have no length at all. */}
+                  {install.phase === "downloading" && install.total !== null && (
                     <span
-                      className="block h-full rounded-full transition-[width] duration-200"
-                      style={{ width: `${install.progress ?? 0}%`, background: "var(--kiwi)" }}
-                    />
-                  </span>
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={install.progress ?? undefined}
+                      className="h-1 w-24 overflow-hidden rounded-full"
+                      style={{ background: "var(--surface2)" }}
+                    >
+                      <span
+                        className="block h-full rounded-full transition-[width] duration-200"
+                        style={{ width: `${install.progress ?? 0}%`, background: "var(--kiwi)" }}
+                      />
+                    </span>
+                  )}
                   <span className="text-[11px] text-mut">
-                    {install.progress == null ? t("settings.downloading") : `${install.progress}%`}
+                    {install.phase === "downloading"
+                      ? [
+                          install.total !== null
+                            ? `${fmtMB(install.downloaded)} / ${fmtMB(install.total)}`
+                            : fmtMB(install.downloaded),
+                          install.rate !== null ? `${fmtMB(install.rate)}/s` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : install.phase === "installing"
+                        ? t("settings.installing")
+                        : t("settings.restarting")}
                   </span>
                 </>
               ) : update ? (

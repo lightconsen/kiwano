@@ -9,6 +9,16 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
+/** Bytes as MB, to one decimal below 100 (12.3 MB, 104 MB).
+ *
+ * The updater downloads an installer, which is always MB-scale — a generic
+ * B/KB/MB/GB ladder would be four branches nobody ever sees three of. `MB` is
+ * a unit, not a word, so it is not translated. */
+export function fmtMB(bytes: number): string {
+  const mb = bytes / 1_000_000;
+  return `${mb >= 100 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
+}
+
 export function fmtLatency(ms: number | null): string {
   if (ms == null) return "—";
   return ms >= 1000 ? `${Math.round(ms / 100) / 10}s` : `${ms}ms`;

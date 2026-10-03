@@ -17,6 +17,78 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.9] - 2026-10-03
+
+### Added
+
+- **The app speaks Traditional Chinese and Japanese.** Four locales now, and the
+  language row in Settings lists them by their own names: English, 简体中文,
+  繁體中文, 日本語. The ids name the script rather than the region — `zh-Hans`
+  and `zh-Hant`, because that is the difference between them, not the flag —
+  so the system-language mapping sends `zh-TW`, `zh-HK` and `zh-MO` to
+  Traditional and everything else Chinese to Simplified. Preferences written
+  by an earlier build keep working: `zh-CN`, `zh` and `zh-SG` all read back as
+  `zh-Hans`, because a preference is written once and read for the life of an
+  install, and there is no migration for a value the user chose. One thing to
+  say plainly: the Traditional and Japanese dictionaries are AI-produced and
+  have not been reviewed by a native speaker. `docs/i18n.md` records that,
+  along with the glossary they were written against, so a reader who finds a
+  phrase wrong can fix it where it lives.
+
+- **The documentation and the landing page, in the same four languages.** Every
+  docs page now exists in all four — sixteen pages, each one alternating with
+  the other three and an English `x-default`, with a hub per language and a
+  sidebar that falls back to English for a page a language has not translated.
+  On the landing page the language control became a menu of language names: a
+  single button that flips to "the other" language stops meaning anything at
+  three, and flags for languages are a category error at four (which flag is
+  English, and is 繁體中文 Taiwan or Hong Kong?). The demo framed in the hero
+  follows the choice, because it is the real application and speaks all four.
+
+### Changed
+
+- **The landing page fits a phone.** The nav collapses into a drawer below
+  1080px — that is where it measured, the full bar needing 1041px in English,
+  so every width between 641 and 1040 had been overflowing the header and
+  pushing the download button off the screen. The hero's live demo is not
+  loaded below 720px: a 900×600 desktop window in a 332px frame renders an
+  unreadable application and costs 886 KB, so a phone keeps the still image and
+  a link to open the demo in its own tab. The strategy diagrams keep their
+  proportions inside a card that scrolls rather than clipping their text, and
+  the grids stopped sizing themselves to their content.
+
+- **The deploy no longer serves the site's own sources.** The Pages upload takes
+  `site/` as it stands, and `site/src/` sat inside it — so `/src/index.html`
+  was a publicly reachable page that was the *template*, with its CSS and JS
+  placeholders unreplaced: an unstyled, scriptless copy of the home page's
+  text. Three build steps compile those sources into what gets uploaded; the
+  sources are now dropped between them and the upload.
+
+### Fixed
+
+- **Four of the hero's agent marks were invisible.** The row is brand marks on
+  near-black, and the site's convention for a monochrome mark is a baked light
+  fill — except for four that still said `fill="currentColor"`, which is right
+  where the app renders them (it inlines the SVG, so the ink colour is
+  inherited) and black through `<img>`, where there is nothing to inherit.
+  Measured against the background, two of them were exactly the background's
+  colour. They now carry the family's light fill, and Kimi uses the variant the
+  app itself shows on a dark theme.
+
+- **The first agent marks could not be scrolled to.** `justify-content: center`
+  with `overflow-x: auto` splits the overflow across both ends, and a scroll
+  container cannot scroll to a negative offset — at 390px the leftmost mark sat
+  215px off-screen, which is Claude Code, Codex and Gemini: the three the row
+  exists to name.
+
+- **The hero no longer waits on a third-party script.** The still image was
+  swapped for the demo on the iframe's `load` event, and a `defer` script that
+  never resolves — Cloudflare's analytics beacon, from a network that cannot
+  reach it — pins that event until the browser's own connection timeout. The
+  demo had already mounted and painted inside the frame, invisibly, while the
+  visitor looked at a picture. The swap now takes whichever comes first: the
+  `load` event, the demo having painted something, or a backstop timer.
+
 ## [0.2.8] - 2026-09-30
 
 ### Added

@@ -156,6 +156,14 @@ section { scroll-margin-top: 76px; }
 .dl-row { margin-top: 34px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
 .dl-note { margin-top: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--mut); letter-spacing: 0.02em; }
 .dl-note b { color: oklch(0.70 0.02 260); font-weight: 500; }
+/* 版本胶囊:这一行里唯一一件"新闻"而不是"参数"的东西(发布/正式发布/リリース),
+   所以给它整行唯一的彩色底。形状与首屏那枚 .badge 同源(kiwi-soft 底 + 999px
+   圆角),字号沿用这一行的 11.5px,不为了醒目去撑大行高。 */
+.dl-ver {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px; border-radius: 999px;
+  background: var(--kiwi-soft); color: var(--kiwi); font-weight: 600;
+}
 /* the agents one port serves: logos only, one row (scrolls sideways on
    narrow screens rather than wrapping — the row is the point) */
 .agents-row {

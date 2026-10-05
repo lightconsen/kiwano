@@ -20,7 +20,7 @@ export const zhHant: Record<string, string> = {
   "hero.h1": "一個入口,管好你的<br>所有 <em>AI 供應商</em>",
   "hero.sub": "Kiwano 是本機優先的閘道,服務你的 Agents:把 <strong>Claude Code、Codex、Grok Build</strong> 一鍵接入,任意供應商路由,所有請求留在本機——API Key 絕不離開。",
   "hero.dlmac": "下載 macOS",
-  "hero.note": "<span class=\"dl-ver\">🎉 v0.2.10 正式發布</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免費開源",
+  "hero.note": "<span class=\"dl-ver\">🎉 v0.2.11 正式發布</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免費開源",
   "feats.h2": "閘道底座 × 供應商目錄",
   "feats.p": "既不是純切換工具,也不是雲端閘道:本機負責路由與計量,Hub 目錄幫你選型。",
   "f1.t": "供應商管理",

@@ -22,7 +22,7 @@ export const ja: Record<string, string> = {
   "hero.h1": "すべての<em>AI プロバイダー</em>を<br>ひとつの入口で",
   "hero.sub": "Kiwano はローカル優先のゲートウェイです。<strong>Claude Code、Codex、Grok Build</strong> をワンクリックで接続し、任意のプロバイダーへルーティング。リクエストはすべてこのマシンに留まり、API キーが外へ出ることはありません。",
   "hero.dlmac": "macOS 版をダウンロード",
-  "hero.note": "<span class=\"dl-ver\">🎉 v0.2.10 リリース</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 無料・オープンソース",
+  "hero.note": "<span class=\"dl-ver\">🎉 v0.2.11 リリース</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 無料・オープンソース",
   "feats.h2": "ゲートウェイ基盤 × プロバイダーカタログ",
   "feats.p": "単なる切り替えツールでも、クラウドゲートウェイでもありません。ルーティングと計測はローカルで、選定は Hub のカタログが支えます。",
   "f1.t": "プロバイダー管理",

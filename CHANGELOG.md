@@ -17,6 +17,25 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.11] - 2026-10-05
+
+### Added
+
+- **The status bar says which version is running.** `get_footer_stats` has carried
+  the app version since the command existed — the updater's own module opens by
+  calling it "the version in the footer" — and nothing rendered it, so the one
+  place a reader looks to answer "which version am I running?" was the one place
+  that did not say. It sits at the far edge of the bar, in the same mono and
+  muted grey as the totals beside it: a label standing after a control, not
+  another control. The version itself comes from the same `tauri.conf.json` the
+  updater compares against, so what the bar names is what the next check looks
+  for.
+
+  The live demo's status bar reads its version from `app/package.json` now,
+  rather than a hand-written value — which, the moment this row became visible,
+  was a claim a visitor could read: it said v0.1.2 while the page embedding the
+  demo said v0.2.10.
+
 ## [0.2.10] - 2026-10-04
 
 ### Added

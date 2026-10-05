@@ -69,7 +69,7 @@ beforeEach(() => {
     today_requests: 1,
     today_tokens: 10,
     hub_synced: true,
-    version: "0.0.0",
+    version: "v9.9.9",
   });
   apiMock.getSettings.mockResolvedValue({
     theme: "dark",
@@ -184,6 +184,17 @@ describe("the gateway's live numbers", () => {
     act(() => listeners.get("usage-changed")!());
 
     await waitFor(() => expect(apiMock.getFooterStats).toHaveBeenCalledTimes(2));
+  });
+
+  it("names the version it is running, in the status bar", async () => {
+    render(<App />);
+
+    // The footer stats have carried the version since the command existed and
+    // nothing rendered it, so the one place a user looks to answer "which
+    // version am I running?" was the one place that did not say. Scoped to the
+    // status bar, because Settings' About row shows the same string.
+    const bar = await screen.findByRole("contentinfo");
+    expect(await within(bar).findByText("v9.9.9")).toBeInTheDocument();
   });
 });
 

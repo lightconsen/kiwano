@@ -4,6 +4,8 @@
 
 import type { ConfigShareReport, FooterStats, KiwanoApi, UpdateInfo, UpdateProgress } from "../../types";
 import { delay } from "../delay";
+// app/package.json is the version source of truth (`scripts/release.sh` bumps it).
+import pkg from "../../../../package.json";
 import { providers } from "../providers";
 
 /** The footer's counters, held as one mutable object rather than rebuilt per
@@ -14,7 +16,11 @@ export const footerStats: FooterStats = {
   today_requests: 1284,
   today_tokens: 1_900_000,
   hub_synced: true,
-  version: "v0.1.2",
+  // From app/package.json, which is the file `scripts/release.sh` bumps — so the
+  // number a visitor reads in the demo's status bar is the version being
+  // released. Hand-writing it here would have it drift one release behind the
+  // hero's, which now also names a version.
+  version: `v${pkg.version}`,
 };
 
 export const appApi: Pick<

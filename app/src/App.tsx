@@ -451,6 +451,19 @@ export default function App() {
               <RefreshCw className={`h-3 w-3${reloading ? " animate-spin" : ""}`} />
             )}
           </Button>
+          {/* The build stamp, at the far edge where a status bar keeps it. It
+              was already being fetched — `get_footer_stats` has carried it
+              since the command existed, formatted `v0.2.10` from the same
+              tauri.conf.json the updater compares against — and nothing
+              rendered it, so the one place a user looks to answer "which
+              version am I running?" was the one place that did not say.
+              Mono and muted, like the readings beside it: a label, not a
+              control, standing after one. */}
+          {footer && (
+            <span className="font-mono" title={t("settings.version")}>
+              {footer.version}
+            </span>
+          )}
         </span>
       </footer>
 

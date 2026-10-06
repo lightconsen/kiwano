@@ -278,6 +278,18 @@ code, pre { font-family: var(--font-mono); }
 .side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
 .side a:hover { color: var(--ink); background: var(--surface2); }
 .side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+/* The language row, above the page list: this page's other languages, in the
+   same weight as the crumb. The current one is a span, not a link — it is not
+   somewhere to go, and a link to where you already are reads as broken. */
+.langs { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 0 14px 12px; font-size: 11px; color: var(--mut); }
+/* Scoped to .side, and with the font size restated: .side a (13.5px, padding
+   12px) sits *later* in this stylesheet at the same specificity, so a plain
+   .langs a loses to it — which is how the row came to wrap in a 216px column
+   while the same markup fitted one line on the hubs. (No backticks in here:
+   this stylesheet is a JS template literal.) */
+.side .langs a, .langs a { padding: 0; font-size: 11px; color: var(--mut); }
+.side .langs a:hover, .langs a:hover { color: var(--ink); background: none; }
+.langs .on { color: var(--kiwi); font-weight: 500; }
 
 .content { min-width: 0; }
 .content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
@@ -325,6 +337,9 @@ code, pre { font-family: var(--font-mono); }
   .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
   .side nav::-webkit-scrollbar { display: none; }
   .side a { flex: none; border: 1px solid var(--line); }
+  /* The language row is not part of that scroller: it is a small list that
+     wraps, and inside a nowrap flex row it would stretch to one long line. */
+  .langs { margin-left: 0; }
   .pn-nav { grid-template-columns: 1fr; }
 }
 `;
@@ -386,6 +401,18 @@ function chrome(bodyInner, doc) {
     .join("\n");
   // The crumb doubles as the way back to this language's hub.
   const hub = `${docsPath(doc.lang)}/`;
+  // Which languages to offer is which languages *this page* exists in, not
+  // which languages the site has: a page nobody has translated yet should not
+  // offer a link to a 404, and the list shrinking for one page is the honest
+  // signal that the translation is behind. Each is the same slug under
+  // another language's root, so the reader lands on the same page.
+  const langs = doc.published
+    .map((l) =>
+      l === doc.lang
+        ? `<span class="on">${LOCALE_LABEL[l]}</span>`
+        : `<a href="${docsPath(l, doc.slug)}/">${LOCALE_LABEL[l]}</a>`,
+    )
+    .join("");
   return `<div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
@@ -397,6 +424,7 @@ function chrome(bodyInner, doc) {
 <div class="doc">
   <aside class="side">
     <a class="crumb" href="${hub}">Docs</a>
+    <div class="langs" role="group" aria-label="Language">${langs}</div>
     <nav>${items}</nav>
   </aside>
   <main class="content">
@@ -430,6 +458,7 @@ function loadDoc(file, path, lang, published) {
   const { title, para, description, bodyMd } = extractMeta(md);
   return {
     file, path, lang, published,
+    slug: path.split("/").filter(Boolean).pop(),
     title,
     // Sidebar, prev/next and the hub show plain text — an inline-code title
     // (`kiwano`) reads with stray backticks once escaped.
@@ -602,6 +631,11 @@ ${head(
 </div></div>
 <div class="wrap">
   <div class="crumb">Docs</div>
+  <div class="langs" role="group" aria-label="Language">${HUBS.map((h) =>
+    h.locale === hub.locale
+      ? `<span class="on">${LOCALE_LABEL[h.locale]}</span>`
+      : `<a href="${h.path}/">${LOCALE_LABEL[h.locale]}</a>`,
+  ).join("")}</div>
   <h1>${hub.title}</h1>
   <p>${hub.description}</p>
   <div class="grid">

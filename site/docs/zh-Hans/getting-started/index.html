@@ -64,6 +64,18 @@ code, pre { font-family: var(--font-mono); }
 .side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
 .side a:hover { color: var(--ink); background: var(--surface2); }
 .side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+/* The language row, above the page list: this page's other languages, in the
+   same weight as the crumb. The current one is a span, not a link — it is not
+   somewhere to go, and a link to where you already are reads as broken. */
+.langs { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 0 14px 12px; font-size: 11px; color: var(--mut); }
+/* Scoped to .side, and with the font size restated: .side a (13.5px, padding
+   12px) sits *later* in this stylesheet at the same specificity, so a plain
+   .langs a loses to it — which is how the row came to wrap in a 216px column
+   while the same markup fitted one line on the hubs. (No backticks in here:
+   this stylesheet is a JS template literal.) */
+.side .langs a, .langs a { padding: 0; font-size: 11px; color: var(--mut); }
+.side .langs a:hover, .langs a:hover { color: var(--ink); background: none; }
+.langs .on { color: var(--kiwi); font-weight: 500; }
 
 .content { min-width: 0; }
 .content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
@@ -111,6 +123,9 @@ code, pre { font-family: var(--font-mono); }
   .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
   .side nav::-webkit-scrollbar { display: none; }
   .side a { flex: none; border: 1px solid var(--line); }
+  /* The language row is not part of that scroller: it is a small list that
+     wraps, and inside a nowrap flex row it would stretch to one long line. */
+  .langs { margin-left: 0; }
   .pn-nav { grid-template-columns: 1fr; }
 }
 </style>
@@ -153,6 +168,7 @@ code, pre { font-family: var(--font-mono); }
 <div class="doc">
   <aside class="side">
     <a class="crumb" href="/docs/zh-Hans/">Docs</a>
+    <div class="langs" role="group" aria-label="Language"><a href="/docs/getting-started/">English</a><span class="on">简体中文</span><a href="/docs/zh-Hant/getting-started/">繁體中文</a><a href="/docs/ja/getting-started/">日本語</a></div>
     <nav><a href="/docs/zh-Hans/getting-started/" class="on">快速上手</a>
 <a href="/docs/zh-Hans/agent-takeover/">Agent 接管</a>
 <a href="/docs/zh-Hans/strategies/">策略与限额</a>

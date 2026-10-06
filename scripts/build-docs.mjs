@@ -268,7 +268,7 @@ code, pre { font-family: var(--font-mono); }
 .topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
 .brand img { width: 22px; height: 22px; border-radius: 6px; }
-.top-links { margin-left: auto; display: flex; gap: 6px; }
+.top-links { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
 .top-links a:hover { color: var(--ink); background: var(--surface2); }
 
@@ -281,14 +281,19 @@ code, pre { font-family: var(--font-mono); }
 /* The language row, above the page list: this page's other languages, in the
    same weight as the crumb. The current one is a span, not a link — it is not
    somewhere to go, and a link to where you already are reads as broken. */
-.langs { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 0 14px 12px; font-size: 11px; color: var(--mut); }
+/* The language row, first in the top bar's right cluster: the three links
+   beside it lead off-site, this one stays in the docs, so it is the one that
+   belongs with navigation rather than at the edge where the external ones sit.
+   A flat row of names, no dropdown — four short names fit, and the docs pages
+   carry no script to open a menu with. */
+.langs { display: flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 13px; color: var(--mut); }
 /* Scoped to .side, and with the font size restated: .side a (13.5px, padding
    12px) sits *later* in this stylesheet at the same specificity, so a plain
    .langs a loses to it — which is how the row came to wrap in a 216px column
    while the same markup fitted one line on the hubs. (No backticks in here:
    this stylesheet is a JS template literal.) */
-.side .langs a, .langs a { padding: 0; font-size: 11px; color: var(--mut); }
-.side .langs a:hover, .langs a:hover { color: var(--ink); background: none; }
+.langs a { padding: 6px 8px; border-radius: 8px; color: var(--mut); }
+.langs a:hover { color: var(--ink); background: var(--surface2); }
 .langs .on { color: var(--kiwi); font-weight: 500; }
 
 .content { min-width: 0; }
@@ -333,6 +338,12 @@ code, pre { font-family: var(--font-mono); }
 
 @media (max-width: 860px) {
   .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  /* The top bar wraps rather than dropping anything: with a language row in it
+     the right cluster is wider than a phone, and the three links beside it are
+     the only way off the docs — hiding them to save a row would cost more than
+     the row. */
+  .topbar-in { flex-wrap: wrap; height: auto; min-height: 56px; row-gap: 4px; padding-top: 8px; padding-bottom: 8px; }
+  .top-links { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
   .side { position: static; }
   .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
   .side nav::-webkit-scrollbar { display: none; }
@@ -416,6 +427,7 @@ function chrome(bodyInner, doc) {
   return `<div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
+    <div class="langs" role="group" aria-label="Language">${langs}</div>
     <a href="/">kiwano.cc</a>
     <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
     <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
@@ -424,7 +436,6 @@ function chrome(bodyInner, doc) {
 <div class="doc">
   <aside class="side">
     <a class="crumb" href="${hub}">Docs</a>
-    <div class="langs" role="group" aria-label="Language">${langs}</div>
     <nav>${items}</nav>
   </aside>
   <main class="content">
@@ -624,6 +635,11 @@ ${head(
 <div class="topbar"><div class="topbar-in">
   <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
   <div class="top-links">
+    <div class="langs" role="group" aria-label="Language">${HUBS.map((h) =>
+      h.locale === hub.locale
+        ? `<span class="on">${LOCALE_LABEL[h.locale]}</span>`
+        : `<a href="${h.path}/">${LOCALE_LABEL[h.locale]}</a>`,
+    ).join("")}</div>
     <a href="/">kiwano.cc</a>
     <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
     <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
@@ -631,11 +647,6 @@ ${head(
 </div></div>
 <div class="wrap">
   <div class="crumb">Docs</div>
-  <div class="langs" role="group" aria-label="Language">${HUBS.map((h) =>
-    h.locale === hub.locale
-      ? `<span class="on">${LOCALE_LABEL[h.locale]}</span>`
-      : `<a href="${h.path}/">${LOCALE_LABEL[h.locale]}</a>`,
-  ).join("")}</div>
   <h1>${hub.title}</h1>
   <p>${hub.description}</p>
   <div class="grid">

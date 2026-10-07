@@ -58,6 +58,10 @@ Two gotchas that cost time if you haven't hit them before:
 ## Pull requests
 
 - One logical change per PR.
+- **A fix or a feature comes with a test that fails when the change is put
+  back.** Revert your own change in the working tree, run the test, watch it
+  fail, then put it back — a test that passes both ways documents the code, it
+  does not defend it. Say in the PR that you did this and name the test.
 - Visible in the UI? Say so, and include a screenshot.
 - Anything user-visible needs a `CHANGELOG.md` entry: add it under
   `[Unreleased]`. The release workflow copies that section into the GitHub
@@ -67,6 +71,19 @@ Two gotchas that cost time if you haven't hit them before:
 - Comment the *why*, not the *what*. The codebase already leans that way;
   several files carry long comments about a mistake that was made once. Please
   keep it that way.
+
+## Rules that came from mistakes
+
+[`docs/lessons.md`](docs/lessons.md) is the log of what has already gone wrong
+here, each entry with the commit that paid for it. When a lesson is seen a third
+time it graduates to a rule below, and the entry is marked as graduated — so
+these are not style preferences, they are rules a change has to satisfy.
+
+- **Derive a value that appears twice; never type it twice.** A version string
+  or licence name recorded in two files goes stale quietly, because a wrong
+  string is still a valid string. Either one place reads the other, or a check
+  compares them. See `scripts/sync-site.mjs --check` for the shape.
+
 
 ## Reporting bugs
 

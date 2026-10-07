@@ -21,7 +21,8 @@ macOS 的签名主体是 **个人账号**（`Developer ID Application: Jianxin Y
 
 ## 1. 已经落地的机制
 
-以下六项在本次改动中进入 `release.yml`，均在发布路径上，失败即中断发布。
+以下各项均在发布路径上。除 §1.7 之外，失败即中断发布 —— §1.7 是唯一一处
+「失败」被区分成「环境不能签」与「配置写错了」的地方，只有后者中断。
 
 ### 1.1 macOS：签名身份钉死，而非「有签名就算过」
 
@@ -36,8 +37,10 @@ Developer ID 证书都满足它**，所以它只能发现「完全没签」，�
 - app、DMG、以及 app 内的 gateway sidecar 三者都验，且要求同一身份
   （sidecar 才是真正持有凭据的二进制）。
 
-身份与 Team ID 只在「Prepare the Apple signing material」一处解析并写入 `GITHUB_ENV`，
-避免校验值与被签值来自两个可能漂移的来源。
+身份与 Team ID 各只有一个写入点，避免校验值与被签值来自两个可能漂移的来源：
+身份在「Resolve the macOS signing identity」写入 `GITHUB_ENV`（见 §1.7 —— 它要区分
+真身份与 ad-hoc），Team ID 在「Prepare the Apple signing material」里从身份串解析。
+校验步骤读的都是这两个写入点，而不是再读一次 secret。
 
 ### 1.2 macOS：公证失败不再产生重复提交
 
@@ -90,6 +93,40 @@ updater 的信任根就是这个编译进 App 的公钥：能改它的人可以�
 `publish` 的依赖从 `needs: build` 改为 `needs: [build, release-manifest]`：
 `SHA256SUMS` 属于发布内容，发布后再补会让下载窗口内的用户看到一份命名了不完整资产的清单。
 镜像 job 依旧不参与依赖 —— 镜像故障不应把 release 卡成 draft。
+
+### 1.7 环境无法签名时：降级，而不是构建失败
+
+原来 `verify` 里有一条硬门「Signing credentials are present」，缺密钥即中断发布。
+现在换成**探测**（「Probe the signing material」），并把两种情况分开：
+
+| 情况 | 判定 | 结果 |
+|---|---|---|
+| Apple 六件套全缺 / updater 密钥缺 | **环境不具备签名能力**（fork、密钥尚未配置） | 降级构建，打 `::warning::`，不失败 |
+| Apple 六件套**部分**存在 | 半个证书 = 配置错误，不是「不能签」 | 硬失败 |
+| 密钥存在但形状不对 | 配置错误 | 硬失败（原来的精确报错全部保留） |
+
+降级时具体少什么：
+
+- macOS 用 `APPLE_SIGNING_IDENTITY=-`（ad-hoc）。这不是可选项：Tauri 在既无证书又无身份时
+  **完全不签名**，而 arm64 的 bundle 没有签名根本起不来 —— 所以「不签名」等于「构建机上都跑不了」。
+  ad-hoc 至少能在本机运行，别的机器被 Gatekeeper 拒绝，release body 的横幅写明这一点。
+  注意 Tauri 对 `-` 有专门处理：DMG 在 identity 为 `-` 时不自我签名（tauri#12288），符合预期。
+- 上游 `--config '{"bundle":{"createUpdaterArtifacts":false}}'`：Tauri 在开启 updater 产物
+  却没有私钥时会**整体失败**（"A public key has been found, but no private key"），
+  所以必须显式关掉才能构建。
+- 不生成 `latest.json`：**已安装的 App 不会被推送这个版本**，R2 镜像（产物与清单）全部跳过，
+  镜像继续指向最后一个已签名版本。这对 `install.sh` 与所有不带版本号的下载链接同样成立 ——
+  降级版不会成为它们背后的字节。
+- `uploadUpdaterJson` 关闭；GitHub release 照常发布（草稿转公开），但 body 顶部有警告横幅，
+  指向本次 run 的 step summary（里面有一张「缺了什么」的表）。
+
+**有意发布未签名版本**时不要删密钥，改用仓库变量 `ALLOW_UNSIGNED_BUILD=true`
+（同样是只有管理员能改的仓库外开关）：即使密钥齐全也强制降级，并打印一条专门的 warning。
+触发条件是证书主体从个人转为 LLC 期间需要发 hotfix。
+
+> 与 §1.5 的差别是有意的：`EXPECTED_UPDATER_PUBKEY` 未配置时**故意失败**，
+> 因为那是一条「未配置就跳过自己」的安全检查；签名能力则是环境事实，
+> 缺了它应当产出降级产物并大声说明，而不是让 tag 什么也不产出。
 
 ## 2. 为什么 Windows 现在不买证书
 

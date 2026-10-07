@@ -9,6 +9,13 @@
 # image alike); Windows builds are not signed yet, so SmartScreen still warns
 # there.
 #
+# An environment that *cannot* sign — no Apple certificate, no updater key — is
+# detected up front by `verify` and produces a degraded build instead of no
+# build: ad-hoc-signed macOS bundles, no updater artifacts, no mirror, and a
+# warning banner on the release body. Secrets that are present but malformed
+# still fail the build. See the probe step in `verify` for the line between the
+# two, and `ALLOW_UNSIGNED_BUILD` for shipping unsigned on purpose.
+#
 # The GitHub release body is the tag's own CHANGELOG.md section (`changelog`
 # job), so the notes a reader sees are the ones written before the tag. The
 # per-platform install notes are appended, because those describe the artifacts
@@ -53,9 +60,13 @@ jobs:
     timeout-minutes: 45
     # `version` is what every "does the artifact agree with the tag" check
     # compares against, resolved once here rather than derived again in each
-    # place that needs it.
+    # place that needs it. The signing capabilities decide how the build below
+    # is allowed to degrade — see the probe step.
     outputs:
       version: ${{ steps.version.outputs.version }}
+      apple: ${{ steps.signing.outputs.apple }}
+      updater: ${{ steps.signing.outputs.updater }}
+      degraded: ${{ steps.signing.outputs.degraded }}
     steps:
       - uses: actions/checkout@v7
 
@@ -201,25 +212,34 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "this tag is release version $version"
 
-      # A tag is now expected to yield a signed, notarized build. Shipping
-      # unsigned was the old normal; it is a regression now, and nothing
-      # downstream would notice — publishing has no human in it. Fail cheaply
-      # here, on Linux, instead of four builds later.
+      # What this run can sign with, decided here — once, before four builds
+      # depend on it — instead of by whichever build leg hits a missing secret
+      # first. Two independent capabilities: an Apple Developer ID for the
+      # macOS bundles (and the notarization that goes with it), and the updater
+      # key that signs what installed copies download.
       #
-      # To deliberately ship unsigned (a hotfix while the Apple membership is
-      # mid-conversion), delete this step. It is the only gate.
-      - name: Signing credentials are present
-        run: |
-          missing=""
-          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
-                   APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
-            [ -n "${!v:-}" ] || missing="$missing $v"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::missing secrets:$missing — add them, or delete this step deliberately"
-            exit 1
-          fi
-          echo "all six Apple signing secrets are set"
+      # Each is either *absent* or *wrong*, and those are different things:
+      #
+      #   - Absent (the secret is unset) means this environment cannot sign —
+      #     a fork, or a first tag pushed before the secrets were configured.
+      #     The answer is a degraded build rather than no build: ad-hoc-signed
+      #     macOS bundles, no updater artifacts, no mirror, and a banner on the
+      #     release saying so. Loud, but not fatal.
+      #   - Present but malformed is a mistake in *this* repository, and the
+      #     steps further down still fail hard on it with a message naming the
+      #     shape the secret should have. A half-configured certificate set is
+      #     in this class too: signing with some of the material and not the
+      #     rest is not a capability, it is a typo.
+      #
+      # `ALLOW_UNSIGNED_BUILD` — a repository *variable*, so only an admin can
+      # set it — forces the degraded path even when the secrets are present.
+      # That is the deliberate way to ship unsigned (a hotfix while the Apple
+      # membership is mid-conversion); the alternative, deleting the secrets,
+      # costs a re-paste of the private key to undo. See the banner in the
+      # release body, which is what keeps a degraded release from going out
+      # unannounced.
+      - name: Probe the signing material
+        id: signing
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -227,6 +247,83 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          FORCE_UNSIGNED: ${{ vars.ALLOW_UNSIGNED_BUILD }}
+        run: |
+          set -euo pipefail
+
+          apple_present=0
+          apple_missing=""
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                   APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+            if [ -n "${!v:-}" ]; then
+              apple_present=$(( apple_present + 1 ))
+            else
+              apple_missing="$apple_missing $v"
+            fi
+          done
+
+          forced=0
+          if [ "${FORCE_UNSIGNED:-}" = "true" ]; then
+            forced=1
+            apple=0
+            updater=0
+            echo "::warning::ALLOW_UNSIGNED_BUILD is set: building unsigned on purpose, with $apple_present/6 Apple secrets and $([ -n "${UPDATER_KEY:-}" ] && echo 'an updater key' || echo 'no updater key') present but deliberately unused"
+          else
+            case "$apple_present" in
+              6) apple=1 ;;
+              0) apple=0 ;;
+              *)
+                echo "::error::some Apple signing secrets are set and some are not (missing:$apple_missing) — a half-configured certificate is a mistake, not an unsigned environment. Set all six, or unset all six."
+                exit 1
+                ;;
+            esac
+            if [ -n "${UPDATER_KEY:-}" ]; then updater=1; else updater=0; fi
+          fi
+
+          degraded=0
+          if [ "$apple" = 0 ]; then
+            degraded=1
+            [ "$forced" = 1 ] \
+              || echo "::warning::no Apple signing material (missing:$apple_missing): macOS bundles will be ad-hoc signed and not notarized"
+          fi
+          if [ "$updater" = 0 ]; then
+            degraded=1
+            [ "$forced" = 1 ] \
+              || echo "::warning::TAURI_SIGNING_PRIVATE_KEY is unset: this build produces no updater artifacts, and the release is neither mirrored nor offered as an update"
+          fi
+
+          if [ "$degraded" = 1 ]; then
+            {
+              echo "## This release is degraded"
+              echo
+              echo "The tag was pushed in an environment that cannot sign, so this"
+              echo "build ships without one or both of its signatures. Installed"
+              echo "copies are **not** affected: with no updater artifacts there is"
+              echo "no \`latest.json\`, so the R2 mirror is left as it is and no"
+              echo "installed app is offered this version."
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Apple Developer ID | $([ "$apple" = 1 ] && echo 'signed and notarized' || echo '**ad-hoc signed only** — Gatekeeper refuses it on any other machine') |"
+              echo "| Updater artifacts | $([ "$updater" = 1 ] && echo 'signed' || echo '**none produced**, and the mirror is untouched') |"
+              echo
+              echo "To ship signed instead, set the repository secrets"
+              echo "\`APPLE_CERTIFICATE\`, \`APPLE_CERTIFICATE_PASSWORD\`,"
+              echo "\`APPLE_SIGNING_IDENTITY\`, \`APPLE_API_ISSUER\`, \`APPLE_API_KEY\`,"
+              echo "\`APPLE_API_PRIVATE_KEY\` and \`TAURI_SIGNING_PRIVATE_KEY\`, then"
+              echo "re-run this tag. Signing material that is present but malformed"
+              echo "still fails the build."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "signing material complete: the Apple certificate set and the updater key are both present"
+          fi
+
+          {
+            echo "apple=$apple"
+            echo "updater=$updater"
+            echo "degraded=$degraded"
+          } >> "$GITHUB_OUTPUT"
 
   # The release body, read from the changelog section for this tag. Its own job
   # so it runs once rather than per platform, and so a missing section fails in
@@ -359,12 +456,34 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # Which identity signs the macOS bundles, in one place, so the degraded
+      # path cannot be half-applied: the Developer ID when the certificate set
+      # is complete, ad-hoc (`-`) when it is absent.
+      #
+      # Ad-hoc is the floor rather than a nicety. Tauri signs nothing at all
+      # when it has neither a certificate nor an identity, and an arm64 bundle
+      # with no signature does not launch — so "unsigned" would mean "does not
+      # run", on the machine that just built it. With `-` it runs there and
+      # Gatekeeper refuses it anywhere else, which is what the release banner
+      # says. Everything downstream reads $APPLE_SIGNING_IDENTITY from here:
+      # the artifact verification steps are the ones that would otherwise
+      # rubber-stamp an ad-hoc signature as ours.
+      - name: Resolve the macOS signing identity
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          IDENTITY: ${{ needs.verify.outputs.apple == '1' && secrets.APPLE_SIGNING_IDENTITY || '-' }}
+        run: |
+          set -euo pipefail
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "macOS bundles will be signed with: $IDENTITY"
+
       # Both Apple blobs are decoded verbatim by Tauri, and their exact bytes
       # depend on how they were pasted into the secret — a trailing newline in
       # APPLE_CERTIFICATE surfaces as a base64 error that reads like a wrong
       # password. Normalize once, here, instead of debugging that later.
       - name: Prepare the Apple signing material
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.verify.outputs.apple == '1'
         shell: bash
         env:
           CERT_RAW: ${{ secrets.APPLE_CERTIFICATE }}
@@ -390,10 +509,14 @@ jobs:
           # pin every signed artifact to this team, and a Team ID that silently
           # disagreed with the signing identity would turn those checks into
           # rubber stamps.
+          #
+          # A value this step cannot parse fails here rather than degrading: the
+          # probe established that a secret is *present*, which makes this a
+          # malformed secret, and a malformed secret is a bug in this repository
+          # rather than an environment that cannot sign.
           team=$(printf '%s' "$APPLE_SIGNING_IDENTITY" | sed -n 's/.*(\([A-Za-z0-9]*\))$/\1/p')
           [ -n "$team" ] \
             || { echo "::error::APPLE_SIGNING_IDENTITY must look like 'Developer ID Application: Name (TEAMID)', got a value this step cannot parse"; exit 1; }
-          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
           echo "APPLE_TEAM_ID=$team" >> "$GITHUB_ENV"
           echo "signing identity resolved for team $team"
 
@@ -421,7 +544,13 @@ jobs:
       # The key is never echoed, not even a prefix: the secret arrives by env
       # var (never interpolated into this script), and the only things printed
       # below are a shape name and a length.
+      # Skipped when the probe found no key at all: there is nothing to
+      # normalize, and the build turns updater artifacts off for this run
+      # instead (see the `--config` in the tauri-action step). A key that *is*
+      # present still has to survive every check below — absence and malformed
+      # are different failures, and only the first one degrades.
       - name: Normalize the updater signing key
+        if: needs.verify.outputs.updater == '1'
         shell: bash
         env:
           KEY_RAW: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -556,12 +685,18 @@ jobs:
           # The identity is a secret rather than a tauri.conf.json value because
           # it carries a personal name, and this is expected to become the LLC's
           # when the membership converts.
-          APPLE_CERTIFICATE: ${{ env.APPLE_CERTIFICATE }}
+          #
+          # APPLE_CERTIFICATE, APPLE_SIGNING_IDENTITY and APPLE_API_KEY_PATH are
+          # deliberately *not* repeated here: the steps above export them
+          # through $GITHUB_ENV, which this step inherits. Listing them again
+          # would read the secret a second time and, in a degraded run, turn an
+          # absent certificate into an empty string — and Tauri's
+          # `var_os("APPLE_CERTIFICATE")` seeing Some("") is the difference
+          # between signing ad-hoc and trying to import an empty .p12, which
+          # fails as base64 (the failure mode the notes above describe).
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           # The frontend and the Tauri shell live under app/. Without this the
           # action looks for src-tauri at the repo root, and — because it also
@@ -575,7 +710,22 @@ jobs:
           releaseName: "Kiwano ${{ github.ref_name }}"
           # Literal block, not folded: the changelog is Markdown and its line
           # breaks are the formatting.
+          #
+          # The two lines above the changelog are the degraded-build banner,
+          # empty when the signing material was complete. It goes above
+          # everything else because it changes whether the rest applies at all,
+          # and a reader who stops after a paragraph stops after this one.
+          #
+          # It says which *kind* of degradation only in general terms: whether
+          # it was the Developer ID, the updater key or both is a table in the
+          # `verify` job's step summary, and the sentence here would have to be
+          # assembled from two flags to be specific. Each expression is a single
+          # line because a GitHub expression string cannot carry a newline; the
+          # blank lines around it are the block scalar's.
           releaseBody: |
+            ${{ needs.verify.outputs.degraded == '1' && '> [!WARNING]' || '' }}
+            ${{ needs.verify.outputs.degraded == '1' && '> **This build is degraded.** It was produced in an environment that cannot sign it completely, so at least one of the macOS Developer ID and the updater key is missing — the run summary has the details, including what a degraded macOS bundle means for Gatekeeper. Installed copies are not offered this version. Do not install it over a signed release.' || '' }}
+
             ${{ needs.changelog.outputs.body }}
 
             ---
@@ -595,7 +745,23 @@ jobs:
           # A tag carrying a prerelease suffix (`v0.2.0-rc.1`) is a rehearsal:
           # it builds and verifies, then stops. See the gates below.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          args: --target ${{ matrix.target }}
+          # The action's own updater manifest is the *merge* point: each leg
+          # downloads the draft's latest.json, adds its platform and uploads it
+          # again. There is nothing to merge into when no leg produces updater
+          # artifacts, and a manifest naming platforms whose downloads are not
+          # signed is worse than no manifest — the app would accept the offer
+          # and fail the signature check at install time.
+          uploadUpdaterJson: ${{ needs.verify.outputs.updater == '1' }}
+          # `--config` with inline JSON, because that is what turns updater
+          # artifacts off: Tauri fails the whole build when they are on and no
+          # key is set ("A public key has been found, but no private key"), so
+          # the flag is what lets a keyless environment build at all. The JSON
+          # has no spaces in it, which matters because the action splits this
+          # string into arguments itself. See the probe step for when this
+          # applies.
+          args: >-
+            --target ${{ matrix.target }}
+            ${{ needs.verify.outputs.updater != '1' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
 
       # Tauri notarizes and staples the .app, then builds the .dmg *from* it and
       # never submits the image itself. Gatekeeper assesses a disk image on its
@@ -604,7 +770,7 @@ jobs:
       # Submit the image too, staple it, and replace the copy tauri-action has
       # already attached to the release, or the two sources would disagree.
       - name: Notarize and staple the DMG
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.verify.outputs.apple == '1'
         shell: bash
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -701,8 +867,14 @@ jobs:
       # quietly lost its signature — only the user's Gatekeeper dialog would.
       # Prove the signature, the notarization ticket and the staple here, while
       # a failure still costs a release instead of a support thread.
+      #
+      # Skipped for a build that was never signed: this is the step that reads
+      # $APPLE_SIGNING_IDENTITY, and in the degraded path that value is `-`,
+      # which would make every check below fail on an artifact that is exactly
+      # what it was asked to be. The presence checks that do not care about
+      # signing — the sidecar, the version — are unconditional.
       - name: Verify the signed artifacts
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.verify.outputs.apple == '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -714,9 +886,10 @@ jobs:
           # --verify` answers "is this intact and coherently signed", which an
           # app signed by *any* Developer ID certificate satisfies; this pins the
           # leaf certificate to our team, so somebody else's signature fails.
-          # APPLE_SIGNING_IDENTITY and APPLE_TEAM_ID are resolved once, in the
-          # signing-material step, so this cannot silently disagree with what
-          # actually did the signing.
+          # APPLE_SIGNING_IDENTITY is resolved in the identity step and
+          # APPLE_TEAM_ID in the signing-material step — one writer each, and
+          # both of them the value the build itself was handed, so this cannot
+          # silently disagree with what actually did the signing.
           requirement="anchor apple generic and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\""
 
           # Deliberately *not* `--strict`: that treats a stray FinderInfo xattr
@@ -789,12 +962,20 @@ jobs:
               # the sidecar is the binary that actually holds the credentials.
               # The identity variables only exist on macOS, which is why this
               # lives in the macOS arm of the case.
+              #
+              # `codesign --verify` still runs in a degraded build: an ad-hoc
+              # signature is a real signature, and a sidecar that fails this is
+              # broken whatever identity is behind it. Only the two comparisons
+              # against *our* identity are skipped, because in a degraded build
+              # the identity is `-` and there is no team to match.
               codesign --verify --verbose=2 "$sidecar"
-              sidecar_info=$(codesign -dv --verbose=4 "$sidecar" 2>&1)
-              printf '%s\n' "$sidecar_info" | grep -Fxq "Authority=$APPLE_SIGNING_IDENTITY" \
-                || fail "$sidecar is not signed by $APPLE_SIGNING_IDENTITY"
-              printf '%s\n' "$sidecar_info" | grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" \
-                || fail "$sidecar carries an unexpected TeamIdentifier"
+              if [ "${{ needs.verify.outputs.apple }}" = "1" ]; then
+                sidecar_info=$(codesign -dv --verbose=4 "$sidecar" 2>&1)
+                printf '%s\n' "$sidecar_info" | grep -Fxq "Authority=$APPLE_SIGNING_IDENTITY" \
+                  || fail "$sidecar is not signed by $APPLE_SIGNING_IDENTITY"
+                printf '%s\n' "$sidecar_info" | grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID" \
+                  || fail "$sidecar carries an unexpected TeamIdentifier"
+              fi
               ;;
 
             *-unknown-linux-gnu)
@@ -978,10 +1159,18 @@ jobs:
       # the updater reads first, so `mirror-manifest` runs after `publish`.
       # shell: bash on every runner (Windows included) so the staging logic is
       # one script rather than a PowerShell rewrite.
+      #
       # Not on a rehearsal tag: the mirror's paths carry no version, so a test
       # build would overwrite the download every user is pointed at.
+      #
+      # Not without an updater key either, for the same reason a rehearsal is
+      # excluded: these keys are what `install.sh` and every existing download
+      # link resolve to, and a build that cannot sign its own updater artifacts
+      # must not become the bytes behind them. The GitHub release still carries
+      # everything, banner and all; the mirror keeps serving the last signed
+      # release until a signed one replaces it.
       - name: Mirror artifacts to Cloudflare R2
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: ${{ !contains(github.ref_name, '-') && needs.verify.outputs.updater == '1' }}
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -1140,10 +1329,14 @@ jobs:
   # the release as a draft. That is now the wrong trade: an unmirrored release
   # has a repair path, an unreleased mirror does not.
   mirror-manifest:
-    needs: [build, publish]
+    needs: [verify, build, publish]
     # Same reason as the artifact mirror: the R2 manifest is what the app's
-    # updater reads, so a rehearsal must not repoint it.
-    if: ${{ !contains(github.ref_name, '-') }}
+    # updater reads, so a rehearsal must not repoint it — and neither must a
+    # build with no updater key, which has no manifest to point it at. The
+    # download it would rewrite does not exist there either (`uploadUpdaterJson`
+    # is off in that run), so this job would fail on a missing asset rather than
+    # mirror anything.
+    if: ${{ !contains(github.ref_name, '-') && needs.verify.outputs.updater == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -1228,7 +1421,13 @@ jobs:
   smoke:
     name: Release smoke
     needs: [verify, publish, mirror-manifest]
-    if: ${{ !contains(github.ref_name, '-') }}
+    # Written out rather than left to the default rule, because `needs` now
+    # includes a job that a degraded release skips: without this, a skipped
+    # `mirror-manifest` would skip the smoke too, and a degraded build is
+    # exactly the one whose artifact nobody has installed yet. The condition is
+    # what the default would have been — everything it needs succeeded — with
+    # the rehearsal gate kept.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && !contains(github.ref_name, '-') }}
     permissions:
       # `gh release download` reads; upload-artifact needs actions: write.
       contents: read

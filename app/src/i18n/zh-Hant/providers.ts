@@ -15,7 +15,7 @@ export const providers = {
   enabling: "啟用中…",
   addProviderFirst: "先新增 Provider",
   oauthNote:
-    "使用官方訂閱登入（Claude 登入、Codex ChatGPT）？官方 OAuth 目前無法代理 —— 請先手動新增一個 Provider。",
+    "使用官方方案登入（Claude 登入、Codex ChatGPT）？這類憑證無法代理 —— 廠商條款不允許在自家應用程式之外使用。請改用 API Key 新增 Provider。",
 
   // ── Provider rows ──
   unbound: "未綁定",

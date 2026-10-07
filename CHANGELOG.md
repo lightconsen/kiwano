@@ -17,6 +17,18 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [Unreleased]
+
+### Fixed
+
+- **The provider screen no longer promises something the vendors forbid.** Adding
+  a provider next to an agent that is signed in with an official subscription
+  used to say official OAuth *"can't be proxied yet"* — a "yet" that reads as a
+  backlog item. It is not one: Anthropic's terms (February 2026) restrict Free,
+  Pro and Max credentials to Claude's own apps, and routing requests on a
+  subscriber's behalf is named as the thing that is not allowed. The note now
+  says that, and points at the path that is open — a provider with an API Key.
+
 ## [0.2.12] - 2026-10-07
 
 ### Added

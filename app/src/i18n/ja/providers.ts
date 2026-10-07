@@ -17,7 +17,7 @@ export const providers = {
   enabling: "有効化中…",
   addProviderFirst: "先にプロバイダーを追加",
   oauthNote:
-    "公式サブスクリプションでサインインしていますか（Claude ログイン、Codex ChatGPT）？公式の OAuth はまだプロキシできません。先にプロバイダーを手動で追加してください。",
+    "公式プランでサインイン済みですか（Claude ログイン、Codex ChatGPT）？そのログイン情報はプロキシできません — 各社の規約が自社アプリの外での使用を認めていません。代わりに API キーでプロバイダーを追加してください。",
 
   // ── Provider rows ──
   unbound: "未紐付け",

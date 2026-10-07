@@ -29,11 +29,6 @@ set -eu
 
 MIRROR="${KIWANO_MIRROR:-https://hub.kiwano.cc/releases}"
 GITHUB="${KIWANO_GITHUB:-https://github.com/lightconsen/kiwano/releases}"
-# Where a request for an unpublished platform is counted. There is no arm64
-# build to fetch, and that is a fact about this project rather than about the
-# machine it is running on — so the failure message has somewhere to point
-# that can change the fact.
-ARM64_ISSUE="https://github.com/lightconsen/kiwano/issues/1"
 DATA_PORT="${KIWANO_DATA_PORT:-8317}"
 
 SYSTEM=0
@@ -77,8 +72,11 @@ done
 
 # ── what are we on ──────────────────────────────────────────────────────────
 #
-# The triples are the ones this project actually publishes. Linux is x86_64
-# only; refusing by name beats downloading something that will not run.
+# The triples are the ones this project actually publishes. Linux arm64 carries
+# the CLI and the gateway and nothing else — there is no arm64 app — so this
+# installer is the whole of the experience there, which is why it is also the
+# thing the release smoke runs on that architecture. Refusing an architecture by
+# name beats downloading something that will not run.
 
 os=$(uname -s)
 arch=$(uname -m)
@@ -86,14 +84,7 @@ case "$os" in
     Linux)
         case "$arch" in
             x86_64 | amd64) triple=x86_64-unknown-linux-gnu ;;
-            aarch64 | arm64)
-                # Not "unsupported architecture": the server side is plain Rust
-                # and builds here from source today, so what is missing is a
-                # published binary — a request to count rather than a wall.
-                # Both the count and the way out are named, in that order,
-                # because a +1 is cheap and is the thing that changes this.
-                die "no Linux arm64 build is published yet. Add your setup to $ARM64_ISSUE and it will be built, or build it here: cargo build --release -p kiwano -p kiwanod"
-                ;;
+            aarch64 | arm64) triple=aarch64-unknown-linux-gnu ;;
             *) die "unsupported Linux architecture: $arch" ;;
         esac
         ;;

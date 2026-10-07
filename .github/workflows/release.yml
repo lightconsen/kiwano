@@ -1,9 +1,11 @@
 # Tag-triggered release pipeline (docs/upgrade.md phase 3).
 #
-# Pushing a `v*` tag runs the same checks as CI (`verify`), then builds all four
-# targets (macOS aarch64 + x86_64, Windows, Linux), signs the updater artifacts,
-# uploads them to a draft release, and publishes it automatically once every
-# platform has landed — the tag push is the only manual step. Because publishing
+# Pushing a `v*` tag runs the same checks as CI (`verify`), then builds every
+# target: macOS aarch64 + x86_64, Windows x64 and Linux x86_64 for the desktop
+# app, plus Linux arm64 for the server bundle alone (no app is published for
+# arm64 — see the note on that leg). It signs the updater artifacts, uploads
+# them to a draft release, and publishes it automatically once every platform
+# has landed — the tag push is the only manual step. Because publishing
 # needs no human, `verify` is what stops a tag on a red commit from shipping.
 # macOS builds are signed with a Developer ID and notarized (app and disk
 # image alike); Windows builds are not signed yet, so SmartScreen still warns
@@ -191,7 +193,7 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
-      # What this tag means as a *version*, resolved once for the four places
+      # What this tag means as a *version*, resolved once for the five places
       # that compare a built artifact against it: the CLI's `--version`, the
       # macOS bundle's CFBundleShortVersionString, the Linux package's Version,
       # and the installed Windows app's ProductVersion.
@@ -212,8 +214,8 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "this tag is release version $version"
 
-      # What this run can sign with, decided here — once, before four builds
-      # depend on it — instead of by whichever build leg hits a missing secret
+      # What this run can sign with, decided here — once, before every build
+      # depends on it — instead of by whichever build leg hits a missing secret
       # first. Two independent capabilities: an Apple Developer ID for the
       # macOS bundles (and the notarization that goes with it), and the updater
       # key that signs what installed copies download.
@@ -327,7 +329,7 @@ jobs:
 
   # The release body, read from the changelog section for this tag. Its own job
   # so it runs once rather than per platform, and so a missing section fails in
-  # seconds instead of after four builds — `build` needs it, so nothing ships
+  # seconds instead of after every build — `build` needs it, so nothing ships
   # without it. `scripts/release.sh --tag` refuses to create the tag in the
   # first place; this catches a tag made by hand or pushed from elsewhere.
   changelog:
@@ -409,6 +411,23 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             rust_targets: x86_64-pc-windows-msvc
+          # A leg with no GUI. The server bundle is plain Rust — no Tauri, no
+          # webkit, no desktop session — which is what makes it buildable on a
+          # platform the app itself does not support: arm64 Linux is servers,
+          # containers on Apple Silicon and Raspberry Pis, and the CLI and
+          # gateway are the whole of what belongs there.
+          #
+          # `server_only: true` is what every GUI step below is gated on. The
+          # packaging, the upload and the mirror are not: those produce the
+          # same artifact on this leg as on the others. `ubuntu-22.04-arm`
+          # is a standard hosted runner, free for public repositories, and it
+          # builds natively — the alternatives (cross-compiling SQLite and
+          # aws-lc from an x86 runner) are a cross C toolchain for the same
+          # bytes, and can only fail in more ways.
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            rust_targets: aarch64-unknown-linux-gnu
+            server_only: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -417,22 +436,25 @@ jobs:
       # No `version:` here: pnpm/action-setup reads `packageManager` from
       # package.json, and pinning both is an error in v6 — which is how this
       # workflow came to fail every run since the pin landed.
-      - uses: pnpm/action-setup@v6
+      - if: ${{ !matrix.server_only }}
+        uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v7
+      - if: ${{ !matrix.server_only }}
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
           # The lockfile lives with the frontend, not at the repo root.
           cache-dependency-path: app/pnpm-lock.yaml
 
-      - name: Install frontend dependencies
+      - if: ${{ !matrix.server_only }}
+        name: Install frontend dependencies
         working-directory: app
         run: pnpm install --frozen-lockfile
 
       # Same Tauri v2 system packages as ci.yml (webkit2gtk 4.1 + ayatana appindicator)
       - name: Install Tauri system dependencies (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.server_only
         run: |
           APT="timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
           $APT update
@@ -662,10 +684,12 @@ jobs:
       # shipped build could not start a gateway on a machine that had never
       # compiled one. Build it for the target being bundled, explicitly: the
       # beforeBuildCommand hook cannot see --target.
-      - name: Build the gateway sidecar
+      - if: ${{ !matrix.server_only }}
+        name: Build the gateway sidecar
         run: node scripts/build-sidecar.mjs --target ${{ matrix.target }} --profile release
 
-      - uses: tauri-apps/tauri-action@v1
+      - if: ${{ !matrix.server_only }}
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The action runs the build through the package manager — with
@@ -941,7 +965,8 @@ jobs:
       # the triple is wrong — the 0.1.7 bundles went out with no gateway on any
       # platform and nothing noticed, because the dev machine always had one
       # running to adopt. Assert it is inside the artifact a user installs.
-      - name: Verify the gateway sidecar is in the bundle
+      - if: ${{ !matrix.server_only }}
+        name: Verify the gateway sidecar is in the bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -1038,7 +1063,8 @@ jobs:
       # Windows is not here: its app binary only exists inside the NSIS
       # installer, so it is asserted after a silent install instead — see the
       # smoke job.
-      - name: Verify the app reports the version being released
+      - if: ${{ !matrix.server_only }}
+        name: Verify the app reports the version being released
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.verify.outputs.version }}
@@ -1083,8 +1109,15 @@ jobs:
 
       # The server bundle: the CLI and the daemon, plus a unit file and install
       # notes. Packaged here rather than in its own job so it reuses this leg's
-      # target directory — the gateway binary is already built for exactly this
-      # triple by the sidecar step above.
+      # target directory, and it runs on every leg including the one with no
+      # GUI — this is the artifact that leg exists for.
+      #
+      # Both binaries are named on the cargo line rather than relying on the
+      # sidecar step above having built the daemon. That step exists to satisfy
+      # Tauri's `externalBin`, so it does not run on a leg with no Tauri build,
+      # and a dependency that holds only on the legs that bundle a GUI is the
+      # kind that breaks silently. On those legs this is a no-op: same target
+      # directory, same profile, already fresh.
       #
       # `cargo build -p kiwano` deliberately does not go through
       # `app/src-tauri/build.rs`, so it cannot fail on a missing sidecar and needs
@@ -1099,7 +1132,7 @@ jobs:
           exe=""
           case "$triple" in *windows*) exe=".exe" ;; esac
 
-          cargo build -p kiwano --release --target "$triple" --locked
+          cargo build -p kiwano -p kiwanod --release --target "$triple" --locked
 
           rm -rf dist-cli && mkdir -p dist-cli/pkg
           cp "target/$triple/release/kiwano$exe" dist-cli/pkg/
@@ -1139,17 +1172,46 @@ jobs:
           esac
 
           # The digest install.sh checks against when GitHub is unreachable.
-          # Per-platform on purpose: all four legs write to the same mirror
-          # prefix, and one shared SHA256SUMS would be four uploads racing to
+          # Per-platform on purpose: every leg writes to the same mirror
+          # prefix, and one shared SHA256SUMS would be five uploads racing to
           # overwrite each other with a file describing one platform.
           ( cd dist-cli && sha256sum "kiwano-$triple.tar.gz" > "kiwano-$triple.sha256" )
           cat "dist-cli/kiwano-$triple.sha256"
 
-      - name: Upload the server bundle
+      - if: ${{ !matrix.server_only }}
+        name: Upload the server bundle
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" dist-cli/kiwano-*.tar.gz --clobber
+
+      # The server-only leg cannot upload to the release itself, and the reason
+      # is ordering rather than permission: the draft release is created by
+      # tauri-action on the legs that bundle a GUI, and this leg finishes its
+      # build in a fraction of the time they take. Uploading here would mean
+      # either creating the draft from a step that does not know the release
+      # body (the changelog, the install notes, the degraded banner all come
+      # from `build`'s tauri-action step) or idling a runner in a wait loop for
+      # twenty minutes.
+      #
+      # So the tarball travels to `release-manifest`, which already runs once
+      # after every leg has landed and before the release is published — the
+      # same moment the checksums are taken, which is what makes the upload
+      # part of that set rather than an addition to a finished release.
+      - if: ${{ matrix.server_only }}
+        name: Hand the server bundle to the release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-bundle-${{ matrix.target }}
+          # The tarball only, which is what the other legs put on the release.
+          # The per-platform `.sha256` is a mirror file — it exists for
+          # `install.sh` on a network that cannot reach GitHub, and the release
+          # carries one `SHA256SUMS` over all of its assets instead.
+          path: dist-cli/kiwano-*.tar.gz
+          # Long enough to outlive the release, short enough not to accumulate:
+          # the point of the hop is minutes, not history.
+          retention-days: 7
+          if-no-files-found: error
 
       # Mirror the built installers to Cloudflare R2 under releases/ (served at
       # hub.kiwano.cc/releases). Only the newest build lives there: names are
@@ -1177,11 +1239,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
           AWS_ENDPOINT_URL_S3: https://ff2be2b098633861a9f4b24e7ddfdc9d.r2.cloudflarestorage.com
+          # The version the artifact names carry, from the one place that
+          # resolves it. This used to read app/package.json, which is the same
+          # string — but only because release.sh bumps three files together, and
+          # a second reader of it is a second thing to keep in step. It is also
+          # why this step no longer needs node: the server-only leg has none.
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
           # The build passes --target, so bundles land under target/<triple>/.
           bundle="target/${{ matrix.target }}/release/bundle"
-          version=$(node -p "require('./app/package.json').version")
+          version="$RELEASE_VERSION"
 
           case "${{ matrix.target }}" in
             aarch64-apple-darwin)     arch=aarch64 ;;
@@ -1195,8 +1263,15 @@ jobs:
           # patchwork is needed. `dist-cli` is the second root: the server
           # bundle is built outside `bundle/`, and it is the same kind of thing
           # (a download for a user) so it belongs on the mirror too.
+          #
+          # The roots are collected rather than listed because the server-only
+          # leg has no Tauri bundle directory at all — and `find` on a path that
+          # is not there exits non-zero, which under `set -e` would fail the leg
+          # for producing exactly what it was asked to produce.
           mkdir -p mirror
-          find "$bundle" dist-cli -type f \
+          roots=(dist-cli)
+          [ -d "$bundle" ] && roots=("$bundle" "${roots[@]}")
+          find "${roots[@]}" -type f \
             \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
                -o -name '*.exe' -o -name '*.msi' -o -name '*.sha256' \) \
@@ -1258,11 +1333,49 @@ jobs:
     permissions:
       # `gh release download` and `upload` against the draft release.
       contents: write
+      # Fetching the server bundle the server-only leg handed over. Naming any
+      # scope in this block sets every scope it does not name to none, so this
+      # has to be said out loud rather than left to the default.
+      actions: read
       # Keyless: the attestation is signed by this run's GitHub OIDC identity,
       # so there is no key to hold, rotate or leak.
       id-token: write
       attestations: write
     steps:
+      # Before anything is read back: the server bundle from the leg that has no
+      # GUI is uploaded here rather than by its own leg, because the draft
+      # release does not exist until a GUI leg's build finishes (see the
+      # hand-off step in `build` for the whole reason). It has to arrive before
+      # the checksums are taken, or `SHA256SUMS` and the attestation would
+      # describe a release missing one of its downloads.
+      #
+      # A pattern matching nothing is an error in v4, which is the behaviour
+      # wanted here: no artifact means the hand-off broke, not that this release
+      # has no such file.
+      - name: Collect the server bundle that could not upload itself
+        uses: actions/download-artifact@v4
+        with:
+          pattern: server-bundle-*
+          path: server-bundles
+          merge-multiple: true
+
+      - name: Upload it to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Matching into an array rather than passing the glob through: with
+          # nothing to match, a bare `server-bundles/kiwano-*` reaches `gh` as a
+          # literal path and is reported as a missing file, which reads like a
+          # lost tarball rather than a missing hand-off.
+          shopt -s nullglob
+          files=(server-bundles/kiwano-*)
+          [ "${#files[@]}" -gt 0 ] \
+            || { echo "::error::the server-bundle artifact arrived empty"; exit 1; }
+          ls -la "${files[@]}"
+          gh release upload "${{ github.ref_name }}" "${files[@]}" \
+            --clobber -R "${{ github.repository }}"
+
       - name: Download the release's assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1435,13 +1548,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+          # The leg with no GUI, and therefore no artifact to download: arm64
+          # Linux gets the CLI and the gateway, and `install.sh` is how they
+          # arrive. It is exercised as published, on the architecture that has
+          # no app — see the two steps it adds below.
+          - os: ubuntu-22.04-arm
+            server_only: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download the platform artifact
+      - if: ${{ !matrix.server_only }}
+        name: Download the platform artifact
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1524,7 +1646,7 @@ jobs:
 
       # ── Linux: AppImage is self-contained (a .deb would drag webkit deps) ─
       - name: Stage the AppImage (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.server_only
         run: |
           set -euo pipefail
           img=$(ls artifacts/*.AppImage)
@@ -1534,6 +1656,49 @@ jobs:
           # mounting anything, and its `AppRun` then runs the real payload.
           "$img" --appimage-extract
           echo "APP=$(pwd)/squashfs-root/AppRun" >> "$GITHUB_ENV"
+
+      # ── Linux arm64: the server bundle, installed the way a user installs it ─
+      #
+      # There is no arm64 app to stage, so this leg runs the installer a server
+      # user runs — the same command the README gives — and thereby exercises
+      # the parts a `gh release download` would stand in for: the published
+      # tarball, the checksum checked against GitHub, the archive layout, the
+      # glibc floor, and the two binaries that land in the prefix.
+      #
+      # `--version` pins it to the release being smoked rather than to whatever
+      # the mirror's version-free names resolve to by the time this starts.
+      - if: ${{ matrix.server_only }}
+        name: Install from the published installer (arm64 Linux)
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          sh packaging/install.sh --no-service \
+            --prefix "$RUNNER_TEMP/prefix" --version "${{ github.ref_name }}"
+
+          # Read out of the binary that was just installed, which is the same
+          # assertion the CLI and the desktop app get — on this architecture the
+          # server bundle is the only artifact there is to ask.
+          #
+          # Captured rather than piped into `grep -q`: the short-circuit closes
+          # the pipe and `pipefail` reports the writer's SIGPIPE as a failure,
+          # which is the false negative spelled out at the deb check in `build`.
+          installed=$("$RUNNER_TEMP/prefix/kiwano" --version)
+          echo "$installed"
+          case "$installed" in
+            *"$RELEASE_VERSION"*) ;;
+            *) echo "::error::the installed CLI says '$installed', this tag is version $RELEASE_VERSION"; exit 1 ;;
+          esac
+
+      - if: ${{ matrix.server_only }}
+        name: Start the installed daemon (arm64 Linux)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/prefix/kiwanod" > daemon.log 2>&1 &
+          echo $! > daemon.pid
+          sleep 3
 
       # The system GL libraries webkit needs at load time; the AppImage does
       # not bundle them (they are host concern), and the runner has none of
@@ -1545,7 +1710,7 @@ jobs:
       # is best-effort evidence: chasing webkit/GTK/dbus details on a headless
       # runner tests the runner's desktop stack, not this package.
       - name: Run the daemon directly (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.server_only
         shell: bash
         run: |
           set -euo pipefail
@@ -1559,7 +1724,7 @@ jobs:
       # the x-extensions webkit dlopen's — runs inside a step that is allowed
       # to fail, because a missing picture is not a broken package.
       - name: GUI, best-effort (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.server_only
         continue-on-error: true
         shell: bash
         run: |

@@ -70,7 +70,7 @@ Those links are served from Cloudflare R2 and always point at the newest build �
 
 **Linux** — `chmod +x` the AppImage, or install the `.deb` / `.rpm` with your package manager. The Linux builds need **glibc 2.35+** (Ubuntu 22.04+, Debian 12+, Fedora 36+, RHEL/Rocky 10+); the desktop app additionally runs on webkit2gtk 4.1, which is what sets that floor — the installer checks glibc before it downloads anything, and names the way out per distribution. Older systems: the **CLI and gateway build from source** (`cargo build --release -p kiwano -p kiwanod`) — that covers Ubuntu 20.04, Debian 11, RHEL 9 and Amazon Linux 2023 (glibc 2.31–2.34). The **desktop app** does not work on any of them: it needs webkit2gtk 4.1, which those releases either lack entirely (20.04, Debian 11) or ship only as 4.0 (RHEL 9 family, Amazon Linux).
 
-**Linux arm64** has no published build yet — the same source build works there, and [#1](https://github.com/lightconsen/kiwano/issues/1) is where the platform is tracked. A +1 that says what you are running it on is what makes it land, and `install.sh` refuses there with that same address.
+**Linux arm64** is supported on the server side: the **CLI and the gateway** are published as `kiwano-aarch64-unknown-linux-gnu.tar.gz`, and `install.sh` installs them there like any other platform. There is no arm64 **desktop app** — that is a build nobody has asked for — and [#1](https://github.com/lightconsen/kiwano/issues/1) is where that, and anything else arm64 a user needs, is tracked.
 
 ### Verify your download
 

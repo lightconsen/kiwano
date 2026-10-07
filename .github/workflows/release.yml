@@ -51,6 +51,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # `version` is what every "does the artifact agree with the tag" check
+    # compares against, resolved once here rather than derived again in each
+    # place that needs it.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -174,6 +179,27 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace --locked
+
+      # What this tag means as a *version*, resolved once for the four places
+      # that compare a built artifact against it: the CLI's `--version`, the
+      # macOS bundle's CFBundleShortVersionString, the Linux package's Version,
+      # and the installed Windows app's ProductVersion.
+      #
+      # The tag's prerelease suffix is dropped rather than compared. A
+      # rehearsal tag names the release it rehearses and carries a suffix
+      # (`v0.1.9-rc.1` against a tree whose version is `0.1.9`), so comparing
+      # the raw tag fails every rehearsal — and fails it *before* the bundle
+      # checks, which are exactly what a rehearsal exists to run.
+      - name: Resolve the release version
+        id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          version="${version%%-*}"
+          [ -n "$version" ] \
+            || { echo "::error::$GITHUB_REF_NAME carries no version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "this tag is release version $version"
 
       # A tag is now expected to yield a signed, notarized build. Shipping
       # unsigned was the old normal; it is a regression now, and nothing
@@ -816,6 +842,64 @@ jobs:
           esac
           echo "gateway sidecar present in the ${{ matrix.target }} bundle"
 
+      # What the *installed* app says it is, read out of the artifact a user
+      # downloads rather than out of the tree that built it. The CLI gets the
+      # same assertion a few steps below, and for the same reason: a version
+      # recorded in two places drifts quietly, and nothing else in this pipeline
+      # would notice a bundle that reports the wrong one — the release notes,
+      # the updater manifest and the .dmg all come from the same tag, so only
+      # the binary itself can disagree with them.
+      #
+      # The version it is compared against is resolved once, in `verify`
+      # (`needs.verify.outputs.version`), including how a rehearsal tag's
+      # suffix is handled.
+      #
+      # Windows is not here: its app binary only exists inside the NSIS
+      # installer, so it is asserted after a silent install instead — see the
+      # smoke job.
+      - name: Verify the app reports the version being released
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          bundle="target/${{ matrix.target }}/release/bundle"
+          fail() { echo "::error::$*"; exit 1; }
+
+          case "${{ matrix.target }}" in
+            *-apple-darwin)
+              app=$(find "$bundle" -maxdepth 3 -name '*.app' -type d | head -n 1)
+              [ -n "$app" ] || fail "no .app under $bundle"
+              plist="$app/Contents/Info.plist"
+              [ -f "$plist" ] || fail "$app has no Info.plist"
+              # Both keys come from the one version in tauri.conf.json:
+              # CFBundleShortVersionString is the version macOS shows and the
+              # one an update is compared against, CFBundleVersion is the build
+              # number. Checking both is what notices a config that sets one and
+              # derives the other from somewhere else.
+              for key in CFBundleShortVersionString CFBundleVersion; do
+                found=$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist" 2>/dev/null || true)
+                [ "$found" = "$RELEASE_VERSION" ] \
+                  || fail "$app: $key says '$found', this tag is version $RELEASE_VERSION"
+              done
+              echo "the macOS bundle reports $RELEASE_VERSION"
+              ;;
+
+            *-unknown-linux-gnu)
+              # The package, not the staging directory: this is the file a
+              # server installs from, and dpkg's control file is what
+              # `apt`/`dpkg -i` would read. The AppImage carries the same
+              # binary and no version field of its own, so it is covered by
+              # this rather than checked separately.
+              deb=$(find "$bundle/deb" -maxdepth 2 -name '*.deb' | head -n 1)
+              [ -n "$deb" ] || fail "no .deb under $bundle/deb"
+              found=$(dpkg-deb -f "$deb" Version) || fail "cannot read the version out of $deb"
+              [ "$found" = "$RELEASE_VERSION" ] \
+                || fail "$deb: Version says '$found', this tag is version $RELEASE_VERSION"
+              echo "the Linux package reports $RELEASE_VERSION"
+              ;;
+          esac
+
       # The server bundle: the CLI and the daemon, plus a unit file and install
       # notes. Packaged here rather than in its own job so it reuses this leg's
       # target directory — the gateway binary is already built for exactly this
@@ -826,6 +910,8 @@ jobs:
       # none of the Tauri system libraries the app build requires.
       - name: Package the CLI server bundle
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
           triple='${{ matrix.target }}'
@@ -846,17 +932,17 @@ jobs:
           # shipping, and a version that disagrees with the tag means something
           # in the version plumbing is wrong.
           #
-          # Compared against the tag's *release* version, not the tag. A
-          # rehearsal tag names the release it rehearses and carries a suffix
-          # (`v0.1.9-rc.1` against a tree whose version is `0.1.9`), so comparing
-          # the raw tag fails every rehearsal — and fails it *here*, before the
-          # bundle checks below, which are exactly what a rehearsal exists to run.
+          # Compared against the tag's *release* version, resolved once in the
+          # `verify` job: a rehearsal tag names the release it rehearses and
+          # carries a suffix (`v0.1.9-rc.1` against a tree whose version is
+          # `0.1.9`), so a comparison against the raw tag would fail every
+          # rehearsal. Three other artifacts are asserted against that same
+          # value — see `Verify the app reports the version being released`
+          # above, and ProductVersion in the smoke job's Windows leg.
           ./dist-cli/pkg/kiwano$exe --version
           built=$(./dist-cli/pkg/kiwano$exe --version | awk '{print $NF}')
-          expected="${GITHUB_REF_NAME#v}"
-          expected="${expected%%-*}"
-          [ "$built" = "$expected" ] \
-            || { echo "::error::kiwano --version says $built, the tag is $GITHUB_REF_NAME"; exit 1; }
+          [ "$built" = "$RELEASE_VERSION" ] \
+            || { echo "::error::kiwano --version says $built, the tag is $GITHUB_REF_NAME (version $RELEASE_VERSION)"; exit 1; }
 
           # And the daemon has to be in there: the bundle is useless without it,
           # which is the same failure the sidecar check above exists for.
@@ -1141,7 +1227,7 @@ jobs:
   # Rehearsal tags publish nothing and are skipped like every mirror gate.
   smoke:
     name: Release smoke
-    needs: [publish, mirror-manifest]
+    needs: [verify, publish, mirror-manifest]
     if: ${{ !contains(github.ref_name, '-') }}
     permissions:
       # `gh release download` reads; upload-artifact needs actions: write.
@@ -1210,6 +1296,27 @@ jobs:
             Write-Error "installed kiwano-app.exe not found under: $($roots -join ', ')"
           }
           echo "APP_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      # The Windows half of `Verify the app reports the version being released`,
+      # which the build job runs on the other two platforms. It is here rather
+      # than there because the Windows app binary only exists inside the
+      # installer: Tauri's NSIS bundle has no staged copy to read a version out
+      # of, so the assertion waits for something to have installed it.
+      #
+      # Read from the installed *executable's* own resource — Tauri writes
+      # `ProductVersion` from the config version at build time (see
+      # `tauri-build`'s windows resource step), so this is the binary answering
+      # for itself and not a file name or an installer script doing it.
+      - name: Ask the app which version it is (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $expected = "${{ needs.verify.outputs.version }}"
+          $found = (Get-Item -LiteralPath $env:APP_EXE).VersionInfo.ProductVersion
+          Write-Host "the installed app reports $found"
+          if ($found -ne $expected) {
+            Write-Error "$($env:APP_EXE) reports version '$found', this tag is version $expected"
+          }
 
       - name: Launch the app (Windows)
         if: runner.os == 'Windows'

@@ -91,7 +91,9 @@ these are not style preferences, they are rules a change has to satisfy.
 - **Derive a value that appears twice; never type it twice.** A version string
   or licence name recorded in two files goes stale quietly, because a wrong
   string is still a valid string. Either one place reads the other, or a check
-  compares them. See `scripts/sync-site.mjs --check` for the shape.
+  compares them. See `scripts/sync-site.mjs --check` for the shape, and the
+  release workflow's `Verify the app reports the version being released` for
+  the same rule where the second copy is compiled into the binary.
 
 
 ## Reporting bugs

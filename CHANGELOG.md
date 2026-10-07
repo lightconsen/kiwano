@@ -17,6 +17,52 @@ GitHub release body, so this is what someone reads before downloading.
 
 Releases up to and including 0.1.5 predate this file; their tags carry them.
 
+## [0.2.12] - 2026-10-07
+
+### Added
+
+- **The update notes arrive in your language.** A release body is written once,
+  in English, and read in three places that all use the same string: the GitHub
+  release page, the updater manifest, and the About row in Settings. Kiwano
+  ships in four languages, so that row was the one place a reader met English
+  because of how the text travels rather than because of what it said. The fix
+  is in how the body is *written*: the English stays first and a translation
+  goes below a marker naming its locale. A release with no translations reads
+  exactly as every release before this one did, and a body that carries some
+  translations but not the reader's gives them the English — not all four
+  languages at once. The convention is in `CONTRIBUTING.md`, and this release
+  is the first that could carry translations.
+
+- **The CLI and the gateway build for Linux arm64.** `install.sh` used to stop on
+  an ARM machine — *"there is no Linux arm64 build yet"* — which ruled out ARM
+  servers (Graviton, Hetzner CAX, Oracle's free tier), a `linux/arm64` container
+  on an Apple Silicon Mac, and every Raspberry Pi. The daemon is the whole point
+  of installing on a machine like that, and it now installs the way it does
+  anywhere else: one command, checksum-checked, no root. There is no arm64
+  **desktop app** — that needs webkit2gtk and a desktop session, and nobody has
+  asked to run a provider manager on an ARM desktop — so on that architecture
+  `install.sh` is the entire experience. Issue #1 tracks the app, and anything
+  else arm64 a user turns out to need.
+
+### Changed
+
+- **The docs switch language in place.** A reader on a translated page had one
+  way to another language: back to the hub, then find the page again. The switch
+  is now in the top bar — beside `Kiwano / kiwano.cc / GitHub / X`, where the
+  site's own controls live rather than where the page list does — and every link
+  is the same slug under another language's root, so switching keeps you on the
+  page you were reading. Only the languages that page actually exists in are
+  offered.
+
+- **A release is built even when the environment cannot sign it, and says so.**
+  A tag pushed where the signing credentials are incomplete used to fail before
+  anything was built, which for a fork or a first tag means no release at all.
+  It now produces a degraded build instead — an ad-hoc-signed macOS bundle, no
+  updater artifacts, the download mirror left alone so installed copies are not
+  offered it — with a warning banner on the release page naming what is missing.
+  A secret that is present but malformed still fails the build, and shipping
+  unsigned on purpose is now an explicit switch rather than a deleted step.
+
 ## [0.2.11] - 2026-10-05
 
 ### Added

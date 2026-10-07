@@ -12,7 +12,9 @@
 # The GitHub release body is the tag's own CHANGELOG.md section (`changelog`
 # job), so the notes a reader sees are the ones written before the tag. The
 # per-platform install notes are appended, because those describe the artifacts
-# rather than the release.
+# rather than the release; a translation of that section, when there is one,
+# comes from `docs/release-notes/<version>.<locale>.md` under a
+# `<!-- notes:<locale> -->` marker that the app splits on.
 #
 # A tag with a prerelease suffix (`v0.2.0-rc.1`) is a rehearsal: it runs every
 # check and build, then stops. It publishes nothing, mirrors nothing, and
@@ -242,6 +244,22 @@ jobs:
                 echo "::error::CHANGELOG.md has no '$version' section with content — write it, commit it, then re-tag"
                 exit 1
               }
+
+              # Translations, when there are any. `docs/release-notes/<version>.<locale>.md`
+              # is appended below its own marker, and the app shows a reader the
+              # section for their language (app/src/lib/releaseNotes.ts). A
+              # release with no such files carries English alone, which is what
+              # every release before this one looks like — so a translation that
+              # never arrives costs a gap in the prose, not a broken release.
+              shopt -s nullglob
+              for file in "docs/release-notes/$version".*.md; do
+                locale=$(basename "$file" .md)
+                locale=${locale#"$version".}
+                printf '\n\n<!-- notes:%s -->\n\n' "$locale" >> notes.md
+                cat "$file" >> notes.md
+                echo "appended release notes for $locale"
+              done
+              shopt -u nullglob
               ;;
           esac
           {

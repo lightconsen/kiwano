@@ -66,6 +66,15 @@ Two gotchas that cost time if you haven't hit them before:
 - Anything user-visible needs a `CHANGELOG.md` entry: add it under
   `[Unreleased]`. The release workflow copies that section into the GitHub
   release body, so it is what people read before they download.
+- Releasing writes the notes once and translates them afterwards. The
+  `CHANGELOG.md` section is English and stays English; a translation of that
+  same section goes in `docs/release-notes/<version>.<locale>.md`, with the
+  locale spelled as the app spells it (`en`, `zh-Hans`, `zh-Hant`, `ja`). The
+  release workflow appends each file under a `<!-- notes:<locale> -->` marker
+  and the app shows a reader the section for their language
+  (`app/src/lib/releaseNotes.ts`). A version with no such files carries English
+  alone, which is what every release before this convention looks like — so a
+  translation that arrives late is a gap in the prose, not a broken release.
 - New UI strings go through the i18n dictionaries in `app/src/i18n/` — every
   language needs the key, and there is a test that enforces it.
 - Comment the *why*, not the *what*. The codebase already leans that way;

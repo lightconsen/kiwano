@@ -12,6 +12,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { api } from "../api/client";
 import { fmtMB } from "../lib/format";
+import { releaseNotesFor } from "../lib/releaseNotes";
 import { useReload } from "../lib/reload";
 import { applyTheme } from "../lib/theme";
 import { onUpdateAvailable } from "../lib/updateEvents";
@@ -21,6 +22,7 @@ import {
   languageLabel,
   resolveLocale,
   setLocale,
+  useLocale,
   useT,
   type LanguagePref,
 } from "../i18n";
@@ -180,6 +182,8 @@ function TimeoutSelect({
 
 export default function Settings() {
   const t = useT();
+  // For the release notes' language split: the notes arrive as one string.
+  const locale = useLocale();
   const [s, setS] = useState<AppSettings | null>(null);
   const [currencies, setCurrencies] = useState<string[]>([]);
   const [version, setVersion] = useState("");
@@ -647,7 +651,9 @@ export default function Settings() {
             </span>
           </Row>
           {update?.notes ? (
-            <div className="whitespace-pre-wrap text-[11px] text-mut">{update.notes}</div>
+            <div className="whitespace-pre-wrap text-[11px] text-mut">
+              {releaseNotesFor(update.notes, locale)}
+            </div>
           ) : null}
           {install.err ?? checkErr ? (
             <div className="text-[11px] text-red-400">{install.err ?? checkErr}</div>

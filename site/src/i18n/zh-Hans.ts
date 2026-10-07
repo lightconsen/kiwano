@@ -17,7 +17,7 @@ export const zhHans: Record<string, string> = {
   "hero.h1": "一个入口,管好你的<br>所有 <em>AI 供应商</em>",
   "hero.sub": "Kiwano 是本地优先的网关,服务你的 Agents:把 <strong>Claude Code、Codex、Grok Build</strong> 一键接入,任意供应商路由,所有请求留在本机——API Key 绝不离开。",
   "hero.dlmac": "下载 macOS",
-  "hero.note": "<span class=\"dl-ver\">🎉 v0.2.11 正式发布</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源",
+  "hero.note": "<span class=\"dl-ver\">🎉 v0.2.12 正式发布</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — 免费开源",
   "feats.h2": "网关底座 × 供应商目录",
   "feats.p": "既不是纯切换工具,也不是云端网关:本地负责路由与计量,Hub 目录帮你选型。",
   "f1.t": "供应商管理",

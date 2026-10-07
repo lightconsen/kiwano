@@ -75,6 +75,13 @@ Two gotchas that cost time if you haven't hit them before:
   (`app/src/lib/releaseNotes.ts`). A version with no such files carries English
   alone, which is what every release before this convention looks like — so a
   translation that arrives late is a gap in the prose, not a broken release.
+- **Write a translation from the frozen section, not from an earlier draft of
+  it.** The file *replaces* the English for that reader rather than adding to it,
+  so a translation written while the section was still growing hides whatever
+  was added after it — and that is worse than having none, because a reader who
+  got English at least read the release. If the `[Unreleased]` items change
+  after someone has translated them, the translation has to move with them; the
+  release body is where the two are visible side by side.
 - New UI strings go through the i18n dictionaries in `app/src/i18n/` — every
   language needs the key, and there is a test that enforces it.
 - Comment the *why*, not the *what*. The codebase already leans that way;

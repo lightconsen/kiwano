@@ -85,6 +85,19 @@ impl Store {
     }
 
     /// Insert an extra key; returns its row id.
+    /// Add a key to a provider's pool. **Idempotent on the key itself**: a key
+    /// the provider already has is returned rather than inserted again.
+    ///
+    /// The identity of "this rotation key" is its value, so a request delivered
+    /// twice is one key — which is what makes the API's `add_api_key` safe to
+    /// retry (`migrate.local.md` §6.1: of batch 1's writes, this one and
+    /// `add_custom_agent` and `add_provider` are the three that mint something).
+    /// The check lives here rather than in one caller because both callers —
+    /// the daemon's endpoint and the `vm::` path the app used to take — must
+    /// agree about it.
+    ///
+    /// The label of an already-present key is left alone: the row exists, and a
+    /// retry is not an edit.
     pub fn insert_api_key(
         &self,
         provider_id: &str,
@@ -92,6 +105,16 @@ impl Store {
         label: Option<&str>,
     ) -> Result<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM api_keys WHERE provider_id = ?1 AND api_key = ?2",
+                params![provider_id, api_key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
         conn.execute(
             "INSERT INTO api_keys (provider_id, api_key, label, enabled, created_at)
              VALUES (?1, ?2, ?3, 1, ?4)",

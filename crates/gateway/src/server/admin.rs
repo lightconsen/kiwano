@@ -76,7 +76,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
@@ -91,21 +91,49 @@ pub const ADMIN_TOKEN_HEADER: &str = "x-kiwano-admin-token";
 pub const ADMIN_TOKEN_KEY: &str = "gateway.admin_token";
 
 pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
+    // The resource API is one nested router with **one** auth layer, rather
+    // than a check at the top of each handler. The difference is not style:
+    // axum runs a handler's extractors before its body, so a per-handler check
+    // is skipped for every request whose body does not parse — an
+    // unauthenticated caller would get 415 from an endpoint whose contract says
+    // 401, and the guard would be one refactor away from not running at all.
+    // A layer cannot be overtaken that way: it runs before any extractor does.
+    let api = Router::new()
+        .route(
+            "/providers/{provider_id}/keys",
+            get(list_provider_keys).post(add_provider_key),
+        )
+        .route("/keys/{id}", delete(delete_provider_key))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_admin_token,
+        ));
+
     Router::new()
         .route("/status", get(status))
         .route("/events", get(events))
         .route("/reload", post(reload))
         .route("/shutdown", post(shutdown))
-        // ── resources (`migrate.local.md` §7 batch 1) ──
-        //
-        // The state the app and the CLI manage, behind the token they already
-        // hold: same listener, same auth, same reason it is a socket rather
-        // than a port. Paths name a resource and its owner; the payload is the
-        // *same JSON the frontend receives today* (`kiwano-api`), because the
-        // point of the migration is to move where a value comes from, not to
-        // change what it looks like.
-        .route("/api/providers/{provider_id}/keys", get(list_provider_keys))
+        .nest("/api", api)
         .with_state(state)
+}
+
+/// The gate every resource route sits behind: the same token `/reload` wants,
+/// applied once for the whole subtree.
+async fn require_admin_token(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if !authorized(&state, &headers) {
+        tracing::warn!(
+            path = %request.uri().path(),
+            "resource request refused: admin token missing or invalid"
+        );
+        return unauthorized();
+    }
+    next.run(request).await
 }
 
 /// `GET /api/providers/{provider_id}/keys` — the provider's key pool, masked.
@@ -116,11 +144,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
 async fn list_provider_keys(
     State(state): State<Arc<GatewayState>>,
     Path(provider_id): Path<String>,
-    headers: HeaderMap,
 ) -> Response {
-    if !authorized(&state, &headers) {
-        return unauthorized();
-    }
     match state.store.list_api_keys(&provider_id) {
         Ok(rows) => {
             let keys: Vec<kiwano_api::keys::ApiKeyVm> = rows
@@ -418,6 +442,83 @@ async fn reload(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
     }
 }
 
+/// `POST /api/providers/{provider_id}/keys` — add a rotation key.
+///
+/// Idempotent on the key's value (the store decides that, so the `vm::` path
+/// agrees). A retry therefore answers with the row that is already there
+/// rather than a second one, which is what lets a client retry a write at all
+/// (`migrate.local.md` §6.1).
+#[derive(serde::Deserialize)]
+struct AddKeyBody {
+    api_key: String,
+    #[serde(default)]
+    label: Option<String>,
+}
+
+async fn add_provider_key(
+    State(state): State<Arc<GatewayState>>,
+    Path(provider_id): Path<String>,
+    Json(body): Json<AddKeyBody>,
+) -> Response {
+    let key = body.api_key.trim();
+    if key.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "API key must not be empty" })),
+        )
+            .into_response();
+    }
+    if state
+        .store
+        .get_provider(&provider_id)
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "ok": false, "error": format!("provider `{provider_id}` not found") })),
+        )
+            .into_response();
+    }
+    let label = body
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match state.store.insert_api_key(&provider_id, key, label) {
+        Ok(id) => Json(kiwano_api::keys::ApiKeyVm {
+            id,
+            masked: kiwano_api::keys::mask_key(key),
+            label: label.map(String::from),
+            enabled: true,
+            created_at: crate::store::now_rfc3339(),
+        })
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `DELETE /api/keys/{id}` — remove a rotation key. `false` when there was no
+/// such row, which is the state a retry finds and is not an error.
+async fn delete_provider_key(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<i64>,
+) -> Response {
+    match state.store.delete_api_key(id) {
+        Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,6 +766,97 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The write endpoints are behind the token too — the resource routes are
+    /// not a second, weaker door into the same state.
+    #[tokio::test]
+    async fn the_key_writes_need_the_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+
+        for (method, uri) in [
+            ("POST", "/api/providers/p-ant/keys"),
+            ("DELETE", "/api/keys/1"),
+        ] {
+            let response = admin_plane_router(state.clone())
+                .oneshot(admin_request(method, uri, None))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {uri}"
+            );
+        }
+    }
+
+    /// Adding the same key twice is one row, and the second answer is the same
+    /// row — the daemon's half of `migrate.local.md` §6.1. Asserted through the
+    /// endpoint rather than the store, because it is the *endpoint* a client
+    /// retries.
+    #[tokio::test]
+    async fn adding_the_same_key_twice_is_one_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let body = serde_json::json!({ "api_key": "sk-ant-rotated-1", "label": "backup" });
+            // Built here rather than by `admin_request`, which sends no body:
+            // a JSON endpoint is asked with a JSON content type, and the client
+            // (`sidecar::admin_post_json`) sends exactly this.
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/providers/p-ant/keys")
+                .header(ADMIN_TOKEN_HEADER, &token)
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            let response = admin_plane_router(state.clone())
+                .oneshot(request)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            ids.push(body_json(response).await["id"].as_i64().unwrap());
+        }
+        assert_eq!(
+            ids[0], ids[1],
+            "a replay answers with the row already there"
+        );
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "GET",
+                "/api/providers/p-ant/keys",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(body_json(response).await.as_array().unwrap().len(), 1);
+    }
+
+    /// A key that is not there to delete is `deleted: false`, not an error —
+    /// the state a retry finds.
+    #[tokio::test]
+    async fn deleting_a_missing_key_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let response = admin_plane_router(state)
+            .oneshot(admin_request("DELETE", "/api/keys/9999", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["deleted"], false);
     }
 
     // ── admin plane auth ────────────────────────────────────────────────

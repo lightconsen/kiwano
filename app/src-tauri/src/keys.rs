@@ -27,14 +27,22 @@ pub fn add_api_key(
     api_key: String,
     label: Option<String>,
 ) -> Result<vm::ApiKeyVm, String> {
-    let vm = vm::add_api_key(&state.store, &provider_id, &api_key, label.as_deref())?;
+    // Served by the daemon, which also owns the idempotency (§6.1): a retry
+    // answers with the key that is already there.
+    let vm = kiwano_core::daemon_api::DaemonApi::connect().add_api_key(
+        &provider_id,
+        &api_key,
+        label.as_deref(),
+    )?;
+    // Still a mutation as far as the app is concerned: the daemon's cached
+    // route table names the keys a provider may use, so it re-reads.
     after_mutation(&state);
     Ok(vm)
 }
 
 #[tauri::command]
 pub fn delete_api_key(state: State<AppState>, id: i64) -> Result<bool, String> {
-    let ok = vm::delete_api_key(&state.store, id)?;
+    let ok = kiwano_core::daemon_api::DaemonApi::connect().delete_api_key(id)?;
     after_mutation(&state);
     Ok(ok)
 }

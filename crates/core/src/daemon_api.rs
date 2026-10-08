@@ -47,6 +47,42 @@ impl DaemonApi {
             &format!("/api/providers/{provider_id}/keys"),
         )
     }
+
+    /// Add a rotation key — `vm::add_api_key`. Safe to retry: the far end keys
+    /// on the value, so a second delivery answers with the row already there
+    /// rather than a second one (`migrate.local.md` §6.1).
+    pub fn add_api_key(
+        &self,
+        provider_id: &str,
+        api_key: &str,
+        label: Option<&str>,
+    ) -> Result<ApiKeyVm, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            api_key: &'a str,
+            label: Option<&'a str>,
+        }
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{provider_id}/keys"),
+            &Body { api_key, label },
+        )
+    }
+
+    /// Remove a rotation key — `vm::delete_api_key`. `false` when there was no
+    /// such row, which is what a retry finds and is not an error.
+    pub fn delete_api_key(&self, id: i64) -> Result<bool, String> {
+        let deleted: serde_json::Value = sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/keys/{id}"),
+        )?;
+        Ok(deleted
+            .get("deleted")
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
 }
 
 #[cfg(test)]
@@ -71,10 +107,23 @@ mod tests {
         let endpoint = AdminEndpoint::beside_db(&dir.path().join("k.db"));
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0u8; 4096];
-            let n = stream.read(&mut request).unwrap();
+            // Read until the client stops writing, not once: headers and body
+            // can arrive as separate segments, and a single `read` is how the
+            // body would go missing from an assertion about the body.
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_millis(250)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                match stream.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => request.extend_from_slice(&chunk[..n]),
+                    Err(_) => break,
+                }
+            }
             stream.write_all(response.as_bytes()).unwrap();
-            String::from_utf8_lossy(&request[..n]).into_owned()
+            String::from_utf8_lossy(&request).into_owned()
         });
         (dir, endpoint, handle)
     }
@@ -108,6 +157,61 @@ mod tests {
             request.contains("x-kiwano-admin-token: tok-123"),
             "{request}"
         );
+    }
+
+    /// The write half: the body is JSON, the content type says so, and a
+    /// deletion uses the verb that names the row rather than a body.
+    #[test]
+    fn writes_send_json_and_the_right_verb() {
+        let body = r#"{"id":7,"masked":"…abcd","label":null,"enabled":true,"created_at":"2026-01-01T00:00:00Z"}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir, endpoint, handle) = stub(response);
+        let api = DaemonApi::with_token(endpoint, Some("tok-1".into()));
+
+        let added = api
+            .add_api_key("p-ant", "sk-rotated", Some("backup"))
+            .unwrap();
+        assert_eq!(added.id, 7);
+        let request = handle.join().unwrap();
+        assert!(
+            request.starts_with("POST /api/providers/p-ant/keys HTTP/1.1"),
+            "{request}"
+        );
+        assert!(
+            request.contains("Content-Type: application/json"),
+            "{request}"
+        );
+        assert!(
+            request.contains(r#"{"api_key":"sk-rotated","label":"backup"}"#),
+            "{request}"
+        );
+
+        let deleted_body = r#"{"deleted":true}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{deleted_body}",
+                deleted_body.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir2, endpoint2, handle2) = stub(response);
+        let ok = DaemonApi::with_token(endpoint2, Some("tok-1".into()))
+            .delete_api_key(7)
+            .unwrap();
+        assert!(ok);
+        let request2 = handle2.join().unwrap();
+        assert!(
+            request2.starts_with("DELETE /api/keys/7 HTTP/1.1"),
+            "{request2}"
+        );
+        // No body on a deletion: the path is the whole request.
+        assert!(!request2.contains("Content-Type"), "{request2}");
     }
 
     /// A refusal arrives as the daemon's own sentence, not as a status code

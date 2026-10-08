@@ -130,18 +130,14 @@ fn the_add_api_key_failure_vocabulary_is_frozen() {
     assert_eq!(unknown, want["unknown_provider"].as_str().unwrap());
 }
 
-/// The first thing the migration has to flip (§6.1): today a replay mints a
-/// second row.
+/// §6.1: a replay mints one row, not two.
 ///
-/// Left `#[ignore]`d rather than asserted, because asserting today's behaviour
-/// would lock the bug in, and asserting the fixed behaviour would leave a red
-/// test on `main`. Run it with `cargo test -- --ignored` to see the gap:
-///
-/// ```text
-/// cargo test -p kiwano-core --test api_contract -- --ignored
-/// ```
+/// This was written `#[ignore]`d, because the behaviour it asserts did not
+/// exist yet and a red test on `main` is not a plan: run with `-- --ignored` it
+/// failed against the old store (`left: 2, right: 1`). The keys module landed
+/// the fix — the identity of a rotation key is its value — so it runs now, and
+/// it is the acceptance gate for that change rather than a description of it.
 #[test]
-#[ignore = "§6.1: a replayed add_api_key must not mint a second row — implemented with the API, not before"]
 fn a_replayed_add_api_key_does_not_mint_a_second_row() {
     let (_tmp, store, _aux, provider) = store_with_provider();
     vm::add_api_key(&store, &provider, "sk-rotated-1", Some("backup")).unwrap();

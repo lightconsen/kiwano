@@ -354,23 +354,35 @@ fn endpoint_body(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
     raw.split_once("\r\n\r\n").map(|(_, body)| body.to_string())
 }
 
-/// One authorized GET from the daemon's resource API, parsed.
+/// One authorized request from the daemon's resource API, parsed.
 ///
 /// The client half of `migrate.local.md` §7's batch 1: the app and the CLI ask
-/// the daemon instead of reading the store, so that one process owns the state.
-/// Everything the 30 commands need is here — the transport, the token, the
-/// error convention — and a resource function is a path and a type.
+/// the daemon instead of reading the store, so one process owns the state.
+/// Everything the commands need is here — the transport, the token, the error
+/// convention — and a resource function is a verb, a path and a type.
 ///
 /// Errors carry the daemon's own message when it sent one (`{"ok":false,
-/// "error":…}`), because a refusal the user can act on should not be replaced
-/// by a status code retyped here.
-pub fn admin_get_json<T: serde::de::DeserializeOwned>(
+/// "error":…}`), because a refusal a user can act on should not be replaced by
+/// a status code retyped here.
+fn admin_send<T: serde::de::DeserializeOwned>(
     endpoint: &AdminEndpoint,
     token: Option<&str>,
+    method: &str,
     path: &str,
+    body: Option<String>,
 ) -> Result<T, String> {
+    let (body_headers, payload) = match &body {
+        Some(payload) => (
+            format!(
+                "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                payload.len()
+            ),
+            payload.as_str(),
+        ),
+        None => (String::new(), ""),
+    };
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Connection: close\r\n\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}{body_headers}Connection: close\r\n\r\n{payload}",
         token_header(token)
     );
     let mut stream = endpoint
@@ -387,7 +399,6 @@ pub fn admin_get_json<T: serde::de::DeserializeOwned>(
         .split_once("\r\n\r\n")
         .ok_or_else(|| "gateway answered with no HTTP body".to_string())?;
     if !head.starts_with("HTTP/1.1 200") {
-        // The daemon's error envelope, when it sent one.
         let message = serde_json::from_str::<serde_json::Value>(body)
             .ok()
             .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
@@ -395,6 +406,40 @@ pub fn admin_get_json<T: serde::de::DeserializeOwned>(
         return Err(message);
     }
     serde_json::from_str(body).map_err(|e| format!("gateway answered something unreadable: {e}"))
+}
+
+/// [`admin_send`] for a read.
+pub fn admin_get_json<T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+) -> Result<T, String> {
+    admin_send(endpoint, token, "GET", path, None)
+}
+
+/// [`admin_send`] for a write.
+///
+/// Separate from the read rather than a mode on it, because the two differ in
+/// what a caller has to think about: a GET can be retried by anyone, a POST has
+/// to be idempotent at the far end or the retry is a second row
+/// (`migrate.local.md` §6.1).
+pub fn admin_post_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
+    let payload = serde_json::to_string(body).map_err(|e| format!("cannot encode request: {e}"))?;
+    admin_send(endpoint, token, "POST", path, Some(payload))
+}
+
+/// [`admin_send`] for a deletion. No body: the path names the row.
+pub fn admin_delete_json<T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+) -> Result<T, String> {
+    admin_send(endpoint, token, "DELETE", path, None)
 }
 
 /// The response's first line only — all the liveness probe and the

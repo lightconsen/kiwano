@@ -1,0 +1,20 @@
+{
+  "name": "Test",
+  "api_key": "sk-primary",
+  "endpoint": "https://api.example.com",
+  "protocol": "openai",
+  "model_default": "",
+  "billing": "payg",
+  "billing_config": {
+    "limit_value": null,
+    "limit_unit": null,
+    "reset_period": null,
+    "plan_limits": null
+  },
+  "agents": null,
+  "endpoints": [],
+  "advanced": null,
+  "plan_query": null,
+  "prices": null,
+  "catalog_id": null
+}

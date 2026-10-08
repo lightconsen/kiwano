@@ -1,0 +1,4 @@
+{
+  "empty_key": "API key must not be empty",
+  "unknown_provider": "provider `no-such-provider` not found"
+}

@@ -82,8 +82,13 @@ pub use kiwano_adapters::config::home_owned_by_other_user;
 // ── the public surface, re-exported so every `takeover::x` path still resolves ──
 
 pub use backup::BackupFile;
+pub(crate) use disable::restore_backup;
 pub use disable::{disable, REBUILDABLE_AGENTS};
 pub use enable::enable;
+/// Public for the crash-consistency tests in `tests/`: a takeover's file half
+/// is several writes, and the only way to see what the disk holds when the
+/// process dies between them is to die between them.
+pub use enable::enable_with;
 pub use paths::CONFIG_DIR_VARS;
 pub use state::{
     live_placeholder_key, restorable_backup, ProviderRoute, RestoreOutcome, RestoreReport,

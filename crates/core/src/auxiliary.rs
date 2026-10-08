@@ -20,6 +20,43 @@ pub struct Aux {
     pub conn: Mutex<Connection>,
 }
 
+/// What a takeover operation's row says. Two states, because the point of the
+/// row is the window between them: `Pending` means the store half landed and
+/// the file half has not (or the process died trying).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeoverOpState {
+    Pending,
+    Applied,
+}
+
+impl TakeoverOpState {
+    /// An unknown string reads as `Pending`, the conservative side: it is the
+    /// state that makes `reconcile_takeovers` look at the agent.
+    fn parse(raw: &str) -> Self {
+        match raw {
+            "applied" => Self::Applied,
+            _ => Self::Pending,
+        }
+    }
+}
+
+/// A takeover operation as stored: `op_id` is what makes a replayed request
+/// recognisable as the same operation rather than a new one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeoverOp {
+    pub op_id: String,
+    pub state: TakeoverOpState,
+    pub started_at: String,
+    pub applied_at: Option<String>,
+}
+
+impl TakeoverOp {
+    /// Whether the file half is recorded as having landed.
+    pub fn is_applied(&self) -> bool {
+        self.state == TakeoverOpState::Applied
+    }
+}
+
 impl Aux {
     pub fn open(path: impl AsRef<std::path::Path>) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
@@ -56,6 +93,30 @@ impl Aux {
                  agent         TEXT PRIMARY KEY,
                  files         TEXT NOT NULL,
                  backed_up_at  TEXT NOT NULL
+             )",
+            [],
+        )?;
+        // A takeover operation in flight — one row per agent.
+        //
+        // A new table rather than two more columns on `takeover_backups`, for
+        // the reason `hub_models_cache` gives below: `CREATE TABLE IF NOT
+        // EXISTS` reaches existing databases for free, and this half of the DB
+        // has no migration framework.
+        //
+        // It exists because a takeover has two halves that cannot commit
+        // together — the store rows and the agent's own config files — and each
+        // half looks complete on its own. The row is what makes "the store half
+        // landed and the file half did not" a state someone can see:
+        // `vm::takeover::reconcile_takeovers` reads it and converges. An agent
+        // with no row is never touched by that pass, which is what keeps every
+        // install that predates this table out of it.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS takeover_ops (
+                 agent       TEXT PRIMARY KEY,
+                 op_id       TEXT NOT NULL,
+                 state       TEXT NOT NULL,
+                 started_at  TEXT NOT NULL,
+                 applied_at  TEXT
              )",
             [],
         )?;
@@ -137,6 +198,58 @@ impl Aux {
     pub fn delete_takeover_backup(&self, agent: &str) -> rusqlite::Result<()> {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         conn.execute("DELETE FROM takeover_backups WHERE agent = ?1", [agent])?;
+        Ok(())
+    }
+
+    /// Record that a takeover's store half has landed and its file half has
+    /// not. Supersedes any previous operation for the same agent: one agent has
+    /// at most one takeover in flight, and an abandoned one is not a reason to
+    /// refuse the next.
+    pub fn start_takeover_op(&self, agent: &str, op_id: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.execute(
+            "INSERT INTO takeover_ops (agent, op_id, state, started_at, applied_at)
+             VALUES (?1, ?2, 'pending', ?3, NULL)
+             ON CONFLICT(agent) DO UPDATE SET
+                 op_id = ?2, state = 'pending', started_at = ?3, applied_at = NULL",
+            rusqlite::params![agent, op_id, rfc3339(unix_now())],
+        )?;
+        Ok(())
+    }
+
+    /// Mark the operation applied — the file half landed. Answered `true` only
+    /// for the operation that made the transition, so a replayed mark is not
+    /// mistaken for a fresh one.
+    pub fn apply_takeover_op(&self, agent: &str, op_id: &str) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE takeover_ops SET state = 'applied', applied_at = ?3
+             WHERE agent = ?1 AND op_id = ?2 AND state = 'pending'",
+            rusqlite::params![agent, op_id, rfc3339(unix_now())],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn load_takeover_op(&self, agent: &str) -> Option<TakeoverOp> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.query_row(
+            "SELECT op_id, state, started_at, applied_at FROM takeover_ops WHERE agent = ?1",
+            [agent],
+            |row| {
+                Ok(TakeoverOp {
+                    op_id: row.get(0)?,
+                    state: TakeoverOpState::parse(&row.get::<_, String>(1)?),
+                    started_at: row.get(2)?,
+                    applied_at: row.get(3)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    pub fn clear_takeover_op(&self, agent: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("aux mutex poisoned");
+        conn.execute("DELETE FROM takeover_ops WHERE agent = ?1", [agent])?;
         Ok(())
     }
 

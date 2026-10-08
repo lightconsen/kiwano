@@ -31,6 +31,28 @@ pub fn enable(
     home: &Path,
     vars: &ShellVars,
 ) -> Result<(), String> {
+    enable_with(aux, agent, placeholder_key, data_port, home, vars, |_| {})
+}
+
+/// [`enable`], with a hook that runs after each file is written.
+///
+/// The hook exists for one reason: a takeover's file half is several writes,
+/// and no test can observe what the *disk* looks like when the process dies
+/// between them — an in-process test that returns early still unwinds, and the
+/// rollback above then cleans up, which is the opposite of the case under
+/// study. A caller that wants that case passes a hook that ends the process
+/// (`takeover_crash` in `tests/` does), so the crash is real and nothing gets
+/// to run afterwards. Production passes the no-op above and this costs it
+/// nothing.
+pub fn enable_with(
+    aux: &Aux,
+    agent: &str,
+    placeholder_key: &str,
+    data_port: u16,
+    home: &Path,
+    vars: &ShellVars,
+    after_each: impl FnMut(usize),
+) -> Result<(), String> {
     // Read: the files as they are now, and whether each was there at all.
     let paths = takeover_paths(agent, home, vars)?;
     let originals = read_originals(agent, &paths)?;
@@ -52,7 +74,7 @@ pub fn enable(
     }
 
     // Write, and put everything back if a write fails.
-    write_rewrites(aux, agent, &rewritten, &originals, first_time)
+    write_rewrites(aux, agent, &rewritten, &originals, first_time, after_each)
 }
 
 /// The first step of [`enable`]: read every file a takeover will touch, with
@@ -122,6 +144,7 @@ fn write_rewrites(
     rewritten: &Files,
     originals: &[BackupFile],
     first_time: bool,
+    mut after_each: impl FnMut(usize),
 ) -> Result<(), String> {
     let mut written: Vec<usize> = Vec::with_capacity(rewritten.len());
     for (index, (path, content)) in rewritten.iter().enumerate() {
@@ -141,6 +164,7 @@ fn write_rewrites(
             ));
         }
         written.push(index);
+        after_each(index);
     }
     Ok(())
 }

@@ -55,14 +55,23 @@ pub fn set_agent_takeover(
             // takeover is followed immediately by real requests.
             let _ = link_providers(store, aux);
         }
-        let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
-        let key = format!("kw-ag-{agent}-{rand}");
-        store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
-        // Rewrite the Agent config (backup → base_url → placeholder key); on
-        // failure roll back the key registration to stay consistent
-        if let Err(e) = crate::takeover::enable(aux, agent, &key, data_port, home, vars) {
-            let _ = store.delete_placeholder_key(&key);
+        // Three phases, in an order that cannot be reversed: the store rows
+        // first, the agent's config second, the "applied" mark last. Between
+        // any two of them the process can die, and every one of those windows
+        // leaves something *recoverable* rather than something broken — the
+        // agent is either untouched or pointing at a gateway that knows its
+        // key. See `reconcile_takeovers`, which closes them.
+        let prepared = phase_state(store, aux, agent, home, None)?;
+        if let Err(e) = crate::takeover::enable(aux, agent, &prepared.key, data_port, home, vars) {
+            // The file half never landed: take the store half back out.
+            undo_state(store, aux, agent, &prepared.key);
             return Err(e);
+        }
+        // A failure here is not a failed takeover: the files are in place and
+        // the row is merely still `pending`, which is exactly the state
+        // `reconcile_takeovers` finishes. Reported, not propagated.
+        if let Err(e) = mark_applied(aux, agent, &prepared.op_id) {
+            eprintln!("kiwano: {agent} takeover applied but not marked: {e}");
         }
     } else {
         // The provider the gateway serves for this agent, handed to restore as
@@ -104,6 +113,212 @@ pub fn set_agent_takeover(
             store.delete_binding(agent, &b.provider_id).map_err(e2s)?;
         }
         store.delete_strategy(agent).map_err(e2s)?;
+        // No operation is in flight once the agent has its own config back;
+        // leaving the row would put the agent on the reconcile pass's list for
+        // a takeover that has been deliberately undone.
+        let _ = aux.clear_takeover_op(agent);
+    }
+    Ok(())
+}
+
+/// What phase one produced, for phase two to use. `op_id` is the operation's
+/// identity, which is what makes a replay recognisable as a replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedTakeover {
+    pub op_id: String,
+    pub key: String,
+}
+
+/// Phase one — everything that lands in the store: the provider imported from
+/// the agent's own credentials, the strategy and binding that give the gateway
+/// a route on day one, the placeholder key the agent will carry, and the
+/// operation row that says the file half has not happened yet.
+///
+/// Idempotent by `op_id`: replaying the same operation reuses the key it
+/// already minted rather than minting a second one. `None` starts a new
+/// operation.
+pub fn phase_state(
+    store: &Store,
+    aux: &Aux,
+    agent: &str,
+    home: &std::path::Path,
+    replay_of: Option<&str>,
+) -> Result<PreparedTakeover, String> {
+    // First-takeover import: pick up the provider the agent is currently
+    // using and bind it as the agent's sole candidate, so the gateway has
+    // a route on day one (official-login/blank configs yield no creds —
+    // the onboarding guide steers those users to manual entry). Import or
+    // binding failures never block the takeover itself.
+    if let Some(creds) = crate::creds::read_current_creds(agent, home) {
+        match import_current_provider(store, &creds) {
+            Ok(provider_id) => {
+                if store.bindings_for_agent(agent).map_err(e2s)?.is_empty() {
+                    store
+                        .upsert_strategy(agent, StrategyType::Single, None)
+                        .map_err(e2s)?;
+                    store
+                        .upsert_binding(&Binding {
+                            agent: agent.to_string(),
+                            provider_id,
+                            priority: 0,
+                            weight: 1,
+                            win_start: None,
+                            win_end: None,
+                            enabled: true,
+                        })
+                        .map_err(e2s)?;
+                }
+            }
+            Err(e) => eprintln!("kiwano: current-provider import skipped: {e}"),
+        }
+        // The import leaves the link empty (the agent's config knows
+        // nothing about our catalog), and this is the one path where the
+        // provider starts carrying traffic before any backfill pass runs —
+        // takeover is followed immediately by real requests.
+        let _ = link_providers(store, aux);
+    }
+
+    // A replay keeps the key it already registered: minting a second one would
+    // leave the first orphaned in the config the file half may yet read.
+    if let Some(op_id) = replay_of {
+        if let Some(existing) = store
+            .list_placeholder_keys()
+            .map_err(e2s)?
+            .into_iter()
+            .find(|k| k.agent == agent)
+        {
+            return Ok(PreparedTakeover {
+                op_id: op_id.to_string(),
+                key: existing.key,
+            });
+        }
+    }
+
+    let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let key = format!("kw-ag-{agent}-{rand}");
+    store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
+    let op_id = uuid::Uuid::new_v4().simple().to_string();
+    aux.start_takeover_op(agent, &op_id).map_err(e2s)?;
+    Ok(PreparedTakeover { op_id, key })
+}
+
+/// Phase three — mark the operation applied. Separate from the file writes on
+/// purpose: the window between them is real, and it is the one
+/// `reconcile_takeovers` finishes for free.
+pub fn mark_applied(aux: &Aux, agent: &str, op_id: &str) -> Result<(), String> {
+    aux.apply_takeover_op(agent, op_id).map_err(e2s).map(|_| ())
+}
+
+/// Take phase one back out, and whatever landed of phase two with it.
+///
+/// The order is forced by what each half costs to get wrong: a key registered
+/// for a config that does not carry it is untidy (the UI would offer a key
+/// nothing uses), while a half-rewritten agent config is the user's tool
+/// pointing at something that no longer answers. So the *files* come back from
+/// the backup first — and only when that backup is a restorable one, which is
+/// the same test `disable` applies, because a backup holding our own route is
+/// not the user's original.
+///
+/// A no-op when the file half never started: `restorable_backup` is false once
+/// the backup row is gone, which is what an in-process failure leaves behind.
+fn undo_state(store: &Store, aux: &Aux, agent: &str, key: &str) {
+    if crate::takeover::restorable_backup(aux, agent) {
+        if let Some((_, files)) = aux.load_takeover_backup(agent) {
+            let _ = crate::takeover::restore_backup(aux, agent, &files, None);
+        }
+    }
+    let _ = store.delete_placeholder_key(key);
+    let _ = aux.clear_takeover_op(agent);
+}
+
+/// A takeover that stopped between its phases, and what it converged to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakeoverFinding {
+    /// The store half landed, the file half never did: a key is registered for
+    /// an agent whose config does not carry it. Converged by revoking the key.
+    StoreWithoutConfig { agent: String, op_id: String },
+    /// The file half landed, the applied mark never did. Converged by marking
+    /// it — the work is already done, so this window costs nothing but the row.
+    ConfigWithoutMark { agent: String, op_id: String },
+    /// Marked applied, and the config no longer carries the key: the file was
+    /// put back by hand or by another tool. Converged by revoking the key and
+    /// forgetting the operation.
+    MarkWithoutConfig { agent: String, op_id: String },
+}
+
+/// Close every takeover that stopped between phases.
+///
+/// Idempotent — a second run finds nothing unless a new window was opened — and
+/// deliberately blind to agents with no operation row: every install that
+/// predates the row has keys and backups without one, and reporting those would
+/// invent a problem out of a missing record. The three outcomes are the three
+/// ways the two halves can disagree; there is no fourth, because an operation
+/// row only ever exists once phase one has run.
+pub fn reconcile_takeovers(
+    store: &Store,
+    aux: &Aux,
+    home: &std::path::Path,
+    vars: &ShellVars,
+) -> Result<Vec<TakeoverFinding>, String> {
+    let mut findings = Vec::new();
+    for (agent, _) in AGENTS {
+        let Some(op) = aux.load_takeover_op(agent) else {
+            continue;
+        };
+        let carries = crate::takeover::live_placeholder_key(agent, home, vars).is_some();
+        let applied = op.state == crate::vm::TakeoverOpState::Applied;
+        match (applied, carries) {
+            // `applied` and the config agrees: nothing in flight.
+            (true, true) => {}
+            (true, false) => {
+                revoke_agent_keys(store, agent)?;
+                let _ = aux.clear_takeover_op(agent);
+                findings.push(TakeoverFinding::MarkWithoutConfig {
+                    agent: agent.to_string(),
+                    op_id: op.op_id.clone(),
+                });
+            }
+            (false, false) => {
+                // The store half landed and the files did not (or landed
+                // partially): put the user's files back before letting the key
+                // go, or the agent is left pointing at a gateway that will
+                // refuse it.
+                let key = store
+                    .list_placeholder_keys()
+                    .map_err(e2s)?
+                    .into_iter()
+                    .find(|k| k.agent == agent)
+                    .map(|k| k.key);
+                match key {
+                    Some(key) => undo_state(store, aux, agent, &key),
+                    None => {
+                        let _ = aux.clear_takeover_op(agent);
+                    }
+                }
+                findings.push(TakeoverFinding::StoreWithoutConfig {
+                    agent: agent.to_string(),
+                    op_id: op.op_id.clone(),
+                });
+            }
+            (false, true) => {
+                let _ = aux.apply_takeover_op(agent, &op.op_id);
+                findings.push(TakeoverFinding::ConfigWithoutMark {
+                    agent: agent.to_string(),
+                    op_id: op.op_id.clone(),
+                });
+            }
+        }
+    }
+    Ok(findings)
+}
+
+/// Drop every placeholder key registered for `agent` — the half of a takeover
+/// that a convergence or a teardown has to take back out.
+fn revoke_agent_keys(store: &Store, agent: &str) -> Result<(), String> {
+    for k in store.list_placeholder_keys().map_err(e2s)? {
+        if k.agent == agent {
+            store.delete_placeholder_key(&k.key).map_err(e2s)?;
+        }
     }
     Ok(())
 }

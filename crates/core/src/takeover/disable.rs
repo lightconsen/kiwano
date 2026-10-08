@@ -95,7 +95,7 @@ fn usable_backup(aux: &Aux, agent: &str) -> (Option<Vec<BackupFile>>, Option<Str
 /// Tier one continued: write the captured files back — a file that did not
 /// exist before the takeover is removed rather than written empty — then
 /// deregister the backup.
-fn restore_backup(
+pub(crate) fn restore_backup(
     aux: &Aux,
     agent: &str,
     files: &[BackupFile],

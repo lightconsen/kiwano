@@ -32,7 +32,7 @@ pub mod time;
 
 // ── Auxiliary connection (moved to `crate::auxiliary`, re-exported here) ──
 
-pub use crate::auxiliary::Aux;
+pub use crate::auxiliary::{Aux, TakeoverOpState};
 
 fn e2s(e: impl std::fmt::Display) -> String {
     e.to_string()

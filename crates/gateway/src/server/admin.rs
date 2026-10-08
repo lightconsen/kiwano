@@ -121,6 +121,10 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
         .route("/providers/{id}", delete(delete_provider_route))
+        .route("/logs", get(list_logs_route).delete(clear_logs_route))
+        .route("/logs/{id}", get(get_log_route))
+        .route("/credential-finding", get(check_finding_route))
+        .route("/credential-finding/ack", post(ack_finding_route))
         .route("/custom-agents", post(create_custom_agent_route))
         .route(
             "/custom-agents/{id}",
@@ -811,6 +815,92 @@ async fn delete_provider_route(
     }
 }
 
+// ── Request logs (`migrate.local.md` §7 batch 1) ──
+
+/// The list's query string. Every filter is optional, and an absent one means
+/// "no filter" — which is why the client omits it rather than sending an empty
+/// value (`RequestLogFilter` treats `Some("")` as a filter that matches nothing).
+#[derive(serde::Deserialize)]
+struct LogQuery {
+    page: i64,
+    page_size: i64,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+}
+
+/// `GET /api/logs` — one page of the audit trail. A read, so a `GET`: the
+/// filter travels in the query string where a client can see it in a log line.
+async fn list_logs_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<LogQuery>,
+) -> Response {
+    let filter = crate::store::RequestLogFilter {
+        agent: q.agent.as_deref(),
+        provider_id: q.provider_id.as_deref(),
+        status: q.status.as_deref(),
+        from: q.from.as_deref(),
+        to: q.to.as_deref(),
+    };
+    match crate::api::logs::list_request_logs(&state.store, q.page, q.page_size, filter) {
+        Ok(page) => Json(page).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/logs/{id}` — one entry in full, bodies included. `null` when there
+/// is no such row: the client asks about a row it is showing, and "it was
+/// cleared" is an answer rather than an error.
+async fn get_log_route(State(state): State<Arc<GatewayState>>, Path(id): Path<i64>) -> Response {
+    match crate::api::logs::get_request_log(&state.store, id) {
+        Ok(row) => Json(row).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `DELETE /api/logs` — empty the trail. Idempotent: the second call finds the
+/// state the first one asked for.
+async fn clear_logs_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::logs::clear_request_logs(&state.store) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/credential-finding` — the newest unacknowledged finding, or `null`.
+async fn check_finding_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::logs::check_credential_finding(&state.store) {
+        Ok(row) => Json(row).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AckBody {
+    id: i64,
+}
+
+/// `POST /api/credential-finding/ack` — the banner was dismissed or clicked.
+/// A `POST` rather than a `PUT`: this is an event about a row, not the state of
+/// a resource, and sending it twice is the same as sending it once (the marker
+/// is the id, not a counter).
+async fn ack_finding_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<AckBody>,
+) -> Response {
+    match crate::api::logs::ack_credential_finding(&state.store, body.id) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1495,6 +1585,50 @@ mod tests {
         // Without the token: refused, like every other resource route.
         let response = admin_plane_router(state.clone())
             .oneshot(admin_request("GET", "/api/agent-routes", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The log list takes its filter in the query string, every parameter
+    /// optional — and this is the test that would catch a name that does not
+    /// match between the two sides.
+    ///
+    /// A `Query` extractor that cannot fill its struct is a 400 before any
+    /// handler runs, so a 200 here says the names, the types and the *decoding*
+    /// all line up: the timestamp below arrives percent-encoded, exactly as the
+    /// client sends one (`daemon_api::encode_query`), and the `+` in its offset
+    /// has to survive.
+    #[tokio::test]
+    async fn the_log_list_reads_its_filter_from_the_query_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "GET",
+                "/api/logs?page=1&page_size=10&agent=claude&status=error&from=2026-10-01T00%3A00%3A00%2B08%3A00&to=2026-10-02T00%3A00%3A00%2B08%3A00",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let page = body_json(response).await;
+        assert_eq!(page["total"], 0, "no rows seeded, and no filter error");
+        assert!(page["rows"].as_array().unwrap().is_empty());
+
+        // A missing required parameter is refused, and without the token it is
+        // refused before the extractor runs at all.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/logs?page=1", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/logs?page=1&page_size=10", None))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

@@ -12,7 +12,7 @@ use crate::error::Result;
 use crate::store::Store;
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One complete data-plane request awaiting persistence (tech.md: full request
 /// logging). Bodies are optional — disabled capture or oversize truncation.
@@ -65,7 +65,12 @@ pub struct RequestLogNew {
 }
 
 /// Metadata row of `request_logs` (list view — never includes bodies).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+///
+/// `Deserialize` because the row crosses the wire in both directions now: the
+/// daemon serves it and a client parses it back (`kiwanod::api::logs`). A
+/// response type that can only be written cannot be read by the side that
+/// receives it, which is the same gap the wire types had before the migration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestLogEntry {
     pub id: i64,
     pub ts: String,
@@ -133,8 +138,9 @@ impl RequestLogExportRow {
     }
 }
 
-/// Detail view: metadata + the captured bodies.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// Detail view: metadata + the captured bodies. `Deserialize` for the same
+/// reason as [`RequestLogEntry`] — it travels to the client.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestLogDetail {
     #[serde(flatten)]
     pub entry: RequestLogEntry,

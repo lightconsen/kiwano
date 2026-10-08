@@ -14,6 +14,8 @@
 use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
+use kiwanod::api::logs::RequestLogListVm;
+use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter};
 
 use crate::sidecar::{self, AdminEndpoint};
 
@@ -314,6 +316,99 @@ impl DaemonApi {
             .and_then(|d| d.as_bool())
             .unwrap_or(false))
     }
+    // ── Request logs and the credential banner ──
+
+    /// One page of the audit trail — `vm::list_request_logs`.
+    pub fn list_request_logs(
+        &self,
+        page: i64,
+        page_size: i64,
+        filter: RequestLogFilter<'_>,
+    ) -> Result<RequestLogListVm, String> {
+        let mut query = format!("page={page}&page_size={page_size}");
+        // Absent filters are *omitted*, not sent empty: the far end reads an
+        // empty value as a filter that matches nothing, which is a different
+        // request from "no filter".
+        for (key, value) in [
+            ("agent", filter.agent),
+            ("provider_id", filter.provider_id),
+            ("status", filter.status),
+            ("from", filter.from),
+            ("to", filter.to),
+        ] {
+            if let Some(value) = value {
+                query.push_str(&format!("&{key}={}", encode_query(value)));
+            }
+        }
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/logs?{query}"),
+        )
+    }
+
+    /// One entry in full — `vm::get_request_log`. `None` when there is no such
+    /// row, which is what a cleared trail answers.
+    pub fn get_request_log(&self, id: i64) -> Result<Option<RequestLogDetail>, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/logs/{id}"),
+        )
+    }
+
+    /// Empty the audit trail — `vm::clear_request_logs`. Idempotent.
+    pub fn clear_request_logs(&self) -> Result<(), String> {
+        wrote(sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/logs",
+        ))
+    }
+
+    /// The newest unacknowledged credential finding — `vm::check_credential_finding`.
+    pub fn check_credential_finding(&self) -> Result<Option<RequestLogEntry>, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/credential-finding",
+        )
+    }
+
+    /// Acknowledge a finding — `vm::ack_credential_finding`.
+    pub fn ack_credential_finding(&self, id: i64) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body {
+            id: i64,
+        }
+        wrote(sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/credential-finding/ack",
+            &Body { id },
+        ))
+    }
+}
+
+/// A value as a query-string component: everything outside the unreserved set is
+/// percent-encoded.
+///
+/// Not decoration — the time filters are timestamps.
+/// `2026-10-01T00:00:00+08:00` sent raw arrives with its `+` read as a space, and
+/// the far end then compares against a string no row has. Encoding the whole
+/// value is the only version of this that cannot be wrong for a character nobody
+/// thought of.
+fn encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// A write whose answer carries nothing a caller needs: `admin_send` already
@@ -459,6 +554,58 @@ mod tests {
         assert!(
             request.contains(r#"{"label":"Nightly","note":"moved","protocol":"gemini"}"#),
             "{request}"
+        );
+    }
+
+    /// The list's query string, filters and all — and the one character that
+    /// makes this test worth writing: a time filter with a `+` in its offset.
+    ///
+    /// `2026-10-01T00:00:00+08:00` sent raw arrives as `2026-10-01T00:00:00
+    /// 08:00` (a space), and the far end then filters against a string no row
+    /// has — a silently empty page rather than an error. An absent filter is
+    /// omitted rather than sent empty, for the same class of reason: the daemon
+    /// reads an empty value as "match nothing".
+    #[test]
+    fn the_log_query_string_omits_absent_filters_and_encodes_the_rest() {
+        let body = r#"{"rows":[],"total":0}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir, endpoint, handle) = stub(response);
+        let api = DaemonApi::with_token(endpoint, Some("tok-1".into()));
+
+        let page = api
+            .list_request_logs(
+                2,
+                50,
+                RequestLogFilter {
+                    agent: Some("claude"),
+                    provider_id: None,
+                    status: Some("error"),
+                    from: Some("2026-10-01T00:00:00+08:00"),
+                    to: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(page.total, 0);
+
+        let request = handle.join().unwrap();
+        let line = request.lines().next().unwrap();
+        assert!(
+            line.starts_with("GET /api/logs?page=2&page_size=50&agent=claude&status=error&from="),
+            "{line}"
+        );
+        assert!(
+            line.contains("from=2026-10-01T00%3A00%3A00%2B08%3A00"),
+            "the offset's `+` must be encoded: {line}"
+        );
+        assert!(
+            !line.contains("provider_id") && !line.contains("to="),
+            "an absent filter is omitted, not sent empty: {line}"
         );
     }
 

@@ -1,12 +1,22 @@
-//! The request-log audit trail: the paged list, one entry in full, the CSV
-//! export and the clear — plus the one action about the log *files* rather than
-//! the rows, revealing the directory in the OS file manager.
+//! The request-log audit trail: the paged list, one entry in full, the clear —
+//! plus the one action about the log *files* rather than the rows, revealing the
+//! directory in the OS file manager.
+//!
+//! Five of the seven are the daemon's now (`migrate.local.md` §7 batch 1): the
+//! reads and the clear, and the two credential-banner calls, whose ack marker
+//! sits in the same `app_settings` KV the daemon already writes its own settings
+//! to. None of them affects routing, so none sends a reload ping.
+//!
+//! Two stay: `export_request_logs` writes to a path the user picked in a save
+//! dialog — the client's own half, split out in batch 3 — and `open_log_folder`
+//! is a statement about *this machine*, which the daemon will never serve.
 
 use kiwanod::store::RequestLogFilter;
 use tauri::{AppHandle, State};
 
 use crate::paths::db_path;
 use crate::state::AppState;
+use kiwano_core::daemon_api::DaemonApi;
 use kiwano_core::vm;
 
 // ── Request logs (full data-plane audit trail, migration V5) ──
@@ -14,7 +24,6 @@ use kiwano_core::vm;
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn list_request_logs(
-    state: State<AppState>,
     page: i64,
     page_size: i64,
     agent: Option<String>,
@@ -23,8 +32,7 @@ pub fn list_request_logs(
     from: Option<String>,
     to: Option<String>,
 ) -> Result<vm::RequestLogListVm, String> {
-    vm::list_request_logs(
-        &state.store,
+    DaemonApi::connect().list_request_logs(
         page,
         page_size,
         RequestLogFilter {
@@ -68,16 +76,13 @@ pub fn export_request_logs(
 }
 
 #[tauri::command]
-pub fn get_request_log(
-    state: State<AppState>,
-    id: i64,
-) -> Result<Option<vm::RequestLogDetailVm>, String> {
-    vm::get_request_log(&state.store, id)
+pub fn get_request_log(id: i64) -> Result<Option<vm::RequestLogDetailVm>, String> {
+    DaemonApi::connect().get_request_log(id)
 }
 
 #[tauri::command]
-pub fn clear_request_logs(state: State<AppState>) -> Result<(), String> {
-    vm::clear_request_logs(&state.store)
+pub fn clear_request_logs() -> Result<(), String> {
+    DaemonApi::connect().clear_request_logs()
 }
 
 // ── Credential-watch banner ──
@@ -86,17 +91,15 @@ pub fn clear_request_logs(state: State<AppState>) -> Result<(), String> {
 /// poll. Read-only on purpose: only an explicit dismiss/click acks, so the
 /// banner survives across polls and restarts until then.
 #[tauri::command]
-pub fn check_credential_finding(
-    state: State<AppState>,
-) -> Result<Option<kiwanod::store::RequestLogEntry>, String> {
-    vm::check_credential_finding(&state.store, &state.aux)
+pub fn check_credential_finding() -> Result<Option<kiwanod::store::RequestLogEntry>, String> {
+    DaemonApi::connect().check_credential_finding()
 }
 
 /// Banner dismissed or clicked: acknowledge that log id. A newer finding
 /// re-raises the banner.
 #[tauri::command]
-pub fn ack_credential_finding(state: State<AppState>, id: i64) -> Result<(), String> {
-    vm::ack_credential_finding(&state.aux, id)
+pub fn ack_credential_finding(id: i64) -> Result<(), String> {
+    DaemonApi::connect().ack_credential_finding(id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -1,16 +1,17 @@
 //! Request logs: the list, one detail row, the CSV export, and the clear.
 
 use crate::vm::e2s;
+use kiwanod::api::logs as daemon;
 use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter, Store, EXPORT_ROW_CAP};
 use serde::Serialize;
 
 // ── Request logs (request_logs + request_bodies, migration V5) ──
 
-#[derive(Serialize)]
-pub struct RequestLogListVm {
-    pub rows: Vec<RequestLogEntry>,
-    pub total: i64,
-}
+// The list payload is built by the daemon now (`kiwanod::api::logs`), so it
+// lives there — it embeds a store row, which `kiwano-api` cannot name without
+// depending on this crate's gateway (§10.6's rule applied to a type that
+// carries one). Re-exported so `crate::vm::RequestLogListVm` still resolves.
+pub use kiwanod::api::logs::RequestLogListVm;
 
 pub fn list_request_logs(
     store: &Store,
@@ -18,12 +19,12 @@ pub fn list_request_logs(
     page_size: i64,
     filter: RequestLogFilter<'_>,
 ) -> Result<RequestLogListVm, String> {
-    let (rows, total) = store
-        .list_request_logs(page, page_size, filter)
-        .map_err(e2s)?;
-    Ok(RequestLogListVm { rows, total })
+    daemon::list_request_logs(store, page, page_size, filter).map_err(|e| e.to_string())
 }
 
+/// What an export wrote. Stays here with the export itself: this is the half of
+/// the logs module the client keeps (§7 batch 3), because the file it writes is
+/// the user's own.
 #[derive(Serialize)]
 pub struct RequestLogExportVm {
     pub rows_written: usize,
@@ -63,45 +64,29 @@ pub fn export_request_logs_csv(
 /// Detail view (metadata + bodies); re-exported for the command signature.
 pub use kiwanod::store::RequestLogDetail as RequestLogDetailVm;
 
+/// Served by the daemon (`kiwanod::api::logs::get_request_log`).
 pub fn get_request_log(store: &Store, id: i64) -> Result<Option<RequestLogDetail>, String> {
-    store.get_request_log(id).map_err(e2s)
+    daemon::get_request_log(store, id).map_err(|e| e.to_string())
 }
 
+/// Served by the daemon. Emptying a trail that is already empty is not an error.
 pub fn clear_request_logs(store: &Store) -> Result<(), String> {
-    store.clear_request_logs().map_err(e2s).map(drop)
+    daemon::clear_request_logs(store).map_err(|e| e.to_string())
 }
 
 // ── Credential-watch banner (spec: dlp findings surface in-app) ──
 
-/// The app_settings key holding the last log id the user acknowledged via the
-/// banner (dismiss or click both acknowledge). Same KV family the cost alerts
-/// dedup with.
-const DLP_FINDING_ACKED_KEY: &str = "dlp_finding_acked";
-
-/// The newest credential-watch finding the user has not yet acknowledged —
-/// what the banner polls. Read-only: the banner stays up across polls (and
-/// restarts) until the user explicitly acks, so nothing is marked here.
-pub fn check_credential_finding(
-    store: &Store,
-    aux: &crate::auxiliary::Aux,
-) -> Result<Option<RequestLogEntry>, String> {
-    let Some(row) = store.latest_credential_finding().map_err(e2s)? else {
-        return Ok(None);
-    };
-    let acked: i64 = aux
-        .get_setting(DLP_FINDING_ACKED_KEY)
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    // Ids are rowids: strictly increasing, so `>` covers "a newer finding
-    // arrived since the ack" without a list of acked ids.
-    Ok((row.id > acked).then_some(row))
+/// The newest credential-watch finding the user has not acknowledged — the
+/// banner's poll. Served by the daemon, which holds the ack marker in the same
+/// `app_settings` KV it keeps its admin token in, so neither function needs the
+/// auxiliary connection any more.
+pub fn check_credential_finding(store: &Store) -> Result<Option<RequestLogEntry>, String> {
+    daemon::check_credential_finding(store).map_err(|e| e.to_string())
 }
 
-/// Acknowledge a finding: banner dismissed or clicked. The next poll hides it;
-/// a finding with a higher log id shows again.
-pub fn ack_credential_finding(aux: &crate::auxiliary::Aux, id: i64) -> Result<(), String> {
-    aux.set_setting(DLP_FINDING_ACKED_KEY, &id.to_string())
-        .map_err(e2s)
+/// Banner dismissed or clicked: acknowledge that log id.
+pub fn ack_credential_finding(store: &Store, id: i64) -> Result<(), String> {
+    daemon::ack_credential_finding(store, id).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -207,10 +192,14 @@ mod tests {
 
     /// The banner's contract: an unacked finding is returned, acking hides it,
     /// and a *newer* finding shows again. Ids do the ordering.
+    ///
+    /// Kept on this side, through the wrappers, because it is the app's promise:
+    /// what the banner does across polls and restarts. The ack marker now lives
+    /// in the KV the daemon already writes its own settings to, so this no
+    /// longer needs an auxiliary connection — that is the one change.
     #[test]
     fn credential_finding_hides_on_ack_and_returns_on_a_newer_one() {
         let s = store();
-        let aux = crate::vm::test_support::linkless_aux();
         let insert = |notes: Option<&str>| {
             let log = kiwanod::store::RequestLogNew {
                 ts: rfc3339(unix_now()),
@@ -249,34 +238,34 @@ mod tests {
             s.insert_request_log(&log).unwrap()
         };
 
-        assert_eq!(check_credential_finding(&s, &aux).unwrap(), None);
+        assert_eq!(check_credential_finding(&s).unwrap(), None);
 
         insert(Some("thinking: removed invalid value"));
         assert_eq!(
-            check_credential_finding(&s, &aux).unwrap(),
+            check_credential_finding(&s).unwrap(),
             None,
             "shim notes are not findings"
         );
 
         let first = insert(Some("dlp: github-token ×1"));
         assert_eq!(
-            check_credential_finding(&s, &aux).unwrap().map(|r| r.id),
+            check_credential_finding(&s).unwrap().map(|r| r.id),
             Some(first)
         );
 
         // A read is not an ack: polling again returns the same finding.
         assert_eq!(
-            check_credential_finding(&s, &aux).unwrap().map(|r| r.id),
+            check_credential_finding(&s).unwrap().map(|r| r.id),
             Some(first),
             "the banner survives its own poll"
         );
 
-        ack_credential_finding(&aux, first).unwrap();
-        assert_eq!(check_credential_finding(&s, &aux).unwrap(), None);
+        ack_credential_finding(&s, first).unwrap();
+        assert_eq!(check_credential_finding(&s).unwrap(), None);
 
         let second = insert(Some("dlp: openai-key ×1"));
         assert_eq!(
-            check_credential_finding(&s, &aux).unwrap().map(|r| r.id),
+            check_credential_finding(&s).unwrap().map(|r| r.id),
             Some(second),
             "a newer finding re-raises the banner"
         );

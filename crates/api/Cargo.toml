@@ -12,3 +12,7 @@ name = "kiwano_api"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Minting an agent id: the six hex characters that make a repeated label its own
+# agent. Here rather than in either caller because both sides mint ids
+# (`migrate.local.md` §6.1).
+uuid = { version = "1", features = ["v4"] }

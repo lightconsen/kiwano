@@ -44,7 +44,9 @@
 //! was already awkward (a `Result<T, E>` whose `T` is not `Debug` cannot be
 //! unwrapped on the error side).
 
+pub mod agents;
 pub mod error;
+pub mod ids;
 pub mod keys;
 pub mod logo;
 pub mod providers;

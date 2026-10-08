@@ -40,24 +40,13 @@ fn e2s(e: impl std::fmt::Display) -> String {
 
 // ── Mutations (called from commands; each ends with an admin /reload) ──
 
-pub fn slug(name: &str) -> String {
-    let s: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = s.trim_matches('-');
-    if trimmed.is_empty() {
-        "provider".into()
-    } else {
-        trimmed.to_string()
-    }
-}
+// The rule moved to `kiwano-api` when the daemon started minting ids from it too
+// (a custom agent's id is derived from its label). Re-exported, not re-declared:
+// `vm::slug` is what every call site already names.
+pub use kiwano_api::ids::slug;
+// The minting rule travels with it: a caller that creates an agent decides the
+// agent's id, which is what makes a retried create idempotent (§6.1).
+pub use kiwano_api::ids::mint_agent_id;
 
 // ── the public surface, re-exported so every `vm::x` path still resolves ──
 

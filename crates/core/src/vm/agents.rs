@@ -2,9 +2,9 @@
 //! custom agents the user added.
 
 use crate::vm::catalog::load_catalog;
-use crate::vm::time::{rfc3339, unix_now};
-use crate::vm::{e2s, slug, Aux};
-use kiwanod::store::{Provider, Store, StrategyType};
+use crate::vm::{e2s, Aux};
+use kiwanod::api::agents as daemon;
+use kiwanod::store::{Provider, Store};
 use serde::{Deserialize, Serialize};
 
 pub const AGENTS: [(&str, &str); 26] = [
@@ -48,23 +48,10 @@ pub fn is_builtin_agent(id: &str) -> bool {
     AGENTS.iter().any(|(a, _)| *a == id)
 }
 
-/// A user-defined agent's view: a name for a route, the key its traffic is
-/// attributed by, and nothing else — there is no config file to report on.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct CustomAgentVm {
-    pub id: String,
-    pub label: String,
-    pub note: Option<String>,
-    /// Always present: the key is minted with the agent and deleted with it, so
-    /// unlike a built-in's (read out of its live config), this one cannot be
-    /// stale — the row *is* the truth here, and it is the same row the gateway
-    /// attributes by.
-    pub placeholder_key: Option<String>,
-    /// What this agent's clients speak, chosen when it was defined. `None` for
-    /// one defined before the field existed — "not said", which is why the UI
-    /// reads it as such rather than showing a protocol nobody picked.
-    pub protocol: Option<String>,
-}
+// Re-exported, not declared here: the daemon serves this type now, so it lives
+// where both sides can see it (`migrate.local.md` §10.6). The path
+// `crate::vm::CustomAgentVm` is unchanged on purpose.
+pub use kiwano_api::agents::CustomAgentVm;
 
 /// Every agent the UI should offer, built-ins first (registry order), then the
 /// user's own in the order they were created.
@@ -77,18 +64,6 @@ pub(crate) fn list_agents(store: &Store) -> Result<Vec<(String, String)>, String
         out.push((a.id, a.label));
     }
     Ok(out)
-}
-
-/// The id stem for a user-defined agent: the label's slug, or `custom` when the
-/// label has nothing slug-able in it (an all-CJK name). The check is on the
-/// label, not on `slug`'s output, so `slug`'s own empty-name fallback ("provider")
-/// cannot leak into an agent id.
-fn agent_id_stem(label: &str) -> String {
-    if label.chars().any(|c| c.is_ascii_alphanumeric()) {
-        slug(label)
-    } else {
-        "custom".to_string()
-    }
 }
 
 /// One prompt round trip against a provider, for the Apps screen's Test button.
@@ -194,64 +169,25 @@ fn test_verdict(
     }
 }
 
-/// Create a user-defined agent: a row, a placeholder key, and a `single`
-/// strategy — which is all an agent *is* to the gateway, whose route table is
-/// built from those tables and never from the registry.
+/// Create a user-defined agent — served by the daemon
+/// (`kiwanod::api::agents::create_custom_agent`).
 ///
-/// The id is derived from the label and never changes (bindings, strategies,
-/// keys and usage rows reference it); renaming moves the label only. A label the
-/// user repeats gets its own agent: the suffix is what makes that possible.
+/// This wrapper mints the id itself so the signature every existing caller knows
+/// stays put: it is the **intent** that mints, and this is a fresh intent. The
+/// idempotent path is the API's, where the caller sends the id it already minted
+/// (`migrate.local.md` §6.1).
 pub fn add_custom_agent(
     store: &Store,
     label: &str,
     note: Option<&str>,
     protocol: Option<&str>,
 ) -> Result<CustomAgentVm, String> {
-    let label = label.trim();
-    if label.is_empty() {
-        return Err("an agent needs a name".to_string());
-    }
-    let protocol = normalize_agent_protocol(protocol)?;
-    let id = format!(
-        "{}-{}",
-        agent_id_stem(label),
-        &uuid::Uuid::new_v4().simple().to_string()[..6]
-    );
-    let note = note.map(str::trim).filter(|n| !n.is_empty());
-    store
-        .insert_custom_agent(&kiwanod::store::CustomAgent {
-            id: id.clone(),
-            label: label.to_string(),
-            note: note.map(str::to_string),
-            protocol: protocol.clone(),
-            created_at: rfc3339(unix_now()),
-        })
-        .map_err(e2s)?;
-    // Its key, in the same shape a takeover mints — the gateway's attribution
-    // does not care where the row came from.
-    let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
-    let key = format!("kw-ag-{id}-{rand}");
-    store.upsert_placeholder_key(&key, &id).map_err(e2s)?;
-    // A route with no strategy still routes (the engine reads `single` for a
-    // missing row), but writing it here is what makes the agent's tab show the
-    // strategy it actually has rather than an implicit default.
-    store
-        .upsert_strategy(&id, StrategyType::Single, None)
-        .map_err(e2s)?;
-    Ok(CustomAgentVm {
-        id,
-        label: label.to_string(),
-        note: note.map(str::to_string),
-        protocol,
-        placeholder_key: Some(key),
-    })
+    let id = kiwano_api::ids::mint_agent_id(label);
+    daemon::create_custom_agent(store, &id, label, note, protocol).map_err(|e| e.to_string())
 }
 
-/// Rename a user-defined agent.
-///
-/// Only its label and note move: the id is what bindings, routes, keys and
-/// usage rows point at, so a rename must not touch it — the agent keeps its
-/// route and its history, and only the name its user reads changes.
+/// Rename a user-defined agent — served by the daemon. Its id, route and key are
+/// untouched: only the name its user reads changes.
 pub fn update_custom_agent(
     store: &Store,
     id: &str,
@@ -259,71 +195,14 @@ pub fn update_custom_agent(
     note: Option<&str>,
     protocol: Option<&str>,
 ) -> Result<CustomAgentVm, String> {
-    let label = label.trim();
-    if label.is_empty() {
-        return Err("an agent needs a name".to_string());
-    }
-    let note = note.map(str::trim).filter(|n| !n.is_empty());
-    let protocol = normalize_agent_protocol(protocol)?;
-    if !store
-        .update_custom_agent_label(id, label, note, protocol.as_deref())
-        .map_err(e2s)?
-    {
-        return Err(format!("no such custom agent: {id}"));
-    }
-    // The same shape `add_custom_agent` returns, key included: the dialog that
-    // shows an agent's settings reads it from here too.
-    let placeholder_key = store
-        .list_placeholder_keys()
-        .map_err(e2s)?
-        .into_iter()
-        .find(|k| k.agent == id)
-        .map(|k| k.key);
-    Ok(CustomAgentVm {
-        id: id.to_string(),
-        label: label.to_string(),
-        note: note.map(str::to_string),
-        protocol,
-        placeholder_key,
-    })
+    daemon::update_custom_agent(store, id, label, note, protocol).map_err(|e| e.to_string())
 }
 
-/// A protocol as it is stored: one of the three words, or None for "not said".
-///
-/// An unknown word is a refusal rather than a row — the field is a label the UI
-/// renders and the CLI prints, so a typo in the database would be a word no
-/// reader recognises. Empty trims to None: clearing the choice is how a user
-/// says they would rather not say.
-fn normalize_agent_protocol(protocol: Option<&str>) -> Result<Option<String>, String> {
-    match protocol.map(str::trim).filter(|p| !p.is_empty()) {
-        None => Ok(None),
-        Some(p) => match kiwanod::store::Protocol::parse_str(p) {
-            Some(parsed) => Ok(Some(parsed.as_str().to_string())),
-            None => Err(format!(
-                "unknown protocol: {p} — one of anthropic, openai, gemini"
-            )),
-        },
-    }
-}
-
-/// Delete a user-defined agent, and everything that was only about it: its
-/// bindings, its strategy, its key, its row. `usage` and `request_logs` are
-/// history and stay — the same line the provider deletion draws.
+/// Delete a user-defined agent along with its route and its key — served by the
+/// daemon. Its usage and request logs stay, so the Dashboard keeps accounting
+/// for what ran.
 pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), String> {
-    if store.get_custom_agent(id).map_err(e2s)?.is_none() {
-        return Err(format!("no such custom agent: {id}"));
-    }
-    for b in store.bindings_for_agent(id).map_err(e2s)? {
-        store.delete_binding(id, &b.provider_id).map_err(e2s)?;
-    }
-    store.delete_strategy(id).map_err(e2s)?;
-    for k in store.list_placeholder_keys().map_err(e2s)? {
-        if k.agent == id {
-            store.delete_placeholder_key(&k.key).map_err(e2s)?;
-        }
-    }
-    store.delete_custom_agent(id).map_err(e2s)?;
-    Ok(())
+    daemon::remove_custom_agent(store, id).map_err(|e| e.to_string())
 }
 
 /// The protocols each built-in agent's own clients speak, in the vocabulary

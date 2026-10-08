@@ -119,6 +119,11 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/agents/{target}/route/apply",
             post(apply_agent_route_route),
         )
+        .route("/custom-agents", post(create_custom_agent_route))
+        .route(
+            "/custom-agents/{id}",
+            put(update_custom_agent_route).delete(remove_custom_agent_route),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_admin_token,
@@ -533,12 +538,30 @@ async fn delete_provider_key(
 fn after_write(state: &GatewayState, result: Result<(), kiwano_api::error::ApiError>) -> Response {
     match result {
         Ok(()) => {
-            if let Err(e) = state.reload_routes() {
-                tracing::error!(error = %e, "route table reload failed after a write");
-            }
+            reload_after_write(state);
             Json(json!({ "ok": true })).into_response()
         }
         Err(e) => resource_error(e),
+    }
+}
+
+/// [`after_write`] for a write whose answer is the resource it produced.
+fn after_write_with<T: serde::Serialize>(
+    state: &GatewayState,
+    result: Result<T, kiwano_api::error::ApiError>,
+) -> Response {
+    match result {
+        Ok(value) => {
+            reload_after_write(state);
+            Json(value).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
+}
+
+fn reload_after_write(state: &GatewayState) {
+    if let Err(e) = state.reload_routes() {
+        tracing::error!(error = %e, "route table reload failed after a write");
     }
 }
 
@@ -673,6 +696,77 @@ async fn apply_agent_route_route(
     Json(body): Json<ApplyRouteBody>,
 ) -> Response {
     let result = crate::api::routes::apply_agent_route(&state.store, &target, &body.source);
+    after_write(&state, result)
+}
+
+// ── User-defined agents (`migrate.local.md` §7 batch 1) ──
+
+/// The body of a create. **The id is the caller's**: it is minted client-side
+/// (`kiwano_api::ids::mint_agent_id`) and is the identity of the operation, so a
+/// replayed request lands on the agent it already made instead of making a
+/// second one — the resolution §6.1 asked for on the one command whose id is
+/// random.
+#[derive(serde::Deserialize)]
+struct CreateAgentBody {
+    id: String,
+    label: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    protocol: Option<String>,
+}
+
+/// `POST /api/custom-agents` — define a user-defined agent: a row, a key and a
+/// default route. Idempotent on `id`.
+async fn create_custom_agent_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<CreateAgentBody>,
+) -> Response {
+    let result = crate::api::agents::create_custom_agent(
+        &state.store,
+        &body.id,
+        &body.label,
+        body.note.as_deref(),
+        body.protocol.as_deref(),
+    );
+    after_write_with(&state, result)
+}
+
+/// The body of a rename: the resulting state, which is what makes a `PUT` the
+/// right verb for it.
+#[derive(serde::Deserialize)]
+struct UpdateAgentBody {
+    label: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    protocol: Option<String>,
+}
+
+/// `PUT /api/custom-agents/{id}` — rename, re-note, re-protocol. The id is in
+/// the path because it is not what is changing.
+async fn update_custom_agent_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateAgentBody>,
+) -> Response {
+    let result = crate::api::agents::update_custom_agent(
+        &state.store,
+        &id,
+        &body.label,
+        body.note.as_deref(),
+        body.protocol.as_deref(),
+    );
+    after_write_with(&state, result)
+}
+
+/// `DELETE /api/custom-agents/{id}` — the agent, its route and its key. Its
+/// usage history stays: it is not the route that was deleted.
+async fn remove_custom_agent_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let result = crate::api::agents::remove_custom_agent(&state.store, &id);
     after_write(&state, result)
 }
 

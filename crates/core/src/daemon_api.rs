@@ -11,6 +11,7 @@
 //! ([`crate::sidecar::admin_get_json`]) and the endpoint the app and the CLI
 //! already resolve the same way.
 
+use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 
@@ -211,6 +212,79 @@ impl DaemonApi {
             &Body { source },
         ))
     }
+    // ── User-defined agents ──
+
+    /// Define a user-defined agent — `vm::add_custom_agent`.
+    ///
+    /// The **id is the caller's** (`kiwano_api::ids::mint_agent_id`): nothing
+    /// else in the request can identify the operation, since the agent's id
+    /// carries a random suffix, and an id the daemon has already seen is
+    /// answered with the agent that exists (`migrate.local.md` §6.1). Passing it
+    /// in is what lets a caller that retries hold the same id across attempts.
+    pub fn add_custom_agent(
+        &self,
+        id: &str,
+        label: &str,
+        note: Option<&str>,
+        protocol: Option<&str>,
+    ) -> Result<CustomAgentVm, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            id: &'a str,
+            label: &'a str,
+            note: Option<&'a str>,
+            protocol: Option<&'a str>,
+        }
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/custom-agents",
+            &Body {
+                id,
+                label,
+                note,
+                protocol,
+            },
+        )
+    }
+
+    /// Rename one, re-note it, re-protocol it — `vm::update_custom_agent`. A
+    /// `PUT`: the body is the resulting state, and the id is in the path because
+    /// it is the one field that does not change.
+    pub fn update_custom_agent(
+        &self,
+        id: &str,
+        label: &str,
+        note: Option<&str>,
+        protocol: Option<&str>,
+    ) -> Result<CustomAgentVm, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            label: &'a str,
+            note: Option<&'a str>,
+            protocol: Option<&'a str>,
+        }
+        sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/custom-agents/{id}"),
+            &Body {
+                label,
+                note,
+                protocol,
+            },
+        )
+    }
+
+    /// Delete an agent with its route and its key — `vm::remove_custom_agent`.
+    /// Its usage history stays.
+    pub fn remove_custom_agent(&self, id: &str) -> Result<(), String> {
+        wrote(sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/custom-agents/{id}"),
+        ))
+    }
 }
 
 /// A write whose answer carries nothing a caller needs: `admin_send` already
@@ -305,6 +379,60 @@ mod tests {
     /// still work against this daemon and would be wrong the moment a second
     /// implementation read it. So they are asserted here, at the seam where a
     /// mistake would be invisible.
+    /// The create carries the **id the caller minted** — the whole of §6.1's
+    /// idempotency for a command whose id is random. A client that let the
+    /// daemon mint it would have no way to identify a retry, so this asserts the
+    /// field is on the wire rather than that the call compiles.
+    #[test]
+    fn creating_an_agent_sends_the_id_the_caller_minted() {
+        let body = r#"{"id":"long-tasks-3f9a1c","label":"Long Tasks","note":null,"placeholder_key":"kw-ag-long-tasks-3f9a1c-ab12","protocol":null}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir, endpoint, handle) = stub(response);
+        let api = DaemonApi::with_token(endpoint, Some("tok-1".into()));
+
+        let created = api
+            .add_custom_agent("long-tasks-3f9a1c", "Long Tasks", None, None)
+            .unwrap();
+        assert_eq!(created.id, "long-tasks-3f9a1c");
+
+        let request = handle.join().unwrap();
+        assert!(
+            request.starts_with("POST /api/custom-agents HTTP/1.1"),
+            "{request}"
+        );
+        assert!(
+            request.contains(r#"{"id":"long-tasks-3f9a1c","label":"Long Tasks","#),
+            "{request}"
+        );
+
+        // And a rename is a PUT whose body is the resulting state: the id is in
+        // the path, because it is the one field that does not change.
+        let (_d2, e2, h2) = stub(response);
+        DaemonApi::with_token(e2, Some("tok-1".into()))
+            .update_custom_agent(
+                "long-tasks-3f9a1c",
+                "Nightly",
+                Some("moved"),
+                Some("gemini"),
+            )
+            .unwrap();
+        let request = h2.join().unwrap();
+        assert!(
+            request.starts_with("PUT /api/custom-agents/long-tasks-3f9a1c HTTP/1.1"),
+            "{request}"
+        );
+        assert!(
+            request.contains(r#"{"label":"Nightly","note":"moved","protocol":"gemini"}"#),
+            "{request}"
+        );
+    }
+
     #[test]
     fn the_route_writes_use_the_verbs_the_contract_names() {
         let ok: &'static str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\n\r\n{\"ok\":true}";

@@ -2502,6 +2502,7 @@ version = "0.2.12"
 dependencies = [
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

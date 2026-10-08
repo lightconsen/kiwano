@@ -158,7 +158,7 @@ pub struct Provider {
     /// added before the column existed — both price at the general rate.
     ///
     /// Kept apart from `id` on purpose: `vm::add_provider` names a row
-    /// `<slug>-<hex>`, so `Kimi (Moonshot)` is `kimi-moonshot-4f2a1c` while the
+    /// `<slug>-<hex>`, so `Kimi (Moonshot)` is `kimi--moonshot-4f2a1c` (punctuation runs are not collapsed: the space and the `(` each become a dash) while the
     /// catalog calls it `kimi`, and the price table is keyed by the latter.
     #[serde(default)]
     pub catalog_id: Option<String>,

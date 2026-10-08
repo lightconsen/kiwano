@@ -8,12 +8,10 @@
 //! used to end with is gone. A command that no longer touches the store also no
 //! longer takes `State<AppState>` — the signature says so.
 //!
-//! The three custom-agent commands still write directly and still reload; they
-//! are the other half of this module and move next.
+//! The whole module is served by the daemon now, so nothing here takes
+//! `State<AppState>` any more: a command that no longer touches the store says
+//! so in its signature.
 
-use tauri::State;
-
-use crate::state::{after_mutation, AppState};
 use kiwano_core::daemon_api::DaemonApi;
 use kiwano_core::vm;
 
@@ -77,46 +75,40 @@ pub fn remove_agent_binding(agent: String, provider_id: String) -> Result<(), St
 /// Define a user-defined agent: a named route with its own placeholder key.
 /// Nothing on disk changes — there is no config here to rewrite — so the only
 /// work is the row, the key and the default strategy.
+///
+/// **This command mints the id**, and that is what makes a retried create
+/// idempotent: nothing else in the request identifies the operation, since the
+/// id carries a random suffix, and the daemon answers an id it has already seen
+/// with the agent that exists (`migrate.local.md` §6.1). A label the user
+/// repeats is a fresh intent here, so it gets a fresh id — and therefore its own
+/// agent, which is the behaviour the Apps screen documents.
 #[tauri::command]
 pub fn add_custom_agent(
-    state: State<AppState>,
     label: String,
     note: Option<String>,
     protocol: Option<String>,
 ) -> Result<vm::CustomAgentVm, String> {
-    let created = vm::add_custom_agent(&state.store, &label, note.as_deref(), protocol.as_deref())?;
-    after_mutation(&state);
-    Ok(created)
+    let id = vm::mint_agent_id(&label);
+    DaemonApi::connect().add_custom_agent(&id, &label, note.as_deref(), protocol.as_deref())
 }
 
 /// Rename a user-defined agent. Its id, route and key are untouched — only the
 /// name its user reads changes.
 #[tauri::command]
 pub fn update_custom_agent(
-    state: State<AppState>,
     id: String,
     label: String,
     note: Option<String>,
     protocol: Option<String>,
 ) -> Result<vm::CustomAgentVm, String> {
-    let updated = vm::update_custom_agent(
-        &state.store,
-        &id,
-        &label,
-        note.as_deref(),
-        protocol.as_deref(),
-    )?;
-    after_mutation(&state);
-    Ok(updated)
+    DaemonApi::connect().update_custom_agent(&id, &label, note.as_deref(), protocol.as_deref())
 }
 
 /// Delete a user-defined agent along with its route and its key. Its usage and
 /// request logs stay, so the Dashboard keeps accounting for what ran.
 #[tauri::command]
-pub fn remove_custom_agent(state: State<AppState>, id: String) -> Result<(), String> {
-    vm::remove_custom_agent(&state.store, &id)?;
-    after_mutation(&state);
-    Ok(())
+pub fn remove_custom_agent(id: String) -> Result<(), String> {
+    DaemonApi::connect().remove_custom_agent(&id)
 }
 
 /// Copy another agent's whole route (strategy + ordered candidates) onto

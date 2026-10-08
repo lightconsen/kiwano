@@ -25,10 +25,15 @@
 //!   detect family, the updater, `open_url` / `open_log_folder`,
 //!   `verify_agent_dir`. Those describe *this machine*, the daemon will never
 //!   serve them, and moving them would suggest otherwise.
-//! - **Not here either**: the API's own envelopes (request wrappers, error
-//!   bodies, the version range). Those are the daemon's and the client's to
-//!   define together, and they do not exist yet — writing them now would be
+//! - **Not here either**: the rest of the API's own envelopes (request
+//!   wrappers, the version range). Those are the daemon's and the client's to
+//!   define together, and nothing needs them yet — writing them now would be
 //!   guessing at a shape nothing has needed.
+//!
+//! The **error** body was on that list until the first endpoint needed it
+//! (`error.rs`): the daemon has to pick an HTTP status, and it cannot pick one
+//! from a sentence. It is here now for the same reason the rest of the crate
+//! is — both sides read it, and neither may depend on the other.
 //!
 //! # The derives are deliberately less than complete
 //!
@@ -39,5 +44,6 @@
 //! was already awkward (a `Result<T, E>` whose `T` is not `Debug` cannot be
 //! unwrapped on the error side).
 
+pub mod error;
 pub mod keys;
 pub mod providers;

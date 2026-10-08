@@ -138,32 +138,20 @@ async fn require_admin_token(
 
 /// `GET /api/providers/{provider_id}/keys` — the provider's key pool, masked.
 ///
-/// Masked here rather than by the caller: the daemon holds the plaintext, and a
-/// response that carried it would put it on a channel that has no need for it
-/// (`kiwano_api::keys::mask_key` is the same function the app used to apply).
+/// Masked before it gets here rather than by the caller: the daemon holds the
+/// plaintext, and a response that carried it would put it on a channel that has
+/// no need for it. The masking is `crate::api::keys`'s — the same function
+/// `vm::list_api_keys` re-exports — so the app's direct path and this one cannot
+/// come to disagree about what a reader sees.
+///
+/// What is left here is transport: the status, and the envelope.
 async fn list_provider_keys(
     State(state): State<Arc<GatewayState>>,
     Path(provider_id): Path<String>,
 ) -> Response {
-    match state.store.list_api_keys(&provider_id) {
-        Ok(rows) => {
-            let keys: Vec<kiwano_api::keys::ApiKeyVm> = rows
-                .into_iter()
-                .map(|r| kiwano_api::keys::ApiKeyVm {
-                    id: r.id,
-                    masked: kiwano_api::keys::mask_key(&r.api_key),
-                    label: r.label,
-                    enabled: r.enabled,
-                    created_at: r.created_at,
-                })
-                .collect();
-            Json(keys).into_response()
-        }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "ok": false, "error": e.to_string() })),
-        )
-            .into_response(),
+    match crate::api::keys::list_api_keys(&state.store, &provider_id) {
+        Ok(keys) => Json(keys).into_response(),
+        Err(e) => resource_error(e),
     }
 }
 
@@ -442,12 +430,43 @@ async fn reload(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
     }
 }
 
+/// A resource failure as a response: the **kind** picks the status, the
+/// **message** is what a person reads.
+///
+/// One function rather than a match per handler, for the reason the token check
+/// is a layer rather than a line: thirty copies of a mapping is thirty chances
+/// for one of them to answer 500 where the contract says 404.
+///
+/// The body keeps the envelope the client already parses (`{"ok":false,
+/// "error":…}` — `sidecar::admin_send` reads `error`) and adds `kind` beside
+/// it. Nothing has to read the new field yet; it is there so a caller *can*
+/// tell "retry this" from "this will never work" without matching on prose.
+///
+/// [`ApiError`]: kiwano_api::error::ApiError
+fn resource_error(err: kiwano_api::error::ApiError) -> Response {
+    use kiwano_api::error::ApiErrorKind;
+    let status = match err.kind() {
+        ApiErrorKind::NotFound => StatusCode::NOT_FOUND,
+        ApiErrorKind::Invalid => StatusCode::BAD_REQUEST,
+        ApiErrorKind::Failed => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if status.is_server_error() {
+        // The caller gets the sentence; the operator gets it with the path.
+        tracing::error!(error = %err, "resource request failed");
+    }
+    (
+        status,
+        Json(json!({ "ok": false, "error": err.message(), "kind": err.kind() })),
+    )
+        .into_response()
+}
+
 /// `POST /api/providers/{provider_id}/keys` — add a rotation key.
 ///
-/// Idempotent on the key's value (the store decides that, so the `vm::` path
-/// agrees). A retry therefore answers with the row that is already there
-/// rather than a second one, which is what lets a client retry a write at all
-/// (`migrate.local.md` §6.1).
+/// Idempotent on the key's value, and that is the store's decision rather than
+/// this handler's, so the `vm::` path agrees with it. A retry therefore answers
+/// with the row that is already there rather than a second one, which is what
+/// lets a client retry a write at all (`migrate.local.md` §6.1).
 #[derive(serde::Deserialize)]
 struct AddKeyBody {
     api_key: String,
@@ -460,46 +479,14 @@ async fn add_provider_key(
     Path(provider_id): Path<String>,
     Json(body): Json<AddKeyBody>,
 ) -> Response {
-    let key = body.api_key.trim();
-    if key.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "ok": false, "error": "API key must not be empty" })),
-        )
-            .into_response();
-    }
-    if state
-        .store
-        .get_provider(&provider_id)
-        .ok()
-        .flatten()
-        .is_none()
-    {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "ok": false, "error": format!("provider `{provider_id}` not found") })),
-        )
-            .into_response();
-    }
-    let label = body
-        .label
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    match state.store.insert_api_key(&provider_id, key, label) {
-        Ok(id) => Json(kiwano_api::keys::ApiKeyVm {
-            id,
-            masked: kiwano_api::keys::mask_key(key),
-            label: label.map(String::from),
-            enabled: true,
-            created_at: crate::store::now_rfc3339(),
-        })
-        .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "ok": false, "error": e.to_string() })),
-        )
-            .into_response(),
+    match crate::api::keys::add_api_key(
+        &state.store,
+        &provider_id,
+        &body.api_key,
+        body.label.as_deref(),
+    ) {
+        Ok(key) => Json(key).into_response(),
+        Err(e) => resource_error(e),
     }
 }
 
@@ -509,13 +496,9 @@ async fn delete_provider_key(
     State(state): State<Arc<GatewayState>>,
     Path(id): Path<i64>,
 ) -> Response {
-    match state.store.delete_api_key(id) {
+    match crate::api::keys::delete_api_key(&state.store, id) {
         Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "ok": false, "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => resource_error(e),
     }
 }
 
@@ -688,6 +671,15 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    /// [`body_json`] for a response that is *supposed* to be a refusal: the
+    /// status is the caller's assertion to make, not this helper's.
+    async fn error_json(response: Response) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
     // ── the token itself ────────────────────────────────────────────────
 
     /// Minted on first use, then adopted: a restart must not rotate the secret
@@ -839,6 +831,61 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body_json(response).await.as_array().unwrap().len(), 1);
+    }
+
+    /// A refused write answers with the status its **kind** implies, and with
+    /// the sentence the `vm::` path produces — both halves matter.
+    ///
+    /// This is the test the first version of these endpoints could not have
+    /// passed honestly: it had no kind, so it re-queried the store to decide
+    /// between 400 and 404, which is a second place for the answer to live
+    /// (`migrate.local.md` §10.8). The `error` strings are asserted at their
+    /// endpoint because they are asserted at the `vm::` end too — the contract
+    /// fixtures freeze them, and two assertions that have to agree is what a
+    /// move of this kind is checked by.
+    #[tokio::test]
+    async fn a_refused_key_write_carries_a_status_and_a_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let post = |path: &'static str, body: serde_json::Value| {
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(ADMIN_TOKEN_HEADER, token.clone())
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            admin_plane_router(state.clone()).oneshot(request)
+        };
+
+        // Refused on the request's own terms: repeating it fails the same way,
+        // so a client should not retry it.
+        let response = post(
+            "/api/providers/p-ant/keys",
+            serde_json::json!({ "api_key": "   " }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = error_json(response).await;
+        assert_eq!(body["kind"], "invalid");
+        assert_eq!(body["error"], "API key must not be empty");
+
+        // The request was fine; the world was not what it assumed.
+        let response = post(
+            "/api/providers/no-such-provider/keys",
+            serde_json::json!({ "api_key": "sk-x" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = error_json(response).await;
+        assert_eq!(body["kind"], "not_found");
+        assert_eq!(body["error"], "provider `no-such-provider` not found");
     }
 
     /// A key that is not there to delete is `deleted: false`, not an error —

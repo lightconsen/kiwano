@@ -285,6 +285,35 @@ impl DaemonApi {
             &format!("/api/custom-agents/{id}"),
         ))
     }
+    // ── Provider writes ──
+
+    /// Switch a provider on or off — `vm::set_provider_enabled`.
+    pub fn set_provider_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body {
+            enabled: bool,
+        }
+        wrote(sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{id}/enabled"),
+            &Body { enabled },
+        ))
+    }
+
+    /// Delete a provider — `vm::delete_provider`. `false` when there was no such
+    /// row, which is what a retry finds and is not an error.
+    pub fn delete_provider(&self, id: &str) -> Result<bool, String> {
+        let deleted: serde_json::Value = sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{id}"),
+        )?;
+        Ok(deleted
+            .get("deleted")
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
 }
 
 /// A write whose answer carries nothing a caller needs: `admin_send` already

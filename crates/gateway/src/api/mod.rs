@@ -36,4 +36,5 @@
 
 pub mod agents;
 pub mod keys;
+pub mod providers;
 pub mod routes;

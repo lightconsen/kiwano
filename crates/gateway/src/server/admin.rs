@@ -119,6 +119,8 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/agents/{target}/route/apply",
             post(apply_agent_route_route),
         )
+        .route("/providers/{id}/enabled", put(set_provider_enabled_route))
+        .route("/providers/{id}", delete(delete_provider_route))
         .route("/custom-agents", post(create_custom_agent_route))
         .route(
             "/custom-agents/{id}",
@@ -768,6 +770,45 @@ async fn remove_custom_agent_route(
 ) -> Response {
     let result = crate::api::agents::remove_custom_agent(&state.store, &id);
     after_write(&state, result)
+}
+
+// ── Provider writes (`migrate.local.md` §7 batch 1) ──
+
+#[derive(serde::Deserialize)]
+struct EnabledBody {
+    enabled: bool,
+}
+
+/// `PUT /api/providers/{id}/enabled` — switch a provider on or off. A `PUT`
+/// because the body is the state the caller wants: sending it twice leaves the
+/// same row, and the function's own early return means it does not even touch
+/// `updated_at` the second time.
+async fn set_provider_enabled_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(body): Json<EnabledBody>,
+) -> Response {
+    let result = crate::api::providers::set_provider_enabled(&state.store, &id, body.enabled);
+    after_write(&state, result)
+}
+
+/// `DELETE /api/providers/{id}` — delete a provider, promoting the next
+/// candidate wherever it was some agent's primary.
+async fn delete_provider_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match crate::api::providers::delete_provider(&state.store, &id) {
+        Ok(deleted) => {
+            // Only a real deletion changes what routes; a retry of a delete that
+            // already happened has nothing to re-read.
+            if deleted {
+                reload_after_write(&state);
+            }
+            Json(json!({ "deleted": deleted })).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
 }
 
 #[cfg(test)]

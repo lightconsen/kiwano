@@ -13,6 +13,7 @@ use crate::vm::providers::{
 };
 use crate::vm::time::{rfc3339, unix_now};
 use crate::vm::{e2s, slug, Aux};
+use kiwanod::api::providers as daemon;
 use kiwanod::store::{Binding, Provider, Store, StrategyType};
 use serde::Deserialize;
 use std::path::Path;
@@ -378,17 +379,11 @@ pub fn add_provider(
 /// The old `enable_provider` did something else with the word: it promoted a
 /// provider to primary everywhere it was bound. `providers use --agent` is that
 /// operation, one agent at a time, and it keeps its name.
+///
+/// Served by the daemon (`kiwanod::api::providers::set_provider_enabled`); this
+/// wrapper keeps the signature every caller knows.
 pub fn set_provider_enabled(store: &Store, id: &str, enabled: bool) -> Result<(), String> {
-    let mut p = store
-        .get_provider(id)
-        .map_err(e2s)?
-        .ok_or_else(|| format!("provider not found: {id}"))?;
-    if p.enabled == enabled {
-        return Ok(());
-    }
-    p.enabled = enabled;
-    p.updated_at = rfc3339(unix_now());
-    store.update_provider(&p).map_err(e2s)
+    daemon::set_provider_enabled(store, id, enabled).map_err(|e| e.to_string())
 }
 
 /// Make `provider_id` the primary for `agent`: priority 0, every other binding
@@ -573,52 +568,11 @@ pub fn update_provider(
 
 /// Delete a provider. If it is some Agent's primary, the next-best candidate
 /// in that Agent's list is promoted automatically.
+///
+/// The body lives in `kiwanod::api::providers` — the daemon serves this
+/// (`migrate.local.md` §7 batch 1), and the promotion above is its work now.
 pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
-    let mut affected: Vec<String> = Vec::new();
-    for a in store.bound_agents().map_err(e2s)? {
-        if store.primary_provider_id(&a).map_err(e2s)?.as_deref() == Some(id) {
-            affected.push(a);
-        }
-    }
-    let deleted = store.delete_provider(id).map_err(e2s)?;
-    if !deleted {
-        return Ok(false);
-    }
-    for agent in affected {
-        let remaining = store.bindings_for_agent(&agent).map_err(e2s)?;
-        if let Some(next) = remaining.first() {
-            let next_id = next.provider_id.clone();
-            store
-                .upsert_binding(&Binding {
-                    agent: agent.clone(),
-                    provider_id: next_id.clone(),
-                    priority: 0,
-                    weight: 1,
-                    win_start: None,
-                    win_end: None,
-                    enabled: true,
-                })
-                .map_err(e2s)?;
-            for (i, b) in remaining
-                .iter()
-                .filter(|b| b.provider_id != next_id)
-                .enumerate()
-            {
-                store
-                    .upsert_binding(&Binding {
-                        agent: agent.clone(),
-                        provider_id: b.provider_id.clone(),
-                        priority: i as i64 + 1,
-                        weight: b.weight,
-                        win_start: b.win_start.clone(),
-                        win_end: b.win_end.clone(),
-                        enabled: b.enabled,
-                    })
-                    .map_err(e2s)?;
-            }
-        }
-    }
-    Ok(true)
+    daemon::delete_provider(store, id).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

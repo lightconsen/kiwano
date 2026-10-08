@@ -95,6 +95,27 @@ fn null_device() -> std::fs::File {
         .expect("the Windows null device opens")
 }
 
+/// The command that starts the sidecar, with the database it must open handed
+/// to it explicitly.
+///
+/// The daemon resolves `KIWANO_DB_PATH` itself, and so does this process — the
+/// resolver is shared precisely so the two agree (`kiwano_adapters::config::
+/// kiwano_db_path`). But "agree on a *rule*" is not "agree on a *value*": the
+/// fallback is `$HOME/.kiwano/kiwano.db`, and a child that re-resolves it can
+/// land somewhere else the moment its `$HOME` differs — which is exactly the
+/// position a service manager launches it from, and how one install ends up
+/// with two databases. Passing the resolved path removes the child's reason to
+/// look, so the sidecar case cannot diverge at all.
+///
+/// The port is deliberately *not* passed: it comes from the environment this
+/// process already inherited, so the child reads the same value by the same
+/// route. The database is the one that has a fallback to disagree about.
+fn spawn_command(bin: &Path, db: &Path) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.env("KIWANO_DB_PATH", db);
+    cmd
+}
+
 /// Spawn the sidecar; the child prints a `ready ...` line on stdout once
 /// both planes are bound. Callers need not wait — status pings handle it.
 pub fn spawn() -> std::io::Result<Child> {
@@ -104,7 +125,7 @@ pub fn spawn() -> std::io::Result<Child> {
              or set KIWANO_GATEWAY_BIN to a kiwanod build",
         ));
     };
-    let mut cmd = Command::new(&bin);
+    let mut cmd = spawn_command(&bin, &db_path(None).path);
     #[cfg(windows)]
     {
         // `kiwanod.exe` is a console program, and a console child whose parent
@@ -133,6 +154,9 @@ pub fn db_path(explicit: Option<&Path>) -> DbPath {
         Some(p) => DbPath {
             path: p.to_path_buf(),
             ignored: None,
+            // Named on the command line in this very invocation, so there is
+            // nothing ambient about it — the opposite of the fallback.
+            defaulted: false,
         },
         None => kiwano_adapters::config::kiwano_db_path(),
     }
@@ -1307,6 +1331,27 @@ mod tests {
         assert!(
             !ping_admin(&gw.endpoint),
             "and stopped serving the endpoint"
+        );
+    }
+
+    /// The sidecar is handed the *resolved* database path, not a rule it could
+    /// resolve differently. This is the difference between "both processes read
+    /// the same fallback" and "both processes open the same file": a child
+    /// launched from a service context has a different `$HOME`, and re-deriving
+    /// it there is how one install ends up with two databases.
+    #[test]
+    fn the_sidecar_is_told_which_database_to_open() {
+        let bin = Path::new("/nonexistent/kiwanod");
+        let db = Path::new("/tmp/example/kiwano.db");
+        let cmd = spawn_command(bin, db);
+        let envs: Vec<(String, Option<&std::ffi::OsStr>)> = cmd
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v))
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "KIWANO_DB_PATH" && *v == Some(db.as_os_str())),
+            "spawn_command must hand the child its database path: {envs:?}"
         );
     }
 }

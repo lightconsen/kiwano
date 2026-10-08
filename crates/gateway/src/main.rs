@@ -57,6 +57,19 @@ async fn main() {
     if let Some(note) = db.ignored_note() {
         tracing::warn!("{note}");
     }
+    // And the same for the case that has no message of its own: nothing named a
+    // database, so this one came from `$HOME`. A service manager gives its
+    // child a different `$HOME` from the user's session, which is how one
+    // install ends up with a gateway that is up, happy, and writing to a
+    // database nobody is reading (`migrate.local.md` §13.1). The sidecar path
+    // cannot reach here — the app hands its own resolved path down — so this
+    // line means a hand-written unit or a manual start.
+    if db.defaulted {
+        tracing::warn!(
+            db = %db_path.display(),
+            "$HOME resolved this database: nothing set KIWANO_DB_PATH. If this was started by a              service manager, its $HOME may not be the one your app is using — set              KIWANO_DB_PATH explicitly in the unit."
+        );
+    }
 
     // A service running as another user than the owner of the home it writes —
     // the takeovers it creates land in a `~/.claude` the agent's human cannot

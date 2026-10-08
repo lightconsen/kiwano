@@ -50,6 +50,14 @@ pub struct DbPath {
     /// Set when `KIWANO_DB_PATH` named something unusable — the value itself,
     /// trimmed, for the message.
     pub ignored: Option<String>,
+    /// True when nothing named this path and it came from the `$HOME` fallback.
+    ///
+    /// Worth carrying because of *who reads it*: a daemon launched by a service
+    /// manager has a different `$HOME` from the user's session, so a defaulted
+    /// path is a database the user's app may not be looking at — silently, and
+    /// with no error anywhere (`migrate.local.md` §13.1). A caller that can be
+    /// started that way logs it.
+    pub defaulted: bool,
 }
 
 impl DbPath {
@@ -70,14 +78,17 @@ fn kiwano_db_path_from(value: Option<&std::ffi::OsStr>) -> DbPath {
         EnvDir::Absolute(path) => DbPath {
             path,
             ignored: None,
+            defaulted: false,
         },
         EnvDir::Unset => DbPath {
             path: default(),
             ignored: None,
+            defaulted: true,
         },
         EnvDir::Relative(relative) => DbPath {
             path: default(),
             ignored: Some(relative),
+            defaulted: true,
         },
     }
 }
@@ -724,7 +735,10 @@ mod tests {
             kiwano_db_path_from(Some(OsStr::new(&absolute_arg))),
             DbPath {
                 path: absolute.clone(),
-                ignored: None
+                ignored: None,
+                // Named, so a daemon started from a different `$HOME` still
+                // opens this file rather than one of its own.
+                defaulted: false,
             }
         );
         // Unset, blank, and relative all land on the same default — the last
@@ -735,6 +749,12 @@ mod tests {
                 resolved.path.ends_with(".kiwano/kiwano.db"),
                 "{value:?} resolved to {}",
                 resolved.path.display()
+            );
+
+            assert!(
+                resolved.defaulted,
+                "{value:?} fell back to $HOME, which is what a service manager's child must be \
+                 told about"
             );
         }
 

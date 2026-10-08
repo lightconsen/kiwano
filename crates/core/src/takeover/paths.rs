@@ -718,6 +718,50 @@ mod tests {
 
     // ── where an agent keeps its files ──
 
+    /// Every agent the registry calls built-in reaches this module.
+    ///
+    /// The registry and this file are two hand-written lists of the same 26 ids,
+    /// and until now nothing joined them. `AGENTS` is pinned to its protocol
+    /// table and to the docs' takeover table, and each agent has tests of its
+    /// own paths here — but an agent could be added to the registry, the icon
+    /// list, the app's list and all four docs with **no arm in this match**, and
+    /// everything would pass: CI, the docs test, the app. The first thing to
+    /// notice would be a user pressing Takeover, on the platform where a list
+    /// that is right 26 times is still wrong. This codebase has watched five
+    /// parallel tables drift before (the registry test's own comment counts
+    /// them), so the pairing is asserted rather than trusted.
+    ///
+    /// Asserted as "not *unknown*" rather than as "resolves": a machine can
+    /// legitimately refuse, and so can a config — `claude-desktop` is macOS-only,
+    /// `dsh` refuses a tree that still has only the pre-0.1.5 config, `hanaagent`
+    /// one with no catalog. Those refusals are decisions taken *about* an agent,
+    /// which is the property under test. "unknown agent" is the absence of one.
+    #[test]
+    fn every_built_in_agent_has_a_takeover_path_or_a_named_refusal() {
+        let (_tmp, home) = temp_home();
+        let mut unrecognised = Vec::new();
+        for (id, label) in crate::vm::agents::AGENTS {
+            match takeover_paths(id, &home, &no_vars()) {
+                Ok(paths) => assert!(
+                    !paths.is_empty(),
+                    "{id} ({label}) is in the registry and resolved to no files at all — a \
+                     takeover would report success and rewrite nothing"
+                ),
+                Err(e) if e.contains("unknown agent") => {
+                    unrecognised.push(format!("{id} ({label})"))
+                }
+                Err(_) => {}
+            }
+        }
+        assert!(
+            unrecognised.is_empty(),
+            "the registry calls these agents built-in, but this module does not know them, so \
+             Takeover would fail at the last step: {}. Add their paths here (and their arm in \
+             `AGENT_PROTOCOLS` / the docs table, which the registry's own tests enforce).",
+            unrecognised.join(", ")
+        );
+    }
+
     /// The map the caller passes *is* the environment: nothing in this module
     /// reads this process's own, so a variable exported outside the map cannot
     /// move a path — which is what keeps a takeover reproducible, and what kept a

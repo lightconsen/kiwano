@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 27;
+pub const SCHEMA_VERSION: i32 = 28;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -701,6 +701,29 @@ ALTER TABLE request_logs ADD COLUMN request_notes TEXT;
 /// with `least-busy` added to the accepted set. Rows carry over; the table
 /// has no foreign keys pointing at it, but the pragma guard follows the
 /// rebuild pattern [`MIGRATION_V23`] established for the same maneuver.
+/// v28: the Hub caches become the daemon's tables.
+///
+/// They already exist on every install — the app's `Aux` made them — so this is
+/// `IF NOT EXISTS`, with the same columns, and changes no data. What it changes
+/// is who *declares* the schema: the daemon serves `list_catalog` and infers a
+/// provider's Hub entry in `add_provider`, so it is the side that has to be able
+/// to name these tables (`store::hub`). `migrate.local.md` §9-B: ownership
+/// decides, not convenience.
+const MIGRATION_V28: &str = r#"
+CREATE TABLE IF NOT EXISTS hub_cache (
+    id        INTEGER PRIMARY KEY CHECK (id = 1),
+    payload   TEXT NOT NULL,
+    synced_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hub_models_cache (
+    id        INTEGER PRIMARY KEY CHECK (id = 1),
+    version   INTEGER NOT NULL,
+    sha256    TEXT NOT NULL,
+    payload   TEXT NOT NULL,
+    synced_at TEXT NOT NULL
+);
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -841,6 +864,9 @@ impl Store {
         Self::apply_migrations_v16_through_v26(conn, version)?;
         if version < 27 {
             conn.execute_batch(MIGRATION_V27)?;
+        }
+        if version < 28 {
+            conn.execute_batch(MIGRATION_V28)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

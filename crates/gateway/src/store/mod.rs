@@ -30,6 +30,7 @@ use std::sync::Mutex;
 pub mod agents;
 pub mod config;
 pub mod health;
+pub mod hub;
 pub mod keys;
 pub mod logs;
 pub mod metrics;

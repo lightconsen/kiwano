@@ -10,6 +10,7 @@ import {
 import { api } from "./api/client";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { CredentialBanner } from "./components/CredentialBanner";
+import { GatewayDbBanner } from "./components/GatewayDbBanner";
 import { applyTheme } from "./lib/theme";
 import { ReloadRegistryProvider, useReloadRegistry } from "./lib/reload";
 import { resolveLocale, setLocale, useLocale, useT, type KeyPath, type Messages } from "./i18n";
@@ -381,6 +382,7 @@ export default function App() {
 
       <UpdateBanner />
       <CredentialBanner />
+      <GatewayDbBanner />
 
       {/* overscroll-none: this is the app's only scroll region, and once it
           hits its end WebKit hands the remaining scroll to the document, which

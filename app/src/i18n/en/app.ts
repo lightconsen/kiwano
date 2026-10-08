@@ -56,6 +56,8 @@ export const app = {
   // Credential-watch banner (under the nav; the finding's own note line
   // carries the rule names, e.g. "dlp: github-token ×1")
   credentialBannerTitle: "An API key or private key left the machine in a recent request.",
+  dbMismatch:
+    "The gateway is running against a different database than this app. Everything here describes a store it is not filling — restart it with KIWANO_DB_PATH set to this app's database.",
   credentialBannerCta: "View the request",
   credentialBannerDismiss: "Dismiss",
 };

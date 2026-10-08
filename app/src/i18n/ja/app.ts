@@ -44,6 +44,8 @@ export const app = {
 
   // Credential-watch banner
   credentialBannerTitle: "最近のリクエストで API キーまたは秘密キーが本機の外に送信されました。",
+  dbMismatch:
+    "ゲートウェイはこのアプリが読んでいるのとは別のデータベースに書き込んでいます。ここに表示される数字は、ゲートウェイが書き込んでいないデータベースのものです — KIWANO_DB_PATH をこのアプリのデータベースに設定して再起動してください。",
   credentialBannerCta: "リクエストを表示",
   credentialBannerDismiss: "閉じる",
 };

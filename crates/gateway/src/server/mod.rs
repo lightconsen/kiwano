@@ -79,6 +79,9 @@ pub struct GatewayState {
     limits: RwLock<Arc<crate::limits::LimitState>>,
     pub started_at: Instant,
     pub version: &'static str,
+    /// This install's identity — the same string in the database the gateway
+    /// opened and in the one the app did, unless they are not the same file.
+    pub install_id: String,
     /// Optional bearer token guarding `/metrics` (KIW-PRIV-001). Set by the
     /// daemon from `KIWANO_METRICS_TOKEN`. Absent, `/metrics` stays open to any
     /// loopback caller but serves per-agent labels redacted; configured, only a
@@ -192,6 +195,11 @@ impl GatewayState {
         // answers. A store that cannot hold it is a gateway that cannot
         // enforce anything — the same class of failure as the route table.
         admin::ensure_admin_token(&store)?;
+        // This install's identity, minted beside the token and for a related
+        // reason: an app that opens one database while the gateway writes to
+        // another has no error and no symptom it can name (`migrate.local.md`
+        // §13.1). Comparing identities over `/status` is how it finds out.
+        let install_id = store.ensure_install_id()?;
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let (usage_ticks, _) = tokio::sync::broadcast::channel(USAGE_TICK_BACKLOG);
         Ok(GatewayState {
@@ -210,6 +218,7 @@ impl GatewayState {
             limits: RwLock::new(Arc::new(limits)),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
+            install_id,
             metrics_token: None,
             shutdown,
             usage_ticks,

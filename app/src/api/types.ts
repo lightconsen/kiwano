@@ -693,6 +693,9 @@ export interface HubSyncReport {
 export interface GatewayStatus {
   running: boolean;
   port: number;
+  /** The gateway is up and writing to a different database than this app reads.
+   *  Nothing else reports it: the split has no error, only symptoms. */
+  db_mismatch: boolean;
   /** Providers the gateway is refusing to route, with its reason. The gateway
    *  decides this, so the card reads it rather than working out its own. */
   blocked: { id: string; reason: string }[];

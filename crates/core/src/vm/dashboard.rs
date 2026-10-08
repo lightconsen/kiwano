@@ -105,6 +105,11 @@ pub struct GatewayStatusVm {
     /// there, and a card that worked out its own answer could disagree with the
     /// process actually turning requests away.
     pub blocked: Vec<BlockedProviderVm>,
+    /// The gateway is up and writing to a *different* database than this app
+    /// reads — so every number in this window is about a store the gateway is
+    /// not filling. No error reports this on its own; the identity comparison
+    /// does (see `crate::sidecar::database_agreement`).
+    pub db_mismatch: bool,
 }
 
 #[derive(Serialize)]

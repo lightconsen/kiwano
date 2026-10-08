@@ -37,6 +37,8 @@ export const app = {
   },
 
   credentialBannerTitle: "最近的请求中有 API key 或私钥离开了本机。",
+  dbMismatch:
+    "网关正在写另一个数据库，不是本 app 读的这个。界面上的数字都来自一个它没有在写入的库 —— 请用 KIWANO_DB_PATH 指向本 app 的数据库后重启它。",
   credentialBannerCta: "查看该请求",
   credentialBannerDismiss: "关闭",
 };

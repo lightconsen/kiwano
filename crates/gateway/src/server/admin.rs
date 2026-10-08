@@ -282,6 +282,9 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         return Json(liveness).into_response();
     }
 
+    // Past the token check, so only a caller holding the admin token sees it.
+    // The identity is what an app compares against its own database to notice
+    // that the gateway is writing somewhere else.
     let metrics = match state.store.metrics() {
         Ok(m) => m,
         Err(e) => {
@@ -332,6 +335,10 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         "name": "kiwanod",
         "version": state.version,
         "uptime_secs": state.started_at.elapsed().as_secs(),
+        // Which database this process opened. A client that has its own open
+        // compares the two — the only way to notice the split described in
+        // `migrate.local.md` §13.1 from the outside.
+        "install_id": state.install_id,
         "providers": metrics.providers,
         "bindings": metrics.bindings,
         "placeholder_keys": metrics.placeholder_keys,

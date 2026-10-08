@@ -197,10 +197,24 @@ pub fn get_gateway_status(state: State<AppState>) -> vm::GatewayStatusVm {
                 .collect()
         })
         .unwrap_or_default();
+    // Whether the gateway answering is on the database this app has open. Read
+    // here rather than cached: the answer changes when a daemon is restarted
+    // against another file, and this command is already the one that asks.
+    let ours = state.store.gateway_setting("gateway.install_id");
+    let db_mismatch = match report.as_ref() {
+        // No gateway answering is not a mismatch — that is the `running: false`
+        // this same value reports.
+        None => false,
+        Some(status) => {
+            sidecar::database_agreement(status, ours.as_deref())
+                == sidecar::DatabaseAgreement::Differs
+        }
+    };
     vm::GatewayStatusVm {
         running: report.is_some(),
         port: state.data_port,
         blocked,
+        db_mismatch,
     }
 }
 

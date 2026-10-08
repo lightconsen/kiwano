@@ -28,6 +28,10 @@ export const providersApi: Pick<
     return {
       running: true,
       port: 8317,
+      // The dev mock has no gateway and no second database, so the state this
+      // flag exists for cannot arise here. Reachable on purpose in `pnpm dev`
+      // by flipping this to `true` — the banner is otherwise unreviewable.
+      db_mismatch: false,
       blocked: MATRIX.filter((m) => m.blocked).map((m) => ({ id: m.id, reason: m.blocked! })),
     };
   },

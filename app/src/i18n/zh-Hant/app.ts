@@ -37,6 +37,8 @@ export const app = {
   },
 
   credentialBannerTitle: "最近的請求中有 API 金鑰或私密金鑰離開了本機。",
+  dbMismatch:
+    "閘道正在寫另一個資料庫，不是本 app 讀的這一個。畫面上的數字都來自一個它沒有在寫入的資料庫 —— 請用 KIWANO_DB_PATH 指向本 app 的資料庫後重新啟動它。",
   credentialBannerCta: "查看該請求",
   credentialBannerDismiss: "關閉",
 };

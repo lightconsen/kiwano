@@ -39,6 +39,49 @@ impl Store {
         .flatten()
     }
 
+    /// This install's identity, minting one if the database has none.
+    ///
+    /// Idempotent by design: every start reads the same row back, so the value
+    /// means "this database", not "this process". That is the whole point — a
+    /// second value is how two databases are told apart.
+    pub fn ensure_install_id(&self) -> Result<String> {
+        const KEY: &str = "gateway.install_id";
+        if let Some(existing) = self.gateway_setting(KEY) {
+            return Ok(existing);
+        }
+        let minted = uuid::Uuid::new_v4().to_string();
+        self.set_gateway_setting(KEY, &minted)?;
+        Ok(minted)
+    }
+
+    /// One of the gateway's own keys. `gateway_settings` is the daemon's KV —
+    /// the log capture, the compat shim and the stream timeouts live there as
+    /// JSON blobs — and this is the plain (key, value) pair for a value that is
+    /// not a blob.
+    pub fn gateway_setting(&self, key: &str) -> Option<String> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .query_row(
+                "SELECT value FROM gateway_settings WHERE key = ?1",
+                params![key],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn set_gateway_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO gateway_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn set_app_setting(&self, key: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

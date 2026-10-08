@@ -358,6 +358,36 @@ fn endpoint_http(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
     Some(line)
 }
 
+/// Whether the gateway answering is on the database *this* process reads.
+///
+/// There is no error for the case this catches: a daemon started by a service
+/// manager resolves `$HOME/.kiwano/kiwano.db` against *its* `$HOME`, so it can
+/// come up healthy, answer `/status`, route requests, and be writing to a
+/// database nobody is looking at (`migrate.local.md` §13.1). The identity in
+/// `/status` is the one thing a client can compare from the outside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseAgreement {
+    /// Same database: the two ids are the same string.
+    Agrees,
+    /// Different databases. `ours` is `None` when this side has never seen an
+    /// identity at all — which is itself the mismatch: the gateway mints one in
+    /// whichever database it opens, so a database without one is not that one.
+    Differs,
+    /// The gateway did not report an identity — an older build, which predates
+    /// this. Unknown rather than agreeing: a check that passes when it could not
+    /// run is the state this whole comparison exists to avoid.
+    Unknown,
+}
+
+/// Compare the identity in a `/status` report against this side's own row.
+pub fn database_agreement(status: &serde_json::Value, ours: Option<&str>) -> DatabaseAgreement {
+    match status.get("install_id").and_then(|v| v.as_str()) {
+        None => DatabaseAgreement::Unknown,
+        Some(theirs) if ours == Some(theirs) => DatabaseAgreement::Agrees,
+        Some(_) => DatabaseAgreement::Differs,
+    }
+}
+
 /// The gateway's own `/status` report, off the admin endpoint. None when it is
 /// not answering, or says something we cannot read — the caller then shows less,
 /// never a guess.
@@ -1352,6 +1382,24 @@ mod tests {
             envs.iter()
                 .any(|(k, v)| k == "KIWANO_DB_PATH" && *v == Some(db.as_os_str())),
             "spawn_command must hand the child its database path: {envs:?}"
+        );
+    }
+
+    /// The three answers, including the one that is easy to get wrong: an
+    /// identity this side has never seen is a *mismatch*, not an unknown —
+    /// the gateway mints its id in whichever database it opened.
+    #[test]
+    fn the_database_identity_comparison_has_three_answers() {
+        use DatabaseAgreement::{Agrees, Differs, Unknown};
+        let with_id = |id: &str| serde_json::json!({ "ok": true, "install_id": id });
+
+        assert_eq!(database_agreement(&with_id("abc"), Some("abc")), Agrees);
+        assert_eq!(database_agreement(&with_id("abc"), Some("xyz")), Differs);
+        assert_eq!(database_agreement(&with_id("abc"), None), Differs);
+        // An older gateway reports no identity: unknown, never "fine".
+        assert_eq!(
+            database_agreement(&serde_json::json!({"ok": true}), Some("abc")),
+            Unknown
         );
     }
 }

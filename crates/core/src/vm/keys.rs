@@ -3,22 +3,14 @@
 use crate::vm::e2s;
 use crate::vm::time::{rfc3339, unix_now};
 use kiwanod::store::Store;
-use serde::Serialize;
 
 // ── Multi-key rotation (spec §4.1 P1: auto-rotate multiple API keys per provider) ──
 
-#[derive(Serialize)]
-pub struct ApiKeyVm {
-    pub id: i64,
-    /// Masked for display — never the key itself. The UI only ever needs to
-    /// tell two entries apart, and every copy of the plaintext we do not hand
-    /// out is one less copy sitting in a webview heap.
-    pub masked: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    pub enabled: bool,
-    pub created_at: String,
-}
+// Re-exported, not declared here: the wire types moved to `kiwano-api`, which
+// the daemon can depend on and `kiwano-core` cannot be reached from
+// (`migrate.local.md` §10.5). The path `crate::vm::keys::ApiKeyVm` is unchanged
+// on purpose.
+pub use kiwano_api::keys::ApiKeyVm;
 
 /// Display form of a key: a recognisable head and tail, never a usable secret.
 ///

@@ -2497,6 +2497,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kiwano-api"
+version = "0.2.12"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kiwano-app"
 version = "0.2.12"
 dependencies = [
@@ -2522,6 +2530,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "kiwano-adapters",
+ "kiwano-api",
  "kiwanod",
  "libc",
  "reqwest",

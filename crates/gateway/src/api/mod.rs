@@ -35,3 +35,4 @@
 //! [`ApiError`]: kiwano_api::error::ApiError
 
 pub mod keys;
+pub mod routes;

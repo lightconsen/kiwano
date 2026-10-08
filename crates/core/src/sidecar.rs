@@ -433,6 +433,32 @@ pub fn admin_post_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
     admin_send(endpoint, token, "POST", path, Some(payload))
 }
 
+/// [`admin_send`] for a replacement: the body *is* the resulting state, so
+/// sending it twice leaves the same thing behind. The transport is a POST's —
+/// the verb is a promise, and the caller is the one making it.
+pub fn admin_put_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
+    let payload = serde_json::to_string(body).map_err(|e| format!("cannot encode request: {e}"))?;
+    admin_send(endpoint, token, "PUT", path, Some(payload))
+}
+
+/// [`admin_send`] for a partial update: the fields present are the ones that
+/// change and an absent one means "leave it alone" — which is what a `PUT`
+/// cannot express, since it has no way to tell "unset" from "not mentioned".
+pub fn admin_patch_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
+    let payload = serde_json::to_string(body).map_err(|e| format!("cannot encode request: {e}"))?;
+    admin_send(endpoint, token, "PATCH", path, Some(payload))
+}
+
 /// [`admin_send`] for a deletion. No body: the path names the row.
 pub fn admin_delete_json<T: serde::de::DeserializeOwned>(
     endpoint: &AdminEndpoint,

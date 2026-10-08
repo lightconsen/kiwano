@@ -12,6 +12,7 @@
 //! already resolve the same way.
 
 use kiwano_api::keys::ApiKeyVm;
+use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 
 use crate::sidecar::{self, AdminEndpoint};
 
@@ -83,6 +84,140 @@ impl DaemonApi {
             .and_then(|d| d.as_bool())
             .unwrap_or(false))
     }
+
+    // ── Agent routes and bindings ──
+
+    /// Every agent's route, its ordered candidates and its ceilings —
+    /// `vm::build_agent_routes`.
+    pub fn list_agent_routes(&self) -> Result<Vec<AgentRouteVm>, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/agent-routes")
+    }
+
+    /// Set an agent's strategy, and the JSON payload some of them carry —
+    /// `vm::set_agent_strategy`.
+    pub fn set_agent_strategy(
+        &self,
+        agent: &str,
+        strategy: &str,
+        config: Option<&str>,
+    ) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            strategy: &'a str,
+            config: Option<&'a str>,
+        }
+        wrote(sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/strategy"),
+            &Body { strategy, config },
+        ))
+    }
+
+    /// Replace an agent's whole ceiling set — `vm::set_agent_limits`. A `PUT`:
+    /// the array *is* the resulting set, and an empty one clears it.
+    pub fn set_agent_limits(&self, agent: &str, limits: &[AgentLimitVm]) -> Result<(), String> {
+        wrote(sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/limits"),
+            &limits,
+        ))
+    }
+
+    /// Rewrite the candidate order — `vm::reorder_agent_bindings`.
+    pub fn reorder_agent_bindings(
+        &self,
+        agent: &str,
+        provider_ids: &[String],
+    ) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            provider_ids: &'a [String],
+        }
+        wrote(sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/bindings"),
+            &Body { provider_ids },
+        ))
+    }
+
+    /// Patch one binding's weight and time window — `vm::update_agent_binding`.
+    /// A `PATCH`: a field left out keeps its value, which is what the screen's
+    /// half-filled forms rely on.
+    pub fn update_agent_binding(
+        &self,
+        agent: &str,
+        provider_id: &str,
+        weight: Option<i64>,
+        win_start: Option<&str>,
+        win_end: Option<&str>,
+    ) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            weight: Option<i64>,
+            win_start: Option<&'a str>,
+            win_end: Option<&'a str>,
+        }
+        wrote(sidecar::admin_patch_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/bindings/{provider_id}"),
+            &Body {
+                weight,
+                win_start,
+                win_end,
+            },
+        ))
+    }
+
+    /// Bind a provider to an agent — `vm::add_agent_binding`. A no-op when it
+    /// is already bound, so a retry cannot reorder the queue (`§6.1`).
+    pub fn add_agent_binding(&self, agent: &str, provider_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            provider_id: &'a str,
+        }
+        wrote(sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/bindings"),
+            &Body { provider_id },
+        ))
+    }
+
+    /// Unbind one candidate — `vm::remove_agent_binding`. Unlike the key pool,
+    /// removing what is not bound is an error; the daemon decides that, and the
+    /// message travels back unchanged.
+    pub fn remove_agent_binding(&self, agent: &str, provider_id: &str) -> Result<(), String> {
+        wrote(sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/bindings/{provider_id}"),
+        ))
+    }
+
+    /// Copy one agent's route onto another — `vm::apply_agent_route`.
+    pub fn apply_agent_route(&self, target: &str, source: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            source: &'a str,
+        }
+        wrote(sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{target}/route/apply"),
+            &Body { source },
+        ))
+    }
+}
+
+/// A write whose answer carries nothing a caller needs: `admin_send` already
+/// turned a refusal into the `String` beside it, and the `{"ok":true}` body is
+/// the convention, not information.
+fn wrote(result: Result<serde_json::Value, String>) -> Result<(), String> {
+    result.map(|_| ())
 }
 
 #[cfg(test)]
@@ -161,6 +296,77 @@ mod tests {
 
     /// The write half: the body is JSON, the content type says so, and a
     /// deletion uses the verb that names the row rather than a body.
+    /// The verbs the route commands use, on the wire.
+    ///
+    /// Three of these are new to the client (`PUT`, `PATCH`, and a `POST` whose
+    /// body carries an optional field), and a verb is not decoration: `PUT`
+    /// claims the body is the resulting state, `PATCH` claims an absent field
+    /// means "leave it alone". A transport that quietly sent POST for both would
+    /// still work against this daemon and would be wrong the moment a second
+    /// implementation read it. So they are asserted here, at the seam where a
+    /// mistake would be invisible.
+    #[test]
+    fn the_route_writes_use_the_verbs_the_contract_names() {
+        let ok: &'static str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\n\r\n{\"ok\":true}";
+
+        // PUT: the ceiling set is the whole state.
+        let (_d1, e1, h1) = stub(ok);
+        DaemonApi::with_token(e1, Some("tok-1".into()))
+            .set_agent_limits(
+                "claude",
+                &[kiwano_api::routes::AgentLimitVm {
+                    period: "day".into(),
+                    period_limit: 100.0,
+                    limit_unit: None,
+                }],
+            )
+            .unwrap();
+        let request = h1.join().unwrap();
+        assert!(
+            request.starts_with("PUT /api/agents/claude/limits HTTP/1.1"),
+            "{request}"
+        );
+        assert!(
+            request.contains(r#"[{"period":"day","period_limit":100.0,"limit_unit":null}]"#),
+            "{request}"
+        );
+
+        // PATCH: an omitted field means "leave it alone", so it must not be
+        // spelled as a null the far end would write.
+        let (_d2, e2, h2) = stub(ok);
+        DaemonApi::with_token(e2, Some("tok-1".into()))
+            .update_agent_binding("claude", "p-ant", Some(7), None, None)
+            .unwrap();
+        let request = h2.join().unwrap();
+        assert!(
+            request.starts_with("PATCH /api/agents/claude/bindings/p-ant HTTP/1.1"),
+            "{request}"
+        );
+        assert!(request.contains(r#""weight":7"#), "{request}");
+
+        // DELETE: the path names the binding, so there is no body to send.
+        let (_d3, e3, h3) = stub(ok);
+        DaemonApi::with_token(e3, Some("tok-1".into()))
+            .remove_agent_binding("claude", "p-ant")
+            .unwrap();
+        let request = h3.join().unwrap();
+        assert!(
+            request.starts_with("DELETE /api/agents/claude/bindings/p-ant HTTP/1.1"),
+            "{request}"
+        );
+        assert!(!request.contains("Content-Type"), "{request}");
+
+        // And a refusal keeps the daemon's own sentence, not a status code
+        // retyped here — the app shows that string.
+        let refusal: &'static str = "HTTP/1.1 404 Not Found\r\ncontent-type: application/json\r\ncontent-length: 79\r\n\r\n{\"ok\":false,\"error\":\"provider ghost is not bound to claude\",\"kind\":\"not_found\"}";
+        let (_d4, e4, _h4) = stub(refusal);
+        let err = DaemonApi::with_token(e4, Some("tok-1".into()))
+            .remove_agent_binding("claude", "ghost")
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err, "provider ghost is not bound to claude");
+    }
+
     #[test]
     fn writes_send_json_and_the_right_verb() {
         let body = r#"{"id":7,"masked":"…abcd","label":null,"enabled":true,"created_at":"2026-01-01T00:00:00Z"}"#;

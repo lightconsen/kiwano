@@ -76,7 +76,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
@@ -104,6 +104,21 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             get(list_provider_keys).post(add_provider_key),
         )
         .route("/keys/{id}", delete(delete_provider_key))
+        .route("/agent-routes", get(list_agent_routes))
+        .route("/agents/{agent}/strategy", post(set_agent_strategy_route))
+        .route("/agents/{agent}/limits", put(set_agent_limits_route))
+        .route(
+            "/agents/{agent}/bindings",
+            post(add_agent_binding_route).put(reorder_agent_bindings_route),
+        )
+        .route(
+            "/agents/{agent}/bindings/{provider_id}",
+            patch(update_agent_binding_route).delete(remove_agent_binding_route),
+        )
+        .route(
+            "/agents/{target}/route/apply",
+            post(apply_agent_route_route),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_admin_token,
@@ -500,6 +515,165 @@ async fn delete_provider_key(
         Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
         Err(e) => resource_error(e),
     }
+}
+
+// ── Agent routes and bindings (`migrate.local.md` §7 batch 1) ──
+
+/// Re-read the route table after a write, then answer.
+///
+/// This is what the app did for the daemon before the write moved here: every
+/// mutation ended with a `POST /reload`, because the process doing the writing
+/// was not the one holding the table. Now it is the same process, so it
+/// invalidates its own copy — one fewer round trip, and one fewer thing a
+/// caller can forget to do.
+///
+/// A failed reload does **not** fail the request: the row is committed, and
+/// answering 500 would report a problem the caller has no way to act on. The
+/// operator gets the log line instead.
+fn after_write(state: &GatewayState, result: Result<(), kiwano_api::error::ApiError>) -> Response {
+    match result {
+        Ok(()) => {
+            if let Err(e) = state.reload_routes() {
+                tracing::error!(error = %e, "route table reload failed after a write");
+            }
+            Json(json!({ "ok": true })).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/agent-routes` — one row per agent that has bindings.
+async fn list_agent_routes(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::routes::build_agent_routes(&state.store) {
+        Ok(routes) => Json(routes).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct StrategyBody {
+    strategy: String,
+    /// Strategy JSON payload (quota: `{"limit","unit"}`); absent otherwise.
+    #[serde(default)]
+    config: Option<String>,
+}
+
+/// `POST /api/agents/{agent}/strategy` — set an agent's strategy, and its
+/// optional payload.
+async fn set_agent_strategy_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+    Json(body): Json<StrategyBody>,
+) -> Response {
+    let result = crate::api::routes::set_agent_strategy(
+        &state.store,
+        &agent,
+        &body.strategy,
+        body.config.as_deref(),
+    );
+    after_write(&state, result)
+}
+
+/// `PUT /api/agents/{agent}/limits` — the agent's whole ceiling set. An empty
+/// array clears it, which is how the screen says "no limit".
+async fn set_agent_limits_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+    Json(limits): Json<Vec<kiwano_api::routes::AgentLimitVm>>,
+) -> Response {
+    let result = crate::api::routes::set_agent_limits(&state.store, &agent, limits);
+    after_write(&state, result)
+}
+
+#[derive(serde::Deserialize)]
+struct BindBody {
+    provider_id: String,
+}
+
+/// `POST /api/agents/{agent}/bindings` — add a candidate at the queue tail.
+/// Binding a provider that is already bound is a no-op, so a retry is safe.
+async fn add_agent_binding_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+    Json(body): Json<BindBody>,
+) -> Response {
+    let result = crate::api::routes::add_agent_binding(&state.store, &agent, &body.provider_id);
+    after_write(&state, result)
+}
+
+#[derive(serde::Deserialize)]
+struct ReorderBody {
+    provider_ids: Vec<String>,
+}
+
+/// `PUT /api/agents/{agent}/bindings` — rewrite the priority order. A `PUT`
+/// rather than a `POST` because the body *is* the resulting order: sending it
+/// twice leaves the same route, which is the property the verb claims.
+async fn reorder_agent_bindings_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+    Json(body): Json<ReorderBody>,
+) -> Response {
+    let result =
+        crate::api::routes::reorder_agent_bindings(&state.store, &agent, &body.provider_ids);
+    after_write(&state, result)
+}
+
+/// A patch to one binding. Every field is optional and its absence means "leave
+/// it alone" — which is why this cannot be a `PUT` of the whole binding.
+#[derive(serde::Deserialize)]
+struct BindingPatchBody {
+    #[serde(default)]
+    weight: Option<i64>,
+    #[serde(default)]
+    win_start: Option<String>,
+    #[serde(default)]
+    win_end: Option<String>,
+}
+
+/// `PATCH /api/agents/{agent}/bindings/{provider_id}` — weight and window.
+async fn update_agent_binding_route(
+    State(state): State<Arc<GatewayState>>,
+    Path((agent, provider_id)): Path<(String, String)>,
+    Json(body): Json<BindingPatchBody>,
+) -> Response {
+    let result = crate::api::routes::update_agent_binding(
+        &state.store,
+        &agent,
+        &provider_id,
+        body.weight,
+        body.win_start,
+        body.win_end,
+    );
+    after_write(&state, result)
+}
+
+/// `DELETE /api/agents/{agent}/bindings/{provider_id}` — unbind one candidate.
+/// Unlike the key pool's delete, a second call is an error: the binding is not
+/// a row you can re-point at, and "it was already gone" is worth telling apart
+/// from "it never was" (`vm::remove_agent_binding` has always decided that).
+async fn remove_agent_binding_route(
+    State(state): State<Arc<GatewayState>>,
+    Path((agent, provider_id)): Path<(String, String)>,
+) -> Response {
+    let result = crate::api::routes::remove_agent_binding(&state.store, &agent, &provider_id);
+    after_write(&state, result)
+}
+
+#[derive(serde::Deserialize)]
+struct ApplyRouteBody {
+    source: String,
+}
+
+/// `POST /api/agents/{target}/route/apply` — copy `source`'s route onto
+/// `target`, replacing its own. The source keeps its bindings.
+async fn apply_agent_route_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(target): Path<String>,
+    Json(body): Json<ApplyRouteBody>,
+) -> Response {
+    let result = crate::api::routes::apply_agent_route(&state.store, &target, &body.source);
+    after_write(&state, result)
 }
 
 #[cfg(test)]
@@ -1109,6 +1283,86 @@ mod tests {
             !*rx.borrow_and_update(),
             "a refused request must not have asked the gateway to stop"
         );
+    }
+
+    /// A binding written through the API is routed **without** anyone calling
+    /// `/reload`.
+    ///
+    /// Before the write moved here this took two steps and two callers: the app
+    /// wrote SQLite and then had to remember to ping the gateway
+    /// (`after_mutation` → `notify_reload`). Forgetting left a route the gateway
+    /// would not use until it restarted — a failure with no symptom until
+    /// traffic arrived. The daemon now performs the write and re-reads its own
+    /// table, so there is nothing left to forget. This is the assertion that it
+    /// does, and it is the reason the app's write commands lost their
+    /// `after_mutation` call.
+    #[tokio::test]
+    async fn a_binding_written_through_the_api_is_routed_without_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, false);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        assert!(
+            state.route_table().select("claude").is_err(),
+            "nothing is bound yet, so nothing routes"
+        );
+
+        let body = serde_json::json!({ "provider_id": "p-ant" });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/agents/claude/bindings")
+            .header(ADMIN_TOKEN_HEADER, &token)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let response = admin_plane_router(state.clone())
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["ok"], true);
+
+        // No `/reload` between the write and this read.
+        let table = state.route_table();
+        let routed = table
+            .select("claude")
+            .expect("the write itself re-read the table");
+        assert_eq!(routed.id, "p-ant");
+    }
+
+    /// The route payload the app's Apps screen renders, served by the daemon —
+    /// and the same shape `vm::build_agent_routes` produces, because it is the
+    /// same function.
+    #[tokio::test]
+    async fn the_agent_routes_endpoint_serves_the_bound_routes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/agent-routes", Some(&token)))
+            .await
+            .unwrap();
+        let routes = body_json(response).await;
+        assert_eq!(routes.as_array().unwrap().len(), 1);
+        assert_eq!(routes[0]["agent"], "claude");
+        assert_eq!(routes[0]["strategy"], "single");
+        assert_eq!(routes[0]["bindings"][0]["provider_id"], "p-ant");
+        assert_eq!(
+            routes[0]["bindings"][0]["logo_char"], "P",
+            "the avatar letter"
+        );
+
+        // Without the token: refused, like every other resource route.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/agent-routes", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

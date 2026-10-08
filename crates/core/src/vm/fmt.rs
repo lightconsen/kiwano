@@ -1,14 +1,11 @@
 //! Presentation helpers: the palette a slice or a logo gets, and the token
 //! formatter the CLI and the dashboard both print.
 
-const PALETTE: [&str; 6] = [
-    "#4D6BFE", "#615CED", "#3859FF", "#F55036", "#6467F2", "#0F9D58",
-];
-
-pub(crate) fn palette_color(name: &str) -> &'static str {
-    let h: u64 = name.bytes().map(|b| (b as u64).wrapping_mul(31)).sum();
-    PALETTE[(h as usize) % PALETTE.len()]
-}
+// The avatar rules moved to `kiwano-api`: the daemon produces `logo_char` and
+// `logo_color` too, and two copies of a rule that decides what a provider looks
+// like would let the two sides draw it differently (`migrate.local.md` §10.7).
+// Re-exported rather than re-declared, so the paths here are what they were.
+pub(crate) use kiwano_api::logo::{logo_char, palette_color};
 
 /// Categorical colours for charts. Spread around the hue wheel and held at a
 /// lightness that reads on both themes — the letter-avatar palette above is
@@ -44,14 +41,6 @@ pub(crate) fn chart_palette(ids: &[String]) -> Vec<&'static str> {
             CHART_COLORS[i]
         })
         .collect()
-}
-
-pub(crate) fn logo_char(name: &str) -> String {
-    name.chars()
-        .next()
-        .unwrap_or('?')
-        .to_uppercase()
-        .to_string()
 }
 
 /// Token formatting, mirroring `src/lib/format.ts`.

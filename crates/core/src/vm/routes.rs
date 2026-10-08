@@ -1,126 +1,84 @@
 //! Agent routing: which provider serves an agent, in what order the candidates
 //! are tried, and the per-agent limits and strategy that ride along.
+//!
+//! The bodies live in `kiwanod::api::routes` now: the daemon serves this
+//! resource and owns the store it is read from, so a copy here would be the
+//! second one (`migrate.local.md` §10.8). What stays is the *client-facing*
+//! signature — `Result<_, String>`, which is what the app's IPC and the CLI
+//! take — and the wire types, re-exported so `crate::vm::AgentRouteVm` and
+//! friends still resolve.
+//!
+//! The tests at the bottom did **not** move with the bodies on purpose: they
+//! are the app-facing promises (a rename keeps its id, a route copies whole,
+//! a zero ceiling is no ceiling), and through these wrappers they run against
+//! the daemon's implementation rather than a copy of it.
 
-use crate::vm::e2s;
-use crate::vm::fmt::{logo_char, palette_color};
-use kiwanod::store::{AgentLimit, Binding, Provider, Store, Strategy, StrategyType};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use kiwanod::api::routes as daemon;
+use kiwanod::store::Store;
 use std::path::Path;
 
-// ── Agent strategy views (tech.md §4.7: strategy types + candidate ordering) ──
+pub use kiwano_api::routes::{AgentLimitVm, AgentRouteVm, BindingVm};
 
-/// UI projection of agent_strategies + agent_bindings.
-#[derive(Serialize)]
-pub struct BindingVm {
-    pub provider_id: String,
-    pub provider_name: String,
-    pub logo_char: String,
-    pub logo_color: String,
-    pub priority: i64,
-    pub weight: i64,
-    /// Local "HH:MM" window bounds (timewindow strategy); null = no window.
-    pub win_start: Option<String>,
-    pub win_end: Option<String>,
-    pub enabled: bool,
-}
-
-#[derive(Serialize)]
-pub struct AgentRouteVm {
-    pub agent: String,
-    /// single | failover | roundrobin | timewindow | quota
-    pub strategy: String,
-    /// Strategy JSON payload (quota: {"limit","unit"}; null otherwise)
-    pub config: Option<String>,
-    /// Candidates in ascending priority order (index 0 = primary)
-    pub bindings: Vec<BindingVm>,
-    /// The agent's own ceilings, one per window, empty when it has none. Not part
-    /// of the strategy — they hold under every one of them — but read with the
-    /// route because that is the fetch the agent's tab already makes.
-    #[serde(default)]
-    pub limits: Vec<AgentLimitVm>,
-}
-
-/// One window of an agent's spend ceiling, as the Apps screen edits it.
-///
-/// An agent holds a list of these: a day's ceiling and a month's answer different
-/// questions, and being over either is being over. The screen edits the list as a
-/// set, which is why it is a `Vec` at every layer rather than a struct with a
-/// window per field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentLimitVm {
-    /// `day` | `weekly` | `monthly` | `yearly` | `all` — the window this ceiling
-    /// is measured over.
-    pub period: String,
-    pub period_limit: f64,
-    /// `requests` (default), `wan_tokens`, or a 3-letter currency code.
-    pub limit_unit: Option<String>,
-}
-
-impl AgentLimitVm {
-    /// Read stored rows as the screen sees them.
-    pub fn from_store(limits: Vec<AgentLimit>) -> Vec<Self> {
-        limits
-            .into_iter()
-            .map(|l| AgentLimitVm {
-                period: l.period,
-                period_limit: l.period_limit,
-                limit_unit: l.limit_unit,
-            })
-            .collect()
-    }
-}
-
-/// One row per Agent (only agents with bindings); strategy defaults to single.
 pub fn build_agent_routes(store: &Store) -> Result<Vec<AgentRouteVm>, String> {
-    let providers: HashMap<String, Provider> = store
-        .list_providers()
-        .map_err(e2s)?
-        .into_iter()
-        .map(|p| (p.id.clone(), p))
-        .collect();
+    daemon::build_agent_routes(store).map_err(|e| e.to_string())
+}
 
-    let mut routes = Vec::new();
-    for agent in store.bound_agents().map_err(e2s)? {
-        let strategy = store
-            .get_strategy(&agent)
-            .map_err(e2s)?
-            .unwrap_or(Strategy {
-                agent: agent.clone(),
-                kind: StrategyType::Single,
-                config: None,
-            });
-        let bindings = store
-            .bindings_for_agent(&agent)
-            .map_err(e2s)?
-            .into_iter()
-            .map(|b| {
-                let name = providers
-                    .get(&b.provider_id)
-                    .map(|p| p.name.clone())
-                    .unwrap_or_else(|| b.provider_id.clone());
-                BindingVm {
-                    logo_char: logo_char(&name),
-                    logo_color: palette_color(&name).to_string(),
-                    provider_name: name,
-                    provider_id: b.provider_id,
-                    priority: b.priority,
-                    weight: b.weight,
-                    win_start: b.win_start,
-                    win_end: b.win_end,
-                    enabled: b.enabled,
-                }
-            })
-            .collect();
-        routes.push(AgentRouteVm {
-            strategy: strategy.kind.as_str().to_string(),
-            config: strategy.config,
-            limits: AgentLimitVm::from_store(store.agent_limits_for(&agent).map_err(e2s)?),
-            agent,
-            bindings,
-        });
-    }
-    Ok(routes)
+/// Set or clear one agent's spend ceilings — the whole set at once, one window
+/// per entry. An empty list clears them.
+pub fn set_agent_limits(
+    store: &Store,
+    agent: &str,
+    limits: Vec<AgentLimitVm>,
+) -> Result<(), String> {
+    daemon::set_agent_limits(store, agent, limits).map_err(|e| e.to_string())
+}
+
+/// Update an Agent's strategy type (+ optional JSON config); unknown types error.
+pub fn set_agent_strategy(
+    store: &Store,
+    agent: &str,
+    strategy: &str,
+    config: Option<&str>,
+) -> Result<(), String> {
+    daemon::set_agent_strategy(store, agent, strategy, config).map_err(|e| e.to_string())
+}
+
+/// Candidate reorder: given a provider_id order → rewrite priority 0..n.
+pub fn reorder_agent_bindings(
+    store: &Store,
+    agent: &str,
+    provider_ids: &[String],
+) -> Result<(), String> {
+    daemon::reorder_agent_bindings(store, agent, provider_ids).map_err(|e| e.to_string())
+}
+
+/// Patch one binding's strategy parameters (weight / local time window).
+pub fn update_agent_binding(
+    store: &Store,
+    agent: &str,
+    provider_id: &str,
+    weight: Option<i64>,
+    win_start: Option<String>,
+    win_end: Option<String>,
+) -> Result<(), String> {
+    daemon::update_agent_binding(store, agent, provider_id, weight, win_start, win_end)
+        .map_err(|e| e.to_string())
+}
+
+/// Bind a provider to an agent (appended at the queue tail).
+pub fn add_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
+    daemon::add_agent_binding(store, agent, provider_id).map_err(|e| e.to_string())
+}
+
+/// Unbind a provider from one agent (other agents keep theirs).
+pub fn remove_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
+    daemon::remove_agent_binding(store, agent, provider_id).map_err(|e| e.to_string())
+}
+
+/// Copy another agent's whole route (strategy + ordered candidates) onto this
+/// one, replacing whatever it had.
+pub fn apply_agent_route(store: &Store, target: &str, source: &str) -> Result<(), String> {
+    daemon::apply_agent_route(store, target, source).map_err(|e| e.to_string())
 }
 
 /// A path as the screen should print it: `~` for the home tree, absolute for
@@ -138,202 +96,6 @@ pub(crate) fn display_path(path: &Path, home: &Path) -> String {
         Ok(rest) => Path::new("~").join(rest).display().to_string(),
         Err(_) => path.display().to_string(),
     }
-}
-
-/// Set or clear one agent's own ceiling. `None` clears it — an absent row is the
-/// absence of a limit, which is what the gateway reads as "no ceiling".
-pub fn set_agent_limits(
-    store: &Store,
-    agent: &str,
-    limits: Vec<AgentLimitVm>,
-) -> Result<(), String> {
-    let now = kiwanod::store::now_rfc3339();
-    let rows: Vec<AgentLimit> = limits
-        .into_iter()
-        // A window of zero is not a window of nothing: the gateway reads it as
-        // "no ceiling at all" (see `limits::agent_limit_usage`), so storing one
-        // would show the user a limit that does not exist. The screen sends what
-        // its fields hold, including an empty or half-typed one, and this is where
-        // that is dropped rather than being written down. `is_finite` first, for
-        // the reason the quota config does it: a NaN compares false against
-        // everything.
-        .filter(|l| l.period_limit.is_finite() && l.period_limit > 0.0 && !l.period.is_empty())
-        .map(|l| AgentLimit {
-            agent: agent.to_string(),
-            period: l.period,
-            period_limit: l.period_limit,
-            limit_unit: l.limit_unit,
-            created_at: now.clone(),
-            updated_at: now.clone(),
-        })
-        .collect();
-    // An empty set is how the screen says "no limit"; `replace` writes it as the
-    // absence of rows.
-    store.replace_agent_limits(agent, &rows).map_err(e2s)
-}
-
-/// Update an Agent's strategy type (+ optional JSON config); unknown types error.
-pub fn set_agent_strategy(
-    store: &Store,
-    agent: &str,
-    strategy: &str,
-    config: Option<&str>,
-) -> Result<(), String> {
-    let kind = StrategyType::parse_str(strategy)
-        .ok_or_else(|| format!("unknown strategy type: {strategy}"))?;
-    store.upsert_strategy(agent, kind, config).map_err(e2s)?;
-    // Entering roundrobin: seed the weights as an even split of 100 (2
-    // candidates → 50/50, 3 → 34/33/33, remainder to the head of the queue)
-    // instead of leaving every candidate at 1, so the rotation starts balanced.
-    if kind == StrategyType::Roundrobin {
-        let bindings = store.bindings_for_agent(agent).map_err(e2s)?;
-        let n = bindings.len();
-        for (i, mut b) in bindings.into_iter().enumerate() {
-            let w = ((100 / n) + if i < 100 % n { 1 } else { 0 }).max(1) as i64;
-            if b.weight != w {
-                b.weight = w;
-                store.upsert_binding(&b).map_err(e2s)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Candidate reorder: given a provider_id order → rewrite priority 0..n
-/// (weight/window/enabled bits preserved). Unlisted bindings stay; unknown
-/// provider_ids error.
-pub fn reorder_agent_bindings(
-    store: &Store,
-    agent: &str,
-    provider_ids: &[String],
-) -> Result<(), String> {
-    let existing: HashMap<String, Binding> = store
-        .bindings_for_agent(agent)
-        .map_err(e2s)?
-        .into_iter()
-        .map(|b| (b.provider_id.clone(), b))
-        .collect();
-    for (i, pid) in provider_ids.iter().enumerate() {
-        let Some(mut b) = existing.get(pid).cloned() else {
-            return Err(format!("provider {pid} is not bound to {agent}"));
-        };
-        b.priority = i as i64;
-        store.upsert_binding(&b).map_err(e2s)?;
-    }
-    Ok(())
-}
-
-/// Patch one binding's strategy parameters (weight for roundrobin, the local
-/// "HH:MM" window for timewindow). Unspecified fields keep their value; a
-/// binding without a window is the timewindow fallback candidate.
-pub fn update_agent_binding(
-    store: &Store,
-    agent: &str,
-    provider_id: &str,
-    weight: Option<i64>,
-    win_start: Option<String>,
-    win_end: Option<String>,
-) -> Result<(), String> {
-    let mut b = store
-        .bindings_for_agent(agent)
-        .map_err(e2s)?
-        .into_iter()
-        .find(|b| b.provider_id == provider_id)
-        .ok_or_else(|| format!("provider {provider_id} is not bound to {agent}"))?;
-    if let Some(w) = weight {
-        b.weight = w.max(1);
-    }
-    // Both bounds are set/cleared together: a half window would never match.
-    if win_start.is_some() || win_end.is_some() {
-        let (s, e) = (
-            win_start.filter(|v| !v.is_empty()),
-            win_end.filter(|v| !v.is_empty()),
-        );
-        match (s, e) {
-            (Some(s), Some(e)) => {
-                b.win_start = Some(s);
-                b.win_end = Some(e);
-            }
-            _ => {
-                b.win_start = None;
-                b.win_end = None;
-            }
-        }
-    }
-    store.upsert_binding(&b).map_err(e2s)?;
-    Ok(())
-}
-
-/// Bind a provider to an agent as a new candidate: appended at the tail of
-/// the queue (primary keeps its place). Binding an already-bound provider is
-/// a no-op so the call stays idempotent. Takes effect on the gateway via
-/// after_mutation's /reload.
-pub fn add_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
-    if store.get_provider(provider_id).map_err(e2s)?.is_none() {
-        return Err(format!("unknown provider: {provider_id}"));
-    }
-    let existing = store.bindings_for_agent(agent).map_err(e2s)?;
-    if existing.iter().any(|b| b.provider_id == provider_id) {
-        return Ok(());
-    }
-    let next_priority = existing.iter().map(|b| b.priority).max().unwrap_or(-1) + 1;
-    store
-        .upsert_binding(&Binding {
-            agent: agent.to_string(),
-            provider_id: provider_id.to_string(),
-            priority: next_priority,
-            weight: 1,
-            win_start: None,
-            win_end: None,
-            enabled: true,
-        })
-        .map_err(e2s)?;
-    Ok(())
-}
-
-/// Remove one agent's binding of a provider (other agents keep theirs).
-/// Unbinding the last candidate is allowed: the route then has zero
-/// candidates and requests fail cleanly with NoBinding until re-bound.
-pub fn remove_agent_binding(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
-    let removed = store.delete_binding(agent, provider_id).map_err(e2s)?;
-    if !removed {
-        return Err(format!("provider {provider_id} is not bound to {agent}"));
-    }
-    Ok(())
-}
-
-/// Copy another agent's whole route onto this one: strategy kind + config
-/// plus the ordered candidate list (priority, weight, time windows). The
-/// target's existing route is replaced; providers are shared, not moved —
-/// the source agent keeps its own bindings. Weights come over as-is
-/// (upsert_strategy directly, no roundrobin even-split reseed).
-pub fn apply_agent_route(store: &Store, target: &str, source: &str) -> Result<(), String> {
-    if target == source {
-        return Err("cannot copy an agent's route onto itself".to_string());
-    }
-    let strategy = store
-        .get_strategy(source)
-        .map_err(e2s)?
-        .ok_or_else(|| format!("{source} has no route to copy"))?;
-    let bindings = store.bindings_for_agent(source).map_err(e2s)?;
-    if bindings.is_empty() {
-        return Err(format!("{source} has no candidates to copy"));
-    }
-    store
-        .upsert_strategy(target, strategy.kind, strategy.config.as_deref())
-        .map_err(e2s)?;
-    for b in store.bindings_for_agent(target).map_err(e2s)? {
-        store.delete_binding(target, &b.provider_id).map_err(e2s)?;
-    }
-    for b in bindings {
-        store
-            .upsert_binding(&Binding {
-                agent: target.to_string(),
-                ..b
-            })
-            .map_err(e2s)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

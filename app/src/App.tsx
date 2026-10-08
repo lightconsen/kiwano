@@ -360,9 +360,17 @@ export default function App() {
             (import.meta.env.DEV is a build-time constant — vite dev serves
             true, `pnpm build` bakes false), so the installed app can never
             wear it. Amber, the caution colour: this window does not share
-            the installed app's database, gateway port or admin socket. */}
+            the installed app's database, gateway port or admin socket.
+
+            The hook is for the other thing built on top of this window: the
+            promo video is recorded from `pnpm dev` (it needs the sample data,
+            which only the dev build has), and a DEV pill in the corner of a
+            public demo says "this is not the product". The recorder hides
+            this one element by that attribute and nothing else — the marker
+            itself is unchanged for anyone running the app. */}
         {import.meta.env.DEV && (
           <span
+            data-dev-badge
             className="ml-auto select-none rounded-md px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.12em]"
             style={{ color: "var(--amber)", background: "var(--amber-soft)", border: "1px solid var(--amber)" }}
           >

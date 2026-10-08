@@ -46,21 +46,25 @@
 ## 成片制作记录(2026-09-20)
 
 **中间源片**(不入库):Playwright 录出的 webm,落在 `/tmp/kiwano-video/kiwano-demo-90s.webm`
-(~97s / VP8 / 1600×1000)。**90s 的 mp4 版本已删除**,仓库只留 30s 成片——中间片是重录产物,
+(~99s / VP8 / 1600×1000)。**90s 的 mp4 版本已删除**,仓库只留 30s 成片——中间片是重录产物,
 留着是负担,需要时一条命令从 webm 直出。
 
-**成片**:`docs/media/kiwano-demo-30s.mp4`(30.3s,**1.5 MB**)+ 封面帧
+**成片**:`docs/media/kiwano-demo-30s.mp4`(30.4s,**1.7 MB**)+ 封面帧
 `docs/media/kiwano-demo-poster.png`。从中间源片**原速剪出**(不做变速,字幕仍可读),七段硬切。
 
 | 成片内时间 | 取自源片 | 内容 |
 | --- | --- | --- |
-| 0.0–1.3 | 1.7–3.0 | 片头 KIWANO |
-| 1.3–4.8 | 7.0–10.5 | Apps 首屏 + **A LOCAL AGENT GATEWAY** |
-| 4.8–11.3 | 36.5–43.0 | 策略下拉展开 + FAILOVER 字幕 |
-| 11.3–17.8 | 52.5–59.0 | Dashboard 成本 + KEYS NEVER LEAVE 字幕 |
-| 17.8–21.8 | 62.5–66.5 | 日志详情弹窗 + AUDITABLE 字幕 |
-| 21.8–26.3 | 75.0–79.5 | **Settings → Features 列表** + OPT-IN FEATURES 字幕 |
-| 26.3–30.3 | 90.5–94.5 | 片尾 kiwano.cc / Apache-2.0 |
+| 0.0–1.3 | 1.8–3.1 | 片头 KIWANO |
+| 1.3–4.8 | 9.0–12.5 | Apps 首屏 + **A LOCAL AGENT GATEWAY** |
+| 4.8–11.3 | 34.5–41.0 | 策略下拉展开 + FAILOVER 字幕 |
+| 11.3–17.8 | 50.2–56.7 | Dashboard 成本 + KEYS NEVER LEAVE 字幕 |
+| 17.8–21.8 | 61.6–65.6 | 日志详情弹窗 + AUDITABLE 字幕 |
+| 21.8–26.3 | 73.8–78.3 | **Settings → Features 列表** + OPT-IN FEATURES 字幕 |
+| 26.3–30.3 | 88.5–92.5 | 片尾 kiwano.cc / Apache-2.0 |
+
+> "取自源片"是**这一次**录制的时刻。每次复录都不同(同一台机器上先后两次也能差
+> ±1s),所以要重剪时以脚本打印的 CAP 时间戳为准 —— 那才是这一刻每个字幕落在哪。
+> 上表是 2026-10-08 重录、也就是仓库里这个成片的来源。
 
 复录并重剪(从 webm 一步直出 30s 成片,不再生成 90s mp4 中间片):
 
@@ -73,10 +77,10 @@ node scripts/record-demo-video.cjs        # 会打印每条字幕的精确时间
 ffmpeg -i /tmp/kiwano-video/kiwano-demo-90s.webm \
   -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
   -filter_complex "[0:v]split=7[a][b][c][d][e][f][g];\
-[a]trim=start=1.7:end=3.0,setpts=PTS-STARTPTS[v0];[b]trim=start=7.0:end=10.5,setpts=PTS-STARTPTS[v1];\
-[c]trim=start=36.5:end=43.0,setpts=PTS-STARTPTS[v2];[d]trim=start=52.5:end=59.0,setpts=PTS-STARTPTS[v3];\
-[e]trim=start=62.5:end=66.5,setpts=PTS-STARTPTS[v4];[f]trim=start=75.0:end=79.5,setpts=PTS-STARTPTS[v5];\
-[g]trim=start=90.5:end=94.5,setpts=PTS-STARTPTS[v6];\
+[a]trim=start=1.8:end=3.1,setpts=PTS-STARTPTS[v0];[b]trim=start=9.0:end=12.5,setpts=PTS-STARTPTS[v1];\
+[c]trim=start=34.5:end=41.0,setpts=PTS-STARTPTS[v2];[d]trim=start=50.2:end=56.7,setpts=PTS-STARTPTS[v3];\
+[e]trim=start=61.6:end=65.6,setpts=PTS-STARTPTS[v4];[f]trim=start=73.8:end=78.3,setpts=PTS-STARTPTS[v5];\
+[g]trim=start=88.5:end=92.5,setpts=PTS-STARTPTS[v6];\
 [v0][v1][v2][v3][v4][v5][v6]concat=n=7:v=1:a=0[outv]" \
   -map "[outv]" -map 1:a -c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -r 25 \
   -c:a aac -b:a 64k -shortest -movflags +faststart docs/media/kiwano-demo-30s.mp4
@@ -89,7 +93,9 @@ ffmpeg -i /tmp/kiwano-video/kiwano-demo-90s.webm \
 > 为什么不再留长版:30s 覆盖全部卖点且字幕读得完;长版在 HN/Reddit 上的完播率
 > 明显更低,而仓库里多一个 4 MB 二进制是长期负担。视频站上传用 30s 版即可。
 
-**制作方式**:全自动录屏,零人工、零后期。
+**制作方式**:全自动录屏,零人工、零后期。录像前脚本做两件清理,理由都写在脚本里:
+关掉样例数据触发的那条「凭据离开本机」告警条(观众的第一眼不该是一条钥匙告警),
+以及隐藏 dev 构建的 `DEV` 角标(那是提示运行者用的,不是给看片的人看的)。
 
 1. 起前端 dev server(`app/` 下 `vite --port 1420`,纯浏览器模式走内置样例数据);
 2. Playwright 以 `recordVideo` 开 1600×1000 上下文,并 `addInitScript` 向页面注入三样东西:

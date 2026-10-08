@@ -32,6 +32,11 @@ function installOverlay() {
   background:rgba(255,255,255,.92);border:2px solid rgba(0,0,0,.5);box-shadow:0 2px 8px rgba(0,0,0,.55);
   pointer-events:none;transform:translate(-50%,-50%);opacity:0;transition:opacity .2s ease;}
 #kw-cursor.down{transform:translate(-50%,-50%) scale(.7);}
+/* The dev build wears a DEV pill so nobody mistakes this window for the
+   installed app. That warning is for someone using the app, not for someone
+   watching 30 seconds of it, and the pill is in every frame — so the one
+   element the app marks with this attribute is hidden here and nothing else. */
+[data-dev-badge]{display:none!important;}
 `;
   const mount = () => {
     const style = document.createElement("style");
@@ -143,6 +148,20 @@ function installOverlay() {
   await page.goto(BASE + "#providers", { waitUntil: "load" });
   await page.getByRole("button", { name: "Add provider" }).first().waitFor({ timeout: 20000 });
   await page.evaluate(() => document.fonts.ready);
+
+  // The sample data carries a credential finding, so the shell raises its
+  // "a credential left the machine" bar over the opening shot. Nothing is
+  // wrong — it is the detector doing its job on synthetic data — but a
+  // warning about keys is not what a 30-second pitch should open on, and a
+  // user who has read the bar dismisses it. So do we, and it stays dismissed
+  // (acknowledgement is recorded, and no newer finding exists).
+  try {
+    await page.getByRole("button", { name: "Dismiss" })
+      .first().click({ timeout: 3000 });
+    console.log("dismissed the credential banner");
+  } catch {
+    // No banner in this data set: fine, keep recording.
+  }
   await hold(600);
   await splash(true, "LOCAL-FIRST AI PROVIDER MANAGER", "");
   await hold(3000);

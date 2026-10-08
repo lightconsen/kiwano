@@ -6,7 +6,7 @@
 ## A. 资产(第 0 号优先级)
 
 - [x] **演示视频** —— **已产出**(2026-09-20):`docs/media/kiwano-demo-30s.mp4`
-      (30.3s,H.264 1600×1000,静音轨,+faststart,**1.5 MB**)+ 封面 `kiwano-demo-poster.png`。
+      (30.4s,H.264 1600×1000,静音轨,+faststart,**1.7 MB**)+ 封面 `kiwano-demo-poster.png`。
       七段原速硬切:片头 → A LOCAL AGENT GATEWAY → 六种策略/FAILOVER → 成本 +
       KEYS NEVER LEAVE → 日志审计 → Settings Features 列表 → 片尾。
       分镜见 `07-demo-script.md`;复录/重剪方法见该文件「成片制作记录」。

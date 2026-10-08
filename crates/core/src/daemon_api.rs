@@ -11,6 +11,7 @@
 //! ([`crate::sidecar::admin_get_json`]) and the endpoint the app and the CLI
 //! already resolve the same way.
 
+use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
@@ -387,6 +388,10 @@ impl DaemonApi {
             "/api/credential-finding/ack",
             &Body { id },
         ))
+    }
+    /// The price mirror — `vm::list_model_prices`.
+    pub fn list_model_prices(&self) -> Result<Vec<ModelPriceEntry>, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/model-prices")
     }
 }
 

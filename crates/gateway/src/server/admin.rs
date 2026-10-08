@@ -121,6 +121,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
         .route("/providers/{id}", delete(delete_provider_route))
+        .route("/model-prices", get(list_model_prices_route))
         .route("/logs", get(list_logs_route).delete(clear_logs_route))
         .route("/logs/{id}", get(get_log_route))
         .route("/credential-finding", get(check_finding_route))
@@ -505,15 +506,18 @@ async fn add_provider_key(
     Path(provider_id): Path<String>,
     Json(body): Json<AddKeyBody>,
 ) -> Response {
-    match crate::api::keys::add_api_key(
+    // The daemon re-reads its own route table: the key pool is part of what a
+    // provider's route carries (`router/mod.rs`), so a second key has to be
+    // picked up by the process that will use it. Until this call existed, the
+    // app sent the reload ping itself — which is the arrangement the rest of the
+    // migration has been removing.
+    let result = crate::api::keys::add_api_key(
         &state.store,
         &provider_id,
         &body.api_key,
         body.label.as_deref(),
-    ) {
-        Ok(key) => Json(key).into_response(),
-        Err(e) => resource_error(e),
-    }
+    );
+    after_write_with(&state, result)
 }
 
 /// `DELETE /api/keys/{id}` — remove a rotation key. `false` when there was no
@@ -523,7 +527,13 @@ async fn delete_provider_key(
     Path(id): Path<i64>,
 ) -> Response {
     match crate::api::keys::delete_api_key(&state.store, id) {
-        Ok(deleted) => Json(json!({ "deleted": deleted })).into_response(),
+        Ok(deleted) => {
+            // A delete that removed nothing has nothing to re-read.
+            if deleted {
+                reload_after_write(&state);
+            }
+            Json(json!({ "deleted": deleted })).into_response()
+        }
         Err(e) => resource_error(e),
     }
 }
@@ -897,6 +907,14 @@ async fn ack_finding_route(
 ) -> Response {
     match crate::api::logs::ack_credential_finding(&state.store, body.id) {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/model-prices` — the price mirror the gateway charges with.
+async fn list_model_prices_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::pricing::list_model_prices(&state.store) {
+        Ok(rows) => Json(rows).into_response(),
         Err(e) => resource_error(e),
     }
 }

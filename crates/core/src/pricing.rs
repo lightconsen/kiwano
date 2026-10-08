@@ -324,8 +324,10 @@ pub fn preferred_currency(aux: &Aux) -> String {
 /// provider's models costs lives here — and so does each row's own tier
 /// schedule, which for any model other than the flagship is the only place it
 /// is stated. Read-only, and small enough to hand over whole.
+/// Served by the daemon (`kiwanod::api::pricing::list_model_prices`) — it is the
+/// side that charges with this table, so it is the side that serves it.
 pub fn list_model_prices(store: &kiwanod::store::Store) -> Result<Vec<ModelPriceEntry>, String> {
-    store.load_model_pricing().map_err(|e| e.to_string())
+    kiwanod::api::pricing::list_model_prices(store).map_err(|e| e.to_string())
 }
 
 pub fn currency_meta(aux: &Aux) -> Result<CurrencyMetaVm, String> {

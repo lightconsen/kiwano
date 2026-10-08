@@ -15,8 +15,9 @@ pub fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
 /// The price mirror — the rows the gateway charges with — so the Models page can
 /// price every model a provider serves, not just the entry's flagship.
 #[tauri::command]
-pub fn list_model_prices(state: State<AppState>) -> Result<Vec<pricing::ModelPriceEntry>, String> {
-    pricing::list_model_prices(&state.store)
+pub fn list_model_prices() -> Result<Vec<pricing::ModelPriceEntry>, String> {
+    // Served by the daemon: it is the side that charges with this table.
+    kiwano_core::daemon_api::DaemonApi::connect().list_model_prices()
 }
 
 /// Open a vendor's site in the user's browser.

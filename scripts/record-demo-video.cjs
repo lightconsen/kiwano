@@ -249,9 +249,9 @@ function installOverlay() {
   // ---------- S7 outro -------------------------------------------------------
   await page.keyboard.press("Escape");
   await hold(1200);
-  await cap("ONE COMMAND TO INSTALL · GPLv3 · MACOS / WINDOWS / LINUX");
+  await cap("ONE COMMAND TO INSTALL · Apache-2.0 · MACOS / WINDOWS / LINUX");
   await hold(2600);
-  await splash(true, "kiwano.cc", "GPLv3 · SIGNED PROVENANCE ON EVERY RELEASE");
+  await splash(true, "kiwano.cc", "Apache-2.0 · SIGNED PROVENANCE ON EVERY RELEASE");
   await hold(5200);
   console.log("S7 outro done", at());
 

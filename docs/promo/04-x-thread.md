@@ -68,7 +68,7 @@ No analytics. No telemetry. Import cc-switch in one command.
 **Post 6(行动号召,收在链接)**
 
 ```
-Kiwano is open source (GPLv3+), macOS signed + notarized. Server mode runs
+Kiwano is open source (Apache-2.0), macOS signed + notarized. Server mode runs
 headless with a user-level service — no root.
 
 Downloads: kiwano.cc

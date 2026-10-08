@@ -1,0 +1,9 @@
+Kiwano
+Copyright 2026 john2ai <john@lightconsen.com>
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes code ported from other projects, and depends on third-party
+crates and packages. Their licences and attributions are recorded in
+THIRD-PARTY-NOTICES, which Apache-2.0 §4(d) asks to be kept with any
+redistribution.

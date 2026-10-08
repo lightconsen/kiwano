@@ -101,7 +101,7 @@ export const zhHant: Record<string, string> = {
   "fq8.t": "能在伺服器上無桌面執行嗎?",
   "fq8.d": "可以。<a href=\"/docs/zh-Hant/cli/\">CLI 能做桌面應用的每一件事</a>:一行指令安裝用戶端與閘道,並註冊為 systemd 服務(無需 root;資料庫在 <code>~/.kiwano</code>),然後 <code>kiwano agents takeover</code> 把 Agent 指向它。",
   "fq9.t": "Kiwano 要收費嗎?",
-  "fq9.d": "完全免費——無帳號,離線可用。GPL-3.0-or-later 開源。",
+  "fq9.d": "完全免費——無帳號,離線可用。Apache-2.0 開源。",
   "pv.1": "API 請求本機直連,不經過任何雲端中轉",
   "pv.2": "API Key 僅存本機,只有你能讀取",
   "pv.3": "無帳號體系,離線完整可用",

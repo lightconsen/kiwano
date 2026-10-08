@@ -52,7 +52,7 @@ verifiable against GitHub's transparency log without trusting your mirror:
 
     gh attestation verify Kiwano_x64.dmg --repo lightconsen/kiwano
 
-No analytics, no telemetry, GPLv3+ (selected modules ported from cc-switch, MIT,
+No analytics, no telemetry, Apache-2.0 (selected modules ported from cc-switch, MIT,
 credited in THIRD-PARTY-NOTICES). macOS builds are signed+notarized; Windows
 is not yet code-signed, so SmartScreen will warn — known gap, on the list.
 

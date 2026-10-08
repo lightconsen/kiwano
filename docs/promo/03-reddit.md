@@ -41,7 +41,7 @@ Privacy matters to me here: keys live in an owner-only local SQLite (0700/0600),
 no telemetry, no analytics. Every release carries SHA256SUMS and a signed
 build-provenance attestation (verifiable via `gh attestation verify`).
 
-Open source, GPLv3+. macOS signed+notarized; Windows not yet signed (known gap).
+Open source, Apache-2.0. macOS signed+notarized; Windows not yet signed (known gap).
 
 30-second demo: https://youtu.be/M0pO79Wlx-s
 Downloads: https://kiwano.cc
@@ -126,7 +126,7 @@ sent to the provider you configured. No telemetry, no analytics, no account.
 There is also a desktop app (Tauri) over the same core crate — same rows, same
 writes — but the server mode above is what I would want reviewed here.
 
-GPLv3+. Releases carry SHA256SUMS and a signed build-provenance attestation:
+Apache-2.0. Releases carry SHA256SUMS and a signed build-provenance attestation:
 
     gh attestation verify kiwano-x86_64-unknown-linux-gnu.tar.gz --repo lightconsen/kiwano
 

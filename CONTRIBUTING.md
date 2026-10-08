@@ -111,5 +111,5 @@ old config" from a real defect.
 
 ## License
 
-By contributing you agree that your work is licensed under GPLv3-or-later, the
+By contributing you agree that your work is licensed under Apache-2.0, the
 same as the project.

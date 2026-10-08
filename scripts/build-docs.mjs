@@ -443,7 +443,7 @@ ${bodyInner}
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <span>© 2026 Kiwano · Apache-2.0</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>`;
 }
@@ -655,7 +655,7 @@ ${hub.cards.join("\n")}
 ${hub.notes.join("\n")}
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
+  <span>© 2026 Kiwano · Apache-2.0</span>
   <a href="${GITHUB_BLOB}/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

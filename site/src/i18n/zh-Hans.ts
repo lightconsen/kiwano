@@ -98,7 +98,7 @@ export const zhHans: Record<string, string> = {
   "fq8.t": "能在服务器上无桌面运行吗?",
   "fq8.d": "可以。<a href=\"/docs/zh-Hans/cli/\">CLI 能做桌面应用的每一件事</a>:一条命令安装客户端与网关,并注册为 systemd 服务(无需 root;数据库在 <code>~/.kiwano</code>),然后 <code>kiwano agents takeover</code> 把 Agent 指向它。",
   "fq9.t": "Kiwano 收费吗?",
-  "fq9.d": "完全免费——无账号,离线可用。GPL-3.0-or-later 开源。",
+  "fq9.d": "完全免费——无账号,离线可用。Apache-2.0 开源。",
   "pv.1": "API 请求本地直连,不经过任何云端中转",
   "pv.2": "API Key 仅存本机，只有你能读取",
   "pv.3": "无账号体系,离线完整可用",

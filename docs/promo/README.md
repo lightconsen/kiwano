@@ -108,7 +108,7 @@ commit 出现。**只起草,不发布**——帖子里不出现未验证的能�
 | 接管 Agent 数 | **25**(名单以 README 为准) | README + `crates/core/src/vm/agents.rs` |
 | 本地网关端口 | `127.0.0.1:8317` | README |
 | 最新版本 / 日期 | v0.1.16 / 2026-09-19 | GitHub Releases API |
-| 仓库 | 2026-09-07 创建,GPL-3.0,0 star | GitHub API |
+| 仓库 | 2026-09-07 创建,Apache-2.0,0 star | GitHub API |
 | 落地页 | `https://kiwano.cc` 在线,英文优先 + 中文版 | HTTP 200 + 页尾语言字典 |
 | 安装脚本 | `https://hub.kiwano.cc/install.sh` 在线(15 KB) | HTTP 200 |
 | macOS 签名 | 已 Developer ID 签名 + 公证 | README |

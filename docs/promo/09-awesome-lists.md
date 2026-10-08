@@ -18,7 +18,7 @@ CONTRIBUTING**。
 | --- | --- | --- | --- | --- |
 | awesome-claude-code | **网页 issue 表单**,不是 PR | ≥14 天(首个 commit 起)且有持续开发 **或** ≥100 star | 首 commit 2026-09-07,持续开发中,0 star → 走 14 天路线 | **2026-09-21** |
 | awesome-tauri | ~~PR~~ | **不再接受应用投稿**(2026-08-24 起) | Kiwano 是桌面应用 → **不投** | — |
-| awesome-selfhosted | PR 到 **`-data` 仓库** | FOSS + 可自托管 + 有许可证 + 持续维护 + **首次 release 满 4 个月** | GPL-3.0、headless 网关可自托管;首次 release 2026-09-10 | **2027-01-10**(见 C 节) |
+| awesome-selfhosted | PR 到 **`-data` 仓库** | FOSS + 可自托管 + 有许可证 + 持续维护 + **首次 release 满 4 个月** | Apache-2.0、headless 网关可自托管;首次 release 2026-09-10 | **2027-01-10**(见 C 节) |
 
 ---
 
@@ -157,7 +157,7 @@ released **more than 4 months ago**." 违反会被原样模板回复后关单。
 ```yaml
 # 内容要点:local AI gateway; routes coding agents through providers you
 # already have; failover strategies; per-request cost metering; /metrics。
-# 语言 Rust;许可 GPL-3.0;首页 kiwano.cc;源码 github.com/lightconsen/kiwano
+# 语言 Rust;许可 Apache-2.0;首页 kiwano.cc;源码 github.com/lightconsen/kiwano
 ```
 
 > 旧版这里的 markdown 条目样例已删除——它正是"LLM 代写文本"的形态,2027-01

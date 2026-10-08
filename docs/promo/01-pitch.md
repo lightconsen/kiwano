@@ -58,7 +58,7 @@ Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你�
   macOS 已用 Developer ID 签名并公证;Windows 未签名。
 - 信任基建(别人少有的加分项):每个发布附 `SHA256SUMS` + 可验证构建溯源
   (`gh attestation verify <file> --repo lightconsen/kiwano`,走 GitHub 透明度日志)。
-- 许可证:GPLv3-or-later;部分模块移植自
+- 许可证:Apache-2.0;部分模块移植自
   [cc-switch](https://github.com/farion1231/cc-switch)(MIT,见 `THIRD-PARTY-NOTICES`)。
 - 平台:macOS(Apple Silicon / Intel)、Windows 10+、Linux x86_64。
 
@@ -83,7 +83,7 @@ Agent、并知道花了多少钱"。** 前者是后者的子集(还提供 import
   计量、告警、desktop 管理做成一体;ccr 是很有趣的 Claude Code 专用方案。见对比表。
 - **Key 安全吗?** 本地 SQLite,目录 0700/文件 0600;凭证只发给配置的 Provider;
   网关 /metrics 默认哈希 agent 标签,需要时可加 Bearer token 全名鉴权。
-- **免费吗?** GPLv3-or-later 开源,Hub 是元数据目录(价格/名称/端点),不碰数据。
+- **免费吗?** Apache-2.0 开源,Hub 是元数据目录(价格/名称/端点),不碰数据。
 - **Windows 签名?** 还没签,SmartScreen 会提示,「更多信息 → 仍要运行」;这是我们
   已知短板,正在处理。
 - **为什么选 Rust/Tauri?** 网关 daemon 与 CLI 需要无 GUI 也能跑(服务器模式),后端

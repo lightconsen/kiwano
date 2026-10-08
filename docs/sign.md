@@ -146,7 +146,7 @@ updater 的信任根就是这个编译进 App 的公钥：能改它的人可以�
 | 方案 | 可行性 | 成本 | 得到什么 |
 |---|---|---|---|
 | Azure Trusted Signing | ❌ 个人身份验证已暂停，且个人仅限美国/加拿大 | — | — |
-| **SignPath Foundation** | ✅ GPL-3.0 符合其 OSI 许可要求，但信誉评估为自由裁量 | **免费** | Authenticode，**证书主体为 SignPath Foundation** 而非 Kiwano |
+| **SignPath Foundation** | ✅ Apache-2.0 符合其 OSI 许可要求，但信誉评估为自由裁量 | **免费** | Authenticode，**证书主体为 SignPath Foundation** 而非 Kiwano |
 | OV 证书 + 云 HSM（SSL.com eSigner / DigiCert KeyLocker） | ✅ 个人可申请 | ~$200–500/年 | 目标 A，**不含目标 B** |
 | 不签，文档写清 | ✅ 现状 | 0 | — |
 

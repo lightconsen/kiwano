@@ -19,7 +19,7 @@
 | 5 | 0:52–1:05 | 打开某个 Provider 的路由设为 failover;把它的 key 临时改为错钥(或断网),重发请求——App 显示请求自动打到下一个候选,Agent 侧无感知 | `FAILOVER: THE REQUEST REPLAYS, THE AGENT NEVER NOTICES.` |
 | 6 | 1:05–1:20 | 成本面板:今日/7 日/30 日切换,按 agent × provider 归因的堆叠柱;quota 环告警;一个「forecast」气泡提前报超限 | `REAL PER-REQUEST COST, PER AGENT × PROVIDER.` |
 | 7 | 1:20–1:33 | 终端:`curl -fsSL https://hub.kiwano.cc/install.sh \| sh`,随后 `kiwano agents takeover`,systemd status 显示 active | `HEADLESS MODE: ONE-LINE INSTALL, USER-LEVEL SERVICE, NO ROOT.` |
-| 8 | 1:33–1:40 | 黑场收尾:logo + `kiwano.cc` | `GPLv3 · macOS / WINDOWS / LINUX · SIGNED PROVENANCE ON EVERY RELEASE` |
+| 8 | 1:33–1:40 | 黑场收尾:logo + `kiwano.cc` | `Apache-2.0 · macOS / WINDOWS / LINUX · SIGNED PROVENANCE ON EVERY RELEASE` |
 
 ## 制作规格
 
@@ -60,7 +60,7 @@
 | 11.3–17.8 | 52.5–59.0 | Dashboard 成本 + KEYS NEVER LEAVE 字幕 |
 | 17.8–21.8 | 62.5–66.5 | 日志详情弹窗 + AUDITABLE 字幕 |
 | 21.8–26.3 | 75.0–79.5 | **Settings → Features 列表** + OPT-IN FEATURES 字幕 |
-| 26.3–30.3 | 90.5–94.5 | 片尾 kiwano.cc / GPLv3 |
+| 26.3–30.3 | 90.5–94.5 | 片尾 kiwano.cc / Apache-2.0 |
 
 复录并重剪(从 webm 一步直出 30s 成片,不再生成 90s mp4 中间片):
 

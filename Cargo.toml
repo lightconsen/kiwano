@@ -6,7 +6,7 @@ members = ["app/src-tauri", "crates/core", "crates/gateway", "crates/adapters", 
 version = "0.2.12"
 edition = "2021"
 authors = ["john2ai <john@lightconsen.com>"]
-license = "GPL-3.0-or-later"
+license = "Apache-2.0"
 
 [profile.release]
 codegen-units = 1

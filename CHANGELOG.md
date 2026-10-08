@@ -19,6 +19,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Kiwano is Apache-2.0 from this version on.** It was GPL-3.0-or-later since
+  0.1.6. The permissive licence drops the copyleft obligation for anyone reusing
+  the code, and keeps an explicit patent grant — the two differences from MIT
+  worth knowing. Versions up to and including 0.2.12 stay GPL-3.0-or-later:
+  those are released, and a licence already granted cannot be taken back, so the
+  split is by version rather than by file. `NOTICE` carries the copyright line;
+  `THIRD-PARTY-NOTICES` is unchanged, because what Kiwano ports and depends on is
+  MIT and ISC, both of which this licence can be combined with.
+
 ### Fixed
 
 - **The provider screen no longer promises something the vendors forbid.** Adding

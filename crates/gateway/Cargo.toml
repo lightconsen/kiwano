@@ -19,6 +19,9 @@ reqwest = { version = "0.13", features = ["stream", "json"] }
 futures-core = "0.3.34"
 futures-util = "0.3.34"
 kiwano-adapters = { path = "../adapters" }
+# The wire types: the daemon serves them, so it must be able to name them
+# (migrate.local.md §10.5-10.6).
+kiwano-api = { path = "../api" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"

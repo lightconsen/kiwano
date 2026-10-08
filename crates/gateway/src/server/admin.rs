@@ -72,7 +72,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -96,7 +96,51 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/events", get(events))
         .route("/reload", post(reload))
         .route("/shutdown", post(shutdown))
+        // ── resources (`migrate.local.md` §7 batch 1) ──
+        //
+        // The state the app and the CLI manage, behind the token they already
+        // hold: same listener, same auth, same reason it is a socket rather
+        // than a port. Paths name a resource and its owner; the payload is the
+        // *same JSON the frontend receives today* (`kiwano-api`), because the
+        // point of the migration is to move where a value comes from, not to
+        // change what it looks like.
+        .route("/api/providers/{provider_id}/keys", get(list_provider_keys))
         .with_state(state)
+}
+
+/// `GET /api/providers/{provider_id}/keys` — the provider's key pool, masked.
+///
+/// Masked here rather than by the caller: the daemon holds the plaintext, and a
+/// response that carried it would put it on a channel that has no need for it
+/// (`kiwano_api::keys::mask_key` is the same function the app used to apply).
+async fn list_provider_keys(
+    State(state): State<Arc<GatewayState>>,
+    Path(provider_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    match state.store.list_api_keys(&provider_id) {
+        Ok(rows) => {
+            let keys: Vec<kiwano_api::keys::ApiKeyVm> = rows
+                .into_iter()
+                .map(|r| kiwano_api::keys::ApiKeyVm {
+                    id: r.id,
+                    masked: kiwano_api::keys::mask_key(&r.api_key),
+                    label: r.label,
+                    enabled: r.enabled,
+                    created_at: r.created_at,
+                })
+                .collect();
+            Json(keys).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 /// `GET /events` — a stream of "a request was just metered" ticks.
@@ -565,6 +609,62 @@ mod tests {
         assert!(!token_matches("abcdef", "abcde"));
         assert!(!token_matches("abcdef", "abcdxf"));
         assert!(!token_matches("", "abcdef"));
+    }
+
+    // ── the resource API (migrate.local.md §7 batch 1) ──────────────────
+
+    /// The daemon serves the key pool the way the app used to build it, and
+    /// **the plaintext never crosses the socket** — the assertion that matters,
+    /// because the failure it catches is silent: a response carrying the real
+    /// key looks exactly like a response carrying the masked one until someone
+    /// reads it.
+    #[tokio::test]
+    async fn the_key_pool_is_served_masked() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        store
+            .insert_api_key("p-ant", "sk-ant-rotated-abcdefghijkl", Some("backup"))
+            .unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "GET",
+                "/api/providers/p-ant/keys",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let v = body_json(response).await;
+        let rows = v
+            .as_array()
+            .expect("a bare array, as the frontend receives");
+        assert_eq!(rows.len(), 1);
+        let masked = rows[0]["masked"].as_str().unwrap();
+        assert!(
+            !masked.contains("abcdefghijkl"),
+            "the served key must not carry the plaintext: {masked}"
+        );
+        assert_eq!(rows[0]["label"], "backup");
+    }
+
+    /// Without the token it is not served at all — the resource routes are
+    /// behind the same gate as `/reload`, and this is the test that says so.
+    #[tokio::test]
+    async fn the_key_pool_needs_the_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+
+        let response = admin_plane_router(state)
+            .oneshot(admin_request("GET", "/api/providers/p-ant/keys", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     // ── admin plane auth ────────────────────────────────────────────────

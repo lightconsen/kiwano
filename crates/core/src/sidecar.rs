@@ -207,7 +207,14 @@ pub fn admin_token_for(db: &Path) -> Option<String> {
 ///
 /// The cache is why this is the app's form and not the CLI's: a CLI process
 /// resolves its own `--db` once and reads the token from there.
-fn admin_token() -> Option<String> {
+/// The token this install minted, read from the database — the answer for a
+/// client on the same machine as its daemon, which is every client today.
+///
+/// Deliberately *not* baked into the request helper: a remote client (§13.5)
+/// will get its token from somewhere else, and that decision should land here,
+/// at the caller, rather than inside a function that looks like it needs no
+/// credentials.
+pub fn admin_token() -> Option<String> {
     static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     if let Some(token) = CACHED.get() {
         return Some(token.clone());
@@ -345,6 +352,49 @@ fn endpoint_body(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
     BufReader::new(stream).read_to_string(&mut raw).ok()?;
     // Drop the status line and headers: the body follows the blank line.
     raw.split_once("\r\n\r\n").map(|(_, body)| body.to_string())
+}
+
+/// One authorized GET from the daemon's resource API, parsed.
+///
+/// The client half of `migrate.local.md` §7's batch 1: the app and the CLI ask
+/// the daemon instead of reading the store, so that one process owns the state.
+/// Everything the 30 commands need is here — the transport, the token, the
+/// error convention — and a resource function is a path and a type.
+///
+/// Errors carry the daemon's own message when it sent one (`{"ok":false,
+/// "error":…}`), because a refusal the user can act on should not be replaced
+/// by a status code retyped here.
+pub fn admin_get_json<T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+) -> Result<T, String> {
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Connection: close\r\n\r\n",
+        token_header(token)
+    );
+    let mut stream = endpoint
+        .connect(CONNECT_TIMEOUT)
+        .map_err(|e| format!("gateway is not answering: {e}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| format!("gateway stopped answering: {e}"))?;
+    let mut raw = String::new();
+    std::io::BufReader::new(stream)
+        .read_to_string(&mut raw)
+        .map_err(|e| format!("gateway stopped answering: {e}"))?;
+    let (head, body) = raw
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "gateway answered with no HTTP body".to_string())?;
+    if !head.starts_with("HTTP/1.1 200") {
+        // The daemon's error envelope, when it sent one.
+        let message = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+            .unwrap_or_else(|| head.lines().next().unwrap_or("request refused").to_string());
+        return Err(message);
+    }
+    serde_json::from_str(body).map_err(|e| format!("gateway answered something unreadable: {e}"))
 }
 
 /// The response's first line only — all the liveness probe and the

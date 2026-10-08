@@ -10,11 +10,13 @@ use kiwano_core::vm;
 
 /// A provider's rotation keys (the ones besides the primary key).
 #[tauri::command]
-pub fn list_api_keys(
-    state: State<AppState>,
-    provider_id: String,
-) -> Result<Vec<vm::ApiKeyVm>, String> {
-    vm::list_api_keys(&state.store, &provider_id)
+pub fn list_api_keys(provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
+    // Served by the daemon (`migrate.local.md` §7 batch 1): no `AppState`, no
+    // store — the signature lost its state parameter because the command no
+    // longer has any. The return type is unchanged (`vm::ApiKeyVm` is
+    // `kiwano_api::keys::ApiKeyVm`, re-exported), and so is what the frontend
+    // sends: `state` was injected by Tauri, never passed by the webview.
+    kiwano_core::daemon_api::DaemonApi::connect().list_api_keys(&provider_id)
 }
 
 /// Append a rotation key; triggers /reload so the gateway key pool picks it up immediately.

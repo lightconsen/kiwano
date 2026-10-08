@@ -8,7 +8,7 @@
 
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthVm {
     /// `ok` | `idle` | `off` | `error` — what the dot is drawn from.
     pub state: String,
@@ -34,7 +34,7 @@ pub struct HealthVm {
     pub error: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QuotaVm {
     pub used: f64,
     pub limit: f64,
@@ -42,7 +42,7 @@ pub struct QuotaVm {
     pub resets_at: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UsageVm {
     pub requests: i64,
     pub input_tokens: i64,
@@ -63,14 +63,14 @@ pub struct UsageVm {
 }
 
 /// Advanced forwarding settings echoed back to the modal for edit prefill.
-#[derive(Serialize, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderAdvancedVm {
     pub timeout_secs: Option<i64>,
     pub retries: Option<i64>,
     pub headers: std::collections::BTreeMap<String, String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderVm {
     pub id: String,
     pub name: String,
@@ -146,7 +146,7 @@ pub struct ProviderVm {
 
 /// An additional per-protocol endpoint of a provider (migration v7): the
 /// gateway forwards natively here when an inbound request speaks `protocol`.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderEndpointVm {
     pub protocol: String,
     pub endpoint: String,

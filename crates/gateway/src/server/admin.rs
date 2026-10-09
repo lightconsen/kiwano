@@ -125,6 +125,12 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/model-prices", get(list_model_prices_route))
         .route("/catalog", get(list_catalog_route))
         .route("/sync-hub", post(sync_hub_route))
+        .route("/plan-quota/{provider_id}", get(plan_quota_route))
+        .route("/probe", post(probe_route))
+        .route(
+            "/providers/{id}/test-latency",
+            post(test_provider_latency_route),
+        )
         .route("/logs", get(list_logs_route).delete(clear_logs_route))
         .route("/logs/{id}", get(get_log_route))
         .route("/credential-finding", get(check_finding_route))
@@ -990,6 +996,118 @@ async fn sync_hub_route(State(state): State<Arc<GatewayState>>) -> Response {
     }
 }
 
+/// `GET /api/plan-quota/{provider_id}` — one provider's plan usage, from the
+/// vendor's own endpoint.
+///
+/// This lives in the daemon for the reason the sync does: the reader is
+/// network I/O, and the *same* reader is what enforces the ceiling on the data
+/// plane (`plan_quota`) — so the display and the block cannot disagree, and
+/// they cannot drift apart by living in different processes. `?force=1` skips
+/// the 5-minute cache.
+async fn plan_quota_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(provider_id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<PlanQuotaQuery>,
+) -> Response {
+    match crate::plan_quota::get_plan_quota_report(&state.store, &provider_id, q.force).await {
+        Ok(report) => Json(report).into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "ok": false, "error": e, "kind": "not_found" })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PlanQuotaQuery {
+    #[serde(default)]
+    force: bool,
+}
+
+/// The probe request: an endpoint to call, and optionally a key to call it
+/// with. All three probes share this body — which parts of it a given probe
+/// reads is in its handler.
+#[derive(serde::Deserialize)]
+struct ProbeBody {
+    protocol: String,
+    endpoint: String,
+    #[serde(default)]
+    api_key: Option<String>,
+    /// Which provider this is a test *of*: a blank key from the edit dialog is
+    /// filled in with the stored credential — but only for this provider's own
+    /// endpoints, so a Test button cannot post someone's key to a host of the
+    /// typer's choosing (`kiwanod::api::catalog::stored_key_for`).
+    #[serde(default)]
+    provider_id: Option<String>,
+    /// The action: `latency` | `endpoint` | `models`. One endpoint for all
+    /// three because they are the same question asked three ways.
+    action: String,
+}
+
+/// `POST /api/probe` — the network half of the Apps screen's Test buttons.
+///
+/// The daemon probes because it is the process whose route this is a probe
+/// *of*: the health verdict it writes is what the Status column reads, and a
+/// probe in another process would be writing to a table the daemon owns.
+///
+/// `latency` is a bare TCP connect (no key); `endpoint` is a protocol-aware
+/// GET (a 401 still proves the route exists); `models` is the live list the
+/// Default model picker fills from, which needs a key.
+async fn probe_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<ProbeBody>,
+) -> Response {
+    // Fill a blank key from the stored one — for this provider's own endpoints
+    // only, so the button means "does my saved configuration still work".
+    let key = body.api_key.filter(|k| !k.trim().is_empty()).or_else(|| {
+        body.provider_id
+            .as_deref()
+            .and_then(|id| crate::api::catalog::stored_key_for(&state.store, id, &body.endpoint))
+    });
+    let result = match body.action.as_str() {
+        "latency" => {
+            crate::api::probe::measure_latency(&body.endpoint).map(|ms| json!({ "latency_ms": ms }))
+        }
+        "endpoint" => {
+            crate::api::probe::probe_endpoint(&body.protocol, &body.endpoint, key.as_deref())
+                .await
+                .map(|report| json!(report))
+        }
+        "models" => match key {
+            Some(k) => crate::api::probe::fetch_model_names(&body.protocol, &body.endpoint, &k)
+                .await
+                .map(|names| json!(names)),
+            None => Err(format!(
+                "no stored key covers {} — enter one to fetch its models",
+                body.endpoint
+            )),
+        },
+        other => Err(format!("unknown probe action: {other}")),
+    };
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => resource_error(kiwano_api::error::ApiError::invalid(e)),
+    }
+}
+
+/// `POST /api/providers/{id}/test-latency` — one prompt round trip against a
+/// stored provider, for the Apps screen's Test button.
+///
+/// The provider is tested as it is stored: its own endpoint, its own key, and —
+/// when it has no default model — the model its catalog entry prices. The
+/// verdict is written to the health table (the same row the Status column
+/// reads), which is the whole of what this endpoint's "test" means.
+async fn test_provider_latency_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match crate::api::probe::test_provider_latency(&state.store, &id).await {
+        Ok(vm) => Json(vm).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1128,6 +1246,20 @@ mod tests {
             .store
             .app_setting(ADMIN_TOKEN_KEY)
             .expect("the gateway mints its admin token at startup")
+    }
+
+    /// A successful quota report as the cache holds one.
+    fn kiwanod_plan_quota_report() -> crate::plan_quota::PlanQuotaReport {
+        crate::plan_quota::PlanQuotaReport {
+            provider_id: "p-ant".into(),
+            template: "test".into(),
+            success: true,
+            error: None,
+            note: None,
+            tiers: Vec::new(),
+            queried_at: 0,
+            cached: false,
+        }
     }
 
     fn admin_request(method: &str, uri: &str, token: Option<&str>) -> Request<Body> {
@@ -1696,6 +1828,54 @@ mod tests {
     /// a local provider answers on is marked `added`. A shelf that skipped the
     /// normalize would match no endpoints and offer every entry for adding a
     /// second time.
+    /// The plan-quota endpoint, in the two states the UI reads: a cached
+    /// report comes back without a vendor call, and a provider with no plan
+    /// query is a 404 with the kind that lets a client tell it from a network
+    /// failure.
+    #[tokio::test]
+    async fn the_plan_quota_endpoint_serves_a_cached_report_and_a_named_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        seed(&store, true);
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        // No plan query configured: the reader refuses by name, and the kind
+        // says "not_found", not "hub" — the UI shows this as "not configured",
+        // not as an error to retry.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/plan-quota/p-ant", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = error_json(response).await;
+        assert_eq!(body["kind"], "not_found");
+        assert!(
+            body["error"].as_str().unwrap().contains("no plan query"),
+            "{}",
+            body["error"]
+        );
+
+        // A cached report answers without the vendor: the cache is keyed by
+        // provider, and `cached` is what the UI badges.
+        crate::plan_quota::cache_write(&state.store, "p-ant", &kiwanod_plan_quota_report());
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/plan-quota/p-ant", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let report = body_json(response).await;
+        assert_eq!(report["provider_id"], "p-ant");
+        assert_eq!(report["success"], true);
+
+        // Without the token: refused like every other resource route.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/plan-quota/p-ant", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn the_catalog_endpoint_serves_the_normalized_shelf() {
         let dir = tempfile::tempdir().unwrap();

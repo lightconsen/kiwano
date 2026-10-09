@@ -22,7 +22,6 @@
 //! developer's machine, and the app now speaks IPC alone.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
@@ -30,12 +29,18 @@ use std::time::Duration;
 use kiwano_adapters::config::DbPath;
 use kiwanod::server::{ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
 use kiwanod::store::Store;
-use serde::Serialize;
 
 /// The endpoint type itself, so callers in this crate name
 /// `sidecar::AdminEndpoint` and do not need to know the gateway crate's module
 /// layout.
 pub use kiwanod::server::AdminEndpoint;
+
+// The probes moved to the daemon (`kiwanod::api::probe`) — they are network I/O,
+// and the health table they write to is the daemon's. Re-exported so the
+// `sidecar::probe_*` paths that call them keep resolving.
+pub use kiwanod::api::probe::{
+    fetch_model_names, measure_latency, probe_endpoint, probe_prompt, ProbeReport, PromptProbe,
+};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -680,336 +685,6 @@ pub fn reload(endpoint: &AdminEndpoint, token: Option<&str>) -> Option<serde_jso
 
 /// TCP connect-time probe of an endpoint (host or URL). Measures the
 /// handshake only — enough for the inline latency readout in the add dialog.
-pub fn measure_latency(endpoint: &str) -> Result<u64, String> {
-    use std::net::ToSocketAddrs;
-
-    let trimmed = endpoint.trim();
-    let https = trimmed.starts_with("https://") || !trimmed.contains("://");
-    let rest = trimmed
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    let authority = rest.split('/').next().unwrap_or(rest);
-    if authority.is_empty() {
-        return Err("empty endpoint".into());
-    }
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((h, p)) => (
-            h.to_string(),
-            p.parse::<u16>().map_err(|_| format!("invalid port: {p}"))?,
-        ),
-        None => (authority.to_string(), if https { 443 } else { 80 }),
-    };
-    let addr = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|e| e.to_string())?
-        .next()
-        .ok_or_else(|| format!("cannot resolve: {host}"))?;
-    let start = std::time::Instant::now();
-    TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|e| e.to_string())?;
-    Ok(start.elapsed().as_millis() as u64)
-}
-
-/// Result of a protocol-aware endpoint probe (GET models on the canonical
-/// per-protocol route).
-#[derive(serde::Serialize)]
-pub struct ProbeReport {
-    /// ok | auth | unsupported | error | unreachable
-    pub verdict: String,
-    pub status: Option<u16>,
-    pub latency_ms: u64,
-    /// Human-readable explanation for the UI chip.
-    pub detail: String,
-}
-
-/// Build the canonical "does this endpoint speak this protocol" URL:
-/// the protocol's models list on its well-known path.
-fn probe_url(protocol: &str, base: &str) -> Result<String, String> {
-    let trimmed = base.trim().trim_end_matches('/');
-    let root = trimmed
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    if root.is_empty() {
-        return Err("empty endpoint".into());
-    }
-    let (scheme, rest) = if let Some(r) = trimmed.strip_prefix("https://") {
-        ("https://", r)
-    } else if let Some(r) = trimmed.strip_prefix("http://") {
-        ("http://", r)
-    } else {
-        ("https://", root)
-    };
-    // A base that already carries a version segment extends with /models;
-    // a bare host gets the protocol's canonical version path.
-    let already_versioned =
-        rest.ends_with("/v1") || rest.ends_with("/v1beta") || rest.ends_with("/v1alpha");
-    let url = match protocol {
-        "anthropic" | "openai" | "gemini" if already_versioned => format!("{scheme}{rest}/models"),
-        "anthropic" | "openai" => format!("{scheme}{rest}/v1/models"),
-        // The native Gemini API lives under /v1beta.
-        "gemini" => format!("{scheme}{rest}/v1beta/models"),
-        other => return Err(format!("unknown protocol: {other}")),
-    };
-    Ok(url)
-}
-
-/// Attach the protocol's canonical auth headers to a GET request. A blank or
-/// missing key is allowed (anonymous probe); an unknown protocol is an error.
-fn apply_auth(
-    protocol: &str,
-    mut req: reqwest::RequestBuilder,
-    api_key: Option<&str>,
-) -> Result<reqwest::RequestBuilder, String> {
-    let key = api_key.map(str::trim).filter(|k| !k.is_empty());
-    match protocol {
-        "openai" => {
-            if let Some(k) = key {
-                req = req.bearer_auth(k);
-            }
-        }
-        "anthropic" => {
-            if let Some(k) = key {
-                req = req.header("x-api-key", k);
-            }
-            req = req.header("anthropic-version", "2023-06-01");
-        }
-        "gemini" => {
-            if let Some(k) = key {
-                req = req.header("x-goog-api-key", k);
-            }
-        }
-        other => return Err(format!("unknown protocol: {other}")),
-    }
-    Ok(req)
-}
-
-/// Probe one endpoint for protocol support: GET the protocol's models route
-/// with its canonical auth headers. A 401/403 still proves the route exists
-/// (protocol supported, key missing/invalid); only 404/405 means unsupported.
-/// Works without an API key.
-/// Async on purpose: commands run on the tokio runtime, and a blocking
-/// client (which owns its own runtime) panics when dropped inside one.
-pub async fn probe_endpoint(
-    protocol: &str,
-    endpoint: &str,
-    api_key: Option<&str>,
-) -> Result<ProbeReport, String> {
-    let url = probe_url(protocol, endpoint)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let req = apply_auth(protocol, client.get(&url), api_key)?;
-
-    let start = std::time::Instant::now();
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(ProbeReport {
-                verdict: "unreachable".into(),
-                status: None,
-                latency_ms: start.elapsed().as_millis() as u64,
-                detail: format!("connection failed: {e}"),
-            });
-        }
-    };
-    let latency_ms = start.elapsed().as_millis() as u64;
-    let status = resp.status().as_u16();
-    let is_json = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.contains("json"));
-    let body = resp.text().await.unwrap_or_default();
-
-    let (verdict, detail) = match status {
-        s if (200..300).contains(&s) => {
-            if !is_json {
-                // A marketing page answers 200 on anything — not an API.
-                (
-                    "error".into(),
-                    "endpoint returned HTML, not an API".to_string(),
-                )
-            } else {
-                let models = count_models(&body);
-                match models {
-                    Some(n) if n > 0 => ("ok".into(), format!("{n} models listed")),
-                    _ => ("ok".into(), "route answered".to_string()),
-                }
-            }
-        }
-        401 | 403 => (
-            "auth".into(),
-            "route exists — auth required or key invalid".to_string(),
-        ),
-        404 | 405 => (
-            "unsupported".into(),
-            "route not found — protocol not supported".to_string(),
-        ),
-        s if (500..600).contains(&s) => ("error".into(), format!("upstream error {s}")),
-        s => ("error".into(), format!("unexpected status {s}")),
-    };
-    Ok(ProbeReport {
-        verdict,
-        status: Some(status),
-        latency_ms,
-        detail,
-    })
-}
-
-/// Count models in a models-list body (`data[]`). None when the shape does
-/// not match.
-fn count_models(body: &str) -> Option<usize> {
-    let v: serde_json::Value = serde_json::from_str(body).ok()?;
-    v.get("data").and_then(|d| d.as_array()).map(|a| a.len())
-}
-
-/// Extract the model ids from a models-list body (`data[].id`).
-fn parse_models(body: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
-        return Vec::new();
-    };
-    // OpenAI-compatible (and Anthropic's compatible list): `data[].id`.
-    let openai: Vec<String> = v
-        .get("data")
-        .and_then(|d| d.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m.get("id").and_then(|x| x.as_str()))
-        .map(str::to_string)
-        .collect();
-    if !openai.is_empty() {
-        return openai;
-    }
-    // Native Gemini: `models[].name`, spelled `models/gemini-2.5-pro` — the
-    // prefix is the API's resource path, not part of the model id.
-    v.get("models")
-        .and_then(|d| d.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m.get("name").and_then(|x| x.as_str()))
-        .map(|name| name.strip_prefix("models/").unwrap_or(name).to_string())
-        .collect()
-}
-
-/// Fetch the live model-name list from a provider endpoint. Requires the API
-/// key (cloud providers reject anonymous /models calls). One page: both
-/// protocols answer the whole list at once. Sorted and deduped for the
-/// dropdown.
-pub async fn fetch_model_names(
-    protocol: &str,
-    endpoint: &str,
-    api_key: &str,
-) -> Result<Vec<String>, String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("API key required".into());
-    }
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let url = probe_url(protocol, endpoint)?;
-    let req = apply_auth(protocol, client.get(&url), Some(key))?;
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.unwrap_or_default();
-    if !(200..300).contains(&status) {
-        return Err(match status {
-            401 | 403 => "auth failed — check the API key".into(),
-            404 | 405 => "route not found — protocol not supported".into(),
-            s if (500..600).contains(&s) => format!("upstream error {s}"),
-            s => format!("unexpected status {s}"),
-        });
-    }
-    let mut names = parse_models(&body);
-    names.sort();
-    names.dedup();
-    Ok(names)
-}
-
-/// One prompt round trip, timed.
-#[derive(Debug, Serialize)]
-pub struct PromptProbe {
-    /// Wall time for the whole exchange: request sent, response read to the end.
-    pub latency_ms: u64,
-    pub status: u16,
-    /// The upstream's own words when it refused. A rejected ping is not a
-    /// latency: reporting 180ms for a 401 would read as "fast" on a provider
-    /// that never answered.
-    pub error: Option<String>,
-}
-
-/// The body a latency ping sends: one user turn, one token out.
-///
-/// Small enough to be cheap on every pricing model, large enough that the answer
-/// is a real generation — a zero-token request can be answered from a cache or
-/// refused outright. One shape for both flavors, because for a minimal ping they
-/// ask the same three fields; the protocols differ in where it goes and how it
-/// is authenticated, which is `probe_prompt`'s business, not this one's.
-fn prompt_body(model: &str) -> String {
-    serde_json::json!({
-        "model": serde_json::Value::String(model.to_string()),
-        "max_tokens": 1,
-        "messages": [{ "role": "user", "content": "ping" }],
-    })
-    .to_string()
-}
-
-/// The message inside an error body, for both flavors: Anthropic and OpenAI
-/// both put it at `error.message`.
-fn upstream_error_message(body: &str, status: u16) -> String {
-    serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| {
-            v.pointer("/error/message")
-                .and_then(|m| m.as_str())
-                .map(str::to_string)
-        })
-        .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| format!("upstream answered {status}"))
-}
-
-/// Send a prompt to `url` and time the full round trip (headers **and** body).
-///
-/// Time-to-first-byte is the number a streaming client feels, and it needs a
-/// stream to measure; the whole exchange is what a non-streaming one feels and
-/// is what this reports — one number, taken the same way for every provider,
-/// which is what makes two rows comparable.
-pub async fn probe_prompt(
-    protocol: &str,
-    url: &str,
-    api_key: &str,
-    model: &str,
-) -> Result<PromptProbe, String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("API key required".into());
-    }
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let req = apply_auth(protocol, client.post(url), Some(key))?
-        .header("content-type", "application/json")
-        .body(prompt_body(model));
-    let start = std::time::Instant::now();
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.unwrap_or_default();
-    let latency_ms = start.elapsed().as_millis() as u64;
-    Ok(PromptProbe {
-        latency_ms,
-        status,
-        error: (!(200..300).contains(&status)).then(|| upstream_error_message(&body, status)),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1254,32 +929,34 @@ mod tests {
     fn probe_urls_follow_protocol_conventions() {
         // bare hosts get the canonical version path per protocol
         assert_eq!(
-            probe_url("openai", "https://api.deepseek.com").unwrap(),
+            kiwanod::api::probe::probe_url("openai", "https://api.deepseek.com").unwrap(),
             "https://api.deepseek.com/v1/models"
         );
         assert_eq!(
-            probe_url("anthropic", "https://api.deepseek.com/anthropic").unwrap(),
+            kiwanod::api::probe::probe_url("anthropic", "https://api.deepseek.com/anthropic")
+                .unwrap(),
             "https://api.deepseek.com/anthropic/v1/models"
         );
         // versioned bases extend with /models as-is
         assert_eq!(
-            probe_url("openai", "https://api.moonshot.cn/v1").unwrap(),
+            kiwanod::api::probe::probe_url("openai", "https://api.moonshot.cn/v1").unwrap(),
             "https://api.moonshot.cn/v1/models"
         );
         // scheme defaults to https when absent; garbage is rejected
         assert_eq!(
-            probe_url("openai", "api.example.com").unwrap(),
+            kiwanod::api::probe::probe_url("openai", "api.example.com").unwrap(),
             "https://api.example.com/v1/models"
         );
-        assert!(probe_url("openai", "").is_err());
-        assert!(probe_url("grpc", "https://x.example.com").is_err());
+        assert!(kiwanod::api::probe::probe_url("openai", "").is_err());
+        assert!(kiwanod::api::probe::probe_url("grpc", "https://x.example.com").is_err());
     }
 
     /// The ping body: one user turn, one token out — and the model it names is
     /// the one the caller resolved, not a default of ours.
     #[test]
     fn the_prompt_body_is_one_turn_and_one_token() {
-        let v: serde_json::Value = serde_json::from_str(&prompt_body("kimi-k2")).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&kiwanod::api::probe::prompt_body("kimi-k2")).unwrap();
         assert_eq!(v["model"], "kimi-k2");
         assert_eq!(v["max_tokens"], 1);
         assert_eq!(v["messages"][0]["role"], "user");
@@ -1292,14 +969,14 @@ mod tests {
     fn an_error_body_is_read_for_its_message() {
         // Both flavors put it at `error.message`.
         assert_eq!(
-            upstream_error_message(
+            kiwanod::api::probe::upstream_error_message(
                 r#"{"error":{"message":"model not found","type":"invalid"}}"#,
                 404
             ),
             "model not found"
         );
         assert_eq!(
-            upstream_error_message(
+            kiwanod::api::probe::upstream_error_message(
                 r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
                 401
             ),
@@ -1307,30 +984,33 @@ mod tests {
         );
         // Anything else falls back to the status rather than to an empty string.
         assert_eq!(
-            upstream_error_message("<html>nope</html>", 502),
+            kiwanod::api::probe::upstream_error_message("<html>nope</html>", 502),
             "upstream answered 502"
         );
         assert_eq!(
-            upstream_error_message(r#"{"error":{}}"#, 400),
+            kiwanod::api::probe::upstream_error_message(r#"{"error":{}}"#, 400),
             "upstream answered 400"
         );
     }
 
     #[test]
     fn count_models_reads_the_list_shape() {
-        assert_eq!(count_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#), Some(2));
-        assert_eq!(count_models(r#"{"error":{}}"#), None);
-        assert_eq!(count_models("<html>"), None);
+        assert_eq!(
+            kiwanod::api::probe::count_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#),
+            Some(2)
+        );
+        assert_eq!(kiwanod::api::probe::count_models(r#"{"error":{}}"#), None);
+        assert_eq!(kiwanod::api::probe::count_models("<html>"), None);
     }
 
     #[test]
     fn parse_models_reads_ids() {
         assert_eq!(
-            parse_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#),
+            kiwanod::api::probe::parse_models(r#"{"data":[{"id":"a"},{"id":"b"}]}"#),
             vec!["a".to_string(), "b".to_string()]
         );
-        assert!(parse_models("<html>").is_empty());
-        assert!(parse_models(r#"{"data":[{"object":"model"}]}"#).is_empty());
+        assert!(kiwanod::api::probe::parse_models("<html>").is_empty());
+        assert!(kiwanod::api::probe::parse_models(r#"{"data":[{"object":"model"}]}"#).is_empty());
     }
 
     // The native Gemini list spells the id `models/<id>`; the dropdown wants
@@ -1338,12 +1018,12 @@ mod tests {
     #[test]
     fn parse_models_reads_gemini_names() {
         assert_eq!(
-            parse_models(
+            kiwanod::api::probe::parse_models(
                 r#"{"models":[{"name":"models/gemini-2.5-pro"},{"name":"models/gemini-2.5-flash"}]}"#
             ),
             vec!["gemini-2.5-pro".to_string(), "gemini-2.5-flash".to_string()]
         );
-        assert!(parse_models(r#"{"models":[]}"#).is_empty());
+        assert!(kiwanod::api::probe::parse_models(r#"{"models":[]}"#).is_empty());
     }
 
     /// An in-process stand-in for a real admin plane, serving the three routes

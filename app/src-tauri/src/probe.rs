@@ -1,10 +1,12 @@
 //! Endpoint probes: latency, protocol-aware reachability, one prompt round trip
 //! against a stored provider, and the model-name list the Default model picker
-//! fills from. These are diagnostics — none writes, none reloads the daemon.
+//! fills from.
+//!
+//! Three of the four are the daemon's now (`migrate.local.md` §10.15): they are
+//! network I/O, and the health verdict the provider test writes is the Status
+//! column's, which the daemon owns. `test_latency` stays a plain function — a
+//! bare TCP connect needs no daemon, and the CLI calls it too.
 
-use tauri::State;
-
-use crate::state::AppState;
 use kiwano_core::{sidecar, vm};
 
 #[tauri::command(async)]
@@ -24,16 +26,23 @@ pub fn test_latency(endpoint: String) -> Result<u64, String> {
 /// `vm::stored_key_for`.
 #[tauri::command]
 pub async fn test_endpoint(
-    state: State<'_, AppState>,
     protocol: String,
     endpoint: String,
     api_key: Option<String>,
     provider_id: Option<String>,
 ) -> Result<sidecar::ProbeReport, String> {
-    let key = api_key
-        .filter(|k| !k.trim().is_empty())
-        .or_else(|| vm::stored_key_for(&state.store, provider_id.as_deref()?, &endpoint));
-    sidecar::probe_endpoint(&protocol, &endpoint, key.as_deref()).await
+    // Served by the daemon: the health verdict it writes is the Status column's,
+    // which the daemon owns.
+    kiwano_core::daemon_api::DaemonApi::connect()
+        .probe(
+            &protocol,
+            &endpoint,
+            api_key.as_deref(),
+            provider_id.as_deref(),
+            "endpoint",
+        )
+        .await
+        .and_then(|v| serde_json::from_value(v).map_err(|e| e.to_string()))
 }
 
 /// One prompt round trip against a provider, for the Apps screen's Test button.
@@ -42,11 +51,12 @@ pub async fn test_endpoint(
 /// when it has no default model — the model its catalog entry prices. Async:
 /// the round trip is an HTTP call, and a blocking client panics on the runtime.
 #[tauri::command]
-pub async fn test_provider_latency(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<vm::PromptLatencyVm, String> {
-    vm::test_provider_latency(&state.store, &id).await
+pub async fn test_provider_latency(id: String) -> Result<vm::PromptLatencyVm, String> {
+    // Served by the daemon: the verdict it writes is the health row the Status
+    // column reads, which the daemon owns.
+    kiwano_core::daemon_api::DaemonApi::connect()
+        .test_provider_latency(&id)
+        .await
 }
 
 /// Live model-name list for the Default model picker (requires an API key:
@@ -54,21 +64,21 @@ pub async fn test_provider_latency(
 /// probe: a typed key wins, and the stored one stands in for an edit.
 #[tauri::command]
 pub async fn list_models(
-    state: State<'_, AppState>,
     protocol: String,
     endpoint: String,
     api_key: String,
     provider_id: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let key = if api_key.trim().is_empty() {
-        provider_id
-            .as_deref()
-            .and_then(|id| vm::stored_key_for(&state.store, id, &endpoint))
-            .ok_or_else(|| {
-                format!("no stored key covers {endpoint} — enter one to fetch its models")
-            })?
-    } else {
-        api_key
-    };
-    sidecar::fetch_model_names(&protocol, &endpoint, &key).await
+    // Served by the daemon. A blank key is filled in with the stored one — for
+    // that provider's own endpoints only, on the daemon's side now.
+    let value = kiwano_core::daemon_api::DaemonApi::connect()
+        .probe(
+            &protocol,
+            &endpoint,
+            Some(api_key.as_str()).filter(|k| !k.trim().is_empty()),
+            provider_id.as_deref(),
+            "models",
+        )
+        .await?;
+    serde_json::from_value(value).map_err(|e| e.to_string())
 }

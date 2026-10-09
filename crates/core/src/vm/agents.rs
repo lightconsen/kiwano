@@ -1,11 +1,9 @@
 //! The agent registry: which agents exist, which protocols each speaks, and the
 //! custom agents the user added.
 
-use crate::vm::catalog::load_catalog;
 use crate::vm::e2s;
 use kiwanod::api::agents as daemon;
-use kiwanod::store::{Provider, Store};
-use serde::{Deserialize, Serialize};
+use kiwanod::store::Store;
 
 pub const AGENTS: [(&str, &str); 26] = [
     ("claude", "Claude Code"),
@@ -48,10 +46,9 @@ pub fn is_builtin_agent(id: &str) -> bool {
     AGENTS.iter().any(|(a, _)| *a == id)
 }
 
-// Re-exported, not declared here: the daemon serves this type now, so it lives
-// where both sides can see it (`migrate.local.md` §10.6). The path
-// `crate::vm::CustomAgentVm` is unchanged on purpose.
-pub use kiwano_api::agents::CustomAgentVm;
+// Re-exported, not declared here: the daemon serves these types now, so they
+// live where both sides can see them. The paths are unchanged on purpose.
+pub use kiwano_api::agents::{CustomAgentVm, PromptLatencyVm};
 
 /// Every agent the UI should offer, built-ins first (registry order), then the
 /// user's own in the order they were created.
@@ -66,103 +63,13 @@ pub(crate) fn list_agents(store: &Store) -> Result<Vec<(String, String)>, String
     Ok(out)
 }
 
-/// One prompt round trip against a provider, for the Apps screen's Test button.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PromptLatencyVm {
-    pub provider_id: String,
-    /// The model the ping was sent with — it decides the number as much as the
-    /// network does, so the UI can say which one was measured.
-    pub model: String,
-    pub latency_ms: u64,
-    pub status: u16,
-    /// The upstream's own words when it refused, so a failure reads as one.
-    pub error: Option<String>,
-}
-
-/// What model to ping a provider with: its own default when it has one,
-/// otherwise the model its catalog entry publishes a price for — the one model
-/// we know the vendor serves.
-fn prompt_test_model(store: &Store, p: &Provider) -> Option<String> {
-    if let Some(m) = p
-        .model_default
-        .as_deref()
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-    {
-        return Some(m.to_string());
-    }
-    let catalog = load_catalog(store);
-    let entry = catalog
-        .entries
-        .iter()
-        .find(|e| Some(e.id.as_str()) == p.catalog_id.as_deref())?;
-    entry.price_ref.as_ref().map(|r| r.model_id.clone())
-}
-
-/// Send one prompt through a provider and time it.
-///
-/// The URL is composed by the gateway's own function (`compose_upstream`), so
-/// the test measures the endpoint the gateway would actually use; the ping is a
-/// real completion, because a models-list GET answers from a different code path
-/// and a different cache and says nothing about what a request costs in time.
+/// One prompt round trip against a provider — served by the daemon
+/// (`kiwanod::api::probe::test_provider_latency`). The verdict it writes is the
+/// health row the Status column reads, which the daemon owns.
 pub async fn test_provider_latency(store: &Store, id: &str) -> Result<PromptLatencyVm, String> {
-    let p = store
-        .get_provider(id)
-        .map_err(e2s)?
-        .ok_or_else(|| format!("provider not found: {id}"))?;
-    let model = prompt_test_model(store, &p).ok_or_else(|| {
-        "no model to test with — set a default model on this provider".to_string()
-    })?;
-    let key = p
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|k| !k.is_empty())
-        .ok_or_else(|| "this provider has no API key".to_string())?;
-    let protocol = p.protocol.as_str();
-    let path = if protocol == "anthropic" {
-        "/v1/messages"
-    } else {
-        "/v1/chat/completions"
-    };
-    let url = kiwanod::server::data::compose_upstream(&p.base_url, p.api_path.as_deref(), path);
-    let probe = crate::sidecar::probe_prompt(protocol, &url, key, &model).await;
-    // What the click measured outlives the click: it is recorded as this
-    // provider's verdict, so the Status column can show it. This is the one
-    // measurement that works when the provider has no traffic of its own and the
-    // prober has not been round — or is not running at all, which happens
-    // whenever the daemon up is a build from before the prober existed. The
-    // number on the button stays a readout of *this* click; the cell shows the
-    // standing verdict, which this just became.
-    let (status, latency_ms, error) = test_verdict(&probe);
-    store
-        .upsert_provider_health(id, status, latency_ms, "test", error.as_deref())
-        .map_err(e2s)?;
-    let probe = probe?;
-    Ok(PromptLatencyVm {
-        provider_id: id.to_string(),
-        model,
-        latency_ms: probe.latency_ms,
-        status: probe.status,
-        error: probe.error,
-    })
-}
-
-/// What the latency test's result means as a health verdict.
-///
-/// Any HTTP answer proves reachability — a 401 is the vendor saying no to the
-/// key, not the network saying nothing — so a refusal is `reachable` with the
-/// vendor's own message beside it, and only a transport failure is `down`. The
-/// distinction is the whole reason `provider_health` carries an `error` column:
-/// the two read differently on the row, and conflating them sends the reader to
-/// the wrong end of the problem.
-fn test_verdict(
-    probe: &Result<crate::sidecar::PromptProbe, String>,
-) -> (&'static str, i64, Option<String>) {
-    match probe {
-        Ok(p) => ("reachable", p.latency_ms as i64, p.error.clone()),
-        Err(e) => ("down", 0, Some(e.clone())),
-    }
+    kiwanod::api::probe::test_provider_latency(store, id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Create a user-defined agent — served by the daemon
@@ -512,18 +419,21 @@ mod tests {
         let mut p = provider("p1", "DeepSeek", Billing::Metered);
         p.catalog_id = Some("deepseek".into());
         s.insert_provider(&p).unwrap();
-        assert_eq!(prompt_test_model(&s, &p).as_deref(), Some("deepseek-chat"));
+        assert_eq!(
+            kiwanod::api::probe::prompt_test_model(&s, &p).as_deref(),
+            Some("deepseek-chat")
+        );
 
         // A default of its own wins: it is the model the user routes with.
         let mut with_default = p.clone();
         with_default.model_default = Some("deepseek-v4-flash".into());
         assert_eq!(
-            prompt_test_model(&s, &with_default).as_deref(),
+            kiwanod::api::probe::prompt_test_model(&s, &with_default).as_deref(),
             Some("deepseek-v4-flash")
         );
 
         let orphan = provider("p2", "No Catalog", Billing::Metered);
-        assert_eq!(prompt_test_model(&s, &orphan), None);
+        assert_eq!(kiwanod::api::probe::prompt_test_model(&s, &orphan), None);
     }
 
     /// The id is derived from the name, is unique per agent even when the name
@@ -612,7 +522,10 @@ mod tests {
             status: 200,
             error: None,
         });
-        assert_eq!(test_verdict(&ok), ("reachable", 218, None));
+        assert_eq!(
+            kiwanod::api::probe::test_verdict(&ok),
+            ("reachable", 218, None)
+        );
 
         // Answered, refused: reachable, and the reason travels with it.
         let refused = Ok(PromptProbe {
@@ -620,7 +533,7 @@ mod tests {
             status: 401,
             error: Some("invalid API key".into()),
         });
-        let (status, ms, error) = test_verdict(&refused);
+        let (status, ms, error) = kiwanod::api::probe::test_verdict(&refused);
         assert_eq!(
             status, "reachable",
             "the vendor answered — that is the fact"
@@ -630,7 +543,7 @@ mod tests {
 
         // Nobody answered.
         let dead = Err("connection failed: dns error".to_string());
-        let (status, ms, error) = test_verdict(&dead);
+        let (status, ms, error) = kiwanod::api::probe::test_verdict(&dead);
         assert_eq!(status, "down");
         assert_eq!(ms, 0);
         assert_eq!(error.as_deref(), Some("connection failed: dns error"));

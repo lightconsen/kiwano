@@ -22,7 +22,6 @@ pub use kiwanod::api::catalog::{
 };
 // The endpoint-matching primitives `stored_key_for` is built from — the same
 // rules the shelf matches by, so the two cannot drift.
-pub(crate) use kiwanod::api::catalog::{endpoint_key, provider_endpoint_keys};
 
 use crate::vm::e2s;
 
@@ -30,27 +29,9 @@ use crate::vm::e2s;
 // (`migrate.local.md` §10.14): the daemon produces it, so it is a wire type.
 pub use kiwano_api::providers::SyncReportVm;
 
-/// The credential stored for `provider_id`, but **only** when `endpoint` is one
-/// of the endpoints that provider already answers on.
-///
-/// The add/edit form deliberately keeps the key out of the webview: it shows a
-/// masked placeholder and sends a blank when the user has not typed a new one
-/// (blank = keep the stored key). So a Test or a Fetch pressed from the edit
-/// dialog arrives with nothing to authenticate with, and both used to fail —
-/// the probe reported `auth`, and the model list refused outright — for a
-/// provider whose key was sitting right there.
-///
-/// The endpoint has to match, and that is the point rather than a nicety: the
-/// URL field is editable, so reading the stored key for whatever address is in
-/// the box would turn a Test button into a way to post someone's credential to a
-/// host of the typer's choosing. Matching the stored endpoints keeps the button
-/// meaning "does my saved configuration still work".
-pub fn stored_key_for(store: &Store, provider_id: &str, endpoint: &str) -> Option<String> {
-    let p = store.get_provider(provider_id).ok().flatten()?;
-    let wanted = endpoint_key(endpoint);
-    let known = provider_endpoint_keys(&p);
-    known.contains(&wanted).then_some(p.api_key)?
-}
+// The stored-key lookup moved to `kiwanod::api::catalog` — the daemon's probes
+// need it, and it is built from the same endpoint keys the shelf matches by.
+pub use kiwanod::api::catalog::stored_key_for;
 
 /// Fill in the catalog link on providers that have none.
 ///

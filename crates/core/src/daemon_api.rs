@@ -18,6 +18,7 @@ use kiwano_api::providers::{NewProviderInput, ProviderVm, SyncReportVm};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::logs::RequestLogListVm;
+use kiwanod::plan_quota::PlanQuotaReport;
 use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter};
 
 use crate::sidecar::{self, AdminEndpoint};
@@ -429,6 +430,73 @@ impl DaemonApi {
             &self.endpoint,
             self.token.as_deref(),
             "/api/sync-hub",
+            &serde_json::Value::Null,
+        )
+    }
+    /// One provider's plan usage — `kiwanod::plan_quota::get_plan_quota_report`.
+    /// The daemon reads the vendor's own endpoint, which is the same reader the
+    /// data plane enforces the ceiling with, so the display and the block
+    /// cannot disagree. `force` skips the 5-minute cache.
+    pub fn get_plan_quota(
+        &self,
+        provider_id: &str,
+        force: bool,
+    ) -> Result<PlanQuotaReport, String> {
+        let query = if force { "?force=true" } else { "" };
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/plan-quota/{provider_id}{query}"),
+        )
+    }
+
+    /// The network half of a Test button — one of the three probes.
+    ///
+    /// `action` is `latency` | `endpoint` | `models`. A blank `api_key` is
+    /// filled in with the stored credential — for that provider's own endpoints
+    /// only, on the daemon's side (`migrate.local.md` §10.15). The response is
+    /// the probe's own shape: `{latency_ms}`, the `ProbeReport`, or the model
+    /// list, so the caller deserializes what it asked for.
+    pub async fn probe(
+        &self,
+        protocol: &str,
+        endpoint: &str,
+        api_key: Option<&str>,
+        provider_id: Option<&str>,
+        action: &str,
+    ) -> Result<serde_json::Value, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            protocol: &'a str,
+            endpoint: &'a str,
+            api_key: Option<&'a str>,
+            provider_id: Option<&'a str>,
+            action: &'a str,
+        }
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/probe",
+            &Body {
+                protocol,
+                endpoint,
+                api_key,
+                provider_id,
+                action,
+            },
+        )
+    }
+
+    /// One prompt round trip against a stored provider — the Apps screen's Test
+    /// button. The verdict is written to the health table, which the daemon owns.
+    pub async fn test_provider_latency(
+        &self,
+        id: &str,
+    ) -> Result<kiwano_api::agents::PromptLatencyVm, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{id}/test-latency"),
             &serde_json::Value::Null,
         )
     }

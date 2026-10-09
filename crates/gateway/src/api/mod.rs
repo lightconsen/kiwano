@@ -41,6 +41,7 @@ pub mod limits;
 pub mod logs;
 pub mod pricing;
 pub mod pricing_sync;
+pub mod probe;
 pub mod providers;
 pub mod providers_add;
 pub mod routes;

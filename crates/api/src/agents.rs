@@ -19,3 +19,16 @@ pub struct CustomAgentVm {
     /// reads it as such rather than showing a protocol nobody picked.
     pub protocol: Option<String>,
 }
+
+/// One prompt round trip against a provider, for the Apps screen's Test button.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptLatencyVm {
+    pub provider_id: String,
+    /// The model the ping was sent with — it decides the number as much as the
+    /// network does, so the UI can say which one was measured.
+    pub model: String,
+    pub latency_ms: u64,
+    pub status: u16,
+    /// The upstream's own words when it refused, so a failure reads as one.
+    pub error: Option<String>,
+}

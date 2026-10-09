@@ -162,6 +162,126 @@ fn provider_vm(
     }
 }
 
+pub fn update_provider(store: &Store, id: &str, input: &NewProviderInput) -> Result<(), ApiError> {
+    let mut p = store
+        .get_provider(id)
+        .map_err(ApiError::failed)?
+        .ok_or_else(|| ApiError::not_found(format!("provider `{id}` not found")))?;
+
+    p.name = input.name.trim().to_string();
+    p.base_url = absolute_endpoint(&input.endpoint);
+    p.protocol = crate::store::Protocol::parse_str(&input.protocol)
+        .unwrap_or(crate::store::Protocol::OpenAI);
+    p.endpoints = input_endpoints(input);
+    // Authoritative, like `endpoints`: the form is the only caller and always
+    // sends it, so clearing the box means "no default" rather than "leave it".
+    // Empty stores NULL.
+    p.model_default = Some(input.model_default.trim().to_string()).filter(|m| !m.is_empty());
+    p.billing = billing_to_db(&input.billing).map_err(ApiError::invalid)?;
+    // Plan rows carry percent limits in plan_limits and NULL the legacy
+    // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
+    let is_plan = p.billing == crate::store::Billing::Subscription;
+    p.period_limit = if is_plan {
+        None
+    } else {
+        input.billing_config.limit_value
+    };
+    p.limit_unit = if is_plan {
+        None
+    } else {
+        normalize_limit_unit(
+            input.billing_config.limit_unit.as_deref(),
+            input.billing_config.limit_value.is_some(),
+            &known_limit_currencies(store),
+        )
+        .map_err(ApiError::invalid)?
+    };
+    p.plan_limits = if is_plan {
+        plan_limits_json(input.billing_config.plan_limits.as_ref())
+    } else {
+        None
+    };
+    // Declared prices: same absent-keeps semantics as `advanced` below, and a
+    // present bundle is the snapshot — including an empty one, which is how a
+    // provider that leaves pay-as-you-go stops carrying prices.
+    if input.prices.is_some() {
+        p.prices = normalize_declared_prices(input.prices.as_ref(), &known_limit_currencies(store))
+            .map_err(ApiError::invalid)?;
+    }
+    p.reset_period = if is_plan {
+        None
+    } else {
+        match input.billing_config.reset_period.as_deref() {
+            Some("monthly") | Some("weekly") | Some("yearly") => {
+                input.billing_config.reset_period.clone()
+            }
+            _ => None,
+        }
+    };
+    if !input.api_key.trim().is_empty() {
+        p.api_key = Some(input.api_key.clone());
+    }
+    // The catalog entry this provider was added from: absent or empty keeps
+    // what is stored. The edit form has no catalog picker, and dropping the
+    // link on an unrelated edit would quietly change which price it is costed
+    // at — the one thing this column exists to pin down.
+    if let Some(catalog_id) = input.catalog_id.as_deref().map(str::trim) {
+        if !catalog_id.is_empty() {
+            p.catalog_id = Some(catalog_id.to_string());
+        }
+    }
+    // Advanced: absent = keep existing (same semantics as an empty api_key);
+    // a present object is an authoritative snapshot — null fields clear values.
+    if let Some(adv) = &input.advanced {
+        let (timeout_secs, retries, headers) = advanced_columns(adv);
+        p.timeout_secs = timeout_secs;
+        p.retries = retries;
+        p.headers = headers;
+    }
+    // Plan quota query: same absent-keeps semantics; null clears.
+    if let Some(pq) = &input.plan_query {
+        p.plan_query = (!pq.is_null()).then(|| pq.to_string());
+    }
+    p.updated_at = crate::store::now_rfc3339();
+    store.update_provider(&p).map_err(ApiError::failed)?;
+
+    // Bindings: absent leaves them exactly as they are, which is what an edit
+    // sends. They belong to the Apps screen's agent tabs — that screen binds,
+    // unbinds and sets the strategy — and this loop is not a neutral rewrite of
+    // "the same set": every agent it names is promoted to *this* provider as
+    // primary, and has its strategy flattened to Single. Running it on an
+    // unrelated save is how editing a provider's timeout silently reordered an
+    // agent's failover queue.
+    if let Some(agents) = &input.agents {
+        // Unbind old agents not in the new set; new ones use the same primary
+        // logic as add.
+        let new_set: std::collections::HashSet<&str> = agents.iter().map(String::as_str).collect();
+        let old_agents: Vec<String> = store
+            .bound_agents()
+            .map_err(ApiError::failed)?
+            .into_iter()
+            .filter(|a| {
+                store
+                    .bindings_for_agent(a)
+                    .map(|bs| bs.iter().any(|b| b.provider_id == id))
+                    .unwrap_or(false)
+            })
+            .collect();
+        for agent in &old_agents {
+            if !new_set.contains(agent.as_str()) {
+                store.delete_binding(agent, id).map_err(ApiError::failed)?;
+            }
+        }
+        for agent in agents {
+            store
+                .upsert_strategy(agent, StrategyType::Single, None)
+                .map_err(ApiError::failed)?;
+            bind_as_primary(store, agent, id)?;
+        }
+    }
+    Ok(())
+}
+
 /// Make `provider_id` the primary for `agent`: priority 0, every other binding
 /// reindexed after it in the order it already had.
 ///
@@ -481,6 +601,46 @@ mod tests {
             both.message(),
             "billing \"both\" must be resolved to plan or payg before saving"
         );
+    }
+
+    /// An edit is idempotent by nature — the body *is* the resulting state — and
+    /// the two halves that are easy to get wrong are asserted here: a field the
+    /// form always sends is authoritative, and a field it may omit keeps what is
+    /// stored.
+    #[test]
+    fn an_edit_replaces_what_the_form_sent_and_keeps_what_it_did_not() {
+        let store = Store::open_in_memory().unwrap();
+        let id = kiwano_api::ids::mint_provider_id("Original");
+        let mut create = input("Original", "https://one.example");
+        create.api_key = "sk-original".into();
+        create.model_default = "m-one".into();
+        add_provider(&store, &id, &create).unwrap();
+
+        // The edit renames it and points it elsewhere, and says nothing about
+        // the key — which must survive, because a blank key is how the form
+        // says "keep the stored one".
+        let mut edit = input("Renamed", "https://two.example");
+        edit.api_key = String::new();
+        edit.model_default = String::new();
+        update_provider(&store, &id, &edit).unwrap();
+
+        let row = store.get_provider(&id).unwrap().unwrap();
+        assert_eq!(row.name, "Renamed");
+        assert_eq!(row.base_url, "https://two.example");
+        assert_eq!(
+            row.api_key.as_deref(),
+            Some("sk-original"),
+            "a blank key keeps the stored one"
+        );
+        assert_eq!(
+            row.model_default, None,
+            "but a blank model default clears it — the form always sends that field"
+        );
+
+        // Editing something that is not there is a named refusal.
+        let missing = update_provider(&store, "ghost", &edit).unwrap_err();
+        assert_eq!(missing.kind(), kiwano_api::error::ApiErrorKind::NotFound);
+        assert_eq!(missing.message(), "provider `ghost` not found");
     }
 
     /// "Save & Enable": the agents the form named get this provider as their

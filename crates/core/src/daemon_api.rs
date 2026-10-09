@@ -578,6 +578,17 @@ impl DaemonApi {
             page["truncated"].as_bool().unwrap_or(false),
         ))
     }
+    /// Apply an edit — `vm::update_provider`'s **write** half. The view is the
+    /// caller's (`migrate.local.md` §5's fifth constraint): the daemon updates
+    /// the row and the bindings, and the caller assembles what it shows.
+    pub fn update_provider(&self, id: &str, input: &NewProviderInput) -> Result<(), String> {
+        wrote(sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{id}"),
+            input,
+        ))
+    }
 }
 
 /// A value as a query-string component: everything outside the unreserved set is

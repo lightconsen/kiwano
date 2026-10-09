@@ -3,11 +3,11 @@
 
 use crate::detect::ShellVars;
 use crate::vm::providers::{build_provider_vms, ProviderVm};
-use crate::vm::time::{rfc3339, unix_now};
-use crate::vm::{e2s, mint_provider_id, Aux};
+use crate::vm::{mint_provider_id, Aux};
 use kiwanod::api::providers as daemon;
 use kiwanod::api::providers_add as daemon_add;
-use kiwanod::store::{Store, StrategyType};
+use kiwanod::store::Store;
+
 use std::path::Path;
 
 /// Add a provider — served by the daemon (`kiwanod::api::providers_add::add_provider`).
@@ -81,6 +81,11 @@ pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<
 /// becomes primary; removed ones are unbound). An empty api_key means keep
 /// the existing key. Returns the refreshed VM (re-aggregated so badges and
 /// notes stay consistent), read against `home` like [`build_provider_vms`].
+/// Update a provider — the **write** is the daemon's
+/// (`kiwanod::api::providers_add::update_provider`), and the **view** is this
+/// side's. That split is `migrate.local.md` §5's fifth constraint: the
+/// aggregation layer stays on the client, because it is the half that reads
+/// *this machine* (which agents actually route here).
 pub fn update_provider(
     store: &Store,
     aux: &Aux,
@@ -89,122 +94,7 @@ pub fn update_provider(
     input: &NewProviderInput,
     vars: &ShellVars,
 ) -> Result<ProviderVm, String> {
-    let mut p = store
-        .get_provider(id)
-        .map_err(e2s)?
-        .ok_or_else(|| format!("provider `{id}` not found"))?;
-
-    p.name = input.name.trim().to_string();
-    p.base_url = absolute_endpoint(&input.endpoint);
-    p.protocol = kiwanod::store::Protocol::parse_str(&input.protocol)
-        .unwrap_or(kiwanod::store::Protocol::OpenAI);
-    p.endpoints = input_endpoints(input);
-    // Authoritative, like `endpoints`: the form is the only caller and always
-    // sends it, so clearing the box means "no default" rather than "leave it".
-    // Empty stores NULL.
-    p.model_default = Some(input.model_default.trim().to_string()).filter(|m| !m.is_empty());
-    p.billing = billing_to_db(&input.billing)?;
-    // Plan rows carry percent limits in plan_limits and NULL the legacy
-    // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
-    let is_plan = p.billing == kiwanod::store::Billing::Subscription;
-    p.period_limit = if is_plan {
-        None
-    } else {
-        input.billing_config.limit_value
-    };
-    p.limit_unit = if is_plan {
-        None
-    } else {
-        normalize_limit_unit(
-            input.billing_config.limit_unit.as_deref(),
-            input.billing_config.limit_value.is_some(),
-            &known_limit_currencies(store),
-        )?
-    };
-    p.plan_limits = if is_plan {
-        plan_limits_json(input.billing_config.plan_limits.as_ref())
-    } else {
-        None
-    };
-    // Declared prices: same absent-keeps semantics as `advanced` below, and a
-    // present bundle is the snapshot — including an empty one, which is how a
-    // provider that leaves pay-as-you-go stops carrying prices.
-    if input.prices.is_some() {
-        p.prices =
-            normalize_declared_prices(input.prices.as_ref(), &known_limit_currencies(store))?;
-    }
-    p.reset_period = if is_plan {
-        None
-    } else {
-        match input.billing_config.reset_period.as_deref() {
-            Some("monthly") | Some("weekly") | Some("yearly") => {
-                input.billing_config.reset_period.clone()
-            }
-            _ => None,
-        }
-    };
-    if !input.api_key.trim().is_empty() {
-        p.api_key = Some(input.api_key.clone());
-    }
-    // The catalog entry this provider was added from: absent or empty keeps
-    // what is stored. The edit form has no catalog picker, and dropping the
-    // link on an unrelated edit would quietly change which price it is costed
-    // at — the one thing this column exists to pin down.
-    if let Some(catalog_id) = input.catalog_id.as_deref().map(str::trim) {
-        if !catalog_id.is_empty() {
-            p.catalog_id = Some(catalog_id.to_string());
-        }
-    }
-    // Advanced: absent = keep existing (same semantics as an empty api_key);
-    // a present object is an authoritative snapshot — null fields clear values.
-    if let Some(adv) = &input.advanced {
-        let (timeout_secs, retries, headers) = advanced_columns(adv);
-        p.timeout_secs = timeout_secs;
-        p.retries = retries;
-        p.headers = headers;
-    }
-    // Plan quota query: same absent-keeps semantics; null clears.
-    if let Some(pq) = &input.plan_query {
-        p.plan_query = (!pq.is_null()).then(|| pq.to_string());
-    }
-    p.updated_at = rfc3339(unix_now());
-    store.update_provider(&p).map_err(e2s)?;
-
-    // Bindings: absent leaves them exactly as they are, which is what an edit
-    // sends. They belong to the Apps screen's agent tabs — that screen binds,
-    // unbinds and sets the strategy — and this loop is not a neutral rewrite of
-    // "the same set": every agent it names is promoted to *this* provider as
-    // primary, and has its strategy flattened to Single. Running it on an
-    // unrelated save is how editing a provider's timeout silently reordered an
-    // agent's failover queue.
-    if let Some(agents) = &input.agents {
-        // Unbind old agents not in the new set; new ones use the same primary
-        // logic as add.
-        let new_set: std::collections::HashSet<&str> = agents.iter().map(String::as_str).collect();
-        let old_agents: Vec<String> = store
-            .bound_agents()
-            .map_err(e2s)?
-            .into_iter()
-            .filter(|a| {
-                store
-                    .bindings_for_agent(a)
-                    .map(|bs| bs.iter().any(|b| b.provider_id == id))
-                    .unwrap_or(false)
-            })
-            .collect();
-        for agent in &old_agents {
-            if !new_set.contains(agent.as_str()) {
-                store.delete_binding(agent, id).map_err(e2s)?;
-            }
-        }
-        for agent in agents {
-            store
-                .upsert_strategy(agent, StrategyType::Single, None)
-                .map_err(e2s)?;
-            bind_as_primary(store, agent, id)?;
-        }
-    }
-
+    kiwanod::api::providers_add::update_provider(store, id, input).map_err(|e| e.to_string())?;
     let vms = build_provider_vms(store, aux, home, vars)?;
     vms.into_iter()
         .find(|v| v.id == id)

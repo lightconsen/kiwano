@@ -120,8 +120,13 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             post(apply_agent_route_route),
         )
         .route("/providers", post(add_provider_route))
+        // One route per path: axum panics on a second `route()` for the same
+        // path, and the two verbs here are one resource's.
+        .route(
+            "/providers/{id}",
+            put(update_provider_route).delete(delete_provider_route),
+        )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
-        .route("/providers/{id}", delete(delete_provider_route))
         .route("/model-prices", get(list_model_prices_route))
         .route("/catalog", get(list_catalog_route))
         .route("/sync-hub", post(sync_hub_route))
@@ -1232,6 +1237,29 @@ async fn export_logs_route(
         .into_response(),
         Err(e) => resource_error(e),
     }
+}
+
+/// The body of an edit: the same form shape the add takes, without an id — the
+/// path names the provider being edited.
+#[derive(serde::Deserialize)]
+struct UpdateProviderBody {
+    #[serde(flatten)]
+    input: kiwano_api::providers::NewProviderInput,
+}
+
+/// `PUT /api/providers/{id}` — apply an edit.
+///
+/// The **write** is here and the **view** is the client's (`migrate.local.md`
+/// §5's fifth constraint): the daemon updates the row and the bindings, and the
+/// caller assembles the row it shows, because that assembly reads *this
+/// machine* — which agents actually route through the gateway.
+async fn update_provider_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateProviderBody>,
+) -> Response {
+    let result = crate::api::providers_add::update_provider(&state.store, &id, &body.input);
+    after_write(&state, result)
 }
 
 #[cfg(test)]

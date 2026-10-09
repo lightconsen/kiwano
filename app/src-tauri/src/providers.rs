@@ -1,17 +1,17 @@
 //! Provider rows: the list the first screen reads, and the writes behind its
 //! add / edit / enable / delete actions.
 //!
-//! Two of the five are the daemon's now (`migrate.local.md` §7 batch 1) — it
-//! performs the write and re-reads its own route table, so those commands carry
-//! no `State<AppState>` and no reload ping. The other three still write directly:
-//! `list_providers` and `update_provider` are mixed (they need the live
-//! per-machine view), and `add_provider` reads the Hub catalog, which moves with
-//! the Hub half of the work (§10.9).
+//! Four of the five are the daemon's now — it performs each write and re-reads
+//! its own route table, so they carry no reload ping. `update_provider` is the
+//! one that is **split**: its write is the daemon's and its view is assembled
+//! here, because the assembly reads *this machine* (`migrate.local.md` §5's
+//! fifth constraint). `list_providers` is that same assembly with nothing to
+//! write, so it is a client command by the same rule.
 
 use tauri::State;
 
 use crate::paths::home_dir;
-use crate::state::{after_mutation, AppState};
+use crate::state::AppState;
 use kiwano_core::vm;
 
 #[tauri::command]
@@ -42,16 +42,15 @@ pub fn update_provider(
     id: String,
     input: vm::NewProviderInput,
 ) -> Result<vm::ProviderVm, String> {
-    let vm = vm::update_provider(
-        &state.store,
-        &state.aux,
-        &home_dir(),
-        &id,
-        &input,
-        state.shell_vars(),
-    )?;
-    after_mutation(&state);
-    Ok(vm)
+    // The write is the daemon's; the **view** is assembled here, because it is
+    // the half that reads this machine (which agents actually route through the
+    // gateway) — `migrate.local.md` §5's fifth constraint. The daemon re-reads
+    // its own route table, so there is no reload ping to send.
+    kiwano_core::daemon_api::DaemonApi::connect().update_provider(&id, &input)?;
+    let vms = vm::build_provider_vms(&state.store, &state.aux, &home_dir(), state.shell_vars())?;
+    vms.into_iter()
+        .find(|v| v.id == id)
+        .ok_or_else(|| "provider vanished after update".to_string())
 }
 
 #[tauri::command]

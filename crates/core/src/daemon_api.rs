@@ -668,6 +668,24 @@ impl DaemonApi {
             .unwrap_or(kiwanod::server::DEFAULT_DATA_PORT as u64);
         Ok(format!("http://{}:{port}", self.endpoint.host()))
     }
+    /// The Apps list, assembled by the daemon — `vm::build_provider_vms`.
+    ///
+    /// `live` is the one thing the client supplies: which agents actually route
+    /// through the gateway, read out of their own config files, which are this
+    /// machine's (`migrate.local.md` §5 #2). Everything else is the daemon's
+    /// database, which is the whole reason this endpoint exists.
+    pub fn provider_view(&self, live: &[String]) -> Result<Vec<ProviderVm>, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            live: &'a [String],
+        }
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/providers/view",
+            &Body { live },
+        )
+    }
 }
 
 /// A value as a query-string component: everything outside the unreserved set is

@@ -1,16 +1,15 @@
-//! Presentation helpers: the palette a slice or a logo gets, and the token
-//! formatter the CLI and the dashboard both print.
-
-// The avatar rules moved to `kiwano-api`: the daemon produces `logo_char` and
-// `logo_color` too, and two copies of a rule that decides what a provider looks
-// like would let the two sides draw it differently (`migrate.local.md` §10.7).
-// Re-exported rather than re-declared, so the paths here are what they were.
-pub(crate) use kiwano_api::logo::{logo_char, palette_color};
+//! Presentation helpers: the chart palette, and the token formatter the CLI and
+//! the dashboard both print.
+//!
+//! The avatar rules (`logo_char`, `palette_color`) are `kiwano_api::logo`'s, and
+//! the provider view that used them is the daemon's now (`migrate.local.md`
+//! §10.21) — so nothing in this crate reads them and there is nothing to
+//! re-export.
 
 /// Categorical colours for charts. Spread around the hue wheel and held at a
-/// lightness that reads on both themes — the letter-avatar palette above is
-/// blue-heavy, which is fine behind a white glyph and useless for slices that
-/// have to be told apart.
+/// lightness that reads on both themes — the avatar palette is blue-heavy, which
+/// is fine behind a white glyph and useless for slices that have to be told
+/// apart.
 const CHART_COLORS: [&str; 8] = [
     "#4D6BFE", // blue
     "#0F9D58", // green

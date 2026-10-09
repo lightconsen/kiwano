@@ -23,7 +23,7 @@ pub mod usage;
 // ── the public surface, re-exported from the file that now owns it ──
 
 pub use billing::billing_to_ui;
-pub use rows::build_provider_vms;
+pub use rows::{build_provider_vms, live_bound_agents};
 pub use types::{HealthVm, ProviderAdvancedVm, ProviderEndpointVm, ProviderVm, QuotaVm, UsageVm};
 
 // The write paths' view rules moved to the daemon (`kiwanod::api::views`) —

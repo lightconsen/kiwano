@@ -46,6 +46,7 @@ pub mod pricing_sync;
 pub mod probe;
 pub mod providers;
 pub mod providers_add;
+pub mod providers_view;
 pub mod routes;
 pub mod settings;
 pub mod share;

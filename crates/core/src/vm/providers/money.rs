@@ -3,8 +3,6 @@
 //! that currency. Never converted: both are read beside the provider's own
 //! limits rather than in the user's display currency.
 
-use std::collections::HashMap;
-
 /// The currencies a spending limit may be denominated in.
 ///
 /// The Hub's rate table, because that is what makes the limit comparable with the
@@ -23,31 +21,17 @@ use std::collections::HashMap;
 /// only honest answer when nothing said otherwise.
 // The rule is the daemon's (`kiwanod::api::views`): what a provider's figures
 // are denominated in is produced by whichever side builds the row, and that is
-// the daemon now (`migrate.local.md` §10.7). Re-exported, paths unchanged.
+// the daemon now (`migrate.local.md` §10.7). Nothing in this crate calls it any
+// more — the view is the daemon's too (§10.21) — but the tests below still pin
+// the rule, and they call the daemon's copy rather than a local one.
+#[cfg(test)]
 pub(crate) use kiwanod::api::views::provider_currency;
 
-/// Cost of one provider, in the currency its usage was priced in.
-///
-/// No conversion: a provider bills in one currency and this number is read
-/// beside that provider's own limits. Should usage ever be priced in more than
-/// one currency (a price-table currency change mid-period), the currency
-/// carrying the most money names the total — the alternatives are folding
-/// other currencies in at a rate nobody asked for, or inventing a second line
-/// for a case that does not occur in practice. Unpriced rows (`None`)
-/// contribute nothing, exactly as they did when the sum was converted.
-pub(crate) fn provider_cost(buckets: &[(Option<String>, f64)]) -> (Option<f64>, Option<String>) {
-    let mut per_currency: HashMap<&str, f64> = HashMap::new();
-    for (currency, cost) in buckets {
-        let Some(currency) = currency.as_deref() else {
-            continue;
-        };
-        *per_currency.entry(currency).or_default() += cost;
-    }
-    match per_currency.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
-        Some((currency, total)) => (Some(total), Some(currency.to_string())),
-        None => (None, None),
-    }
-}
+// The cost rule is the daemon's (`kiwanod::api::providers_view`): it produces
+// the Usage cell, and that is the daemon's now (`migrate.local.md` §10.7,
+// §10.21). Nothing here calls it; the tests below pin it through that copy.
+#[cfg(test)]
+pub(crate) use kiwanod::api::providers_view::provider_cost;
 
 #[cfg(test)]
 mod tests {

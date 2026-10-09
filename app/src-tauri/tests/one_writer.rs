@@ -131,7 +131,7 @@ fn the_app_does_not_open_a_database_of_its_own() {
 /// where it can be looked at, instead of appearing silently in a diff.
 #[test]
 fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
-    const KNOWN: [&str; 10] = [
+    const KNOWN: [&str; 11] = [
         "vm::build_dashboard",
         "vm::build_footer_stats",
         "vm::build_provider_vms",
@@ -145,6 +145,11 @@ fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
         // close behaviour. Added when the test caught it, which is the test
         // doing its job rather than a reason to loosen it.
         "vm::ui_settings",
+        // Reads which agents route here — the machine fact the provider view
+        // needs — so it opens the agents' config files and the store's custom
+        // agent rows. Caught by this test when the view moved
+        // (`migrate.local.md` §10.21).
+        "vm::providers::live_bound_agents",
     ];
     let mut found: Vec<String> = Vec::new();
     for (_, text) in app_sources() {

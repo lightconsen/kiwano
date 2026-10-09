@@ -119,6 +119,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/agents/{target}/route/apply",
             post(apply_agent_route_route),
         )
+        .route("/providers/view", post(provider_view_route))
         .route("/providers", post(add_provider_route))
         // One route per path: axum panics on a second `route()` for the same
         // path, and the two verbs here are one resource's.
@@ -1389,6 +1390,34 @@ async fn takeover_state_route(
     let result =
         crate::api::takeover::phase_state(&state.store, &agent, &body.key, body.creds.as_ref());
     after_write(&state, result)
+}
+
+/// `POST /api/providers/view` — the Apps list, assembled.
+///
+/// **The one endpoint whose input is a machine fact.** Which agents actually
+/// route through the gateway is read out of their own config files, which are
+/// the client's to read (§5 #2) — so the client sends that set and the daemon
+/// assembles the rows around it. Everything else about the screen is the
+/// daemon's, because everything else is its database.
+///
+/// A `POST` for a read, deliberately: the body is the input, and a query string
+/// carrying a list of agent ids would be a URL that grows with the user's
+/// roster.
+#[derive(serde::Deserialize)]
+struct ProviderViewBody {
+    /// Agents whose config points at this gateway right now.
+    #[serde(default)]
+    live: Vec<String>,
+}
+
+async fn provider_view_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<ProviderViewBody>,
+) -> Response {
+    match crate::api::providers_view::build_provider_vms(&state.store, &body.live) {
+        Ok(vms) => Json(vms).into_response(),
+        Err(e) => resource_error(e),
+    }
 }
 
 #[cfg(test)]

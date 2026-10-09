@@ -14,9 +14,15 @@ use crate::paths::home_dir;
 use crate::state::AppState;
 use kiwano_core::vm;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, String> {
-    vm::build_provider_vms(&state.store, &state.aux, &home_dir(), state.shell_vars())
+    // **The one screen whose assembly needs a machine fact.** Which agents route
+    // through the gateway is read out of their own config files, so the client
+    // computes that and the daemon builds the rows around it
+    // (`migrate.local.md` §5 #2, §10.21) — which is what lets this work when the
+    // daemon is on another machine.
+    let live = vm::providers::live_bound_agents(&state.store, &home_dir(), state.shell_vars())?;
+    kiwano_core::daemon_api::DaemonApi::connect().provider_view(&live)
 }
 
 #[tauri::command(async)]

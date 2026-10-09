@@ -194,6 +194,7 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
     } else {
         ctx.out.line(format!("{agent}: configuration restored"));
     }
-    ctx.after_mutation();
+    // No reload ping: the store half went over the wire, and the daemon re-reads
+    // its own route table when it lands — which is what the ping was for.
     Ok(())
 }

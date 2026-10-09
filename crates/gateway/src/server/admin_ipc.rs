@@ -258,6 +258,22 @@ impl AdminEndpoint {
         }
     }
 
+    /// The host a client reaches this plane on: the address it dialled, or
+    /// loopback for a local one.
+    ///
+    /// The companion of [`AdminTcp`]'s address discipline: a client on another
+    /// machine composes the data plane's URL from this and the port the daemon
+    /// reports, because it knows the host and only the daemon knows the port.
+    pub fn host(&self) -> String {
+        match self {
+            #[cfg(unix)]
+            AdminEndpoint::Local(_) => "127.0.0.1".to_string(),
+            #[cfg(windows)]
+            AdminEndpoint::Local(_) => "127.0.0.1".to_string(),
+            AdminEndpoint::Tcp(addr) => addr.ip().to_string(),
+        }
+    }
+
     /// The endpoint as a human reads it: a path on unix, a pipe name on
     /// Windows. For logs, the sidecar's ready line and the CLI's status header.
     pub fn describe(&self) -> String {

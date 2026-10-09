@@ -107,6 +107,19 @@ impl Ctx<'_> {
             .get_or_init(|| detect::login_shell_vars(kiwano_core::takeover::CONFIG_DIR_VARS))
     }
 
+    /// Where an agent on this machine reaches the gateway's data plane.
+    ///
+    /// Asks the daemon for its port rather than assuming the conventional one:
+    /// a daemon started with `KIWANO_DATA_PORT` set, or reached over TCP, would
+    /// otherwise have agents pointed at a port nothing listens on
+    /// (`migrate.local.md` §10.30). Falls back to the local default when the
+    /// daemon does not answer — a takeover with no daemon running is a
+    /// takeover of nothing, and the fallback at least names the usual place.
+    pub fn gateway_base(&self) -> String {
+        kiwano_core::daemon_api::DaemonApi::with_token(self.admin.clone(), self.token.clone())
+            .gateway_base()
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{}", self.data_port))
+    }
     pub fn store(&self) -> Result<&Store, CliError> {
         if self.store.get().is_none() {
             if let Some(dir) = self.db.parent() {

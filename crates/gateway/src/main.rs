@@ -107,6 +107,9 @@ async fn main() {
     };
 
     let data_addr = std::net::SocketAddr::from(([127, 0, 0, 1], data_port));
+    // What `/status` reports, so a client on another machine can point an agent
+    // here. The port may not be the conventional one.
+    state.set_data_port(data_port);
     let data_listener = match tokio::net::TcpListener::bind(data_addr).await {
         Ok(l) => l,
         Err(e) => {

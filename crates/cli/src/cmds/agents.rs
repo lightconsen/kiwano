@@ -159,7 +159,10 @@ fn render_agent_rows(rows: &[AgentRow]) -> String {
 /// Take over, or restore, one agent — the operation that makes a server
 /// usable, and the one the CLI could not do at all.
 fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliError> {
-    let (home, port) = (ctx.home.clone(), ctx.data_port);
+    let home = ctx.home.clone();
+    // Where this machine's agents reach the gateway — computed once, and used
+    // both to write the config and to say what was written.
+    let gateway = ctx.gateway_base();
     {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
         vm::set_agent_takeover(
@@ -167,7 +170,7 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
             aux,
             agent,
             enabled,
-            port,
+            &gateway,
             &home,
             ctx.config_vars(),
             // The CLI opens the database itself for every command it has, so
@@ -189,9 +192,8 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
                 .find(|k| k.agent == agent)
                 .map(|k| k.key)
         };
-        ctx.out.line(format!(
-            "{agent}: routed through the gateway on 127.0.0.1:{port}"
-        ));
+        ctx.out
+            .line(format!("{agent}: routed through the gateway on {gateway}"));
         match key {
             Some(key) => ctx.out.line(format!("placeholder key: {key}")),
             None => ctx.out.note(format!(

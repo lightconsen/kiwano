@@ -15,15 +15,15 @@ use serde_json::Value;
 pub(crate) fn codex_rewrites(
     originals: &[BackupFile],
     placeholder_key: &str,
-    data_port: u16,
+    gateway: &str,
 ) -> Result<Files, String> {
     let config = originals
         .iter()
         .find(|o| o.path.ends_with("config.toml"))
         .expect("takeover_paths always lists codex's config.toml");
-    let gateway = gateway_target("codex", data_port);
+    let target = gateway_target("codex", gateway);
     let plan =
-        codex_config::plan_codex_takeover_live_write(&config.content, placeholder_key, &gateway)
+        codex_config::plan_codex_takeover_live_write(&config.content, placeholder_key, &target)
             .map_err(|e| e.to_string())?;
     let config_text = plan.config_text.unwrap_or_else(|| config.content.clone());
 

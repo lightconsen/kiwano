@@ -250,7 +250,15 @@ mod tests {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, CODEX_ORIGINAL, r#"{"OPENAI_API_KEY":"sk-old"}"#);
-        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "codex",
+            "kw-ag-codex-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         // The SQLite row is the backup restore reads; losing it is the case
         // that used to be reported as a successful "Not taken over".
         aux.delete_takeover_backup("codex").unwrap();
@@ -276,7 +284,15 @@ mod tests {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, CODEX_ORIGINAL, r#"{"OPENAI_API_KEY":"sk-old"}"#);
-        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "codex",
+            "kw-ag-codex-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         aux.delete_takeover_backup("codex").unwrap();
 
         let route = ProviderRoute {
@@ -357,7 +373,15 @@ mod tests {
             r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","SOMETHING":"kept"}}"#,
         )
         .unwrap();
-        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "claude",
+            "kw-ag-claude-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         aux.delete_takeover_backup("claude").unwrap();
 
         let route = ProviderRoute {
@@ -384,7 +408,15 @@ mod tests {
             r#"{"model":"opus","env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","SOMETHING":"kept"}}"#,
         )
         .unwrap();
-        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "claude",
+            "kw-ag-claude-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         aux.delete_takeover_backup("claude").unwrap();
 
         let err = disable(&aux, "claude", &home, None, &no_vars()).unwrap_err();
@@ -411,7 +443,7 @@ mod tests {
             &aux,
             "opencode",
             "kw-ag-opencode-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -438,7 +470,15 @@ mod tests {
             "model: openai/claude-sonnet-4-6\ndark-mode: true\nopenai-api-base: http://127.0.0.1:8317/v1\nopenai-api-key: kw-ag-aider-abcd\n",
         )
         .unwrap();
-        enable(&aux, "aider", "kw-ag-aider-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "aider",
+            "kw-ag-aider-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         aux.delete_takeover_backup("aider").unwrap();
 
         let err = disable(&aux, "aider", &home, None, &no_vars()).unwrap_err();

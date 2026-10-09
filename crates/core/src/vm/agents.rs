@@ -302,7 +302,7 @@ mod tests {
                 &aux,
                 &a.id,
                 true,
-                8317,
+                "http://127.0.0.1:8317",
                 home.path(),
                 &no_vars(),
                 StateHalf::InProcess,

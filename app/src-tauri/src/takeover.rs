@@ -24,14 +24,20 @@ pub fn set_agent_takeover(
     agent: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let data_port = state.data_port;
     let api = DaemonApi::connect();
+    // Where an agent on **this** machine reaches the gateway. Composed from the
+    // daemon's own report, so a gateway on another machine — or on a
+    // non-standard port — has its agents pointed at the right place
+    // (`migrate.local.md` §10.30).
+    let gateway = api
+        .gateway_base()
+        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", state.data_port));
     vm::set_agent_takeover(
         &state.store,
         &state.aux,
         &agent,
         enabled,
-        data_port,
+        &gateway,
         &home_dir(),
         state.shell_vars(),
         // The store half goes to the daemon, which re-reads its own route table

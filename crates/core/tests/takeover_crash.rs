@@ -43,7 +43,9 @@ const AGENT: &str = "claude";
 /// that window — one file is all of it.
 const MULTI_FILE_AGENT: &str = "commandcode";
 
-const DATA_PORT: u16 = 8317;
+/// Where a takeover points an agent. A constant because the crash tests assert
+/// on the rewritten config, and it is the string a local client composes.
+const GATEWAY: &str = "http://127.0.0.1:8317";
 
 const ENV_HOME: &str = "KIWANO_CRASH_HOME";
 const ENV_DB: &str = "KIWANO_CRASH_DB";
@@ -163,7 +165,7 @@ fn crash_worker() {
                 &aux,
                 &agent,
                 &prepared.key,
-                DATA_PORT,
+                GATEWAY,
                 &home,
                 &vars,
                 |index| {
@@ -177,7 +179,7 @@ fn crash_worker() {
         "before_mark" => {
             let prepared = phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
                 .expect("child: phase_state");
-            enable(&aux, &agent, &prepared.key, DATA_PORT, &home, &vars).expect("child: enable");
+            enable(&aux, &agent, &prepared.key, GATEWAY, &home, &vars).expect("child: enable");
             // Every file is written; only the mark is missing.
             std::process::abort();
         }

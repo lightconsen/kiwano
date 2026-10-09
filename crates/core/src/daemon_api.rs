@@ -652,6 +652,22 @@ impl DaemonApi {
             &Body { key, creds },
         ))
     }
+    /// Where an agent on **this** machine should be pointed to reach this
+    /// daemon's data plane.
+    ///
+    /// Composed from the two halves each side actually knows: the client knows
+    /// the host — it dialled it — and the daemon reports the port, which may not
+    /// be the conventional one (`migrate.local.md` §10.30). A local client gets
+    /// `http://127.0.0.1:<port>`, which is what a takeover wrote before this
+    /// existed.
+    pub fn gateway_base(&self) -> Result<String, String> {
+        let status: serde_json::Value =
+            sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/status")?;
+        let port = status["data_port"]
+            .as_u64()
+            .unwrap_or(kiwanod::server::DEFAULT_DATA_PORT as u64);
+        Ok(format!("http://{}:{port}", self.endpoint.host()))
+    }
 }
 
 /// A value as a query-string component: everything outside the unreserved set is

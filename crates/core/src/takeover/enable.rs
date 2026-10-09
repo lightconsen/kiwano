@@ -11,9 +11,12 @@ use crate::vm::Aux;
 use kiwano_adapters::config::atomic_write_private;
 use std::path::{Path, PathBuf};
 
-/// The local gateway's origin. The port comes from the caller (the sidecar's
-/// data port), and the per-agent path suffix from [`gateway_target`].
-const GATEWAY_HOST: &str = "http://127.0.0.1";
+// The gateway's origin used to be a constant here, `http://127.0.0.1` — and the
+// per-agent path suffix still comes from `gateway_target`. The origin is a
+// parameter now: a takeover of an agent on *this* machine points at a gateway
+// that may be on another one, and the client is the side that knows which
+// (`migrate.local.md` §10.30). A single-machine install passes the same string
+// the constant held, so nothing about it changed.
 
 /// Takeover: read the original files → perform all rewrites in memory
 /// (can fail as a whole, zero side effects) → back up → atomic write.
@@ -27,11 +30,11 @@ pub fn enable(
     aux: &Aux,
     agent: &str,
     placeholder_key: &str,
-    data_port: u16,
+    gateway: &str,
     home: &Path,
     vars: &ShellVars,
 ) -> Result<(), String> {
-    enable_with(aux, agent, placeholder_key, data_port, home, vars, |_| {})
+    enable_with(aux, agent, placeholder_key, gateway, home, vars, |_| {})
 }
 
 /// [`enable`], with a hook that runs after each file is written.
@@ -48,7 +51,7 @@ pub fn enable_with(
     aux: &Aux,
     agent: &str,
     placeholder_key: &str,
-    data_port: u16,
+    gateway: &str,
     home: &Path,
     vars: &ShellVars,
     after_each: impl FnMut(usize),
@@ -58,7 +61,7 @@ pub fn enable_with(
     let originals = read_originals(agent, &paths)?;
 
     // Rewrite: every new content computed in memory, so a refusal costs nothing.
-    let rewritten = compute_rewrites(agent, &originals, placeholder_key, data_port)?;
+    let rewritten = compute_rewrites(agent, &originals, placeholder_key, gateway)?;
 
     // Back up unless what is on disk is already our route: a repeated enable
     // must not record a loopback config as the user's original (escape-hatch
@@ -178,12 +181,12 @@ fn compute_rewrites(
     agent: &str,
     originals: &[BackupFile],
     placeholder_key: &str,
-    data_port: u16,
+    gateway: &str,
 ) -> Result<Files, String> {
     if agent == "codex" {
-        return codex_rewrites(originals, placeholder_key, data_port);
+        return codex_rewrites(originals, placeholder_key, gateway);
     }
-    let target = gateway_target(agent, data_port);
+    let target = gateway_target(agent, gateway);
     // One timestamp for the whole run: Cline's provider settings carry an
     // `updatedAt` the file's schema requires, and two files of one takeover
     // disagreeing about when it happened would be a detail with no meaning.
@@ -275,7 +278,7 @@ fn compute_rewrites(
 /// origin bare (their clients add `/v1/messages`), OpenAI-SDK-shaped ones want
 /// the version root (their clients add only `/chat/completions`), and agents
 /// that append nothing at all need the full route in the URL.
-pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
+pub(crate) fn gateway_target(agent: &str, gateway: &str) -> String {
     let suffix = match agent {
         "codex" | "grokbuild" | "opencode" | "pi" => "/v1",
         // Kimi and Qwen want the version root; their clients append the route.
@@ -333,7 +336,7 @@ pub(crate) fn gateway_target(agent: &str, data_port: u16) -> String {
         "workbuddy" | "codebuddy" => "/v1/chat/completions",
         _ => "",
     };
-    format!("{GATEWAY_HOST}:{data_port}{suffix}")
+    format!("{gateway}{suffix}")
 }
 
 /// Put the files this call already replaced back the way they were. Best
@@ -354,6 +357,37 @@ fn rollback_writes(rewritten: &Files, written: &[usize], originals: &[BackupFile
             let _ = std::fs::remove_file(path);
         }
     }
+}
+
+/// A takeover writes the origin it was handed, not loopback.
+///
+/// The origin was a constant (`http://127.0.0.1`) until a client could be on
+/// a different machine from its daemon: then the agent being taken over on
+/// *this* machine has to send its traffic to *that* one, and a hardcoded
+/// loopback points it at a port nothing listens on (`migrate.local.md`
+/// §10.30). Both halves are asserted — the remote case is the new
+/// behaviour, and the local case is the one that must not have moved.
+#[test]
+fn a_takeover_writes_the_origin_it_was_given() {
+    assert_eq!(
+        gateway_target("claude", "http://127.0.0.1:8317"),
+        "http://127.0.0.1:8317",
+        "an Anthropic-shaped agent takes the origin bare"
+    );
+    assert_eq!(
+        gateway_target("codex", "http://127.0.0.1:8317"),
+        "http://127.0.0.1:8317/v1",
+        "and the suffix still rides along"
+    );
+    // The cross-machine case: the host is the daemon's, the suffix unchanged.
+    assert_eq!(
+        gateway_target("codex", "http://100.64.0.5:8317"),
+        "http://100.64.0.5:8317/v1"
+    );
+    assert_eq!(
+        gateway_target("claude", "http://192.168.1.9:9000"),
+        "http://192.168.1.9:9000"
+    );
 }
 
 #[cfg(test)]
@@ -378,7 +412,15 @@ mod tests {
         )
         .unwrap();
 
-        enable(&aux, "claude", "kw-ag-claude-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "claude",
+            "kw-ag-claude-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let rewritten = std::fs::read_to_string(&settings).unwrap();
         let v: Value = serde_json::from_str(&rewritten).unwrap();
         assert_eq!(v["model"], "opus"); // other fields preserved
@@ -403,8 +445,24 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, r#"{"original":true}"#).unwrap();
 
-        enable(&aux, "claude", "kw-ag-claude-1111", 8317, &home, &no_vars()).unwrap();
-        enable(&aux, "claude", "kw-ag-claude-2222", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "claude",
+            "kw-ag-claude-1111",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
+        enable(
+            &aux,
+            "claude",
+            "kw-ag-claude-2222",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "kw-ag-claude-2222");
 
@@ -421,7 +479,15 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, CODEX_ORIGINAL, r#"{"OPENAI_API_KEY":"sk-old"}"#);
 
-        enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "codex",
+            "kw-ag-codex-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let toml = std::fs::read_to_string(codex_dir.join("config.toml")).unwrap();
         assert!(toml.contains("base_url = \"http://127.0.0.1:8317/v1\""));
         assert!(toml.contains("wire_api = \"responses\"")); // other lines untouched
@@ -456,7 +522,15 @@ mod tests {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         let codex_dir = write_codex_config(&home, "model = \"m\"\n", "{}");
-        let err = enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "codex",
+            "kw-ag-codex-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(err.contains("custom"), "{err}");
         // The switch did not happen: no backup row, and the live config is the
         // one the user wrote (the gates run before any write).
@@ -482,7 +556,15 @@ mod tests {
         std::fs::remove_file(codex_dir.join("auth.json")).unwrap();
         std::fs::create_dir(codex_dir.join("auth.json")).unwrap();
 
-        let err = enable(&aux, "codex", "kw-ag-codex-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "codex",
+            "kw-ag-codex-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(err.contains("the takeover was not applied"), "{err}");
         assert!(aux.load_takeover_backup("codex").is_none());
         assert_eq!(
@@ -504,7 +586,15 @@ mod tests {
             "model = \"m\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"DeepSeek\"\nbase_url = \"http://127.0.0.1:8317/v1\"\nwire_api = \"responses\"\nexperimental_bearer_token = \"kw-ag-codex-old\"\n",
             r#"{"OPENAI_API_KEY":"kw-ag-codex-old"}"#,
         );
-        enable(&aux, "codex", "kw-ag-codex-new", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "codex",
+            "kw-ag-codex-new",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         assert!(
             aux.load_takeover_backup("codex").is_none(),
             "what is on disk is our own route, so there is nothing to capture"
@@ -530,7 +620,15 @@ mod tests {
     fn missing_claude_config_errors() {
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
-        assert!(enable(&aux, "claude", "k", 8317, &home, &no_vars()).is_err());
+        assert!(enable(
+            &aux,
+            "claude",
+            "k",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars()
+        )
+        .is_err());
         // disable before any takeover succeeds idempotently, and reports that
         // there was nothing of ours to undo rather than a restore it did not do
         let report = restore(&aux, "claude", &home).unwrap();
@@ -550,7 +648,15 @@ mod tests {
         )
         .unwrap();
 
-        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "gemini",
+            "kw-ag-gemini-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let env = std::fs::read_to_string(gemini_dir.join(".env")).unwrap();
         assert!(env.contains("GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8317\n"));
         assert!(env.contains("GEMINI_API_KEY=kw-ag-gemini-abcd\n"));
@@ -572,7 +678,15 @@ mod tests {
         let aux = Aux::open_in_memory().unwrap();
         let env_path = home.join(".gemini").join(".env");
         // takeover works even when ~/.gemini/.env is missing entirely (dir + file are created automatically)
-        enable(&aux, "gemini", "kw-ag-gemini-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "gemini",
+            "kw-ag-gemini-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let env = std::fs::read_to_string(&env_path).unwrap();
         assert_eq!(
             env,
@@ -622,7 +736,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "grokbuild",
             "kw-ag-grokbuild-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -677,7 +791,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "grokbuild",
             "kw-ag-grokbuild-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -701,7 +815,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "grokbuild",
             "kw-ag-grokbuild-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars()
         )
@@ -727,7 +841,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "opencode",
             "kw-ag-opencode-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -777,7 +891,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "workbuddy",
             "kw-ag-workbuddy-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -822,7 +936,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "codebuddy",
             "kw-ag-codebuddy-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -858,7 +972,15 @@ base_url = "https://relay.example.com/v1"
                         api_key = \"sk-old\"\n";
         std::fs::write(dir.join("config.toml"), original).unwrap();
 
-        enable(&aux, "kimi", "kw-ag-kimi-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "kimi",
+            "kw-ag-kimi-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(
             text.contains("base_url = \"http://127.0.0.1:8317/v1\""),
@@ -907,7 +1029,7 @@ base_url = "https://relay.example.com/v1"
             &aux,
             "openclaw",
             "kw-ag-openclaw-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -969,7 +1091,15 @@ base_url = "https://relay.example.com/v1"
 }"#;
         std::fs::write(dir.join("settings.json"), original).unwrap();
 
-        enable(&aux, "qwen", "kw-ag-qwen-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "qwen",
+            "kw-ag-qwen-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
                 .unwrap();
@@ -1011,7 +1141,15 @@ base_url = "https://relay.example.com/v1"
 }"#;
         std::fs::write(dir.join("mimocode.jsonc"), original).unwrap();
 
-        enable(&aux, "mimo", "kw-ag-mimo-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "mimo",
+            "kw-ag-mimo-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("mimocode.jsonc")).unwrap())
                 .unwrap();
@@ -1046,7 +1184,15 @@ custom_provider:
 "#;
         std::fs::write(dir.join("config.yaml"), original).unwrap();
 
-        enable(&aux, "mcode", "kw-ag-mcode-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "mcode",
+            "kw-ag-mcode-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(dir.join("config.yaml")).unwrap())
                 .unwrap();
@@ -1078,7 +1224,15 @@ custom_provider:
         let config = home.join(".aider.conf.yml");
         std::fs::write(&config, original).unwrap();
 
-        enable(&aux, "aider", "kw-ag-aider-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "aider",
+            "kw-ag-aider-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
         assert_eq!(v["openai-api-base"], "http://127.0.0.1:8317/v1");
@@ -1124,7 +1278,7 @@ models:
             &aux,
             "continue",
             "kw-ag-continue-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -1168,7 +1322,15 @@ models:
         std::fs::create_dir_all(config.parent().unwrap()).unwrap();
         std::fs::write(&config, original).unwrap();
 
-        enable(&aux, "crush", "kw-ag-crush-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "crush",
+            "kw-ag-crush-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
         assert_eq!(v["models"]["large"]["provider"], "kiwano-gateway");
@@ -1210,7 +1372,15 @@ models:
         std::fs::create_dir_all(config.parent().unwrap()).unwrap();
         std::fs::write(&config, original).unwrap();
 
-        enable(&aux, "droid", "kw-ag-droid-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "droid",
+            "kw-ag-droid-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
         assert_eq!(v["model"], "claude-sonnet-4-6");
@@ -1241,7 +1411,15 @@ models:
         let aux = Aux::open_in_memory().unwrap();
         let root = goose_test_root(&home);
 
-        enable(&aux, "goose", "kw-ag-goose-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "goose",
+            "kw-ag-goose-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
 
         // The selection points at the gateway; nothing to keep, so the
         // placeholder model id.
@@ -1297,7 +1475,15 @@ models:
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("config.yaml"), original).unwrap();
 
-        enable(&aux, "goose", "kw-ag-goose-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "goose",
+            "kw-ag-goose-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: serde_yaml::Value = serde_yaml::from_str(
             &std::fs::read_to_string(root.join("custom_providers").join("kiwano-gateway.json"))
                 .unwrap(),
@@ -1354,7 +1540,15 @@ models:
         std::fs::create_dir_all(config.parent().unwrap()).unwrap();
         std::fs::write(&config, original).unwrap();
 
-        enable(&aux, "zcode", "kw-ag-zcode-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "zcode",
+            "kw-ag-zcode-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
         let sel = &v["config"]["defaultModelSelection"];
@@ -1447,7 +1641,7 @@ models:
                 &aux,
                 agent,
                 &format!("kw-ag-{agent}-abcd"),
-                8317,
+                "http://127.0.0.1:8317",
                 &home,
                 &no_vars(),
             )
@@ -1494,7 +1688,15 @@ models:
 }"#;
         std::fs::write(&path, original).unwrap();
 
-        enable(&aux, "cline", "kw-ag-cline-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "cline",
+            "kw-ag-cline-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
 
         let settings = &serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap())
             .unwrap()["providers"]["openai-compatible"]["settings"];
@@ -1523,7 +1725,15 @@ models:
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
 
-        let err = enable(&aux, "cline", "kw-ag-cline-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "cline",
+            "kw-ag-cline-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(
             err.contains("not found — run cline at least once before takeover"),
             "{err}"
@@ -1545,7 +1755,15 @@ models:
         std::fs::write(dir.join("config.yml"), config).unwrap();
         std::fs::write(dir.join("models.yml"), models).unwrap();
 
-        enable(&aux, "omp", "kw-ag-omp-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "omp",
+            "kw-ag-omp-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
 
         let cfg: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(dir.join("config.yml")).unwrap())
@@ -1605,7 +1823,7 @@ models:
             &aux,
             "hanaagent",
             "kw-ag-hanaagent-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -1671,7 +1889,7 @@ models:
             &aux,
             "hanaagent",
             "kw-ag-hanaagent-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -1696,7 +1914,15 @@ models:
         let env_original = "# dsh's own\nDEEPSEEK_API_KEY=sk-real\n";
         std::fs::write(dir.join(".env"), env_original).unwrap();
 
-        enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "dsh",
+            "kw-ag-dsh-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
 
         for profile in ["web", "desktop"] {
             let text = std::fs::read_to_string(
@@ -1749,7 +1975,15 @@ models:
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
 
-        let err = enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "dsh",
+            "kw-ag-dsh-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(
             err.contains("not found — run dsh at least once before takeover"),
             "{err}"
@@ -1766,7 +2000,15 @@ models:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("config.yaml"), "[]\n").unwrap();
 
-        let err = enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "dsh",
+            "kw-ag-dsh-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(err.contains("dsh < 0.1.5's config"), "{err}");
     }
 
@@ -1789,7 +2031,15 @@ models:
         )
         .unwrap();
 
-        let err = enable(&aux, "dsh", "kw-ag-dsh-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "dsh",
+            "kw-ag-dsh-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(err.contains("sets its own DeepSeek"), "{err}");
     }
 
@@ -1808,7 +2058,7 @@ models:
             &aux,
             "commandcode",
             "kw-ag-cmd-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )
@@ -1863,7 +2113,15 @@ models:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("models.json"), r#"{"providers":{}}"#).unwrap();
 
-        let err = enable(&aux, "omp", "kw-ag-omp-abcd", 8317, &home, &no_vars()).unwrap_err();
+        let err = enable(
+            &aux,
+            "omp",
+            "kw-ag-omp-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap_err();
         assert!(err.contains("pre-YAML provider file"), "{err}");
         assert!(!dir.join("models.yml").exists());
     }
@@ -1873,7 +2131,15 @@ models:
         let (_dir, home) = temp_home();
         let aux = Aux::open_in_memory().unwrap();
         // pi's files may not exist yet (agent dir is created on takeover)
-        enable(&aux, "pi", "kw-ag-pi-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "pi",
+            "kw-ag-pi-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let agent = home.join(".pi").join("agent");
         let models: Value =
             serde_json::from_str(&std::fs::read_to_string(agent.join("models.json")).unwrap())
@@ -1909,7 +2175,15 @@ models:
         let original = "agent:\n  max_turns: 50\ncustom_providers:\n  - name: openrouter\n    base_url: https://openrouter.ai/api/v1\n";
         std::fs::write(dir.join("config.yaml"), original).unwrap();
 
-        enable(&aux, "hermes", "kw-ag-hermes-abcd", 8317, &home, &no_vars()).unwrap();
+        enable(
+            &aux,
+            "hermes",
+            "kw-ag-hermes-abcd",
+            "http://127.0.0.1:8317",
+            &home,
+            &no_vars(),
+        )
+        .unwrap();
         let out = std::fs::read_to_string(dir.join("config.yaml")).unwrap();
         let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(v["model"]["provider"], "kiwano-gateway");
@@ -1951,7 +2225,7 @@ models:
             &aux,
             "claude-desktop",
             "kw-ag-claude-desktop-abcd",
-            8317,
+            "http://127.0.0.1:8317",
             &home,
             &no_vars(),
         )

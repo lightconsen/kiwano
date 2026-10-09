@@ -38,6 +38,10 @@ use crate::store::{
 pub const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Shared gateway state for both planes.
+/// The data plane's conventional port, and the one a state that never serves
+/// one reports. `main` overrides it with the port it actually bound.
+pub const DEFAULT_DATA_PORT: u16 = 8317;
+
 pub struct GatewayState {
     pub store: Arc<Store>,
     pub http: reqwest::Client,
@@ -85,6 +89,14 @@ pub struct GatewayState {
     /// This install's identity — the same string in the database the gateway
     /// opened and in the one the app did, unless they are not the same file.
     pub install_id: String,
+    /// Where the data plane listens, as a port.
+    ///
+    /// Reported by `/status` so a client on another machine can point an agent
+    /// at it (`migrate.local.md` §10.30): the client knows the *host* — it
+    /// dialled it — and only the daemon knows the port. The default is the
+    /// conventional one, so a state built by a test that never serves a data
+    /// plane still answers sensibly.
+    pub data_port: std::sync::atomic::AtomicU16,
     /// Optional bearer token guarding `/metrics` (KIW-PRIV-001). Set by the
     /// daemon from `KIWANO_METRICS_TOKEN`. Absent, `/metrics` stays open to any
     /// loopback caller but serves per-agent labels redacted; configured, only a
@@ -184,6 +196,13 @@ fn resolve_declared_pricing(store: &Store) -> kiwano_adapters::model_pricing::Pr
 }
 
 impl GatewayState {
+    /// Record the port the data plane actually bound — called by `main`, which
+    /// is the only place that knows it.
+    pub fn set_data_port(&self, port: u16) {
+        self.data_port
+            .store(port, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn new(store: Store) -> Result<GatewayState> {
         let route_table = Arc::new(RouteTable::load(&store)?);
         let log_config = store.load_log_config().unwrap_or_default();
@@ -231,6 +250,7 @@ impl GatewayState {
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
             install_id,
+            data_port: std::sync::atomic::AtomicU16::new(crate::server::DEFAULT_DATA_PORT),
             metrics_token: None,
             shutdown,
             usage_ticks,

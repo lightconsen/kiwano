@@ -404,6 +404,12 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         "name": "kiwanod",
         "version": state.version,
         "uptime_secs": state.started_at.elapsed().as_secs(),
+        // Where this daemon's data plane listens, in the **unauthenticated**
+        // part on purpose: it is where agents connect, not a secret the way the
+        // provider list is. A client on another machine needs it to point an
+        // agent here — it knows the host, having dialled it, and only the daemon
+        // knows the port (`migrate.local.md` §10.30).
+        "data_port": state.data_port.load(std::sync::atomic::Ordering::Relaxed),
     });
     if !authorized(&state, &headers) {
         return Json(liveness).into_response();
@@ -466,6 +472,13 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         // compares the two — the only way to notice the split described in
         // `migrate.local.md` §13.1 from the outside.
         "install_id": state.install_id,
+        // Here as well as in the liveness payload, because **this** is the one
+        // a client that has a token receives — and a client composing a
+        // data-plane URL always has one. Putting it only in the liveness answer
+        // was a mistake worth naming: the endpoint looked right to a bare
+        // `curl` and was invisible to every real caller (`migrate.local.md`
+        // §10.30).
+        "data_port": state.data_port.load(std::sync::atomic::Ordering::Relaxed),
         "providers": metrics.providers,
         "bindings": metrics.bindings,
         "placeholder_keys": metrics.placeholder_keys,
@@ -1583,6 +1596,51 @@ mod tests {
         both.set_gateway_setting(ADMIN_TOKEN_KEY, "tok-current")
             .unwrap();
         assert_eq!(ensure_admin_token(&both).unwrap(), "tok-current");
+    }
+
+    /// `/status` reports where the data plane is, **without** a token.
+    ///
+    /// A client on another machine needs it to point an agent here: it knows the
+    /// host — it dialled it — and only the daemon knows the port
+    /// (`migrate.local.md` §10.30). Unauthenticated on purpose, and that is not
+    /// a lapse: agents connect to this address, so it is not a secret the way
+    /// the provider list is. What the token protects is who may *read and
+    /// change* the configuration, not where traffic goes.
+    #[tokio::test]
+    async fn status_reports_the_data_port_without_a_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        // What `main` does once the listener is bound; a non-default port so the
+        // assertion cannot pass by coincidence.
+        state.set_data_port(9317);
+
+        // **With the token**, because that is what a real client sends — and the
+        // first version of this test asked without one, so it passed against the
+        // liveness payload while the authenticated one (the only one a client
+        // ever sees) was missing the field entirely.
+        let token = shared_token(&state);
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/status", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["data_port"], 9317);
+        assert!(body["providers"].is_number(), "{body}");
+
+        // And the unauthenticated answer carries it too, for a client that has
+        // no token yet — the same value, because it is the same daemon.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/status", None))
+            .await
+            .unwrap();
+        let body = body_json(response).await;
+        assert_eq!(body["data_port"], 9317);
+        assert!(
+            body["providers"].is_null(),
+            "no configuration without a token"
+        );
     }
 
     #[test]

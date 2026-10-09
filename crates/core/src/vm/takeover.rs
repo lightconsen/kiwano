@@ -14,7 +14,11 @@ pub fn set_agent_takeover(
     aux: &Aux,
     agent: &str,
     enabled: bool,
-    data_port: u16,
+    // `gateway` is where an agent on this machine reaches the data plane —
+    // `http://127.0.0.1:8317` locally, or another machine's address. Composed
+    // by the caller, which is the side that knows where its daemon is
+    // (`migrate.local.md` §10.30).
+    gateway: &str,
     home: &std::path::Path,
     vars: &ShellVars,
     state_half: StateHalf<'_>,
@@ -35,7 +39,7 @@ pub fn set_agent_takeover(
         // agent is either untouched or pointing at a gateway that knows its
         // key. See `reconcile_takeovers`, which closes them.
         let prepared = phase_state(store, aux, agent, home, None, state_half)?;
-        if let Err(e) = crate::takeover::enable(aux, agent, &prepared.key, data_port, home, vars) {
+        if let Err(e) = crate::takeover::enable(aux, agent, &prepared.key, gateway, home, vars) {
             // The file half never landed: take the store half back out.
             undo_state(store, aux, agent, &prepared.key);
             return Err(e);
@@ -406,7 +410,7 @@ mod tests {
             &aux,
             "claude",
             true,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,
@@ -418,7 +422,7 @@ mod tests {
             &aux,
             "claude",
             false,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,
@@ -482,7 +486,7 @@ mod tests {
             &aux,
             "claude",
             true,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,
@@ -519,7 +523,7 @@ mod tests {
             &aux,
             "claude",
             true,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,
@@ -530,7 +534,7 @@ mod tests {
             &aux,
             "claude",
             false,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,
@@ -576,7 +580,7 @@ mod tests {
             &aux,
             "claude",
             true,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,
@@ -590,7 +594,7 @@ mod tests {
             &aux,
             "claude",
             false,
-            8317,
+            "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
             StateHalf::InProcess,

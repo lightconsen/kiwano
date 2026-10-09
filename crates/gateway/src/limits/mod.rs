@@ -151,27 +151,18 @@ pub(crate) mod test_support {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("kiwano.db");
         let store = Store::open(&path).unwrap();
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        // The GUI's own schema (`kiwano_core::Aux`), which the gateway reads but
-        // does not create.
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS hub_models_cache (
-                 id        INTEGER PRIMARY KEY CHECK (id = 1),
-                 version   INTEGER NOT NULL,
-                 sha256    TEXT NOT NULL,
-                 payload   TEXT NOT NULL,
-                 synced_at TEXT NOT NULL
-             )",
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO hub_models_cache (id, version, sha256, payload, synced_at)
-             VALUES (1, 1, 'sha', ?1, '2026-01-01T00:00:00Z')",
-            rusqlite::params![format!(
-                r#"{{"version":1,"exchange_rates":{rates},"models":[]}}"#
-            )],
-        )
-        .unwrap();
+        // Through the store's own accessor: the cache is the daemon's table
+        // (migration v28), so a fixture that built it by hand was keeping a
+        // second copy of the schema — the thing this migration removes
+        // (`migrate.local.md` §10.14).
+        store
+            .save_hub_models_cache(
+                1,
+                &format!(r#"{{"version":1,"exchange_rates":{rates},"models":[]}}"#),
+                "sha",
+                "2026-01-01T00:00:00Z",
+            )
+            .unwrap();
         (dir, store)
     }
 }

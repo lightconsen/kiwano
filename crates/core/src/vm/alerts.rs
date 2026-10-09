@@ -797,7 +797,8 @@ mod tests {
             "models": []
         })
         .to_string();
-        aux.save_hub_models_cache(99, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
+        // Through the store: the cache is the daemon's table now.
+        s.save_hub_models_cache(99, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
             .unwrap();
 
         let mut cny = provider("glm-1", "GLM", Billing::Subscription);

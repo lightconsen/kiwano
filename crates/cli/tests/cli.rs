@@ -1407,8 +1407,12 @@ fn catalog_list_filters_by_tag_and_name() {
     // catalog — so the fixture is the cache. That makes this deterministic
     // instead of depending on whatever blob a release happened to compile in.
     {
-        let aux = kiwano_core::auxiliary::Aux::open(&db).unwrap();
-        aux.save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
+        // Seeded through the store: the cache is the daemon's table, so its
+        // accessor there is the only one — the `Aux` copies are gone
+        // (`migrate.local.md` §10.14).
+        let store = Store::open(&db).unwrap();
+        store
+            .save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
             .unwrap();
     }
 
@@ -1445,8 +1449,12 @@ fn catalog_list_filters_by_tag_and_name() {
 fn providers_add_links_the_catalog_entry() {
     let (_dir, db) = temp_db();
     {
-        let aux = kiwano_core::auxiliary::Aux::open(&db).unwrap();
-        aux.save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
+        // Seeded through the store: the cache is the daemon's table, so its
+        // accessor there is the only one — the `Aux` copies are gone
+        // (`migrate.local.md` §10.14).
+        let store = Store::open(&db).unwrap();
+        store
+            .save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
             .unwrap();
     }
 

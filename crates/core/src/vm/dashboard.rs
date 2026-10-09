@@ -714,7 +714,10 @@ mod tests {
             "models": []
         })
         .to_string();
-        aux.save_hub_models_cache(1, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
+        // Seeded through the store: the cache is the daemon's table, and its
+        // accessor there is the only one that survives (`migrate.local.md`
+        // §10.14).
+        s.save_hub_models_cache(1, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
             .unwrap();
         // Distinct magnitudes per age so a window that is too wide or too
         // narrow cannot cancel out: today 2, 3 days back 4, 10 days back 6,
@@ -1011,7 +1014,7 @@ mod tests {
             "models": []
         })
         .to_string();
-        aux.save_hub_models_cache(99, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
+        s.save_hub_models_cache(99, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
             .unwrap();
         for (id, name) in [("p1", "Alpha"), ("p2", "Beta")] {
             s.insert_provider(&provider(id, name, Billing::Metered))

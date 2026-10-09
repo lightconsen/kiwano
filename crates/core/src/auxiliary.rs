@@ -3,9 +3,14 @@
 //! gateway's `Store` does not expose.
 //!
 //! It is separate from `Store` because it owns tables the gateway has no reason
-//! to know about — `app_settings`, `takeover_backups`, `hub_cache`,
-//! `hub_models_cache` — and those carry no migrations (see `sync`). Both
-//! connections are WAL with a busy timeout, so they coexist.
+//! to know about — `app_settings`, `takeover_backups`, `takeover_ops` — and
+//! those carry no migrations (see `sync`). Both connections are WAL with a busy
+//! timeout, so they coexist.
+//!
+//! **The Hub caches are no longer here.** They moved to the daemon's schema
+//! (`store::hub`, migration v28) when the sync became the daemon's: the client
+//! was the only writer, so a second set of accessors on this side was a second
+//! path to a table with one owner (`migrate.local.md` §10.14).
 //!
 //! Extracted from `vm.rs` when the crate was split. `vm` re-exports it as
 //! `vm::Aux`, so `crate::vm::Aux` paths keep resolving.
@@ -117,29 +122,6 @@ impl Aux {
                  state       TEXT NOT NULL,
                  started_at  TEXT NOT NULL,
                  applied_at  TEXT
-             )",
-            [],
-        )?;
-        // Hub catalog cache (tech.md §3 Hub sync): single-row cache, payload = CatalogListVm JSON
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS hub_cache (
-                 id        INTEGER PRIMARY KEY CHECK (id = 1),
-                 payload   TEXT NOT NULL,
-                 synced_at TEXT NOT NULL
-             )",
-            [],
-        )?;
-        // Hub pricing cache: single-row, self-describing so the seed gate is
-        // one read. A new table (not a column) because `CREATE TABLE IF NOT
-        // EXISTS` reaches existing databases for free, whereas added columns
-        // would need a migration framework this half of the DB does not have.
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS hub_models_cache (
-                 id        INTEGER PRIMARY KEY CHECK (id = 1),
-                 version   INTEGER NOT NULL,
-                 sha256    TEXT NOT NULL,
-                 payload   TEXT NOT NULL,
-                 synced_at TEXT NOT NULL
              )",
             [],
         )?;
@@ -300,78 +282,5 @@ impl Aux {
         let conn = self.conn.lock().expect("aux mutex poisoned");
         let n = conn.execute("DELETE FROM app_settings WHERE key = ?1", [key])?;
         Ok(n > 0)
-    }
-
-    /// Hub catalog cache: single-row upsert (RFC3339 synced_at).
-    pub fn save_hub_cache(&self, payload: &str, synced_at: &str) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().expect("aux mutex poisoned");
-        conn.execute(
-            "INSERT INTO hub_cache (id, payload, synced_at) VALUES (1, ?1, ?2)
-             ON CONFLICT(id) DO UPDATE SET payload = ?1, synced_at = ?2",
-            rusqlite::params![payload, synced_at],
-        )?;
-        Ok(())
-    }
-
-    /// `(payload, synced_at)`; None when never synced.
-    pub fn load_hub_cache(&self) -> Option<(String, String)> {
-        let conn = self.conn.lock().expect("aux mutex poisoned");
-        conn.query_row(
-            "SELECT payload, synced_at FROM hub_cache WHERE id = 1",
-            [],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .ok()
-    }
-
-    /// Refresh only the cache timestamp, leaving the payload untouched — the
-    /// conditional-sync path (manifest sha matched, nothing to re-download).
-    /// Returns false when there is no cache row (never synced).
-    pub fn touch_hub_synced_at(&self, synced_at: &str) -> rusqlite::Result<bool> {
-        let conn = self.conn.lock().expect("aux mutex poisoned");
-        let n = conn.execute(
-            "UPDATE hub_cache SET synced_at = ?1 WHERE id = 1",
-            rusqlite::params![synced_at],
-        )?;
-        Ok(n > 0)
-    }
-
-    /// Hub pricing cache: single-row upsert. `payload` is the remote
-    /// models.json **verbatim** — re-serializing would break the sha256 that
-    /// the seed gate compares against the manifest.
-    pub fn save_hub_models_cache(
-        &self,
-        version: i64,
-        payload: &str,
-        sha256: &str,
-        synced_at: &str,
-    ) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().expect("aux mutex poisoned");
-        conn.execute(
-            "INSERT INTO hub_models_cache (id, version, sha256, payload, synced_at)
-             VALUES (1, ?1, ?2, ?3, ?4)
-             ON CONFLICT(id) DO UPDATE SET
-                 version = ?1, sha256 = ?2, payload = ?3, synced_at = ?4",
-            rusqlite::params![version, sha256, payload, synced_at],
-        )?;
-        Ok(())
-    }
-
-    /// `(version, payload, sha256, synced_at)`; None when never fetched.
-    pub fn load_hub_models_cache(&self) -> Option<(i64, String, String, String)> {
-        let conn = self.conn.lock().expect("aux mutex poisoned");
-        conn.query_row(
-            "SELECT version, payload, sha256, synced_at FROM hub_models_cache WHERE id = 1",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            },
-        )
-        .ok()
     }
 }

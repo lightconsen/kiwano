@@ -167,6 +167,78 @@ pub fn db_path(explicit: Option<&Path>) -> DbPath {
     }
 }
 
+/// Environment variable naming a daemon on **another machine**
+/// (`migrate.local.md` §13.5).
+///
+/// Unset — the default, and every install today — means the client resolves the
+/// local plane beside its own database, exactly as before. Set, the client dials
+/// that address instead.
+///
+/// It is a **client-side** variable and deliberately not the daemon's own
+/// `KIWANO_ADMIN_ADDR`: that one means "listen here", and a machine configured
+/// to listen on `0.0.0.0:8318` would, under a shared name, try to *connect* to
+/// `0.0.0.0:8318` — which is not an address anything answers on.
+pub const DAEMON_ADDR_ENV: &str = "KIWANO_DAEMON_ADDR";
+
+/// Environment variable carrying that daemon's admin token.
+///
+/// Needed because the usual source is gone: the token lives in the row the
+/// daemon minted it into, and on a remote daemon that row is on the other
+/// machine (`migrate.local.md` §9.2.1). Where a *local* client reads it, a
+/// remote one has to be told — and this is the smallest honest way to be told.
+pub const DAEMON_TOKEN_ENV: &str = "KIWANO_DAEMON_TOKEN";
+
+/// Why a configured remote daemon was refused.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RemoteConfigError(String);
+
+impl std::fmt::Display for RemoteConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The remote daemon a client was pointed at, if any.
+///
+/// A malformed value is an **error, not a fallback**. Falling back to the local
+/// plane would mean a typo silently connects to a different daemon than the one
+/// named — the same class of failure as a daemon quietly opening a different
+/// database, and it has the same fix: say so and stop.
+fn remote_endpoint() -> Result<Option<AdminEndpoint>, RemoteConfigError> {
+    let Some(value) = std::env::var(DAEMON_ADDR_ENV)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    else {
+        return Ok(None);
+    };
+    match value.parse::<std::net::SocketAddr>() {
+        Ok(addr) => Ok(Some(AdminEndpoint::Tcp(addr))),
+        Err(e) => Err(RemoteConfigError(format!(
+            "{DAEMON_ADDR_ENV} = \"{value}\" is not an address: {e} \
+             (expected host:port, e.g. 100.64.0.5:8318)"
+        ))),
+    }
+}
+
+/// The admin endpoint a client should dial: a remote daemon when one is named,
+/// the local plane otherwise.
+///
+/// Two forms because the two clients resolve their database differently — the
+/// app through the environment, the CLI through `--db` — and the *choice*
+/// between remote and local must not differ between them.
+pub fn admin_endpoint_resolved() -> Result<AdminEndpoint, RemoteConfigError> {
+    admin_endpoint_resolved_for(&db_path(None).path)
+}
+
+/// [`admin_endpoint_resolved`] for an explicit database path.
+pub fn admin_endpoint_resolved_for(db: &Path) -> Result<AdminEndpoint, RemoteConfigError> {
+    match remote_endpoint()? {
+        Some(remote) => Ok(remote),
+        None => Ok(admin_endpoint_for(db)),
+    }
+}
+
 /// The admin plane endpoint this app and its gateway share.
 ///
 /// Resolved exactly the way the gateway resolves it — the same function, on the
@@ -230,9 +302,59 @@ pub fn admin_token() -> Option<String> {
     if let Some(token) = CACHED.get() {
         return Some(token.clone());
     }
-    let token = admin_token_for(&db_path(None).path)?;
+    // A named remote daemon is the one case where the database row is not the
+    // answer — it is on the other machine (`migrate.local.md` §13.5). Read the
+    // environment first, and only then the local row.
+    let token = admin_token_resolved(&db_path(None).path)?;
     let _ = CACHED.set(token.clone());
     Some(token)
+}
+
+/// The token for whichever daemon a client is pointed at: the environment's when
+/// a remote one is named, the local row otherwise.
+///
+/// One function rather than two call sites doing it, because the two clients
+/// must not disagree about which daemon they are authenticating to.
+pub fn admin_token_resolved(db: &Path) -> Option<String> {
+    // **No fallback to the local row when a remote is named.** That row belongs
+    // to a *different* daemon: sending its token to another host is a credential
+    // handed to the wrong place, and the far end would refuse it anyway. A
+    // remote client that was not given a token sends none, and the daemon's own
+    // 401 is the answer — which says what is missing, unlike a mystery here.
+    if remote_is_named() {
+        remote_token()
+    } else {
+        admin_token_for(db)
+    }
+}
+
+/// Whether the environment names a daemon on another machine.
+///
+/// Public because the advice differs: a client with no token is told to check
+/// its database when the daemon is local, and to set the token variable when it
+/// is not — "point `--db` at the shared database" is not something a remote
+/// client can do, that database being on the other machine.
+pub fn daemon_is_remote() -> bool {
+    remote_is_named()
+}
+
+fn remote_is_named() -> bool {
+    std::env::var(DAEMON_ADDR_ENV)
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// The token for a named remote daemon, if one is named.
+///
+/// `None` when no remote is configured — which is not an error, it is the local
+/// case — but also when one *is* configured without a token: the caller then
+/// sends an unauthenticated request and gets the daemon's own 401, which is a
+/// better error than anything this could invent.
+fn remote_token() -> Option<String> {
+    std::env::var(DAEMON_TOKEN_ENV)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 /// The token header for one raw request, or nothing when there is no token to
@@ -716,6 +838,69 @@ mod tests {
     /// these four requests have to carry it — and must still be well-formed
     /// when the app has none (a fresh install, before the gateway has written
     /// its row), rather than dropping the header line and the blank line with it.
+    /// Pointing a client at another machine's daemon, which is what makes the
+    /// TCP plane reachable from the app at all (`migrate.local.md` §13.5).
+    ///
+    /// One test rather than four because the process environment is shared by
+    /// every test in this binary: the guards would otherwise race each other,
+    /// and a value leaking into a neighbouring test is exactly the failure this
+    /// helper exists to avoid.
+    #[test]
+    fn a_named_remote_daemon_wins_over_the_local_plane() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kiwano.db");
+        let store = Store::open(&db).unwrap();
+        store.set_app_setting(ADMIN_TOKEN_KEY, "tok-local").unwrap();
+
+        // Not configured: the local plane, and the local row — every install
+        // today, and the behaviour that must not change.
+        {
+            let _addr = crate::test_env::EnvGuard::set(DAEMON_ADDR_ENV, None);
+            let _tok = crate::test_env::EnvGuard::set(DAEMON_TOKEN_ENV, None);
+            assert_eq!(
+                admin_endpoint_resolved_for(&db).unwrap(),
+                admin_endpoint_for(&db),
+                "no remote named means the local plane"
+            );
+            assert_eq!(
+                admin_token_resolved(&db).as_deref(),
+                Some("tok-local"),
+                "and the token comes from the local row"
+            );
+        }
+
+        // A remote named: the client dials it, and the token is the one it was
+        // told — the local row is the *other* machine's business now.
+        {
+            let _addr = crate::test_env::EnvGuard::set(DAEMON_ADDR_ENV, Some("100.64.0.5:8318"));
+            let _tok = crate::test_env::EnvGuard::set(DAEMON_TOKEN_ENV, Some("tok-remote"));
+            assert_eq!(
+                admin_endpoint_resolved_for(&db).unwrap(),
+                AdminEndpoint::Tcp("100.64.0.5:8318".parse().unwrap())
+            );
+            assert_eq!(admin_token_resolved(&db).as_deref(), Some("tok-remote"));
+        }
+
+        // A remote named without a token: no token, and the daemon's own 401 is
+        // a better answer than anything this could invent.
+        {
+            let _addr = crate::test_env::EnvGuard::set(DAEMON_ADDR_ENV, Some("100.64.0.5:8318"));
+            let _tok = crate::test_env::EnvGuard::set(DAEMON_TOKEN_ENV, None);
+            assert_eq!(admin_token_resolved(&db), None);
+        }
+
+        // A remote that is not an address: **refused**, not fallen back from. A
+        // client that quietly talked to a different daemon than the one named is
+        // the same failure as a daemon quietly opening another database.
+        {
+            let _addr = crate::test_env::EnvGuard::set(DAEMON_ADDR_ENV, Some("daemon.local"));
+            let err = admin_endpoint_resolved_for(&db).expect_err("not an address");
+            let text = err.to_string();
+            assert!(text.contains(DAEMON_ADDR_ENV), "{text}");
+            assert!(text.contains("host:port"), "{text}");
+        }
+    }
+
     #[test]
     fn admin_requests_carry_the_token_when_we_have_one() {
         let header = format!("{ADMIN_TOKEN_HEADER}: tok-123\r\n");

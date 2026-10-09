@@ -32,9 +32,15 @@ pub(crate) fn render_status(
             v["providers"], v["bindings"], v["placeholder_keys"], v["usage_rows"]
         ));
     } else {
-        out.push_str(
-            "\nstore: not reported (no gateway token — point --db at the shared database)",
-        );
+        // Two causes, and they need different advice: a local client whose
+        // `--db` is not the shared one, and a remote one that was not given a
+        // token — for which "point --db at the shared database" is not a thing
+        // that exists, since that database is on the other machine.
+        out.push_str(if sidecar::daemon_is_remote() {
+            "\nstore: not reported (no token for the remote daemon — set KIWANO_DAEMON_TOKEN)"
+        } else {
+            "\nstore: not reported (no gateway token — point --db at the shared database)"
+        });
     }
     // Providers the gateway is refusing to route to right now, with its reason.
     // This is the operational answer to "why is nothing working" — the app shows

@@ -42,7 +42,20 @@ impl DaemonApi {
     /// The client for a daemon on this machine: same database, therefore the
     /// same token.
     pub fn connect() -> Self {
-        Self::with_token(sidecar::admin_endpoint(), sidecar::admin_token())
+        // A named remote daemon wins over the local plane — the same resolution
+        // the app and the CLI share (`sidecar::admin_endpoint_resolved`). A
+        // malformed address is reported rather than fallen back from, so a typo
+        // cannot silently reach a different daemon.
+        let endpoint = match sidecar::admin_endpoint_resolved() {
+            Ok(endpoint) => endpoint,
+            Err(e) => {
+                tracing::error!("{e}");
+                // The local plane, which will fail to answer and surface as an
+                // unreachable daemon — but the message above says why.
+                sidecar::admin_endpoint()
+            }
+        };
+        Self::with_token(endpoint, sidecar::admin_token())
     }
 
     pub fn with_token(endpoint: AdminEndpoint, token: Option<String>) -> Self {

@@ -198,16 +198,31 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
     // then the default: a socket beside the database. An empty value counts as
     // "not given" rather than as an endpoint named "".
     let db = sidecar::db_path(cli.db.as_deref());
+    // A malformed remote address is refused here rather than fallen back from:
+    // a client that silently talked to a *different* daemon than the one named
+    // is the same class of failure as a daemon quietly opening another database
+    // (`migrate.local.md` §13.1's finding, one layer up).
+    let remote = sidecar::admin_endpoint_resolved_for(&db.path);
+    let mut out = Out::new(stdout, stderr, cli.json, cli.quiet);
+    if let Err(e) = &remote {
+        out.note(e.to_string());
+        return 2;
+    }
     let admin = match cli
         .admin_socket
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
     {
+        // The flag is the most specific thing a caller can say, so it wins.
         Some(value) => AdminEndpoint::parse(value),
-        None => AdminEndpoint::from_env(&db.path),
+        // Then a daemon named by the environment — another machine — and only
+        // then the local plane (`migrate.local.md` §13.5).
+        None => remote.expect("checked above"),
     };
-    let token = sidecar::admin_token_for(&db.path);
+    // The token follows the endpoint: a remote daemon's row is on the other
+    // machine, so a remote client is told rather than reading it.
+    let token = sidecar::admin_token_resolved(&db.path);
     // Same resolution the rest of the codebase uses, so a container with no
     // HOME set behaves the way the gateway does rather than failing.
     let home = cli.home.clone().unwrap_or_else(default_home);
@@ -216,7 +231,6 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
     // *it* was resolved can be said: a `KIWANO_DB_PATH` that names no absolute
     // path is ignored, and silence about that is a user wondering where their
     // data went. stderr, and `--quiet` still silences it.
-    let mut out = Out::new(stdout, stderr, cli.json, cli.quiet);
     if let Some(note) = db.ignored_note() {
         out.note(note);
     }

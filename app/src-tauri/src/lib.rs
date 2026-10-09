@@ -128,7 +128,12 @@ pub fn run() {
             let data_port = env_port("KIWANO_DATA_PORT", 8317);
             // Not a port: the admin plane is a socket beside the database, or a
             // per-user named pipe.
-            let admin = sidecar::admin_endpoint();
+            let admin = sidecar::admin_endpoint_resolved().unwrap_or_else(|e| {
+                // A named-but-malformed remote daemon: say so once, then use the
+                // local plane so the app still starts and shows the problem.
+                tracing::error!("{e}");
+                sidecar::admin_endpoint()
+            });
 
             // Sidecar lifecycle (tech.md §4.6): adopt an already-running daemon
             // — but only one of our own version. The daemon deliberately

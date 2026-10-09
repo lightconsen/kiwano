@@ -52,3 +52,4 @@ pub mod logo;
 pub mod providers;
 pub mod routes;
 pub mod settings;
+pub mod version;

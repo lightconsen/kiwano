@@ -368,6 +368,20 @@ fn token_header(token: Option<&str>) -> String {
     }
 }
 
+/// The API generation this client speaks (`migrate.local.md` §11.2).
+///
+/// Sent on every request, including the ones with no token: a daemon that
+/// cannot answer this generation should say so **before** anything else, and a
+/// client that left the header off would be treated as generation 0 — which is
+/// what a build from the middle of the migration is, and not what this is.
+fn api_version_header() -> String {
+    format!(
+        "{}: {}\r\n",
+        kiwano_api::version::HEADER,
+        kiwano_api::version::CURRENT
+    )
+}
+
 /// The three admin requests that are one exchange each ([`events_request`] is
 /// the fourth, and the only one that is read rather than answered). The framing
 /// is raw HTTP written to the endpoint, which is why these are strings rather
@@ -376,8 +390,9 @@ fn token_header(token: Option<&str>) -> String {
 /// call.
 fn status_request(token: Option<&str>) -> String {
     format!(
-        "GET /status HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Connection: close\r\n\r\n",
-        token_header(token)
+        "GET /status HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}{}Connection: close\r\n\r\n",
+        token_header(token),
+        api_version_header()
     )
 }
 
@@ -404,8 +419,9 @@ fn reload_request(token: Option<&str>) -> String {
 /// `Sse` answers on, and it is sent because the reader is one.
 fn events_request(token: Option<&str>) -> String {
     format!(
-        "GET /events HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Accept: text/event-stream\r\n\r\n",
-        token_header(token)
+        "GET /events HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}{}Accept: text/event-stream\r\n\r\n",
+        token_header(token),
+        api_version_header()
     )
 }
 
@@ -515,8 +531,9 @@ fn admin_send<T: serde::de::DeserializeOwned>(
         None => (String::new(), ""),
     };
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}{body_headers}Connection: close\r\n\r\n{payload}",
-        token_header(token)
+        "{method} {path} HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}{}{body_headers}Connection: close\r\n\r\n{payload}",
+        token_header(token),
+        api_version_header()
     );
     let mut stream = endpoint
         .connect(CONNECT_TIMEOUT)

@@ -176,6 +176,23 @@ async fn require_admin_token(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
+    // The generation check sits in the same layer as the token, and before the
+    // route is reached: a request this daemon cannot understand should be told
+    // so rather than answered by a handler that has already parsed it
+    // (`migrate.local.md` §11.2).
+    let wanted = kiwano_api::version::requested(
+        headers
+            .get(kiwano_api::version::HEADER)
+            .and_then(|v| v.to_str().ok()),
+    );
+    if let Some(side) = kiwano_api::version::check(wanted) {
+        tracing::warn!(
+            path = %request.uri().path(),
+            wanted,
+            "resource request refused: API generation out of range"
+        );
+        return resource_error(kiwano_api::error::ApiError::out_of_range(wanted, side));
+    }
     if !authorized(&state, &headers) {
         tracing::warn!(
             path = %request.uri().path(),
@@ -410,6 +427,18 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         // agent here — it knows the host, having dialled it, and only the daemon
         // knows the port (`migrate.local.md` §10.30).
         "data_port": state.data_port.load(std::sync::atomic::Ordering::Relaxed),
+        "api": {
+            "min": kiwano_api::version::MIN_SUPPORTED,
+            "max": kiwano_api::version::CURRENT,
+        },
+        // The API generations this daemon answers, so a client can **ask before
+        // it sends** rather than learning from a refusal (§11.2). Here too, and
+        // for the same reason as the data port: the client that most needs to
+        // know whether it can talk has no token yet.
+        "api": {
+            "min": kiwano_api::version::MIN_SUPPORTED,
+            "max": kiwano_api::version::CURRENT,
+        },
     });
     if !authorized(&state, &headers) {
         return Json(liveness).into_response();
@@ -533,6 +562,12 @@ fn resource_error(err: kiwano_api::error::ApiError) -> Response {
         ApiErrorKind::NotFound => StatusCode::NOT_FOUND,
         ApiErrorKind::Invalid => StatusCode::BAD_REQUEST,
         ApiErrorKind::Failed => StatusCode::INTERNAL_SERVER_ERROR,
+        // **426 Upgrade Required**, which is the status that exists for exactly
+        // this: the server refuses to serve this protocol version and the fix
+        // is on one of the two machines. A 400 would say the request was
+        // malformed, and it is not — the same request would work against a
+        // build that speaks this generation.
+        ApiErrorKind::ApiOutOfRange => StatusCode::UPGRADE_REQUIRED,
     };
     if status.is_server_error() {
         // The caller gets the sentence; the operator gets it with the path.
@@ -2213,6 +2248,90 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The three things §11.2 asks for, in the order a real pair of builds meets
+    /// them: the range is published, a request inside it is served, and one
+    /// outside it is refused **with the side that must move**.
+    ///
+    /// The refusal is the part worth writing down. "Unsupported API version" is
+    /// not something an operator can act on; "upgrade the daemon" is, and the
+    /// direction is derived from the two numbers rather than passed in, so the
+    /// two sides cannot disagree about it.
+    #[tokio::test]
+    async fn the_api_generation_is_published_checked_and_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        // Published, without a token — a client that does not know whether it
+        // can talk has no token yet either.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/status", None))
+            .await
+            .unwrap();
+        let body = body_json(response).await;
+        assert_eq!(body["api"]["min"], kiwano_api::version::MIN_SUPPORTED);
+        assert_eq!(body["api"]["max"], kiwano_api::version::CURRENT);
+
+        // Inside the range, and with **no header at all** — a build from the
+        // middle of the migration is generation 0, and refusing it would break
+        // a deployment that is working.
+        for header in [None, Some("0"), Some("1")] {
+            let mut request = Request::builder()
+                .method("GET")
+                .uri("/api/agent-routes")
+                .header(ADMIN_TOKEN_HEADER, &token);
+            if let Some(v) = header {
+                request = request.header(kiwano_api::version::HEADER, v);
+            }
+            let response = admin_plane_router(state.clone())
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "generation {header:?}");
+        }
+
+        // A client newer than this daemon speaks: **the daemon** is behind.
+        let response = admin_plane_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/agent-routes")
+                    .header(ADMIN_TOKEN_HEADER, &token)
+                    .header(kiwano_api::version::HEADER, "99")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+        let body = error_json(response).await;
+        assert_eq!(body["kind"], "api_out_of_range");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("upgrade the daemon"),
+            "{}",
+            body["error"]
+        );
+
+        // And the check runs before the token: an unauthenticated request from a
+        // future client is told what is wrong rather than told to authenticate.
+        let response = admin_plane_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/agent-routes")
+                    .header(kiwano_api::version::HEADER, "99")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
     }
 
     #[tokio::test]

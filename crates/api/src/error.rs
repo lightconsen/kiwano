@@ -40,6 +40,11 @@ pub enum ApiErrorKind {
     /// The storage layer said no. Nothing about the request explains it, so it
     /// is the one kind worth retrying.
     Failed,
+    /// The two builds cannot talk: one of them speaks a generation of the API
+    /// the other does not (`version.rs`). Its own kind rather than `Invalid`,
+    /// because nothing about the *request* is wrong — the fix is on one of the
+    /// machines, and the message says which.
+    ApiOutOfRange,
 }
 
 /// A failure, as the wire carries it.
@@ -85,6 +90,32 @@ impl ApiError {
         }
     }
 
+    /// The two builds cannot talk — see [`ApiErrorKind::ApiOutOfRange`].
+    ///
+    /// The message names the side that must move, because "unsupported API
+    /// version" is not something an operator can act on.
+    pub fn out_of_range(wanted: u32, side: crate::version::Behind) -> Self {
+        let (what, who) = match side {
+            crate::version::Behind::Client => (
+                "this client is older than the daemon answers",
+                "upgrade the app",
+            ),
+            crate::version::Behind::Daemon => (
+                "this client is newer than the daemon speaks",
+                "upgrade the daemon",
+            ),
+        };
+        Self {
+            kind: ApiErrorKind::ApiOutOfRange,
+            message: format!(
+                "API generation {wanted} refused: {what} (this daemon speaks {}..={}). \
+                 To fix it, {who}.",
+                crate::version::MIN_SUPPORTED,
+                crate::version::CURRENT,
+            ),
+        }
+    }
+
     pub fn kind(&self) -> ApiErrorKind {
         self.kind
     }
@@ -124,6 +155,7 @@ mod tests {
         assert_eq!(as_wire(ApiErrorKind::NotFound), "not_found");
         assert_eq!(as_wire(ApiErrorKind::Invalid), "invalid");
         assert_eq!(as_wire(ApiErrorKind::Failed), "failed");
+        assert_eq!(as_wire(ApiErrorKind::ApiOutOfRange), "api_out_of_range");
     }
 
     /// The message survives the round trip unchanged — a client shows what the

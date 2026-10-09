@@ -954,6 +954,39 @@ mod tests {
         );
     }
 
+    /// Every request carries the API generation (`migrate.local.md` §11.2).
+    ///
+    /// Asserted on the wire because nothing else can see it: a client that
+    /// stopped sending the header would be treated as generation 0, which
+    /// *works* today — the daemon still accepts it — and would stop working the
+    /// day the floor moves. That is exactly the failure a version policy exists
+    /// to make loud, and it would be silent if the header were not pinned here.
+    #[test]
+    fn every_request_carries_the_api_generation() {
+        let body = r#"{"rows":[],"total":0}"#;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir, endpoint, handle) = stub(response);
+        DaemonApi::with_token(endpoint, Some("tok-1".into()))
+            .list_request_logs(1, 10, RequestLogFilter::default())
+            .unwrap();
+
+        let request = handle.join().unwrap();
+        assert!(
+            request.contains(&format!(
+                "{}: {}",
+                kiwano_api::version::HEADER,
+                kiwano_api::version::CURRENT
+            )),
+            "the generation is missing from: {request}"
+        );
+    }
+
     #[test]
     fn the_route_writes_use_the_verbs_the_contract_names() {
         let ok: &'static str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\n\r\n{\"ok\":true}";

@@ -512,10 +512,12 @@ fn plan_query_round_trips_and_clears() {
 #[test]
 fn keys_add_list_remove_roundtrips() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let provider = add_provider(&db, "rotating", &[]);
 
-    let (code, out, err) = run(
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--json",
             "keys",
@@ -540,16 +542,46 @@ fn keys_add_list_remove_roundtrips() {
     assert_ne!(masked, "sk-rotating-key-0001");
     assert!(masked.starts_with("sk-rot"), "head kept, got {masked}");
 
-    let (_, out, _) = run(&db, &["--json", "keys", "list", &provider]);
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "keys", "list", &provider]);
     let keys: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0]["label"], "spare");
 
-    let (code, _, err) = run(&db, &["keys", "remove", &key_id.to_string()]);
+    let (code, _, err) = run_served(&db, &daemon, &["keys", "remove", &key_id.to_string()]);
     assert_eq!(code, 0, "{err}");
-    let (_, out, _) = run(&db, &["--json", "keys", "list", &provider]);
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "keys", "list", &provider]);
     let keys: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert!(keys.is_empty());
+}
+
+/// A command that has moved answers **only** through the daemon, and says so
+/// when there is none.
+///
+/// This is the evidence that it moved at all. While the command read the store
+/// itself it answered with no daemon running — and a CLI that still did would
+/// pass every test above, because the temp database is right there. Now the
+/// answer comes over the admin plane, so a missing daemon is an error rather
+/// than a silent second source of the same data (`migrate.local.md` §14.1,
+/// decision D1). When the next batch moves, add its command here.
+#[test]
+fn a_moved_command_needs_the_daemon() {
+    let (_dir, db) = temp_db();
+    let provider = add_provider(&db, "rotating", &[]);
+
+    for args in [
+        vec!["keys", "list", provider.as_str()],
+        vec!["keys", "add", provider.as_str(), "--key", "sk-another"],
+        vec!["routes", "list"],
+        vec!["routes", "binding", "add", "claude", provider.as_str()],
+        vec!["routes", "apply", "--from", "claude", "--to", "codex"],
+        vec!["logs", "list"],
+        vec!["logs", "show", "1"],
+        vec!["logs", "clear", "--yes"],
+    ] {
+        let (code, out, err) = run(&db, &args);
+        assert_eq!(code, 3, "{args:?}\nstdout: {out}\nstderr: {err}");
+        assert!(err.contains("gateway is not answering"), "{args:?}: {err}");
+    }
 }
 
 // ── usage / status ──────────────────────────────────────────────────────────
@@ -750,10 +782,15 @@ fn providers_disable_and_enable_round_trip() {
 #[test]
 fn strategy_roundrobin_seeds_balanced_weights() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     add_provider(&db, "one", &["claude"]);
     add_provider(&db, "two", &["claude"]);
 
-    let (code, _, err) = run(&db, &["routes", "strategy", "claude", "roundrobin"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["routes", "strategy", "claude", "roundrobin"],
+    );
     assert_eq!(code, 0, "{err}");
 
     let store = Store::open(&db).unwrap();
@@ -771,14 +808,16 @@ fn strategy_roundrobin_seeds_balanced_weights() {
 #[test]
 fn quota_strategy_requires_a_limit_and_a_known_unit() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     add_provider(&db, "one", &["claude"]);
 
-    let (code, _, err) = run(&db, &["routes", "strategy", "claude", "quota"]);
+    let (code, _, err) = run_served(&db, &daemon, &["routes", "strategy", "claude", "quota"]);
     assert_eq!(code, 2);
     assert!(err.contains("--limit"), "{err}");
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "routes", "strategy", "claude", "quota", "--limit", "10", "--unit", "cost",
         ],
@@ -786,8 +825,9 @@ fn quota_strategy_requires_a_limit_and_a_known_unit() {
     assert_eq!(code, 2);
     assert!(err.contains("cost"), "{err}");
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "routes", "strategy", "claude", "quota", "--limit", "5000", "--unit", "tokens",
         ],
@@ -803,8 +843,9 @@ fn quota_strategy_requires_a_limit_and_a_known_unit() {
     assert!(config.contains("tokens"), "{config}");
 
     // A limit on a strategy that ignores one is a mistake, not a no-op.
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &["routes", "strategy", "claude", "failover", "--limit", "10"],
     );
     assert_eq!(code, 2);
@@ -814,16 +855,22 @@ fn quota_strategy_requires_a_limit_and_a_known_unit() {
 #[test]
 fn routes_binding_add_set_and_remove() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let first = add_provider(&db, "first", &["claude"]);
     let second = add_provider(&db, "second", &[]);
 
-    let (code, _, err) = run(&db, &["routes", "binding", "add", "claude", &second]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["routes", "binding", "add", "claude", &second],
+    );
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     assert_eq!(store.bindings_for_agent("claude").unwrap().len(), 2);
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "routes",
             "binding",
@@ -845,8 +892,9 @@ fn routes_binding_add_set_and_remove() {
     assert_eq!(b.win_start.as_deref(), Some("09:00"));
     assert_eq!(b.win_end.as_deref(), Some("17:00"));
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &["routes", "binding", "set", "claude", &second, "--no-window"],
     );
     assert_eq!(code, 0, "{err}");
@@ -860,8 +908,9 @@ fn routes_binding_add_set_and_remove() {
     assert_eq!(b.win_start, None, "both bounds clear together");
 
     // A malformed window is a usage error, not a silently ignored flag.
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "routes", "binding", "set", "claude", &second, "--window", "9am-5pm",
         ],
@@ -869,7 +918,11 @@ fn routes_binding_add_set_and_remove() {
     assert_eq!(code, 2);
     assert!(err.contains("HH:MM"), "{err}");
 
-    let (code, _, err) = run(&db, &["routes", "binding", "remove", "claude", &second]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["routes", "binding", "remove", "claude", &second],
+    );
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     let remaining = store.bindings_for_agent("claude").unwrap();
@@ -880,6 +933,7 @@ fn routes_binding_add_set_and_remove() {
 #[test]
 fn routes_reorder_rewrites_priorities() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let first = add_provider(&db, "first", &["claude"]);
     let second = add_provider(&db, "second", &["claude"]);
     assert_eq!(
@@ -891,7 +945,11 @@ fn routes_reorder_rewrites_priorities() {
         Some(second.as_str())
     );
 
-    let (code, _, err) = run(&db, &["routes", "reorder", "claude", &first, &second]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["routes", "reorder", "claude", &first, &second],
+    );
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     assert_eq!(
@@ -910,11 +968,13 @@ fn routes_reorder_rewrites_priorities() {
 #[test]
 fn routes_apply_copies_another_agents_route() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let provider = add_provider(&db, "shared", &["claude"]);
-    run(&db, &["routes", "strategy", "claude", "failover"]);
+    run_served(&db, &daemon, &["routes", "strategy", "claude", "failover"]);
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &["routes", "apply", "--from", "claude", "--to", "codex"],
     );
     assert_eq!(code, 0, "{err}");
@@ -1047,6 +1107,7 @@ fn takeover_rejects_an_unknown_agent() {
 #[test]
 fn agents_add_list_bind_and_remove_a_custom_agent() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let home = dir.path().join("home");
     let home_arg = home.display().to_string();
 
@@ -1094,8 +1155,9 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     // Binding is the existing command: a custom agent is an agent id like any
     // other to everything that reads routes.
     let provider_id = add_provider(&db, "alpha", &[]);
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &["--no-reload", "routes", "binding", "add", &id, &provider_id],
     );
     assert_eq!(code, 0, "{err}");
@@ -1194,26 +1256,31 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
 #[test]
 fn logs_list_filters_by_status_and_reports_the_total() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     seed_log(&db, "claude", 200);
     seed_log(&db, "claude", 500);
 
-    let (code, out, err) = run(&db, &["--json", "logs", "list"]);
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "logs", "list"]);
     assert_eq!(code, 0, "{err}");
     let list: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(list["total"], 2);
 
-    let (_, out, _) = run(&db, &["--json", "logs", "list", "--status", "error"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--json", "logs", "list", "--status", "error"],
+    );
     let list: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(list["total"], 1);
     assert_eq!(list["rows"][0]["status_code"], 500);
 
     // The column carries a CHECK constraint, so an unknown status should be
     // refused by name rather than by a SQLite constraint message.
-    let (code, _, err) = run(&db, &["logs", "list", "--status", "broken"]);
+    let (code, _, err) = run_served(&db, &daemon, &["logs", "list", "--status", "broken"]);
     assert_eq!(code, 2);
     assert!(err.contains("broken"), "{err}");
 
-    let (code, _, err) = run(&db, &["logs", "list", "--page", "0"]);
+    let (code, _, err) = run_served(&db, &daemon, &["logs", "list", "--page", "0"]);
     assert_eq!(code, 2);
     assert!(err.contains("1-based"), "{err}");
 }
@@ -1221,8 +1288,9 @@ fn logs_list_filters_by_status_and_reports_the_total() {
 #[test]
 fn logs_show_reports_a_pruned_row_clearly() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     seed_log(&db, "claude", 200);
-    let (code, _, err) = run(&db, &["logs", "show", "9999"]);
+    let (code, _, err) = run_served(&db, &daemon, &["logs", "show", "9999"]);
     assert_eq!(code, 3);
     assert!(err.contains("pruned"), "{err}");
 }
@@ -1230,10 +1298,12 @@ fn logs_show_reports_a_pruned_row_clearly() {
 #[test]
 fn logs_export_writes_the_file_and_requires_no_confirmation() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     seed_log(&db, "claude", 200);
     let out_path = dir.path().join("logs.csv");
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &["logs", "export", "--out", &out_path.display().to_string()],
     );
     assert_eq!(code, 0, "{err}");
@@ -1247,18 +1317,19 @@ fn logs_export_writes_the_file_and_requires_no_confirmation() {
 #[test]
 fn logs_clear_demands_confirmation() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     seed_log(&db, "claude", 200);
-    let (code, _, err) = run(&db, &["logs", "clear"]);
+    let (code, _, err) = run_served(&db, &daemon, &["logs", "clear"]);
     assert_eq!(code, 2, "destructive commands ask first");
     assert!(err.contains("--yes"), "{err}");
     // …and the log is untouched by the refusal.
-    let (_, out, _) = run(&db, &["--json", "logs", "list"]);
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "logs", "list"]);
     let list: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(list["total"], 1);
 
-    let (code, _, err) = run(&db, &["logs", "clear", "--yes"]);
+    let (code, _, err) = run_served(&db, &daemon, &["logs", "clear", "--yes"]);
     assert_eq!(code, 0, "{err}");
-    let (_, out, _) = run(&db, &["--json", "logs", "list"]);
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "logs", "list"]);
     let list: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(list["total"], 0);
 }

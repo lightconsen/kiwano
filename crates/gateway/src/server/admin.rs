@@ -1288,6 +1288,29 @@ async fn import_config_route(State(state): State<Arc<GatewayState>>, body: Strin
     }
 }
 
+/// The export's query string: the list's filters, without the paging.
+///
+/// An export is unpaged by definition — the page size is a display concern and
+/// must not cap what lands in the file. Borrowing `LogQuery` for this route
+/// meant inheriting its **required** `page` and `page_size`, and the client
+/// sends neither, so every export was answered with a 400 (the rejection is
+/// axum's, and says nothing about which field). It went unnoticed until the CLI
+/// moved onto the same endpoint and its own export test went red
+/// (`migrate.local.md` §10.34).
+#[derive(serde::Deserialize)]
+struct ExportQuery {
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+}
+
 /// `GET /api/logs/export` — the filtered slice as CSV text.
 ///
 /// The text, not a file: the client writes it to the path the user chose. The
@@ -1295,7 +1318,7 @@ async fn import_config_route(State(state): State<Arc<GatewayState>>, body: Strin
 /// caller can say the file is short rather than imply it is whole.
 async fn export_logs_route(
     State(state): State<Arc<GatewayState>>,
-    axum::extract::Query(q): axum::extract::Query<LogQuery>,
+    axum::extract::Query(q): axum::extract::Query<ExportQuery>,
 ) -> Response {
     let filter = crate::store::RequestLogFilter {
         agent: q.agent.as_deref(),
@@ -2526,6 +2549,51 @@ mod tests {
 
         let response = admin_plane_router(state.clone())
             .oneshot(admin_request("GET", "/api/logs?page=1&page_size=10", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The export takes the list's filters and **no** paging, and answers with
+    /// no query string at all — which is what the client sends for "everything".
+    ///
+    /// The regression this pins: the route borrowed `LogQuery`, whose `page` and
+    /// `page_size` are required, so *every* export came back as the extractor's
+    /// 400 rather than as CSV — with filters or without. Nothing failed, because
+    /// no test called the route; the CLI's own export test caught it the moment
+    /// the CLI moved onto the same endpoint (`migrate.local.md` §10.34).
+    #[tokio::test]
+    async fn the_export_takes_filters_without_paging() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        // The trailing `?` is the client's own spelling for "no filters" — it
+        // omits absent keys rather than sending them empty.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/logs/export?", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let page = body_json(response).await;
+        assert_eq!(page["rows_written"], 0);
+        assert!(page["csv"].as_str().unwrap().contains("request_body"));
+
+        // A filter still narrows it.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request(
+                "GET",
+                "/api/logs/export?agent=claude",
+                Some(&token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Without the token: refused like every other resource route.
+        let response = admin_plane_router(state)
+            .oneshot(admin_request("GET", "/api/logs/export?", None))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

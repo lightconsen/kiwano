@@ -51,9 +51,25 @@ pub fn export_request_logs_csv(
     // §10.17). The daemon hands back the CSV text and the two counts.
     let (csv, written, truncated) =
         daemon::export_request_logs_csv(store, filter).map_err(|e| e.to_string())?;
-    std::fs::write(path, &csv).map_err(|e| format!("cannot write {path}: {e}"))?;
+    write_request_log_export(path, &csv, written, truncated)
+}
+
+/// The file half of an export, on its own.
+///
+/// Split out because the two clients reach the CSV differently — this crate's
+/// caller has a store, the CLI asks the daemon over the wire — and the half
+/// they share is this one. Writing it twice would put the error message in two
+/// places, which is where the two would eventually disagree about what went
+/// wrong with the user's path.
+pub fn write_request_log_export(
+    path: &str,
+    csv: &str,
+    rows_written: usize,
+    truncated: bool,
+) -> Result<RequestLogExportVm, String> {
+    std::fs::write(path, csv).map_err(|e| format!("cannot write {path}: {e}"))?;
     Ok(RequestLogExportVm {
-        rows_written: written,
+        rows_written,
         truncated,
     })
 }

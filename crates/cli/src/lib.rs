@@ -21,6 +21,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use kiwano_core::auxiliary::Aux;
+use kiwano_core::daemon_api::DaemonApi;
 use kiwano_core::detect::{self, ShellVars};
 use kiwano_core::sidecar::{self, AdminEndpoint};
 use kiwanod::store::Store;
@@ -78,6 +79,14 @@ pub struct Ctx<'a> {
     pub db: PathBuf,
     pub admin: AdminEndpoint,
     pub token: Option<String>,
+    /// The client of the daemon that `admin` and `token` resolve to.
+    ///
+    /// Built once here rather than at each call site: the two halves have to be
+    /// answered together, and answering them twice is how they drift — the
+    /// catalog sync used to build its own with `DaemonApi::connect()`, which
+    /// ignores `--admin-socket` and would have talked to a different daemon than
+    /// the rest of the same invocation (`migrate.local.md` §14.1).
+    pub api: DaemonApi,
     /// Port an agent's config is pointed at when it is taken over.
     pub data_port: u16,
     /// Root the agent config files live under.
@@ -116,7 +125,7 @@ impl Ctx<'_> {
     /// daemon does not answer — a takeover with no daemon running is a
     /// takeover of nothing, and the fallback at least names the usual place.
     pub fn gateway_base(&self) -> String {
-        kiwano_core::daemon_api::DaemonApi::with_token(self.admin.clone(), self.token.clone())
+        self.api
             .gateway_base()
             .unwrap_or_else(|_| format!("http://127.0.0.1:{}", self.data_port))
     }
@@ -248,10 +257,12 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         out.note(note);
     }
 
+    let api = DaemonApi::with_token(admin.clone(), token.clone());
     let mut ctx = Ctx {
         db: db.path,
         admin,
         token,
+        api,
         data_port: cli.data_port,
         home,
         out,

@@ -3,7 +3,6 @@
 use super::render::render_routes;
 use crate::cli::{BindingCmd, RoutesCmd};
 use crate::{CliError, Ctx};
-use kiwano_core::vm;
 use kiwanod::strategy::QuotaConfig;
 
 // ── routes ──────────────────────────────────────────────────────────────────
@@ -11,10 +10,7 @@ use kiwanod::strategy::QuotaConfig;
 pub fn routes(cmd: &RoutesCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         RoutesCmd::List => {
-            let routes = {
-                let store = ctx.store()?;
-                vm::build_agent_routes(store)?
-            };
+            let routes = ctx.api.list_agent_routes()?;
             let text = render_routes(&routes);
             ctx.out.emit(&routes, || text);
             Ok(())
@@ -26,37 +22,25 @@ pub fn routes(cmd: &RoutesCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             unit,
         } => {
             let config = strategy_config(kind, *limit, unit)?;
-            {
-                let store = ctx.store()?;
-                vm::set_agent_strategy(store, agent, kind, config.as_deref())?;
-            }
+            ctx.api.set_agent_strategy(agent, kind, config.as_deref())?;
             let detail = config.map(|c| format!(" ({c})")).unwrap_or_default();
             ctx.out.line(format!("{agent}: strategy {kind}{detail}"));
-            ctx.after_mutation();
             Ok(())
         }
         RoutesCmd::Reorder {
             agent,
             provider_ids,
         } => {
-            {
-                let store = ctx.store()?;
-                vm::reorder_agent_bindings(store, agent, provider_ids)?;
-            }
+            ctx.api.reorder_agent_bindings(agent, provider_ids)?;
             ctx.out.line(format!(
                 "{agent}: {} candidates in the given order",
                 provider_ids.len()
             ));
-            ctx.after_mutation();
             Ok(())
         }
         RoutesCmd::Apply { from, to } => {
-            {
-                let store = ctx.store()?;
-                vm::apply_agent_route(store, to, from)?;
-            }
+            ctx.api.apply_agent_route(to, from)?;
             ctx.out.line(format!("{to}: route copied from {from}"));
-            ctx.after_mutation();
             Ok(())
         }
         RoutesCmd::Binding(cmd) => binding(cmd, ctx),
@@ -91,20 +75,12 @@ fn strategy_config(kind: &str, limit: Option<f64>, unit: &str) -> Result<Option<
 fn binding(cmd: &BindingCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         BindingCmd::Add { agent, provider_id } => {
-            {
-                let store = ctx.store()?;
-                vm::add_agent_binding(store, agent, provider_id)?;
-            }
+            ctx.api.add_agent_binding(agent, provider_id)?;
             ctx.out.line(format!("{agent}: bound {provider_id}"));
-            ctx.after_mutation();
         }
         BindingCmd::Remove { agent, provider_id } => {
-            {
-                let store = ctx.store()?;
-                vm::remove_agent_binding(store, agent, provider_id)?;
-            }
+            ctx.api.remove_agent_binding(agent, provider_id)?;
             ctx.out.line(format!("{agent}: unbound {provider_id}"));
-            ctx.after_mutation();
         }
         BindingCmd::Set {
             agent,
@@ -128,12 +104,14 @@ fn binding(cmd: &BindingCmd, ctx: &mut Ctx) -> Result<(), CliError> {
                 (None, true) => (Some(String::new()), Some(String::new())),
                 (None, false) => (None, None),
             };
-            {
-                let store = ctx.store()?;
-                vm::update_agent_binding(store, agent, provider_id, *weight, win_start, win_end)?;
-            }
+            ctx.api.update_agent_binding(
+                agent,
+                provider_id,
+                *weight,
+                win_start.as_deref(),
+                win_end.as_deref(),
+            )?;
             ctx.out.line(format!("{agent}: {provider_id} updated"));
-            ctx.after_mutation();
         }
     }
     Ok(())

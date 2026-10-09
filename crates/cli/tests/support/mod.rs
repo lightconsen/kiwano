@@ -76,23 +76,29 @@ pub fn serve(db: &Path) -> TestDaemon {
     TestDaemon { endpoint }
 }
 
-/// An endpoint that is unique to one test.
+/// An endpoint that is unique to one test, and that `run` will *not* find.
 ///
-/// On unix that is `beside_db` — a socket beside the test's own database, which
-/// is the same place the CLI resolves on its own. On Windows `beside_db`
-/// derives the name from the *user*, so every test in the process would share
-/// one pipe and reach each other's daemon; there the temporary directory is what
-/// makes it unique, so it names the pipe instead.
+/// Deliberately not `AdminEndpoint::beside_db`: that is the path the CLI
+/// resolves on its own, so a daemon served there would also be reached by `run`
+/// — and `run` has to keep meaning "no daemon", because that is a state the CLI
+/// must handle and three tests assert it (decision D3). Naming the endpoint
+/// something else keeps the two apart on every platform, and leaves
+/// `--admin-socket` as the one way a test says which daemon it means.
+///
+/// The name is unique per test either way: a socket inside the test's own
+/// temporary directory on unix, and there a pipe named after that directory —
+/// `beside_db` would derive it from the *user* and every test in the process
+/// would share one.
 fn test_endpoint(db: &Path) -> AdminEndpoint {
+    let dir = db.parent().expect("the database has a directory");
     #[cfg(unix)]
     {
-        AdminEndpoint::beside_db(db)
+        AdminEndpoint::parse(&dir.join("kiwano-test.sock").display().to_string())
     }
     #[cfg(windows)]
     {
-        let unique = db
-            .parent()
-            .and_then(|dir| dir.file_name())
+        let unique = dir
+            .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "endpoint".to_string());
         AdminEndpoint::parse(&format!("kiwano-test-{unique}"))

@@ -22,25 +22,15 @@ use kiwanod::store::Store;
 
 pub const FORMAT_VERSION: u32 = 1;
 
-/// Export all providers and per-Agent route schemes as shareable JSON.
-///
-/// `include_keys` is the explicit opt-in for credentials. It is `false` on the
-/// registered `export_config` IPC command — that surface is dormant (no
-/// frontend screen calls it) and must not leak when it is finally wired up.
-/// Pass `true` only for a local backup that never leaves the machine.
 /// Write an export to `path`, owner-only on unix.
 ///
-/// The file holds plaintext credentials when `include_keys` is set, and
-/// `std::fs::write` creates it with whatever the umask allows — which on a
-/// shared machine can be world-readable. The database this is a backup of is
-/// already 0600 (see `crate::store`'s `harden_permissions`); the export should
-/// not be the thing that undoes it.
+/// The file holds plaintext credentials when the document was built with
+/// `include_keys` — the explicit opt-in, `false` on the registered
+/// `export_config` IPC command, which is dormant (no frontend screen calls it)
+/// and must not leak when it is finally wired up. Pass `true` only for a local
+/// backup that never leaves the machine.
 ///
-/// Returns the number of providers written.
-/// Write an export to `path`, owner-only on unix.
-///
-/// The file holds plaintext credentials when `include_keys` was set, and
-/// `std::fs::write` creates it with whatever the umask allows — which on a
+/// `std::fs::write` creates the file with whatever the umask allows — which on a
 /// shared machine can be world-readable. The database this is a backup of is
 /// already 0600 (see `crate::store`'s `harden_permissions`); the export should
 /// not be the thing that undoes it.

@@ -102,48 +102,14 @@ pub(crate) fn local_day_key(offset_minutes: i64, epoch_secs: i64) -> String {
     day_key(epoch_secs + offset_minutes * 60)
 }
 
-/// The first instant of that local day, as the RFC3339 UTC value a `ts >=`
-/// filter needs — stored timestamps are UTC, so the boundary has to be too.
-pub(crate) fn local_day_start(offset_minutes: i64, epoch_secs: i64) -> String {
-    let local = epoch_secs + offset_minutes * 60;
-    local_day_start_from(offset_minutes, local.div_euclid(86_400))
-}
 
-/// Same, from a local day index (which is what the calendar math produces).
-pub(crate) fn local_day_start_from(offset_minutes: i64, local_day: i64) -> String {
-    rfc3339(local_day * 86_400 - offset_minutes * 60)
-}
 
 // ── "In use" helpers: which candidate would serve a request issued right now,
 //    mirroring the gateway's strategy selection (strategy/mod.rs) minus its
 //    runtime state (circuit breakers, roundrobin sticky sessions) ──
 
-/// Minutes-of-day on the user's clock (timewindow windows are the user's local
-/// time). Reads the stored `tz_offset_minutes` rather than the host's zone, so
-/// the badge and the gateway — which reads the same field — agree on the hour.
-pub(crate) fn local_minutes_now(tz_offset_minutes: i64) -> u32 {
-    use chrono::Timelike;
-    let local = chrono::Utc::now() + chrono::Duration::minutes(tz_offset_minutes);
-    let t = local.time();
-    t.hour() * 60 + t.minute()
-}
-
-/// Whether `now_min` falls inside an "HH:MM" window; inclusive bounds, and a
-/// start later than the end wraps midnight (same semantics as the gateway).
-pub(crate) fn in_window(now_min: u32, start: &str, end: &str) -> bool {
-    let parse = |s: &str| -> Option<u32> {
-        let (h, m) = s.trim().split_once(':')?;
-        let (h, m) = (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?);
-        (h < 24 && m < 60).then_some(h * 60 + m)
-    };
-    match (parse(start), parse(end)) {
-        (Some(s), Some(e)) => {
-            if s <= e {
-                now_min >= s && now_min <= e
-            } else {
-                now_min >= s || now_min <= e
-            }
-        }
-        _ => false,
-    }
-}
+// The local-day arithmetic and the window helpers moved to `kiwanod::store::time`
+// with the provider view (`migrate.local.md` §10.21): the aggregation is their
+// only caller and the aggregation is the daemon's now. Re-exported so the paths
+// here are unchanged.
+pub(crate) use kiwanod::store::time::{in_window, local_day_start, local_day_start_from, local_minutes_now};

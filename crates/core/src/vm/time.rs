@@ -102,8 +102,6 @@ pub(crate) fn local_day_key(offset_minutes: i64, epoch_secs: i64) -> String {
     day_key(epoch_secs + offset_minutes * 60)
 }
 
-
-
 // ── "In use" helpers: which candidate would serve a request issued right now,
 //    mirroring the gateway's strategy selection (strategy/mod.rs) minus its
 //    runtime state (circuit breakers, roundrobin sticky sessions) ──
@@ -112,4 +110,6 @@ pub(crate) fn local_day_key(offset_minutes: i64, epoch_secs: i64) -> String {
 // with the provider view (`migrate.local.md` §10.21): the aggregation is their
 // only caller and the aggregation is the daemon's now. Re-exported so the paths
 // here are unchanged.
-pub(crate) use kiwanod::store::time::{in_window, local_day_start, local_day_start_from, local_minutes_now};
+pub(crate) use kiwanod::store::time::{
+    in_window, local_day_start, local_day_start_from, local_minutes_now,
+};

@@ -4,19 +4,15 @@
 //! shows; an unrecognized tag is an error rather than a silent `Metered`, which
 //! is why the two are a total pair over the tags the UI can send.
 
-use kiwanod::store::Billing;
-
 // `billing_to_db` moved to `kiwanod::api::views` — the daemon's `add_provider`
 // holds the form to the same vocabulary, and a second copy of a total mapping is
 // two vocabularies. The round-trip test below therefore calls the daemon's copy,
 // which is the whole point of keeping it: the vocabulary is pinned, not copied.
-pub fn billing_to_ui(db: Billing) -> &'static str {
-    match db {
-        Billing::Subscription => "plan",
-        Billing::Unlimited => "unl",
-        Billing::Metered => "payg",
-    }
-}
+// The implementation is the daemon's (`kiwanod::api::views`), which produces
+// this field now — a second copy is how two vocabularies come to disagree
+// (`migrate.local.md` §10.7). Re-exported so the paths here are unchanged, and
+// the round-trip test below still pins the vocabulary by calling it.
+pub use kiwanod::api::views::billing_to_ui;
 
 #[cfg(test)]
 mod tests {

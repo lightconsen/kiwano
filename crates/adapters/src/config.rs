@@ -838,8 +838,15 @@ mod tests {
     /// that can flip by accident. Windows has no such account split at all, and
     /// compiles the check to `None` — the carrying `#[cfg(unix)]` is the other
     /// half of the contract.
+    /// `#[serial]` because it mutates `CC_SWITCH_TEST_HOME`, and **that attribute
+    /// only serialises against other `#[serial]` tests**. Its neighbours in
+    /// `codex_config` and `opencode_config` take the same lock; without it here
+    /// this one runs beside them and clobbers the variable mid-test — which is
+    /// not a hypothetical: it produced an intermittent failure whose message
+    /// named the *real* home directory, three times before it was chased down.
     #[cfg(unix)]
     #[test]
+    #[serial_test::serial]
     fn a_home_the_process_owns_is_not_reported_as_a_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         // The same hook grok_config uses, and the reason it exists: point the

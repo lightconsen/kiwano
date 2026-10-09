@@ -3,8 +3,6 @@
 //! that currency. Never converted: both are read beside the provider's own
 //! limits rather than in the user's display currency.
 
-use crate::vm::catalog::CatalogEntryVm;
-use kiwanod::store::Provider;
 use std::collections::HashMap;
 
 /// The currencies a spending limit may be denominated in.
@@ -23,24 +21,10 @@ use std::collections::HashMap;
 /// currency either way). A provider added by hand, with no entry behind it and
 /// nothing declared, falls back to USD as well: the price table's base, and the
 /// only honest answer when nothing said otherwise.
-pub(crate) fn provider_currency(p: &Provider, entries: &[CatalogEntryVm]) -> String {
-    if let Some(c) = p
-        .prices
-        .as_deref()
-        .and_then(|s| {
-            serde_json::from_str::<kiwano_adapters::model_pricing::DeclaredPrices>(s).ok()
-        })
-        .map(|d| d.currency)
-        .filter(|c| !c.is_empty())
-    {
-        return c;
-    }
-    p.catalog_id
-        .as_deref()
-        .and_then(|id| entries.iter().find(|e| e.id == id))
-        .map(|e| e.currency.clone())
-        .unwrap_or_else(|| "USD".to_string())
-}
+// The rule is the daemon's (`kiwanod::api::views`): what a provider's figures
+// are denominated in is produced by whichever side builds the row, and that is
+// the daemon now (`migrate.local.md` §10.7). Re-exported, paths unchanged.
+pub(crate) use kiwanod::api::views::provider_currency;
 
 /// Cost of one provider, in the currency its usage was priced in.
 ///

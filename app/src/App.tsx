@@ -186,11 +186,21 @@ export default function App() {
           break;
         case "limit_cleared":
           break;
+        // The vendor's own counter moved, so the number on the screen is stale.
+        // A re-read rather than a notification: nothing happened that the user
+        // must act on, and a plan quota ticking up is not news the way a refused
+        // key is (`migrate.local.md` §10.27).
+        case "quota_refreshed":
+          void reloadScreen();
+          break;
         case "usage":
           break;
       }
     });
-  }, []);
+    // `reloadScreen` is stable (`useCallback` with no deps) and reads the
+    // registry through a ref, so this closure is never stale — listed for the
+    // same reason its sibling effect lists it.
+  }, [reloadScreen]);
 
   // The tray's event entries deep-link into the app: navigate once mounted.
   useEffect(

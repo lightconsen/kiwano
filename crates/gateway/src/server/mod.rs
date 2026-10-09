@@ -128,6 +128,15 @@ pub enum GatewayEvent {
     /// The provider refused its key enough times that the breaker opened with
     /// the auth-failed mark — the fix is a new key, not a wait.
     AuthFailed { agent: String, provider_id: String },
+    /// A plan-quota report was **re-fetched** from the vendor, so whatever the
+    /// screen shows for that provider is now out of date.
+    ///
+    /// Only a fresh fetch sends this: a cache hit changed nothing, and a failed
+    /// query changed nothing either. Before this existed the percentage moved
+    /// only when traffic happened to re-read the screen, which left an idle
+    /// machine showing a stale number with no way to know (`migrate.local.md`
+    /// §10.27).
+    QuotaRefreshed { provider_id: String },
 }
 
 /// How many events a subscriber may fall behind before it is told it lagged

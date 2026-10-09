@@ -69,12 +69,12 @@ pub fn clear_legacy_disables(store: &Store) -> usize {
 /// Unbounded on purpose: N is the number of providers the operator configured,
 /// which is single digits. A deployment with dozens would want
 /// `buffer_unordered` to stop N simultaneous requests from going out at once.
-pub async fn refresh_plan_reports(store: &Store) {
+pub async fn refresh_plan_reports(store: &Store) -> Vec<String> {
     let providers = match store.list_providers() {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(error = %e, "plan-quota refresh skipped: providers unreadable");
-            return;
+            return Vec::new();
         }
     };
     let due = providers
@@ -83,12 +83,36 @@ pub async fn refresh_plan_reports(store: &Store) {
     // Awaiting the whole batch is the point: `evaluate` below rebuilds the
     // snapshot from the store, so it has to run after every write has landed,
     // and `publish` has to be called exactly once per tick.
-    futures_util::future::join_all(due.map(|p| async move {
-        if let Err(e) = crate::plan_quota::get_plan_quota_report(store, &p.id, false).await {
-            tracing::debug!(provider = %p.id, error = %e, "plan quota refresh failed");
+    let reports = futures_util::future::join_all(due.map(|p| async move {
+        match crate::plan_quota::get_plan_quota_report(store, &p.id, false).await {
+            Ok(report) => Some(report),
+            Err(e) => {
+                tracing::debug!(provider = %p.id, error = %e, "plan quota refresh failed");
+                None
+            }
         }
     }))
     .await;
+    // Which of them are worth telling the app about. Returned rather than
+    // notified here: this function takes a `Store`, and the event needs the
+    // gateway's channel — `run` has it, and this is also the shape the tests can
+    // drive without a network.
+    reports
+        .into_iter()
+        .flatten()
+        .filter(quota_is_news)
+        .map(|r| r.provider_id)
+        .collect()
+}
+
+/// Whether a report the refresh just got is news.
+///
+/// A cache hit is not (nothing changed), and neither is a failed query — the
+/// vendor refused, the report says so, and the number on the screen is still
+/// whatever it was. Only a **fresh, successful** fetch means the displayed
+/// figure has moved.
+fn quota_is_news(report: &crate::plan_quota::PlanQuotaReport) -> bool {
+    !report.cached && report.success
 }
 
 /// How often the limits are re-evaluated. The plan half rides a 5-minute
@@ -105,7 +129,9 @@ pub async fn run(state: Arc<GatewayState>, interval: StdDuration) {
         // (This was a `spawn_blocking` because the refresh used a blocking HTTP
         // client — the one place the daemon had to leave its own runtime to do
         // network I/O.)
-        refresh_plan_reports(&state.store).await;
+        for provider_id in refresh_plan_reports(&state.store).await {
+            state.notify_event(crate::server::GatewayEvent::QuotaRefreshed { provider_id });
+        }
         publish(&state, evaluate(&state.store));
         tokio::time::sleep(interval).await;
     }
@@ -156,6 +182,75 @@ pub fn publish(state: &GatewayState, next: LimitState) {
             tracing::info!(agent = %agent, "agent is back under its own limit");
         }
     }
+}
+
+/// Whether a refresh is worth telling the app about.
+///
+/// The matrix is the whole design of the event: a **fresh, successful**
+/// fetch means the figure on the screen has moved. A cache hit means nothing
+/// changed. A failed query means the vendor refused and the number is
+/// whatever it was — reporting that would make the app re-read on every
+/// failed poll, which for a provider whose key was revoked is every tick.
+///
+/// `zhipu_team` with no fields is the failure case that needs no network:
+/// the template refuses before it builds a client.
+#[test]
+fn only_a_fresh_successful_fetch_is_news() {
+    let report = |cached: bool, success: bool| crate::plan_quota::PlanQuotaReport {
+        provider_id: "p-1".into(),
+        template: "t".into(),
+        success,
+        error: (!success).then(|| "refused".to_string()),
+        note: None,
+        tiers: Vec::new(),
+        queried_at: 0,
+        cached,
+    };
+
+    assert!(quota_is_news(&report(false, true)), "a fresh fetch is news");
+    assert!(!quota_is_news(&report(true, true)), "a cache hit is not");
+    assert!(
+        !quota_is_news(&report(false, false)),
+        "a failed query is not — nothing on the screen moved"
+    );
+    assert!(!quota_is_news(&report(true, false)));
+}
+
+/// And the refresh reports exactly those, offline.
+///
+/// Two providers with a plan query: one whose template refuses without a
+/// network, and one with a **fresh** cache entry that the refresh will
+/// therefore serve from the cache. Neither is news, so the returned list is
+/// empty — and a version that fired on either would be caught here.
+#[tokio::test]
+async fn the_refresh_reports_nothing_when_nothing_was_fetched() {
+    let store = Store::open_in_memory().unwrap();
+    let mut refusing = crate::limits::test_support::test_provider("p-refuse");
+    refusing.plan_query = Some(r#"{"template":"zhipu_team","fields":{}}"#.into());
+    store.insert_provider(&refusing).unwrap();
+
+    let mut cached = crate::limits::test_support::test_provider("p-cached");
+    cached.plan_query = Some(r#"{"template":"kimi","fields":{}}"#.into());
+    store.insert_provider(&cached).unwrap();
+    crate::plan_quota::cache_write(
+        &store,
+        "p-cached",
+        &crate::plan_quota::PlanQuotaReport {
+            provider_id: "p-cached".into(),
+            template: "kimi".into(),
+            success: true,
+            error: None,
+            note: None,
+            tiers: Vec::new(),
+            queried_at: 0,
+            cached: false,
+        },
+    );
+
+    assert!(
+        refresh_plan_reports(&store).await.is_empty(),
+        "a refusal and a cache hit are both not news"
+    );
 }
 
 #[cfg(test)]

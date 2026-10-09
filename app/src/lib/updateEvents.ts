@@ -69,7 +69,8 @@ export type GatewayEventPayload =
   | { kind: "dlp_finding"; log_id: number; agent: string; provider_id: string | null; note: string }
   | { kind: "limit_hit"; provider_id: string; reason: string }
   | { kind: "limit_cleared"; provider_id: string }
-  | { kind: "auth_failed"; agent: string; provider_id: string };
+  | { kind: "auth_failed"; agent: string; provider_id: string }
+  | { kind: "quota_refreshed"; provider_id: string };
 
 /**
  * A typed gateway event: a credential finding, a billing-limit transition, or a

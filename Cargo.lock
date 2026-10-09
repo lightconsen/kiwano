@@ -2459,6 +2459,7 @@ dependencies = [
 name = "kiwano"
 version = "0.2.12"
 dependencies = [
+ "axum",
  "clap",
  "kiwano-core",
  "kiwanod",
@@ -2466,6 +2467,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

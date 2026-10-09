@@ -30,3 +30,8 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# The integration tests serve the daemon's real admin router over a real
+# endpoint (`tests/support`), now that the CLI is a client of it rather than a
+# second process reading the same SQLite file.
+axum = "0.8.9"
+tokio = { version = "1", features = ["rt", "net", "time"] }

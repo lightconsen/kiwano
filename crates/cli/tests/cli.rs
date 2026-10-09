@@ -5,16 +5,36 @@
 //! of the contract, not an implementation detail: stdout is the payload, so a
 //! `--json` consumer can pipe it without a diagnostic landing in the middle.
 //!
-//! Nothing here reaches a real gateway. Commands that would reload discover no
-//! admin plane beside the temp database and say so on stderr.
+//! Commands that need the daemon are handed one by [`support::serve`]; the rest
+//! run with no admin plane beside the temp database, which is a state the CLI
+//! has to handle anyway (`migrate.local.md` §14.1, decision D3).
+
+mod support;
 
 use std::path::{Path, PathBuf};
 
 use kiwanod::store::Store;
 
-/// Run the CLI against `db`, returning (exit code, stdout, stderr).
+use support::TestDaemon;
+
+/// Run the CLI against `db` with no daemon, returning (exit code, stdout, stderr).
 fn run(db: &Path, args: &[&str]) -> (i32, String, String) {
+    run_at(db, None, args)
+}
+
+/// Run the CLI against `db` with `daemon` serving its admin plane.
+fn run_served(db: &Path, daemon: &TestDaemon, args: &[&str]) -> (i32, String, String) {
+    run_at(db, Some(daemon), args)
+}
+
+fn run_at(db: &Path, daemon: Option<&TestDaemon>, args: &[&str]) -> (i32, String, String) {
     let mut argv = vec!["--db".to_string(), db.display().to_string()];
+    // The flag is how a test names *its* daemon without touching the process
+    // environment, which the tests here share and run in parallel.
+    if let Some(daemon) = daemon {
+        argv.push("--admin-socket".to_string());
+        argv.push(daemon.socket());
+    }
     argv.extend(args.iter().map(|s| s.to_string()));
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = kiwano_cli::run_with(&argv, &mut out, &mut err);
@@ -549,6 +569,26 @@ fn usage_rejects_a_non_positive_window() {
     let (code, _, err) = run(&db, &["usage", "--days", "0"]);
     assert_eq!(code, 2);
     assert!(err.contains("--days"), "{err}");
+}
+
+/// The daemon harness, proven end to end.
+///
+/// `status` is the one command that already spoke to the admin plane before this
+/// migration, which makes it the honest proof that the harness serves the
+/// *real* router: if `support::serve` bound nothing, or bound something the CLI
+/// does not resolve, this test would land in the "not running" branch below
+/// instead of passing. Every command moved onto the API in the next step leans
+/// on exactly this.
+#[test]
+fn the_harness_serves_a_daemon_the_cli_actually_reaches() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(&db, &daemon, &["status"]);
+    assert_eq!(code, 0, "stdout: {out}\nstderr: {err}");
+    assert!(
+        out.contains("gateway: running"),
+        "the CLI did not reach the harness's daemon: {out}"
+    );
 }
 
 /// Gateway down is an answer, not a failure — exit 1, and the store is still

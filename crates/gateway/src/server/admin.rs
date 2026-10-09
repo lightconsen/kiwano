@@ -1269,7 +1269,11 @@ async fn export_config_route(
     axum::extract::Query(q): axum::extract::Query<ExportConfigQuery>,
 ) -> Response {
     match crate::api::share::export_config(&state.store, q.include_keys) {
-        Ok(json) => json.into_response(),
+        // The document as a **string field**, not as the body: a client that
+        // parses JSON responses reads an object here, and a bare document is
+        // whatever shape the document happens to have. Same reason
+        // `/api/logs/export` wraps its CSV (`migrate.local.md` §10.39).
+        Ok(json) => Json(json!({ "config": json })).into_response(),
         Err(e) => resource_error(e),
     }
 }

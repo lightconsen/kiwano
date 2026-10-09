@@ -7,7 +7,7 @@ use super::render::{render_catalog, render_settings};
 use super::runtime;
 use crate::cli::{CatalogCmd, ConfigCmd, ImportCmd, SettingsCmd};
 use crate::{CliError, Ctx};
-use kiwano_core::{import, pricing, share, vm};
+use kiwano_core::{import, share, vm};
 
 // ── settings / config / catalog / import ────────────────────────────────────
 
@@ -100,8 +100,10 @@ pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         ConfigCmd::Export { out, include_keys } => {
             let path = out.to_string_lossy();
             let count = {
-                let store = ctx.store()?;
-                let json = share::export_config(store, *include_keys)?;
+                // The document is the daemon's; the **file** is this side's,
+                // because the path came from this machine's `--out`
+                // (`migrate.local.md` §10.17).
+                let json = ctx.api.export_config(*include_keys)?;
                 share::write_config_file(&path, &json)?;
                 share::provider_count(&json)
             };
@@ -120,16 +122,14 @@ pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             let path = file.to_string_lossy();
             let json = std::fs::read_to_string(file)
                 .map_err(|e| runtime(format!("cannot read {path}: {e}")))?;
-            let report = {
-                let store = ctx.store()?;
-                share::import_config(store, &json)?
-            };
+            // The text, not a path: the reading happened above, and the daemon
+            // validates and applies what it says.
+            let report = ctx.api.import_config(&json)?;
             let text = format!(
                 "added {} providers, kept {}, applied {} routes",
                 report.providers_added, report.providers_kept, report.routes_applied
             );
             ctx.out.emit(&report, || text);
-            ctx.after_mutation();
             Ok(())
         }
     }
@@ -138,10 +138,7 @@ pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         CatalogCmd::List { tag, search } => {
-            let mut catalog = {
-                let store = ctx.store()?;
-                vm::load_catalog(store)
-            };
+            let mut catalog = ctx.api.list_catalog()?;
             if let Some(tag) = tag {
                 catalog.entries.retain(|e| e.tag == *tag);
             }
@@ -157,15 +154,10 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         }
         CatalogCmd::Sync => {
             // The hub_url comes from the settings blob the daemon serves — the
-            // same row it reads when it syncs.
-            let hub_url = kiwano_core::daemon_api::DaemonApi::connect()
-                .get_settings()?
-                .hub_url
-                .clone();
-            let report = {
-                let store = ctx.store()?;
-                kiwano_core::block_on(kiwanod::api::sync::sync_from_hub(store, &hub_url))?
-            };
+            // same row it reads when it syncs. Read for the *message*: the fetch
+            // is the daemon's, and it takes the URL from the same row.
+            let hub_url = ctx.api.get_settings()?.hub_url.clone();
+            let report = ctx.api.sync_hub()?;
             let text = if report.unchanged {
                 format!(
                     "already current ({} entries, synced {})",
@@ -178,24 +170,16 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             // The sync may have brought the catalog a provider can now be
             // matched against. Before the reload below, so one pass picks up
             // both.
-            let linked = {
-                let store = ctx.store()?;
-                kiwanod::api::catalog::link_providers(store).map_err(|e| e.to_string())?
-            };
+            let linked = ctx.api.link_providers()?;
             if linked > 0 {
                 ctx.out.note(format!(
                     "linked {linked} provider(s) to their catalog entry"
                 ));
             }
-            // A price refresh only reaches cost recording through a reload.
-            ctx.after_mutation();
             Ok(())
         }
         CatalogCmd::Currency => {
-            let meta = {
-                let store = ctx.store()?;
-                pricing::currency_meta(store)?
-            };
+            let meta = ctx.api.currency_meta()?;
             let text = format!(
                 "preferred {} · {} currencies",
                 meta.preferred,
@@ -210,15 +194,28 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 pub fn import(cmd: &ImportCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         ImportCmd::CcSwitch => {
+            // The rows, not the paths: those files are in this machine's home
+            // and one is a SQLite database, so reading them is the client's
+            // (`migrate.local.md` §10.19). The daemon applies what they say.
             let root = ctx.home.join(".cc-switch");
-            let report = {
-                let store = ctx.store()?;
-                import::run_import(
-                    store,
-                    Some(&root.join("cc-switch.db")),
-                    Some(&root.join("config.json")),
-                )
-            };
+            let (raws, skips, mut detail) = import::read_cc_switch(
+                Some(&root.join("cc-switch.db")),
+                Some(&root.join("config.json")),
+            );
+            if raws.is_empty() && skips.is_empty() {
+                detail.push("No importable CC Switch data found".into());
+                let report = import::ImportReportVm {
+                    imported: 0,
+                    skipped: 0,
+                    detail,
+                };
+                ctx.out
+                    .emit(&report, || "imported 0, skipped 0".to_string());
+                return Ok(());
+            }
+            let mut report = ctx.api.import_cc_switch(&raws, &skips)?;
+            detail.append(&mut report.detail);
+            report.detail = detail;
             let text = format!(
                 "imported {}, skipped {}{}",
                 report.imported,
@@ -230,9 +227,6 @@ pub fn import(cmd: &ImportCmd, ctx: &mut Ctx) -> Result<(), CliError> {
                 }
             );
             ctx.out.emit(&report, || text);
-            if report.imported > 0 {
-                ctx.after_mutation();
-            }
             Ok(())
         }
     }

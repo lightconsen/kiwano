@@ -649,6 +649,8 @@ fn a_moved_command_needs_the_daemon() {
         vec!["providers", "use", provider.as_str(), "--agent", "claude"],
         vec!["providers", "disable", provider.as_str()],
         vec!["providers", "edit", provider.as_str(), "--name", "renamed"],
+        vec!["catalog", "list"],
+        vec!["catalog", "currency"],
     ] {
         let (code, out, err) = run(&db, &args);
         assert_eq!(code, 3, "{args:?}\nstdout: {out}\nstderr: {err}");
@@ -1574,11 +1576,13 @@ fn settings_rejects_a_malformed_patch_and_a_bare_key() {
 #[test]
 fn config_export_is_owner_only_and_round_trips() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     add_provider(&db, "alpha", &["claude"]);
     let out_path = dir.path().join("config.json");
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "config",
             "export",
@@ -1602,8 +1606,10 @@ fn config_export_is_owner_only_and_round_trips() {
 
     // Into a fresh database: the provider and its binding come back.
     let (_dir2, db2) = temp_db();
-    let (code, _, err) = run(
+    let daemon2 = support::serve(&db2);
+    let (code, _, err) = run_served(
         &db2,
+        &daemon2,
         &[
             "config",
             "import",
@@ -1636,6 +1642,7 @@ fn config_import_reports_a_missing_file() {
 #[test]
 fn catalog_list_filters_by_tag_and_name() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     // The shelf reads the Hub cache and nothing else — there is no bundled
     // catalog — so the fixture is the cache. That makes this deterministic
     // instead of depending on whatever blob a release happened to compile in.
@@ -1649,12 +1656,16 @@ fn catalog_list_filters_by_tag_and_name() {
             .unwrap();
     }
 
-    let (code, out, err) = run(&db, &["--json", "catalog", "list"]);
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "catalog", "list"]);
     assert_eq!(code, 0, "{err}");
     let all: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(all["total"], 2);
 
-    let (_, out, _) = run(&db, &["--json", "catalog", "list", "--search", "deepseek"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--json", "catalog", "list", "--search", "deepseek"],
+    );
     let filtered: serde_json::Value = serde_json::from_str(&out).unwrap();
     let entries = filtered["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
@@ -1667,7 +1678,11 @@ fn catalog_list_filters_by_tag_and_name() {
         "{entries:?}"
     );
 
-    let (_, out, _) = run(&db, &["--json", "catalog", "list", "--tag", "official"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--json", "catalog", "list", "--tag", "official"],
+    );
     let tagged: serde_json::Value = serde_json::from_str(&out).unwrap();
     let tagged = tagged["entries"].as_array().unwrap();
     assert_eq!(tagged.len(), 1);

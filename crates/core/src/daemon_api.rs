@@ -550,21 +550,25 @@ impl DaemonApi {
     /// writes it to a file: the path came from the user's save dialog, which is
     /// the client's business (`migrate.local.md` §10.17).
     pub fn export_config(&self, include_keys: bool) -> Result<String, String> {
-        sidecar::admin_get_json(
+        let v: serde_json::Value = sidecar::admin_get_json(
             &self.endpoint,
             self.token.as_deref(),
             &format!("/api/config/export?include_keys={include_keys}"),
-        )
+        )?;
+        Ok(v["config"].as_str().unwrap_or_default().to_string())
     }
 
     /// Apply a shared document — `vm::import_config`. The text, not a path: the
     /// caller read the file, and the daemon validates what it says.
     pub fn import_config(&self, json: &str) -> Result<ImportReport, String> {
-        sidecar::admin_post_json(
+        // The text as the body, not a JSON string containing it: the daemon
+        // parses and validates the document, and it cannot do that with a
+        // quoted copy (`migrate.local.md` §10.39).
+        sidecar::admin_post_text(
             &self.endpoint,
             self.token.as_deref(),
             "/api/config/import",
-            &json,
+            json,
         )
     }
 

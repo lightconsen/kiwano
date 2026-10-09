@@ -609,6 +609,22 @@ pub fn admin_patch_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
     admin_send(endpoint, token, "PATCH", path, Some(payload))
 }
 
+/// [`admin_send`] for a body that **is** the document rather than an encoding
+/// of one.
+///
+/// A shared config is JSON, but what travels is its text: the daemon parses and
+/// validates it, and a client that had parsed it first would be a second parser
+/// to keep in step. `admin_post_json` would send that text as a JSON *string* —
+/// quoted and escaped — which is a different document to the far end.
+pub fn admin_post_text<T: serde::de::DeserializeOwned>(
+    endpoint: &AdminEndpoint,
+    token: Option<&str>,
+    path: &str,
+    body: &str,
+) -> Result<T, String> {
+    admin_send(endpoint, token, "POST", path, Some(body.to_string()))
+}
+
 /// [`admin_send`] for a deletion. No body: the path names the row.
 pub fn admin_delete_json<T: serde::de::DeserializeOwned>(
     endpoint: &AdminEndpoint,

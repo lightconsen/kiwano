@@ -162,7 +162,18 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
     let (home, port) = (ctx.home.clone(), ctx.data_port);
     {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::set_agent_takeover(store, aux, agent, enabled, port, &home, ctx.config_vars())?;
+        vm::set_agent_takeover(
+            store,
+            aux,
+            agent,
+            enabled,
+            port,
+            &home,
+            ctx.config_vars(),
+            // The CLI opens the database itself for every command it has, so
+            // this is the same position — not a second writer.
+            vm::takeover::StateHalf::InProcess,
+        )?;
     }
 
     if enabled {

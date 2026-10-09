@@ -1,18 +1,22 @@
-//! The state `run` manages, and the reload ping a mutation sends through it.
+//! The state `run` manages.
 //!
 //! `AppState` is here rather than in the facade because it belongs to the whole
 //! tree: `app.manage` hands it to the spawn tasks, and 44 of the 52 commands
 //! read the store, the auxiliary connection or the admin endpoint out of it.
-//! Its fields and its one method are `pub(crate)` for that reason, and so is
-//! [`after_mutation`] — twelve writes across six modules end with it. The type
-//! itself is `pub` because the commands that take it are: a `pub` function
-//! cannot name a `pub(crate)` type, and every one of them is re-exported for
-//! `generate_handler!`.
+//! Its fields are `pub(crate)` for that reason. The type itself is `pub` because
+//! the commands that take it are: a `pub` function cannot name a `pub(crate)`
+//! type, and every one of them is re-exported for `generate_handler!`.
+//!
+//! **The reload ping is gone.** `after_mutation` used to end a dozen writes —
+//! the app wrote the database and then told the daemon to re-read its route
+//! table. Every one of those writes is the daemon's now, and it re-reads its own
+//! table before answering, so the ping has no callers left. (The CLI still has
+//! its own: it opens the database directly for every command, so its writes
+//! really do leave the daemon stale.)
 
 use std::sync::{Mutex, OnceLock};
 
 use kiwanod::store::Store;
-use tauri::State;
 
 use crate::update;
 use kiwano_core::{detect, sidecar, vm};
@@ -48,8 +52,4 @@ impl AppState {
         self.shell_vars
             .get_or_init(|| detect::login_shell_vars(kiwano_core::takeover::CONFIG_DIR_VARS))
     }
-}
-
-pub(crate) fn after_mutation(state: &State<AppState>) {
-    sidecar::notify_reload(&state.admin);
 }

@@ -608,6 +608,31 @@ impl DaemonApi {
             &Body { raws, skips },
         )
     }
+    /// The store half of starting a takeover — `vm::takeover::phase_state`.
+    ///
+    /// The **key is the caller's**, which is what makes a replay safe without an
+    /// operation table here (`migrate.local.md` §8): registering the key it
+    /// already minted is one row. The credential is what the caller read out of
+    /// the agent's own config — those files are the client's, and §5's first
+    /// constraint forbids paths in this interface.
+    pub fn takeover_state(
+        &self,
+        agent: &str,
+        key: &str,
+        creds: Option<&kiwanod::api::takeover::CurrentCreds>,
+    ) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            key: &'a str,
+            creds: Option<&'a kiwanod::api::takeover::CurrentCreds>,
+        }
+        wrote(sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/takeover/{agent}/state"),
+            &Body { key, creds },
+        ))
+    }
 }
 
 /// A value as a query-string component: everything outside the unreserved set is

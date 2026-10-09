@@ -136,6 +136,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         )
         .route("/config/export", get(export_config_route))
         .route("/import/cc-switch", post(import_cc_switch_route))
+        .route("/takeover/{agent}/state", post(takeover_state_route))
         .route("/config/import", post(import_config_route))
         .route("/logs/export", get(export_logs_route))
         .route("/plan-quota/{provider_id}", get(plan_quota_route))
@@ -1291,6 +1292,34 @@ async fn import_cc_switch_route(
         }
         Err(e) => resource_error(e),
     }
+}
+
+/// `POST /api/takeover/{agent}/state` — the store half of starting a takeover.
+///
+/// The **key is the caller's** (`kiwano_api::ids::mint_agent_id`'s shape), so a
+/// replay registers the key it already minted rather than a second one — which
+/// is why this endpoint needs no operation table of its own. The credential is
+/// what the client read out of the agent's own config: §5's first constraint
+/// forbids paths here, and those files are the user's.
+///
+/// This is phase one of §8's three. The client does the files between this and
+/// its own "applied" mark, and it is the client that reconciles a takeover that
+/// stopped in between — that state is per-machine, so it lives there.
+#[derive(serde::Deserialize)]
+struct TakeoverStateBody {
+    key: String,
+    #[serde(default)]
+    creds: Option<crate::api::takeover::CurrentCreds>,
+}
+
+async fn takeover_state_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+    Json(body): Json<TakeoverStateBody>,
+) -> Response {
+    let result =
+        crate::api::takeover::phase_state(&state.store, &agent, &body.key, body.creds.as_ref());
+    after_write(&state, result)
 }
 
 #[cfg(test)]

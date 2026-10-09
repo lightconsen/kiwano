@@ -29,7 +29,9 @@ use std::process::Command;
 
 use kiwano_core::detect::ShellVars;
 use kiwano_core::takeover::{enable, live_placeholder_key};
-use kiwano_core::vm::takeover::{mark_applied, phase_state, reconcile_takeovers, TakeoverFinding};
+use kiwano_core::vm::takeover::{
+    mark_applied, phase_state, reconcile_takeovers, StateHalf, TakeoverFinding,
+};
 use kiwano_core::vm::Aux;
 use kiwanod::store::Store;
 
@@ -148,12 +150,13 @@ fn crash_worker() {
 
     match at.as_str() {
         "after_state" => {
-            phase_state(&store, &aux, &agent, &home, None).expect("child: phase_state");
+            phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
+                .expect("child: phase_state");
             std::process::abort();
         }
         "mid_files" => {
-            let prepared =
-                phase_state(&store, &aux, &agent, &home, None).expect("child: phase_state");
+            let prepared = phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
+                .expect("child: phase_state");
             // Die after the first file of the file half: the config is left
             // half-rewritten, which is the state the backup exists for.
             let _ = kiwano_core::takeover::enable_with(
@@ -172,8 +175,8 @@ fn crash_worker() {
             std::process::abort();
         }
         "before_mark" => {
-            let prepared =
-                phase_state(&store, &aux, &agent, &home, None).expect("child: phase_state");
+            let prepared = phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
+                .expect("child: phase_state");
             enable(&aux, &agent, &prepared.key, DATA_PORT, &home, &vars).expect("child: enable");
             // Every file is written; only the mark is missing.
             std::process::abort();
@@ -293,9 +296,17 @@ fn a_replayed_operation_does_not_mint_a_second_key() {
     let store = f.store();
     let aux = f.aux();
 
-    let first = phase_state(&store, &aux, AGENT, &f.home, None).unwrap();
+    let first = phase_state(&store, &aux, AGENT, &f.home, None, StateHalf::InProcess).unwrap();
     // The same operation, delivered again — a retry, not a new takeover.
-    let again = phase_state(&store, &aux, AGENT, &f.home, Some(&first.op_id)).unwrap();
+    let again = phase_state(
+        &store,
+        &aux,
+        AGENT,
+        &f.home,
+        Some(&first.op_id),
+        StateHalf::InProcess,
+    )
+    .unwrap();
 
     assert_eq!(again.key, first.key, "the replay reuses the key it minted");
     assert_eq!(again.op_id, first.op_id);

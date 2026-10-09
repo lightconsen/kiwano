@@ -1,14 +1,14 @@
 //! The view-model half of `crate::takeover`: enabling an agent takeover,
 //! rebuilding its route, and importing a provider from a live agent config.
 
+use crate::daemon_api::DaemonApi;
 use crate::detect::ShellVars;
 use crate::vm::agents::AGENTS;
-use crate::vm::catalog::link_providers;
-use crate::vm::provider_edit::absolute_endpoint;
-use crate::vm::time::{rfc3339, unix_now};
-use crate::vm::{e2s, slug, Aux};
-use kiwanod::store::{Binding, Provider, Store, StrategyType};
+use crate::vm::{e2s, Aux};
+use kiwanod::api::takeover::CurrentCreds;
+use kiwanod::store::Store;
 
+#[allow(clippy::too_many_arguments)] // the phases' inputs, one each
 pub fn set_agent_takeover(
     store: &Store,
     aux: &Aux,
@@ -17,51 +17,24 @@ pub fn set_agent_takeover(
     data_port: u16,
     home: &std::path::Path,
     vars: &ShellVars,
+    state_half: StateHalf<'_>,
 ) -> Result<(), String> {
     if !AGENTS.iter().any(|(a, _)| *a == agent) {
         return Err(format!("unknown agent: {agent}"));
     }
     if enabled {
-        // First-takeover import: pick up the provider the agent is currently
-        // using and bind it as the agent's sole candidate, so the gateway has
-        // a route on day one (official-login/blank configs yield no creds —
-        // the onboarding guide steers those users to manual entry). Import or
-        // binding failures never block the takeover itself.
-        if let Some(creds) = crate::creds::read_current_creds(agent, home) {
-            match import_current_provider(store, &creds) {
-                Ok(provider_id) => {
-                    if store.bindings_for_agent(agent).map_err(e2s)?.is_empty() {
-                        store
-                            .upsert_strategy(agent, StrategyType::Single, None)
-                            .map_err(e2s)?;
-                        store
-                            .upsert_binding(&Binding {
-                                agent: agent.to_string(),
-                                provider_id,
-                                priority: 0,
-                                weight: 1,
-                                win_start: None,
-                                win_end: None,
-                                enabled: true,
-                            })
-                            .map_err(e2s)?;
-                    }
-                }
-                Err(e) => eprintln!("kiwano: current-provider import skipped: {e}"),
-            }
-            // The import leaves the link empty (the agent's config knows
-            // nothing about our catalog), and this is the one path where the
-            // provider starts carrying traffic before any backfill pass runs —
-            // takeover is followed immediately by real requests.
-            let _ = link_providers(store);
-        }
+        // The import of the agent's current provider, and the binding that
+        // gives the gateway a route on day one, are part of `phase_state` now:
+        // they are store writes, and the daemon owns those. What this side
+        // contributes is the credential, read out of the agent's own config.
+        //
         // Three phases, in an order that cannot be reversed: the store rows
         // first, the agent's config second, the "applied" mark last. Between
         // any two of them the process can die, and every one of those windows
         // leaves something *recoverable* rather than something broken — the
         // agent is either untouched or pointing at a gateway that knows its
         // key. See `reconcile_takeovers`, which closes them.
-        let prepared = phase_state(store, aux, agent, home, None)?;
+        let prepared = phase_state(store, aux, agent, home, None, state_half)?;
         if let Err(e) = crate::takeover::enable(aux, agent, &prepared.key, data_port, home, vars) {
             // The file half never landed: take the store half back out.
             undo_state(store, aux, agent, &prepared.key);
@@ -121,6 +94,17 @@ pub fn set_agent_takeover(
     Ok(())
 }
 
+/// How the store half of a takeover is reached.
+#[derive(Clone, Copy)]
+pub enum StateHalf<'a> {
+    /// In-process: the caller shares the database and may write it. What the
+    /// CLI and the crash tests do — the CLI is a direct client throughout.
+    InProcess,
+    /// Over the wire: the caller is a client and must not write the shared
+    /// database. What the app does.
+    Via(&'a DaemonApi),
+}
+
 /// What phase one produced, for phase two to use. `op_id` is the operation's
 /// identity, which is what makes a replay recognisable as a replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,55 +113,34 @@ pub struct PreparedTakeover {
     pub key: String,
 }
 
-/// Phase one — everything that lands in the store: the provider imported from
-/// the agent's own credentials, the strategy and binding that give the gateway
-/// a route on day one, the placeholder key the agent will carry, and the
-/// operation row that says the file half has not happened yet.
+/// Phase one — the store half of a takeover, and the operation row that says
+/// the file half has not happened yet.
 ///
-/// Idempotent by `op_id`: replaying the same operation reuses the key it
-/// already minted rather than minting a second one. `None` starts a new
-/// operation.
+/// **The credential is read here and the writing happens on the far side.** The
+/// agent's config is this machine's — §5's first constraint forbids paths in the
+/// daemon's interface, and the file is the user's — so the client reads it and
+/// hands over what it found; `kiwanod::api::takeover::phase_state` does the
+/// importing, the binding and the key registration.
+///
+/// **The key is minted here**, which is what makes a replay safe without an
+/// operation table on the daemon's side: a replay finds the key already
+/// registered for this agent and reuses it, rather than minting a second one
+/// that the config the file half may yet read would never carry.
+///
+/// **How the store half is reached is the caller's choice, and it is the one
+/// difference between the app and the CLI.** The app must not write the shared
+/// database — it is a client — so it goes over the wire; the CLI opens the
+/// database itself for every command it has, and `InProcess` is that same
+/// position. Making the branch explicit here keeps the *sequence* in one place:
+/// §8's ordering is the part that must not be written twice.
 pub fn phase_state(
     store: &Store,
     aux: &Aux,
     agent: &str,
     home: &std::path::Path,
     replay_of: Option<&str>,
+    state_half: StateHalf<'_>,
 ) -> Result<PreparedTakeover, String> {
-    // First-takeover import: pick up the provider the agent is currently
-    // using and bind it as the agent's sole candidate, so the gateway has
-    // a route on day one (official-login/blank configs yield no creds —
-    // the onboarding guide steers those users to manual entry). Import or
-    // binding failures never block the takeover itself.
-    if let Some(creds) = crate::creds::read_current_creds(agent, home) {
-        match import_current_provider(store, &creds) {
-            Ok(provider_id) => {
-                if store.bindings_for_agent(agent).map_err(e2s)?.is_empty() {
-                    store
-                        .upsert_strategy(agent, StrategyType::Single, None)
-                        .map_err(e2s)?;
-                    store
-                        .upsert_binding(&Binding {
-                            agent: agent.to_string(),
-                            provider_id,
-                            priority: 0,
-                            weight: 1,
-                            win_start: None,
-                            win_end: None,
-                            enabled: true,
-                        })
-                        .map_err(e2s)?;
-                }
-            }
-            Err(e) => eprintln!("kiwano: current-provider import skipped: {e}"),
-        }
-        // The import leaves the link empty (the agent's config knows
-        // nothing about our catalog), and this is the one path where the
-        // provider starts carrying traffic before any backfill pass runs —
-        // takeover is followed immediately by real requests.
-        let _ = link_providers(store);
-    }
-
     // A replay keeps the key it already registered: minting a second one would
     // leave the first orphaned in the config the file half may yet read.
     if let Some(op_id) = replay_of {
@@ -196,7 +159,22 @@ pub fn phase_state(
 
     let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
     let key = format!("kw-ag-{agent}-{rand}");
-    store.upsert_placeholder_key(&key, agent).map_err(e2s)?;
+    // The credential the agent's own config carries, as the daemon's shape —
+    // read here because the file is this machine's.
+    let creds = crate::creds::read_current_creds(agent, home).map(|c| CurrentCreds {
+        base_url: c.base_url,
+        api_key: c.api_key,
+        name: c.name,
+        protocol: c.protocol.to_string(),
+    });
+    match state_half {
+        StateHalf::InProcess => {
+            kiwanod::api::takeover::phase_state(store, agent, &key, creds.as_ref())
+                .map_err(|e| e.to_string())?;
+        }
+        StateHalf::Via(api) => api.takeover_state(agent, &key, creds.as_ref())?,
+    }
+
     let op_id = uuid::Uuid::new_v4().simple().to_string();
     aux.start_takeover_op(agent, &op_id).map_err(e2s)?;
     Ok(PreparedTakeover { op_id, key })
@@ -375,71 +353,10 @@ fn join_provider_url(base_url: &str, api_path: Option<&str>) -> String {
     }
 }
 
-/// Find-or-create a provider for the agent's current credentials: dedup by
-/// base_url (trailing slash ignored) reuses the existing row — that shared
-/// provider then also serves other agents; otherwise insert a new PAYG row
-/// named after the config's provider key (or the URL host).
-fn import_current_provider(
-    store: &Store,
-    creds: &crate::creds::CurrentCreds,
-) -> Result<String, String> {
-    // An agent's config is another tool's file, and it can hold a bare host —
-    // which is how a provider ends up stored as `api.deepseek.com` and unrouted.
-    // Normalizing before the dedup lookup also means a config that gains its
-    // scheme later still matches the row it made without one.
-    let base = absolute_endpoint(creds.base_url.trim_end_matches('/'));
-    for p in store.list_providers().map_err(e2s)? {
-        if p.base_url.trim().trim_end_matches('/') == base {
-            return Ok(p.id);
-        }
-    }
-    let now = rfc3339(unix_now());
-    let name = creds.name.clone().unwrap_or_else(|| {
-        let host = crate::creds::host_of(&creds.base_url);
-        crate::creds::brand_name_for_host(&host)
-            .map(String::from)
-            .unwrap_or_else(|| {
-                if host.is_empty() {
-                    "Imported provider".into()
-                } else {
-                    host
-                }
-            })
-    });
-    let provider = Provider {
-        // Imported from another manager: no Hub catalog entry behind it.
-        catalog_id: None,
-        model_default: None,
-        id: format!(
-            "{}-{}",
-            slug(&name),
-            &uuid::Uuid::new_v4().simple().to_string()[..6]
-        ),
-        name,
-        protocol: kiwanod::store::Protocol::parse_str(creds.protocol)
-            .unwrap_or(kiwanod::store::Protocol::OpenAI),
-        base_url: base.to_string(),
-        api_path: None,
-        endpoints: Vec::new(),
-        api_key: Some(creds.api_key.clone()),
-        billing: kiwanod::store::Billing::Metered,
-        period_limit: None,
-        limit_unit: None,
-        reset_period: None,
-        plan_query: None,
-        plan_limits: None,
-        prices: None,
-        timeout_secs: None,
-        retries: None,
-        headers: None,
-        enabled: true,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-    let id = provider.id.clone();
-    store.insert_provider(&provider).map_err(e2s)?;
-    Ok(id)
-}
+// `import_current_provider` moved to `kiwanod::api::takeover` with the rest of
+// the store half: the daemon does the importing, because the row is its to
+// write. The client's job is to hand over the credential it read out of the
+// agent's own config.
 
 #[cfg(test)]
 mod tests {
@@ -449,34 +366,6 @@ mod tests {
     use crate::vm::test_support::{no_vars, provider, store};
     use crate::vm::Aux;
     use kiwanod::store::{Billing, Binding, StrategyType};
-
-    #[test]
-    fn import_current_provider_dedups_by_base_url() {
-        let s = store();
-        let creds = |base: &str, name: Option<&str>| crate::creds::CurrentCreds {
-            base_url: base.into(),
-            api_key: "sk-x".into(),
-            name: name.map(String::from),
-            protocol: "openai",
-        };
-        // trailing-slash variants dedup to one row
-        let id1 =
-            import_current_provider(&s, &creds("https://api.deepseek.com/v1/", Some("deepseek")))
-                .unwrap();
-        let id2 =
-            import_current_provider(&s, &creds("https://api.deepseek.com/v1", Some("deepseek")))
-                .unwrap();
-        assert_eq!(id1, id2);
-        let list = s.list_providers().unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].name, "deepseek");
-        assert_eq!(list[0].api_key.as_deref(), Some("sk-x"));
-        // no declared name → brand name inferred from the host
-        let id3 = import_current_provider(&s, &creds("https://api.x.ai/v1", None)).unwrap();
-        let p = s.get_provider(&id3).unwrap().unwrap();
-        assert_eq!(p.name, "xAI");
-        assert_ne!(id1, id3);
-    }
 
     /// Turning a takeover off hands the agent its own config back — and its
     /// route with it. The providers themselves stay: they are the user's rows,
@@ -512,9 +401,29 @@ mod tests {
             .unwrap();
         }
 
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
         assert_eq!(s.bindings_for_agent("claude").unwrap().len(), 2);
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            false,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
 
         assert!(
             s.bindings_for_agent("claude").unwrap().is_empty(),
@@ -568,7 +477,17 @@ mod tests {
             enabled: true,
         })
         .unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
         assert!(crate::takeover::live_placeholder_key("claude", tmp.path(), &no_vars()).is_some());
 
         // Another tool puts the agent's own config back. The backup row and the
@@ -595,8 +514,28 @@ mod tests {
         // Taking it over again captures what is there *now*: the stale backup
         // would otherwise be what restore writes back, over a config this
         // takeover is not replacing.
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            false,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), reverted);
     }
 
@@ -632,11 +571,31 @@ mod tests {
         })
         .unwrap();
 
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
         // Lose the backup: the escape hatch is gone, so restore has to fall
         // back to the provider instead of reporting a success it did not have.
         aux.delete_takeover_backup("claude").unwrap();
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            false,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
 
         let env: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();

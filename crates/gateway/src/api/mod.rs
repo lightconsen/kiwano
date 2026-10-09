@@ -50,4 +50,5 @@ pub mod routes;
 pub mod settings;
 pub mod share;
 pub mod sync;
+pub mod takeover;
 pub mod views;

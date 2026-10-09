@@ -198,6 +198,7 @@ mod tests {
     use crate::vm::routes::add_agent_binding;
     use crate::vm::settings::build_settings_with_home;
     use crate::vm::takeover::set_agent_takeover;
+    use crate::vm::takeover::StateHalf;
     use crate::vm::test_support::{live_home, no_vars, provider, store, usage_row};
     use crate::vm::Aux;
     use kiwanod::store::Billing;
@@ -296,7 +297,17 @@ mod tests {
         );
         assert!(settings.takeovers.iter().all(|t| !t.enabled));
         assert!(
-            set_agent_takeover(&s, &aux, &a.id, true, 8317, home.path(), &no_vars()).is_err(),
+            set_agent_takeover(
+                &s,
+                &aux,
+                &a.id,
+                true,
+                8317,
+                home.path(),
+                &no_vars(),
+                StateHalf::InProcess,
+            )
+            .is_err(),
             "takeover is for agents with a config"
         );
     }

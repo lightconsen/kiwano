@@ -142,6 +142,7 @@ mod tests {
     use super::*;
     use crate::vm::routes::display_path;
     use crate::vm::takeover::set_agent_takeover;
+    use crate::vm::takeover::StateHalf;
     use crate::vm::test_support::{no_vars, store};
     use crate::vm::Aux;
     use std::path::Path;
@@ -371,7 +372,17 @@ mod tests {
         assert!(after_patch.takeovers.iter().all(|t| !t.enabled));
 
         // no ~/.claude/settings.json → rejected and no key left behind
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap_err();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap_err();
         assert!(s
             .list_placeholder_keys()
             .unwrap()
@@ -381,7 +392,17 @@ mod tests {
         let settings = tmp.path().join(".claude").join("settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
         let v2 = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         let claude = v2.takeovers.iter().find(|t| t.agent == "claude").unwrap();
         assert!(claude.enabled);
@@ -394,7 +415,17 @@ mod tests {
         let env: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
-        set_agent_takeover(&s, &aux, "claude", false, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            false,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
         let v3 = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         assert!(
@@ -414,7 +445,17 @@ mod tests {
         let settings = tmp.path().join(".claude").join("settings.json");
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
-        set_agent_takeover(&s, &aux, "claude", true, 8317, tmp.path(), &no_vars()).unwrap();
+        set_agent_takeover(
+            &s,
+            &aux,
+            "claude",
+            true,
+            8317,
+            tmp.path(),
+            &no_vars(),
+            StateHalf::InProcess,
+        )
+        .unwrap();
 
         // The registration disappears (a rolled-back key row) while the config
         // stays rewritten: the reader must still report the takeover, because

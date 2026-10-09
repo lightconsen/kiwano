@@ -8,7 +8,6 @@ use super::providers::checked_unit;
 use crate::cli::{AddArgs, ForwardArgs};
 use crate::CliError;
 use kiwano_core::vm;
-use kiwanod::store::Provider;
 use std::collections::BTreeMap;
 
 // ── input mapping ───────────────────────────────────────────────────────────
@@ -65,7 +64,7 @@ pub(crate) fn new_provider_input(
             limit_value: args.limit,
             limit_unit: checked_unit(args.unit.as_deref(), known)?,
             reset_period,
-            plan_limits: plan_limits_input(&args.forward, None),
+            plan_limits: plan_limits_input(&args.forward),
         },
         agents: Some(args.bind.clone()),
         endpoints: parse_extra_endpoints(&args.forward.endpoint_extra)?,
@@ -73,7 +72,7 @@ pub(crate) fn new_provider_input(
         // present, so sending an empty object would clear settings the user
         // never mentioned. There is nothing to preserve on add, so it is only
         // built when a flag actually asks for it.
-        advanced: advanced_input(&args.forward, None, false)?,
+        advanced: advanced_input(&args.forward, false)?,
         plan_query: plan_query_input(&args.forward, false)?,
     })
 }
@@ -113,11 +112,6 @@ fn parse_headers(raw: &[String]) -> Result<BTreeMap<String, String>, CliError> {
     Ok(map)
 }
 
-/// The stored `providers.headers` JSON column back into a map.
-fn headers_from_column(raw: Option<&str>) -> Option<BTreeMap<String, String>> {
-    serde_json::from_str(raw?).ok()
-}
-
 /// `PROTO=URL` → the additional-endpoint list.
 pub(crate) fn parse_extra_endpoints(raw: &[String]) -> Result<Vec<vm::NewEndpointInput>, CliError> {
     raw.iter()
@@ -147,9 +141,28 @@ pub(crate) fn parse_extra_endpoints(raw: &[String]) -> Result<Vec<vm::NewEndpoin
 /// stored row. Sending a partial object would clear them.
 pub(crate) fn advanced_input(
     forward: &ForwardArgs,
-    current: Option<&Provider>,
     clear_headers: bool,
 ) -> Result<Option<vm::AdvancedInput>, CliError> {
+    Ok(
+        advanced_patch(forward, clear_headers)?.map(|patch| vm::AdvancedInput {
+            timeout_secs: patch.timeout_secs,
+            retries: patch.retries,
+            headers: patch.headers,
+        }),
+    )
+}
+
+/// The same flags, as the **patch** an edit sends: only what was named.
+///
+/// The two shapes differ in what "absent" means and that is the whole reason
+/// both exist — [`vm::AdvancedInput`] is the resulting state (a null field
+/// clears it), [`vm::AdvancedPatch`] is a list of changes (`migrate.local.md`
+/// §10.38). On add there is nothing to preserve, so the first is built from the
+/// same reading of the flags.
+pub(crate) fn advanced_patch(
+    forward: &ForwardArgs,
+    clear_headers: bool,
+) -> Result<Option<vm::AdvancedPatch>, CliError> {
     let touched = forward.timeout.is_some()
         || forward.retries.is_some()
         || !forward.headers.is_empty()
@@ -157,54 +170,33 @@ pub(crate) fn advanced_input(
     if !touched {
         return Ok(None);
     }
-    let stored_headers = current.and_then(|p| headers_from_column(p.headers.as_deref()));
     let headers = if clear_headers {
-        None
+        Some(BTreeMap::new())
     } else if !forward.headers.is_empty() {
         Some(parse_headers(&forward.headers)?)
     } else {
-        stored_headers
+        None
     };
-    Ok(Some(vm::AdvancedInput {
-        timeout_secs: forward
-            .timeout
-            .or_else(|| current.and_then(|p| p.timeout_secs)),
-        retries: forward.retries.or_else(|| current.and_then(|p| p.retries)),
+    Ok(Some(vm::AdvancedPatch {
+        timeout_secs: forward.timeout,
+        retries: forward.retries,
         headers,
     }))
 }
 
-/// `{"five_hour":20,"weekly":60}` (the stored shape) back into the input type.
-fn parse_plan_limits(raw: &str) -> Option<vm::PlanLimitsInput> {
-    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
-    let number = |key: &str| v.get(key).and_then(|x| x.as_f64());
-    Some(vm::PlanLimitsInput {
-        five_hour: number("five_hour"),
-        weekly: number("weekly"),
-    })
-}
-
-/// The plan-mode percent limits: flags override, the stored row fills the rest.
+/// The plan-mode percent limits the flags name — **only** those.
 ///
-/// `vm` recomputes the column from this object, so a partial view would clear
-/// the window the caller did not mention.
-pub(crate) fn plan_limits_input(
-    forward: &ForwardArgs,
-    current: Option<&Provider>,
-) -> Option<vm::PlanLimitsInput> {
-    let stored = current
-        .and_then(|p| p.plan_limits.as_deref())
-        .and_then(parse_plan_limits);
+/// An edit no longer fills the windows it did not mention from a row it read
+/// back: the daemon merges them window by window against the row it holds
+/// (`migrate.local.md` §10.38). On add there is no row to fill from either, so
+/// this is the same reading in both cases.
+pub(crate) fn plan_limits_input(forward: &ForwardArgs) -> Option<vm::PlanLimitsInput> {
     if forward.plan_limit_5h.is_none() && forward.plan_limit_weekly.is_none() {
-        return stored;
+        return None;
     }
-    let stored = stored.unwrap_or(vm::PlanLimitsInput {
-        five_hour: None,
-        weekly: None,
-    });
     Some(vm::PlanLimitsInput {
-        five_hour: forward.plan_limit_5h.or(stored.five_hour),
-        weekly: forward.plan_limit_weekly.or(stored.weekly),
+        five_hour: forward.plan_limit_5h,
+        weekly: forward.plan_limit_weekly,
     })
 }
 

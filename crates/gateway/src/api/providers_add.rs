@@ -22,7 +22,8 @@ use crate::store::{Binding, Provider, Store, StrategyType};
 use kiwano_api::error::ApiError;
 use kiwano_api::logo::{logo_char, palette_color};
 use kiwano_api::providers::{
-    AdvancedInput, HealthVm, NewProviderInput, PlanLimitsInput, ProviderVm,
+    AdvancedInput, HealthVm, NewEndpointInput, NewProviderInput, PlanLimitsInput, ProviderPatch,
+    ProviderRefVm, ProviderVm,
 };
 
 use super::catalog::{catalog_id_for, catalog_snapshot};
@@ -55,24 +56,31 @@ pub fn plan_limits_json(input: Option<&PlanLimitsInput>) -> Option<String> {
 /// stored as NULL), headers serialize to a sanitized JSON object (dropping
 /// empty names/values; empty object → NULL).
 pub fn advanced_columns(adv: &AdvancedInput) -> (Option<i64>, Option<i64>, Option<String>) {
-    let timeout_secs = adv.timeout_secs.filter(|s| (1..=3600).contains(s));
-    let retries = adv
-        .retries
-        .filter(|r| (0..=5).contains(r))
-        .filter(|&r| r > 0);
-    let headers = adv
-        .headers
-        .as_ref()
-        .map(|map| {
-            let sanitized: serde_json::Map<String, serde_json::Value> = map
-                .iter()
-                .filter(|(k, v)| !k.trim().is_empty() && !v.is_empty())
-                .map(|(k, v)| (k.trim().to_string(), serde_json::Value::String(v.clone())))
-                .collect();
-            (!sanitized.is_empty()).then(|| serde_json::Value::Object(sanitized).to_string())
-        })
-        .unwrap_or(None);
-    (timeout_secs, retries, headers)
+    (
+        clamped_timeout(adv.timeout_secs),
+        clamped_retries(adv.retries),
+        adv.headers.as_ref().and_then(sanitized_headers),
+    )
+}
+
+/// The three column rules, one each — because an edit patch applies them **per
+/// field** rather than to a whole object, and a second copy of a clamp is a
+/// second place for the range to drift.
+fn clamped_timeout(secs: Option<i64>) -> Option<i64> {
+    secs.filter(|s| (1..=3600).contains(s))
+}
+
+fn clamped_retries(retries: Option<i64>) -> Option<i64> {
+    retries.filter(|r| (0..=5).contains(r)).filter(|&r| r > 0)
+}
+
+fn sanitized_headers(map: &std::collections::BTreeMap<String, String>) -> Option<String> {
+    let sanitized: serde_json::Map<String, serde_json::Value> = map
+        .iter()
+        .filter(|(k, v)| !k.trim().is_empty() && !v.is_empty())
+        .map(|(k, v)| (k.trim().to_string(), serde_json::Value::String(v.clone())))
+        .collect();
+    (!sanitized.is_empty()).then(|| serde_json::Value::Object(sanitized).to_string())
 }
 
 /// An endpoint the gateway can actually route to: keep a URL as given, and
@@ -94,8 +102,13 @@ pub fn absolute_endpoint(raw: &str) -> String {
 }
 
 pub fn input_endpoints(input: &NewProviderInput) -> Vec<crate::store::ProviderEndpoint> {
+    endpoints_from(&input.endpoints)
+}
+
+/// The same mapping for a caller that has the list on its own — an edit patch,
+/// which carries endpoints only when it means to replace them.
+pub fn endpoints_from(input: &[NewEndpointInput]) -> Vec<crate::store::ProviderEndpoint> {
     input
-        .endpoints
         .iter()
         .filter_map(|e| {
             crate::store::Protocol::parse_str(&e.protocol).map(|p| crate::store::ProviderEndpoint {
@@ -162,85 +175,121 @@ fn provider_vm(
     }
 }
 
-pub fn update_provider(store: &Store, id: &str, input: &NewProviderInput) -> Result<(), ApiError> {
+/// Apply an edit field by field: what the patch names is set, what it does not
+/// is left alone (`migrate.local.md` §10.38).
+///
+/// Much of this reads as it did because it was **already half a patch** —
+/// `api_key`, `catalog_id`, `advanced`, `plan_query` and `prices` kept their
+/// stored values when absent. What changed is that `name`, `endpoint`,
+/// `protocol`, `model_default`, the endpoint list and the billing block now do
+/// too, and that is what removes the client's need to read the row first.
+pub fn update_provider(store: &Store, id: &str, patch: &ProviderPatch) -> Result<(), ApiError> {
     let mut p = store
         .get_provider(id)
         .map_err(ApiError::failed)?
         .ok_or_else(|| ApiError::not_found(format!("provider `{id}` not found")))?;
 
-    p.name = input.name.trim().to_string();
-    p.base_url = absolute_endpoint(&input.endpoint);
-    p.protocol = crate::store::Protocol::parse_str(&input.protocol)
-        .unwrap_or(crate::store::Protocol::OpenAI);
-    p.endpoints = input_endpoints(input);
-    // Authoritative, like `endpoints`: the form is the only caller and always
-    // sends it, so clearing the box means "no default" rather than "leave it".
-    // Empty stores NULL.
-    p.model_default = Some(input.model_default.trim().to_string()).filter(|m| !m.is_empty());
-    p.billing = billing_to_db(&input.billing).map_err(ApiError::invalid)?;
-    // Plan rows carry percent limits in plan_limits and NULL the legacy
-    // number+unit+reset-cycle columns (v10 form); payg keeps the old shape.
-    let is_plan = p.billing == crate::store::Billing::Subscription;
-    p.period_limit = if is_plan {
-        None
+    if let Some(name) = &patch.name {
+        p.name = name.trim().to_string();
+    }
+    if let Some(endpoint) = &patch.endpoint {
+        p.base_url = absolute_endpoint(endpoint);
+    }
+    if let Some(protocol) = &patch.protocol {
+        p.protocol =
+            crate::store::Protocol::parse_str(protocol).unwrap_or(crate::store::Protocol::OpenAI);
+    }
+    if let Some(endpoints) = &patch.endpoints {
+        p.endpoints = endpoints_from(endpoints);
+    }
+    // Empty clears the column rather than storing a blank — the patch's way of
+    // saying "no default", which for the form's always-present field was what
+    // an empty box meant.
+    if let Some(model_default) = &patch.model_default {
+        p.model_default = Some(model_default.trim().to_string()).filter(|m| !m.is_empty());
+    }
+
+    if let Some(billing) = &patch.billing {
+        p.billing = billing_to_db(billing).map_err(ApiError::invalid)?;
+    }
+    if let Some(cfg) = &patch.billing_config {
+        if let Some(limit) = cfg.limit_value {
+            p.period_limit = Some(limit);
+        }
+        if let Some(unit) = &cfg.limit_unit {
+            p.limit_unit = if unit.trim().is_empty() {
+                None
+            } else {
+                normalize_limit_unit(Some(unit.as_str()), true, &known_limit_currencies(store))
+                    .map_err(ApiError::invalid)?
+            };
+        }
+        if let Some(reset) = &cfg.reset_period {
+            p.reset_period =
+                matches!(reset.as_str(), "monthly" | "weekly" | "yearly").then(|| reset.clone());
+        }
+        if let Some(limits) = &cfg.plan_limits {
+            // Window by window: naming one keeps the other, which is exactly
+            // what `--plan-limit-5h` on its own means. This is the merge the CLI
+            // used to do against a row it had read back.
+            let stored = stored_plan_limits(&p);
+            p.plan_limits = plan_limits_json(Some(&PlanLimitsInput {
+                five_hour: limits
+                    .five_hour
+                    .or_else(|| stored.as_ref().and_then(|s| s.five_hour)),
+                weekly: limits
+                    .weekly
+                    .or_else(|| stored.as_ref().and_then(|s| s.weekly)),
+            }));
+        }
+    }
+    // The mode decides *which* columns carry the limits (the v10 form): a plan
+    // row has no number+unit+reset cycle, and a pay-as-you-go row has no
+    // percent ceilings. Applied after the patch, so that changing the mode on
+    // its own still moves them and a stale ceiling cannot survive the switch.
+    if p.billing == crate::store::Billing::Subscription {
+        p.period_limit = None;
+        p.limit_unit = None;
+        p.reset_period = None;
     } else {
-        input.billing_config.limit_value
-    };
-    p.limit_unit = if is_plan {
-        None
-    } else {
-        normalize_limit_unit(
-            input.billing_config.limit_unit.as_deref(),
-            input.billing_config.limit_value.is_some(),
-            &known_limit_currencies(store),
-        )
-        .map_err(ApiError::invalid)?
-    };
-    p.plan_limits = if is_plan {
-        plan_limits_json(input.billing_config.plan_limits.as_ref())
-    } else {
-        None
-    };
-    // Declared prices: same absent-keeps semantics as `advanced` below, and a
-    // present bundle is the snapshot — including an empty one, which is how a
-    // provider that leaves pay-as-you-go stops carrying prices.
-    if input.prices.is_some() {
-        p.prices = normalize_declared_prices(input.prices.as_ref(), &known_limit_currencies(store))
+        p.plan_limits = None;
+    }
+
+    // Declared prices: absent keeps, and a present bundle is the snapshot —
+    // including an empty one, which is how a provider stops carrying prices.
+    if let Some(prices) = &patch.prices {
+        p.prices = normalize_declared_prices(Some(prices), &known_limit_currencies(store))
             .map_err(ApiError::invalid)?;
     }
-    p.reset_period = if is_plan {
-        None
-    } else {
-        match input.billing_config.reset_period.as_deref() {
-            Some("monthly") | Some("weekly") | Some("yearly") => {
-                input.billing_config.reset_period.clone()
-            }
-            _ => None,
+    if let Some(key) = &patch.api_key {
+        if !key.trim().is_empty() {
+            p.api_key = Some(key.clone());
         }
-    };
-    if !input.api_key.trim().is_empty() {
-        p.api_key = Some(input.api_key.clone());
     }
     // The catalog entry this provider was added from: absent or empty keeps
-    // what is stored. The edit form has no catalog picker, and dropping the
-    // link on an unrelated edit would quietly change which price it is costed
-    // at — the one thing this column exists to pin down.
-    if let Some(catalog_id) = input.catalog_id.as_deref().map(str::trim) {
+    // what is stored. Dropping the link on an unrelated edit would quietly
+    // change which price it is costed at — the one thing this column pins down.
+    if let Some(catalog_id) = patch.catalog_id.as_deref().map(str::trim) {
         if !catalog_id.is_empty() {
             p.catalog_id = Some(catalog_id.to_string());
         }
     }
-    // Advanced: absent = keep existing (same semantics as an empty api_key);
-    // a present object is an authoritative snapshot — null fields clear values.
-    if let Some(adv) = &input.advanced {
-        let (timeout_secs, retries, headers) = advanced_columns(adv);
-        p.timeout_secs = timeout_secs;
-        p.retries = retries;
-        p.headers = headers;
+    // Advanced forwarding: each field on its own, so naming a timeout leaves
+    // the retry count and the headers where they were.
+    if let Some(adv) = &patch.advanced {
+        if let Some(timeout) = adv.timeout_secs {
+            p.timeout_secs = clamped_timeout(Some(timeout));
+        }
+        if let Some(retries) = adv.retries {
+            p.retries = clamped_retries(Some(retries));
+        }
+        if let Some(headers) = &adv.headers {
+            p.headers = sanitized_headers(headers);
+        }
     }
-    // Plan quota query: same absent-keeps semantics; null clears.
-    if let Some(pq) = &input.plan_query {
-        p.plan_query = (!pq.is_null()).then(|| pq.to_string());
+    // Plan quota query: absent keeps; null clears; an object replaces.
+    if let Some(pq) = &patch.plan_query {
+        p.plan_query = pq.as_ref().map(|v| v.to_string());
     }
     p.updated_at = crate::store::now_rfc3339();
     store.update_provider(&p).map_err(ApiError::failed)?;
@@ -252,7 +301,7 @@ pub fn update_provider(store: &Store, id: &str, input: &NewProviderInput) -> Res
     // primary, and has its strategy flattened to Single. Running it on an
     // unrelated save is how editing a provider's timeout silently reordered an
     // agent's failover queue.
-    if let Some(agents) = &input.agents {
+    if let Some(agents) = &patch.agents {
         // Unbind old agents not in the new set; new ones use the same primary
         // logic as add.
         let new_set: std::collections::HashSet<&str> = agents.iter().map(String::as_str).collect();
@@ -280,6 +329,36 @@ pub fn update_provider(store: &Store, id: &str, input: &NewProviderInput) -> Res
         }
     }
     Ok(())
+}
+
+/// A provider named by id, with the two fields a flag-driven client needs
+/// before it can edit one (`migrate.local.md` §10.38): what to call it, and
+/// which limits apply to it.
+///
+/// Deliberately not the row. The client asked to be able to say only what
+/// changed; what it still cannot avoid knowing is the **billing mode**, because
+/// two of the rules it states are phrased in terms of it — whether
+/// `--plan-limit-5h` is legal here at all, and whether a ceiling is a
+/// percentage or a spend. The rest of the row stays where the patch leaves it.
+pub fn provider_ref(store: &Store, id: &str) -> Result<ProviderRefVm, ApiError> {
+    let p = store
+        .get_provider(id)
+        .map_err(ApiError::failed)?
+        .ok_or_else(|| ApiError::not_found(format!("provider `{id}` not found")))?;
+    Ok(ProviderRefVm {
+        id: p.id,
+        name: p.name,
+        billing: billing_to_ui(p.billing).to_string(),
+    })
+}
+
+/// The stored percent ceilings, read back out of their column.
+///
+/// Possible at all only because `PlanLimitsInput`'s fields default: the column
+/// is written with a window omitted rather than nulled, so `{"five_hour":80}`
+/// is what a provider with one ceiling carries.
+fn stored_plan_limits(provider: &Provider) -> Option<PlanLimitsInput> {
+    serde_json::from_str(provider.plan_limits.as_deref()?).ok()
 }
 
 /// Make `provider_id` the primary for `agent`: priority 0, every other binding
@@ -538,6 +617,82 @@ mod tests {
         }
     }
 
+    /// A patch sets what it names and leaves everything else where it was.
+    ///
+    /// The property the whole shape exists for (`migrate.local.md` §10.38): a
+    /// client without a form says only what changed. Under the authoritative
+    /// rewrite this replaced, every one of these fields would have been
+    /// overwritten by whatever the caller happened to send — which is why such
+    /// a client had to read the row back first, and why it could not edit a
+    /// provider on another machine at all.
+    #[test]
+    fn a_patch_touches_only_the_fields_it_names() {
+        let store = Store::open_in_memory().unwrap();
+        let id = kiwano_api::ids::mint_provider_id("Original");
+        let mut create = input("Original", "https://one.example");
+        create.api_key = "sk-original".into();
+        create.protocol = "anthropic".into();
+        create.model_default = "m-one".into();
+        create.advanced = Some(AdvancedInput {
+            timeout_secs: Some(30),
+            retries: Some(2),
+            headers: Some(
+                [("X-Trace".to_string(), "on".to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+        });
+        create.billing_config = BillingConfigInput {
+            limit_value: Some(50.0),
+            limit_unit: Some("USD".into()),
+            reset_period: Some("monthly".into()),
+            plan_limits: None,
+        };
+        add_provider(&store, &id, &create).unwrap();
+        let before = store.get_provider(&id).unwrap().unwrap();
+
+        // Name one field. Nothing else.
+        update_provider(
+            &store,
+            &id,
+            &ProviderPatch {
+                name: Some("Renamed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let after = store.get_provider(&id).unwrap().unwrap();
+        assert_eq!(after.name, "Renamed");
+        assert_eq!(
+            (
+                after.base_url.as_str(),
+                after.protocol,
+                after.api_key.as_deref(),
+                after.model_default.as_deref(),
+                after.timeout_secs,
+                after.retries,
+                after.headers.as_deref(),
+                after.period_limit,
+                after.limit_unit.as_deref(),
+                after.reset_period.as_deref(),
+            ),
+            (
+                before.base_url.as_str(),
+                before.protocol,
+                before.api_key.as_deref(),
+                before.model_default.as_deref(),
+                before.timeout_secs,
+                before.retries,
+                before.headers.as_deref(),
+                before.period_limit,
+                before.limit_unit.as_deref(),
+                before.reset_period.as_deref(),
+            ),
+            "an edit that names one field must not move any other"
+        );
+    }
+
     /// §6.1: **a replayed add mints one provider.**
     ///
     /// The id is the caller's, so an id that is already in the table *is* this
@@ -620,11 +775,15 @@ mod tests {
         add_provider(&store, &id, &create).unwrap();
 
         // The edit renames it and points it elsewhere, and says nothing about
-        // the key — which must survive, because a blank key is how the form
+        // the key — which must survive, because an empty key is how a caller
         // says "keep the stored one".
-        let mut edit = input("Renamed", "https://two.example");
-        edit.api_key = String::new();
-        edit.model_default = String::new();
+        let edit = ProviderPatch {
+            name: Some("Renamed".into()),
+            endpoint: Some("https://two.example".into()),
+            api_key: Some(String::new()),
+            model_default: Some(String::new()),
+            ..Default::default()
+        };
         update_provider(&store, &id, &edit).unwrap();
 
         let row = store.get_provider(&id).unwrap().unwrap();
@@ -637,7 +796,7 @@ mod tests {
         );
         assert_eq!(
             row.model_default, None,
-            "but a blank model default clears it — the form always sends that field"
+            "but an empty model default clears it — the form always sends that field"
         );
 
         // Editing something that is not there is a named refusal.

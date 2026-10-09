@@ -4,8 +4,8 @@
 //! builds the same `NewProviderInput` from a file.
 
 use super::input::{
-    advanced_input, check_plan_limits, new_provider_input, parse_billing, parse_extra_endpoints,
-    parse_protocol, plan_limits_input, plan_query_input,
+    advanced_patch, check_plan_limits, new_provider_input, parse_billing, parse_extra_endpoints,
+    parse_protocol, plan_query_input,
 };
 use super::render::{render_probe, render_providers, render_quota};
 use super::runtime;
@@ -13,7 +13,6 @@ use crate::cli::{AddArgs, EditArgs, ProbeCmd, ProvidersCmd};
 use crate::{CliError, Ctx};
 use kiwano_core::sidecar;
 use kiwano_core::vm;
-use kiwanod::store::{Provider, StrategyType};
 
 // ── providers ───────────────────────────────────────────────────────────────
 
@@ -35,14 +34,7 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 /// the same code backs the gateway's own limit enforcement, so the display and
 /// the block cannot disagree.
 fn providers_quota(ctx: &mut Ctx, provider_id: &str, force: bool) -> Result<(), CliError> {
-    let report = {
-        let store = ctx.store()?;
-        kiwano_core::block_on(kiwanod::plan_quota::get_plan_quota_report(
-            store,
-            provider_id,
-            force,
-        ))?
-    };
+    let report = ctx.api.get_plan_quota(provider_id, force)?;
     // A deterministic failure (bad credentials, unknown template) comes back as
     // `success: false` rather than as an Err, and reporting it as success would
     // be a lie about what the endpoint said.
@@ -88,47 +80,48 @@ pub(crate) fn checked_unit(
 }
 
 fn providers_add(args: &AddArgs, ctx: &mut Ctx) -> Result<(), CliError> {
-    let known = vm::known_limit_currencies(ctx.store()?);
-    let input = new_provider_input(args, &known)?;
-    let created = {
-        let store = ctx.store()?;
-        vm::add_provider(store, &input)?
+    // The currencies a limit may be written in come from the daemon, because
+    // the rule is its: one this machine has no rate for is refused rather than
+    // read as a request count, and only the side holding the rate table knows
+    // which those are.
+    //
+    // Asked only when `--unit` names one: a flag that is not understood, or a
+    // limit on a plan provider, is a usage error, and a usage error has to be
+    // answerable without a daemon running.
+    let known = match args.unit {
+        Some(_) => ctx.api.limit_currencies()?,
+        None => Vec::new(),
     };
+    let input = new_provider_input(args, &known)?;
+    // Minted here, like the app's: an id the daemon has already seen is
+    // answered with the provider that exists, so a retried add writes nothing
+    // (`migrate.local.md` §6.1).
+    let id = vm::mint_provider_id(&input.name);
+    let created = ctx.api.add_provider(&id, &input)?;
     let text = format!("added {} ({})", created.id, created.name);
     ctx.out.emit(&created, || text);
-    ctx.after_mutation();
     Ok(())
 }
 
 fn providers_use(ctx: &mut Ctx, provider_id: &str, agent: &str) -> Result<(), CliError> {
-    {
-        let store = ctx.store()?;
-        if store.get_provider(provider_id).map_err(runtime)?.is_none() {
-            return Err(runtime(format!("provider not found: {provider_id}")));
-        }
-        // `use` means "switch this agent to this provider", which is a
-        // single-strategy statement — so it forces the strategy rather than
-        // only reordering candidates under whatever was configured.
-        store
-            .upsert_strategy(agent, StrategyType::Single, None)
-            .map_err(runtime)?;
-        vm::bind_as_primary(store, agent, provider_id)?;
-    }
+    // The ref is the existence check: a provider that is not there is a 404
+    // from the daemon, which is where the row lives.
+    ctx.api.provider_ref(provider_id)?;
+    // `use` means "switch this agent to this provider", which is a
+    // single-strategy statement — so it forces the strategy rather than only
+    // reordering candidates under whatever was configured.
+    ctx.api.set_agent_strategy(agent, "single", None)?;
+    ctx.api.bind_as_primary(agent, provider_id)?;
     ctx.out.line(format!("{agent} -> {provider_id} (primary)"));
-    ctx.after_mutation();
     Ok(())
 }
 
 fn providers_remove(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
-    let removed = {
-        let store = ctx.store()?;
-        vm::delete_provider(store, provider_id)?
-    };
+    let removed = ctx.api.delete_provider(provider_id)?;
     if !removed {
         return Err(runtime(format!("provider not found: {provider_id}")));
     }
     ctx.out.line(format!("removed {provider_id}"));
-    ctx.after_mutation();
     Ok(())
 }
 
@@ -138,58 +131,55 @@ fn providers_remove(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
 /// bindings, rotating keys and usage rows all reference it, so remove-and-add
 /// is not the same operation.
 fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
-    let input = {
-        let store = ctx.store()?;
-        let current = store
-            .get_provider(&args.provider_id)
-            .map_err(runtime)?
-            .ok_or_else(|| runtime(format!("provider not found: {}", args.provider_id)))?;
-        edit_input(args, &current, &vm::known_limit_currencies(store))?
-    };
+    // The one read a flag-driven client cannot avoid: two of its rules are
+    // stated in terms of the **stored** billing mode (`migrate.local.md`
+    // §10.38), and the daemon hands back just that much rather than the row.
+    let current = ctx.api.provider_ref(&args.provider_id)?;
+    let patch = edit_patch(args, &current, &ctx.api)?;
+    ctx.api.update_provider(&args.provider_id, &patch)?;
+    // The view is this side's, and it reads *this machine* — which agents
+    // actually route here — so it stays assembled locally (`migrate.local.md`
+    // §5 #2, §10.32).
     let updated = {
         let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::update_provider(
-            store,
-            aux,
-            &ctx.home,
-            &args.provider_id,
-            &input,
-            ctx.config_vars(),
-        )?
-    };
+        vm::build_provider_vms(store, aux, &ctx.home, ctx.config_vars())?
+    }
+    .into_iter()
+    .find(|v| v.id == args.provider_id)
+    .ok_or_else(|| runtime("provider vanished after update"))?;
     let text = format!("updated {} ({})", updated.id, updated.name);
     ctx.out.emit(&updated, || text);
-    ctx.after_mutation();
     Ok(())
 }
 
-/// Rebuild a full `NewProviderInput` from the stored row plus whatever flags
-/// were given.
+/// The patch an edit sends: the fields its flags name, and no others.
 ///
-/// `update_provider` treats name, endpoint, protocol, billing and the endpoint
-/// list as authoritative rather than patch-shaped, so an edit that only sent the
-/// changed fields would blank the rest — including a plan provider's percent
-/// limits. Everything is therefore carried over explicitly, and only the flags
-/// present in `args` override.
-fn edit_input(
+/// This is what used to be a full `NewProviderInput` rebuilt from the row. The
+/// difference is not cosmetic — the old shape had to read the row to put back
+/// everything the flags did not mention, and every field it "carried over" was
+/// a place the two rules could disagree (`migrate.local.md` §10.38). What is
+/// still needed from the row is the **billing mode**, because two of the rules
+/// below are phrased in terms of it, and that is all `ProviderRefVm` carries.
+fn edit_patch(
     args: &EditArgs,
-    current: &Provider,
-    known: &[String],
-) -> Result<vm::NewProviderInput, CliError> {
+    current: &vm::ProviderRefVm,
+    api: &kiwano_core::daemon_api::DaemonApi,
+) -> Result<vm::ProviderPatch, CliError> {
+    // The billing the edit will have: the flag's, or the stored one.
     let billing = match &args.billing {
         Some(raw) => parse_billing(raw)?.to_string(),
-        None => vm::billing_to_ui(current.billing).to_string(),
+        None => current.billing.clone(),
     };
-    let protocol = match &args.protocol {
-        Some(raw) => parse_protocol(raw)?.to_string(),
-        None => current.protocol.as_str().to_string(),
-    };
-    // Three intents, now three values rather than three vectors: `--no-bind`
-    // unbinds everything (an authoritative empty set), naming agents binds those,
-    // and saying nothing leaves the bindings alone. That last case used to be
-    // emulated by re-sending the set already bound, which re-promoted this
-    // provider to primary for each of them and flattened their strategies — the
-    // side effect `None` now avoids.
+    // Checked against the *effective* billing: an edit that names no billing
+    // inherits the stored one, so `--plan-limit-5h` is legitimate on a provider
+    // that is already a plan.
+    check_plan_limits(&billing, &args.forward)?;
+
+    // Three intents, three values: `--no-bind` unbinds everything (an
+    // authoritative empty set), naming agents binds those, and saying nothing
+    // leaves the bindings alone. The last one used to be emulated by re-sending
+    // the set already bound, which re-promoted this provider to primary for each
+    // of them and flattened their strategies.
     let agents = if args.no_bind {
         Some(Vec::new())
     } else if args.bind.is_empty() {
@@ -198,57 +188,62 @@ fn edit_input(
         Some(args.bind.clone())
     };
 
-    // Checked against the *effective* billing: an edit that names no billing
-    // inherits the stored one, so `--plan-limit-5h` is legitimate on a provider
-    // that is already a plan.
-    check_plan_limits(&billing, &args.forward)?;
+    // The limit fields are only sent when a flag names one — the daemon merges
+    // what arrives against the row, so an edit that changes the name does not
+    // speak about limits at all.
+    let touched_limits = args.limit.is_some() || args.unit.is_some() || args.reset.is_some();
+    let touched_windows =
+        args.forward.plan_limit_5h.is_some() || args.forward.plan_limit_weekly.is_some();
+    let billing_config = if touched_limits || touched_windows {
+        Some(vm::BillingConfigPatch {
+            limit_value: args.limit,
+            // The currencies come from the daemon: the rule that a limit cannot
+            // be written in one this machine cannot price is its.
+            limit_unit: match args.unit.as_deref() {
+                Some(unit) => checked_unit(Some(unit), &api.limit_currencies()?)?,
+                None => None,
+            },
+            reset_period: args.reset.clone(),
+            plan_limits: touched_windows.then_some(vm::PlanLimitsInput {
+                five_hour: args.forward.plan_limit_5h,
+                weekly: args.forward.plan_limit_weekly,
+            }),
+        })
+    } else {
+        None
+    };
 
-    let limit_value = args.limit.or(current.period_limit);
-    Ok(vm::NewProviderInput {
-        // The CLI has no shelf to add from, and this column is only ever set
-        // from there — the stored link is kept when the field is absent, so an
-        // edit from the shell does not unlink a provider added in the app.
-        catalog_id: None,
-        // No flag asks for prices yet, and absent means "keep": a `providers
-        // edit` from the shell leaves the ones the app collected alone rather
-        // than clearing them.
-        prices: None,
-        name: args.name.clone().unwrap_or_else(|| current.name.clone()),
-        // An empty key means "keep the stored one" in update_provider, so this
-        // is safe to leave blank when the flag is absent.
-        api_key: args.key.clone().unwrap_or_default(),
-        endpoint: args
-            .endpoint
-            .clone()
-            .unwrap_or_else(|| current.base_url.clone()),
-        protocol,
-        model_default: String::new(),
-        billing,
-        billing_config: vm::BillingConfigInput {
-            limit_value,
-            limit_unit: checked_unit(args.unit.as_deref(), known)?
-                .or_else(|| current.limit_unit.clone()),
-            reset_period: args.reset.clone().or_else(|| current.reset_period.clone()),
-            plan_limits: plan_limits_input(&args.forward, Some(current)),
+    Ok(vm::ProviderPatch {
+        name: args.name.clone(),
+        // Absent or empty keeps the stored key, so leaving the flag out is not
+        // speaking about it.
+        api_key: args.key.clone(),
+        endpoint: args.endpoint.clone(),
+        protocol: match &args.protocol {
+            Some(raw) => Some(parse_protocol(raw)?.to_string()),
+            None => None,
         },
+        // Not a flag here, and the old shape sent `""` — which *cleared* the
+        // column. Silent data loss on an unrelated edit, and exactly what
+        // "absent means keep" removes.
+        model_default: None,
+        billing: args.billing.as_ref().map(|_| billing.clone()),
+        billing_config,
         agents,
-        // The flag list is authoritative when given; otherwise the stored
-        // endpoints are carried over, because `update_provider` rewrites the
-        // whole set and an empty list would drop them.
+        // The flag list is the resulting set when given; otherwise the stored
+        // endpoints are not spoken about.
         endpoints: if args.forward.endpoint_extra.is_empty() {
-            current
-                .endpoints
-                .iter()
-                .map(|e| vm::NewEndpointInput {
-                    protocol: e.protocol.as_str().to_string(),
-                    endpoint: e.base_url.clone(),
-                })
-                .collect()
+            None
         } else {
-            parse_extra_endpoints(&args.forward.endpoint_extra)?
+            Some(parse_extra_endpoints(&args.forward.endpoint_extra)?)
         },
-        advanced: advanced_input(&args.forward, Some(current), args.no_headers)?,
-        plan_query: plan_query_input(&args.forward, args.clear_plan_query)?,
+        advanced: advanced_patch(&args.forward, args.no_headers)?,
+        // Doubled: `None` = not speaking about it, `Some(None)` = clear —
+        // which is what `--clear-plan-query` means, and why the field cannot be
+        // a plain `Option<Value>` (`migrate.local.md` §10.38).
+        plan_query: plan_query_input(&args.forward, args.clear_plan_query)?.map(Some),
+        prices: None,
+        catalog_id: None,
     })
 }
 
@@ -256,15 +251,11 @@ fn edit_input(
 /// own `enabled` decides whether it may serve, and the gateway's route table
 /// reads it on every reload.
 fn providers_set_enabled(ctx: &mut Ctx, provider_id: &str, enabled: bool) -> Result<(), CliError> {
-    let (name, agents) = {
-        let store = ctx.store()?;
-        let p = store
-            .get_provider(provider_id)
-            .map_err(runtime)?
-            .ok_or_else(|| runtime(format!("provider not found: {provider_id}")))?;
-        vm::set_provider_enabled(store, provider_id, enabled)?;
-        (p.name, agents_bound_to(store, provider_id)?)
-    };
+    // Read the two things the message needs *before* the write, so a
+    // disable can still name who it affects.
+    let name = ctx.api.provider_ref(provider_id)?.name;
+    let agents = agents_bound_to(&ctx.api, provider_id)?;
+    ctx.api.set_provider_enabled(provider_id, enabled)?;
     // What the state *means*, not just what changed — and for a disable, who it
     // means it for: the difference between "my requests stop going there" and
     // "the row is gone" is the point of this command.
@@ -279,7 +270,6 @@ fn providers_set_enabled(ctx: &mut Ctx, provider_id: &str, enabled: bool) -> Res
         )
     };
     ctx.out.line(text);
-    ctx.after_mutation();
     Ok(())
 }
 
@@ -320,23 +310,17 @@ fn providers_probe(cmd: &ProbeCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 
 /// Which agents a provider is currently bound to.
 ///
-/// The store indexes bindings by agent, not by provider, so this walks the
-/// bound agents. Cheap at this scale, and there is no reverse index to keep in
-/// sync.
+/// Derived from the agent routes the daemon serves rather than from a store
+/// walk: bindings are indexed by agent, so the honest shape of the question is
+/// "which routes name this provider", and that is what the route list answers.
 fn agents_bound_to(
-    store: &kiwanod::store::Store,
+    api: &kiwano_core::daemon_api::DaemonApi,
     provider_id: &str,
 ) -> Result<Vec<String>, CliError> {
-    let mut bound = Vec::new();
-    for agent in store.bound_agents().map_err(runtime)? {
-        if store
-            .bindings_for_agent(&agent)
-            .map_err(runtime)?
-            .iter()
-            .any(|b| b.provider_id == provider_id)
-        {
-            bound.push(agent);
-        }
-    }
-    Ok(bound)
+    Ok(api
+        .list_agent_routes()?
+        .into_iter()
+        .filter(|r| r.bindings.iter().any(|b| b.provider_id == provider_id))
+        .map(|r| r.agent)
+        .collect())
 }

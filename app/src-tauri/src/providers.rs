@@ -46,12 +46,21 @@ pub fn set_provider_enabled(id: String, enabled: bool) -> Result<(), String> {
 pub fn update_provider(
     state: State<AppState>,
     id: String,
-    input: vm::NewProviderInput,
+    // Still `input` on the wire: the webview sends `{ id, input }`, and Tauri
+    // maps arguments by name. The *type* is what changed — the edit is a patch
+    // now — and that is invisible to the frontend, whose JSON was always the
+    // whole form.
+    input: vm::ProviderPatch,
 ) -> Result<vm::ProviderVm, String> {
     // The write is the daemon's; the **view** is assembled here, because it is
     // the half that reads this machine (which agents actually route through the
     // gateway) — `migrate.local.md` §5's fifth constraint. The daemon re-reads
     // its own route table, so there is no reload ping to send.
+    //
+    // A patch now, not a whole input: the edit dialog still sends its whole form
+    // (the JSON is the same shape — every field present), and the daemon applies
+    // what is named and leaves the rest (`migrate.local.md` §10.38). That is
+    // what lets a client *without* a form edit a provider too.
     kiwano_core::daemon_api::DaemonApi::connect().update_provider(&id, &input)?;
     let vms = vm::build_provider_vms(&state.store, &state.aux, &home_dir(), state.shell_vars())?;
     vms.into_iter()

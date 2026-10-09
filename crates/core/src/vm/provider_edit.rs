@@ -4,6 +4,7 @@
 use crate::detect::ShellVars;
 use crate::vm::providers::{build_provider_vms, ProviderVm};
 use crate::vm::{mint_provider_id, Aux};
+use kiwano_api::providers::ProviderPatch;
 use kiwanod::api::providers as daemon;
 use kiwanod::api::providers_add as daemon_add;
 use kiwanod::store::Store;
@@ -91,10 +92,10 @@ pub fn update_provider(
     aux: &Aux,
     home: &Path,
     id: &str,
-    input: &NewProviderInput,
+    patch: &ProviderPatch,
     vars: &ShellVars,
 ) -> Result<ProviderVm, String> {
-    kiwanod::api::providers_add::update_provider(store, id, input).map_err(|e| e.to_string())?;
+    kiwanod::api::providers_add::update_provider(store, id, patch).map_err(|e| e.to_string())?;
     let vms = build_provider_vms(store, aux, home, vars)?;
     vms.into_iter()
         .find(|v| v.id == id)
@@ -116,8 +117,8 @@ mod tests {
     use crate::vm::catalog::stored_key_for;
     use crate::vm::providers::build_provider_vms;
     use crate::vm::test_support::{
-        catalog_input, catalog_store, linkless_aux, live_home, no_vars, provider, store,
-        stored_catalog_id,
+        catalog_input, catalog_store, full_patch, linkless_aux, live_home, no_vars, provider,
+        store, stored_catalog_id,
     };
     use crate::vm::Aux;
     use kiwanod::store::{Billing, Binding, StrategyType};
@@ -180,8 +181,8 @@ mod tests {
 
         // An edit is authoritative: clearing the box clears the column, the way
         // emptying the endpoint list rewrites it.
-        let mut edit = catalog_input("DeepSeek", "https://api.deepseek.com");
-        edit.model_default = String::new();
+        let mut edit = full_patch(catalog_input("DeepSeek", "https://api.deepseek.com"));
+        edit.model_default = Some(String::new());
         update_provider(&s, &aux, live_home(&[]).path(), &vm.id, &edit, &no_vars()).unwrap();
         assert_eq!(s.get_provider(&vm.id).unwrap().unwrap().model_default, None);
     }
@@ -215,7 +216,7 @@ mod tests {
 
         // An edit that says nothing about agents: nothing moves.
         let home = live_home(&["claude"]);
-        let mut edit = catalog_input("A", "https://a.example.com/v1");
+        let mut edit = full_patch(catalog_input("A", "https://a.example.com/v1"));
         edit.agents = None;
         update_provider(&s, &aux, home.path(), &a.id, &edit, &no_vars()).unwrap();
         assert_eq!(
@@ -553,7 +554,7 @@ mod tests {
             &aux,
             live_home(&["codex"]).path(),
             "p1",
-            &input,
+            &full_patch(input),
             &no_vars(),
         )
         .unwrap();

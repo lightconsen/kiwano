@@ -15,7 +15,9 @@ use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm, UsageAlertVm};
 use kiwano_api::keys::ApiKeyVm;
-use kiwano_api::providers::{NewProviderInput, ProviderVm, SyncReportVm};
+use kiwano_api::providers::{
+    NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, SyncReportVm,
+};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
@@ -601,13 +603,81 @@ impl DaemonApi {
     /// Apply an edit — `vm::update_provider`'s **write** half. The view is the
     /// caller's (`migrate.local.md` §5's fifth constraint): the daemon updates
     /// the row and the bindings, and the caller assembles what it shows.
-    pub fn update_provider(&self, id: &str, input: &NewProviderInput) -> Result<(), String> {
-        wrote(sidecar::admin_put_json(
+    ///
+    /// A patch, so the caller says only what changed and needs no read of the
+    /// row first. `PATCH` rather than `PUT` because that is what the body now
+    /// means (`migrate.local.md` §10.38).
+    pub fn update_provider(&self, id: &str, patch: &ProviderPatch) -> Result<(), String> {
+        wrote(sidecar::admin_patch_json(
             &self.endpoint,
             self.token.as_deref(),
             &format!("/api/providers/{id}"),
-            input,
+            patch,
         ))
+    }
+
+    /// Make a provider the first candidate for an agent — `vm::bind_as_primary`.
+    ///
+    /// One call, not "bind then reorder": the promotion reindexes every other
+    /// binding, and a client doing it in two steps could be interrupted between
+    /// them and leave two candidates claiming priority 1.
+    pub fn bind_as_primary(&self, agent: &str, provider_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            provider_id: &'a str,
+        }
+        wrote(sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/agents/{agent}/primary"),
+            &Body { provider_id },
+        ))
+    }
+
+    /// Infer each provider's catalog entry from the synced shelf. Returns how
+    /// many were linked.
+    pub fn link_providers(&self) -> Result<usize, String> {
+        let v: serde_json::Value = sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/catalog/link",
+            &serde_json::json!({}),
+        )?;
+        Ok(v["linked"].as_u64().unwrap_or(0) as usize)
+    }
+
+    /// The currencies a limit may be written in — `vm::known_limit_currencies`.
+    ///
+    /// Asked rather than derived: the rule is "a currency this machine has no
+    /// rate for is refused", and only the side holding the rate table can say
+    /// which those are.
+    pub fn limit_currencies(&self) -> Result<Vec<String>, String> {
+        let v: serde_json::Value = sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/limit-currencies",
+        )?;
+        Ok(v["currencies"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|c| c.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// A provider named by id: its name, and how it is billed.
+    ///
+    /// The narrow read a client without a form needs before it can state the
+    /// rules that are phrased in terms of the stored mode — `providers edit`'s
+    /// `--plan-limit-*` among them (`migrate.local.md` §10.38).
+    pub fn provider_ref(&self, id: &str) -> Result<ProviderRefVm, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{id}"),
+        )
     }
     /// Apply cc-switch rows the caller extracted — the **store half** of that
     /// import. The files stay on the client (`migrate.local.md` §10.19).

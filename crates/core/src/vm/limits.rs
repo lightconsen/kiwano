@@ -145,7 +145,7 @@ mod tests {
             &aux,
             std::path::Path::new("/tmp"),
             &vm.id,
-            &edit,
+            &crate::vm::test_support::full_patch(edit),
             &no_vars(),
         )
         .unwrap();
@@ -160,7 +160,7 @@ mod tests {
             &aux,
             std::path::Path::new("/tmp"),
             &vm.id,
-            &cleared,
+            &crate::vm::test_support::full_patch(cleared),
             &no_vars(),
         )
         .unwrap();

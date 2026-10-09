@@ -52,20 +52,38 @@ fn temp_db() -> (tempfile::TempDir, PathBuf) {
 }
 
 /// Add a provider and return its generated id.
+///
+/// Seeded through the store, not through the command: `providers add` is served
+/// by the daemon now, and a fixture that needed one would drag a daemon into
+/// every test that wants a provider to exist. This is the same helper
+/// `seed_log` is — the thing under test is what the *command* does with a
+/// provider, not how one got there. `providers_add_then_list_roundtrips` is
+/// where the command itself is exercised, daemon and all.
 fn add_provider(db: &Path, name: &str, bind: &[&str]) -> String {
-    let mut args = vec!["--json", "providers", "add", "--name", name, "--endpoint"];
-    let endpoint = format!("https://{name}.example.com");
-    args.push(&endpoint);
-    args.push("--key");
-    args.push("sk-test");
-    for agent in bind {
-        args.push("--bind");
-        args.push(agent);
-    }
-    let (code, out, err) = run(db, &args);
-    assert_eq!(code, 0, "add failed: {err}");
-    let v: serde_json::Value = serde_json::from_str(&out).expect("add emits JSON under --json");
-    v["id"].as_str().expect("id").to_string()
+    let store = Store::open(db).unwrap();
+    let input = kiwano_core::vm::NewProviderInput {
+        catalog_id: None,
+        prices: None,
+        name: name.into(),
+        api_key: "sk-test".into(),
+        endpoint: format!("https://{name}.example.com"),
+        protocol: "openai".into(),
+        model_default: String::new(),
+        billing: "payg".into(),
+        billing_config: kiwano_core::vm::BillingConfigInput {
+            limit_value: None,
+            limit_unit: None,
+            reset_period: None,
+            plan_limits: None,
+        },
+        agents: Some(bind.iter().map(|a| a.to_string()).collect()),
+        endpoints: Vec::new(),
+        advanced: None,
+        plan_query: None,
+    };
+    kiwano_core::vm::add_provider(&store, &input)
+        .expect("the fixture provider is valid")
+        .id
 }
 
 // ── globals ─────────────────────────────────────────────────────────────────
@@ -175,8 +193,10 @@ fn providers_list_filters_by_agent() {
 #[test]
 fn billing_accepts_both_vocabularies() {
     let (_dir, db) = temp_db();
-    let (code, out, err) = run(
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--json",
             "providers",
@@ -193,8 +213,9 @@ fn billing_accepts_both_vocabularies() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["billing"], "payg");
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "providers",
             "add",
@@ -237,10 +258,15 @@ fn plan_providers_reject_limit_flags() {
 #[test]
 fn providers_use_makes_primary_and_demotes_previous() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let first = add_provider(&db, "first", &["claude"]);
     let second = add_provider(&db, "second", &[]);
 
-    let (code, _, err) = run(&db, &["providers", "use", &second, "--agent", "claude"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["providers", "use", &second, "--agent", "claude"],
+    );
     assert_eq!(code, 0, "{err}");
 
     let store = Store::open(&db).unwrap();
@@ -260,19 +286,32 @@ fn providers_use_makes_primary_and_demotes_previous() {
 #[test]
 fn providers_use_rejects_unknown_provider() {
     let (_dir, db) = temp_db();
-    let (code, _, err) = run(&db, &["providers", "use", "nope", "--agent", "claude"]);
+    let daemon = support::serve(&db);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["providers", "use", "nope", "--agent", "claude"],
+    );
     assert_eq!(code, 3, "a runtime error, not a usage error");
-    assert!(err.contains("provider not found"), "{err}");
+    // The daemon's own wording, which names the id — the row is on its side, so
+    // so is the sentence about not finding it.
+    assert!(err.contains("not found"), "{err}");
+    assert!(err.contains("nope"), "{err}");
 }
 
 #[test]
 fn providers_remove_promotes_the_next_candidate() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let first = add_provider(&db, "first", &["claude"]);
     let second = add_provider(&db, "second", &[]);
-    run(&db, &["providers", "use", &second, "--agent", "claude"]);
+    run_served(
+        &db,
+        &daemon,
+        &["providers", "use", &second, "--agent", "claude"],
+    );
 
-    let (code, _, err) = run(&db, &["providers", "remove", &second]);
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "remove", &second]);
     assert_eq!(code, 0, "{err}");
 
     let store = Store::open(&db).unwrap();
@@ -288,8 +327,10 @@ fn providers_remove_promotes_the_next_candidate() {
 #[test]
 fn providers_add_stores_the_forwarding_options() {
     let (_dir, db) = temp_db();
-    let (code, out, err) = run(
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--json",
             "providers",
@@ -334,9 +375,11 @@ fn providers_add_stores_the_forwarding_options() {
 #[test]
 fn providers_edit_preserves_the_forwarding_options_it_was_not_given() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let id = add_provider(&db, "azure", &[]);
-    run(
+    run_served(
         &db,
+        &daemon,
         &[
             "providers",
             "edit",
@@ -349,7 +392,11 @@ fn providers_edit_preserves_the_forwarding_options_it_was_not_given() {
             "anthropic=https://alt.example.com",
         ],
     );
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--name", "renamed"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["providers", "edit", &id, "--name", "renamed"],
+    );
     assert_eq!(code, 0, "{err}");
 
     let store = Store::open(&db).unwrap();
@@ -360,7 +407,7 @@ fn providers_edit_preserves_the_forwarding_options_it_was_not_given() {
     assert_eq!(row.endpoints.len(), 1, "endpoints survived a rename");
 
     // Changing one field still leaves the other two alone.
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--retries", "3"]);
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "edit", &id, "--retries", "3"]);
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     let row = store.get_provider(&id).unwrap().unwrap();
@@ -368,7 +415,7 @@ fn providers_edit_preserves_the_forwarding_options_it_was_not_given() {
     assert_eq!(row.timeout_secs, Some(120));
 
     // …and clearing them is explicit, not a side effect of an unrelated edit.
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--no-headers"]);
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "edit", &id, "--no-headers"]);
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     let row = store.get_provider(&id).unwrap().unwrap();
@@ -407,8 +454,10 @@ fn forwarding_flags_reject_malformed_values() {
 #[test]
 fn plan_limits_require_plan_billing() {
     let (_dir, db) = temp_db();
-    let (code, _, err) = run(
+    let daemon = support::serve(&db);
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "providers",
             "add",
@@ -423,8 +472,9 @@ fn plan_limits_require_plan_billing() {
     assert_eq!(code, 2, "payg has no plan windows to limit");
     assert!(err.contains("plan providers"), "{err}");
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "providers",
             "add",
@@ -453,8 +503,10 @@ fn plan_limits_require_plan_billing() {
 #[test]
 fn plan_query_round_trips_and_clears() {
     let (_dir, db) = temp_db();
-    let (code, out, err) = run(
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--json",
             "providers",
@@ -478,15 +530,23 @@ fn plan_query_round_trips_and_clears() {
     assert!(row.plan_query.as_deref().unwrap().contains("kimi"));
 
     // Malformed JSON, and a non-object, are both refused.
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--plan-query", "not json"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["providers", "edit", &id, "--plan-query", "not json"],
+    );
     assert_eq!(code, 2);
     assert!(err.contains("valid JSON"), "{err}");
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--plan-query", "[]"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["providers", "edit", &id, "--plan-query", "[]"],
+    );
     assert_eq!(code, 2);
     assert!(err.contains("JSON object"), "{err}");
 
     // Clearing is explicit — an absent --plan-query means "keep".
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--name", "kimi2"]);
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "edit", &id, "--name", "kimi2"]);
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     assert!(store
@@ -496,13 +556,17 @@ fn plan_query_round_trips_and_clears() {
         .plan_query
         .is_some());
 
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--clear-plan-query"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["providers", "edit", &id, "--clear-plan-query"],
+    );
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     assert_eq!(store.get_provider(&id).unwrap().unwrap().plan_query, None);
 
     // And with none configured, quota says so rather than inventing an answer.
-    let (code, _, err) = run(&db, &["providers", "quota", &id]);
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "quota", &id]);
     assert_eq!(code, 3);
     assert!(err.to_lowercase().contains("plan query"), "{err}");
 }
@@ -581,6 +645,10 @@ fn a_moved_command_needs_the_daemon() {
         vec!["alerts"],
         vec!["agents", "add", "--name", "night batch"],
         vec!["agents", "remove", "no-such-agent"],
+        vec!["providers", "remove", provider.as_str()],
+        vec!["providers", "use", provider.as_str(), "--agent", "claude"],
+        vec!["providers", "disable", provider.as_str()],
+        vec!["providers", "edit", provider.as_str(), "--name", "renamed"],
     ] {
         let (code, out, err) = run(&db, &args);
         assert_eq!(code, 3, "{args:?}\nstdout: {out}\nstderr: {err}");
@@ -704,10 +772,12 @@ fn status_does_not_create_a_database() {
 #[test]
 fn providers_edit_keeps_the_id_and_the_fields_it_was_not_given() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let id = add_provider(&db, "original", &["claude"]);
 
-    let (code, out, err) = run(
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--json",
             "providers",
@@ -741,8 +811,9 @@ fn providers_edit_keeps_the_id_and_the_fields_it_was_not_given() {
 #[test]
 fn providers_edit_can_unbind_from_every_agent() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let id = add_provider(&db, "bound", &["claude"]);
-    let (code, _, err) = run(&db, &["providers", "edit", &id, "--no-bind"]);
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "edit", &id, "--no-bind"]);
     assert_eq!(code, 0, "{err}");
     let store = Store::open(&db).unwrap();
     assert!(store.bindings_for_agent("claude").unwrap().is_empty());
@@ -753,8 +824,9 @@ fn providers_edit_can_unbind_from_every_agent() {
 #[test]
 fn providers_quota_reports_a_missing_plan_query() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let id = add_provider(&db, "plain", &[]);
-    let (code, out, err) = run(&db, &["providers", "quota", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["providers", "quota", &id]);
     assert_eq!(code, 3);
     assert!(err.to_lowercase().contains("plan query"), "{err}");
     assert!(out.is_empty(), "no payload on stdout for a failure: {out}");
@@ -765,18 +837,23 @@ fn providers_quota_reports_a_missing_plan_query() {
 #[test]
 fn providers_disable_and_enable_round_trip() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let home = dir.path().join("home");
     let home_arg = home.display().to_string();
     let id = add_provider(&db, "alpha", &["claude"]);
 
-    let (code, out, err) = run(&db, &["--no-reload", "providers", "disable", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["--no-reload", "providers", "disable", &id]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("fall through"), "{out}");
     assert!(out.contains("claude"), "{out}");
 
     // Parked, not gone: the row is still there, with its key, and says which
     // state it is in.
-    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "providers", "list"],
+    );
     let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(list.len(), 1, "{list:?}");
     assert_eq!(list[0]["enabled"], false);
@@ -787,15 +864,23 @@ fn providers_disable_and_enable_round_trip() {
         "the route is untouched"
     );
 
-    let (code, out, err) = run(&db, &["--no-reload", "providers", "enable", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["--no-reload", "providers", "enable", &id]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("may serve again"), "{out}");
-    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "providers", "list"],
+    );
     let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(list[0]["enabled"], true);
 
     // An unknown id is an error rather than a quiet no-op.
-    let (code, _, err) = run(&db, &["--no-reload", "providers", "disable", "ghost"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["--no-reload", "providers", "disable", "ghost"],
+    );
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("not found"), "{err}");
 }
@@ -1031,13 +1116,15 @@ fn write_claude_config(home: &Path, body: &str) {
 #[test]
 fn takeover_routes_an_agent_and_restore_puts_it_back() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let home = dir.path().join("home");
     let home_arg = home.display().to_string();
     let original = r#"{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_AUTH_TOKEN":"sk-real-abcdef123456"},"other":true}"#;
     write_claude_config(&home, original);
 
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "--home",
             &home_arg,
@@ -1055,7 +1142,11 @@ fn takeover_routes_an_agent_and_restore_puts_it_back() {
     );
     assert_eq!(code, 0, "{err}");
 
-    let (code, out, err) = run(&db, &["--home", &home_arg, "agents", "takeover", "claude"]);
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "agents", "takeover", "claude"],
+    );
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("127.0.0.1:8317"), "{out}");
 
@@ -1590,6 +1681,7 @@ fn catalog_list_filters_by_tag_and_name() {
 #[test]
 fn providers_add_links_the_catalog_entry() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     {
         // Seeded through the store: the cache is the daemon's table, so its
         // accessor there is the only one — the `Aux` copies are gone
@@ -1601,8 +1693,9 @@ fn providers_add_links_the_catalog_entry() {
     }
 
     // The URL `docs/cli.md` has users type: the entry's path, not its host.
-    let (code, _, err) = run(
+    let (code, _, err) = run_served(
         &db,
+        &daemon,
         &[
             "providers",
             "add",
@@ -1659,27 +1752,23 @@ fn cc_switch_import_succeeds_when_there_is_nothing_to_import() {
 /// The defect this rewrite fixes: a mutation under `--json` used to print its
 /// reload note to stdout, after the JSON, breaking every `| jq`. The note now
 /// goes to stderr and stdout stays parseable.
+///
+/// The witness is `alerts` rather than a mutation: the reload note that used to
+/// prove this is gone entirely — the daemon re-reads its own route table after a
+/// write, so there is nothing for the client to say. What still has to hold is
+/// the split itself, and `alerts` says it on stderr whether or not anything is
+/// over budget.
 #[test]
 fn json_stdout_stays_parseable_while_notes_go_to_stderr() {
     let (_dir, db) = temp_db();
-    let (code, out, err) = run(
-        &db,
-        &[
-            "--json",
-            "providers",
-            "add",
-            "--name",
-            "clean",
-            "--endpoint",
-            "https://clean.example.com",
-        ],
-    );
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "alerts"]);
     assert_eq!(code, 0, "{err}");
     serde_json::from_str::<serde_json::Value>(&out)
         .unwrap_or_else(|e| panic!("stdout is not a single JSON document ({e}): {out}"));
     assert!(
-        err.contains("gateway not reachable"),
-        "the reload note belongs on stderr: {err}"
+        err.contains("no provider is over its allowance"),
+        "the note belongs on stderr: {err}"
     );
 }
 

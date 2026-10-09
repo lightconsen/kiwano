@@ -79,6 +79,10 @@ pub use provider_edit::{
     add_provider, bind_as_primary, delete_provider, set_provider_enabled, update_provider,
     AdvancedInput, BillingConfigInput, NewEndpointInput, NewProviderInput, PlanLimitsInput,
 };
+// The edit patch is the API's type — the client sends it, so it is a wire type
+// by definition — re-exported here for the same reason the request types above
+// are: the callers (the app's command, the CLI) know it by this path.
+pub use kiwano_api::providers::{AdvancedPatch, BillingConfigPatch, ProviderPatch, ProviderRefVm};
 pub use providers::{
     billing_to_ui, build_provider_vms, HealthVm, ProviderAdvancedVm, ProviderEndpointVm,
     ProviderVm, QuotaVm, UsageVm,
@@ -102,7 +106,9 @@ pub(crate) mod test_support {
     use crate::vm::provider_edit::{BillingConfigInput, NewProviderInput};
     use crate::vm::time::{rfc3339, unix_now};
     use crate::vm::Aux;
-    use kiwano_api::providers::{ProviderPriceInput, ProviderPricesInput};
+    use kiwano_api::providers::{
+        AdvancedPatch, BillingConfigPatch, ProviderPatch, ProviderPriceInput, ProviderPricesInput,
+    };
     use kiwanod::store::UsageRecord;
     use kiwanod::store::{Billing, Provider, Store};
 
@@ -272,6 +278,42 @@ pub(crate) mod test_support {
             endpoints: Vec::new(),
             advanced: None,
             plan_query: None,
+        }
+    }
+
+    /// A whole `NewProviderInput` as the patch that would mean the same thing.
+    ///
+    /// What a caller that **has** the full form sends: every field present, so
+    /// an edit built this way is the authoritative rewrite the old `PUT` was.
+    /// The patch's own subject — a client that speaks about one field and
+    /// leaves the rest (`migrate.local.md` §10.38) — is tested by naming that
+    /// field alone.
+    pub(crate) fn full_patch(input: NewProviderInput) -> ProviderPatch {
+        ProviderPatch {
+            name: Some(input.name),
+            api_key: Some(input.api_key),
+            endpoint: Some(input.endpoint),
+            protocol: Some(input.protocol),
+            model_default: Some(input.model_default),
+            billing: Some(input.billing),
+            billing_config: Some(BillingConfigPatch {
+                limit_value: input.billing_config.limit_value,
+                limit_unit: input.billing_config.limit_unit,
+                reset_period: input.billing_config.reset_period,
+                plan_limits: input.billing_config.plan_limits,
+            }),
+            agents: input.agents,
+            endpoints: Some(input.endpoints),
+            advanced: input.advanced.map(|a| AdvancedPatch {
+                timeout_secs: a.timeout_secs,
+                retries: a.retries,
+                headers: a.headers,
+            }),
+            // `null` means "clear" and must survive the trip as such: a plain
+            // `Option<Value>` would collapse it into "not speaking about it".
+            plan_query: input.plan_query.map(|v| (!v.is_null()).then_some(v)),
+            prices: input.prices,
+            catalog_id: input.catalog_id,
         }
     }
 

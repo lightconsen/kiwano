@@ -9,7 +9,7 @@ pub struct ApiKeyVm {
     /// tell two entries apart, and every copy of the plaintext we do not hand
     /// out is one less copy sitting in a webview heap.
     pub masked: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub enabled: bool,
     pub created_at: String,

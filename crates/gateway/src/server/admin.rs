@@ -120,12 +120,17 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             post(apply_agent_route_route),
         )
         .route("/providers/view", post(provider_view_route))
+        .route("/agents/{agent}/primary", post(bind_as_primary_route))
+        .route("/catalog/link", post(link_providers_route))
+        .route("/limit-currencies", get(limit_currencies_route))
         .route("/providers", post(add_provider_route))
         // One route per path: axum panics on a second `route()` for the same
         // path, and the two verbs here are one resource's.
         .route(
             "/providers/{id}",
-            put(update_provider_route).delete(delete_provider_route),
+            get(provider_ref_route)
+                .patch(update_provider_route)
+                .delete(delete_provider_route),
         )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
         .route("/usage-alerts", get(usage_alerts_route))
@@ -1338,15 +1343,19 @@ async fn export_logs_route(
     }
 }
 
-/// The body of an edit: the same form shape the add takes, without an id — the
-/// path names the provider being edited.
+/// The body of an edit: the fields the caller means to change, and no others.
+///
+/// Not the add's shape. `PATCH`, because that is what it now means — the fields
+/// present are the change, and an absent one is left alone, which is the whole
+/// difference from a `PUT` whose body is the resulting state
+/// (`migrate.local.md` §10.38).
 #[derive(serde::Deserialize)]
 struct UpdateProviderBody {
     #[serde(flatten)]
-    input: kiwano_api::providers::NewProviderInput,
+    patch: kiwano_api::providers::ProviderPatch,
 }
 
-/// `PUT /api/providers/{id}` — apply an edit.
+/// `PATCH /api/providers/{id}` — apply an edit's changed fields.
 ///
 /// The **write** is here and the **view** is the client's (`migrate.local.md`
 /// §5's fifth constraint): the daemon updates the row and the bindings, and the
@@ -1357,8 +1366,68 @@ async fn update_provider_route(
     Path(id): Path<String>,
     Json(body): Json<UpdateProviderBody>,
 ) -> Response {
-    let result = crate::api::providers_add::update_provider(&state.store, &id, &body.input);
+    let result = crate::api::providers_add::update_provider(&state.store, &id, &body.patch);
     after_write(&state, result)
+}
+
+/// The body of "make this provider primary for this agent".
+#[derive(serde::Deserialize)]
+struct PrimaryBody {
+    provider_id: String,
+}
+
+/// `POST /api/agents/{agent}/primary` — make a provider the first candidate.
+///
+/// One call rather than "add a binding, then reorder": the promotion reindexes
+/// every other binding, and a client that did it in two steps could be
+/// interrupted between them and leave two candidates claiming priority 1
+/// (`api::providers_add::bind_as_primary`).
+async fn bind_as_primary_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+    Json(body): Json<PrimaryBody>,
+) -> Response {
+    after_write(
+        &state,
+        crate::api::providers_add::bind_as_primary(&state.store, &agent, &body.provider_id),
+    )
+}
+
+/// `POST /api/catalog/link` — infer each provider's catalog entry from the
+/// synced shelf, and report how many were linked.
+async fn link_providers_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::catalog::link_providers(&state.store) {
+        Ok(linked) => Json(json!({ "linked": linked })).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/limit-currencies` — the currencies a limit may be written in.
+///
+/// The rule is the daemon's because the answer is: a currency this machine has
+/// no rate for is refused rather than quietly read as a request count, and only
+/// the side holding the rate table can say which those are.
+async fn limit_currencies_route(State(state): State<Arc<GatewayState>>) -> Response {
+    Json(json!({
+        "currencies": crate::api::limits::known_limit_currencies(&state.store),
+    }))
+    .into_response()
+}
+
+/// `GET /api/providers/{id}` — a provider named by id: what to call it, and how
+/// it is billed.
+///
+/// The narrow read a flag-driven client needs and cannot derive
+/// (`migrate.local.md` §10.38). It is not the row: the edit that follows says
+/// only what it changes, and the daemon applies it to a row it never hands out.
+async fn provider_ref_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match crate::api::providers_add::provider_ref(&state.store, &id) {
+        Ok(r) => Json(r).into_response(),
+        Err(e) => resource_error(e),
+    }
 }
 
 /// `POST /api/import/cc-switch` — apply rows the client extracted from

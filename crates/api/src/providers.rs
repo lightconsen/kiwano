@@ -13,24 +13,24 @@ pub struct HealthVm {
     /// `ok` | `idle` | `off` | `error` — what the dot is drawn from.
     pub state: String,
     pub latency_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// Where `latency_ms` came from: `traffic` (this provider's own requests in
     /// the window) or `probe` (the gateway's reachability check). Absent when
     /// there is no number, and the two must not be read as one: one is a real
     /// round trip with the user's key, the other is an unsigned hello.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// When the probe ran, for the cell's tooltip. `probe` only: a traffic
     /// average covers a window rather than an instant.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<String>,
     /// What the endpoint said when it said no — the vendor's own message for a
     /// refused key, the transport error when nothing answered. Its presence is
     /// what makes the cell read as "the key" rather than as "no answer": a 401
     /// is the vendor responding, which reachability alone cannot tell apart from
     /// silence.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -55,7 +55,7 @@ pub struct UsageVm {
     pub cost: Option<f64>,
     /// Currency of `cost` — the provider's own, never converted. Absent when
     /// no usage row carried a price.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_currency: Option<String>,
     pub latency_ms: Option<i64>,
     pub quota: Option<QuotaVm>,
@@ -76,13 +76,13 @@ pub struct ProviderVm {
     pub name: String,
     pub logo_char: String,
     pub logo_color: String,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logo_border: bool,
     /// The catalog entry this provider was added from, when it came from the
     /// shelf. The dialog needs it to reach the entry again: the entry is the
     /// authority on the endpoints the provider answers on and on the currency it
     /// bills in, and a stored row can be missing both.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_id: Option<String>,
     /// The currency this provider's figures are denominated in — what the user
     /// declared, else the catalog entry's, else USD. The spending-limit picker
@@ -94,17 +94,17 @@ pub struct ProviderVm {
     pub protocol: String,
     pub endpoint_note: String,
     /// Additional per-protocol endpoints (primary excluded).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<ProviderEndpointVm>,
     pub billing: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_price: Option<String>,
     /// Raw limit unit (requests | wan_tokens | ISO currency) for edit prefill.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_unit: Option<String>,
     /// The model the add/edit form collected as this provider's default, for
     /// edit prefill. Absent when never set.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_default: Option<String>,
     pub enabled: bool,
     pub agents: Vec<String>,
@@ -117,30 +117,30 @@ pub struct ProviderVm {
     /// backup while that agent's primary is over its threshold. Not "in use":
     /// which backup actually serves depends on the gateway's breakers at
     /// request time, so the UI badges this as first-in-line instead.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fallback_agents: Vec<String>,
     pub is_current: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_badge: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agents_note: Option<String>,
     pub health: HealthVm,
     pub usage: Option<UsageVm>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advanced: Option<ProviderAdvancedVm>,
     /// Token-plan quota query JSON (edit prefill); None = not configured.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_query: Option<serde_json::Value>,
     /// Plan-mode percent limits JSON `{"five_hour":20,"weekly":60}` (edit
     /// prefill); None = not set.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_limits: Option<serde_json::Value>,
     /// The prices the user declared for this provider:
     /// `{"currency":"CNY","models":[…]}`. Absent = none declared, so its
     /// requests are priced from the Hub's table (or recorded unpriced when the
     /// Hub knows nothing about the model either). Edit prefill: the form that
     /// collected them is the only one that can correct them.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prices: Option<serde_json::Value>,
 }
 
@@ -166,9 +166,17 @@ pub struct ProviderEndpointVm {
 
 /// Plan-mode percent limits (modal form): utilization ceilings over the
 /// vendor's rolling 5h / weekly windows. Both optional; both absent = none.
+///
+/// `default` on both because the **stored** column is written by the daemon's
+/// `plan_limits_json`, which omits a window rather than writing it as null — so
+/// `{"five_hour":80}` is what a provider with only a five-hour ceiling carries.
+/// Without this the daemon could not read back its own column, which is what a
+/// patch needs in order to merge window by window.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanLimitsInput {
+    #[serde(default)]
     pub five_hour: Option<f64>,
+    #[serde(default)]
     pub weekly: Option<f64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +262,156 @@ pub struct NewProviderInput {
     #[serde(default)]
     pub catalog_id: Option<String>,
 }
+// ── The edit's request body ──
+//
+// Separate from `NewProviderInput` because the two speak differently, and the
+// difference is the point: the add form speaks about **every** field, because
+// it is what the user just filled in, and an edit speaks about **the ones it
+// names**. One type cannot hold both — the same argument
+// `NewProviderInput::agents` already makes for `Option<Vec<_>>` over `Vec<_>`:
+// "a plain `Vec` cannot tell 'no agents' from 'not speaking about agents'".
+//
+// That is what lets a client without a form edit a provider at all. The CLI has
+// none: it read the row back, rebuilt a whole input from it, and sent that, so
+// editing needed a database read it was not otherwise entitled to
+// (`migrate.local.md` §14.1). A client with a form has the values in hand; one
+// without should be able to say only what changed.
+
+/// The limit fields an edit may change — each absent one keeps what is stored.
+///
+/// Field-granular rather than a snapshot, because the flags are:
+/// `providers edit --limit 50` names no billing mode and must not disturb one,
+/// and `--plan-limit-5h 80` must leave the weekly window alone.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BillingConfigPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_value: Option<f64>,
+    /// A currency code, or `""` to clear it — the same spelling
+    /// `update_agent_binding` uses for its window, because a JSON `null` and an
+    /// absent key are the same thing to serde.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_period: Option<String>,
+    /// Merged window by window, so naming one keeps the other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_limits: Option<PlanLimitsInput>,
+}
+
+/// The advanced forwarding settings an edit may change — absent keeps, present
+/// sets.
+///
+/// A distinct type from [`AdvancedInput`] rather than the same struct under a
+/// new name, because there the object **is** the resulting state (a null field
+/// clears it) and here it is a list of changes. Same fields, opposite meaning
+/// for "absent": one type carrying both is how a caller ends up clearing a
+/// retry count it never mentioned.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdvancedPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retries: Option<i64>,
+    /// Present replaces the whole header set, so an empty map clears it — which
+    /// is what `providers edit --no-headers` sends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::BTreeMap<String, String>>,
+}
+
+/// The fields an edit may change, and only those it names.
+///
+/// Absent = leave it. Where "clear it" has to be expressible, the field's own
+/// spelling says so: an empty `model_default`, `limit_unit` or `catalog_id`, an
+/// empty `headers` map, or `plan_query: null` — which is what
+/// `--clear-plan-query` sends, and why that is a flag rather than an empty
+/// value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProviderPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Absent or empty keeps the stored key, as it always did: a key that is
+    /// not being replaced is not usually being spoken about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    /// Empty clears the column (`model_default` stores NULL for none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_default: Option<String>,
+    /// `plan` | `payg` | `unl`. Changing the mode recomputes which columns carry
+    /// the limits, and keeps whatever `billing_config` says — or the stored
+    /// values when it says nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_config: Option<BillingConfigPatch>,
+    /// Present replaces the bound set (an empty one unbinds everything);
+    /// absent leaves the bindings exactly as they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<Vec<String>>,
+    /// Present = the resulting set, so an empty list drops every extra
+    /// endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<Vec<NewEndpointInput>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advanced: Option<AdvancedPatch>,
+    /// Absent keeps; `null` clears; a present object replaces.
+    ///
+    /// The doubled `Option` is what makes `null` and "absent" different things
+    /// across the wire. serde collapses a JSON `null` into `None` for
+    /// `Option<T>`, so a one-layer field cannot tell "clear the query" from
+    /// "not speaking about it" — and the two must differ, because clearing is
+    /// what `providers edit --clear-plan-query` means. Written as
+    /// `Option<Option<_>>`: absent keeps the outer `None`, `null` arrives as
+    /// `Some(None)`, an object as `Some(Some(v))`.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub plan_query: Option<Option<serde_json::Value>>,
+    /// Present = a snapshot, so an empty model list clears the column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prices: Option<ProviderPricesInput>,
+    /// Absent or empty keeps the stored link — an edit must not silently
+    /// unlink a provider from the price row it is costed at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+}
+
+/// A provider named by id, with the two fields a client needs to speak about it
+/// without reading its row: what to call it, and how it is billed.
+///
+/// The CLI edits providers by flags, so it has no form to prefill — but two of
+/// its rules are stated in terms of the **stored** state: which limits apply
+/// (plan ceilings or a spend ceiling) and whether the two plan-window flags are
+/// legal at all. `billing` is the whole of what those need. The rest of the row
+/// stays on the daemon, which is where the patch leaves it
+/// (`migrate.local.md` §10.38).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderRefVm {
+    pub id: String,
+    pub name: String,
+    /// `plan` | `payg` | `unl` — the display spelling, not the column's.
+    pub billing: String,
+}
+
+/// Deserialize a field that is present as `Some`, whatever it holds — `null`
+/// included.
+///
+/// The other half of [`ProviderPatch::plan_query`]'s doubled `Option`: it runs
+/// only when the key is there, so `None` (from `default`) keeps meaning "the
+/// caller did not mention this".
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// The prices a user declared for a provider, as the modal form sends them: one
 /// currency for every figure, one row per model.
 ///
@@ -304,7 +462,7 @@ pub struct SyncReportVm {
     /// Version of the price table now cached; None when the Hub offers no
     /// pricing (unreachable, malformed, or absent — the previous cache, if any,
     /// stands).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pricing_version: Option<i64>,
     /// The pricing half was already current, so models.json was not fetched.
     pub pricing_unchanged: bool,

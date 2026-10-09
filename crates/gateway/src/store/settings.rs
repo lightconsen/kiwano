@@ -168,6 +168,16 @@ impl Store {
     /// read. `convert_amount` then passes each amount through unchanged, which
     /// is the same answer the GUI gives on an install that has never synced —
     /// and one that has no priced usage to convert anyway.
+    /// The user's `hub_url` from the `ui` settings blob, or the default when
+    /// the blob has not been written yet. This is the same `app_settings` KV the
+    /// daemon already reads its own settings from, so the sync — when it moves —
+    /// resolves the Hub's address from the same row the app does.
+    pub fn ui_hub_url(&self) -> Option<String> {
+        self.app_setting("ui")
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|v| v.get("hub_url")?.as_str().map(str::to_string))
+    }
+
     pub fn hub_exchange_rates(&self) -> HashMap<String, f64> {
         let payload: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");

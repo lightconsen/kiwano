@@ -1,12 +1,15 @@
 //! The Hub catalog: the sync the user triggers from Settings, and the retried
-//! one startup runs. Both end the same way — rebuild what the documents imply,
-//! then reload the daemon at most once — so the button and the startup path
-//! cannot drift apart.
+//! one startup runs.
+//!
+//! Both are the daemon's now (`migrate.local.md` §10.14): it fetches, caches,
+//! applies what changed, and re-reads its own route table — which is why this
+//! module no longer reads the cache or sends a reload ping. The startup loop
+//! keeps only what is the app's business: *when* to retry.
 
-use tauri::{Manager, State};
+use tauri::Manager;
 
 use crate::state::AppState;
-use kiwano_core::{sidecar, sync, vm};
+use kiwano_core::vm;
 
 /// Hub sync at startup: catalog + pricing, retried briefly so a login that
 /// beats the network does not settle for the cache. A task on Tauri's async
@@ -16,10 +19,11 @@ use kiwano_core::{sidecar, sync, vm};
 /// cached data always works offline.
 pub(crate) fn spawn_hub_sync(handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let Some(state) = handle.try_state::<AppState>() else {
+        let Some(_state) = handle.try_state::<AppState>() else {
             return;
         };
-        let hub_url = vm::ui_settings(&state.aux).hub_url;
+        // The daemon resolves the hub_url itself — from the same ui settings row
+        // the app used to read, through its own store.
         // Launched at login, this runs while Wi-Fi is often still associating:
         // one attempt then leaves the catalog on whatever was cached for the
         // rest of the session, which is indistinguishable from the Hub being
@@ -30,7 +34,12 @@ pub(crate) fn spawn_hub_sync(handle: tauri::AppHandle) {
             if *delay > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
             }
-            match sync::sync_from_hub(&state.aux, &hub_url).await {
+            let outcome = tokio::task::spawn_blocking(|| {
+                kiwano_core::daemon_api::DaemonApi::connect().sync_hub()
+            })
+            .await
+            .expect("the sync task did not panic");
+            match outcome {
                 // Already current: the manifest sha matched the cache.
                 Ok(r) => {
                     if !r.unchanged {
@@ -44,13 +53,9 @@ pub(crate) fn spawn_hub_sync(handle: tauri::AppHandle) {
                 Err(_) => {} // another attempt is coming
             }
         }
-        // The Hub may have brought a newer price table or made a provider
-        // linkable. Rebuild both from the cache it just wrote and reload the
-        // daemon once — the same call the Sync button makes, so the two cannot
-        // drift apart again.
-        if sync::apply_hub_documents(&state.store, &state.aux) {
-            sidecar::notify_reload(&state.admin);
-        }
+        // The daemon applies what the sync brought and re-reads its own route
+        // table — the same work the Sync button does, and nothing for this path
+        // to repeat.
     });
 }
 
@@ -59,15 +64,9 @@ pub(crate) fn spawn_hub_sync(handle: tauri::AppHandle) {
 /// blocking pool: the same work, on a thread of its own, to satisfy a client that
 /// panics if it is dropped inside a runtime.
 #[tauri::command]
-pub async fn sync_hub(state: State<'_, AppState>) -> Result<vm::SyncReportVm, String> {
-    let hub_url = vm::ui_settings(&state.aux).hub_url;
-    let report = sync::sync_from_hub(&state.aux, &hub_url).await?;
-    // Rebuild everything derived from the documents just cached — the price
-    // mirror and the provider↔catalog links — and reload the daemon once if
-    // either wrote. A manual sync does not otherwise touch the daemon, so this
-    // is the whole of its effect on what gets billed.
-    if sync::apply_hub_documents(&state.store, &state.aux) {
-        sidecar::notify_reload(&state.admin);
-    }
-    Ok(report)
+pub fn sync_hub() -> Result<vm::SyncReportVm, String> {
+    // Served by the daemon (`migrate.local.md` §10.14): it fetches, caches,
+    // applies what changed, and re-reads its own route table — the whole of
+    // what this command used to orchestrate by hand.
+    kiwano_core::daemon_api::DaemonApi::connect().sync_hub()
 }

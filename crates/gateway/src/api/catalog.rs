@@ -17,6 +17,7 @@
 //! endpoint the user is editing.
 
 use crate::store::{Provider, Store};
+use kiwano_api::error::ApiError;
 use kiwano_api::logo::palette_color;
 use serde::{Deserialize, Serialize};
 
@@ -369,4 +370,41 @@ pub fn endpoint_key(s: &str) -> String {
         .or_else(|| t.strip_prefix("http://"))
         .unwrap_or(&t);
     no_scheme.trim_end_matches('/').to_string()
+}
+
+/// Fill in the catalog link on providers that have none.
+///
+/// The link is what prices a request at its own provider's rate, and it is
+/// written when a provider is added from the shelf — and only then, so
+/// everything hand-added, added from the CLI, imported, or present before the
+/// column existed has none. With the Hub pricing per entry, an unlinked
+/// provider is costed at *another* entry's rate, so the link is inferred from
+/// the endpoint wherever that is unambiguous ([`catalog_id_for`]).
+///
+/// Only `NULL`s are considered: a link is a fact that decides a price, so it is
+/// never re-derived, never overwritten, never cleared — the same rule
+/// `update_provider` follows for an edit that carries no catalog id. The row's
+/// own `updated_at` rides along, so a backfill does not read as a user edit.
+///
+/// Returns how many rows were linked: a caller with a running gateway needs to
+/// know whether the daemon's in-memory copy just went stale.
+pub fn link_providers(store: &Store) -> Result<usize, ApiError> {
+    let list = catalog_snapshot(store);
+    // Never synced: nothing to infer from, and nothing to write.
+    if list.entries.is_empty() {
+        return Ok(0);
+    }
+    let mut linked = 0;
+    for mut p in store.list_providers().map_err(ApiError::failed)? {
+        if p.catalog_id.is_some() {
+            continue;
+        }
+        let Some(id) = catalog_id_for(&list.entries, &p) else {
+            continue; // a custom endpoint, or an ambiguous one
+        };
+        p.catalog_id = Some(id);
+        store.update_provider(&p).map_err(ApiError::failed)?;
+        linked += 1;
+    }
+    Ok(linked)
 }

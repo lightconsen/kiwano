@@ -14,7 +14,7 @@
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
-use kiwano_api::providers::{NewProviderInput, ProviderVm};
+use kiwano_api::providers::{NewProviderInput, ProviderVm, SyncReportVm};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::logs::RequestLogListVm;
@@ -418,6 +418,18 @@ impl DaemonApi {
             self.token.as_deref(),
             "/api/providers",
             &body,
+        )
+    }
+    /// Sync the Hub — the catalog and the price table, cached and applied.
+    /// The daemon fetches, and re-reads its own route table when either wrote
+    /// (`migrate.local.md` §10.14). A skip is still an answer: "checked, still
+    /// current" is what the footer badge shows.
+    pub fn sync_hub(&self) -> Result<SyncReportVm, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/sync-hub",
+            &serde_json::Value::Null,
         )
     }
 }

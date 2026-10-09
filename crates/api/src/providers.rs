@@ -286,3 +286,26 @@ pub struct ProviderPriceInput {
     #[serde(default)]
     pub cache_creation: Option<String>,
 }
+
+/// Result of a Hub sync, as the Settings screen shows it.
+///
+/// Moved here from `kiwano-core` when the daemon took over the sync
+/// (`migrate.local.md` §10.14): the daemon produces it, so it is a wire type
+/// rather than a view model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncReportVm {
+    pub fetched: i64,
+    pub synced_at: String,
+    pub hub_url: String,
+    /// Conditional sync: the manifest sha256 matched the cached catalog, so
+    /// catalog.json was not re-downloaded. `synced_at` still refreshed — the
+    /// app confirmed it is current, which is what the footer badge claims.
+    pub unchanged: bool,
+    /// Version of the price table now cached; None when the Hub offers no
+    /// pricing (unreachable, malformed, or absent — the previous cache, if any,
+    /// stands).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing_version: Option<i64>,
+    /// The pricing half was already current, so models.json was not fetched.
+    pub pricing_unchanged: bool,
+}

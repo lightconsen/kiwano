@@ -124,6 +124,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/providers/{id}", delete(delete_provider_route))
         .route("/model-prices", get(list_model_prices_route))
         .route("/catalog", get(list_catalog_route))
+        .route("/sync-hub", post(sync_hub_route))
         .route("/logs", get(list_logs_route).delete(clear_logs_route))
         .route("/logs/{id}", get(get_log_route))
         .route("/credential-finding", get(check_finding_route))
@@ -952,6 +953,41 @@ async fn add_provider_route(
 ) -> Response {
     let result = crate::api::providers_add::add_provider(&state.store, &body.id, &body.input);
     after_write_with(&state, result)
+}
+
+/// `POST /api/sync-hub` — fetch the catalog and the price table, cache both,
+/// and apply what changed (the price mirror, the provider↔catalog links).
+///
+/// `async` because the fetch is the whole of it: this is the one resource
+/// endpoint that does network I/O, and it is the reason the daemon is the
+/// right process for it — the daemon is what the Hub's data is *for*.
+///
+/// The report is the answer either way: a skip is still a sync ("checked,
+/// still current"), which is what the footer badge claims. The daemon re-reads
+/// its own route table when the apply step wrote, which is what makes a price
+/// update take effect without a restart.
+async fn sync_hub_route(State(state): State<Arc<GatewayState>>) -> Response {
+    let hub_url = state
+        .store
+        .ui_hub_url()
+        .unwrap_or_else(|| crate::api::sync::DEFAULT_HUB_URL.to_string());
+    match crate::api::sync::sync_from_hub(&state.store, &hub_url).await {
+        Ok(report) => {
+            // The sync rewrote two cache rows; the derived state is rebuilt
+            // here, and the route table re-read when either wrote. The daemon
+            // used to be told this happened by the app (`apply_hub_documents` +
+            // `/reload`) — it is the same work, in the process that owns it.
+            if crate::api::sync::apply_hub_documents(&state.store) {
+                reload_after_write(&state);
+            }
+            Json(report).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "error": e, "kind": "hub" })),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]

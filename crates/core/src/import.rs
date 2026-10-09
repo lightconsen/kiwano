@@ -23,38 +23,25 @@
 //!   unknown app_types surface a skip detail line instead of being dropped
 //!   silently
 
-use std::collections::HashMap;
 use std::path::Path;
 
-use kiwanod::store::{Binding, Protocol, Provider, Store, StrategyType};
-use serde::Serialize;
+use kiwanod::store::Store;
 use serde_json::Value;
 
-use crate::vm::slug;
+// The row shape and the apply half moved to `kiwanod::api::import`
+// (`migrate.local.md` §10.19): reading cc-switch's files is this side's (they
+// are in the user's home), writing providers is the daemon's.
+pub use kiwanod::api::import::{ImportReportVm, RawProvider};
 
-#[derive(Serialize)]
-pub struct ImportReportVm {
-    pub imported: usize,
-    pub skipped: usize,
-    pub detail: Vec<String>,
-}
-
-struct RawProvider {
-    cc_id: String,
-    app: &'static str, // one of Kiwano's agent ids
-    name: String,
-    base_url: String,
-    api_path: Option<String>,
-    api_key: Option<String>,
-    is_current: bool,
-}
-
-/// Default import entry: pass candidate paths explicitly so tests never read real user data.
-pub fn run_import(
-    store: &Store,
+/// The **reader** half: extract the rows from cc-switch's files, and say what
+/// each file contributed. No store is touched — the rows travel to the daemon,
+/// which applies them (`migrate.local.md` §10.19).
+///
+/// Pass candidate paths explicitly so tests never read real user data.
+pub fn read_cc_switch(
     db_path: Option<&Path>,
     json_path: Option<&Path>,
-) -> ImportReportVm {
+) -> (Vec<RawProvider>, Vec<String>, Vec<String>) {
     let (mut raws, mut detail, mut skips) = (Vec::new(), Vec::new(), Vec::new());
     if let Some(p) = db_path {
         match read_db(p) {
@@ -78,6 +65,18 @@ pub fn run_import(
             }
         }
     }
+    (raws, skips, detail)
+}
+
+/// Read **and** apply, in one call — the shape the CLI and the tests use. The
+/// app's command splits the two so the reading happens on the client and the
+/// writing on the daemon; this is the same thing without the seam.
+pub fn run_import(
+    store: &Store,
+    db_path: Option<&Path>,
+    json_path: Option<&Path>,
+) -> ImportReportVm {
+    let (raws, skips, mut detail) = read_cc_switch(db_path, json_path);
     if raws.is_empty() && skips.is_empty() {
         detail.push("No importable CC Switch data found".into());
         return ImportReportVm {
@@ -86,201 +85,18 @@ pub fn run_import(
             detail,
         };
     }
-
-    let (mut imported, mut skipped) = (0usize, 0usize);
-    for line in &skips {
-        skipped += 1;
-        detail.push(line.clone());
-    }
-
-    // provider_id by (protocol, origin): a provider that is already here —
-    // hand-added, or imported in an earlier run — is the same upstream, so an
-    // import reuses it rather than growing a second row beside it.
-    let mut by_endpoint: HashMap<(Protocol, String), String> = HashMap::new();
-    if !raws.is_empty() {
-        for p in store.list_providers().ok().unwrap_or_default() {
-            by_endpoint.insert(
-                (p.protocol, p.base_url.trim_end_matches('/').to_string()),
-                p.id.clone(),
-            );
+    let mut report = kiwanod::api::import::apply_import(store, &raws, &skips).unwrap_or_else(|e| {
+        ImportReportVm {
+            imported: 0,
+            skipped: raws.len(),
+            detail: vec![format!("import failed: {e}")],
         }
-    }
-
-    for raw in raws {
-        let (name, protocol) = match raw.app {
-            "claude" | "claude-desktop" => (raw.name.clone(), Protocol::Anthropic),
-            _ => (raw.name.clone(), Protocol::OpenAI),
-        };
-        // Skip official placeholders / empty configs
-        if raw.base_url.is_empty() || raw.api_key.as_deref().unwrap_or("").is_empty() {
-            skipped += 1;
-            detail.push(format!(
-                "skip {}/{}: missing endpoint or key",
-                raw.app, raw.cc_id
-            ));
-            continue;
-        }
-        let id = format!("ccs-{}-{}", raw.app, slug(&raw.cc_id));
-        // The deterministic id is *ours*: a row already under it is this
-        // import's earlier run, refreshed in place. Any other provider with the
-        // same origin and protocol — one the user hand-added, or imported from
-        // an earlier manager — is the same upstream, and a fresh row beside it
-        // would be a duplicate that only the id's prefix distinguishes. Neither
-        // is rewritten: the reuse case is somebody else's row, and what it
-        // carries is theirs to keep.
-        let endpoint_key = (protocol, raw.base_url.trim_end_matches('/').to_string());
-        let reused = store
-            .get_provider(&id)
-            .ok()
-            .flatten()
-            .map(|_| None)
-            .unwrap_or_else(|| by_endpoint.get(&endpoint_key).cloned());
-        if let Some(target) = reused {
-            imported += 1;
-            detail.push(format!(
-                "import {id}: {name} ({}) · uses existing provider {target}",
-                protocol.as_str()
-            ));
-            if raw.is_current {
-                let agent = raw.app; // app_type == Kiwano agent id (1:1 for every app)
-                let cur = store.primary_provider_id(agent).ok().flatten();
-                match cur {
-                    // The agent's routing is the user's, and one is already
-                    // theirs — leave the cc-switch choice out of it. Only an
-                    // agent with no route yet is imported onto.
-                    Some(existing) if existing != target => {
-                        skipped += 1;
-                        detail.push(format!(
-                            "leave {agent} routed to {existing} (cc-switch wanted {target})"
-                        ));
-                    }
-                    _ => {
-                        let _ = store.upsert_strategy(agent, StrategyType::Single, None);
-                        let _ = store.upsert_binding(&Binding {
-                            agent: agent.to_string(),
-                            provider_id: target,
-                            priority: 0,
-                            weight: 1,
-                            win_start: None,
-                            win_end: None,
-                            enabled: true,
-                        });
-                    }
-                }
-            }
-            continue;
-        }
-        let now = crate::vm::rfc3339(crate::vm::unix_now());
-        let mut provider = Provider {
-            id: id.clone(),
-            name,
-            catalog_id: None,
-            protocol,
-            base_url: raw.base_url.clone(),
-            api_path: raw.api_path.clone(),
-            endpoints: Vec::new(),
-            api_key: raw.api_key.clone(),
-            // The cc-switch shape has no model field to carry.
-            model_default: None,
-            billing: kiwanod::store::Billing::Metered,
-            period_limit: None,
-            limit_unit: None,
-            reset_period: None,
-            plan_query: None,
-            plan_limits: None,
-            // The cc-switch shape carries no prices to import, and inventing
-            // them from another manager's fields is not this importer's job.
-            // A row already here keeps the ones the app collected — set below,
-            // after the existing row is read.
-            prices: None,
-            timeout_secs: None,
-            retries: None,
-            headers: None,
-            enabled: true,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        let existing = store
-            .get_provider(&id)
-            .map_err(|e| e.to_string())
-            .ok()
-            .flatten();
-        // A re-import updates this row wholesale — the endpoint, the key and the
-        // billing are what it came to refresh — but the declared prices are not
-        // in a cc-switch file at all, and the app is the only place they can be
-        // written. Clearing them here would silently re-price the provider's
-        // requests and move its spending limit on an import nobody asked to do
-        // either.
-        if let Some(prev) = &existing {
-            provider.prices = prev.prices.clone();
-        }
-        let existed = existing.is_some();
-        let up = if existed {
-            store.update_provider(&provider)
-        } else {
-            store.insert_provider(&provider)
-        };
-        if let Err(e) = up {
-            skipped += 1;
-            detail.push(format!("skip {id}: {e}"));
-            continue;
-        }
-        imported += 1;
-        detail.push(format!(
-            "import {id}: {} ({}){}",
-            provider.name,
-            provider.protocol.as_str(),
-            if existed { " · updated" } else { "" },
-        ));
-        if raw.is_current {
-            let agent = raw.app; // app_type == Kiwano agent id (1:1 for every app)
-            if store
-                .upsert_strategy(agent, StrategyType::Single, None)
-                .is_ok()
-            {
-                let prev = store.primary_provider_id(agent).ok().flatten();
-                // Same leave-it-alone rule as the reuse arm: an agent this
-                // import would move off its current route is an agent whose
-                // routing is already the user's answer.
-                match prev {
-                    Some(cur) if cur != id => {
-                        skipped += 1;
-                        detail.push(format!(
-                            "leave {agent} routed to {cur} (cc-switch wanted {id})"
-                        ));
-                    }
-                    _ => {
-                        let _ = store.upsert_binding(&Binding {
-                            agent: agent.to_string(),
-                            provider_id: id.clone(),
-                            priority: 0,
-                            weight: 1,
-                            win_start: None,
-                            win_end: None,
-                            enabled: true,
-                        });
-                        if let Some(prev) = prev {
-                            let _ = store.upsert_binding(&Binding {
-                                agent: agent.to_string(),
-                                provider_id: prev,
-                                priority: 1,
-                                weight: 1,
-                                win_start: None,
-                                win_end: None,
-                                enabled: true,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-    detail.truncate(30);
-    ImportReportVm {
-        imported,
-        skipped,
-        detail,
-    }
+    });
+    // The reader's own lines come first: they say which file answered and what
+    // was skipped before anything was applied.
+    detail.append(&mut report.detail);
+    report.detail = detail;
+    report
 }
 
 /// origin + first-path-segment split: `https://api.deepseek.com/anthropic` →
@@ -439,7 +255,7 @@ fn raw_from(
     let (base_url, api_path) = split_url(&url);
     RawProvider {
         cc_id: cc_id.to_string(),
-        app,
+        app: app.to_string(),
         name: if name.is_empty() {
             cc_id.to_string()
         } else {
@@ -566,6 +382,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use kiwanod::store::{Protocol, Provider};
 
     #[test]
     fn split_url_origin_and_prefix() {

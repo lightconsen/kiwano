@@ -135,6 +135,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             get(get_settings_route).patch(update_settings_route),
         )
         .route("/config/export", get(export_config_route))
+        .route("/import/cc-switch", post(import_cc_switch_route))
         .route("/config/import", post(import_config_route))
         .route("/logs/export", get(export_logs_route))
         .route("/plan-quota/{provider_id}", get(plan_quota_route))
@@ -1260,6 +1261,36 @@ async fn update_provider_route(
 ) -> Response {
     let result = crate::api::providers_add::update_provider(&state.store, &id, &body.input);
     after_write(&state, result)
+}
+
+/// `POST /api/import/cc-switch` — apply rows the client extracted from
+/// cc-switch's files.
+///
+/// The rows, not the paths: those files are in the user's home and one of them
+/// is a SQLite database, so reading them is the client's (`migrate.local.md`
+/// §10.19). The split falls where the reading stops.
+#[derive(serde::Deserialize)]
+struct CcSwitchBody {
+    raws: Vec<crate::api::import::RawProvider>,
+    #[serde(default)]
+    skips: Vec<String>,
+}
+
+async fn import_cc_switch_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<CcSwitchBody>,
+) -> Response {
+    match crate::api::import::apply_import(&state.store, &body.raws, &body.skips) {
+        Ok(report) => {
+            // An import can add providers and bindings, so the daemon re-reads
+            // its own route table.
+            if report.imported > 0 {
+                reload_after_write(&state);
+            }
+            Json(report).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
 }
 
 #[cfg(test)]

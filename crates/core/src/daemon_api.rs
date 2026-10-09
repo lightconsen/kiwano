@@ -589,6 +589,25 @@ impl DaemonApi {
             input,
         ))
     }
+    /// Apply cc-switch rows the caller extracted — the **store half** of that
+    /// import. The files stay on the client (`migrate.local.md` §10.19).
+    pub fn import_cc_switch(
+        &self,
+        raws: &[kiwanod::api::import::RawProvider],
+        skips: &[String],
+    ) -> Result<kiwanod::api::import::ImportReportVm, String> {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            raws: &'a [kiwanod::api::import::RawProvider],
+            skips: &'a [String],
+        }
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/import/cc-switch",
+            &Body { raws, skips },
+        )
+    }
 }
 
 /// A value as a query-string component: everything outside the unreserved set is

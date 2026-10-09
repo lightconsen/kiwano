@@ -2,10 +2,8 @@
 //! that called the export/import pair was removed on 2026-09-10; the note on
 //! the banner below is why they stay registered.
 
-use tauri::State;
-
 use crate::paths::home_dir;
-use crate::state::{after_mutation, AppState};
+
 use kiwano_core::{import, share};
 
 // ── Config sharing (spec §4.1 P1: export/import of one-click scheme JSON) ──
@@ -38,18 +36,34 @@ pub fn import_config(path: String) -> Result<share::ImportReport, String> {
 }
 
 #[tauri::command]
-pub fn import_cc_switch(state: State<AppState>) -> import::ImportReportVm {
+pub fn import_cc_switch() -> import::ImportReportVm {
     // The same home every other read uses: cc-switch's files are the user's,
     // and a `HOME` that is not the profile directory would look for them in a
     // place that does not have them.
     let home = home_dir().join(".cc-switch");
-    let report = import::run_import(
-        &state.store,
+    // Read here — those files are this machine's — and let the daemon write:
+    // it applies the rows and re-reads its own route table, so there is no
+    // reload ping to send (`migrate.local.md` §10.19).
+    let (raws, skips, mut detail) = import::read_cc_switch(
         Some(&home.join("cc-switch.db")),
         Some(&home.join("config.json")),
     );
-    if report.imported > 0 {
-        after_mutation(&state);
+    if raws.is_empty() && skips.is_empty() {
+        detail.push("No importable CC Switch data found".into());
+        return import::ImportReportVm {
+            imported: 0,
+            skipped: 0,
+            detail,
+        };
     }
+    let mut report = kiwano_core::daemon_api::DaemonApi::connect()
+        .import_cc_switch(&raws, &skips)
+        .unwrap_or_else(|e| import::ImportReportVm {
+            imported: 0,
+            skipped: raws.len(),
+            detail: vec![format!("import failed: {e}")],
+        });
+    detail.append(&mut report.detail);
+    report.detail = detail;
     report
 }

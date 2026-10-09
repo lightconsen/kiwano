@@ -56,6 +56,17 @@ pub fn update_settings(store: &Store, patch: &serde_json::Value) -> Result<(), A
     store
         .save_settings_json(&merged)
         .map_err(ApiError::failed)?;
+    // **The offset has a second home, and it has to be kept in step.** The
+    // daemon reads its own key for quota period boundaries, and this is the only
+    // path that changes the value — the app sends the whole blob, so a daemon
+    // that read only its own key would stop seeing a timezone the user had just
+    // changed, silently, as a period resetting at the wrong hour
+    // (`migrate.local.md` §9.2.2's hazard, which is this field).
+    if let Some(minutes) = patch.get("tz_offset_minutes").and_then(|v| v.as_i64()) {
+        store
+            .set_ui_tz_offset_minutes(minutes)
+            .map_err(ApiError::failed)?;
+    }
     // Request-log capture config lives in the shared gateway_settings table:
     // the sidecar reads it at startup and on /reload, so keep both copies in
     // sync whenever the UI patches one of these keys.
@@ -124,4 +135,73 @@ pub fn update_settings(store: &Store, patch: &serde_json::Value) -> Result<(), A
         store.save_stream_timeouts(&cfg).map_err(ApiError::failed)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The timezone's move, and the hazard §9.2.2 wrote down before any of this
+    /// existed: **the app writes the `ui` blob whole**, so a daemon reading only
+    /// its own key would stop seeing an offset the user had just changed —
+    /// silently, as a quota period resetting at the wrong hour.
+    ///
+    /// So the patch keeps both in step, and the read prefers its own key while
+    /// still falling back to the blob an older app writes.
+    #[test]
+    fn the_timezone_moves_without_going_quiet() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.ui_tz_offset_minutes(), 0, "nothing set is UTC");
+
+        // An app from before this change: the blob only, and the daemon reads it.
+        store
+            .save_settings_json(&serde_json::json!({ "tz_offset_minutes": 480 }))
+            .unwrap();
+        assert_eq!(
+            store.ui_tz_offset_minutes(),
+            480,
+            "an older app's blob is still read"
+        );
+
+        // This build's patch: the blob **and** the daemon's own key.
+        update_settings(&store, &serde_json::json!({ "tz_offset_minutes": -300 })).unwrap();
+        assert_eq!(store.ui_tz_offset_minutes(), -300);
+        assert_eq!(
+            store.gateway_setting("tz_offset_minutes").as_deref(),
+            Some("-300"),
+            "the daemon's own copy moved with it"
+        );
+        // The blob agrees, so an app reading it sees the same thing.
+        assert_eq!(
+            store
+                .settings_json()
+                .and_then(|v| v.get("tz_offset_minutes").and_then(|t| t.as_i64())),
+            Some(-300)
+        );
+
+        // And with both present, the daemon's key is the one that wins — it is
+        // what this build writes and what a later one will keep.
+        store
+            .save_settings_json(&serde_json::json!({ "tz_offset_minutes": 60 }))
+            .unwrap();
+        assert_eq!(
+            store.ui_tz_offset_minutes(),
+            -300,
+            "the blob alone cannot move the daemon's answer"
+        );
+    }
+
+    /// A patch that does not mention the offset leaves both alone — the same
+    /// absent-keeps rule every other key in this patch follows.
+    #[test]
+    fn a_patch_without_the_timezone_does_not_touch_it() {
+        let store = Store::open_in_memory().unwrap();
+        update_settings(&store, &serde_json::json!({ "tz_offset_minutes": 120 })).unwrap();
+        update_settings(&store, &serde_json::json!({ "language": "en" })).unwrap();
+        assert_eq!(store.ui_tz_offset_minutes(), 120);
+        assert_eq!(
+            store.gateway_setting("tz_offset_minutes").as_deref(),
+            Some("120")
+        );
+    }
 }

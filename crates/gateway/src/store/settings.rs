@@ -17,6 +17,12 @@ use std::path::{Path, PathBuf};
 /// [`Store::manual_agent_dirs`].
 const MANUAL_AGENT_DIR_PREFIX: &str = "detect_dir:";
 
+/// The daemon's own copy of the user's UTC offset, in minutes east of UTC.
+///
+/// Split out of the app's `ui` blob because the daemon is what needs it
+/// (`migrate.local.md` §9.2.1): quota period boundaries are the user's days.
+const TZ_OFFSET_KEY: &str = "tz_offset_minutes";
+
 impl Store {
     // ── The GUI's KV (`app_settings`) ──
     //
@@ -150,10 +156,34 @@ impl Store {
     /// over at their midnight, not UTC's — so the enforcement side needs it.
     /// Absent means UTC, which is what an older settings blob yields.
     pub fn ui_tz_offset_minutes(&self) -> i64 {
+        // **Its own key first, the `ui` blob second** (`migrate.local.md`
+        // §9.2.1): the offset is moving out of the app's blob because the daemon
+        // is the side that needs it — every quota period boundary is measured in
+        // the user's day, not UTC's — and a daemon reading a blob the app owns
+        // is the arrangement being retired.
+        //
+        // The blob stays as the fallback for as long as an app writes only that:
+        // §9.2.2's warning is exactly this field, because the app writes the blob
+        // *whole*, so a daemon that read only its own key would stop seeing a
+        // timezone the user had just changed — silently, as a period resetting
+        // at the wrong hour.
+        if let Some(own) = self
+            .gateway_setting(TZ_OFFSET_KEY)
+            .and_then(|v| v.trim().parse::<i64>().ok())
+        {
+            return own;
+        }
         self.app_setting("ui")
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
             .and_then(|v| v.get("tz_offset_minutes").and_then(|t| t.as_i64()))
             .unwrap_or(0)
+    }
+
+    /// Keep the daemon's own copy of the UTC offset in step with the blob the
+    /// app writes. Called wherever the offset can change (`migrate.local.md`
+    /// §9.2.2's hazard, and the only reason this key exists at all).
+    pub fn set_ui_tz_offset_minutes(&self, minutes: i64) -> Result<()> {
+        self.set_gateway_setting(TZ_OFFSET_KEY, &minutes.to_string())
     }
 
     /// The Hub's exchange rates, as `models.json` publishes them

@@ -10,9 +10,9 @@ use kiwano_core::vm;
 
 pub fn status(ctx: &mut Ctx) -> Result<i32, CliError> {
     let admin = ctx.admin.describe();
-    let footer = footer_stats(ctx);
     match sidecar::status_for(&ctx.admin, ctx.token.as_deref()) {
         Some(mut v) => {
+            let footer = footer_stats(ctx);
             // Additive rather than reshaped: the rest of this object is the
             // admin plane's report passed through, and a consumer parsing it
             // should keep working.
@@ -25,46 +25,29 @@ pub fn status(ctx: &mut Ctx) -> Result<i32, CliError> {
             ctx.out.emit(&v, || text);
             Ok(EXIT_OK)
         }
-        // Gateway down is an answer, not a failure: the store is still readable
-        // and on a server that is exactly what you want to see. Exit 1 is how a
-        // script tells the two apart.
+        // Gateway down is an answer, not a failure: exit 1 is how a script tells
+        // the two apart, and that much is unchanged.
+        //
+        // What it no longer does is read the shared database for a fallback
+        // report (`migrate.local.md` §14.1, decision D3). A client that answers
+        // from a database of its own is answering about a *different* daemon the
+        // moment it is pointed at another machine — and a remote one could not
+        // open that file at all. It is the same failure class as §10.29's
+        // mistyped address: refused and named, rather than silently substituted.
         None => {
             ctx.out
                 .line(format!("gateway: not running (admin {admin})"));
-            // Only report on a store that is already there. Opening one creates
-            // it as a side effect, and `status` is the first thing anyone runs
-            // on a machine that has neither — it should not be the command that
-            // leaves a database behind.
-            if ctx.db.is_file() {
-                let metrics = ctx.store()?.metrics().map_err(runtime)?;
-                ctx.out.line(format!(
-                    "store: providers {} · bindings {} · placeholder_keys {} · usage_rows {}",
-                    metrics.providers,
-                    metrics.bindings,
-                    metrics.placeholder_keys,
-                    metrics.usage_rows
-                ));
-            }
-            if let Some(footer) = &footer {
-                ctx.out.line(render_footer(footer));
-            }
             Ok(EXIT_NEGATIVE)
         }
     }
 }
 
-/// Today's totals — what the app's status bar shows.
+/// Today's totals — what the app's status bar shows. Asked of the daemon, which
+/// owns the usage rows and is the only side that can answer for *its* database.
 ///
-/// Returns `None` rather than forcing an answer when there is no database yet:
-/// opening the store creates the file as a side effect, and `status` is the
-/// first thing anyone runs on a machine that has neither, so it must stay a
-/// read-only question.
+/// `None` when there is no answer, which is the gateway-down case above.
 fn footer_stats(ctx: &Ctx) -> Option<vm::FooterStatsVm> {
-    if !ctx.db.is_file() {
-        return None;
-    }
-    let store = ctx.store().ok()?;
-    vm::build_footer_stats(store, env!("CARGO_PKG_VERSION")).ok()
+    ctx.api.footer_stats(env!("CARGO_PKG_VERSION")).ok()
 }
 
 pub(crate) fn render_footer(footer: &vm::FooterStatsVm) -> String {

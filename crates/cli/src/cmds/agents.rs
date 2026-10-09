@@ -105,10 +105,11 @@ fn agents_add(
     note: Option<&str>,
     protocol: Option<&str>,
 ) -> Result<(), CliError> {
-    let created = {
-        let store = ctx.store()?;
-        vm::add_custom_agent(store, name, note, protocol)?
-    };
+    // The id is minted here, not by the daemon: it carries a random suffix, and
+    // an id the daemon has already seen is answered with the agent that exists,
+    // so it is also the identity of the operation (`migrate.local.md` §6.1).
+    let id = vm::mint_agent_id(name);
+    let created = ctx.api.add_custom_agent(&id, name, note, protocol)?;
     // The key is the whole integration surface, so it is printed rather than
     // left to be looked up: this is the credential a client is configured with,
     // and the gateway attributes traffic by nothing else.
@@ -120,18 +121,13 @@ fn agents_add(
         created.id
     );
     ctx.out.emit(&created, || text);
-    ctx.after_mutation();
     Ok(())
 }
 
 fn agents_remove(ctx: &mut Ctx, id: &str) -> Result<(), CliError> {
-    {
-        let store = ctx.store()?;
-        vm::remove_custom_agent(store, id)?;
-    }
+    ctx.api.remove_custom_agent(id)?;
     ctx.out
         .line(format!("removed {id} (its usage history stays)"));
-    ctx.after_mutation();
     Ok(())
 }
 

@@ -5,7 +5,6 @@
 use super::render::{render_alerts, render_dashboard};
 use crate::cli::DashboardArgs;
 use crate::{CliError, Ctx};
-use kiwano_core::vm;
 
 // ── dashboard / alerts ──────────────────────────────────────────────────────
 
@@ -18,16 +17,9 @@ pub fn dashboard(args: &DashboardArgs, ctx: &mut Ctx) -> Result<(), CliError> {
             )))
         }
     };
-    let data = {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::build_dashboard(
-            store,
-            aux,
-            window,
-            args.provider.as_deref(),
-            args.agent.as_deref(),
-        )?
-    };
+    let data = ctx
+        .api
+        .dashboard(window, args.provider.as_deref(), args.agent.as_deref())?;
     let text = render_dashboard(&data, window);
     ctx.out.emit(&data, || text);
     Ok(())
@@ -38,10 +30,7 @@ pub fn dashboard(args: &DashboardArgs, ctx: &mut Ctx) -> Result<(), CliError> {
 /// notification. A cron poll consuming it would silence the alert the user was
 /// waiting for.
 pub fn alerts(mark_notified: bool, ctx: &mut Ctx) -> Result<(), CliError> {
-    let alerts = {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::check_usage_alerts(store, aux, mark_notified)?
-    };
+    let alerts = ctx.api.usage_alerts(mark_notified)?;
     if alerts.is_empty() {
         // Not an error: "nothing is over budget" is the answer to the question.
         ctx.out.note("no provider is over its allowance");

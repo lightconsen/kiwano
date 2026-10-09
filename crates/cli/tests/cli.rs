@@ -577,6 +577,10 @@ fn a_moved_command_needs_the_daemon() {
         vec!["logs", "list"],
         vec!["logs", "show", "1"],
         vec!["logs", "clear", "--yes"],
+        vec!["dashboard", "--window", "today"],
+        vec!["alerts"],
+        vec!["agents", "add", "--name", "night batch"],
+        vec!["agents", "remove", "no-such-agent"],
     ] {
         let (code, out, err) = run(&db, &args);
         assert_eq!(code, 3, "{args:?}\nstdout: {out}\nstderr: {err}");
@@ -623,19 +627,36 @@ fn the_harness_serves_a_daemon_the_cli_actually_reaches() {
     );
 }
 
-/// Gateway down is an answer, not a failure — exit 1, and the store is still
-/// reported so a headless operator can see what is configured.
+/// Gateway down is an answer, not a failure — exit 1, and that is *all* it says.
+///
+/// It used to add a report read from the shared database. That is gone on
+/// purpose (`migrate.local.md` §14.1, decision D3): a client answering from a
+/// database of its own is answering about a different daemon the moment it is
+/// pointed at another machine, and a remote one has no such file to read.
 #[test]
-fn status_without_a_gateway_exits_1_and_reports_the_store() {
+fn status_without_a_gateway_exits_1_and_says_only_that() {
     let (_dir, db) = temp_db();
     add_provider(&db, "alpha", &[]);
-    let (code, out, _) = run(&db, &["status"]);
-    assert_eq!(code, 1);
+    let (code, out, err) = run(&db, &["status"]);
+    assert_eq!(code, 1, "{err}");
     assert!(out.contains("gateway: not running"), "{out}");
-    assert!(out.contains("providers 1"), "{out}");
-    // Today's totals, which the app's status bar shows. They come from the
-    // *usage* table — what was billable — not from the request log, so seeding
-    // a log row would not move them.
+    assert!(
+        !out.contains("store:"),
+        "the client must not answer from a database of its own: {out}"
+    );
+}
+
+/// The other half of it: with a daemon, the footer's totals come from *it*.
+///
+/// The rows are seeded directly, which is what the daemon reads; the numbers
+/// arriving in the report is the evidence they travelled over the admin plane.
+#[test]
+fn status_reports_the_daemons_totals_when_it_answers() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    add_provider(&db, "alpha", &[]);
+    // Today's totals come from the *usage* table — what was billable — not from
+    // the request log, so seeding a log row would not move them.
     {
         let store = Store::open(&db).unwrap();
         store
@@ -656,7 +677,9 @@ fn status_without_a_gateway_exits_1_and_reports_the_store() {
             })
             .unwrap();
     }
-    let (_, out, _) = run(&db, &["status"]);
+    let (code, out, err) = run_served(&db, &daemon, &["status"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("gateway: running"), "{out}");
     assert!(out.contains("today: 1 requests"), "{out}");
     assert!(out.contains("120 tokens"), "{out}");
 }
@@ -1111,8 +1134,9 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     let home = dir.path().join("home");
     let home_arg = home.display().to_string();
 
-    let (code, out, err) = run(
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--json",
             "agents",
@@ -1170,7 +1194,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     );
 
     // Deleting it clears the route and the key; the provider row stays.
-    let (code, out, err) = run(&db, &["--no-reload", "agents", "remove", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["--no-reload", "agents", "remove", &id]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("usage history stays"), "{out}");
     let store = Store::open(&db).unwrap();
@@ -1184,7 +1208,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     assert!(store.get_provider(&provider_id).unwrap().is_some());
 
     // …and a second removal has nothing to remove.
-    let (code, _, err) = run(&db, &["--no-reload", "agents", "remove", &id]);
+    let (code, _, err) = run_served(&db, &daemon, &["--no-reload", "agents", "remove", &id]);
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("no such custom agent"), "{err}");
 }
@@ -1192,7 +1216,12 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
 #[test]
 fn agents_add_requires_a_name() {
     let (_dir, db) = temp_db();
-    let (code, _, err) = run(&db, &["--no-reload", "agents", "add", "--name", "   "]);
+    let daemon = support::serve(&db);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["--no-reload", "agents", "add", "--name", "   "],
+    );
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("needs a name"), "{err}");
 }
@@ -1345,15 +1374,16 @@ fn logs_dir_prints_a_path() {
 #[test]
 fn dashboard_rejects_an_unknown_window() {
     let (_dir, db) = temp_db();
-    let (code, _, err) = run(&db, &["dashboard", "--window", "90d"]);
+    let daemon = support::serve(&db);
+    let (code, _, err) = run_served(&db, &daemon, &["dashboard", "--window", "90d"]);
     assert_eq!(code, 2);
     assert!(err.contains("90d"), "{err}");
 
-    let (code, _, err) = run(&db, &["dashboard", "--window", "today"]);
+    let (code, _, err) = run_served(&db, &daemon, &["dashboard", "--window", "today"]);
     assert_eq!(code, 0, "{err}");
 
     // "all" is a window like the others, not an omitted `--window`.
-    let (code, _, err) = run(&db, &["dashboard", "--window", "all"]);
+    let (code, _, err) = run_served(&db, &daemon, &["dashboard", "--window", "all"]);
     assert_eq!(code, 0, "{err}");
 }
 
@@ -1361,7 +1391,8 @@ fn dashboard_rejects_an_unknown_window() {
 #[test]
 fn alerts_on_a_quiet_database_succeeds_with_nothing() {
     let (_dir, db) = temp_db();
-    let (code, out, err) = run(&db, &["--json", "alerts"]);
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "alerts"]);
     assert_eq!(code, 0, "{err}");
     let alerts: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert!(alerts.is_empty());

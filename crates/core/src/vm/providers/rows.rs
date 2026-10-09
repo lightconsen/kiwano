@@ -22,7 +22,7 @@ use std::path::Path;
 /// Whether the quota config puts `provider_id` over threshold for the current
 /// UTC day — counted exactly like the gateway's select_quota (requests, or
 /// input+output tokens; cache reads excluded). No/invalid config → under.
-fn quota_over_threshold(store: &Store, aux: &Aux, config: Option<&str>, provider_id: &str) -> bool {
+fn quota_over_threshold(store: &Store, config: Option<&str>, provider_id: &str) -> bool {
     #[derive(Deserialize)]
     struct QuotaCfg {
         limit: f64,
@@ -35,7 +35,7 @@ fn quota_over_threshold(store: &Store, aux: &Aux, config: Option<&str>, provider
     let Some(cfg) = config.and_then(|c| serde_json::from_str::<QuotaCfg>(c).ok()) else {
         return false;
     };
-    let since = local_day_start(tz_offset(aux), unix_now());
+    let since = local_day_start(tz_offset(store), unix_now());
     let Ok(t) = store.usage_totals_for_provider(provider_id, Some(&since)) else {
         return false;
     };
@@ -189,7 +189,7 @@ struct ServingMaps {
 /// first choice / full rotation.
 fn serving_maps(
     store: &Store,
-    aux: &Aux,
+    _aux: &Aux,
     live: &[String],
     providers: &[Provider],
 ) -> Result<ServingMaps, String> {
@@ -228,7 +228,7 @@ fn serving_maps(
             StrategyType::Roundrobin => enabled.iter().map(|b| b.provider_id.clone()).collect(),
             // the candidate whose local window matches now; none → the head
             StrategyType::Timewindow => {
-                let now = local_minutes_now(tz_offset(aux));
+                let now = local_minutes_now(tz_offset(store));
                 let hit = enabled.iter().find(|b| {
                     matches!(
                         (b.win_start.as_deref(), b.win_end.as_deref()),
@@ -245,7 +245,7 @@ fn serving_maps(
             // and the gateway/CLI reader that says "In use" here would guess
             // wrong. The All tab badges it distinctly; agent tabs likewise.
             StrategyType::Quota => {
-                let over = quota_over_threshold(store, aux, strategy.config.as_deref(), &head);
+                let over = quota_over_threshold(store, strategy.config.as_deref(), &head);
                 if over {
                     if let Some(backup) = enabled.get(1) {
                         maps.fallback
@@ -669,9 +669,10 @@ mod tests {
         assert_eq!(badges(&s), (true, true, vec![]));
 
         // timewindow: a window containing now moves the badge off the head.
-        // Built from the same clock the view model reads — `Aux` here defaults
-        // to UTC — so the case is stated without depending on the host's zone.
-        let now = local_minutes_now(tz_offset(&aux));
+        // Built from the same clock the view model reads — a fresh store has no
+        // settings blob, so the offset defaults to UTC — and the case is stated
+        // without depending on the host's zone.
+        let now = local_minutes_now(tz_offset(&s));
         let hhmm = |min: u32| format!("{:02}:{:02}", min / 60 % 24, min % 60);
         // [now-30, now+30] — wraps midnight safely near the day edges
         s.upsert_binding(&Binding {

@@ -16,6 +16,7 @@ use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::providers::{NewProviderInput, ProviderVm, SyncReportVm};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
+use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::logs::RequestLogListVm;
 use kiwanod::plan_quota::PlanQuotaReport;
@@ -498,6 +499,26 @@ impl DaemonApi {
             self.token.as_deref(),
             &format!("/api/providers/{id}/test-latency"),
             &serde_json::Value::Null,
+        )
+    }
+    /// The settings blob — `vm::ui_settings`. The takeovers and the custom
+    /// agents are **not** in it: the client layers those on from this machine's
+    /// agents and their config files (`build_settings_with_home`), which is the
+    /// one place that layering happens.
+    pub fn get_settings(&self) -> Result<SettingsVm, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/settings")
+    }
+
+    /// Apply a patch — `vm::update_settings`. The daemon mirrors the
+    /// gateway-facing knobs itself and re-reads them on its own reload, so this
+    /// sends no `/reload`; the OS login item is the client's own side effect
+    /// (`sync_autostart` in the app's command).
+    pub fn update_settings(&self, patch: &serde_json::Value) -> Result<SettingsVm, String> {
+        sidecar::admin_patch_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/settings",
+            patch,
         )
     }
 }

@@ -63,8 +63,8 @@ fn footer_stats(ctx: &Ctx) -> Option<vm::FooterStatsVm> {
     if !ctx.db.is_file() {
         return None;
     }
-    let (store, aux) = (ctx.store().ok()?, ctx.aux().ok()?);
-    vm::build_footer_stats(store, aux, env!("CARGO_PKG_VERSION")).ok()
+    let store = ctx.store().ok()?;
+    vm::build_footer_stats(store, env!("CARGO_PKG_VERSION")).ok()
 }
 
 pub(crate) fn render_footer(footer: &vm::FooterStatsVm) -> String {

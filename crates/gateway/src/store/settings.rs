@@ -168,6 +168,20 @@ impl Store {
     /// read. `convert_amount` then passes each amount through unchanged, which
     /// is the same answer the GUI gives on an install that has never synced —
     /// and one that has no priced usage to convert anyway.
+    /// The whole `ui` settings blob, as JSON, or `None` when it has not been
+    /// written yet. The daemon's settings paths read and patch it whole — the
+    /// same row the app's `Aux::load_settings_json` returned.
+    pub fn settings_json(&self) -> Option<serde_json::Value> {
+        self.app_setting("ui")
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+    }
+
+    /// Write the whole `ui` settings blob.
+    pub fn save_settings_json(&self, value: &serde_json::Value) -> Result<()> {
+        self.set_app_setting("ui", &value.to_string())?;
+        Ok(())
+    }
+
     /// The user's `hub_url` from the `ui` settings blob, or the default when
     /// the blob has not been written yet. This is the same `app_settings` KV the
     /// daemon already reads its own settings from, so the sync — when it moves —

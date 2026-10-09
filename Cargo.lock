@@ -2509,6 +2509,7 @@ dependencies = [
 name = "kiwano-app"
 version = "0.2.12"
 dependencies = [
+ "kiwano-api",
  "kiwano-core",
  "kiwanod",
  "serde",

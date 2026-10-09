@@ -2,7 +2,7 @@
 //! and the per-agent limit notices. Every source dedups through `first_notice`,
 //! so a widget that polls keeps its meaning.
 
-use crate::vm::settings::{ui_settings, SettingsVm};
+use crate::vm::settings::SettingsVm;
 use crate::vm::time::{rfc3339, unix_now};
 use crate::vm::{e2s, Aux};
 use kiwanod::store::{Billing, Provider, Store};
@@ -328,7 +328,10 @@ fn check_usage_alerts_at(
     mark: bool,
     now: i64,
 ) -> Result<Vec<UsageAlertVm>, String> {
-    let settings = ui_settings(aux);
+    // The blob comes from the store — the same row `update_settings` patches —
+    // so a feature toggle the user just set is visible to this check. The `aux`
+    // is still here for the dedup markers, which only the client writes.
+    let settings = kiwanod::api::settings::ui_settings(store).map_err(|e| e.to_string())?;
     if !settings.cost_alert
         && !settings.feat_cost_forecast
         && !settings.feat_anomaly_alerts

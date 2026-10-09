@@ -157,8 +157,8 @@ struct DashWindow {
     previous: Option<(String, String)>,
 }
 
-fn resolve_window(aux: &Aux, now: i64, window: &str) -> DashWindow {
-    let tz = tz_offset(aux);
+fn resolve_window(store: &Store, now: i64, window: &str) -> DashWindow {
+    let tz = tz_offset(store);
     // Whole local calendar days, so a stat and its chart describe the same
     // span: 7 days is today plus the six before it, not a rolling 168 hours
     // (which would count the hours between 6 and 7 days back that the chart's
@@ -215,7 +215,7 @@ impl DashboardCosts {
 
 fn dashboard_costs(
     store: &Store,
-    aux: &Aux,
+    _aux: &Aux,
     agent: Option<&str>,
     provider_id: Option<&str>,
     since: Option<&str>,
@@ -224,8 +224,8 @@ fn dashboard_costs(
     // user's preferred display currency via the Hub's published rates, so this
     // agrees with the currency selector. Before the first sync there are no
     // rates and the buckets are summed as-is.
-    let rates = crate::pricing::effective_rates(aux);
-    let preferred = crate::pricing::preferred_currency(aux);
+    let rates = crate::pricing::effective_rates(store);
+    let preferred = crate::pricing::preferred_currency(store);
 
     // Headline cost for the window, with the off-peak equivalent of the same
     // rows beside it. Both sums come from one query over one row set, which is
@@ -558,7 +558,7 @@ pub fn build_dashboard(
     provider_id: Option<&str>,
     agent: Option<&str>,
 ) -> Result<DashboardVm, String> {
-    let w = resolve_window(aux, unix_now(), window);
+    let w = resolve_window(store, unix_now(), window);
 
     let cur = store
         .usage_totals(agent, provider_id, w.since.as_deref())
@@ -649,12 +649,8 @@ pub fn build_dashboard(
     })
 }
 
-pub fn build_footer_stats(
-    store: &Store,
-    aux: &Aux,
-    version: &str,
-) -> Result<FooterStatsVm, String> {
-    let tz = tz_offset(aux);
+pub fn build_footer_stats(store: &Store, version: &str) -> Result<FooterStatsVm, String> {
+    let tz = tz_offset(store);
     let now = unix_now();
     let today = local_day_key(tz, now);
     // The same boundary the dashboard's "today" window uses: local midnight as
@@ -665,8 +661,10 @@ pub fn build_footer_stats(
     let t = store.usage_totals(None, None, Some(&since)).map_err(e2s)?;
     // hub_synced = catalog synced today (first 10 chars of the cache
     // timestamp are the date)
-    let hub_synced = aux
-        .load_hub_cache()
+    // The cache is the daemon's table now, so the badge reads the store — the
+    // same row the sync writes.
+    let hub_synced = store
+        .hub_cache()
         .map(|(_, ts)| ts.starts_with(&today))
         .unwrap_or(false);
     Ok(FooterStatsVm {
@@ -832,7 +830,7 @@ mod tests {
         let local_day = (now + 480 * 60).div_euclid(86_400);
         seed_usage_rows(&s, local_day * 86_400 - 480 * 60 + 1, 1, 1_000);
 
-        let f = build_footer_stats(&s, &aux, "test").unwrap();
+        let f = build_footer_stats(&s, "test").unwrap();
         assert_eq!(
             f.today_requests, 1,
             "00:00:01 local is today, not yesterday"

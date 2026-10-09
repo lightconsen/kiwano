@@ -94,5 +94,5 @@ pub fn clear_agent_dir(state: State<AppState>, agent: String) -> Result<(), Stri
 
 #[tauri::command]
 pub fn get_currency_meta(state: State<AppState>) -> Result<pricing::CurrencyMetaVm, String> {
-    pricing::currency_meta(&state.aux)
+    pricing::currency_meta(&state.store)
 }

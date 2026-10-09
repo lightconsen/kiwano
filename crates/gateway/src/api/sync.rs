@@ -26,7 +26,7 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// `CREATE TABLE IF NOT EXISTS`), so an existing install would never gain the
 /// column. The sha and the payload are always written by the same code path
 /// from the same response, so they cannot drift apart.
-const HUB_CATALOG_SHA_KEY: &str = "hub_catalog_sha";
+pub const HUB_CATALOG_SHA_KEY: &str = "hub_catalog_sha";
 
 /// The sibling artifact URL of the catalog endpoint, derived from `hub_url`:
 /// the manifest lives beside the catalog it describes. Mirrors the frontend's
@@ -34,7 +34,7 @@ const HUB_CATALOG_SHA_KEY: &str = "hub_catalog_sha";
 ///
 /// `https://hub.kiwano.cc/catalog.json` → `https://hub.kiwano.cc/manifest.json`
 /// `https://hub.kiwano.cc/v1/` → `https://hub.kiwano.cc/v1/manifest.json`
-fn hub_asset_url(hub_url: &str, name: &str) -> Result<String, String> {
+pub fn hub_asset_url(hub_url: &str, name: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(hub_url.trim())
         .map_err(|e| format!("hub_url \"{hub_url}\" is not a valid URL: {e}"))?;
     if !matches!(url.scheme(), "http" | "https") {
@@ -58,7 +58,7 @@ fn hub_asset_url(hub_url: &str, name: &str) -> Result<String, String> {
 
 /// sha256 as lowercase hex — the same encoding `generate.mjs` writes with
 /// Node's `digest("hex")`.
-fn sha256_hex(bytes: &[u8]) -> String {
+pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -100,7 +100,7 @@ struct ManifestModelsWire {
 
 /// Every field is optional and every failure degrades to "no gate": a partial,
 /// stale, or absent manifest may only cost us the optimisation.
-fn parse_manifest(raw: &str) -> HubManifest {
+pub fn parse_manifest(raw: &str) -> HubManifest {
     let Ok(wire) = serde_json::from_str::<ManifestWire>(raw) else {
         return HubManifest::default();
     };
@@ -145,7 +145,7 @@ async fn fetch_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, Str
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum SyncAction {
+pub enum SyncAction {
     /// The manifest sha matched what we already cached — skip the download.
     Skip,
     Fetch,
@@ -157,7 +157,7 @@ enum SyncAction {
 /// `cache_payload` is `Some` only when a *parseable* catalog is cached: a skip
 /// also needs to report `fetched`, and a corrupt payload must fall through to
 /// the full fetch so it heals instead of reporting a stale count forever.
-fn sync_action(
+pub fn sync_action(
     remote_sha: Option<&str>,
     cached_sha: Option<&str>,
     cache_payload: Option<&str>,
@@ -172,7 +172,7 @@ fn sync_action(
 /// bytes we cannot vouch for (manifest skew during a publish, truncation) drop
 /// it so the next sync re-fetches and converges. No manifest at all leaves
 /// whatever was stored alone — we have nothing to invalidate it with.
-fn record_catalog_sha(
+pub fn record_catalog_sha(
     store: &Store,
     remote_sha: Option<&str>,
     verified: bool,
@@ -190,7 +190,7 @@ fn record_catalog_sha(
 }
 
 /// Validate and normalize a Hub response: every entry must deserialize as a catalog entry.
-fn parse_catalog(raw: &str) -> Result<super::catalog::CatalogListVm, String> {
+pub fn parse_catalog(raw: &str) -> Result<crate::api::catalog::CatalogListVm, String> {
     serde_json::from_str(raw).map_err(|e| format!("Hub response is not a valid catalog: {e}"))
 }
 
@@ -268,7 +268,7 @@ pub fn apply_hub_documents(store: &Store) -> bool {
     // A provider may have become linkable to a catalog entry it could not be
     // matched against before — this is where a first-run install gets its
     // catalog at all.
-    match super::catalog::link_providers(store).map_err(|e| e.to_string()) {
+    match crate::api::catalog::link_providers(store).map_err(|e| e.to_string()) {
         Ok(linked) if linked > 0 => {
             tracing::info!(linked, "providers linked to their catalog entries");
             wrote = true;
@@ -359,7 +359,7 @@ async fn sync_catalog(
 /// `convert_amount` passes an unknown currency through unchanged rather than
 /// failing, so a missing rate shows up as a plausible-looking wrong number. It
 /// is rejected whole rather than half-applied.
-fn pricing_doc_error(doc: &ModelsDoc) -> Option<&'static str> {
+pub fn pricing_doc_error(doc: &ModelsDoc) -> Option<&'static str> {
     if !doc.exchange_rates.contains_key("USD") {
         return Some("Hub pricing has no USD exchange rate");
     }
@@ -415,13 +415,10 @@ async fn sync_pricing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Store;
 
-    /// The conditional gate, on a store with a cache in it: a manifest whose
-    /// sha matches what is cached skips the fetch, and a sha that does not —
-    /// or no manifest at all — fetches. The gate is the optimisation the whole
-    /// conditional protocol exists for, and a wrong answer is either a wasted
-    /// download or a shelf that silently never updates.
+    /// The conditional gate: a manifest whose sha matches what is cached skips
+    /// the fetch, and anything less fetches. A wrong answer here is either a
+    /// wasted download or a shelf that silently never updates.
     #[test]
     fn the_sync_gate_skips_only_when_everything_matches() {
         let store = Store::open_in_memory().unwrap();
@@ -431,49 +428,28 @@ mod tests {
             .unwrap();
         store.set_app_setting(HUB_CATALOG_SHA_KEY, &sha).unwrap();
 
-        // Match: skip. The manifest offers nothing the cache does not already have.
-        let manifest = HubManifest {
-            catalog_sha: Some(sha.clone()),
-            models_version: None,
-            models_sha: None,
-        };
+        let cached = store.app_setting(HUB_CATALOG_SHA_KEY);
         assert_eq!(
-            sync_action(
-                manifest.catalog_sha.as_deref(),
-                store.app_setting(HUB_CATALOG_SHA_KEY).as_deref(),
-                Some("")
-            ),
+            sync_action(Some(&sha), cached.as_deref(), Some("")),
             SyncAction::Skip
         );
-
-        // A different sha, and no sha at all: fetch. A partial manifest must
-        // never cost the shelf an update.
         assert_eq!(
-            sync_action(
-                Some(&"b".repeat(64)),
-                store.app_setting(HUB_CATALOG_SHA_KEY).as_deref(),
-                Some("")
-            ),
+            sync_action(Some(&"b".repeat(64)), cached.as_deref(), Some("")),
             SyncAction::Fetch
         );
         assert_eq!(
-            sync_action(
-                None,
-                store.app_setting(HUB_CATALOG_SHA_KEY).as_deref(),
-                Some("")
-            ),
+            sync_action(None, cached.as_deref(), Some("")),
             SyncAction::Fetch
         );
     }
 
-    /// `apply_hub_documents` is a no-op when the Hub has published nothing new —
-    /// the common case — and reports "wrote" only when a document actually
-    /// changed what the mirror holds. A caller reloads its route table on that
-    /// signal, so a false positive would re-read on every sync.
+    /// `apply_hub_documents` is a no-op when the Hub published nothing new —
+    /// the common case — and reports "wrote" only when a document changed what
+    /// the mirror holds. A caller re-reads its route table on that signal, so a
+    /// false positive would re-read on every sync.
     #[test]
     fn applying_unchanged_documents_writes_nothing() {
         let store = Store::open_in_memory().unwrap();
-        // No cache at all: nothing to seed from, nothing to link against.
         assert!(!apply_hub_documents(&store));
     }
 }

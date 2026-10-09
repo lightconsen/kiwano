@@ -45,5 +45,6 @@ pub mod probe;
 pub mod providers;
 pub mod providers_add;
 pub mod routes;
+pub mod settings;
 pub mod sync;
 pub mod views;

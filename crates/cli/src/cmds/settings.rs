@@ -7,7 +7,7 @@ use super::render::{render_catalog, render_settings};
 use super::runtime;
 use crate::cli::{CatalogCmd, ConfigCmd, ImportCmd, SettingsCmd};
 use crate::{CliError, Ctx};
-use kiwano_core::{import, pricing, share, sync, vm};
+use kiwano_core::{import, pricing, share, vm};
 
 // ── settings / config / catalog / import ────────────────────────────────────
 
@@ -154,13 +154,15 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             Ok(())
         }
         CatalogCmd::Sync => {
-            let hub_url = {
-                let aux = ctx.aux()?;
-                vm::ui_settings(aux).hub_url
-            };
+            // The hub_url comes from the settings blob the daemon serves — the
+            // same row it reads when it syncs.
+            let hub_url = kiwano_core::daemon_api::DaemonApi::connect()
+                .get_settings()?
+                .hub_url
+                .clone();
             let report = {
-                let aux = ctx.aux()?;
-                kiwano_core::block_on(sync::sync_from_hub(aux, &hub_url))?
+                let store = ctx.store()?;
+                kiwano_core::block_on(kiwanod::api::sync::sync_from_hub(store, &hub_url))?
             };
             let text = if report.unchanged {
                 format!(
@@ -176,7 +178,7 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             // both.
             let linked = {
                 let store = ctx.store()?;
-                vm::link_providers(store)?
+                kiwanod::api::catalog::link_providers(store).map_err(|e| e.to_string())?
             };
             if linked > 0 {
                 ctx.out.note(format!(
@@ -189,8 +191,8 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         }
         CatalogCmd::Currency => {
             let meta = {
-                let aux = ctx.aux()?;
-                pricing::currency_meta(aux)?
+                let store = ctx.store()?;
+                pricing::currency_meta(store)?
             };
             let text = format!(
                 "preferred {} · {} currencies",

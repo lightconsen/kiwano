@@ -51,3 +51,4 @@ pub mod keys;
 pub mod logo;
 pub mod providers;
 pub mod routes;
+pub mod settings;

@@ -55,7 +55,7 @@ use kiwanod::store::Store;
 use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
 
-use kiwano_core::{pricing, sidecar, vm};
+use kiwano_core::{sidecar, vm};
 use vm::Aux;
 
 use crate::daemon::{spawn_usage_watch, spawn_watchdog};
@@ -180,28 +180,15 @@ pub fn run() {
                 },
             };
 
-            let ui = vm::ui_settings(&aux);
-            // Seed the Hub price table into model_pricing (a no-op until the
-            // first sync, and until the document changes after that).
-            match pricing::seed_model_pricing(&aux) {
-                Ok(r) if !r.skipped => {
-                    tracing::info!(version = r.version, rows = r.seeded, "model pricing seeded")
-                }
-                Err(e) => tracing::warn!(error = %e, "model pricing seed failed"),
-                _ => {}
-            }
-            // A provider added before the link existed — or imported from
-            // another manager — gets it now, from the cached catalog, instead
-            // of waiting on a sync that may turn out to be a sha match or a
-            // failure. Cheap after the first run: one catalog parse, no writes.
-            match vm::link_providers(&store) {
-                Ok(linked) if linked > 0 => {
-                    tracing::info!(linked, "providers linked to their catalog entries");
-                    sidecar::notify_reload(&admin);
-                }
-                Err(e) => tracing::warn!(error = %e, "provider catalog link failed"),
-                _ => {}
-            }
+            // The settings blob the rest of startup reads (autostart, the
+            // update check) comes from the daemon, which owns the row.
+            let ui = kiwanod::api::settings::ui_settings(&store).unwrap_or_default();
+            // Seeding the price mirror and linking providers to their catalog
+            // entries are the **daemon's** work now (`migrate.local.md` §10.14):
+            // it does both inside its own sync, and the startup sync below asks
+            // it to. Doing them here too would be a second writer of the same
+            // tables — which is the arrangement this migration has been removing.
+
             app.manage(AppState {
                 store,
                 aux,

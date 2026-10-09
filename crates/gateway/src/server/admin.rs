@@ -125,6 +125,10 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/model-prices", get(list_model_prices_route))
         .route("/catalog", get(list_catalog_route))
         .route("/sync-hub", post(sync_hub_route))
+        .route(
+            "/settings",
+            get(get_settings_route).patch(update_settings_route),
+        )
         .route("/plan-quota/{provider_id}", get(plan_quota_route))
         .route("/probe", post(probe_route))
         .route(
@@ -1104,6 +1108,51 @@ async fn test_provider_latency_route(
 ) -> Response {
     match crate::api::probe::test_provider_latency(&state.store, &id).await {
         Ok(vm) => Json(vm).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/settings` — the settings blob, without this machine's layering.
+///
+/// The takeovers and the custom agents are **not** in this answer: they describe
+/// this machine's agents and their config files, and the client layers them on
+/// (`build_settings_with_home`). A client that expects them in the blob would
+/// read an empty screen for them, which is why the layering is a step rather
+/// than a field.
+async fn get_settings_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::settings::ui_settings(&state.store) {
+        Ok(settings) => Json(settings).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `PATCH /api/settings` — apply a patch, then mirror the gateway-facing knobs
+/// into the config the daemon re-reads. A `PATCH`: a key absent from the patch
+/// is a value left alone, which is the whole of what a patch means.
+///
+/// The daemon re-reads its own route table when a mirrored knob moved — the
+/// log config, the compat shim, the DLP mode, the stream timeouts — which is
+/// the whole of the `/reload` the app's `update_settings` used to send. The OS
+/// login item is **not** here: that is a statement about this machine, and the
+/// client's command applies it.
+async fn update_settings_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(patch): Json<serde_json::Value>,
+) -> Response {
+    let touches_gateway = patch.get("request_logs").is_some()
+        || patch.get("log_retention_days").is_some()
+        || patch.get("log_max_body_bytes").is_some()
+        || patch.get("compat_shim").is_some()
+        || patch.get("dlp_mode").is_some()
+        || patch.get("stream_first_byte_secs").is_some()
+        || patch.get("stream_idle_secs").is_some();
+    match crate::api::settings::update_settings(&state.store, &patch) {
+        Ok(()) => {
+            if touches_gateway {
+                reload_after_write(&state);
+            }
+            get_settings_route(State(state)).await
+        }
         Err(e) => resource_error(e),
     }
 }

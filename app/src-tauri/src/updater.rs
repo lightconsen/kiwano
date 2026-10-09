@@ -18,7 +18,7 @@ pub fn get_footer_stats(
     // tauri.conf.json is the single source of truth for the app version —
     // the same one the updater compares against.
     let version = format!("v{}", app.package_info().version);
-    vm::build_footer_stats(&state.store, &state.aux, &version)
+    vm::build_footer_stats(&state.store, &version)
 }
 
 /// The update the silent startup check found, if any. The About block reads

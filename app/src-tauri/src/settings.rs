@@ -5,7 +5,7 @@
 
 use tauri::State;
 
-use crate::state::{after_mutation, AppState};
+use crate::state::AppState;
 use crate::tray::sync_autostart;
 use kiwano_core::vm;
 
@@ -20,22 +20,20 @@ pub fn update_settings(
     state: State<AppState>,
     patch: serde_json::Value,
 ) -> Result<vm::SettingsVm, String> {
-    let vm = vm::update_settings(&state.store, &state.aux, &patch, state.shell_vars())?;
-    // apply autostart changes to the OS login items immediately
+    // The blob and the gateway-facing mirrors are the daemon's
+    // (`migrate.local.md` §10.16): it applies the patch and re-reads its own
+    // config, so this sends no `/reload`.
+    let mut vm: kiwano_api::settings::SettingsVm =
+        kiwano_core::daemon_api::DaemonApi::connect().update_settings(&patch)?;
+    // The OS login item is a statement about *this machine* — the daemon never
+    // touches it, so the app applies it here.
     if let Some(v) = patch.get("autostart").and_then(|v| v.as_bool()) {
         sync_autostart(&app, v);
     }
-    // The gateway re-reads the log config on /reload; ping it when the
-    // request-log settings changed so the toggle applies without a restart.
-    if patch.get("request_logs").is_some()
-        || patch.get("log_retention_days").is_some()
-        || patch.get("log_max_body_bytes").is_some()
-        || patch.get("compat_shim").is_some()
-        || patch.get("dlp_mode").is_some()
-        || patch.get("stream_first_byte_secs").is_some()
-        || patch.get("stream_idle_secs").is_some()
-    {
-        after_mutation(&state);
-    }
+    // The takeovers and the custom agents are layered on from this machine's
+    // agents and their config files — the daemon's blob has none of them.
+    let full = vm::build_settings(&state.store, &state.aux, state.shell_vars())?;
+    vm.takeovers = full.takeovers;
+    vm.custom_agents = full.custom_agents;
     Ok(vm)
 }

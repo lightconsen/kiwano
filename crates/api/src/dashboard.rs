@@ -135,3 +135,21 @@ pub struct GatewayStatusVm {
     /// does (see `crate::sidecar::database_agreement`).
     pub db_mismatch: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageAlertVm {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub used: f64,
+    pub limit: f64,
+    /// requests | wan_tokens | 3-letter ISO currency code
+    pub unit: String,
+    /// Which check raised this: `provider_limit` | `plan_window` |
+    /// `cost_forecast` | `anomaly` | `agent_limit`. The first two are formatted
+    /// by the frontend from the numbers; the rest carry their text in
+    /// `message`.
+    pub kind: String,
+    /// Pre-built notification text for the feature alerts (English, the same
+    /// convention as insights findings); empty for the two legacy kinds.
+    pub message: String,
+}

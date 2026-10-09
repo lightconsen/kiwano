@@ -128,6 +128,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             put(update_provider_route).delete(delete_provider_route),
         )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
+        .route("/usage-alerts", get(usage_alerts_route))
         .route("/dashboard", get(dashboard_route))
         .route("/footer", get(footer_route))
         .route("/currency", get(currency_route))
@@ -1476,6 +1477,26 @@ async fn footer_route(
 async fn currency_route(State(state): State<Arc<GatewayState>>) -> Response {
     match crate::api::dashboard::currency_meta(&state.store) {
         Ok(vm) => Json(vm).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AlertsQuery {
+    /// Whether this poll may consume the dedup. The app's notification path
+    /// sends true; a read-only caller (the tray's preview) sends false and
+    /// cannot eat the alert the app is about to raise.
+    #[serde(default)]
+    mark: bool,
+}
+
+/// `GET /api/usage-alerts` — the current alerts, and whether they are new.
+async fn usage_alerts_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<AlertsQuery>,
+) -> Response {
+    match crate::api::alerts::check_usage_alerts(&state.store, q.mark) {
+        Ok(alerts) => Json(alerts).into_response(),
         Err(e) => resource_error(e),
     }
 }

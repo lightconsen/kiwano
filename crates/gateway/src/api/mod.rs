@@ -35,6 +35,7 @@
 //! [`ApiError`]: kiwano_api::error::ApiError
 
 pub mod agents;
+pub mod alerts;
 pub mod catalog;
 pub mod csv;
 pub mod dashboard;

@@ -13,7 +13,7 @@
 
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
-use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm};
+use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm, UsageAlertVm};
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::providers::{NewProviderInput, ProviderVm, SyncReportVm};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
@@ -722,6 +722,16 @@ impl DaemonApi {
     /// The currencies a limit may be written in — `pricing::currency_meta`.
     pub fn currency_meta(&self) -> Result<CurrencyMetaVm, String> {
         sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/currency")
+    }
+    /// The current usage alerts — `vm::check_usage_alerts`. `mark` decides
+    /// whether this poll may consume the dedup: the app's notification path
+    /// sends true, a read-only caller sends false.
+    pub fn usage_alerts(&self, mark: bool) -> Result<Vec<UsageAlertVm>, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/usage-alerts?mark={mark}"),
+        )
     }
 }
 

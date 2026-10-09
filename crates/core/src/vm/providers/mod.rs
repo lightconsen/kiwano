@@ -26,10 +26,5 @@ pub use billing::billing_to_ui;
 pub use rows::build_provider_vms;
 pub use types::{HealthVm, ProviderAdvancedVm, ProviderEndpointVm, ProviderVm, QuotaVm, UsageVm};
 
-// The write paths read these back: the billing tag they store, the endpoint and
-// health they prefill the modal with, and the currency a limit is written in.
-pub(crate) use billing::billing_to_db;
-pub(crate) use display::{display_endpoint, endpoint_note, vm_endpoints};
-pub(crate) use health::health_vm;
-pub(crate) use money::provider_currency;
-pub(crate) use rows::advanced_vm;
+// The write paths' view rules moved to the daemon (`kiwanod::api::views`) —
+// only the health of a live row is still built here, by the list itself.

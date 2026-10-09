@@ -37,7 +37,10 @@
 pub mod agents;
 pub mod catalog;
 pub mod keys;
+pub mod limits;
 pub mod logs;
 pub mod pricing;
 pub mod providers;
+pub mod providers_add;
 pub mod routes;
+pub mod views;

@@ -20,13 +20,13 @@ pub fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, Str
 }
 
 #[tauri::command]
-pub fn add_provider(
-    state: State<AppState>,
-    input: vm::NewProviderInput,
-) -> Result<vm::ProviderVm, String> {
-    let vm = vm::add_provider(&state.store, &input)?;
-    after_mutation(&state);
-    Ok(vm)
+pub fn add_provider(input: vm::NewProviderInput) -> Result<vm::ProviderVm, String> {
+    // Served by the daemon. **This command mints the id**, which is what makes
+    // a retried add idempotent: an id the daemon has already seen is answered
+    // with the provider that exists (`migrate.local.md` §6.1). The daemon
+    // re-reads its own route table, so the new candidate is picked up at once.
+    let id = vm::mint_provider_id(&input.name);
+    kiwano_core::daemon_api::DaemonApi::connect().add_provider(&id, &input)
 }
 
 #[tauri::command]

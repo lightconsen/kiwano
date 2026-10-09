@@ -46,7 +46,7 @@ fn e2s(e: impl std::fmt::Display) -> String {
 pub use kiwano_api::ids::slug;
 // The minting rule travels with it: a caller that creates an agent decides the
 // agent's id, which is what makes a retried create idempotent (§6.1).
-pub use kiwano_api::ids::mint_agent_id;
+pub use kiwano_api::ids::{mint_agent_id, mint_provider_id};
 
 // ── the public surface, re-exported so every `vm::x` path still resolves ──
 
@@ -66,9 +66,9 @@ pub use dashboard::{
 };
 pub use fmt::fmt_tokens;
 pub use keys::{add_api_key, delete_api_key, list_api_keys, ApiKeyVm};
+pub use kiwano_api::providers::{ProviderPriceInput, ProviderPricesInput};
 pub use limits::{
-    import_declared_prices, known_limit_currencies, normalize_declared_prices,
-    normalize_limit_unit, ProviderPriceInput, ProviderPricesInput,
+    import_declared_prices, known_limit_currencies, normalize_declared_prices, normalize_limit_unit,
 };
 pub use logs::{
     ack_credential_finding, check_credential_finding, clear_request_logs, export_request_logs_csv,
@@ -98,10 +98,10 @@ pub use time::{rfc3339, unix_now};
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::detect::ShellVars;
-    use crate::vm::limits::{ProviderPriceInput, ProviderPricesInput};
     use crate::vm::provider_edit::{BillingConfigInput, NewProviderInput};
     use crate::vm::time::{rfc3339, unix_now};
     use crate::vm::Aux;
+    use kiwano_api::providers::{ProviderPriceInput, ProviderPricesInput};
     use kiwanod::store::UsageRecord;
     use kiwanod::store::{Billing, Provider, Store};
 

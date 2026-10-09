@@ -119,6 +119,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/agents/{target}/route/apply",
             post(apply_agent_route_route),
         )
+        .route("/providers", post(add_provider_route))
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
         .route("/providers/{id}", delete(delete_provider_route))
         .route("/model-prices", get(list_model_prices_route))
@@ -928,6 +929,29 @@ async fn list_model_prices_route(State(state): State<Arc<GatewayState>>) -> Resp
 /// second copy of the parse-and-normalize rules (`migrate.local.md` §10.12).
 async fn list_catalog_route(State(state): State<Arc<GatewayState>>) -> Response {
     Json(crate::api::catalog::load_catalog(&state.store)).into_response()
+}
+
+/// The body of a provider-add. **The id is the caller's**
+/// (`kiwano_api::ids::mint_provider_id`): nothing else in the request identifies
+/// the operation — the name is a label, not an id — and an id the daemon has
+/// already seen *is* this operation's result, so a retried add answers with the
+/// provider that exists rather than a second one (`migrate.local.md` §6.1).
+#[derive(serde::Deserialize)]
+struct AddProviderBody {
+    id: String,
+    #[serde(flatten)]
+    input: kiwano_api::providers::NewProviderInput,
+}
+
+/// `POST /api/providers` — add a provider, binding it to the agents the form
+/// named. Idempotent on `id`; the daemon re-reads its own route table after the
+/// write, which is the only way a new candidate is picked up.
+async fn add_provider_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(body): Json<AddProviderBody>,
+) -> Response {
+    let result = crate::api::providers_add::add_provider(&state.store, &body.id, &body.input);
+    after_write_with(&state, result)
 }
 
 #[cfg(test)]

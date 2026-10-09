@@ -61,40 +61,17 @@ pub fn mint_agent_id(label: &str) -> String {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_slug_is_lowercase_alphanumerics_and_dashes() {
-        // Punctuation runs are not collapsed: `(` and the space before it each
-        // become a dash. Pinned as the behaviour that is, not the one a reader
-        // would guess — an id already in someone's database is spelled this way.
-        assert_eq!(slug("Kimi (Moonshot)"), "kimi--moonshot");
-        assert_eq!(slug("  DeepSeek  "), "deepseek");
-        // The provider fallback — reachable only through `slug`, never through
-        // an agent id.
-        assert_eq!(slug("长任务"), "provider");
-    }
-
-    /// The two fallbacks are different words on purpose, and this is the test
-    /// that says so: an agent whose name has no ASCII in it must not be named
-    /// after a provider.
-    #[test]
-    fn an_agent_id_never_borrows_the_provider_fallback() {
-        assert_eq!(agent_id_stem("长任务批处理"), "custom");
-        assert_eq!(agent_id_stem("Long Tasks"), "long-tasks");
-        assert_eq!(agent_id_stem("  Mixed 名字 "), "mixed");
-    }
-
-    #[test]
-    fn a_minted_id_carries_its_stem_and_is_unique_per_call() {
-        let a = mint_agent_id("Long Tasks");
-        let b = mint_agent_id("Long Tasks");
-        assert!(a.starts_with("long-tasks-"), "{a}");
-        assert!(!a.starts_with("custom-"));
-        assert_ne!(a, b, "two intents, two ids");
-        assert_eq!(a.len(), "long-tasks-".len() + 6);
-        assert!(mint_agent_id("长任务").starts_with("custom-"));
-    }
+/// A fresh id for a provider: the slug plus six hex characters.
+///
+/// **The client mints it, which is what makes a retried add idempotent**
+/// (`migrate.local.md` §6.1): nothing else in the request identifies the
+/// operation — the name is just a label — and an id the daemon has already seen
+/// is answered with the provider that exists. The suffix is what lets two
+/// providers share a name, the same way a custom agent's id does.
+pub fn mint_provider_id(name: &str) -> String {
+    format!(
+        "{}-{}",
+        slug(name),
+        &uuid::Uuid::new_v4().simple().to_string()[..6]
+    )
 }

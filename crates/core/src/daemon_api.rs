@@ -14,6 +14,7 @@
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
+use kiwano_api::providers::{NewProviderInput, ProviderVm};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::logs::RequestLogListVm;
@@ -400,6 +401,25 @@ impl DaemonApi {
     pub fn list_catalog(&self) -> Result<CatalogListVm, String> {
         sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/catalog")
     }
+    /// Add a provider — `vm::add_provider`. The **id is the caller's**
+    /// (`kiwano_api::ids::mint_provider_id`): an id the daemon has already seen
+    /// is answered with the provider that exists (`§6.1`). This is the same
+    /// shape as `add_custom_agent`, and for the same reason: a client that
+    /// retries must hold the same id across attempts.
+    pub fn add_provider(&self, id: &str, input: &NewProviderInput) -> Result<ProviderVm, String> {
+        // Flattened rather than wrapped, so the body is the form's own shape
+        // plus the id — which is what the endpoint deserializes.
+        let mut body = serde_json::to_value(input).map_err(|e| format!("cannot encode: {e}"))?;
+        body.as_object_mut()
+            .expect("the input is an object")
+            .insert("id".into(), id.into());
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/providers",
+            &body,
+        )
+    }
 }
 
 /// A value as a query-string component: everything outside the unreserved set is
@@ -618,6 +638,71 @@ mod tests {
         assert!(
             !line.contains("provider_id") && !line.contains("to="),
             "an absent filter is omitted, not sent empty: {line}"
+        );
+    }
+
+    /// The add carries the **id the caller minted**, flattened into the form's
+    /// own shape — not a wrapper that would ask the daemon to deserialize a
+    /// different structure from the one the form sends.
+    ///
+    /// This is the whole of §6.1's idempotency for this command, and it is the
+    /// one thing a compiler cannot check: a client that wrapped the input in
+    /// `{"input": …}` instead would still compile, and the endpoint would fail
+    /// every add with a deserialization error instead of writing nothing on a
+    /// retry.
+    #[test]
+    fn adding_a_provider_sends_the_id_flattened_into_the_form() {
+        let body = r##"{"id":"deepseek-a1b2c3","name":"DeepSeek","logo_char":"D","logo_color":"#4D6BFE","logo_border":false,"currency":"USD","endpoint":"https://api.deepseek.com","protocol":"openai","endpoint_note":"OpenAI-compatible","billing":"payg","enabled":true,"agents":[],"serving_agents":[],"fallback_agents":[],"is_current":false,"health":{"state":"idle","latency_ms":null,"note":null,"source":null,"checked_at":null,"error":null},"usage":null,"endpoints":[],"advanced":null,"plan_query":null,"plan_limits":null,"prices":null,"catalog_id":null,"model_default":null,"limit_unit":null,"plan_price":null,"status_badge":null,"agents_note":null}"##;
+        let response: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        );
+        let (_dir, endpoint, handle) = stub(response);
+        let api = DaemonApi::with_token(endpoint, Some("tok-1".into()));
+
+        let input = NewProviderInput {
+            name: "DeepSeek".into(),
+            api_key: "sk-test".into(),
+            endpoint: "https://api.deepseek.com".into(),
+            protocol: "openai".into(),
+            model_default: String::new(),
+            billing: "payg".into(),
+            billing_config: kiwano_api::providers::BillingConfigInput {
+                limit_value: None,
+                limit_unit: None,
+                reset_period: None,
+                plan_limits: None,
+            },
+            agents: None,
+            endpoints: Vec::new(),
+            advanced: None,
+            plan_query: None,
+            prices: None,
+            catalog_id: None,
+        };
+        let created = api.add_provider("deepseek-a1b2c3", &input).unwrap();
+        assert_eq!(created.id, "deepseek-a1b2c3");
+
+        let request = handle.join().unwrap();
+        assert!(
+            request.starts_with("POST /api/providers HTTP/1.1"),
+            "{request}"
+        );
+        let sent = request.split("\r\n\r\n").nth(1).unwrap();
+        assert!(
+            sent.contains(r#""id":"deepseek-a1b2c3""#),
+            "the minted id travels in the body: {sent}"
+        );
+        assert!(
+            sent.contains(r#""name":"DeepSeek""#),
+            "and the form's fields are at the top level, not nested: {sent}"
+        );
+        assert!(
+            !sent.contains(r#""input":"#),
+            "there is no wrapper object: {sent}"
         );
     }
 

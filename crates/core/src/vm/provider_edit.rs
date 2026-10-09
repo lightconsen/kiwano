@@ -2,364 +2,23 @@
 //! mutations that each end in an admin `/reload`.
 
 use crate::detect::ShellVars;
-use crate::vm::catalog::{catalog_id_for, catalog_snapshot};
-use crate::vm::fmt::{logo_char, palette_color};
-use crate::vm::limits::{
-    known_limit_currencies, normalize_declared_prices, normalize_limit_unit, ProviderPricesInput,
-};
-use crate::vm::providers::{
-    advanced_vm, billing_to_db, billing_to_ui, build_provider_vms, display_endpoint, endpoint_note,
-    health_vm, provider_currency, vm_endpoints, ProviderVm,
-};
+use crate::vm::providers::{build_provider_vms, ProviderVm};
 use crate::vm::time::{rfc3339, unix_now};
-use crate::vm::{e2s, slug, Aux};
+use crate::vm::{e2s, mint_provider_id, Aux};
 use kiwanod::api::providers as daemon;
-use kiwanod::store::{Binding, Provider, Store, StrategyType};
-use serde::Deserialize;
+use kiwanod::api::providers_add as daemon_add;
+use kiwanod::store::{Store, StrategyType};
 use std::path::Path;
 
-/// Plan-mode percent limits (modal form): utilization ceilings over the
-/// vendor's rolling 5h / weekly windows. Both optional; both absent = none.
-#[derive(Deserialize, Clone)]
-pub struct PlanLimitsInput {
-    pub five_hour: Option<f64>,
-    pub weekly: Option<f64>,
-}
-
-#[derive(Deserialize)]
-pub struct BillingConfigInput {
-    pub limit_value: Option<f64>,
-    #[allow(dead_code)]
-    pub limit_unit: Option<String>,
-    pub reset_period: Option<String>,
-    pub plan_limits: Option<PlanLimitsInput>,
-}
-
-/// Serialize the percent limits into the `providers.plan_limits` JSON shape.
-/// Non-positive / absent percents are dropped; an empty object reads as NULL.
-fn plan_limits_json(input: Option<&PlanLimitsInput>) -> Option<String> {
-    let input = input?;
-    let mut obj = serde_json::Map::new();
-    if let Some(pct) = input.five_hour.filter(|p| *p > 0.0 && *p <= 100.0) {
-        obj.insert("five_hour".into(), serde_json::json!(pct));
-    }
-    if let Some(pct) = input.weekly.filter(|p| *p > 0.0 && *p <= 100.0) {
-        obj.insert("weekly".into(), serde_json::json!(pct));
-    }
-    if obj.is_empty() {
-        None
-    } else {
-        Some(serde_json::Value::Object(obj).to_string())
-    }
-}
-
-/// Per-provider advanced forwarding settings (timeout / retries / custom
-/// headers), edited in the provider modal's Advanced section. Custom header
-/// names/values are sanitized before they reach the gateway.
-#[derive(Deserialize)]
-pub struct AdvancedInput {
-    pub timeout_secs: Option<i64>,
-    pub retries: Option<i64>,
-    /// Header name → value; serialized to a JSON object column.
-    pub headers: Option<std::collections::BTreeMap<String, String>>,
-}
-
-#[derive(Deserialize)]
-pub struct NewEndpointInput {
-    pub protocol: String,
-    pub endpoint: String,
-}
-
-#[derive(Deserialize)]
-pub struct NewProviderInput {
-    pub name: String,
-    #[allow(dead_code)]
-    pub api_key: String,
-    pub endpoint: String,
-    pub protocol: String,
-    /// The model the form collected as this provider's default.
-    ///
-    /// It was carried here for a long time and read by nothing — stored in no
-    /// column and returned by no view, so reopening a provider always showed an
-    /// empty box. Persisted since v14 (`providers.model_default`), which is what
-    /// lets the edit dialog show what the add dialog asked for.
-    ///
-    /// Remembered rather than consulted: nothing picks a model from it when
-    /// routing, because the model a request uses is the one the agent sent. Empty
-    /// stores `NULL`.
-    pub model_default: String,
-    pub billing: String,
-    pub billing_config: BillingConfigInput,
-    /// Agents to bind this provider to.
-    ///
-    /// Expected when adding — a new provider nothing serves is a dead row — and
-    /// **absent when editing**, where the bindings belong to the Apps screen's
-    /// agent tabs. The distinction has to be in the type: a plain `Vec` cannot
-    /// tell "no agents" from "not speaking about agents", and the difference is
-    /// whether an edit leaves the bindings alone or unbinds the lot.
-    #[serde(default)]
-    pub agents: Option<Vec<String>>,
-    /// Additional per-protocol endpoints; unknown protocol strings are
-    /// skipped (defaulting one to openai could collide with the primary).
-    #[serde(default)]
-    pub endpoints: Vec<NewEndpointInput>,
-    /// Advanced forwarding settings. Absent in an update = keep existing
-    /// (mirrors the empty-api_key semantics); a present object is an
-    /// authoritative snapshot whose null fields clear values.
-    #[serde(default)]
-    pub advanced: Option<AdvancedInput>,
-    /// Token-plan quota query `{"template":"kimi","fields":{...}}`. Absent in
-    /// an update = keep existing; null clears; a present object replaces.
-    #[serde(default)]
-    pub plan_query: Option<serde_json::Value>,
-    /// The prices the user declared for this provider. Absent in an update =
-    /// keep what is stored (same semantics as an empty `api_key`); a present
-    /// bundle is an authoritative snapshot, so an empty model list clears the
-    /// column — which is what switching a provider off pay-as-you-go does.
-    #[serde(default)]
-    pub prices: Option<ProviderPricesInput>,
-    /// The Hub catalog entry this provider is being added from, when the add
-    /// came from the shelf. Prices are published per catalog entry, and a local
-    /// row's own id is `<slug>-<hex>`, so this is what lets a forwarded request
-    /// be costed at its provider's own rate rather than the general one.
-    ///
-    /// Absent (the hand-added form, and every edit) means "no catalog entry":
-    /// on add the provider prices at the general rate, and on update the stored
-    /// value is kept — an edit must not silently unlink the provider from its
-    /// price row.
-    #[serde(default)]
-    pub catalog_id: Option<String>,
-}
-
-/// Map the advanced input to the three store columns: timeout clamps to
-/// 1..=3600 (else unset = gateway defaults), retries to 0..=5 (0 = "no retry"
-/// stored as NULL), headers serialize to a sanitized JSON object (dropping
-/// empty names/values; empty object → NULL).
-fn advanced_columns(adv: &AdvancedInput) -> (Option<i64>, Option<i64>, Option<String>) {
-    let timeout_secs = adv.timeout_secs.filter(|s| (1..=3600).contains(s));
-    let retries = adv
-        .retries
-        .filter(|r| (0..=5).contains(r))
-        .filter(|&r| r > 0);
-    let headers = adv
-        .headers
-        .as_ref()
-        .map(|map| {
-            let sanitized: serde_json::Map<String, serde_json::Value> = map
-                .iter()
-                .filter(|(k, v)| !k.trim().is_empty() && !v.is_empty())
-                .map(|(k, v)| (k.trim().to_string(), serde_json::Value::String(v.clone())))
-                .collect();
-            (!sanitized.is_empty()).then(|| serde_json::Value::Object(sanitized).to_string())
-        })
-        .unwrap_or(None);
-    (timeout_secs, retries, headers)
-}
-
-/// Map the user-supplied additional endpoints to store rows; unknown protocol
-/// strings are skipped (defaulting one to openai could collide with the
-/// primary's protocol in provider_endpoints' PK).
-/// The stored form of an endpoint somebody typed: an absolute URL.
+/// Add a provider — served by the daemon (`kiwanod::api::providers_add::add_provider`).
 ///
-/// The dialog is shown `display_endpoint` — the scheme stripped, `api_path`
-/// folded in — and hands that back on save, so opening a provider and saving it
-/// again rewrote `https://api.deepseek.com` as `api.deepseek.com` and broke
-/// routing for that provider from then on. Nothing downstream puts the scheme
-/// back: the gateway composes the upstream URL by concatenation
-/// (`server::data::compose_upstream`) and `reqwest` refuses a relative one, so
-/// every request to it fails at the transport layer while the row still reads
-/// like a working provider. The invariant is kept here, at the one function
-/// every writer of a provider's endpoints goes through.
-///
-/// The scheme is `http://` for a loopback host and `https://` otherwise. A local
-/// server — Ollama on 11434, an LM Studio port — is both the common case and the
-/// one where the obvious guess is wrong, and it is not a case that corrects
-/// itself by trying: a TLS handshake against a plaintext listener fails before
-/// anything can say why.
-pub(crate) fn absolute_endpoint(raw: &str) -> String {
-    let endpoint = raw.trim();
-    if endpoint.contains("://") {
-        return endpoint.to_string();
-    }
-    let local = matches!(
-        crate::creds::host_of(endpoint)
-            .to_ascii_lowercase()
-            .as_str(),
-        "localhost" | "127.0.0.1" | "::1" | "[::1]"
-    );
-    format!("{}{endpoint}", if local { "http://" } else { "https://" })
-}
-
-fn input_endpoints(input: &NewProviderInput) -> Vec<kiwanod::store::ProviderEndpoint> {
-    input
-        .endpoints
-        .iter()
-        .filter_map(|e| {
-            kiwanod::store::Protocol::parse_str(&e.protocol).map(|p| {
-                kiwanod::store::ProviderEndpoint {
-                    protocol: p,
-                    base_url: absolute_endpoint(&e.endpoint),
-                    api_path: None,
-                }
-            })
-        })
-        .collect()
-}
-
+/// This wrapper mints the id, which is what makes the signature every caller
+/// knows stay put: **this call is a fresh intent**. The idempotent path is the
+/// API's, where the caller sends the id it already minted (`migrate.local.md`
+/// §6.1).
 pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderVm, String> {
-    let now = rfc3339(unix_now());
-    let id = format!(
-        "{}-{}",
-        slug(&input.name),
-        &uuid::Uuid::new_v4().simple().to_string()[..6]
-    );
-    let reset_period = match input.billing_config.reset_period.as_deref() {
-        Some("monthly") | Some("weekly") | Some("yearly") => {
-            input.billing_config.reset_period.clone()
-        }
-        _ => None,
-    };
-    let (timeout_secs, retries, adv_headers) = input
-        .advanced
-        .as_ref()
-        .map(advanced_columns)
-        .unwrap_or((None, None, None));
-    let plan_query_json = input
-        .plan_query
-        .as_ref()
-        .filter(|v| !v.is_null())
-        .map(|v| v.to_string());
-    // Plan rows carry percent limits in plan_limits; the legacy
-    // number+unit+reset-cycle columns are left NULL (v10 form dropped them).
-    let billing = billing_to_db(&input.billing)?;
-    let is_plan = billing == kiwanod::store::Billing::Subscription;
-    let mut provider = Provider {
-        id: id.clone(),
-        name: input.name.trim().to_string(),
-        // Which catalog entry this came from, if it was added from the shelf.
-        // An empty string is the frontend's "nothing selected"; storing it
-        // would be a provider id that names no row.
-        catalog_id: input
-            .catalog_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(str::to_string),
-        protocol: kiwanod::store::Protocol::parse_str(&input.protocol)
-            .unwrap_or(kiwanod::store::Protocol::OpenAI),
-        base_url: absolute_endpoint(&input.endpoint),
-        api_path: None,
-        endpoints: input_endpoints(input),
-        api_key: Some(input.api_key.clone()),
-        // Collected by the form since it existed, and until now dropped on the
-        // floor (see `NewProviderInput::model_default`). Empty is `None`: a
-        // cleared box is "not set", not the empty string.
-        model_default: Some(input.model_default.trim().to_string()).filter(|m| !m.is_empty()),
-        billing,
-        period_limit: if is_plan {
-            None
-        } else {
-            input.billing_config.limit_value
-        },
-        limit_unit: if is_plan {
-            None
-        } else {
-            normalize_limit_unit(
-                input.billing_config.limit_unit.as_deref(),
-                input.billing_config.limit_value.is_some(),
-                &known_limit_currencies(store),
-            )?
-        },
-        plan_query: plan_query_json,
-        plan_limits: if is_plan {
-            plan_limits_json(input.billing_config.plan_limits.as_ref())
-        } else {
-            None
-        },
-        // What this provider charges, when the user said. Validated here rather
-        // than in the gateway: a rate that will not parse is a mistake in the
-        // form, and the person who made it is the one who can fix it.
-        prices: normalize_declared_prices(input.prices.as_ref(), &known_limit_currencies(store))?,
-        reset_period: if is_plan { None } else { reset_period },
-        timeout_secs,
-        retries,
-        headers: adv_headers,
-        enabled: true,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-    // Nobody named an entry — a hand-added provider, or the CLI — so infer it
-    // from the endpoint where that is unambiguous. Worth doing at all because
-    // the row's link is what prices its requests at its own rate rather than at
-    // whichever entry sorts first (`link_providers` has the long version).
-    let catalog_entries = catalog_snapshot(store).entries;
-    if provider.catalog_id.is_none() {
-        provider.catalog_id = catalog_id_for(&catalog_entries, &provider);
-    }
-    store.insert_provider(&provider).map_err(e2s)?;
-
-    // compute view fields before partially moving `provider`
-    let vm_name = provider.name.clone();
-    let vm_catalog_id = provider.catalog_id.clone();
-    let vm_model_default = provider.model_default.clone();
-    let vm_endpoint = display_endpoint(&provider);
-    let vm_note = endpoint_note(&provider);
-    let vm_protocol = provider.protocol.as_str().to_string();
-    let vm_endpoints = vm_endpoints(&provider);
-    let vm_billing = billing_to_ui(provider.billing).to_string();
-    // Nothing has measured this provider yet — it was created a line ago — so
-    // `None` is what the Status column starts as, and the prober fills it in.
-    let vm_health = health_vm(store, &provider, &rfc3339(unix_now() - 86_400), None);
-    let vm_advanced = advanced_vm(&provider);
-    let vm_prices = provider
-        .prices
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let vm_currency = provider_currency(&provider, &catalog_entries);
-
-    for agent in input.agents.iter().flatten() {
-        // "Save & Enable" → becomes the primary for the chosen agents.
-        store
-            .upsert_strategy(agent, StrategyType::Single, None)
-            .map_err(e2s)?;
-        bind_as_primary(store, agent, &id)?;
-    }
-    Ok(ProviderVm {
-        id,
-        name: vm_name,
-        logo_char: logo_char(&input.name),
-        logo_color: palette_color(&input.name).to_string(),
-        logo_border: false,
-        catalog_id: vm_catalog_id,
-        currency: vm_currency,
-        endpoint: vm_endpoint,
-        protocol: vm_protocol,
-        endpoint_note: vm_note,
-        endpoints: vm_endpoints,
-        billing: vm_billing,
-        plan_price: None,
-        limit_unit: None,
-        model_default: vm_model_default,
-        plan_query: input.plan_query.clone(),
-        plan_limits: None,
-        prices: vm_prices,
-        enabled: true,
-        agents: input.agents.clone().unwrap_or_default(),
-        // Optimistic: strategy serving is only computed by build_provider_vms;
-        // the list refetch right after returns the real per-agent state.
-        serving_agents: vec![],
-        fallback_agents: vec![],
-        is_current: input.agents.as_ref().is_some_and(|a| !a.is_empty()),
-        status_badge: None,
-        agents_note: input
-            .agents
-            .as_ref()
-            .filter(|a| !a.is_empty())
-            .map(|a| format!("{} agent(s)", a.len())),
-        health: vm_health,
-        usage: None,
-        advanced: vm_advanced,
-    })
+    let id = mint_provider_id(&input.name);
+    daemon_add::add_provider(store, &id, input).map_err(|e| e.to_string())
 }
 
 /// Park a provider, or put it back: `enabled` decides whether this row may
@@ -378,6 +37,27 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
 ///
 /// Served by the daemon (`kiwanod::api::providers::set_provider_enabled`); this
 /// wrapper keeps the signature every caller knows.
+// The add's helpers moved to the daemon with it (`migrate.local.md` §10.13) —
+// the same move-and-re-export the types made earlier, so the paths these were
+// called from keep resolving. `update_provider` still uses them directly.
+pub use kiwanod::api::limits::{
+    known_limit_currencies, normalize_declared_prices, normalize_limit_unit,
+};
+pub use kiwanod::api::providers_add::{
+    absolute_endpoint, advanced_columns, input_endpoints, plan_limits_json,
+};
+
+// The form's request types moved to `kiwano-api` (`migrate.local.md` §10.13):
+// the daemon serves the command they belong to. Re-exported so the `vm::` paths
+// that name them still resolve.
+pub use kiwano_api::providers::{
+    AdvancedInput, BillingConfigInput, NewEndpointInput, NewProviderInput, PlanLimitsInput,
+};
+pub use kiwanod::api::views::{
+    advanced_vm, billing_to_db, billing_to_ui, display_endpoint, endpoint_note, provider_currency,
+    vm_endpoints,
+};
+
 pub fn set_provider_enabled(store: &Store, id: &str, enabled: bool) -> Result<(), String> {
     daemon::set_provider_enabled(store, id, enabled).map_err(|e| e.to_string())
 }
@@ -394,38 +74,7 @@ pub fn set_provider_enabled(store: &Store, id: &str, enabled: bool) -> Result<()
 /// Save & Enable, `update_provider` and the CLI's `providers use` /
 /// `providers add --bind` all land here.
 pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<(), String> {
-    let mut others: Vec<String> = store
-        .bindings_for_agent(agent)
-        .map_err(e2s)?
-        .into_iter()
-        .map(|b| b.provider_id)
-        .filter(|p| p != provider_id)
-        .collect();
-    store
-        .upsert_binding(&Binding {
-            agent: agent.to_string(),
-            provider_id: provider_id.to_string(),
-            priority: 0,
-            weight: 1,
-            win_start: None,
-            win_end: None,
-            enabled: true,
-        })
-        .map_err(e2s)?;
-    for (i, p) in others.drain(..).enumerate() {
-        store
-            .upsert_binding(&Binding {
-                agent: agent.to_string(),
-                provider_id: p,
-                priority: i as i64 + 1,
-                weight: 1,
-                win_start: None,
-                win_end: None,
-                enabled: true,
-            })
-            .map_err(e2s)?;
-    }
-    Ok(())
+    daemon_add::bind_as_primary(store, agent, provider_id).map_err(|e| e.to_string())
 }
 
 /// Update provider: rewrite the providers row + rebind agents (the new set

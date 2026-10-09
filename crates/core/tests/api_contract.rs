@@ -68,7 +68,7 @@ fn store_with_provider() -> (tempfile::TempDir, Store, Aux, String) {
 
     let request: NewProviderInput = serde_json::from_value(fixture("add_provider.request.json"))
         .expect("the frozen request fixture must still be a valid request");
-    let provider = vm::add_provider(&store, &aux, &request).unwrap();
+    let provider = vm::add_provider(&store, &request).unwrap();
     (tmp, store, aux, provider.id)
 }
 

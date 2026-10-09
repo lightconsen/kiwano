@@ -4,13 +4,11 @@
 
 use super::money::provider_cost;
 use super::types::{QuotaVm, UsageVm};
-use crate::vm::Aux;
 use kiwanod::store::{Billing, Provider, Store, UsageTotals};
 
 /// Usage cell for one provider.
 pub(crate) fn usage_vm(
     store: &Store,
-    aux: &Aux,
     p: &Provider,
     totals: Option<&UsageTotals>,
     since7: &str,
@@ -60,7 +58,8 @@ pub(crate) fn usage_vm(
     };
     let spark = match quota {
         None => normalize_spark(
-            &aux.provider_daily(&p.id, since7)
+            &store
+                .provider_daily(&p.id, since7)
                 .into_iter()
                 .map(|(_, v)| v)
                 .collect::<Vec<_>>(),
@@ -75,7 +74,7 @@ pub(crate) fn usage_vm(
         output_tokens: t.output_tokens,
         cost: cost.map(|c| (c * 1e6).round() / 1e6),
         cost_currency,
-        latency_ms: aux.avg_latency(Some(&p.id), None, Some(since7), None),
+        latency_ms: store.avg_latency(Some(&p.id), None, Some(since7), None),
         quota,
         spark,
     })
@@ -111,7 +110,6 @@ mod tests {
     #[test]
     fn a_spending_limit_shows_up_for_every_billing_that_has_one() {
         let s = store();
-        let aux = Aux::open_in_memory().unwrap();
         let now = unix_now();
         let since7 = local_day_start(0, now - 6 * 86_400);
 
@@ -137,7 +135,7 @@ mod tests {
         })
         .unwrap();
         let totals = s.usage_totals(None, Some("payg-1"), Some(&since7)).unwrap();
-        let payg = usage_vm(&s, &aux, &metered, Some(&totals), &since7).unwrap();
+        let payg = usage_vm(&s, &metered, Some(&totals), &since7).unwrap();
         let q = payg.quota.expect("a payg cap is a quota too");
         assert_eq!((q.used, q.limit), (30.0, 50.0));
         assert_eq!(q.unit, "CNY", "denominated in the provider's own currency");
@@ -147,7 +145,7 @@ mod tests {
         unl.period_limit = Some(50.0);
         s.insert_provider(&unl).unwrap();
         let totals = s.usage_totals(None, Some("unl-1"), Some(&since7)).unwrap();
-        let vm = usage_vm(&s, &aux, &unl, Some(&totals), &since7).unwrap();
+        let vm = usage_vm(&s, &unl, Some(&totals), &since7).unwrap();
         assert!(vm.quota.is_none());
 
         // A metered provider with no cap has nothing to ring against, so the
@@ -155,7 +153,7 @@ mod tests {
         let bare = provider("payg-2", "Bare", Billing::Metered);
         s.insert_provider(&bare).unwrap();
         let totals = s.usage_totals(None, Some("payg-2"), Some(&since7)).unwrap();
-        let vm = usage_vm(&s, &aux, &bare, Some(&totals), &since7).unwrap();
+        let vm = usage_vm(&s, &bare, Some(&totals), &since7).unwrap();
         assert!(vm.quota.is_none());
     }
 }

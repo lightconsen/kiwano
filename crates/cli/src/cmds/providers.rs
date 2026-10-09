@@ -91,8 +91,8 @@ fn providers_add(args: &AddArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     let known = vm::known_limit_currencies(ctx.store()?);
     let input = new_provider_input(args, &known)?;
     let created = {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::add_provider(store, aux, &input)?
+        let store = ctx.store()?;
+        vm::add_provider(store, &input)?
     };
     let text = format!("added {} ({})", created.id, created.name);
     ctx.out.emit(&created, || text);

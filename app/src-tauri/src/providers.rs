@@ -24,7 +24,7 @@ pub fn add_provider(
     state: State<AppState>,
     input: vm::NewProviderInput,
 ) -> Result<vm::ProviderVm, String> {
-    let vm = vm::add_provider(&state.store, &state.aux, &input)?;
+    let vm = vm::add_provider(&state.store, &input)?;
     after_mutation(&state);
     Ok(vm)
 }

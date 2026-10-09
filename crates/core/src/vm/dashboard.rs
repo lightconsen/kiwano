@@ -493,15 +493,15 @@ fn agent_distribution(
 
 /// The headline latency and its change against the window before.
 fn latency_pair(
-    aux: &Aux,
+    store: &Store,
     provider_id: Option<&str>,
     agent: Option<&str>,
     since: Option<&str>,
     previous: Option<&(String, String)>,
 ) -> (i64, Option<i64>) {
-    let latency_now = aux.avg_latency(provider_id, agent, since, None);
+    let latency_now = store.avg_latency(provider_id, agent, since, None);
     let latency_before =
-        previous.and_then(|(from, to)| aux.avg_latency(provider_id, agent, Some(from), Some(to)));
+        previous.and_then(|(from, to)| store.avg_latency(provider_id, agent, Some(from), Some(to)));
     // Both halves have to exist: an average with nothing to compare it against is
     // not a change, and neither is one measured over no rows. `avg_latency`
     // already ignores rows with no latency, so "no average" means "nothing was
@@ -621,7 +621,7 @@ pub fn build_dashboard(
         &costs,
     )?;
     let (latency, latency_delta_pct) = latency_pair(
-        aux,
+        store,
         provider_id,
         agent,
         w.since.as_deref(),

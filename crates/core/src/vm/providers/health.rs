@@ -3,8 +3,7 @@
 //! neither for a parked provider.
 
 use super::types::HealthVm;
-use crate::vm::Aux;
-use kiwanod::store::Provider;
+use kiwanod::store::{Provider, Store};
 
 /// What the row says about a provider nobody has just asked.
 ///
@@ -33,7 +32,7 @@ use kiwanod::store::Provider;
 /// A parked provider answers neither question — it is out of every route, and
 /// that is the fact worth showing.
 pub(crate) fn health_vm(
-    aux: &Aux,
+    store: &Store,
     p: &Provider,
     since: &str,
     probe: Option<&kiwanod::store::ProviderHealth>,
@@ -48,7 +47,7 @@ pub(crate) fn health_vm(
             error: None,
         };
     }
-    if let Some(ms) = aux.avg_latency(Some(&p.id), None, Some(since), None) {
+    if let Some(ms) = store.avg_latency(Some(&p.id), None, Some(since), None) {
         return HealthVm {
             state: "ok".into(),
             latency_ms: Some(ms),
@@ -104,9 +103,9 @@ pub(crate) fn health_vm(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::vm::providers::build_provider_vms;
     use crate::vm::test_support::{no_vars, provider, usage_row};
+    use crate::vm::Aux;
     use kiwanod::store::{Billing, Store};
 
     /// The Status column reads two sources and must not confuse them: a
@@ -114,13 +113,14 @@ mod tests {
     /// when it does not, and neither for a parked one.
     #[test]
     fn the_status_column_shows_a_providers_own_latency_before_a_probe() {
-        // The store and the aux have to share one file here: the traffic average
-        // comes off the aux's connection, which in production is the same
-        // database the gateway writes usage rows into.
+        // The traffic average is a read of the `usage` table, which the store
+        // owns — it used to go through an auxiliary connection, which is what
+        // this fixture had to hand it as well.
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("kiwano.db");
-        let s = Store::open(&path).unwrap();
-        let aux = Aux::open(&path).unwrap();
+        let s = Store::open(dir.path().join("kiwano.db")).unwrap();
+        // `build_provider_vms` still reads the ui settings (the timezone quota
+        // windows are measured in), so the page-level fixture still needs one.
+        let aux = Aux::open_in_memory().unwrap();
 
         let mut parked = provider("parked", "Parked", Billing::Metered);
         parked.enabled = false;

@@ -310,14 +310,13 @@ mod tests {
         // rates against. Empty is not "anything goes" — no rate exists for a third
         // one either.
         let s = store();
-        let aux = Aux::open_in_memory().unwrap();
         assert_eq!(known_limit_currencies(&s), vec!["USD", "CNY"]);
-        assert!(add_provider(&s, &aux, &limited_input("USD")).is_ok());
+        assert!(add_provider(&s, &limited_input("USD")).is_ok());
         assert!(
-            add_provider(&s, &aux, &limited_input("cny")).is_ok(),
+            add_provider(&s, &limited_input("cny")).is_ok(),
             "and it is not case-sensitive"
         );
-        let err = match add_provider(&s, &aux, &limited_input("EUR")) {
+        let err = match add_provider(&s, &limited_input("EUR")) {
             Err(e) => e,
             Ok(_) => panic!("EUR has no rate on this machine"),
         };
@@ -328,16 +327,15 @@ mod tests {
 
         // Synced: the table's own list, in order.
         let (_dir, synced) = store_with_hub_rates(r#"{"USD":1.0,"CNY":7.1,"EUR":0.9}"#);
-        let aux2 = Aux::open_in_memory().unwrap();
         assert_eq!(known_limit_currencies(&synced), vec!["CNY", "EUR", "USD"]);
-        assert!(add_provider(&synced, &aux2, &limited_input("eur")).is_ok());
-        assert!(add_provider(&synced, &aux2, &limited_input("JPY")).is_err());
+        assert!(add_provider(&synced, &limited_input("eur")).is_ok());
+        assert!(add_provider(&synced, &limited_input("JPY")).is_err());
 
         // The counting units are not currencies, and a limit in one is what the
         // vast majority of providers have.
         for unit in ["requests", "wan_tokens"] {
             assert!(
-                add_provider(&s, &aux, &limited_input(unit)).is_ok(),
+                add_provider(&s, &limited_input(unit)).is_ok(),
                 "{unit} is a counting unit"
             );
         }
@@ -373,7 +371,7 @@ mod tests {
                 price_row("glm-4.6", "2", "8"),
             ],
         ));
-        let vm = add_provider(&s, &aux, &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
 
         // The currency is stored uppercase, and the figures come back as typed —
         // the dialog is the only thing that can correct them, so it has to see

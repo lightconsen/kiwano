@@ -60,7 +60,7 @@ mod tests {
         add_provider, update_provider, BillingConfigInput, NewEndpointInput, NewProviderInput,
     };
     use crate::vm::providers::build_provider_vms;
-    use crate::vm::test_support::{catalog_input, linkless_aux, live_home, no_vars, store};
+    use crate::vm::test_support::{catalog_input, live_home, no_vars, store};
     use crate::vm::Aux;
     use kiwanod::store::Store;
 
@@ -87,7 +87,7 @@ mod tests {
             protocol: "anthropic".into(),
             endpoint: "api.deepseek.com/anthropic".into(),
         }];
-        let vm = add_provider(&s, &aux, &bare).unwrap();
+        let vm = add_provider(&s, &bare).unwrap();
         assert_eq!(stored_base(&s, &vm.id), "https://api.deepseek.com");
         let extra = s.get_provider(&vm.id).unwrap().unwrap().endpoints;
         assert_eq!(extra[0].base_url, "https://api.deepseek.com/anthropic");
@@ -108,10 +108,10 @@ mod tests {
         // A local server is plain HTTP: guessing https there fails at the
         // handshake, before anything can say why.
         let local = catalog_input("Ollama", "localhost:11434");
-        let vm = add_provider(&s, &aux, &local).unwrap();
+        let vm = add_provider(&s, &local).unwrap();
         assert_eq!(stored_base(&s, &vm.id), "http://localhost:11434");
         let loopback = catalog_input("Local", "127.0.0.1:1234");
-        let vm = add_provider(&s, &aux, &loopback).unwrap();
+        let vm = add_provider(&s, &loopback).unwrap();
         assert_eq!(stored_base(&s, &vm.id), "http://127.0.0.1:1234");
 
         // An absolute URL is left exactly as it is, http and https alike.
@@ -119,7 +119,7 @@ mod tests {
             ("https://api.moonshot.cn", "https://api.moonshot.cn"),
             ("http://relay.internal", "http://relay.internal"),
         ] {
-            let vm = add_provider(&s, &aux, &catalog_input("Typed", typed)).unwrap();
+            let vm = add_provider(&s, &catalog_input("Typed", typed)).unwrap();
             assert_eq!(stored_base(&s, &vm.id), stored, "{typed}");
         }
     }
@@ -151,7 +151,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        let vm = add_provider(&s, &linkless_aux(), &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
         assert_eq!(vm.endpoints.len(), 1);
         assert_eq!(vm.endpoints[0].protocol, "anthropic");
         // display_base strips the scheme (same as the primary endpoint field)

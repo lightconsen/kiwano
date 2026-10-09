@@ -206,11 +206,7 @@ fn input_endpoints(input: &NewProviderInput) -> Vec<kiwanod::store::ProviderEndp
         .collect()
 }
 
-pub fn add_provider(
-    store: &Store,
-    aux: &Aux,
-    input: &NewProviderInput,
-) -> Result<ProviderVm, String> {
+pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderVm, String> {
     let now = rfc3339(unix_now());
     let id = format!(
         "{}-{}",
@@ -313,7 +309,7 @@ pub fn add_provider(
     let vm_billing = billing_to_ui(provider.billing).to_string();
     // Nothing has measured this provider yet — it was created a line ago — so
     // `None` is what the Status column starts as, and the prober fills it in.
-    let vm_health = health_vm(aux, &provider, &rfc3339(unix_now() - 86_400), None);
+    let vm_health = health_vm(store, &provider, &rfc3339(unix_now() - 86_400), None);
     let vm_advanced = advanced_vm(&provider);
     let vm_prices = provider
         .prices
@@ -592,36 +588,20 @@ mod tests {
     #[test]
     fn add_provider_links_the_unique_catalog_entry() {
         let s = catalog_store();
-        let aux = linkless_aux();
 
         // A bare host where the entry names a deeper path.
-        let vm = add_provider(
-            &s,
-            &aux,
-            &catalog_input("DeepSeek", "https://api.deepseek.com"),
-        )
-        .unwrap();
+        let vm = add_provider(&s, &catalog_input("DeepSeek", "https://api.deepseek.com")).unwrap();
         assert_eq!(stored_catalog_id(&s, &vm.id).as_deref(), Some("deepseek"));
 
         // A path the entry advertises among two — still one entry, one link.
-        let vm = add_provider(
-            &s,
-            &aux,
-            &catalog_input("KFC", "https://api.kimi.com/coding"),
-        )
-        .unwrap();
+        let vm = add_provider(&s, &catalog_input("KFC", "https://api.kimi.com/coding")).unwrap();
         assert_eq!(
             stored_catalog_id(&s, &vm.id).as_deref(),
             Some("kimi-for-coding")
         );
 
         // The other direction: the local URL carries the deeper path.
-        let vm = add_provider(
-            &s,
-            &aux,
-            &catalog_input("Bare", "https://api.bare.example/v1"),
-        )
-        .unwrap();
+        let vm = add_provider(&s, &catalog_input("Bare", "https://api.bare.example/v1")).unwrap();
         assert_eq!(stored_catalog_id(&s, &vm.id).as_deref(), Some("bare-host"));
     }
 
@@ -636,7 +616,7 @@ mod tests {
 
         let mut input = catalog_input("DeepSeek", "https://api.deepseek.com");
         input.model_default = "deepseek-v4-pro".into();
-        let vm = add_provider(&s, &aux, &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
         assert_eq!(vm.model_default.as_deref(), Some("deepseek-v4-pro"));
         assert_eq!(
             s.get_provider(&vm.id)
@@ -652,7 +632,7 @@ mod tests {
         // than the empty string.
         let mut blank = catalog_input("Blank", "https://api.blank.example/v1");
         blank.model_default = "   ".into();
-        let blank_vm = add_provider(&s, &aux, &blank).unwrap();
+        let blank_vm = add_provider(&s, &blank).unwrap();
         assert_eq!(blank_vm.model_default, None);
         assert_eq!(
             s.get_provider(&blank_vm.id).unwrap().unwrap().model_default,
@@ -681,10 +661,10 @@ mod tests {
         // Two providers serving claude. The second one added is primary.
         let mut first = catalog_input("A", "https://a.example.com/v1");
         first.agents = Some(vec!["claude".into()]);
-        let a = add_provider(&s, &aux, &first).unwrap();
+        let a = add_provider(&s, &first).unwrap();
         let mut second = catalog_input("B", "https://b.example.com/v1");
         second.agents = Some(vec!["claude".into()]);
-        let b = add_provider(&s, &aux, &second).unwrap();
+        let b = add_provider(&s, &second).unwrap();
         assert_eq!(
             s.primary_provider_id("claude").unwrap().as_deref(),
             Some(b.id.as_str())
@@ -731,10 +711,9 @@ mod tests {
     #[test]
     fn a_stored_key_covers_only_the_providers_own_endpoints() {
         let s = catalog_store();
-        let aux = linkless_aux();
         let mut input = catalog_input("Kimi", "https://api.moonshot.cn");
         input.api_key = "sk-secret".into();
-        let vm = add_provider(&s, &aux, &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
 
         // Its own endpoint, however it is spelled.
         for spelling in [
@@ -764,11 +743,10 @@ mod tests {
     #[test]
     fn add_provider_keeps_an_explicit_catalog_id() {
         let s = catalog_store();
-        let aux = linkless_aux();
 
         let mut input = catalog_input("DeepSeek", "https://api.deepseek.com");
         input.catalog_id = Some("kimi-for-coding".into());
-        let vm = add_provider(&s, &aux, &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
             stored_catalog_id(&s, &vm.id).as_deref(),
             Some("kimi-for-coding"),
@@ -779,7 +757,7 @@ mod tests {
         // corrected into something the endpoint suggests.
         let mut input = catalog_input("Unlisted", "https://api.deepseek.com");
         input.catalog_id = Some("not-a-real-entry".into());
-        let vm = add_provider(&s, &aux, &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
             stored_catalog_id(&s, &vm.id).as_deref(),
             Some("not-a-real-entry")
@@ -791,13 +769,7 @@ mod tests {
     #[test]
     fn add_provider_does_not_guess_between_ambiguous_entries() {
         let s = catalog_store();
-        let aux = linkless_aux();
-        let vm = add_provider(
-            &s,
-            &aux,
-            &catalog_input("Ambiguous", "https://api.example.com"),
-        )
-        .unwrap();
+        let vm = add_provider(&s, &catalog_input("Ambiguous", "https://api.example.com")).unwrap();
         assert_eq!(stored_catalog_id(&s, &vm.id), None);
     }
 
@@ -806,13 +778,12 @@ mod tests {
     #[test]
     fn add_provider_leaves_a_custom_endpoint_unlinked() {
         let s = catalog_store();
-        let aux = linkless_aux();
         for endpoint in [
             "https://my-own.example.com",
             "https://api.deepseek.com.evil.com",
             "https://api.deepseek.com:8443",
         ] {
-            let vm = add_provider(&s, &aux, &catalog_input("Custom", endpoint)).unwrap();
+            let vm = add_provider(&s, &catalog_input("Custom", endpoint)).unwrap();
             assert_eq!(stored_catalog_id(&s, &vm.id), None, "{endpoint}");
         }
     }
@@ -822,13 +793,12 @@ mod tests {
     #[test]
     fn add_provider_links_from_an_extra_endpoint() {
         let s = catalog_store();
-        let aux = linkless_aux();
         let mut input = catalog_input("KFC", "https://my-own.example.com");
         input.endpoints = vec![NewEndpointInput {
             protocol: "anthropic".into(),
             endpoint: "https://api.kimi.com/coding".into(),
         }];
-        let vm = add_provider(&s, &aux, &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
             stored_catalog_id(&s, &vm.id).as_deref(),
             Some("kimi-for-coding")
@@ -924,7 +894,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        let vm = add_provider(&s, &linkless_aux(), &input).unwrap();
+        let vm = add_provider(&s, &input).unwrap();
         assert_eq!(
             s.primary_provider_id("codex").unwrap().as_deref(),
             Some(vm.id.as_str())
@@ -972,7 +942,7 @@ mod tests {
             advanced: None,
             plan_query: None,
         };
-        add_provider(&s, &linkless_aux(), &input).unwrap();
+        add_provider(&s, &input).unwrap();
 
         let rows = s.list_providers().unwrap();
         assert_eq!(rows.len(), 1);

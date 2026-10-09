@@ -124,7 +124,6 @@ pub fn build_provider_vms(
 
     let ctx = ProviderViewCtx {
         store,
-        aux,
         catalog_entries: &catalog_entries,
         since_day: &since_day,
         since7: &since7,
@@ -369,7 +368,6 @@ fn badge_set(
 /// What every row of `build_provider_vms` reads, resolved once for the page.
 struct ProviderViewCtx<'a> {
     store: &'a Store,
-    aux: &'a Aux,
     catalog_entries: &'a [CatalogEntryVm],
     since_day: &'a str,
     since7: &'a str,
@@ -389,14 +387,8 @@ fn provider_vm(ctx: &ProviderViewCtx, p: Provider, badges: BadgeSet) -> Provider
         None
     };
 
-    let health = health_vm(ctx.aux, &p, ctx.since_day, ctx.health_by_id.get(&p.id));
-    let usage = usage_vm(
-        ctx.store,
-        ctx.aux,
-        &p,
-        ctx.usage_by_id.get(&p.id),
-        ctx.since7,
-    );
+    let health = health_vm(ctx.store, &p, ctx.since_day, ctx.health_by_id.get(&p.id));
+    let usage = usage_vm(ctx.store, &p, ctx.usage_by_id.get(&p.id), ctx.since7);
 
     ProviderVm {
         id: p.id.clone(),

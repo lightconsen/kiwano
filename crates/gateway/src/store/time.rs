@@ -75,3 +75,69 @@ pub fn in_window(now_min: u32, start: &str, end: &str) -> bool {
         _ => false,
     }
 }
+
+pub fn day_key(epoch_secs: i64) -> String {
+    let (y, m, d) = civil_from_days(epoch_secs.div_euclid(86_400));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// `YYYY-MM-DDTHH` — the bucket key `Store::usage_hourly` groups by, from local
+/// time already shifted by the caller's offset.
+pub fn hour_key(local_secs: i64) -> String {
+    let (y, m, d) = civil_from_days(local_secs.div_euclid(86_400));
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}",
+        local_secs.rem_euclid(86_400) / 3600
+    )
+}
+
+/// `MM-DD` label for the dashboard trend axis.
+pub fn mmdd(day: &str) -> String {
+    day.get(5..10).unwrap_or(day).to_string()
+}
+
+/// The local day index a `YYYY-MM-DD` bucket key names — the inverse of
+/// [`local_day_key`], for a chart whose left edge is wherever the oldest bucket
+/// is rather than a day count back from today.
+pub fn day_index_of_key(key: &str) -> Option<i64> {
+    Some(days_from_civil(
+        key.get(0..4)?.parse().ok()?,
+        key.get(5..7)?.parse().ok()?,
+        key.get(8..10)?.parse().ok()?,
+    ))
+}
+
+/// `HH:00` label for the dashboard trend axis when it plots hours.
+pub fn hh00(hour: &str) -> String {
+    hour.get(11..13)
+        .map(|h| format!("{h}:00"))
+        .unwrap_or_else(|| hour.to_string())
+}
+
+/// The local calendar date (`YYYY-MM-DD`) containing a unix timestamp.
+pub fn local_day_key(offset_minutes: i64, epoch_secs: i64) -> String {
+    day_key(epoch_secs + offset_minutes * 60)
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m as i64 - 3 } else { m as i64 + 9 };
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}

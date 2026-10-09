@@ -37,6 +37,7 @@
 pub mod agents;
 pub mod catalog;
 pub mod csv;
+pub mod dashboard;
 pub mod import;
 pub mod keys;
 pub mod limits;

@@ -17,18 +17,6 @@ use kiwano_adapters::model_pricing::ModelsDoc;
 pub use kiwano_adapters::model_pricing::{convert_amount, convert_cost_buckets};
 use std::collections::HashMap;
 
-/// Currency metadata for the Settings selector + UI conversion.
-#[derive(serde::Serialize)]
-pub struct CurrencyMetaVm {
-    /// The codes the selector offers: the rate table's keys, plus the current
-    /// preference if the table has no rate for it.
-    pub currencies: Vec<String>,
-    /// currency -> units of that currency per 1 USD (e.g. CNY: 7.1).
-    pub exchange_rates: HashMap<String, f64>,
-    /// The user's preferred display currency (Settings).
-    pub preferred: String,
-}
-
 /// The price table to seed from, with the sha256 of the bytes it came from, or
 /// `None` when the Hub has never been synced or its cache is unusable.
 ///
@@ -135,20 +123,20 @@ pub fn displayable_currencies(rates: &HashMap<String, f64>, preferred: &str) -> 
     out
 }
 
+/// The currency picker — served by the daemon (`kiwanod::api::dashboard`), like
+/// the rest of the Dashboard's reads (`migrate.local.md` §10.21).
 pub fn currency_meta(store: &kiwanod::store::Store) -> Result<CurrencyMetaVm, String> {
-    let rates = effective_rates(store);
-    let preferred = preferred_currency(store);
-    let currencies = displayable_currencies(&rates, &preferred);
-    Ok(CurrencyMetaVm {
-        currencies,
-        exchange_rates: rates,
-        preferred,
-    })
+    kiwanod::api::dashboard::currency_meta(store).map_err(|e| e.to_string())
 }
+
+// The currency picker's shape moved to `kiwano-api` with the daemon's
+// dashboard (`migrate.local.md` §10.21).
+pub use kiwano_api::dashboard::CurrencyMetaVm;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kiwanod::api::dashboard::displayable_currencies;
 
     /// The conversion and display helpers — the client's half. The seed and the
     /// mirror's own rows are tested where they live now

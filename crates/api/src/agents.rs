@@ -32,3 +32,37 @@ pub struct PromptLatencyVm {
     /// The upstream's own words when it refused, so a failure reads as one.
     pub error: Option<String>,
 }
+
+/// Every built-in agent: its id and the name a person reads.
+///
+/// Here because both sides label rows with it — the daemon's dashboard, the
+/// client's everything-else — and a table copied to two crates is a table that
+/// disagrees with itself the first time an agent is added.
+pub const AGENTS: [(&str, &str); 26] = [
+    ("claude", "Claude Code"),
+    ("codex", "Codex"),
+    ("gemini", "Gemini CLI"),
+    ("grokbuild", "Grok Build"),
+    ("claude-desktop", "Claude Desktop"),
+    ("opencode", "OpenCode"),
+    ("openclaw", "OpenClaw"),
+    ("hermes", "Hermes"),
+    ("pi", "Pi"),
+    ("omp", "oh-my-pi"),
+    ("commandcode", "Command Code"),
+    ("dsh", "DeepSeek Harness"),
+    ("hanaagent", "HanaAgent"),
+    ("workbuddy", "WorkBuddy"),
+    ("codebuddy", "CodeBuddy Code"),
+    ("kimi", "Kimi Code CLI"),
+    ("qwen", "Qwen Code"),
+    ("cline", "Cline"),
+    ("mimo", "MiMo Code"),
+    ("mcode", "MiniMax Code"),
+    ("aider", "Aider"),
+    ("continue", "Continue"),
+    ("crush", "Crush"),
+    ("droid", "Droid"),
+    ("goose", "Goose"),
+    ("zcode", "ZCode"),
+];

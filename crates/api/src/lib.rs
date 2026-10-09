@@ -45,6 +45,7 @@
 //! unwrapped on the error side).
 
 pub mod agents;
+pub mod dashboard;
 pub mod error;
 pub mod ids;
 pub mod keys;

@@ -128,6 +128,9 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             put(update_provider_route).delete(delete_provider_route),
         )
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
+        .route("/dashboard", get(dashboard_route))
+        .route("/footer", get(footer_route))
+        .route("/currency", get(currency_route))
         .route("/model-prices", get(list_model_prices_route))
         .route("/catalog", get(list_catalog_route))
         .route("/sync-hub", post(sync_hub_route))
@@ -1416,6 +1419,63 @@ async fn provider_view_route(
 ) -> Response {
     match crate::api::providers_view::build_provider_vms(&state.store, &body.live) {
         Ok(vms) => Json(vms).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+// ── The Dashboard, the footer and the currency picker (`migrate.local.md` §10.21) ──
+//
+// Three screens, three reads, and none of them a machine fact: the usage table,
+// the price cache and the settings blob are all the daemon's. They moved whole,
+// with nothing for the client to supply but the window it is showing.
+
+#[derive(serde::Deserialize)]
+struct DashboardQuery {
+    window: String,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+}
+
+/// `GET /api/dashboard` — the Dashboard for one window.
+async fn dashboard_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<DashboardQuery>,
+) -> Response {
+    match crate::api::dashboard::build_dashboard(
+        &state.store,
+        &q.window,
+        q.provider_id.as_deref(),
+        q.agent.as_deref(),
+    ) {
+        Ok(vm) => Json(vm).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct FooterQuery {
+    /// The version the client is running — its own, not this daemon's. The
+    /// footer names the app the user is looking at.
+    version: String,
+}
+
+/// `GET /api/footer` — today's totals and whether the Hub was synced today.
+async fn footer_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<FooterQuery>,
+) -> Response {
+    match crate::api::dashboard::build_footer_stats(&state.store, &q.version) {
+        Ok(vm) => Json(vm).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/currency` — the currencies a limit may be written in, and the rates.
+async fn currency_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::dashboard::currency_meta(&state.store) {
+        Ok(vm) => Json(vm).into_response(),
         Err(e) => resource_error(e),
     }
 }

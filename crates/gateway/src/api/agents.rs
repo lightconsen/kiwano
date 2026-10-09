@@ -17,7 +17,7 @@
 //! minted only when the row is.
 
 use crate::store::{CustomAgent, Protocol, Store};
-use kiwano_api::agents::CustomAgentVm;
+use kiwano_api::agents::{CustomAgentVm, AGENTS};
 use kiwano_api::error::ApiError;
 
 /// One stored agent as the UI sees it, key included.
@@ -192,6 +192,18 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), ApiError> {
     }
     store.delete_custom_agent(id).map_err(ApiError::failed)?;
     Ok(())
+}
+
+/// Every agent the UI should offer — built-ins first, then the user's own.
+pub fn list_agents(store: &Store) -> Result<Vec<(String, String)>, ApiError> {
+    let mut out: Vec<(String, String)> = AGENTS
+        .iter()
+        .map(|(id, label)| (id.to_string(), label.to_string()))
+        .collect();
+    for a in store.list_custom_agents().map_err(ApiError::failed)? {
+        out.push((a.id, a.label));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

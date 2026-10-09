@@ -13,6 +13,7 @@
 
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
+use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm};
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::providers::{NewProviderInput, ProviderVm, SyncReportVm};
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
@@ -685,6 +686,42 @@ impl DaemonApi {
             "/api/providers/view",
             &Body { live },
         )
+    }
+    // ── The Dashboard, the footer and the currency picker ──
+
+    /// The Dashboard for one window — `vm::build_dashboard`.
+    pub fn dashboard(
+        &self,
+        window: &str,
+        provider_id: Option<&str>,
+        agent: Option<&str>,
+    ) -> Result<DashboardVm, String> {
+        let mut query = format!("window={}", encode_query(window));
+        for (key, value) in [("provider_id", provider_id), ("agent", agent)] {
+            if let Some(value) = value {
+                query.push_str(&format!("&{key}={}", encode_query(value)));
+            }
+        }
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/dashboard?{query}"),
+        )
+    }
+
+    /// Today's totals — `vm::build_footer_stats`. `version` is the **client's**
+    /// own: the footer names the app the user is looking at.
+    pub fn footer_stats(&self, version: &str) -> Result<FooterStatsVm, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/footer?version={}", encode_query(version)),
+        )
+    }
+
+    /// The currencies a limit may be written in — `pricing::currency_meta`.
+    pub fn currency_meta(&self) -> Result<CurrencyMetaVm, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/currency")
     }
 }
 

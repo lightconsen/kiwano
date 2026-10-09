@@ -11,7 +11,8 @@ pub(crate) use kiwanod::api::providers_view::usage_vm;
 mod tests {
     use super::*;
     use crate::vm::test_support::{provider, store};
-    use crate::vm::time::{local_day_start, rfc3339, unix_now};
+    use crate::vm::time::{rfc3339, unix_now};
+    use kiwanod::store::time::local_day_start;
     use kiwanod::store::Billing;
 
     #[test]

@@ -8,15 +8,6 @@ use crate::vm::routes::display_path;
 use crate::vm::{e2s, Aux};
 use kiwanod::store::Store;
 
-/// The stored UTC offset (minutes east of UTC) the frontend keeps current.
-pub(crate) fn tz_offset(store: &Store) -> i64 {
-    // The blob comes from the store — the same row `update_settings` patches —
-    // so a day boundary the user just set is the one the dashboard uses.
-    kiwanod::api::settings::ui_settings(store)
-        .map(|s| s.tz_offset_minutes)
-        .unwrap_or(0)
-}
-
 // The blob and its types moved to `kiwano-api` — the daemon serves them.
 pub use kiwano_api::settings::{
     default_dlp_mode, default_hub_url, default_preferred_currency, default_stream_first_byte_secs,

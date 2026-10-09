@@ -1,7 +1,6 @@
 //! The agent registry: which agents exist, which protocols each speaks, and the
 //! custom agents the user added.
 
-use crate::vm::e2s;
 use kiwanod::api::agents as daemon;
 use kiwanod::store::Store;
 
@@ -50,18 +49,9 @@ pub fn is_builtin_agent(id: &str) -> bool {
 // live where both sides can see them. The paths are unchanged on purpose.
 pub use kiwano_api::agents::{CustomAgentVm, PromptLatencyVm};
 
-/// Every agent the UI should offer, built-ins first (registry order), then the
-/// user's own in the order they were created.
-pub(crate) fn list_agents(store: &Store) -> Result<Vec<(String, String)>, String> {
-    let mut out: Vec<(String, String)> = AGENTS
-        .iter()
-        .map(|(id, label)| (id.to_string(), label.to_string()))
-        .collect();
-    for a in store.list_custom_agents().map_err(e2s)? {
-        out.push((a.id, a.label));
-    }
-    Ok(out)
-}
+// `list_agents` moved to `kiwanod::api::agents` with the dashboard, which is
+// what labels its rows with it (`migrate.local.md` §10.21). Re-exported so the
+// callers here keep their paths.
 
 /// One prompt round trip against a provider — served by the daemon
 /// (`kiwanod::api::probe::test_provider_latency`). The verdict it writes is the

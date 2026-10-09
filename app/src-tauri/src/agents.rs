@@ -92,7 +92,8 @@ pub fn clear_agent_dir(state: State<AppState>, agent: String) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
-pub fn get_currency_meta(state: State<AppState>) -> Result<pricing::CurrencyMetaVm, String> {
-    pricing::currency_meta(&state.store)
+#[tauri::command(async)]
+pub fn get_currency_meta() -> Result<pricing::CurrencyMetaVm, String> {
+    // Served by the daemon, like the rest of the Dashboard's reads.
+    kiwano_core::daemon_api::DaemonApi::connect().currency_meta()
 }

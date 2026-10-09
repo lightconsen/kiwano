@@ -10,15 +10,14 @@ use crate::tray::refresh_tray;
 use crate::update;
 use kiwano_core::vm;
 
-#[tauri::command]
-pub fn get_footer_stats(
-    app: AppHandle,
-    state: State<AppState>,
-) -> Result<vm::FooterStatsVm, String> {
+#[tauri::command(async)]
+pub fn get_footer_stats(app: AppHandle) -> Result<vm::FooterStatsVm, String> {
     // tauri.conf.json is the single source of truth for the app version —
-    // the same one the updater compares against.
+    // the same one the updater compares against. It travels to the daemon
+    // because the footer names the **app** the user is looking at, not the
+    // daemon that counted the requests.
     let version = format!("v{}", app.package_info().version);
-    vm::build_footer_stats(&state.store, &version)
+    kiwano_core::daemon_api::DaemonApi::connect().footer_stats(&version)
 }
 
 /// The update the silent startup check found, if any. The About block reads

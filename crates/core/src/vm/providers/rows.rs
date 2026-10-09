@@ -79,7 +79,6 @@ pub fn build_provider_vms(
 mod tests {
     use super::*;
     use crate::vm::routes::set_agent_strategy;
-    use crate::vm::settings::tz_offset;
     use crate::vm::test_support::{live_home, no_vars, provider, store};
     use crate::vm::time::{rfc3339, unix_now};
     use crate::vm::Aux;
@@ -300,7 +299,7 @@ mod tests {
         // Built from the same clock the view model reads — a fresh store has no
         // settings blob, so the offset defaults to UTC — and the case is stated
         // without depending on the host's zone.
-        let now = local_minutes_now(tz_offset(&s));
+        let now = local_minutes_now(s.ui_tz_offset_minutes());
         let hhmm = |min: u32| format!("{:02}:{:02}", min / 60 % 24, min % 60);
         // [now-30, now+30] — wraps midnight safely near the day edges
         s.upsert_binding(&Binding {

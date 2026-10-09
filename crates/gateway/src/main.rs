@@ -128,10 +128,35 @@ async fn main() {
         }
     };
 
+    // The cross-machine listener, when one was asked for. Resolved **after** the
+    // local plane is up so a bad address fails a running gateway rather than a
+    // missing one, and refused outright when it would be reachable from
+    // anywhere without the operator saying so (see `AdminTcp`).
+    let admin_tcp = match kiwanod::server::AdminTcp::from_env() {
+        Ok(tcp) => tcp,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let admin_tcp_listener = match &admin_tcp {
+        Some(tcp) => match tokio::net::TcpListener::bind(tcp.addr).await {
+            Ok(l) => Some(l),
+            Err(e) => {
+                tracing::error!(addr = %tcp.addr, error = %e, "cannot bind the admin TCP listener");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+
     let agents = state.route_table().routes.len();
     tracing::info!(
         data = %data_addr,
         admin = %admin_endpoint.describe(),
+        // Said out loud, because it is the one plane a network can reach — and
+        // the only way an operator knows it is on.
+        admin_tcp = %admin_tcp.as_ref().map(|t| t.addr.to_string()).unwrap_or_else(|| "off".into()),
         db = %db_path.display(),
         agents_routed = agents,
         metrics_token = metrics_enabled,
@@ -206,12 +231,28 @@ async fn main() {
         });
     }
 
-    let served = tokio::try_join!(
-        axum::serve(data_listener, data_app)
-            .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
-        axum::serve(admin_listener, admin_app)
-            .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
-    );
+    // The same router on every plane: one API, however it is reached. The TCP
+    // listener is a second `serve` rather than a second router, which is what
+    // keeps an endpoint from existing on one plane and not the other.
+    let admin_tcp_app = admin_app.clone();
+    let served = match admin_tcp_listener {
+        Some(tcp_listener) => tokio::try_join!(
+            axum::serve(data_listener, data_app)
+                .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
+            axum::serve(admin_listener, admin_app)
+                .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
+            axum::serve(tcp_listener, admin_tcp_app)
+                .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
+        )
+        .map(|_| ()),
+        None => tokio::try_join!(
+            axum::serve(data_listener, data_app)
+                .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
+            axum::serve(admin_listener, admin_app)
+                .with_graceful_shutdown(wait_for_stop(state.shutdown_rx())),
+        )
+        .map(|_| ()),
+    };
     // Remove the socket file an orderly stop would otherwise leave for the next
     // bind to reclaim. Best-effort: a crash leaves the file, and `bind`
     // handles that, so this is tidiness rather than correctness.

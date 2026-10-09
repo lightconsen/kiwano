@@ -60,6 +60,118 @@ use std::path::PathBuf;
 /// variable now.
 pub const ADMIN_SOCKET_ENV: &str = "KIWANO_ADMIN_SOCKET";
 
+/// Environment variable that **additionally** binds the admin plane on TCP, so
+/// a client on another machine can reach it.
+///
+/// Unset — the default, and what every install is today — means no TCP listener
+/// at all. Separate from [`ADMIN_SOCKET_ENV`] rather than sharing it: that value
+/// is a path, colons are legal in paths, and one variable whose meaning depends
+/// on what the string looks like is how a socket ends up on a network.
+pub const ADMIN_ADDR_ENV: &str = "KIWANO_ADMIN_ADDR";
+
+/// Environment variable an operator sets to say they mean `0.0.0.0`.
+///
+/// The daemon binds a private address by default, and refuses an
+/// all-interfaces one without this. Not because anything checks who connects —
+/// see the module's note on TLS — but because `0.0.0.0` is the difference
+/// between "my other laptop" and "whoever is on this network", and it should be
+/// a decision someone makes rather than a typo someone makes.
+pub const ADMIN_ALLOW_ANY_ENV: &str = "KIWANO_ADMIN_ALLOW_ANY";
+
+/// Whether an address is one a daemon may bind without being told twice.
+///
+/// Private, loopback, and link-local — the ranges a home network and a
+/// tailnet live in. Anything else (a public address, an all-interfaces one, a
+/// ULA) needs [`ADMIN_ALLOW_ANY_ENV`].
+fn is_private(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            // `is_private` is RFC1918 only, and **the tailnet range is not in
+            // it**: `100.64.0.0/10` is the carrier-grade NAT block, which is
+            // where Tailscale puts every device. It is the single most likely
+            // address this listener is configured with, so it is checked by
+            // hand rather than assumed to be covered.
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]))
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                // `fc00::/7` is every unique-local address, which is where the
+                // v6 side of a tailnet lives.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Where the cross-machine listener goes, resolved once at startup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminTcp {
+    pub addr: std::net::SocketAddr,
+}
+
+/// Why a configured address was refused.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AdminAddrError {
+    /// Not `host:port` at all.
+    Unparseable { value: String, detail: String },
+    /// Reachable from anywhere, and nobody said that was meant.
+    TooPublic { addr: std::net::SocketAddr },
+}
+
+impl std::fmt::Display for AdminAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unparseable { value, detail } => write!(
+                f,
+                "{ADMIN_ADDR_ENV} = \"{value}\" is not an address: {detail}"
+            ),
+            Self::TooPublic { addr } => write!(
+                f,
+                "{ADMIN_ADDR_ENV} = {addr} is reachable from any network. The admin plane can \
+                 read every provider key and rewrite every route, so binding it where anyone \
+                 can reach it is a decision rather than a default — set \
+                 {ADMIN_ALLOW_ANY_ENV}=1 if that is what you mean, or bind a private address \
+                 (or put the daemon on a VPN)."
+            ),
+        }
+    }
+}
+
+impl AdminTcp {
+    /// Resolve the listener from the environment. `None` when not configured —
+    /// which is every install that has not asked for one.
+    ///
+    /// `allow_any` is passed in rather than read here so the decision is
+    /// testable without an environment.
+    pub fn resolve(value: Option<&str>, allow_any: bool) -> Result<Option<Self>, AdminAddrError> {
+        let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+            return Ok(None);
+        };
+        let addr: std::net::SocketAddr =
+            value.parse().map_err(|e| AdminAddrError::Unparseable {
+                value: value.to_string(),
+                detail: format!("{e} (expected host:port, e.g. 192.168.1.5:8318)"),
+            })?;
+        if !is_private(addr.ip()) && !allow_any {
+            return Err(AdminAddrError::TooPublic { addr });
+        }
+        Ok(Some(Self { addr }))
+    }
+
+    /// [`resolve`](Self::resolve) against the real environment.
+    pub fn from_env() -> Result<Option<Self>, AdminAddrError> {
+        let value = std::env::var(ADMIN_ADDR_ENV).ok();
+        let allow_any = std::env::var(ADMIN_ALLOW_ANY_ENV)
+            .map(|v| !v.trim().is_empty() && v.trim() != "0")
+            .unwrap_or(false);
+        Self::resolve(value.as_deref(), allow_any)
+    }
+}
+
 /// Default socket file name, in the database's directory.
 #[cfg(unix)]
 const SOCKET_FILE_NAME: &str = "admin.sock";
@@ -80,11 +192,16 @@ const PIPE_NAME_PREFIX: &str = "kiwano-admin-";
 /// A value, not a handle: it is cheap to clone and safe to hold for the life of
 /// the process, which is what `AppState` does with it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AdminEndpoint {
+pub enum AdminEndpoint {
+    /// The socket file beside the database (a named pipe on Windows) — the
+    /// local plane, and the only one that exists unless someone asks for TCP.
     #[cfg(unix)]
-    path: PathBuf,
+    Local(PathBuf),
     #[cfg(windows)]
-    name: String,
+    Local(String),
+    /// A cross-machine plane: the address a daemon was told to listen on.
+    /// Plaintext, with the token as the credential — see the module's note.
+    Tcp(std::net::SocketAddr),
 }
 
 impl AdminEndpoint {
@@ -102,19 +219,15 @@ impl AdminEndpoint {
         #[cfg(unix)]
         {
             let dir = db_path.parent().filter(|d| !d.as_os_str().is_empty());
-            AdminEndpoint {
-                path: match dir {
-                    Some(dir) => dir.join(SOCKET_FILE_NAME),
-                    None => PathBuf::from(SOCKET_FILE_NAME),
-                },
-            }
+            AdminEndpoint::Local(match dir {
+                Some(dir) => dir.join(SOCKET_FILE_NAME),
+                None => PathBuf::from(SOCKET_FILE_NAME),
+            })
         }
         #[cfg(windows)]
         {
             let _ = db_path;
-            AdminEndpoint {
-                name: user_pipe_name(),
-            }
+            AdminEndpoint::Local(user_pipe_name())
         }
     }
 
@@ -133,32 +246,27 @@ impl AdminEndpoint {
     pub fn parse(value: &str) -> Self {
         #[cfg(unix)]
         {
-            AdminEndpoint {
-                path: PathBuf::from(value),
-            }
+            AdminEndpoint::Local(PathBuf::from(value))
         }
         #[cfg(windows)]
         {
-            AdminEndpoint {
-                name: if value.starts_with(PIPE_PREFIX) {
-                    value.to_string()
-                } else {
-                    format!("{PIPE_PREFIX}{value}")
-                },
-            }
+            AdminEndpoint::Local(if value.starts_with(PIPE_PREFIX) {
+                value.to_string()
+            } else {
+                format!("{PIPE_PREFIX}{value}")
+            })
         }
     }
 
     /// The endpoint as a human reads it: a path on unix, a pipe name on
     /// Windows. For logs, the sidecar's ready line and the CLI's status header.
     pub fn describe(&self) -> String {
-        #[cfg(unix)]
-        {
-            self.path.display().to_string()
-        }
-        #[cfg(windows)]
-        {
-            self.name.clone()
+        match self {
+            #[cfg(unix)]
+            AdminEndpoint::Local(path) => path.display().to_string(),
+            #[cfg(windows)]
+            AdminEndpoint::Local(name) => name.clone(),
+            AdminEndpoint::Tcp(addr) => addr.to_string(),
         }
     }
 
@@ -166,7 +274,13 @@ impl AdminEndpoint {
     /// serving side needs it.
     #[cfg(unix)]
     pub fn path(&self) -> &Path {
-        &self.path
+        match self {
+            AdminEndpoint::Local(path) => path,
+            // Only a local plane has a file; a test that asks for one on a TCP
+            // endpoint is asking the wrong question, and `describe` is the
+            // answer it wants.
+            AdminEndpoint::Tcp(_) => Path::new(""),
+        }
     }
 
     /// Bind the admin plane, failing when another gateway already holds it.
@@ -178,8 +292,20 @@ impl AdminEndpoint {
     /// Requires a tokio runtime: the listener registers with the reactor.
     pub async fn bind(&self) -> std::io::Result<AdminListener> {
         #[cfg(unix)]
+        let path = match self {
+            AdminEndpoint::Local(path) => path,
+            // A TCP endpoint is bound by `AdminTcp::bind`, which has the address
+            // and the discipline that goes with it.
+            AdminEndpoint::Tcp(addr) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("{addr} is a TCP endpoint; bind it through AdminTcp"),
+                ))
+            }
+        };
+        #[cfg(unix)]
         {
-            if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
                 if !dir.exists() {
                     std::fs::create_dir_all(dir)?;
                     // Same policy the store applies to the database directory:
@@ -189,7 +315,7 @@ impl AdminEndpoint {
                 }
             }
 
-            let listener = match tokio::net::UnixListener::bind(&self.path) {
+            let listener = match tokio::net::UnixListener::bind(path) {
                 Ok(listener) => listener,
                 Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
                     // One error, two situations: a live gateway, or the corpse
@@ -199,17 +325,17 @@ impl AdminEndpoint {
                     // "gateway will not start after a crash" failure. Tell them
                     // apart by connecting: a live gateway answers (or at least
                     // accepts), a corpse refuses immediately.
-                    if tokio::net::UnixStream::connect(&self.path).await.is_ok() {
+                    if tokio::net::UnixStream::connect(path).await.is_ok() {
                         // Really is another gateway. Leave it alone and report
                         // the bind failure as-is.
                         return Err(e);
                     }
                     tracing::warn!(
-                        path = %self.path.display(),
+                        path = %path.display(),
                         "removing a stale admin socket left by a gateway that is no longer running"
                     );
-                    std::fs::remove_file(&self.path)?;
-                    tokio::net::UnixListener::bind(&self.path)?
+                    std::fs::remove_file(path)?;
+                    tokio::net::UnixListener::bind(path)?
                 }
                 Err(e) => return Err(e),
             };
@@ -217,7 +343,7 @@ impl AdminEndpoint {
             // that survives the directory being moved: a socket is created
             // `0777 & !umask` (0755 for the usual umask 022), so without this
             // any local process could drive `/shutdown` through it.
-            set_socket_owner_only(&self.path)?;
+            set_socket_owner_only(path)?;
             Ok(AdminListener {
                 inner: listener,
                 describe: self.describe(),
@@ -274,16 +400,30 @@ impl AdminEndpoint {
         timeout: Duration,
         read_timeout: Option<Duration>,
     ) -> std::io::Result<AdminStream> {
+        // A cross-machine plane: the same bytes, over TCP. `TcpStream` has the
+        // same settable timeouts the socket branch relies on, which is why the
+        // streaming reader keeps working unchanged.
+        if let AdminEndpoint::Tcp(addr) = self {
+            let stream = std::net::TcpStream::connect_timeout(addr, timeout)?;
+            if let Some(read) = read_timeout {
+                stream.set_read_timeout(Some(read))?;
+            }
+            stream.set_write_timeout(Some(timeout))?;
+            return Ok(AdminStream::Tcp(stream));
+        }
         #[cfg(unix)]
         {
-            let stream = std::os::unix::net::UnixStream::connect(&self.path)?;
+            let AdminEndpoint::Local(path) = self else {
+                unreachable!("the TCP case returned above")
+            };
+            let stream = std::os::unix::net::UnixStream::connect(path)?;
             // Left unset for a streaming reader: `None` means "block until there
             // is something to read".
             if let Some(read) = read_timeout {
                 stream.set_read_timeout(Some(read))?;
             }
             stream.set_write_timeout(Some(timeout))?;
-            Ok(stream)
+            Ok(AdminStream::Local(stream))
         }
         #[cfg(windows)]
         {
@@ -330,7 +470,9 @@ impl AdminEndpoint {
             }
             // SAFETY: `handle` is a valid, owned file handle (CreateFileW
             // succeeded), and `File` takes ownership of it from here.
-            Ok(unsafe { std::fs::File::from_raw_handle(handle) })
+            Ok(AdminStream::Local(unsafe {
+                std::fs::File::from_raw_handle(handle)
+            }))
         }
     }
 
@@ -341,10 +483,14 @@ impl AdminEndpoint {
     pub fn cleanup(&self) {
         #[cfg(unix)]
         {
-            if let Err(e) = std::fs::remove_file(&self.path) {
+            let AdminEndpoint::Local(path) = self else {
+                // A TCP listener leaves nothing behind to clean up.
+                return;
+            };
+            if let Err(e) = std::fs::remove_file(path) {
                 // Not an error worth a warning on the happy path: the file may
                 // already be gone, and a leftover is reclaimed on next bind.
-                tracing::debug!(path = %self.path.display(), error = %e, "admin socket not removed");
+                tracing::debug!(path = %path.display(), error = %e, "admin socket not removed");
             }
         }
         #[cfg(windows)]
@@ -373,10 +519,50 @@ fn set_socket_owner_only(path: &Path) -> std::io::Result<()> {
 /// Both platforms' client types are a plain OS handle with `Read`/`Write` on
 /// it, so there is nothing to wrap: a unix socket, and the `File` over the
 /// `HANDLE` a named pipe is opened through.
-#[cfg(unix)]
-pub type AdminStream = std::os::unix::net::UnixStream;
-#[cfg(windows)]
-pub type AdminStream = std::fs::File;
+#[derive(Debug)]
+pub enum AdminStream {
+    /// The local plane: a unix socket, or the `File` over the `HANDLE` a named
+    /// pipe is opened through.
+    #[cfg(unix)]
+    Local(std::os::unix::net::UnixStream),
+    #[cfg(windows)]
+    Local(std::fs::File),
+    /// A cross-machine plane. Same bytes, same hand-written HTTP on top.
+    Tcp(std::net::TcpStream),
+}
+
+impl std::io::Read for AdminStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            AdminStream::Local(s) => s.read(buf),
+            #[cfg(windows)]
+            AdminStream::Local(s) => s.read(buf),
+            AdminStream::Tcp(s) => s.read(buf),
+        }
+    }
+}
+
+impl std::io::Write for AdminStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            AdminStream::Local(s) => s.write(buf),
+            #[cfg(windows)]
+            AdminStream::Local(s) => s.write(buf),
+            AdminStream::Tcp(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            AdminStream::Local(s) => s.flush(),
+            #[cfg(windows)]
+            AdminStream::Local(s) => s.flush(),
+            AdminStream::Tcp(s) => s.flush(),
+        }
+    }
+}
 
 /// The per-connection IO `axum::serve` drives.
 #[cfg(unix)]
@@ -739,6 +925,33 @@ pub(crate) mod test_support {
 
     /// A unique endpoint for one test.
     ///
+    /// Serve the admin router on a TCP listener, and report the address it got.
+    ///
+    /// The counterpart of [`serve_in_background`] for the cross-machine plane:
+    /// it binds port 0 and hands back the port the OS chose, so tests never race
+    /// each other for one. This is what `main` does for the same listener —
+    /// `AdminTcp::bind` is deliberately not involved, because it resolves an
+    /// address from the environment and a test should not be an environment.
+    pub(crate) fn serve_tcp_in_background(app: axum::Router) -> std::net::SocketAddr {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("test runtime");
+            runtime.block_on(async move {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                    .await
+                    .expect("bind a loopback port");
+                let addr = listener.local_addr().expect("the bound address");
+                tx.send(addr).expect("report the address");
+                let _ = axum::serve(listener, app).await;
+            });
+        });
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("the TCP listener never came up")
+    }
+
     /// Windows cannot use `beside_db` here: the real name is per-user, so every
     /// test in the process would share one pipe and collide with the others.
     /// The socket path is unique per test by construction (its own tempdir).
@@ -804,6 +1017,62 @@ pub(crate) mod test_support {
     }
 }
 
+/// The address discipline, which is the substitute for TLS in this design.
+///
+/// Nothing here checks *who* connects — the token does that. What it checks
+/// is the thing an operator can get wrong by accident: an address that
+/// reaches further than they meant. A typo (`0.0.0.0` for `127.0.0.1`) is
+/// one character and would otherwise silently expose every credential the
+/// daemon holds.
+#[test]
+fn a_configured_listener_address_needs_to_be_a_private_one() {
+    // Not configured: no listener. The default, and every install today.
+    assert_eq!(AdminTcp::resolve(None, false), Ok(None));
+    assert_eq!(AdminTcp::resolve(Some("   "), false), Ok(None));
+
+    // A private address is fine without being asked twice — this is the
+    // home network and the tailnet, which is the case that exists.
+    for value in [
+        "127.0.0.1:8318",
+        "192.168.1.5:8318",
+        "10.0.0.7:8318",
+        "172.16.4.4:8318",
+        "100.101.102.103:8318", // tailnet
+        "[::1]:8318",
+        "[fd7a:115c:a1e0::1]:8318", // tailnet, v6
+    ] {
+        assert!(
+            AdminTcp::resolve(Some(value), false).is_ok(),
+            "{value} should be bindable without ALLOW_ANY"
+        );
+    }
+
+    // All-interfaces and public addresses need the second switch.
+    for value in ["0.0.0.0:8318", "[::]:8318", "203.0.113.9:8318"] {
+        match AdminTcp::resolve(Some(value), false) {
+            Err(AdminAddrError::TooPublic { .. }) => {}
+            other => panic!("{value} should need ALLOW_ANY, got {other:?}"),
+        }
+        assert!(
+            AdminTcp::resolve(Some(value), true).is_ok(),
+            "{value} is allowed once the operator says so"
+        );
+    }
+
+    // And the refusal says what to do about it, which a bare "denied" does
+    // not — the reader is an operator who just typed an address.
+    let err = AdminTcp::resolve(Some("0.0.0.0:8318"), false).unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains(ADMIN_ALLOW_ANY_ENV), "{text}");
+    assert!(text.contains("VPN"), "{text}");
+
+    // A value that is not an address at all names the variable and the
+    // shape it wanted, rather than "invalid".
+    let err = AdminTcp::resolve(Some("/tmp/admin.sock"), false).unwrap_err();
+    assert!(matches!(err, AdminAddrError::Unparseable { .. }));
+    assert!(err.to_string().contains("host:port"), "{err}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::test_support::{request, serve_in_background, test_endpoint};
@@ -858,6 +1127,52 @@ mod tests {
     /// The point of keeping the HTTP framing: the transport carries whole HTTP
     /// requests, so the same router answers over a socket or a pipe as it does
     /// over TCP. GET and POST are both exercised — the admin plane uses both.
+    /// The cross-machine plane carries the same requests as the local one.
+    ///
+    /// This is the whole point of the TCP listener: the app on another machine
+    /// speaks the same hand-written HTTP over it, so the only new thing is the
+    /// transport underneath. Proven rather than asserted — a router served on a
+    /// TCP socket, dialled through `AdminEndpoint::Tcp`, answered.
+    #[test]
+    fn the_admin_plane_answers_http_over_tcp() {
+        use axum::routing::get;
+
+        let app = axum::Router::new().route(
+            "/status",
+            get(|| async { axum::Json(serde_json::json!({ "ok": true, "version": "test" })) }),
+        );
+        let addr = super::test_support::serve_tcp_in_background(app);
+        let endpoint = AdminEndpoint::Tcp(addr);
+
+        let raw = super::test_support::request(
+            &endpoint,
+            "GET /status HTTP/1.1\r\nHost: kiwanod\r\nConnection: close\r\n\r\n",
+        );
+        assert!(raw.starts_with("HTTP/1.1 200"), "{raw}");
+        assert!(raw.contains(r#""ok":true"#), "{raw}");
+
+        // And the endpoint describes itself as the address, which is what the
+        // ready line and the logs print.
+        assert_eq!(endpoint.describe(), addr.to_string());
+    }
+
+    /// A TCP endpoint is not something `bind` knows how to open — it has no
+    /// path, and `AdminTcp` is where the address discipline lives. Asking the
+    /// wrong one is a named refusal rather than a panic or a silent no-op.
+    #[tokio::test]
+    async fn binding_a_tcp_endpoint_through_bind_is_refused() {
+        let endpoint = AdminEndpoint::Tcp("127.0.0.1:8318".parse().unwrap());
+        let err = match endpoint.bind().await {
+            Ok(_) => panic!("a TCP endpoint has no local listener to bind"),
+            Err(e) => e,
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("AdminTcp"), "{err}");
+
+        // Cleanup is a no-op for it too: there is no socket file to remove.
+        endpoint.cleanup();
+    }
+
     #[test]
     fn the_admin_plane_answers_http_over_the_endpoint() {
         use axum::routing::{get, post};

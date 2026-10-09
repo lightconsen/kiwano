@@ -13,7 +13,10 @@ pub mod admin_ipc;
 pub mod data;
 
 pub use admin::{admin_plane_router, ensure_admin_token, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY};
-pub use admin_ipc::{AdminEndpoint, AdminListener, AdminStream, ADMIN_SOCKET_ENV};
+pub use admin_ipc::{
+    AdminAddrError, AdminEndpoint, AdminListener, AdminStream, AdminTcp, ADMIN_ADDR_ENV,
+    ADMIN_ALLOW_ANY_ENV, ADMIN_SOCKET_ENV,
+};
 pub use data::data_plane_router;
 
 use std::sync::{Arc, RwLock};

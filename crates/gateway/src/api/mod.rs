@@ -36,6 +36,7 @@
 
 pub mod agents;
 pub mod catalog;
+pub mod csv;
 pub mod keys;
 pub mod limits;
 pub mod logs;
@@ -46,5 +47,6 @@ pub mod providers;
 pub mod providers_add;
 pub mod routes;
 pub mod settings;
+pub mod share;
 pub mod sync;
 pub mod views;

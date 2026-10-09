@@ -19,6 +19,7 @@ use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::logs::RequestLogListVm;
+use kiwanod::api::share::ImportReport;
 use kiwanod::plan_quota::PlanQuotaReport;
 use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter};
 
@@ -520,6 +521,62 @@ impl DaemonApi {
             "/api/settings",
             patch,
         )
+    }
+    // ── Config share and the log export ──
+
+    /// The whole configuration as JSON — `vm::export_config`. The **caller**
+    /// writes it to a file: the path came from the user's save dialog, which is
+    /// the client's business (`migrate.local.md` §10.17).
+    pub fn export_config(&self, include_keys: bool) -> Result<String, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/config/export?include_keys={include_keys}"),
+        )
+    }
+
+    /// Apply a shared document — `vm::import_config`. The text, not a path: the
+    /// caller read the file, and the daemon validates what it says.
+    pub fn import_config(&self, json: &str) -> Result<ImportReport, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/config/import",
+            &json,
+        )
+    }
+
+    /// The filtered log slice as CSV **text** — the content half of the export.
+    /// The caller writes the file.
+    pub fn export_request_logs(
+        &self,
+        filter: RequestLogFilter<'_>,
+    ) -> Result<(String, usize, bool), String> {
+        let mut query = String::new();
+        for (key, value) in [
+            ("agent", filter.agent),
+            ("provider_id", filter.provider_id),
+            ("status", filter.status),
+            ("from", filter.from),
+            ("to", filter.to),
+        ] {
+            if let Some(value) = value {
+                if !query.is_empty() {
+                    query.push('&');
+                }
+                query.push_str(&format!("{key}={}", encode_query(value)));
+            }
+        }
+        let page: serde_json::Value = sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/logs/export?{query}"),
+        )?;
+        Ok((
+            page["csv"].as_str().unwrap_or_default().to_string(),
+            page["rows_written"].as_u64().unwrap_or(0) as usize,
+            page["truncated"].as_bool().unwrap_or(false),
+        ))
     }
 }
 

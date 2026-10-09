@@ -18,40 +18,9 @@
 //! directly; bindings of untouched agents are left alone. The caller is
 //! responsible for triggering admin /reload.
 
-use std::collections::HashMap;
-
-use serde::{Deserialize, Serialize};
-
-use kiwanod::store::{Binding, Provider, Store, StrategyType};
-
-use crate::vm;
+use kiwanod::store::Store;
 
 pub const FORMAT_VERSION: u32 = 1;
-
-#[derive(Serialize, Deserialize)]
-struct ConfigShare {
-    kiwano_config: u32,
-    exported_at: String,
-    providers: Vec<Provider>,
-    routes: Vec<ShareRoute>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ShareRoute {
-    agent: String,
-    strategy: String,
-    config: Option<String>,
-    /// Provider id order at export time (i.e. the priority).
-    candidates: Vec<String>,
-}
-
-/// Import result (for the frontend to display).
-#[derive(Serialize)]
-pub struct ImportReport {
-    pub providers_added: usize,
-    pub providers_kept: usize,
-    pub routes_applied: usize,
-}
 
 /// Export all providers and per-Agent route schemes as shareable JSON.
 ///
@@ -68,188 +37,58 @@ pub struct ImportReport {
 /// not be the thing that undoes it.
 ///
 /// Returns the number of providers written.
-pub fn export_config_to_file(
-    store: &Store,
-    path: &str,
-    include_keys: bool,
-) -> Result<usize, String> {
-    let json = export_config(store, include_keys)?;
-    std::fs::write(path, &json).map_err(|e| format!("cannot write {path}: {e}"))?;
+/// Write an export to `path`, owner-only on unix.
+///
+/// The file holds plaintext credentials when `include_keys` was set, and
+/// `std::fs::write` creates it with whatever the umask allows — which on a
+/// shared machine can be world-readable. The database this is a backup of is
+/// already 0600 (see `crate::store`'s `harden_permissions`); the export should
+/// not be the thing that undoes it.
+///
+/// The document comes from the daemon; what is here is the writing, and the
+/// permissions it lands with.
+pub fn write_config_file(path: &str, json: &str) -> Result<(), String> {
+    std::fs::write(path, json).map_err(|e| format!("cannot write {path}: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
-    Ok(store.list_providers().map_err(|e| e.to_string())?.len())
+    Ok(())
 }
 
+/// The shareable JSON — built by the daemon (`kiwanod::api::share::export_config`):
+/// the providers and routes are its rows, and it is the side that knows what a
+/// complete document is. The **file** is the client's, which is why
+/// `export_config_to_file` below stays.
 pub fn export_config(store: &Store, include_keys: bool) -> Result<String, String> {
-    let mut providers = store.list_providers().map_err(|e| e.to_string())?;
-    if !include_keys {
-        for p in providers.iter_mut() {
-            p.api_key = None;
-        }
-    }
-    let mut routes = Vec::new();
-    for agent in store.bound_agents().map_err(|e| e.to_string())? {
-        let (strategy, config) = store
-            .get_strategy(&agent)
-            .map_err(|e| e.to_string())?
-            .map(|s| (s.kind.as_str().to_string(), s.config))
-            .unwrap_or_else(|| ("single".to_string(), None));
-        let candidates = store
-            .bindings_for_agent(&agent)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|b| b.provider_id)
-            .collect();
-        routes.push(ShareRoute {
-            agent,
-            strategy,
-            config,
-            candidates,
-        });
-    }
-    let share = ConfigShare {
-        kiwano_config: FORMAT_VERSION,
-        exported_at: vm::rfc3339(vm::unix_now()),
-        providers,
-        routes,
-    };
-    serde_json::to_string_pretty(&share).map_err(|e| e.to_string())
+    kiwanod::api::share::export_config(store, include_keys).map_err(|e| e.to_string())
 }
 
-/// Import a scheme (semantics in the module doc); returns a count report.
+/// Import a scheme — served by the daemon. The client reads the file and hands
+/// over its text; everything that touches the store happens on the far side.
 pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, String> {
-    let share: ConfigShare =
-        serde_json::from_str(json).map_err(|e| format!("Not a valid Kiwano config file: {e}"))?;
-    if share.kiwano_config != FORMAT_VERSION {
-        return Err(format!(
-            "Unsupported config version {}",
-            share.kiwano_config
-        ));
-    }
+    kiwanod::api::share::import_config(store, json).map_err(|e| e.to_string())
+}
 
-    let now = vm::rfc3339(vm::unix_now());
-    // (name, base_url) → local id
-    let mut by_identity: HashMap<(String, String), String> = HashMap::new();
-    for p in store.list_providers().map_err(|e| e.to_string())? {
-        by_identity.insert((p.name.clone(), p.base_url.clone()), p.id.clone());
-    }
-    let mut remap: HashMap<String, String> = HashMap::new();
-    let mut added = 0usize;
-    let mut kept = 0usize;
+// The report travels with the function that produces it.
+pub use kiwanod::api::share::ImportReport;
 
-    for sp in &share.providers {
-        let key = (sp.name.clone(), sp.base_url.clone());
-        if let Some(local_id) = by_identity.get(&key).cloned() {
-            // Already exists locally: only backfill a missing key (all other fields stay local)
-            if sp.api_key.as_deref().is_some_and(|k| !k.is_empty()) {
-                if let Some(mut local) = store.get_provider(&local_id).map_err(|e| e.to_string())? {
-                    if local.api_key.as_deref().unwrap_or("").is_empty() {
-                        local.api_key = sp.api_key.clone();
-                        local.updated_at = now.clone();
-                        store.update_provider(&local).map_err(|e| e.to_string())?;
-                    }
-                }
-            }
-            remap.insert(sp.id.clone(), local_id);
-            kept += 1;
-        } else {
-            let new_id = format!(
-                "{}-{}",
-                vm::slug(&sp.name),
-                &uuid::Uuid::new_v4().simple().to_string()[..6]
-            );
-            store
-                .insert_provider(&Provider {
-                    id: new_id.clone(),
-                    name: sp.name.clone(),
-                    // Carried over, unlike the plan-query credentials below: a
-                    // catalog id names a Hub entry, not something local to the
-                    // exporting install — so the imported provider is priced at
-                    // the same entry's rates as the one it came from.
-                    catalog_id: sp.catalog_id.clone(),
-                    protocol: sp.protocol,
-                    base_url: sp.base_url.clone(),
-                    api_path: sp.api_path.clone(),
-                    endpoints: sp.endpoints.clone(),
-                    api_key: sp.api_key.clone(),
-                    // A model name, not a credential: it stays useful to
-                    // whoever imports the provider.
-                    model_default: sp.model_default.clone(),
-                    billing: sp.billing,
-                    period_limit: sp.period_limit,
-                    // Same rule the dialog and the CLI apply: the currency has to be
-                    // one this machine can price against, and a shared file is the
-                    // one place it can arrive without anyone having said so.
-                    limit_unit: vm::normalize_limit_unit(
-                        sp.limit_unit.as_deref(),
-                        sp.period_limit.is_some(),
-                        &vm::known_limit_currencies(store),
-                    )?,
-                    reset_period: sp.reset_period.clone(),
-                    // What the user declared this provider charges, re-validated
-                    // the way the limit's unit just above is: it travels with
-                    // the row, so a shared provider keeps being costed at its
-                    // own rates rather than falling back to the Hub's.
-                    prices: vm::import_declared_prices(
-                        sp.prices.as_deref(),
-                        &vm::known_limit_currencies(store),
-                    )?,
-                    // Plan-query credentials are intentionally not shared.
-                    plan_query: None,
-                    // Percent limits carry over (no credentials inside).
-                    plan_limits: sp.plan_limits.clone(),
-                    timeout_secs: sp.timeout_secs,
-                    retries: sp.retries,
-                    headers: sp.headers.clone(),
-                    enabled: sp.enabled,
-                    created_at: now.clone(),
-                    updated_at: now.clone(),
-                })
-                .map_err(|e| e.to_string())?;
-            by_identity.insert(key, new_id.clone());
-            remap.insert(sp.id.clone(), new_id);
-            added += 1;
-        }
-    }
-
-    let mut routes_applied = 0usize;
-    for r in &share.routes {
-        let kind = StrategyType::parse_str(&r.strategy).unwrap_or(StrategyType::Single);
-        store
-            .upsert_strategy(&r.agent, kind, r.config.as_deref())
-            .map_err(|e| e.to_string())?;
-        for (i, pid) in r.candidates.iter().enumerate() {
-            let Some(final_id) = remap.get(pid) else {
-                continue; // Scheme references a provider outside the file → skip this candidate
-            };
-            store
-                .upsert_binding(&Binding {
-                    agent: r.agent.clone(),
-                    provider_id: final_id.clone(),
-                    priority: i as i64,
-                    weight: 1,
-                    win_start: None,
-                    win_end: None,
-                    enabled: true,
-                })
-                .map_err(|e| e.to_string())?;
-        }
-        routes_applied += 1;
-    }
-    Ok(ImportReport {
-        providers_added: added,
-        providers_kept: kept,
-        routes_applied,
-    })
+/// How many providers a document carries — the count the export command
+/// reports. Read out of the document rather than the store: the two agree, and
+/// the document is the thing that was actually written.
+pub fn provider_count(json: &str) -> usize {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v.get("providers")?.as_array().map(Vec::len))
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use kiwanod::store::{Billing, Protocol};
+    use kiwanod::store::{Binding, Provider, StrategyType};
 
     fn provider(id: &str, name: &str, base_url: &str, api_key: Option<&str>) -> Provider {
         Provider {
@@ -280,7 +119,7 @@ mod tests {
     }
 
     fn now_stamp() -> String {
-        vm::rfc3339(vm::unix_now())
+        kiwanod::store::now_rfc3339()
     }
 
     #[test]

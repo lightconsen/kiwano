@@ -101,7 +101,9 @@ pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             let path = out.to_string_lossy();
             let count = {
                 let store = ctx.store()?;
-                share::export_config_to_file(store, &path, *include_keys)?
+                let json = share::export_config(store, *include_keys)?;
+                share::write_config_file(&path, &json)?;
+                share::provider_count(&json)
             };
             let text = format!("wrote {count} providers to {path}");
             ctx.out.emit(

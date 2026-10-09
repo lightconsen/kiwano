@@ -59,6 +59,29 @@ pub fn clear_request_logs(store: &Store) -> Result<(), ApiError> {
 
 // ── Credential-watch banner (spec: dlp findings surface in-app) ──
 
+/// The filtered slice as CSV text — the export's **content** half. The file is
+/// the client's (it writes the path the user picked); what the rows are, and
+/// how they are spelled, is the daemon's, because it is the side that holds
+/// them (`migrate.local.md` §10.17).
+///
+/// Unpaged, unlike `list_request_logs`: the page size is a display concern and
+/// must not cap what lands in the file. `truncated` says the slice was larger
+/// than the cap, so the caller can say so rather than implying a complete file.
+pub fn export_request_logs_csv(
+    store: &Store,
+    filter: RequestLogFilter<'_>,
+) -> Result<(String, usize, bool), ApiError> {
+    // Ask for one row more than the cap will allow, so "exactly at the cap"
+    // and "more than the cap" are distinguishable.
+    let mut rows = store
+        .export_request_logs_with_bodies(filter, crate::store::EXPORT_ROW_CAP + 1)
+        .map_err(ApiError::failed)?;
+    let truncated = rows.len() as i64 > crate::store::EXPORT_ROW_CAP;
+    rows.truncate(crate::store::EXPORT_ROW_CAP as usize);
+    let written = rows.len();
+    Ok((super::csv::to_csv(&rows), written, truncated))
+}
+
 /// The `app_settings` key holding the last log id the user acknowledged via the
 /// banner (dismiss or click both acknowledge). Same KV family the cost alerts
 /// dedup with.

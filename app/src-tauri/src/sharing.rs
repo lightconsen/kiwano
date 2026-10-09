@@ -20,20 +20,21 @@ use kiwano_core::{import, share};
 /// The frontend picks the target path via the dialog plugin first; this writes the file (file IO → async).
 /// Credentials are omitted unless `include_keys` is set (local backup only).
 #[tauri::command(async)]
-pub fn export_config(
-    state: State<AppState>,
-    path: String,
-    include_keys: Option<bool>,
-) -> Result<usize, String> {
-    share::export_config_to_file(&state.store, &path, include_keys.unwrap_or(false))
+pub fn export_config(path: String, include_keys: Option<bool>) -> Result<usize, String> {
+    // The document is the daemon's; the **file** is this side's, because the
+    // path came from the user's save dialog.
+    let json = kiwano_core::daemon_api::DaemonApi::connect()
+        .export_config(include_keys.unwrap_or(false))?;
+    share::write_config_file(&path, &json)?;
+    Ok(share::provider_count(&json))
 }
 
 #[tauri::command(async)]
-pub fn import_config(state: State<AppState>, path: String) -> Result<share::ImportReport, String> {
+pub fn import_config(path: String) -> Result<share::ImportReport, String> {
+    // The file is this side's; the daemon applies what it says and re-reads its
+    // own route table, so there is no reload ping to send.
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let report = share::import_config(&state.store, &json)?;
-    after_mutation(&state);
-    Ok(report)
+    kiwano_core::daemon_api::DaemonApi::connect().import_config(&json)
 }
 
 #[tauri::command]

@@ -7,15 +7,15 @@
 //! sits in the same `app_settings` KV the daemon already writes its own settings
 //! to. None of them affects routing, so none sends a reload ping.
 //!
-//! Two stay: `export_request_logs` writes to a path the user picked in a save
-//! dialog — the client's own half, split out in batch 3 — and `open_log_folder`
-//! is a statement about *this machine*, which the daemon will never serve.
+//! The export is **split** now (`migrate.local.md` §10.17): the daemon says what
+//! the rows are and how they are spelled, and this side writes them to the path
+//! the user picked in a save dialog. `open_log_folder` stays whole — it is a
+//! statement about *this machine*, which the daemon will never serve.
 
 use kiwanod::store::RequestLogFilter;
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 
 use crate::paths::db_path;
-use crate::state::AppState;
 use kiwano_core::daemon_api::DaemonApi;
 use kiwano_core::vm;
 
@@ -54,7 +54,6 @@ pub fn list_request_logs(
 /// export makes for a file that can actually be looked at.
 #[tauri::command(async)]
 pub fn export_request_logs(
-    state: State<AppState>,
     path: String,
     agent: Option<String>,
     provider_id: Option<String>,
@@ -62,17 +61,21 @@ pub fn export_request_logs(
     from: Option<String>,
     to: Option<String>,
 ) -> Result<vm::RequestLogExportVm, String> {
-    vm::export_request_logs_csv(
-        &state.store,
-        &path,
-        RequestLogFilter {
+    // The rows and their spelling are the daemon's; the **file** is this side's,
+    // because the path came from the user's save dialog.
+    let (csv, rows_written, truncated) = kiwano_core::daemon_api::DaemonApi::connect()
+        .export_request_logs(RequestLogFilter {
             agent: agent.as_deref(),
             provider_id: provider_id.as_deref(),
             status: status.as_deref(),
             from: from.as_deref(),
             to: to.as_deref(),
-        },
-    )
+        })?;
+    std::fs::write(&path, &csv).map_err(|e| format!("cannot write {path}: {e}"))?;
+    Ok(vm::RequestLogExportVm {
+        rows_written,
+        truncated,
+    })
 }
 
 #[tauri::command]

@@ -1,8 +1,7 @@
 //! Request logs: the list, one detail row, the CSV export, and the clear.
 
-use crate::vm::e2s;
 use kiwanod::api::logs as daemon;
-use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter, Store, EXPORT_ROW_CAP};
+use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter, Store};
 use serde::Serialize;
 
 // ── Request logs (request_logs + request_bodies, migration V5) ──
@@ -47,16 +46,14 @@ pub fn export_request_logs_csv(
     path: &str,
     filter: RequestLogFilter<'_>,
 ) -> Result<RequestLogExportVm, String> {
-    // Ask for one row more than the cap will allow, so "exactly at the cap"
-    // and "more than the cap" are distinguishable.
-    let mut rows = store
-        .export_request_logs_with_bodies(filter, EXPORT_ROW_CAP + 1)
-        .map_err(e2s)?;
-    let truncated = rows.len() as i64 > EXPORT_ROW_CAP;
-    rows.truncate(EXPORT_ROW_CAP as usize);
-    crate::csv::write_csv(path, &rows).map_err(e2s)?;
+    // The rows and their spelling are the daemon's; the **file** is this side's,
+    // because the path came from the user's save dialog (`migrate.local.md`
+    // §10.17). The daemon hands back the CSV text and the two counts.
+    let (csv, written, truncated) =
+        daemon::export_request_logs_csv(store, filter).map_err(|e| e.to_string())?;
+    std::fs::write(path, &csv).map_err(|e| format!("cannot write {path}: {e}"))?;
     Ok(RequestLogExportVm {
-        rows_written: rows.len(),
+        rows_written: written,
         truncated,
     })
 }

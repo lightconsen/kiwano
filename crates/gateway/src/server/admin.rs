@@ -129,6 +129,9 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/settings",
             get(get_settings_route).patch(update_settings_route),
         )
+        .route("/config/export", get(export_config_route))
+        .route("/config/import", post(import_config_route))
+        .route("/logs/export", get(export_logs_route))
         .route("/plan-quota/{provider_id}", get(plan_quota_route))
         .route("/probe", post(probe_route))
         .route(
@@ -1153,6 +1156,80 @@ async fn update_settings_route(
             }
             get_settings_route(State(state)).await
         }
+        Err(e) => resource_error(e),
+    }
+}
+
+// ── Config share and the log export (`migrate.local.md` §10.17) ──
+//
+// The file half of each stays on the client: it writes the path the user picked
+// in a save dialog, and reads one back for an import. What is here is the half
+// that touches the store — and, for the export, the spelling of every row.
+
+#[derive(serde::Deserialize)]
+struct ExportConfigQuery {
+    #[serde(default)]
+    include_keys: bool,
+}
+
+/// `GET /api/config/export` — the whole configuration as JSON.
+///
+/// `include_keys` is the explicit opt-in for credentials, and it is a query
+/// parameter rather than a header so it is visible in a log line: this is the
+/// one response that carries plaintext keys, and "who asked for them" is worth
+/// being able to answer.
+async fn export_config_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<ExportConfigQuery>,
+) -> Response {
+    match crate::api::share::export_config(&state.store, q.include_keys) {
+        Ok(json) => json.into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `POST /api/config/import` — apply a shared document.
+///
+/// The body is the document's text, not a parsed object: the daemon validates
+/// it, and a client that sent a shape it had already parsed would be a second
+/// parser to keep in step.
+async fn import_config_route(State(state): State<Arc<GatewayState>>, body: String) -> Response {
+    match crate::api::share::import_config(&state.store, &body) {
+        Ok(report) => {
+            // A shared document can add providers and routes, so the daemon
+            // re-reads its own route table.
+            if report.providers_added > 0 || report.routes_applied > 0 {
+                reload_after_write(&state);
+            }
+            Json(report).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/logs/export` — the filtered slice as CSV text.
+///
+/// The text, not a file: the client writes it to the path the user chose. The
+/// row cap is the daemon's, and `truncated` travels with the answer so the
+/// caller can say the file is short rather than imply it is whole.
+async fn export_logs_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<LogQuery>,
+) -> Response {
+    let filter = crate::store::RequestLogFilter {
+        agent: q.agent.as_deref(),
+        provider_id: q.provider_id.as_deref(),
+        status: q.status.as_deref(),
+        from: q.from.as_deref(),
+        to: q.to.as_deref(),
+    };
+    match crate::api::logs::export_request_logs_csv(&state.store, filter) {
+        Ok((csv, rows_written, truncated)) => Json(json!({
+            "csv": csv,
+            "rows_written": rows_written,
+            "truncated": truncated,
+        }))
+        .into_response(),
         Err(e) => resource_error(e),
     }
 }

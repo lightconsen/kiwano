@@ -35,10 +35,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Do not ask a running gateway to reload after a change
-    #[arg(long, global = true)]
-    pub no_reload: bool,
-
     /// Suppress informational notes
     #[arg(long, global = true)]
     pub quiet: bool,
@@ -66,7 +62,11 @@ pub enum Command {
     /// Gateway, store and route summary (exit 1 when the gateway is down)
     Status,
 
-    /// Ask a running gateway to hot-reload its route table
+    /// Ask a running gateway to re-read its route table
+    ///
+    /// Nothing in this CLI needs it after a change any more — the daemon re-reads
+    /// its own table when a write lands. It is for the case this tool cannot see:
+    /// a row edited outside all three of them.
     Reload,
 
     /// Providers: add, inspect, bind, delete

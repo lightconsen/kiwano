@@ -93,8 +93,9 @@ fn add_provider(db: &Path, name: &str, bind: &[&str]) -> String {
 #[test]
 fn globals_are_position_independent() {
     let (_dir, db) = temp_db();
-    let (a, out_a, _) = run(&db, &["providers", "list", "--json"]);
-    let (b, out_b, _) = run(&db, &["--json", "providers", "list"]);
+    let daemon = support::serve(&db);
+    let (a, out_a, _) = run_served(&db, &daemon, &["providers", "list", "--json"]);
+    let (b, out_b, _) = run_served(&db, &daemon, &["--json", "providers", "list"]);
     assert_eq!(a, 0);
     assert_eq!(b, 0);
     assert_eq!(out_a, out_b);
@@ -114,9 +115,10 @@ fn unknown_command_is_a_usage_error() {
 #[test]
 fn providers_add_then_list_roundtrips() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let id = add_provider(&db, "alpha", &[]);
 
-    let (code, out, _) = run(&db, &["--json", "providers", "list"]);
+    let (code, out, _) = run_served(&db, &daemon, &["--json", "providers", "list"]);
     assert_eq!(code, 0);
     let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(list.len(), 1);
@@ -139,6 +141,7 @@ fn providers_add_then_list_roundtrips() {
 #[test]
 fn providers_list_filters_by_agent() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     // A private home: which agents count as bound follows the agent configs, so
     // the assertion must not depend on what the operator has taken over.
     let home = dir.path().join("home");
@@ -149,8 +152,9 @@ fn providers_list_filters_by_agent() {
     // A binding whose agent never took the gateway over is not a route: the
     // agent's traffic goes wherever its own config points, so the provider is
     // not listed under it.
-    let (_, out, _) = run(
+    let (_, out, _) = run_served(
         &db,
+        &daemon,
         &[
             "--home",
             &home_arg,
@@ -169,8 +173,9 @@ fn providers_list_filters_by_agent() {
         &home,
         r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"kw-ag-claude-test"}}"#,
     );
-    let (_, out, _) = run(
+    let (_, out, _) = run_served(
         &db,
+        &daemon,
         &[
             "--home",
             &home_arg,
@@ -880,7 +885,7 @@ fn providers_disable_and_enable_round_trip() {
     let home_arg = home.display().to_string();
     let id = add_provider(&db, "alpha", &["claude"]);
 
-    let (code, out, err) = run_served(&db, &daemon, &["--no-reload", "providers", "disable", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["providers", "disable", &id]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("fall through"), "{out}");
     assert!(out.contains("claude"), "{out}");
@@ -902,7 +907,7 @@ fn providers_disable_and_enable_round_trip() {
         "the route is untouched"
     );
 
-    let (code, out, err) = run_served(&db, &daemon, &["--no-reload", "providers", "enable", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["providers", "enable", &id]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("may serve again"), "{out}");
     let (_, out, _) = run_served(
@@ -914,11 +919,7 @@ fn providers_disable_and_enable_round_trip() {
     assert_eq!(list[0]["enabled"], true);
 
     // An unknown id is an error rather than a quiet no-op.
-    let (code, _, err) = run_served(
-        &db,
-        &daemon,
-        &["--no-reload", "providers", "disable", "ghost"],
-    );
+    let (code, _, err) = run_served(&db, &daemon, &["providers", "disable", "ghost"]);
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("not found"), "{err}");
 }
@@ -1231,7 +1232,11 @@ fn takeover_routes_an_agent_and_restore_puts_it_back() {
     // the next takeover imports and binds it again.
     assert!(store.bindings_for_agent("claude").unwrap().is_empty());
     assert!(store.get_strategy("claude").unwrap().is_none());
-    let (code, out, err) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "providers", "list"],
+    );
     assert_eq!(code, 0, "{err}");
     let list: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     // Two rows: `ds`, plus the provider the first takeover imported out of the
@@ -1292,7 +1297,11 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
 
     // It lists as an agent, marked custom and routed (there is no config for it
     // to fail to point at the gateway).
-    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "agents", "list"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "agents", "list"],
+    );
     let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     let mine = rows
         .iter()
@@ -1315,10 +1324,14 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     let (code, _, err) = run_served(
         &db,
         &daemon,
-        &["--no-reload", "routes", "binding", "add", &id, &provider_id],
+        &["routes", "binding", "add", &id, &provider_id],
     );
     assert_eq!(code, 0, "{err}");
-    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "providers", "list"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "providers", "list"],
+    );
     let providers: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(
         providers[0]["agents"],
@@ -1327,7 +1340,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     );
 
     // Deleting it clears the route and the key; the provider row stays.
-    let (code, out, err) = run_served(&db, &daemon, &["--no-reload", "agents", "remove", &id]);
+    let (code, out, err) = run_served(&db, &daemon, &["agents", "remove", &id]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("usage history stays"), "{out}");
     let store = Store::open(&db).unwrap();
@@ -1341,7 +1354,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     assert!(store.get_provider(&provider_id).unwrap().is_some());
 
     // …and a second removal has nothing to remove.
-    let (code, _, err) = run_served(&db, &daemon, &["--no-reload", "agents", "remove", &id]);
+    let (code, _, err) = run_served(&db, &daemon, &["agents", "remove", &id]);
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("no such custom agent"), "{err}");
 }
@@ -1350,11 +1363,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
 fn agents_add_requires_a_name() {
     let (_dir, db) = temp_db();
     let daemon = support::serve(&db);
-    let (code, _, err) = run_served(
-        &db,
-        &daemon,
-        &["--no-reload", "agents", "add", "--name", "   "],
-    );
+    let (code, _, err) = run_served(&db, &daemon, &["agents", "add", "--name", "   "]);
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("needs a name"), "{err}");
 }
@@ -1552,13 +1561,18 @@ fn gateway_stop_reports_when_there_is_nothing_to_stop() {
 #[test]
 fn settings_read_and_write_round_trip() {
     let (dir, db) = temp_db();
+    let daemon = support::serve(&db);
     // A private home, so the assertion does not depend on what agent configs
     // the machine running the tests happens to have.
     let home = dir.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
     let home_arg = home.display().to_string();
 
-    let (code, out, err) = run(&db, &["--home", &home_arg, "--json", "settings", "get"]);
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "settings", "get"],
+    );
     assert_eq!(code, 0, "{err}");
     let before: serde_json::Value = serde_json::from_str(&out).unwrap();
     // 0 is "keep every row", and it is the default: capture is the point of
@@ -1567,8 +1581,9 @@ fn settings_read_and_write_round_trip() {
 
     // Values are parsed as JSON, so `false` lands as a boolean and `7` as a
     // number — that is what makes one flag serve every setting.
-    let (code, out, err) = run(
+    let (code, out, err) = run_served(
         &db,
+        &daemon,
         &[
             "--home",
             &home_arg,
@@ -1590,7 +1605,11 @@ fn settings_read_and_write_round_trip() {
     assert_eq!(after["log_max_body_bytes"], 1048576);
 
     // It persists, rather than only being echoed.
-    let (_, out, _) = run(&db, &["--home", &home_arg, "--json", "settings", "get"]);
+    let (_, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "settings", "get"],
+    );
     let reread: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(reread["cost_alert"], false);
 }
@@ -2002,27 +2021,41 @@ fn mcp_is_gated_by_the_features_flag() {
 #[test]
 fn rules_apply_is_gated_and_honest_about_empty_windows() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let home = tempfile::tempdir().unwrap();
     let home_arg = home.path().display().to_string();
 
     // Flag off (the default): refused before any file is touched.
-    let (code, _out, err) = run(&db, &["--home", &home_arg, "rules", "apply", "claude"]);
+    let (code, _out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "rules", "apply", "claude"],
+    );
     assert_eq!(code, 2);
     assert!(err.contains("Features"), "{err}");
     assert!(!home.path().join(".claude/CLAUDE.md").exists());
 
     // Flag on, nothing in the log: no rules, and still no file.
-    let (code, _out, err) = run(
+    let (code, _out, err) = run_served(
         &db,
+        &daemon,
         &["settings", "set", "--key", "feat_rule_injection=true"],
     );
     assert_eq!(code, 0, "{err}");
-    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "apply", "claude"]);
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "rules", "apply", "claude"],
+    );
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("no rules"), "{out}");
     assert!(!home.path().join(".claude/CLAUDE.md").exists());
 
-    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "status", "claude"]);
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "rules", "status", "claude"],
+    );
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("no rules applied"), "{out}");
 }
@@ -2032,16 +2065,18 @@ fn rules_apply_is_gated_and_honest_about_empty_windows() {
 #[test]
 fn cache_experiment_is_gated_and_reports_empty_windows() {
     let (_dir, db) = temp_db();
-    let (code, _out, err) = run(&db, &["cache-experiment"]);
+    let daemon = support::serve(&db);
+    let (code, _out, err) = run_served(&db, &daemon, &["cache-experiment"]);
     assert_eq!(code, 2);
     assert!(err.contains("Features"), "{err}");
 
-    let (code, _out, err) = run(
+    let (code, _out, err) = run_served(
         &db,
+        &daemon,
         &["settings", "set", "--key", "feat_cache_experiment=true"],
     );
     assert_eq!(code, 0, "{err}");
-    let (code, out, err) = run(&db, &["cache-experiment", "--days", "7"]);
+    let (code, out, err) = run_served(&db, &daemon, &["cache-experiment", "--days", "7"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("pairs 0"), "{out}");
     assert!(out.contains("too little data"), "{out}");

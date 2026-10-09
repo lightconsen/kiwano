@@ -286,14 +286,46 @@ fn quota_over_threshold(store: &Store, config: Option<&str>, provider_id: &str) 
 
 // ── Provider view assembly ──
 
-// `live_bound_agents` stays on the client: it reads the agents' own config files,
-// which are this machine's, and §5 #2 keeps that fact out of the daemon. It
-// travels here as an argument.
+// The one machine fact travels in: which agents' own configs carry our key.
+// Reading those files stays on the client (§5 #2); deciding which of them count
+// needs rows, so it happens here.
 
-/// Provider rows for the Apps screen. `home` roots the agent config files the
-/// takeover state is read from, so a caller that knows its own tree (the CLI's
-/// `--home`) does not have to settle for `$HOME`.
-pub fn build_provider_vms(store: &Store, live: &[String]) -> Result<Vec<ProviderVm>, ApiError> {
+/// Provider rows for the Apps screen.
+pub fn build_provider_vms(store: &Store, carrying: &[String]) -> Result<Vec<ProviderVm>, ApiError> {
+    let live = live_agents(store, carrying)?;
+    build_rows(store, &live)
+}
+
+/// The agents that count, from the one machine fact the client supplies.
+///
+/// `carrying` is "these agents' own configs carry our placeholder key right
+/// now" — the client's to know, because those files are this machine's and the
+/// daemon never reads them (§5 #2). **Which of them count** is the daemon's,
+/// because it needs rows: an agent is live when its config carries the key *and*
+/// it is one this database knows about — a user-defined agent always is (it has
+/// no config to lack evidence from), a built-in one when it has a route.
+///
+/// The intersection used to be the client's whole job (`live_bound_agents`),
+/// which meant it needed the custom agents and the bindings — two shared reads —
+/// to answer a question whose only *machine* half was the config files. Doing it
+/// this way round leaves the client with the half it can actually see
+/// (`migrate.local.md` §10.44).
+fn live_agents(store: &Store, carrying: &[String]) -> Result<Vec<String>, ApiError> {
+    let custom: Vec<String> = store
+        .list_custom_agents()
+        .map_err(ApiError::failed)?
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    Ok(store
+        .bound_agents()
+        .map_err(ApiError::failed)?
+        .into_iter()
+        .filter(|agent| custom.contains(agent) || carrying.contains(agent))
+        .collect())
+}
+
+fn build_rows(store: &Store, live: &[String]) -> Result<Vec<ProviderVm>, ApiError> {
     let providers = store.list_providers().map_err(ApiError::failed)?;
     if providers.is_empty() {
         return Ok(Vec::new());

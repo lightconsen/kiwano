@@ -238,6 +238,16 @@ impl DaemonApi {
     }
     // ── User-defined agents ──
 
+    /// Every user-defined agent, with its placeholder key —
+    /// `kiwanod::api::agents::custom_agents_with_keys`.
+    ///
+    /// The key is not a secret being handed out: it is the one the client minted
+    /// and wrote into the agent's own config, and it is what lets the settings
+    /// screen show it back.
+    pub fn custom_agents(&self) -> Result<Vec<CustomAgentVm>, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/custom-agents")
+    }
+
     /// Define a user-defined agent — `vm::add_custom_agent`.
     ///
     /// The **id is the caller's** (`kiwano_api::ids::mint_agent_id`): nothing

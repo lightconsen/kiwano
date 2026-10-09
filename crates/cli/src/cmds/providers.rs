@@ -50,12 +50,9 @@ fn providers_quota(ctx: &mut Ctx, provider_id: &str, force: bool) -> Result<(), 
 }
 
 fn providers_list(ctx: &mut Ctx, agent: Option<&str>) -> Result<(), CliError> {
-    let mut vms = {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
-        // `--home` decides which agent configs count as routed here, the same
-        // way it decides it for `settings get`.
-        vm::build_provider_vms(store, aux, &ctx.home, ctx.config_vars())?
-    };
+    // `--home` decides which agent configs count as routed here, the same way it
+    // decides it for `settings get` — and that evidence is all this side sends.
+    let mut vms = vm::providers::provider_view(&ctx.api, &ctx.home, ctx.config_vars())?;
     if let Some(agent) = agent {
         vms.retain(|p| p.agents.iter().any(|a| a == agent));
     }
@@ -137,16 +134,12 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     let current = ctx.api.provider_ref(&args.provider_id)?;
     let patch = edit_patch(args, &current, &ctx.api)?;
     ctx.api.update_provider(&args.provider_id, &patch)?;
-    // The view is this side's, and it reads *this machine* — which agents
-    // actually route here — so it stays assembled locally (`migrate.local.md`
-    // §5 #2, §10.32).
-    let updated = {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
-        vm::build_provider_vms(store, aux, &ctx.home, ctx.config_vars())?
-    }
-    .into_iter()
-    .find(|v| v.id == args.provider_id)
-    .ok_or_else(|| runtime("provider vanished after update"))?;
+    // Back through the daemon for the refreshed row, with this machine's
+    // evidence: nothing here reads a database (`migrate.local.md` §10.44).
+    let updated = vm::providers::provider_view(&ctx.api, &ctx.home, ctx.config_vars())?
+        .into_iter()
+        .find(|v| v.id == args.provider_id)
+        .ok_or_else(|| runtime("provider vanished after update"))?;
     let text = format!("updated {} ({})", updated.id, updated.name);
     ctx.out.emit(&updated, || text);
     Ok(())

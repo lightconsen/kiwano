@@ -16,13 +16,16 @@ use kiwano_core::vm;
 
 #[tauri::command(async)]
 pub fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, String> {
-    // **The one screen whose assembly needs a machine fact.** Which agents route
-    // through the gateway is read out of their own config files, so the client
-    // computes that and the daemon builds the rows around it
-    // (`migrate.local.md` §5 #2, §10.21) — which is what lets this work when the
-    // daemon is on another machine.
-    let live = vm::providers::live_bound_agents(&state.store, &home_dir(), state.shell_vars())?;
-    kiwano_core::daemon_api::DaemonApi::connect().provider_view(&live)
+    // **The one screen whose assembly needs a machine fact**, and the fact is
+    // read out of the agents' own config files — which is all this side
+    // supplies. Which of those agents count needs rows, so the daemon decides it
+    // (`migrate.local.md` §5 #2, §10.44) — which is what lets this work when the
+    // daemon is on another machine, and what takes `state.store` out of here.
+    vm::providers::provider_view(
+        &kiwano_core::daemon_api::DaemonApi::connect(),
+        &home_dir(),
+        state.shell_vars(),
+    )
 }
 
 #[tauri::command(async)]
@@ -61,9 +64,10 @@ pub fn update_provider(
     // (the JSON is the same shape — every field present), and the daemon applies
     // what is named and leaves the rest (`migrate.local.md` §10.38). That is
     // what lets a client *without* a form edit a provider too.
-    kiwano_core::daemon_api::DaemonApi::connect().update_provider(&id, &input)?;
-    let vms = vm::build_provider_vms(&state.store, &state.aux, &home_dir(), state.shell_vars())?;
-    vms.into_iter()
+    let api = kiwano_core::daemon_api::DaemonApi::connect();
+    api.update_provider(&id, &input)?;
+    vm::providers::provider_view(&api, &home_dir(), state.shell_vars())?
+        .into_iter()
         .find(|v| v.id == id)
         .ok_or_else(|| "provider vanished after update".to_string())
 }

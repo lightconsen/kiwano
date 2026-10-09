@@ -31,7 +31,6 @@ for what it does step by step, and for the machine-wide alternative.
 | `--admin-socket <TARGET>` | Where the gateway's admin plane is: a socket path on unix, a pipe name on Windows. Default: `admin.sock` beside the database, or `KIWANO_ADMIN_SOCKET` |
 | `--json` | Machine-readable output on stdout |
 | `--quiet` | Suppress informational notes |
-| `--no-reload` | Do not ask a running gateway to reload after a change |
 | `--data-port <PORT>` | The port an agent's config is pointed at when it is taken over. Default 8317, or `KIWANO_DATA_PORT` |
 | `--home <PATH>` | The root agent config files live under. Default `$HOME` |
 

@@ -30,7 +30,6 @@ curl -fsSL https://hub.kiwano.cc/install.sh | sh
 | `--admin-socket <TARGET>` | 网关管理平面的位置:unix 上是 socket 路径,Windows 上是 pipe 名称。默认:数据库旁边的 `admin.sock`,或 `KIWANO_ADMIN_SOCKET` |
 | `--json` | stdout 上的机器可读输出 |
 | `--quiet` | 抑制信息性提示 |
-| `--no-reload` | 变更后不要求运行中的网关重载 |
 | `--data-port <PORT>` | 接管 Agent 时,其配置被指向的端口。默认 8317,或 `KIWANO_DATA_PORT` |
 | `--home <PATH>` | Agent 配置文件所在的根目录。默认 `$HOME` |
 

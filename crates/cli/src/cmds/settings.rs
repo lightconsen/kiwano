@@ -14,27 +14,21 @@ use kiwano_core::{import, share, vm};
 pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         SettingsCmd::Get => {
-            let settings = {
-                let (store, aux) = (ctx.store()?, ctx.aux()?);
-                // The home-taking form: `build_settings` would resolve $HOME
-                // itself, ignoring --home and reporting on the wrong tree.
-                vm::build_settings_with_home(store, aux, &ctx.home, ctx.config_vars())?
-            };
+            // `--home` decides which tree the takeovers are read out of, so the
+            // home-taking form is the one to use — `settings_view` over the
+            // daemon's blob and this machine's config files.
+            let settings = vm::settings_view(&ctx.api, &ctx.home, ctx.config_vars())?;
             let text = render_settings(&settings);
             ctx.out.emit(&settings, || text);
             Ok(())
         }
         SettingsCmd::Set { keys, patch } => {
             let patch = settings_patch(keys, patch.as_deref())?;
-            let settings = {
-                let (store, aux) = (ctx.store()?, ctx.aux()?);
-                vm::update_settings(store, aux, &patch, ctx.config_vars())?
-            };
-            // Only some settings change routing; reloading for the rest would
-            // be noise on every `settings set`.
-            if touches_routing(&patch) {
-                ctx.after_mutation();
-            }
+            // The blob and the gateway-facing mirrors are the daemon's, and it
+            // re-reads its own config after the patch — which is what the reload
+            // ping this used to send was for (`migrate.local.md` §10.16).
+            let mut settings = ctx.api.update_settings(&patch)?;
+            vm::layer_settings(&ctx.api, &mut settings, &ctx.home, ctx.config_vars())?;
             let text = render_settings(&settings);
             ctx.out.emit(&settings, || text);
             Ok(())
@@ -74,25 +68,6 @@ fn settings_patch(pairs: &[String], patch: Option<&str>) -> Result<serde_json::V
         object.insert(key.to_string(), value);
     }
     Ok(merged)
-}
-
-/// Whether a settings patch can change what the gateway routes.
-///
-/// The GUI reloads on any settings change; for a scripted `settings set` that
-/// would mean an admin round-trip per key, most of which cannot affect routing
-/// at all. The set here is the conservative one: anything that could plausibly
-/// reach the route table or the limits evaluation.
-fn touches_routing(patch: &serde_json::Value) -> bool {
-    const ROUTING_KEYS: [&str; 4] = [
-        "auto_failover",
-        "gateway_listen",
-        "request_logs",
-        "log_retention_days",
-    ];
-    match patch.as_object() {
-        Some(map) => map.keys().any(|k| ROUTING_KEYS.contains(&k.as_str())),
-        None => false,
-    }
 }
 
 pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {

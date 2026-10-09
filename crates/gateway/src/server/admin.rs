@@ -2,11 +2,14 @@
 //! control channel; §4.3 flow 2), and the event stream the app's live numbers
 //! ride on.
 //!
-//! The Tauri app calls `POST /reload` after writing new bindings to SQLite;
-//! the next request routed by the gateway hits the new provider. `GET
-//! /status` powers the first-screen gateway state chip and sidecar re-connect,
-//! and `GET /events` streams a tick per recorded request, which is what lets a
-//! screen re-read its numbers instead of polling for them.
+//! Every write route re-reads the route table itself (`after_write`), so a
+//! mutation no longer ends with a ping: the process that wrote a binding is the
+//! process that routes by it (`migrate.local.md` §10.20). `POST /reload` stays
+//! as the **operator's** lever — an out-of-band edit to the database, a row
+//! changed by a tool that is not one of these three, and the gateway still needs
+//! telling. `GET /status` powers the first-screen gateway state chip and sidecar
+//! re-connect, and `GET /events` streams a tick per recorded request, which is
+//! what lets a screen re-read its numbers instead of polling for them.
 //!
 //! # Transport
 //!
@@ -165,7 +168,10 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/logs/{id}", get(get_log_route))
         .route("/credential-finding", get(check_finding_route))
         .route("/credential-finding/ack", post(ack_finding_route))
-        .route("/custom-agents", post(create_custom_agent_route))
+        .route(
+            "/custom-agents",
+            get(list_custom_agents_route).post(create_custom_agent_route),
+        )
         .route(
             "/custom-agents/{id}",
             put(update_custom_agent_route).delete(remove_custom_agent_route),
@@ -538,6 +544,10 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
 /// `POST /reload` — rebuild the route table from SQLite. The powerful one:
 /// it decides which provider the operator's traffic is spent on, which is
 /// exactly what a token is for.
+///
+/// No route calls it any more — the writes that used to are the daemon's, and it
+/// re-reads its own table before answering (`migrate.local.md` §10.20). What is
+/// left is the manual case: the row changed somewhere this process cannot see.
 async fn reload(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> Response {
     if !authorized(&state, &headers) {
         tracing::warn!("reload refused: admin token missing or invalid");
@@ -1316,6 +1326,16 @@ async fn takeover_teardown_route(
             reload_after_write(&state);
             Json(json!({ "ok": true })).into_response()
         }
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/custom-agents` — every user-defined agent, with its placeholder
+/// key. The key is not a secret being handed out: it is the one the client
+/// minted and configured the agent with.
+async fn list_custom_agents_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::agents::custom_agents_with_keys(&state.store) {
+        Ok(list) => Json(list).into_response(),
         Err(e) => resource_error(e),
     }
 }

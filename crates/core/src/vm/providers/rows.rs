@@ -1,62 +1,62 @@
-//! The provider view — assembled by the daemon, with this machine's facts
+//! The provider view — assembled by the daemon, with this machine's evidence
 //! supplied by the client.
 //!
-//! Everything that *builds* a row moved to `kiwanod::api::providers_view`
+//! Everything that *builds* a row lives in `kiwanod::api::providers_view`
 //! (`migrate.local.md` §10.21): the client cannot open the daemon's database
-//! when the daemon is on another machine, and the daemon is the side that owns
-//! the rows. What stays is the one function that reads **this machine** —
-//! [`live_bound_agents`], which opens the agents' own config files — because
-//! that is the fact §5 #2 keeps out of the daemon.
+//! when the daemon is on another machine, and the daemon owns the rows. What
+//! stays here is the **one machine fact** the view needs — which agents' own
+//! configs carry our placeholder key — because §5 #2 keeps that out of the
+//! daemon.
 //!
-//! [`build_provider_vms`] below is the same call the app and the CLI have always
-//! made: it computes the live set here and hands it over, so no call site moved.
-//! A client that is not on the daemon's machine calls the endpoint instead.
+//! **Which of those agents count is not this side's question.** It used to be:
+//! `live_bound_agents` intersected the config evidence with the bindings and the
+//! custom agents, which meant two *shared* reads to answer it. The intersection
+//! needs rows, so it belongs where the rows are, and all the client has to say
+//! is what it can see (`migrate.local.md` §10.44).
 
 use super::ProviderVm;
+use crate::daemon_api::DaemonApi;
 use crate::detect::ShellVars;
 use crate::vm::e2s;
+use crate::vm::AGENTS;
 use kiwanod::store::Store;
 use std::path::Path;
 
-/// The bound agents whose config actually points at the gateway *right now*.
+/// The agents whose own config carries our placeholder key **right now**.
 ///
 /// Turning a takeover off drops that agent's route (`set_agent_takeover`), so
-/// what is left here is the odd row: an agent whose config was reverted behind
+/// what is left is the odd row: an agent whose config was reverted behind
 /// Kiwano's back by another tool, a store written by a build that kept dormant
-/// routes, a binding an import landed on an agent that was never taken over.
-/// In every one of them the agent's traffic goes to its own provider rather than
-/// to this gateway, so a provider must not read as bound to it — or, worse, as
-/// *in use* by it, which is what the list claimed for every binding row.
+/// routes, a binding an import landed on an agent that was never taken over. In
+/// every one of them the agent's traffic goes to its own provider rather than to
+/// this gateway, so a provider must not read as bound to it — or, worse, as *in
+/// use* by it, which is what the list claimed for every binding row.
 ///
-/// Recognition is by the live file (`kw-ag-<agent>-…` in the config the
-/// takeover wrote), never by the `placeholder_keys` table: a key row can
-/// outlive its rewrite. The takeover panel reads the same files and counts
-/// *more* agents than this on purpose — it also accepts a restorable backup,
-/// which is a claim about being able to undo a takeover, not about traffic
-/// arriving here.
-pub fn live_bound_agents(
-    store: &Store,
+/// Recognition is by the live file (`kw-ag-<agent>-…` in the config the takeover
+/// wrote), never by the `placeholder_keys` table: a key row can outlive its
+/// rewrite. The takeover panel reads the same files and counts *more* agents
+/// than this on purpose — it also accepts a restorable backup, which is a claim
+/// about being able to undo a takeover, not about traffic arriving here.
+///
+/// Purely local, and deliberately so: it opens config files and touches no
+/// database at all.
+pub fn carrying_agents(home: &Path, vars: &ShellVars) -> Vec<String> {
+    AGENTS
+        .iter()
+        .map(|(agent, _)| *agent)
+        .filter(|agent| crate::takeover::live_placeholder_key(agent, home, vars).is_some())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The Apps list, as a client asks for it: the daemon assembles the rows, this
+/// side supplies the evidence it alone can see.
+pub fn provider_view(
+    api: &DaemonApi,
     home: &Path,
     vars: &ShellVars,
-) -> Result<Vec<String>, String> {
-    let custom: Vec<String> = store
-        .list_custom_agents()
-        .map_err(e2s)?
-        .into_iter()
-        .map(|a| a.id)
-        .collect();
-    let bound = store.bound_agents().map_err(e2s)?;
-    Ok(bound
-        .into_iter()
-        // A user-defined agent routes as long as it exists: it has no config
-        // file for the evidence to be missing from, and asking for one would
-        // report its providers as unbound — the falsehood this whole helper was
-        // added to remove, wearing a new hat.
-        .filter(|agent| {
-            custom.contains(agent)
-                || crate::takeover::live_placeholder_key(agent, home, vars).is_some()
-        })
-        .collect())
+) -> Result<Vec<ProviderVm>, String> {
+    api.provider_view(&carrying_agents(home, vars))
 }
 
 /// The provider screen, as every existing caller asks for it.
@@ -71,8 +71,8 @@ pub fn build_provider_vms(
     home: &Path,
     vars: &ShellVars,
 ) -> Result<Vec<ProviderVm>, String> {
-    let live = live_bound_agents(store, home, vars)?;
-    kiwanod::api::providers_view::build_provider_vms(store, &live).map_err(e2s)
+    kiwanod::api::providers_view::build_provider_vms(store, &carrying_agents(home, vars))
+        .map_err(e2s)
 }
 
 #[cfg(test)]

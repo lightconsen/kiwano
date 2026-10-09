@@ -1,4 +1,7 @@
 //! Status and reload: the two commands a shell runs first.
+//!
+//! `reload` is the operator's lever rather than a mutation's epilogue — every
+//! write route re-reads the table itself now (`migrate.local.md` §10.20).
 
 use super::render::render_status;
 use super::runtime;

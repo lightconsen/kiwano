@@ -160,27 +160,20 @@ fn the_app_does_not_open_a_database_of_its_own() {
 ///
 /// Pinning the list is the next best thing — a new pass-through shows up here,
 /// where it can be looked at, instead of appearing silently in a diff.
+///
+/// **It is down to one, and that one is deliberate.** Everything that assembled
+/// a view from the store moved to the daemon (`migrate.local.md` §10.44): the
+/// provider rows, the dashboard, the footer, the alerts, the settings blob. What
+/// is left is the tray, which reads a single boolean on a window event — a
+/// decision about *this* window, taken on the UI thread, where a round trip to
+/// the daemon would be the freeze `every_command_that_reaches_the_daemon…`
+/// exists to prevent.
 #[test]
-fn the_functions_the_app_hands_its_handles_to_are_the_known_ones() {
-    const KNOWN: [&str; 11] = [
-        "vm::build_dashboard",
-        "vm::build_footer_stats",
-        "vm::build_provider_vms",
-        "vm::build_settings",
-        "vm::check_usage_alerts",
-        "vm::set_agent_takeover",
-        "vm::update_provider",
-        "vm::export_request_logs_csv",
-        "pricing::currency_meta",
-        // Reads the settings blob — the row the daemon patches — for the tray's
-        // close behaviour. Added when the test caught it, which is the test
-        // doing its job rather than a reason to loosen it.
+fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
+    const KNOWN: [&str; 1] = [
+        // The tray's close behaviour: one field, read synchronously on a window
+        // event. Local on purpose — see this test's own note.
         "vm::ui_settings",
-        // Reads which agents route here — the machine fact the provider view
-        // needs — so it opens the agents' config files and the store's custom
-        // agent rows. Caught by this test when the view moved
-        // (`migrate.local.md` §10.21).
-        "vm::providers::live_bound_agents",
     ];
     let mut found: Vec<String> = Vec::new();
     for (_, text) in app_sources() {
@@ -189,9 +182,6 @@ fn the_functions_the_app_hands_its_handles_to_are_the_known_ones() {
             if line.starts_with("//") || !line.contains("&state.") {
                 continue;
             }
-            // The callee is the token right before the argument, so a binding
-            // (`let vms = vm::build_provider_vms(&state.store…`) reads as the
-            // function rather than as the binding.
             let arg = if line.contains("(&state.store") {
                 "(&state.store"
             } else {

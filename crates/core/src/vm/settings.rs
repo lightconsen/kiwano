@@ -3,9 +3,9 @@
 //! rest of the module reads through `tz_offset`.
 
 use crate::detect::ShellVars;
-use crate::vm::agents::{agent_protocols, CustomAgentVm, ADDITIVE_AGENTS, AGENTS};
+use crate::vm::agents::{agent_protocols, ADDITIVE_AGENTS, AGENTS};
 use crate::vm::routes::display_path;
-use crate::vm::{e2s, Aux};
+use crate::vm::Aux;
 use kiwanod::store::Store;
 
 // The blob and its types moved to `kiwano-api` — the daemon serves them.
@@ -49,15 +49,27 @@ pub fn build_settings_with_home(
     // knows about; its own blob is not.
     let mut s: SettingsVm =
         kiwanod::api::settings::ui_settings(store).map_err(|e| e.to_string())?;
-    // A takeover *is* its rewrite: the agent's own config carries our
-    // placeholder key, which is also how its requests get attributed. Neither
-    // of the other two possible claims counts here — not the `placeholder_keys`
-    // table (a row can outlive its rewrite), and not the backup (it is the
-    // escape hatch, and it outlives the rewrite by design). Counting the backup
-    // answered "is this agent ours?" with "we could undo a takeover", which is
-    // how an agent reads as taken over while its traffic goes straight to its
-    // own provider — and its provider reads as in use.
-    s.takeovers = AGENTS
+    s.takeovers = local_takeovers(home, vars);
+    s.custom_agents =
+        kiwanod::api::agents::custom_agents_with_keys(store).map_err(|e| e.to_string())?;
+    Ok(s)
+}
+
+/// The takeovers, from the agents' own config files.
+///
+/// The **only** machine fact the settings screen carries, and the reason the
+/// assembly is split: a takeover *is* its rewrite — the agent's config carries
+/// our placeholder key, which is also how its requests get attributed. Neither
+/// of the other two possible claims counts here: not the `placeholder_keys`
+/// table (a row can outlive its rewrite), and not the backup (it is the escape
+/// hatch, and it outlives the rewrite by design). Counting the backup answered
+/// "is this agent ours?" with "we could undo a takeover", which is how an agent
+/// reads as taken over while its traffic goes straight to its own provider —
+/// and its provider reads as in use.
+///
+/// Local and synchronous: it opens files, and touches no database.
+pub fn local_takeovers(home: &std::path::Path, vars: &ShellVars) -> Vec<TakeoverVm> {
+    AGENTS
         .iter()
         .map(|(agent, label)| {
             let key = crate::takeover::live_placeholder_key(agent, home, vars);
@@ -80,25 +92,40 @@ pub fn build_settings_with_home(
                     .collect(),
             }
         })
-        .collect();
-    // The user's own agents, with the key their traffic is attributed by. The
-    // key comes out of the table here — where a built-in's comes out of its
-    // config file — because for these there is no file to read: the row *is*
-    // the agent, and it is deleted with it, so it cannot outlive anything.
-    let keys = store.list_placeholder_keys().map_err(e2s)?;
-    s.custom_agents = store
-        .list_custom_agents()
-        .map_err(e2s)?
-        .into_iter()
-        .map(|a| CustomAgentVm {
-            placeholder_key: keys.iter().find(|k| k.agent == a.id).map(|k| k.key.clone()),
-            id: a.id,
-            label: a.label,
-            note: a.note,
-            protocol: a.protocol,
-        })
-        .collect();
+        .collect()
+}
+
+/// The settings screen, as a client asks for it: the daemon's blob and its
+/// custom agents, plus the takeovers this machine can see for itself.
+///
+/// The client needs **no database handle** for this (`migrate.local.md`
+/// §10.44): two of the three parts are asked for and the third is a file read.
+pub fn settings_view(
+    api: &crate::daemon_api::DaemonApi,
+    home: &std::path::Path,
+    vars: &ShellVars,
+) -> Result<SettingsVm, String> {
+    let mut s = api.get_settings()?;
+    layer_settings(api, &mut s, home, vars)?;
     Ok(s)
+}
+
+/// Fill in the two parts a client assembles rather than asks for: the custom
+/// agents (asked of the daemon) and the takeovers (read from this machine's own
+/// config files).
+///
+/// Split out for the caller that already holds a blob — the app's
+/// `update_settings` gets one back from the write and would otherwise re-read
+/// the row it just changed.
+pub fn layer_settings(
+    api: &crate::daemon_api::DaemonApi,
+    s: &mut SettingsVm,
+    home: &std::path::Path,
+    vars: &ShellVars,
+) -> Result<(), String> {
+    s.custom_agents = api.custom_agents()?;
+    s.takeovers = local_takeovers(home, vars);
+    Ok(())
 }
 
 /// Patch the settings — served by the daemon

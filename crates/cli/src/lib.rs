@@ -94,7 +94,6 @@ pub struct Ctx<'a> {
     /// Root the agent config files live under.
     pub home: PathBuf,
     pub out: Out<'a>,
-    reload: bool,
     store: OnceCell<Store>,
     aux: OnceCell<Aux>,
     /// The variables that move where an agent keeps its files, as the user's own
@@ -181,36 +180,6 @@ impl Ctx<'_> {
             let _ = self.aux.set(aux);
         }
         Ok(self.aux.get().expect("just set"))
-    }
-
-    /// Best-effort hot reload of a running gateway after a mutation.
-    ///
-    /// Reported rather than fatal: a gateway that is not running is a normal
-    /// state on a server, and the change is already durable in SQLite. A
-    /// *refusal* is called out separately from "not reachable", because it means
-    /// the gateway is up but still routing the previous table — saying nothing,
-    /// or saying "0 agents", would read as success.
-    pub fn after_mutation(&mut self) {
-        if !self.reload {
-            return;
-        }
-        match sidecar::reload(&self.admin, self.token.as_deref()) {
-            Some(v) if v["ok"].as_bool() == Some(true) => {
-                self.out.note(format!(
-                    "gateway route table reloaded ({} agents)",
-                    v["agents_routed"].as_u64().unwrap_or(0)
-                ));
-            }
-            Some(v) => self.out.note(format!(
-                "note: gateway refused the reload ({}); it keeps routing the previous \
-                 table until it is restarted",
-                v["error"].as_str().unwrap_or("no reason given")
-            )),
-            None => self.out.note(format!(
-                "note: gateway not reachable on {}; changes apply on next start",
-                self.admin.describe()
-            )),
-        }
     }
 }
 
@@ -304,7 +273,6 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         data_port: cli.data_port,
         home,
         out,
-        reload: !cli.no_reload,
         store: OnceCell::new(),
         aux: OnceCell::new(),
         config_vars: OnceCell::new(),

@@ -61,8 +61,7 @@ struct AgentRow {
 
 fn agents_list(ctx: &mut Ctx) -> Result<(), CliError> {
     let rows = {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
-        let settings = vm::build_settings_with_home(store, aux, &ctx.home, ctx.config_vars())?;
+        let settings = vm::settings_view(&ctx.api, &ctx.home, ctx.config_vars())?;
         let mut rows: Vec<AgentRow> = settings
             .takeovers
             .into_iter()

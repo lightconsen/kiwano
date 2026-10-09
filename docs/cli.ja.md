@@ -30,7 +30,6 @@ root は不要です。これは便利だからではなく意図的です。`ag
 | `--admin-socket <TARGET>` | ゲートウェイの管理プレーンの場所。unix ではソケットパス、Windows ではパイプ名。既定はデータベースの隣の `admin.sock`、または `KIWANO_ADMIN_SOCKET` |
 | `--json` | stdout に機械可読な出力 |
 | `--quiet` | 情報メッセージを抑制 |
-| `--no-reload` | 変更後に稼働中のゲートウェイへリロードを要求しない |
 | `--data-port <PORT>` | エージェントを引き継ぐ際に、その設定が指す先のポート。既定は 8317、または `KIWANO_DATA_PORT` |
 | `--home <PATH>` | エージェントの設定ファイルが置かれるルート。既定は `$HOME` |
 

@@ -206,6 +206,32 @@ pub fn list_agents(store: &Store) -> Result<Vec<(String, String)>, ApiError> {
     Ok(out)
 }
 
+/// Every user-defined agent, with the placeholder key its traffic is attributed
+/// by.
+///
+/// The key comes out of the table here — where a built-in's comes out of its
+/// config file — because for these there is no file to read: the row *is* the
+/// agent, and it is deleted with it, so it cannot outlive anything.
+///
+/// Moved from `kiwano_core::vm::settings` with the rest of the read
+/// (`migrate.local.md` §10.44): it is the daemon's rows, and a client that
+/// assembles the settings screen needs them to be told.
+pub fn custom_agents_with_keys(store: &Store) -> Result<Vec<CustomAgentVm>, ApiError> {
+    let keys = store.list_placeholder_keys().map_err(ApiError::failed)?;
+    Ok(store
+        .list_custom_agents()
+        .map_err(ApiError::failed)?
+        .into_iter()
+        .map(|a| CustomAgentVm {
+            placeholder_key: keys.iter().find(|k| k.agent == a.id).map(|k| k.key.clone()),
+            id: a.id,
+            label: a.label,
+            note: a.note,
+            protocol: a.protocol,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

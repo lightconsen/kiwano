@@ -94,8 +94,8 @@ pub use routes::{
 };
 pub use settings::{
     build_settings, build_settings_with_home, default_hub_url, default_preferred_currency,
-    default_stream_first_byte_secs, default_stream_idle_secs, default_true, ui_settings,
-    update_settings, SettingsVm, TakeoverVm,
+    default_stream_first_byte_secs, default_stream_idle_secs, default_true, layer_settings,
+    local_takeovers, settings_view, ui_settings, update_settings, SettingsVm, TakeoverVm,
 };
 pub use takeover::set_agent_takeover;
 pub use time::{rfc3339, unix_now};

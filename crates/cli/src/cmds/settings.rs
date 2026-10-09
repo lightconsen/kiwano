@@ -137,8 +137,8 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
         CatalogCmd::List { tag, search } => {
             let mut catalog = {
-                let (store, aux) = (ctx.store()?, ctx.aux()?);
-                vm::load_catalog(store, aux)
+                let store = ctx.store()?;
+                vm::load_catalog(store)
             };
             if let Some(tag) = tag {
                 catalog.entries.retain(|e| e.tag == *tag);
@@ -175,8 +175,8 @@ pub fn catalog(cmd: &CatalogCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             // matched against. Before the reload below, so one pass picks up
             // both.
             let linked = {
-                let (store, aux) = (ctx.store()?, ctx.aux()?);
-                vm::link_providers(store, aux)?
+                let store = ctx.store()?;
+                vm::link_providers(store)?
             };
             if linked > 0 {
                 ctx.out.note(format!(

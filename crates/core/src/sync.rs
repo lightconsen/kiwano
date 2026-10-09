@@ -269,7 +269,7 @@ pub fn apply_hub_documents(store: &kiwanod::store::Store, aux: &Aux) -> bool {
     // A provider may have become linkable to a catalog entry it could not be
     // matched against before — this is where a first-run install gets its
     // catalog at all.
-    match vm::link_providers(store, aux) {
+    match vm::link_providers(store) {
         Ok(linked) if linked > 0 => {
             tracing::info!(linked, "providers linked to their catalog entries");
             wrote = true;
@@ -463,11 +463,12 @@ mod tests {
     /// dress up as "no matches".
     #[test]
     fn the_shelf_is_the_cache_and_nothing_else() {
-        let aux = Aux::open_in_memory().unwrap();
+        // The cache lives in the store now — it is the daemon's table
+        // (`store::hub`), and the client reads it through the same accessor.
         let store = kiwanod::store::Store::open_in_memory().unwrap();
 
         // Never synced: empty, not stale.
-        let never = vm::load_catalog(&store, &aux);
+        let never = vm::load_catalog(&store);
         assert_eq!(never.total, 0);
         assert!(never.entries.is_empty());
 
@@ -486,9 +487,11 @@ mod tests {
         // every assertion below pass for the wrong reason (an empty shelf).
         serde_json::from_str::<vm::CatalogListVm>(payload)
             .unwrap_or_else(|e| panic!("the fixture must parse: {e}\n{payload}"));
-        aux.save_hub_cache(payload, "2026-09-07T00:00:00Z").unwrap();
+        store
+            .save_hub_cache(payload, "2026-09-07T00:00:00Z")
+            .unwrap();
 
-        let cached = vm::load_catalog(&store, &aux);
+        let cached = vm::load_catalog(&store);
         assert_eq!(cached.total, 1);
         assert_eq!(cached.entries[0].name, "X");
         // Normalization still runs on the way in: the primary is hoisted out of
@@ -499,9 +502,10 @@ mod tests {
 
         // A cache we cannot parse is empty too — it used to fall back to the
         // bundled copy, which answered a broken cache with stale data.
-        aux.save_hub_cache("{not json", "2026-09-07T00:00:00Z")
+        store
+            .save_hub_cache("{not json", "2026-09-07T00:00:00Z")
             .unwrap();
-        let broken = vm::load_catalog(&store, &aux);
+        let broken = vm::load_catalog(&store);
         assert_eq!(broken.total, 0);
         assert!(broken.entries.is_empty());
     }
@@ -518,7 +522,6 @@ mod tests {
     /// later cleanup could as easily delete.
     #[test]
     fn a_catalog_entrys_plan_query_survives_the_cache_roundtrip() {
-        let aux = Aux::open_in_memory().unwrap();
         let store = kiwanod::store::Store::open_in_memory().unwrap();
         let body = r#"{"total":2,"entries":[
             {"id": "kimi-for-coding", "name": "Kimi for Coding", "tag": "official",
@@ -532,10 +535,11 @@ mod tests {
         // The exact three steps the sync takes: parse, re-serialize, cache.
         let list = parse_catalog(body).expect("the fixture must parse");
         let cached_body = serde_json::to_string(&list).unwrap();
-        aux.save_hub_cache(&cached_body, "2026-09-14T00:00:00Z")
+        store
+            .save_hub_cache(&cached_body, "2026-09-14T00:00:00Z")
             .unwrap();
 
-        let cached = vm::load_catalog(&store, &aux);
+        let cached = vm::load_catalog(&store);
         assert_eq!(cached.total, 2);
         assert_eq!(
             cached.entries[0]

@@ -53,7 +53,7 @@ pub fn set_agent_takeover(
             // nothing about our catalog), and this is the one path where the
             // provider starts carrying traffic before any backfill pass runs —
             // takeover is followed immediately by real requests.
-            let _ = link_providers(store, aux);
+            let _ = link_providers(store);
         }
         // Three phases, in an order that cannot be reversed: the store rows
         // first, the agent's config second, the "applied" mark last. Between
@@ -175,7 +175,7 @@ pub fn phase_state(
         // nothing about our catalog), and this is the one path where the
         // provider starts carrying traffic before any backfill pass runs —
         // takeover is followed immediately by real requests.
-        let _ = link_providers(store, aux);
+        let _ = link_providers(store);
     }
 
     // A replay keeps the key it already registered: minting a second one would

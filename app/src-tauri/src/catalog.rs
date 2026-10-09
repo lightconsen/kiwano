@@ -2,14 +2,15 @@
 //! against, and the one action that leaves the app — opening a vendor page in
 //! the user's browser.
 
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 
-use crate::state::AppState;
 use kiwano_core::{pricing, vm};
 
 #[tauri::command]
-pub fn list_catalog(state: State<AppState>) -> vm::CatalogListVm {
-    vm::load_catalog(&state.store, &state.aux)
+pub fn list_catalog() -> Result<vm::CatalogListVm, String> {
+    // Served by the daemon: it owns the Hub cache and the endpoint matching that
+    // marks an entry as already added (`migrate.local.md` §10.12).
+    kiwano_core::daemon_api::DaemonApi::connect().list_catalog()
 }
 
 /// The price mirror — the rows the gateway charges with — so the Models page can

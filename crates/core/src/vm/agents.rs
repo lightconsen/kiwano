@@ -2,7 +2,7 @@
 //! custom agents the user added.
 
 use crate::vm::catalog::load_catalog;
-use crate::vm::{e2s, Aux};
+use crate::vm::e2s;
 use kiwanod::api::agents as daemon;
 use kiwanod::store::{Provider, Store};
 use serde::{Deserialize, Serialize};
@@ -82,7 +82,7 @@ pub struct PromptLatencyVm {
 /// What model to ping a provider with: its own default when it has one,
 /// otherwise the model its catalog entry publishes a price for — the one model
 /// we know the vendor serves.
-fn prompt_test_model(store: &Store, aux: &Aux, p: &Provider) -> Option<String> {
+fn prompt_test_model(store: &Store, p: &Provider) -> Option<String> {
     if let Some(m) = p
         .model_default
         .as_deref()
@@ -91,7 +91,7 @@ fn prompt_test_model(store: &Store, aux: &Aux, p: &Provider) -> Option<String> {
     {
         return Some(m.to_string());
     }
-    let catalog = load_catalog(store, aux);
+    let catalog = load_catalog(store);
     let entry = catalog
         .entries
         .iter()
@@ -105,16 +105,12 @@ fn prompt_test_model(store: &Store, aux: &Aux, p: &Provider) -> Option<String> {
 /// the test measures the endpoint the gateway would actually use; the ping is a
 /// real completion, because a models-list GET answers from a different code path
 /// and a different cache and says nothing about what a request costs in time.
-pub async fn test_provider_latency(
-    store: &Store,
-    aux: &Aux,
-    id: &str,
-) -> Result<PromptLatencyVm, String> {
+pub async fn test_provider_latency(store: &Store, id: &str) -> Result<PromptLatencyVm, String> {
     let p = store
         .get_provider(id)
         .map_err(e2s)?
         .ok_or_else(|| format!("provider not found: {id}"))?;
-    let model = prompt_test_model(store, aux, &p).ok_or_else(|| {
+    let model = prompt_test_model(store, &p).ok_or_else(|| {
         "no model to test with — set a default model on this provider".to_string()
     })?;
     let key = p
@@ -509,27 +505,25 @@ mod tests {
              "endpoints":[{"protocol":"openai","endpoint":"https://api.deepseek.com"}],
              "price_ref":{"model_id":"deepseek-chat","display_name":"DeepSeek Chat",
                           "input":"1","output":"2","currency":"USD"}}]}"#;
-        let aux = Aux::open_in_memory().unwrap();
-        aux.save_hub_cache(catalog, "2026-09-07T00:00:00Z").unwrap();
+        // The cache is the daemon's table (`store::hub`), so it goes in the
+        // store — writing it into an aux would leave this reading an empty one.
+        s.save_hub_cache(catalog, "2026-09-07T00:00:00Z").unwrap();
 
         let mut p = provider("p1", "DeepSeek", Billing::Metered);
         p.catalog_id = Some("deepseek".into());
         s.insert_provider(&p).unwrap();
-        assert_eq!(
-            prompt_test_model(&s, &aux, &p).as_deref(),
-            Some("deepseek-chat")
-        );
+        assert_eq!(prompt_test_model(&s, &p).as_deref(), Some("deepseek-chat"));
 
         // A default of its own wins: it is the model the user routes with.
         let mut with_default = p.clone();
         with_default.model_default = Some("deepseek-v4-flash".into());
         assert_eq!(
-            prompt_test_model(&s, &aux, &with_default).as_deref(),
+            prompt_test_model(&s, &with_default).as_deref(),
             Some("deepseek-v4-flash")
         );
 
         let orphan = provider("p2", "No Catalog", Billing::Metered);
-        assert_eq!(prompt_test_model(&s, &aux, &orphan), None);
+        assert_eq!(prompt_test_model(&s, &orphan), None);
     }
 
     /// The id is derived from the name, is unique per agent even when the name

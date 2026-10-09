@@ -194,7 +194,7 @@ pub fn run() {
             // another manager — gets it now, from the cached catalog, instead
             // of waiting on a sync that may turn out to be a sha match or a
             // failure. Cheap after the first run: one catalog parse, no writes.
-            match vm::link_providers(&store, &aux) {
+            match vm::link_providers(&store) {
                 Ok(linked) if linked > 0 => {
                     tracing::info!(linked, "providers linked to their catalog entries");
                     sidecar::notify_reload(&admin);

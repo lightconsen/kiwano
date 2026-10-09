@@ -70,7 +70,6 @@ mod tests {
     use super::*;
     use crate::vm::catalog::catalog_snapshot;
     use crate::vm::test_support::provider;
-    use crate::vm::Aux;
     use kiwanod::store::Billing;
 
     /// The currency a provider's figures are denominated in — the field the
@@ -91,9 +90,9 @@ mod tests {
              "currency":"USD",
              "endpoints":[{"protocol":"openai","endpoint":"https://api.us1.example"}]}
         ]}"#;
-        let aux = Aux::open_in_memory().unwrap();
-        aux.save_hub_cache(CUR, "2026-09-07T00:00:00Z").unwrap();
-        let entries = catalog_snapshot(&aux).entries;
+        let store = kiwanod::store::Store::open_in_memory().unwrap();
+        store.save_hub_cache(CUR, "2026-09-07T00:00:00Z").unwrap();
+        let entries = catalog_snapshot(&store).entries;
 
         // Added from an entry: what that entry bills in.
         let mut cn = provider("cn", "CN One", Billing::Metered);

@@ -225,11 +225,18 @@ pub(crate) mod test_support {
          "endpoints":[{"protocol":"openai","endpoint":"https://api.example.com/two"}]}
     ]}"#;
 
-    pub(crate) fn catalog_aux() -> Aux {
-        let aux = Aux::open_in_memory().unwrap();
-        aux.save_hub_cache(LINK_CATALOG, "2026-09-07T00:00:00Z")
+    /// A store whose hub cache holds the link catalog.
+    ///
+    /// The cache is the **daemon's** table now (`store::hub`,
+    /// `migrate.local.md` §10.12), so a fixture has to put it where the code
+    /// reads it — writing it into an `Aux` would leave the shelf empty and the
+    /// test passing for the wrong reason.
+    pub(crate) fn catalog_store() -> Store {
+        let store = store();
+        store
+            .save_hub_cache(LINK_CATALOG, "2026-09-07T00:00:00Z")
             .unwrap();
-        aux
+        store
     }
 
     /// The link as stored. The inference writes the row, so this is where the

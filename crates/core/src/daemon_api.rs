@@ -15,6 +15,7 @@ use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
+use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::logs::RequestLogListVm;
 use kiwanod::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter};
 
@@ -392,6 +393,12 @@ impl DaemonApi {
     /// The price mirror — `vm::list_model_prices`.
     pub fn list_model_prices(&self) -> Result<Vec<ModelPriceEntry>, String> {
         sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/model-prices")
+    }
+    /// The Hub shelf — `vm::load_catalog`. Served by the daemon, which owns the
+    /// cache it is read from and the endpoint matching that marks an entry as
+    /// already added.
+    pub fn list_catalog(&self) -> Result<CatalogListVm, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/catalog")
     }
 }
 

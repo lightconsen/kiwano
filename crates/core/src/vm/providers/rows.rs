@@ -101,7 +101,7 @@ pub fn build_provider_vms(
     }
 
     // What each provider bills in, resolved per row below.
-    let catalog_entries = catalog_snapshot(aux).entries;
+    let catalog_entries = catalog_snapshot(store).entries;
 
     let now = unix_now();
     let since7 = rfc3339(now - 7 * 86_400);

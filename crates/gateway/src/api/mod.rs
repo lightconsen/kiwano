@@ -35,6 +35,7 @@
 //! [`ApiError`]: kiwano_api::error::ApiError
 
 pub mod agents;
+pub mod catalog;
 pub mod keys;
 pub mod logs;
 pub mod pricing;

@@ -122,6 +122,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
         .route("/providers/{id}", delete(delete_provider_route))
         .route("/model-prices", get(list_model_prices_route))
+        .route("/catalog", get(list_catalog_route))
         .route("/logs", get(list_logs_route).delete(clear_logs_route))
         .route("/logs/{id}", get(get_log_route))
         .route("/credential-finding", get(check_finding_route))
@@ -919,6 +920,16 @@ async fn list_model_prices_route(State(state): State<Arc<GatewayState>>) -> Resp
     }
 }
 
+/// `GET /api/catalog` — the Hub shelf: the cached catalog, each entry marked as
+/// already added when a local provider answers on one of its endpoints.
+///
+/// Read out of the daemon's own `hub_cache` (`store::hub`) — the table became
+/// the daemon's when this endpoint was written, because the alternative was a
+/// second copy of the parse-and-normalize rules (`migrate.local.md` §10.12).
+async fn list_catalog_route(State(state): State<Arc<GatewayState>>) -> Response {
+    Json(crate::api::catalog::load_catalog(&state.store)).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1617,6 +1628,66 @@ mod tests {
     /// all line up: the timestamp below arrives percent-encoded, exactly as the
     /// client sends one (`daemon_api::encode_query`), and the `+` in its offset
     /// has to survive.
+    /// The Hub shelf, served out of the cache the daemon now owns.
+    ///
+    /// Two things this pins beyond "it answers": the payload is parsed and
+    /// **normalized** on the way out (the primary endpoint is hoisted out of the
+    /// list into its own fields, and the avatar colour is derived), and an entry
+    /// a local provider answers on is marked `added`. A shelf that skipped the
+    /// normalize would match no endpoints and offer every entry for adding a
+    /// second time.
+    #[tokio::test]
+    async fn the_catalog_endpoint_serves_the_normalized_shelf() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("t.db")).unwrap();
+        store
+            .save_hub_cache(
+                r#"{"total":1,"entries":[{"id":"deepseek","name":"DeepSeek","tag":"official",
+                    "rating":4.8,"billing":"payg","currency":"USD",
+                    "endpoints":[{"protocol":"openai","endpoint":"https://api.deepseek.com"}]}]}"#,
+                "2026-09-07T00:00:00Z",
+            )
+            .unwrap();
+        // A local provider on that same endpoint, so the badge has something to
+        // match: the endpoint key is host+path, compared without the scheme.
+        store
+            .insert_provider(&provider(
+                "p-ds",
+                Protocol::OpenAI,
+                "https://api.deepseek.com",
+            ))
+            .unwrap();
+        let state = Arc::new(GatewayState::new(store).unwrap());
+        let token = shared_token(&state);
+
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/catalog", Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let shelf = body_json(response).await;
+        assert_eq!(shelf["total"], 1);
+        let entry = &shelf["entries"][0];
+        assert_eq!(entry["id"], "deepseek");
+        assert_eq!(entry["protocol"], "openai", "the primary was hoisted");
+        assert_eq!(entry["endpoint"], "https://api.deepseek.com");
+        assert!(
+            !entry["logo_color"].as_str().unwrap().is_empty(),
+            "the avatar colour is derived on the way out"
+        );
+        assert_eq!(
+            entry["added"], true,
+            "the local provider answers on that endpoint, so the shelf says so"
+        );
+
+        // Without the token: refused like every other resource route.
+        let response = admin_plane_router(state.clone())
+            .oneshot(admin_request("GET", "/api/catalog", None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn the_log_list_reads_its_filter_from_the_query_string() {
         let dir = tempfile::tempdir().unwrap();

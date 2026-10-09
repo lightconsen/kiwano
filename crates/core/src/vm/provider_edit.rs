@@ -296,7 +296,7 @@ pub fn add_provider(
     // from the endpoint where that is unambiguous. Worth doing at all because
     // the row's link is what prices its requests at its own rate rather than at
     // whichever entry sorts first (`link_providers` has the long version).
-    let catalog_entries = catalog_snapshot(aux).entries;
+    let catalog_entries = catalog_snapshot(store).entries;
     if provider.catalog_id.is_none() {
         provider.catalog_id = catalog_id_for(&catalog_entries, &provider);
     }
@@ -581,7 +581,7 @@ mod tests {
     use crate::vm::catalog::stored_key_for;
     use crate::vm::providers::build_provider_vms;
     use crate::vm::test_support::{
-        catalog_aux, catalog_input, linkless_aux, live_home, no_vars, provider, store,
+        catalog_input, catalog_store, linkless_aux, live_home, no_vars, provider, store,
         stored_catalog_id,
     };
     use crate::vm::Aux;
@@ -591,8 +591,8 @@ mod tests {
     /// that is what makes the provider's own prices reachable.
     #[test]
     fn add_provider_links_the_unique_catalog_entry() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
 
         // A bare host where the entry names a deeper path.
         let vm = add_provider(
@@ -631,8 +631,8 @@ mod tests {
     /// filled in.
     #[test]
     fn add_provider_stores_the_default_model_and_hands_it_back() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
 
         let mut input = catalog_input("DeepSeek", "https://api.deepseek.com");
         input.model_default = "deepseek-v4-pro".into();
@@ -675,8 +675,8 @@ mod tests {
     /// to reorder an agent's failover queue and change how it routes.
     #[test]
     fn an_edit_that_names_no_agents_leaves_the_bindings_alone() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
 
         // Two providers serving claude. The second one added is primary.
         let mut first = catalog_input("A", "https://a.example.com/v1");
@@ -730,8 +730,8 @@ mod tests {
     /// would make the Test button a way to post a credential to any host.
     #[test]
     fn a_stored_key_covers_only_the_providers_own_endpoints() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
         let mut input = catalog_input("Kimi", "https://api.moonshot.cn");
         input.api_key = "sk-secret".into();
         let vm = add_provider(&s, &aux, &input).unwrap();
@@ -763,8 +763,8 @@ mod tests {
     /// what nobody said.
     #[test]
     fn add_provider_keeps_an_explicit_catalog_id() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
 
         let mut input = catalog_input("DeepSeek", "https://api.deepseek.com");
         input.catalog_id = Some("kimi-for-coding".into());
@@ -790,8 +790,8 @@ mod tests {
     /// guess here is a wrong price with nothing to show for it.
     #[test]
     fn add_provider_does_not_guess_between_ambiguous_entries() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
         let vm = add_provider(
             &s,
             &aux,
@@ -805,8 +805,8 @@ mod tests {
     /// not list — has no entry to link to, and stays that way.
     #[test]
     fn add_provider_leaves_a_custom_endpoint_unlinked() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
         for endpoint in [
             "https://my-own.example.com",
             "https://api.deepseek.com.evil.com",
@@ -821,8 +821,8 @@ mod tests {
     /// same set the shelf's `added` derives from.
     #[test]
     fn add_provider_links_from_an_extra_endpoint() {
-        let s = store();
-        let aux = catalog_aux();
+        let s = catalog_store();
+        let aux = linkless_aux();
         let mut input = catalog_input("KFC", "https://my-own.example.com");
         input.endpoints = vec![NewEndpointInput {
             protocol: "anthropic".into(),

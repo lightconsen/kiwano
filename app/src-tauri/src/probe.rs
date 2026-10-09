@@ -46,7 +46,7 @@ pub async fn test_provider_latency(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<vm::PromptLatencyVm, String> {
-    vm::test_provider_latency(&state.store, &state.aux, &id).await
+    vm::test_provider_latency(&state.store, &id).await
 }
 
 /// Live model-name list for the Default model picker (requires an API key:

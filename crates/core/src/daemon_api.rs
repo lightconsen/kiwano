@@ -702,6 +702,46 @@ impl DaemonApi {
             &Body { raws, skips },
         )
     }
+    /// What a client needs before it acts on an agent's takeover: the key
+    /// already registered, and where restore would point the agent if its backup
+    /// turns out to be unusable.
+    ///
+    /// The rebuild half is why this is asked rather than read
+    /// (`migrate.local.md` §10.43): it carries the provider's credential, which
+    /// lives in the daemon's row.
+    pub fn takeover_state(
+        &self,
+        agent: &str,
+    ) -> Result<kiwanod::api::takeover::TakeoverStateVm, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/takeover/{agent}/state"),
+        )
+    }
+
+    /// Take back one registration — what a takeover whose file half failed has
+    /// to undo. Narrower than [`Self::takeover_teardown`]: the rest of the state
+    /// is left as it was found.
+    pub fn takeover_unregister(&self, agent: &str) -> Result<bool, String> {
+        let v: serde_json::Value = sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/takeover/{agent}/key"),
+        )?;
+        Ok(v["removed"].as_bool().unwrap_or(false))
+    }
+
+    /// Undo the store half of a takeover — registration, bindings, strategy.
+    /// One call, because they are one decision.
+    pub fn takeover_teardown(&self, agent: &str) -> Result<(), String> {
+        wrote(sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/takeover/{agent}/state"),
+        ))
+    }
+
     /// The store half of starting a takeover — `vm::takeover::phase_state`.
     ///
     /// The **key is the caller's**, which is what makes a replay safe without an
@@ -709,7 +749,7 @@ impl DaemonApi {
     /// already minted is one row. The credential is what the caller read out of
     /// the agent's own config — those files are the client's, and §5's first
     /// constraint forbids paths in this interface.
-    pub fn takeover_state(
+    pub fn takeover_register(
         &self,
         agent: &str,
         key: &str,

@@ -152,12 +152,12 @@ fn crash_worker() {
 
     match at.as_str() {
         "after_state" => {
-            phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
+            phase_state(&aux, &agent, &home, None, StateHalf::InProcess(&store))
                 .expect("child: phase_state");
             std::process::abort();
         }
         "mid_files" => {
-            let prepared = phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
+            let prepared = phase_state(&aux, &agent, &home, None, StateHalf::InProcess(&store))
                 .expect("child: phase_state");
             // Die after the first file of the file half: the config is left
             // half-rewritten, which is the state the backup exists for.
@@ -177,7 +177,7 @@ fn crash_worker() {
             std::process::abort();
         }
         "before_mark" => {
-            let prepared = phase_state(&store, &aux, &agent, &home, None, StateHalf::InProcess)
+            let prepared = phase_state(&aux, &agent, &home, None, StateHalf::InProcess(&store))
                 .expect("child: phase_state");
             enable(&aux, &agent, &prepared.key, GATEWAY, &home, &vars).expect("child: enable");
             // Every file is written; only the mark is missing.
@@ -203,7 +203,7 @@ fn crash_after_the_store_half_converges_by_revoking_the_key() {
         "the file half did not"
     );
 
-    let findings = reconcile_takeovers(&store, &aux, &f.home, &vars).unwrap();
+    let findings = reconcile_takeovers(&aux, &f.home, &vars, StateHalf::InProcess(&store)).unwrap();
     assert_eq!(findings.len(), 1, "got {findings:?}");
     match &findings[0] {
         TakeoverFinding::StoreWithoutConfig { agent, op_id } => {
@@ -216,9 +216,11 @@ fn crash_after_the_store_half_converges_by_revoking_the_key() {
     assert!(aux.load_takeover_op(AGENT).is_none(), "the row is cleared");
 
     // And it stays converged: a second pass has nothing to do.
-    assert!(reconcile_takeovers(&store, &aux, &f.home, &vars)
-        .unwrap()
-        .is_empty());
+    assert!(
+        reconcile_takeovers(&aux, &f.home, &vars, StateHalf::InProcess(&store))
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -239,7 +241,7 @@ fn crash_mid_file_half_puts_the_config_back_and_revokes() {
     );
     assert_eq!(f.keys_for(&store, MULTI_FILE_AGENT).len(), 1);
 
-    let findings = reconcile_takeovers(&store, &aux, &f.home, &vars).unwrap();
+    let findings = reconcile_takeovers(&aux, &f.home, &vars, StateHalf::InProcess(&store)).unwrap();
     assert_eq!(findings.len(), 1, "got {findings:?}");
     assert!(matches!(
         findings[0],
@@ -277,7 +279,7 @@ fn crash_before_the_mark_converges_by_marking() {
         .load_takeover_op(AGENT)
         .is_some_and(|op| !op.is_applied()));
 
-    let findings = reconcile_takeovers(&store, &aux, &f.home, &vars).unwrap();
+    let findings = reconcile_takeovers(&aux, &f.home, &vars, StateHalf::InProcess(&store)).unwrap();
     assert_eq!(findings.len(), 1, "got {findings:?}");
     assert!(matches!(
         findings[0],
@@ -298,15 +300,14 @@ fn a_replayed_operation_does_not_mint_a_second_key() {
     let store = f.store();
     let aux = f.aux();
 
-    let first = phase_state(&store, &aux, AGENT, &f.home, None, StateHalf::InProcess).unwrap();
+    let first = phase_state(&aux, AGENT, &f.home, None, StateHalf::InProcess(&store)).unwrap();
     // The same operation, delivered again — a retry, not a new takeover.
     let again = phase_state(
-        &store,
         &aux,
         AGENT,
         &f.home,
         Some(&first.op_id),
-        StateHalf::InProcess,
+        StateHalf::InProcess(&store),
     )
     .unwrap();
 
@@ -335,7 +336,13 @@ fn reconcile_leaves_agents_without_an_operation_row_alone() {
         .upsert_placeholder_key("kw-ag-claude-legacy", AGENT)
         .unwrap();
 
-    let findings = reconcile_takeovers(&store, &aux, &f.home, &ShellVars::new()).unwrap();
+    let findings = reconcile_takeovers(
+        &aux,
+        &f.home,
+        &ShellVars::new(),
+        StateHalf::InProcess(&store),
+    )
+    .unwrap();
     assert!(findings.is_empty(), "got {findings:?}");
     assert_eq!(
         f.keys_for(&store, AGENT),

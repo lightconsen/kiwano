@@ -4,7 +4,6 @@
 //! between them.
 
 use super::render::{render_agents, render_versions};
-use super::runtime;
 use crate::cli::AgentsCmd;
 use crate::output::{ellipsize, render_table};
 use crate::{CliError, Ctx};
@@ -160,18 +159,20 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
     // both to write the config and to say what was written.
     let gateway = ctx.gateway_base();
     {
-        let (store, aux) = (ctx.store()?, ctx.aux()?);
+        let aux = ctx.aux()?;
+        // The store half goes to the daemon, as it does for the app: the CLI is
+        // a client like any other now, and this was the last command that wrote
+        // the shared database (`migrate.local.md` §10.43). The **file** half is
+        // still this side's — the agent's config is this machine's.
+        let api = &ctx.api;
         vm::set_agent_takeover(
-            store,
             aux,
             agent,
             enabled,
             &gateway,
             &home,
             ctx.config_vars(),
-            // The CLI opens the database itself for every command it has, so
-            // this is the same position — not a second writer.
-            vm::takeover::StateHalf::InProcess,
+            vm::takeover::StateHalf::Via(api),
         )?;
     }
 
@@ -179,15 +180,9 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
         // The placeholder key is the part that is invisible from outside, and
         // getting it wrong is the difference between a routed agent and a 401 —
         // the data plane only routes keys it minted itself. Printed as stored.
-        let key = {
-            let store = ctx.store()?;
-            store
-                .list_placeholder_keys()
-                .map_err(runtime)?
-                .into_iter()
-                .find(|k| k.agent == agent)
-                .map(|k| k.key)
-        };
+        // Read back through the daemon rather than from a local handle: it is
+        // the side that registered it, and the side that will route by it.
+        let key = ctx.api.takeover_state(agent)?.key;
         ctx.out
             .line(format!("{agent}: routed through the gateway on {gateway}"));
         match key {

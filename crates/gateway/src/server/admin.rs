@@ -146,7 +146,13 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         )
         .route("/config/export", get(export_config_route))
         .route("/import/cc-switch", post(import_cc_switch_route))
-        .route("/takeover/{agent}/state", post(takeover_state_route))
+        .route(
+            "/takeover/{agent}/state",
+            get(takeover_state_read_route)
+                .post(takeover_state_route)
+                .delete(takeover_teardown_route),
+        )
+        .route("/takeover/{agent}/key", delete(takeover_unregister_route))
         .route("/config/import", post(import_config_route))
         .route("/logs/export", get(export_logs_route))
         .route("/plan-quota/{provider_id}", get(plan_quota_route))
@@ -1274,6 +1280,60 @@ async fn export_config_route(
         // whatever shape the document happens to have. Same reason
         // `/api/logs/export` wraps its CSV (`migrate.local.md` §10.39).
         Ok(json) => Json(json!({ "config": json })).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/takeover/{agent}/state` — what a client needs to know before it
+/// acts: the key already registered, and where restore would point the agent if
+/// the backup turns out to be unusable.
+///
+/// The rebuild half is why this cannot be the client's own read
+/// (`migrate.local.md` §10.43): it needs the provider's **credential**, which is
+/// in the daemon's row and which no other endpoint hands out.
+async fn takeover_state_read_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+) -> Response {
+    match crate::api::takeover::takeover_state(&state.store, &agent) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `DELETE /api/takeover/{agent}/state` — undo the store half.
+///
+/// One call for the registration, the bindings and the strategy, because they
+/// are one decision: the agent has its own config back, so nothing about it is
+/// ours any more.
+async fn takeover_teardown_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+) -> Response {
+    match crate::api::takeover::teardown(&state.store, &agent) {
+        Ok(()) => {
+            // The route table names the candidates this just removed.
+            reload_after_write(&state);
+            Json(json!({ "ok": true })).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `DELETE /api/takeover/{agent}/key` — take back one registration, and nothing
+/// else. What a takeover whose file half failed has to undo.
+async fn takeover_unregister_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(agent): Path<String>,
+) -> Response {
+    match crate::api::takeover::unregister_key(&state.store, &agent) {
+        Ok(removed) => {
+            if removed {
+                // A candidate the route table may still be serving.
+                reload_after_write(&state);
+            }
+            Json(json!({ "removed": removed })).into_response()
+        }
         Err(e) => resource_error(e),
     }
 }

@@ -288,14 +288,13 @@ mod tests {
         assert!(settings.takeovers.iter().all(|t| !t.enabled));
         assert!(
             set_agent_takeover(
-                &s,
                 &aux,
                 &a.id,
                 true,
                 "http://127.0.0.1:8317",
                 home.path(),
                 &no_vars(),
-                StateHalf::InProcess,
+                StateHalf::InProcess(&s),
             )
             .is_err(),
             "takeover is for agents with a config"

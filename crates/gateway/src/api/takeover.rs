@@ -218,6 +218,104 @@ pub fn phase_state(
 mod tests {
     use super::*;
 
+    /// A store with an agent mid-takeover: a registered key, a route of its own,
+    /// and a provider behind it.
+    fn taken_over() -> Store {
+        let store = Store::open_in_memory().unwrap();
+        let now = crate::store::now_rfc3339();
+        store
+            .insert_provider(&Provider {
+                catalog_id: None,
+                model_default: None,
+                id: "p-1".into(),
+                name: "Upstream".into(),
+                protocol: crate::store::Protocol::OpenAI,
+                base_url: "https://api.upstream.example".into(),
+                api_path: None,
+                endpoints: Vec::new(),
+                api_key: Some("sk-upstream".into()),
+                billing: crate::store::Billing::Metered,
+                period_limit: None,
+                limit_unit: None,
+                reset_period: None,
+                plan_query: None,
+                plan_limits: None,
+                prices: None,
+                timeout_secs: None,
+                retries: None,
+                headers: None,
+                enabled: true,
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
+        store
+            .upsert_binding(&Binding {
+                agent: "claude".into(),
+                provider_id: "p-1".into(),
+                priority: 0,
+                weight: 1,
+                win_start: None,
+                win_end: None,
+                enabled: true,
+            })
+            .unwrap();
+        store
+            .upsert_strategy("claude", StrategyType::Single, None)
+            .unwrap();
+        store
+            .upsert_placeholder_key("kw-ag-claude-ab12", "claude")
+            .unwrap();
+        store
+    }
+
+    /// The read answers both questions a client has, and the rebuild half is the
+    /// one it could not answer for itself: it carries the provider's
+    /// **credential**, which lives in this row (`migrate.local.md` §10.43).
+    #[test]
+    fn the_state_read_carries_the_key_and_the_route_to_fall_back_to() {
+        let store = taken_over();
+        let state = takeover_state(&store, "claude").unwrap();
+        assert_eq!(state.key.as_deref(), Some("kw-ag-claude-ab12"));
+        let rebuild = state.rebuild.expect("a provider to point back at");
+        assert_eq!(rebuild.base_url, "https://api.upstream.example");
+        assert_eq!(rebuild.api_key, "sk-upstream");
+
+        // An agent that was never taken over answers plainly rather than failing.
+        let empty = takeover_state(&store, "codex").unwrap();
+        assert_eq!(empty.key, None);
+        assert!(empty.rebuild.is_none());
+    }
+
+    /// The two undos are different sizes, and the difference is what keeps a
+    /// failed takeover from deleting a route the user had.
+    #[test]
+    fn unregistering_one_key_is_not_the_same_as_tearing_the_state_down() {
+        let store = taken_over();
+
+        assert!(unregister_key(&store, "claude").unwrap());
+        assert!(store.list_placeholder_keys().unwrap().is_empty());
+        assert!(
+            !store.bindings_for_agent("claude").unwrap().is_empty(),
+            "the route stays: phase one may not have created it"
+        );
+        assert!(store.get_strategy("claude").unwrap().is_some());
+        assert!(!unregister_key(&store, "claude").unwrap(), "idempotent");
+
+        // And the full teardown is the one that clears the route.
+        store
+            .upsert_placeholder_key("kw-ag-claude-ab12", "claude")
+            .unwrap();
+        teardown(&store, "claude").unwrap();
+        assert!(store.list_placeholder_keys().unwrap().is_empty());
+        assert!(store.bindings_for_agent("claude").unwrap().is_empty());
+        assert!(store.get_strategy("claude").unwrap().is_none());
+        assert!(
+            store.get_provider("p-1").unwrap().is_some(),
+            "the provider is the user's own row, with its key and its history"
+        );
+    }
+
     #[test]
     fn import_current_provider_dedups_by_base_url() {
         let s = Store::open_in_memory().unwrap();
@@ -245,4 +343,132 @@ mod tests {
         assert_eq!(p.name, "xAI");
         assert_ne!(id1, id3);
     }
+}
+
+/// The route an agent should be pointed back at when its own config cannot be
+/// handed back — the provider it was using, with the credential to reach it.
+///
+/// Moved here from `kiwano_core::vm::takeover` with the rest of the store half:
+/// the key it needs is in the daemon's `providers` row, and a client on another
+/// machine has no way to read it (`migrate.local.md` §10.43).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TakeoverRebuildVm {
+    pub base_url: String,
+    pub api_key: String,
+}
+
+/// What a client needs to know about an agent's takeover before it acts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TakeoverStateVm {
+    /// The placeholder key registered for this agent, if any. The client looks
+    /// before it mints: a replay must register the key it already has rather
+    /// than a second one the config it may still read would never carry.
+    #[serde(default)]
+    pub key: Option<String>,
+    /// Where restore should point the agent if the backup turns out to be
+    /// unusable. `None` when there is nothing safe to point at.
+    #[serde(default)]
+    pub rebuild: Option<TakeoverRebuildVm>,
+}
+
+/// The provider to fall back to when a backup cannot be written back.
+///
+/// Only for the agents whose config can be rebuilt from a provider at all, and
+/// only when the provider's own endpoint is *not* the gateway: pointing an agent
+/// back at loopback is the one outcome a restore must never produce.
+pub fn rebuild_route(store: &Store, agent: &str) -> Result<Option<TakeoverRebuildVm>, ApiError> {
+    if !kiwano_api::agents::REBUILDABLE_AGENTS.contains(&agent) {
+        return Ok(None);
+    }
+    let Some(id) = store.primary_provider_id(agent).map_err(ApiError::failed)? else {
+        return Ok(None);
+    };
+    let Some(provider) = store.get_provider(&id).map_err(ApiError::failed)? else {
+        return Ok(None);
+    };
+    let Some(api_key) = provider
+        .api_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    else {
+        return Ok(None);
+    };
+    let base_url = join_provider_url(&provider.base_url, provider.api_path.as_deref());
+    if kiwano_adapters::codex_config::is_loopback_gateway_url(&base_url) {
+        return Ok(None);
+    }
+    Ok(Some(TakeoverRebuildVm { base_url, api_key }))
+}
+
+/// The registered key and the rebuild fallback, in one answer — the two reads a
+/// client makes about an agent's takeover state.
+pub fn takeover_state(store: &Store, agent: &str) -> Result<TakeoverStateVm, ApiError> {
+    let key = store
+        .list_placeholder_keys()
+        .map_err(ApiError::failed)?
+        .into_iter()
+        .find(|k| k.agent == agent)
+        .map(|k| k.key);
+    Ok(TakeoverStateVm {
+        key,
+        rebuild: rebuild_route(store, agent)?,
+    })
+}
+
+/// Undo the store half: the registration, the route, and the strategy.
+///
+/// All three, in one call, because they are one decision — the agent has its own
+/// config back, so nothing about it is ours any more. Left behind, the key is
+/// one the UI keeps offering and the config no longer carries, and the bindings
+/// keep an agent that sends us nothing reading as *bound* and even as *in use*
+/// (see `live_bound_agents`). The **providers** stay: they are the user's own
+/// rows, with their keys, plans and usage history, and they are what a later
+/// takeover re-imports and binds again.
+pub fn teardown(store: &Store, agent: &str) -> Result<(), ApiError> {
+    for k in store.list_placeholder_keys().map_err(ApiError::failed)? {
+        if k.agent == agent {
+            store
+                .delete_placeholder_key(&k.key)
+                .map_err(ApiError::failed)?;
+        }
+    }
+    for b in store.bindings_for_agent(agent).map_err(ApiError::failed)? {
+        store
+            .delete_binding(agent, &b.provider_id)
+            .map_err(ApiError::failed)?;
+    }
+    store.delete_strategy(agent).map_err(ApiError::failed)?;
+    Ok(())
+}
+
+/// `base_url` with the provider's optional `api_path` prefix appended.
+fn join_provider_url(base_url: &str, api_path: Option<&str>) -> String {
+    let base = base_url.trim().trim_end_matches('/');
+    match api_path.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(path) => format!(
+            "{base}/{}",
+            path.trim_start_matches('/').trim_end_matches('/')
+        ),
+        None => base.to_string(),
+    }
+}
+
+/// Take back **one** registration — what a failed takeover's first phase has to
+/// undo, and nothing else.
+///
+/// Narrower than [`teardown`] on purpose, and the difference is not cosmetic: a
+/// takeover that fails while rewriting the agent's config must leave the rest of
+/// the state as it found it. `phase_state` binds a provider only when the agent
+/// had no route, so a full teardown here would delete a route the user had
+/// before Kiwano was involved.
+pub fn unregister_key(store: &Store, agent: &str) -> Result<bool, ApiError> {
+    let mut removed = false;
+    for k in store.list_placeholder_keys().map_err(ApiError::failed)? {
+        if k.agent == agent {
+            removed |= store
+                .delete_placeholder_key(&k.key)
+                .map_err(ApiError::failed)?;
+        }
+    }
+    Ok(removed)
 }

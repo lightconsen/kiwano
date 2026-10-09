@@ -355,14 +355,13 @@ mod tests {
 
         // no ~/.claude/settings.json → rejected and no key left behind
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap_err();
         assert!(s
@@ -375,14 +374,13 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         let v2 = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
@@ -398,14 +396,13 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(env["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8317");
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             false,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
@@ -428,14 +425,13 @@ mod tests {
         std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
         std::fs::write(&settings, "{}").unwrap();
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
 

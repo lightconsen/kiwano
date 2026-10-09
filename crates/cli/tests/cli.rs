@@ -658,6 +658,42 @@ fn a_moved_command_needs_the_daemon() {
     }
 }
 
+/// The takeover's store half is the daemon's now — it was the last command that
+/// wrote the shared database directly (`migrate.local.md` §10.43).
+///
+/// Its own test rather than a row in the table above, because it can assert one
+/// thing more: **the file half does not run when the store half never landed.**
+/// That ordering is §8's, and it is what keeps a half-done takeover pointing at
+/// a gateway that knows its key rather than at one that would refuse it.
+#[test]
+fn a_takeover_needs_the_daemon_and_writes_no_config_without_one() {
+    let (dir, db) = temp_db();
+    let home = dir.path().join("home");
+    write_claude_config(
+        &home,
+        r#"{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_AUTH_TOKEN":"sk-real-1"}}"#,
+    );
+    let before = std::fs::read_to_string(claude_settings(&home)).unwrap();
+
+    let (code, _, err) = run(
+        &db,
+        &[
+            "--home",
+            &home.display().to_string(),
+            "agents",
+            "takeover",
+            "claude",
+        ],
+    );
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("gateway is not answering"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(claude_settings(&home)).unwrap(),
+        before,
+        "the agent's config must be untouched when the store half did not land"
+    );
+}
+
 // ── usage / status ──────────────────────────────────────────────────────────
 
 #[test]
@@ -1178,7 +1214,11 @@ fn takeover_routes_an_agent_and_restore_puts_it_back() {
         minted.key
     );
 
-    let (code, _, err) = run(&db, &["--home", &home_arg, "agents", "restore", "claude"]);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "agents", "restore", "claude"],
+    );
     assert_eq!(code, 0, "{err}");
     assert_eq!(
         std::fs::read_to_string(claude_settings(&home)).unwrap(),

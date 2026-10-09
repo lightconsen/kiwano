@@ -66,3 +66,14 @@ pub const AGENTS: [(&str, &str); 26] = [
     ("goose", "Goose"),
     ("zcode", "ZCode"),
 ];
+
+/// The agents whose config can be rebuilt from a provider when their backup
+/// turns out to be unusable.
+///
+/// Here rather than in `kiwano-core` because **both sides need it now**: the
+/// daemon decides what to fall back to (`kiwanod::api::takeover::rebuild_route`)
+/// and the client decides whether that fallback applies
+/// (`kiwano_core::takeover::disable`). It is a rule about agent configs, which
+/// makes it exactly the kind of thing §10.6 says must live where both sides can
+/// see it — a copy on each side is a copy that drifts.
+pub const REBUILDABLE_AGENTS: [&str; 4] = ["claude", "codex", "gemini", "grokbuild"];

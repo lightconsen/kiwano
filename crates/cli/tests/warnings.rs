@@ -6,6 +6,8 @@
 //! `main` installs. The rest of the command tree is driven in-process (see
 //! `cli.rs`); this one file pays for a process to prove the wiring.
 
+mod support;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -31,9 +33,16 @@ fn home_with_unnormalized_openclaw() -> tempfile::TempDir {
 }
 
 fn run_takeover(home: &Path, quiet: bool) -> (i32, String) {
+    // A daemon, because a takeover's **store half is the daemon's** now
+    // (`migrate.local.md` §10.43) — without one the command stops before the
+    // file half, which is where every warning this file is about comes from.
+    let db = home.join("kiwano.db");
+    let daemon = support::serve(&db);
+
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kiwano"));
     cmd.env(HOME_HOOK, home)
-        .env("KIWANO_DB_PATH", home.join("kiwano.db"))
+        .env("KIWANO_DB_PATH", &db)
+        .args(["--admin-socket", &daemon.socket()])
         .args(["agents", "takeover", "openclaw"]);
     if quiet {
         cmd.arg("--quiet");

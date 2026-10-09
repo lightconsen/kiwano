@@ -19,7 +19,7 @@ use std::path::Path;
 /// rebuilt into it verbatim. The additive agents' `kiwano-gateway` entry and
 /// Claude Desktop's configLibrary profile are kiwano-authored projections with
 /// no faithful provider-side rebuild, so they fall through to the strip tier.
-pub const REBUILDABLE_AGENTS: [&str; 4] = ["claude", "codex", "gemini", "grokbuild"];
+pub use kiwano_api::agents::REBUILDABLE_AGENTS;
 
 /// Restore: put every captured file back the way it was, then deregister the
 /// backup. A file that did not exist before the takeover is removed rather than

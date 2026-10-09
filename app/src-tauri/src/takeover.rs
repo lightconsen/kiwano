@@ -33,7 +33,6 @@ pub fn set_agent_takeover(
         .gateway_base()
         .unwrap_or_else(|_| format!("http://127.0.0.1:{}", state.data_port));
     vm::set_agent_takeover(
-        &state.store,
         &state.aux,
         &agent,
         enabled,

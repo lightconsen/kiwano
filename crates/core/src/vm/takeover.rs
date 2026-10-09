@@ -10,7 +10,6 @@ use kiwanod::store::Store;
 
 #[allow(clippy::too_many_arguments)] // the phases' inputs, one each
 pub fn set_agent_takeover(
-    store: &Store,
     aux: &Aux,
     agent: &str,
     enabled: bool,
@@ -38,10 +37,10 @@ pub fn set_agent_takeover(
         // leaves something *recoverable* rather than something broken — the
         // agent is either untouched or pointing at a gateway that knows its
         // key. See `reconcile_takeovers`, which closes them.
-        let prepared = phase_state(store, aux, agent, home, None, state_half)?;
+        let prepared = phase_state(aux, agent, home, None, state_half)?;
         if let Err(e) = crate::takeover::enable(aux, agent, &prepared.key, gateway, home, vars) {
             // The file half never landed: take the store half back out.
-            undo_state(store, aux, agent, &prepared.key);
+            undo_state(aux, agent, &prepared.key, state_half);
             return Err(e);
         }
         // A failure here is not a failed takeover: the files are in place and
@@ -54,7 +53,7 @@ pub fn set_agent_takeover(
         // The provider the gateway serves for this agent, handed to restore as
         // the rebuild tier: losing the backup must not strand the agent at
         // loopback if there is a provider to point it back at.
-        let fallback = rebuild_route(store, agent)?;
+        let fallback = state_half.rebuild_route(agent)?;
         let report = crate::takeover::disable(aux, agent, home, fallback.as_ref(), vars)?;
         // A restore that could not hand the original config back changed the
         // agent's config in a way the user did not ask for: it is not an error
@@ -71,13 +70,10 @@ pub fn set_agent_takeover(
         if let Some(warning) = report.warning {
             eprintln!("kiwano: {agent} takeover restore: {warning}");
         }
-        // The registration is dropped whatever the restore outcome: leave it
-        // and the UI keeps offering a key the config no longer carries.
-        for k in store.list_placeholder_keys().map_err(e2s)? {
-            if k.agent == agent {
-                store.delete_placeholder_key(&k.key).map_err(e2s)?;
-            }
-        }
+        // The registration, the bindings and the strategy are dropped whatever
+        // the restore outcome — one call, because they are one decision. Leave
+        // them and the UI keeps offering a key the config no longer carries,
+        // and an agent that sends us nothing keeps reading as *bound*.
         // …and so does the route, for the same reason one step further out: an
         // agent that has its own config back sends us nothing, so its candidate
         // list and strategy are stale the moment the restore lands — invisible
@@ -86,10 +82,7 @@ pub fn set_agent_takeover(
         // as "In use" (see `live_bound_agents`). The *providers* stay: they are
         // the user's own rows, with their keys, plans and usage history, and
         // they are what a later takeover re-imports and binds again.
-        for b in store.bindings_for_agent(agent).map_err(e2s)? {
-            store.delete_binding(agent, &b.provider_id).map_err(e2s)?;
-        }
-        store.delete_strategy(agent).map_err(e2s)?;
+        state_half.teardown(agent)?;
         // No operation is in flight once the agent has its own config back;
         // leaving the row would put the agent on the reconcile pass's list for
         // a takeover that has been deliberately undone.
@@ -98,15 +91,87 @@ pub fn set_agent_takeover(
     Ok(())
 }
 
-/// How the store half of a takeover is reached.
+/// How the store half of a takeover is reached — the **one** place that decides
+/// it.
+///
+/// It used to be a marker beside a `store` parameter the function took anyway,
+/// so the caller always held a database handle whether or not the branch it took
+/// used one. That is what it took for the CLI to stop opening the shared
+/// database here (`migrate.local.md` §10.43): the handle is now *inside* the
+/// variant, and a caller that goes over the wire cannot name one.
 #[derive(Clone, Copy)]
 pub enum StateHalf<'a> {
     /// In-process: the caller shares the database and may write it. What the
-    /// CLI and the crash tests do — the CLI is a direct client throughout.
-    InProcess,
+    /// crash tests do — they drive the phases against a real store on purpose.
+    InProcess(&'a Store),
     /// Over the wire: the caller is a client and must not write the shared
-    /// database. What the app does.
+    /// database. What the app and the CLI do.
     Via(&'a DaemonApi),
+}
+
+impl StateHalf<'_> {
+    /// The placeholder key already registered for this agent, if any.
+    ///
+    /// Looked up before a key is minted: a replay must register the one it
+    /// already has, or the config the file half may yet read would carry a key
+    /// the gateway never sees.
+    fn registered_key(&self, agent: &str) -> Result<Option<String>, String> {
+        match self {
+            StateHalf::InProcess(store) => Ok(store
+                .list_placeholder_keys()
+                .map_err(e2s)?
+                .into_iter()
+                .find(|k| k.agent == agent)
+                .map(|k| k.key)),
+            StateHalf::Via(api) => Ok(api.takeover_state(agent)?.key),
+        }
+    }
+
+    /// Where restore should point the agent when its own backup cannot be
+    /// written back.
+    fn rebuild_route(&self, agent: &str) -> Result<Option<crate::takeover::ProviderRoute>, String> {
+        let route = match self {
+            StateHalf::InProcess(store) => {
+                kiwanod::api::takeover::rebuild_route(store, agent).map_err(|e| e.to_string())?
+            }
+            StateHalf::Via(api) => api.takeover_state(agent)?.rebuild,
+        };
+        Ok(route.map(|v| crate::takeover::ProviderRoute {
+            base_url: v.base_url,
+            api_key: v.api_key,
+        }))
+    }
+
+    /// Register the key against the agent — the rest of phase one.
+    fn register(&self, agent: &str, key: &str, creds: Option<&CurrentCreds>) -> Result<(), String> {
+        match self {
+            StateHalf::InProcess(store) => {
+                kiwanod::api::takeover::phase_state(store, agent, key, creds)
+                    .map_err(|e| e.to_string())
+            }
+            StateHalf::Via(api) => api.takeover_register(agent, key, creds),
+        }
+    }
+
+    /// Take back one registration, leaving the rest of the state alone.
+    fn unregister_key(&self, agent: &str) -> Result<(), String> {
+        match self {
+            StateHalf::InProcess(store) => kiwanod::api::takeover::unregister_key(store, agent)
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            StateHalf::Via(api) => api.takeover_unregister(agent).map(|_| ()),
+        }
+    }
+
+    /// Undo the store half: the registration, the bindings and the strategy.
+    fn teardown(&self, agent: &str) -> Result<(), String> {
+        match self {
+            StateHalf::InProcess(store) => {
+                kiwanod::api::takeover::teardown(store, agent).map_err(|e| e.to_string())
+            }
+            StateHalf::Via(api) => api.takeover_teardown(agent),
+        }
+    }
 }
 
 /// What phase one produced, for phase two to use. `op_id` is the operation's
@@ -138,7 +203,6 @@ pub struct PreparedTakeover {
 /// position. Making the branch explicit here keeps the *sequence* in one place:
 /// §8's ordering is the part that must not be written twice.
 pub fn phase_state(
-    store: &Store,
     aux: &Aux,
     agent: &str,
     home: &std::path::Path,
@@ -148,15 +212,10 @@ pub fn phase_state(
     // A replay keeps the key it already registered: minting a second one would
     // leave the first orphaned in the config the file half may yet read.
     if let Some(op_id) = replay_of {
-        if let Some(existing) = store
-            .list_placeholder_keys()
-            .map_err(e2s)?
-            .into_iter()
-            .find(|k| k.agent == agent)
-        {
+        if let Some(existing) = state_half.registered_key(agent)? {
             return Ok(PreparedTakeover {
                 op_id: op_id.to_string(),
-                key: existing.key,
+                key: existing,
             });
         }
     }
@@ -171,13 +230,7 @@ pub fn phase_state(
         name: c.name,
         protocol: c.protocol.to_string(),
     });
-    match state_half {
-        StateHalf::InProcess => {
-            kiwanod::api::takeover::phase_state(store, agent, &key, creds.as_ref())
-                .map_err(|e| e.to_string())?;
-        }
-        StateHalf::Via(api) => api.takeover_state(agent, &key, creds.as_ref())?,
-    }
+    state_half.register(agent, &key, creds.as_ref())?;
 
     let op_id = uuid::Uuid::new_v4().simple().to_string();
     aux.start_takeover_op(agent, &op_id).map_err(e2s)?;
@@ -203,13 +256,19 @@ pub fn mark_applied(aux: &Aux, agent: &str, op_id: &str) -> Result<(), String> {
 ///
 /// A no-op when the file half never started: `restorable_backup` is false once
 /// the backup row is gone, which is what an in-process failure leaves behind.
-fn undo_state(store: &Store, aux: &Aux, agent: &str, key: &str) {
+fn undo_state(aux: &Aux, agent: &str, key: &str, state_half: StateHalf<'_>) {
     if crate::takeover::restorable_backup(aux, agent) {
         if let Some((_, files)) = aux.load_takeover_backup(agent) {
             let _ = crate::takeover::restore_backup(aux, agent, &files, None);
         }
     }
-    let _ = store.delete_placeholder_key(key);
+    // **One registration**, not the whole state: this runs when the file half
+    // failed, and a full teardown would delete a route the user had before
+    // Kiwano was involved. `key` names what phase one registered — kept in the
+    // signature so the intent survives the move to the wire, where the daemon
+    // resolves it by agent (`migrate.local.md` §10.43).
+    let _ = key;
+    let _ = state_half.unregister_key(agent);
     let _ = aux.clear_takeover_op(agent);
 }
 
@@ -237,10 +296,10 @@ pub enum TakeoverFinding {
 /// ways the two halves can disagree; there is no fourth, because an operation
 /// row only ever exists once phase one has run.
 pub fn reconcile_takeovers(
-    store: &Store,
     aux: &Aux,
     home: &std::path::Path,
     vars: &ShellVars,
+    state_half: StateHalf<'_>,
 ) -> Result<Vec<TakeoverFinding>, String> {
     let mut findings = Vec::new();
     for (agent, _) in AGENTS {
@@ -253,7 +312,7 @@ pub fn reconcile_takeovers(
             // `applied` and the config agrees: nothing in flight.
             (true, true) => {}
             (true, false) => {
-                revoke_agent_keys(store, agent)?;
+                state_half.unregister_key(agent)?;
                 let _ = aux.clear_takeover_op(agent);
                 findings.push(TakeoverFinding::MarkWithoutConfig {
                     agent: agent.to_string(),
@@ -265,14 +324,8 @@ pub fn reconcile_takeovers(
                 // partially): put the user's files back before letting the key
                 // go, or the agent is left pointing at a gateway that will
                 // refuse it.
-                let key = store
-                    .list_placeholder_keys()
-                    .map_err(e2s)?
-                    .into_iter()
-                    .find(|k| k.agent == agent)
-                    .map(|k| k.key);
-                match key {
-                    Some(key) => undo_state(store, aux, agent, &key),
+                match state_half.registered_key(agent)? {
+                    Some(key) => undo_state(aux, agent, &key, state_half),
                     None => {
                         let _ = aux.clear_takeover_op(agent);
                     }
@@ -292,69 +345,6 @@ pub fn reconcile_takeovers(
         }
     }
     Ok(findings)
-}
-
-/// Drop every placeholder key registered for `agent` — the half of a takeover
-/// that a convergence or a teardown has to take back out.
-fn revoke_agent_keys(store: &Store, agent: &str) -> Result<(), String> {
-    for k in store.list_placeholder_keys().map_err(e2s)? {
-        if k.agent == agent {
-            store.delete_placeholder_key(&k.key).map_err(e2s)?;
-        }
-    }
-    Ok(())
-}
-
-/// The route restore can rebuild an agent's config from: its primary provider,
-/// when that provider carries a key and does not itself point at the gateway.
-///
-/// `None` is a real answer — the strip tier then applies. Only the agents the
-/// takeover module can actually rewrite from a provider get looked up at all:
-/// the additive agents' `kiwano-gateway` entry and Claude Desktop's
-/// configLibrary profile are kiwano-authored projections with no faithful
-/// provider-side rebuild.
-fn rebuild_route(
-    store: &Store,
-    agent: &str,
-) -> Result<Option<crate::takeover::ProviderRoute>, String> {
-    if !crate::takeover::REBUILDABLE_AGENTS.contains(&agent) {
-        return Ok(None);
-    }
-    let Some(id) = store.primary_provider_id(agent).map_err(e2s)? else {
-        return Ok(None);
-    };
-    let Some(provider) = store.get_provider(&id).map_err(e2s)? else {
-        return Ok(None);
-    };
-    let Some(api_key) = provider
-        .api_key
-        .map(|k| k.trim().to_string())
-        .filter(|k| !k.is_empty())
-    else {
-        return Ok(None);
-    };
-    // A provider whose own endpoint is the gateway (a card created from an
-    // already taken-over config, say) would rebuild the agent straight back
-    // onto loopback, which is the one outcome restore must never produce.
-    let base_url = join_provider_url(&provider.base_url, provider.api_path.as_deref());
-    if kiwano_adapters::codex_config::is_loopback_gateway_url(&base_url) {
-        return Ok(None);
-    }
-    Ok(Some(crate::takeover::ProviderRoute { base_url, api_key }))
-}
-
-/// `base_url` with the provider's optional `api_path` prefix appended — the URL
-/// the gateway itself forwards to, and therefore the one an agent rebuilt onto
-/// this provider has to hold.
-fn join_provider_url(base_url: &str, api_path: Option<&str>) -> String {
-    let base = base_url.trim().trim_end_matches('/');
-    match api_path.map(str::trim).filter(|p| !p.is_empty()) {
-        Some(path) => format!(
-            "{base}/{}",
-            path.trim_start_matches('/').trim_end_matches('/')
-        ),
-        None => base.to_string(),
-    }
 }
 
 // `import_current_provider` moved to `kiwanod::api::takeover` with the rest of
@@ -406,26 +396,24 @@ mod tests {
         }
 
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         assert_eq!(s.bindings_for_agent("claude").unwrap().len(), 2);
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             false,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
 
@@ -482,14 +470,13 @@ mod tests {
         })
         .unwrap();
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         assert!(crate::takeover::live_placeholder_key("claude", tmp.path(), &no_vars()).is_some());
@@ -519,25 +506,23 @@ mod tests {
         // would otherwise be what restore writes back, over a config this
         // takeover is not replacing.
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             false,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), reverted);
@@ -576,28 +561,26 @@ mod tests {
         .unwrap();
 
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             true,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
         // Lose the backup: the escape hatch is gone, so restore has to fall
         // back to the provider instead of reporting a success it did not have.
         aux.delete_takeover_backup("claude").unwrap();
         set_agent_takeover(
-            &s,
             &aux,
             "claude",
             false,
             "http://127.0.0.1:8317",
             tmp.path(),
             &no_vars(),
-            StateHalf::InProcess,
+            StateHalf::InProcess(&s),
         )
         .unwrap();
 

@@ -9,7 +9,7 @@ use crate::cli::InsightsArgs;
 use crate::{CliError, Ctx};
 use kiwano_core::insights;
 use kiwano_core::vm;
-use kiwanod::store::{RequestLogEntry, RequestLogFilter, Store};
+use kiwanod::store::{RequestLogEntry, RequestLogFilter};
 use std::collections::BTreeMap;
 
 // ── insights ────────────────────────────────────────────────────────────────
@@ -18,8 +18,10 @@ pub fn insights(args: &InsightsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     if args.days <= 0 {
         return Err(CliError::usage("--days must be a positive number"));
     }
-    let tuning = vm::ui_settings(ctx.store()?).feat_tuning_advice;
-    let report = build_insights_report(ctx.store()?, args.days, args.agent.clone(), tuning)?;
+    // The flag is the daemon's row, read over the wire; a usage error has to be
+    // answerable without one, so it is checked here rather than by the daemon.
+    let tuning = ctx.api.get_settings()?.feat_tuning_advice;
+    let report = build_insights_report(&ctx.api, args.days, args.agent.clone(), tuning)?;
     let text = render_insights(&report);
     ctx.out.emit(&report, || text);
     Ok(())
@@ -31,7 +33,7 @@ pub fn insights(args: &InsightsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
 /// itself). At the cap the report covers the newest EXPORT_ROW_CAP rows — the
 /// same honest ceiling the CSV export has.
 pub(crate) fn build_insights_report(
-    store: &Store,
+    api: &kiwano_core::daemon_api::DaemonApi,
     days: i64,
     agent: Option<String>,
     tuning_advice: bool,
@@ -41,8 +43,10 @@ pub(crate) fn build_insights_report(
         from: vm::rfc3339(now - days * 86_400),
         to: vm::rfc3339(now),
     };
-    let entries = store
-        .export_request_logs(
+    // Metadata only: the report scores rows, and the two bodies it needs for the
+    // fixed-overhead rule are sampled below, one row at a time.
+    let (rows, _truncated) = api
+        .export_rows(
             RequestLogFilter {
                 agent: agent.as_deref(),
                 from: Some(&window.from),
@@ -50,9 +54,11 @@ pub(crate) fn build_insights_report(
                 ..Default::default()
             },
             kiwanod::store::EXPORT_ROW_CAP,
+            false,
         )
         .map_err(runtime)?;
-    let bodies = sample_insight_bodies(store, &entries)?;
+    let entries: Vec<RequestLogEntry> = rows.into_iter().map(|r| r.entry).collect();
+    let bodies = sample_insight_bodies(api, &entries)?;
     let rows: Vec<insights::InsightRow> = entries.iter().map(insight_row_of).collect();
     Ok(insights::build_insights(
         days,
@@ -88,7 +94,7 @@ fn insight_row_of(e: &RequestLogEntry) -> insights::InsightRow {
 /// parse, and its ratios would be meaningless even if it did. Bodies stay
 /// inside this process — only the measurement reaches the report.
 fn sample_insight_bodies(
-    store: &Store,
+    api: &kiwano_core::daemon_api::DaemonApi,
     entries: &[RequestLogEntry],
 ) -> Result<Vec<insights::BodySample>, CliError> {
     // `entries` arrive newest-first, so the first sighting of an agent is
@@ -103,7 +109,7 @@ fn sample_insight_bodies(
 
     let mut samples = Vec::new();
     for (agent, (_, latest_id)) in agents.into_iter().take(4) {
-        let Some(detail) = store.get_request_log(latest_id).map_err(runtime)? else {
+        let Some(detail) = api.get_request_log(latest_id).map_err(runtime)? else {
             continue;
         };
         if detail.entry.truncated {

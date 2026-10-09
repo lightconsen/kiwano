@@ -19,7 +19,9 @@
 //! table it already owns a handle on; the row, the key and the semantics are
 //! unchanged, and the banner's contract test still runs.
 
-use crate::store::{RequestLogDetail, RequestLogEntry, RequestLogFilter, Store};
+use crate::store::{
+    RequestLogDetail, RequestLogEntry, RequestLogExportRow, RequestLogFilter, Store,
+};
 use kiwano_api::error::ApiError;
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +114,45 @@ pub fn ack_credential_finding(store: &Store, id: i64) -> Result<(), ApiError> {
     store
         .set_app_setting(DLP_FINDING_ACKED_KEY, &id.to_string())
         .map_err(ApiError::failed)
+}
+
+/// The rows an export covers, as **rows** rather than as CSV.
+///
+/// The same read the CSV export makes, for the two callers that compute over it
+/// instead of carrying it away: `kiwano insights` (metadata; it samples a few
+/// bodies separately, through `get_request_log`) and the cache-shaping
+/// experiment (bodies for every row, which is the whole point of it).
+///
+/// `bodies` is the difference between them and it is the caller's to state —
+/// the metadata-only path exists because the list view never asks, and a row
+/// whose body was not requested carries `None` rather than an empty string.
+///
+/// The cap is the export's, the same one the CSV has: an analysis that silently
+/// covered part of a window would report a number nobody could place.
+pub fn export_rows(
+    store: &Store,
+    filter: RequestLogFilter<'_>,
+    limit: i64,
+    bodies: bool,
+) -> Result<(Vec<RequestLogExportRow>, bool), ApiError> {
+    // One row more than the cap, so "exactly at it" and "more than it" are
+    // distinguishable — the same trick the CSV export uses.
+    let cap = limit.clamp(1, crate::store::EXPORT_ROW_CAP);
+    let mut rows = if bodies {
+        store
+            .export_request_logs_with_bodies(filter, cap + 1)
+            .map_err(ApiError::failed)?
+    } else {
+        store
+            .export_request_logs(filter, cap + 1)
+            .map_err(ApiError::failed)?
+            .into_iter()
+            .map(RequestLogExportRow::from_entry)
+            .collect()
+    };
+    let truncated = rows.len() as i64 > cap;
+    rows.truncate(cap as usize);
+    Ok((rows, truncated))
 }
 
 #[cfg(test)]

@@ -118,7 +118,7 @@ pub struct RequestLogEntry {
 /// One row of an export: the metadata every export carries, plus the captured
 /// bodies when the caller asked for them (the export is the only reader that
 /// can ask — the list view never does).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RequestLogExportRow {
     pub entry: RequestLogEntry,
     /// `None` when the export was run without bodies, or when this row has

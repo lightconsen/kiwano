@@ -4,12 +4,9 @@
 //! prints it.
 
 use super::render::render_usage;
-use super::runtime;
 use crate::cli::UsageArgs;
 use crate::{CliError, Ctx};
-use kiwano_core::vm;
 use kiwanod::store::UsageTotals;
-use std::collections::BTreeMap;
 
 // ── usage ───────────────────────────────────────────────────────────────────
 
@@ -17,32 +14,20 @@ pub fn usage(args: &UsageArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     if args.days <= 0 {
         return Err(CliError::usage("--days must be a positive number"));
     }
-    let since = vm::rfc3339(vm::unix_now() - args.days * 86_400);
-    let (totals, by_provider, names) = {
-        let store = ctx.store()?;
-        let totals = store
-            .usage_totals(args.agent.as_deref(), None, Some(&since))
-            .map_err(runtime)?;
-        let by_provider = store
-            .usage_by_provider(args.agent.as_deref(), None, Some(&since))
-            .map_err(runtime)?;
-        let names: BTreeMap<String, String> = store
-            .list_providers()
-            .map_err(runtime)?
-            .into_iter()
-            .map(|p| (p.id, p.name))
-            .collect();
-        (totals, by_provider, names)
-    };
-
+    // The whole window in one answer: the daemon draws it from its own clock and
+    // aggregates it, and this side only decides how to lay it out
+    // (`migrate.local.md` §10.45).
+    let view = ctx.api.usage_report(args.days, args.agent.as_deref())?;
     let report = UsageReport {
         days: args.days,
         agent: args.agent.clone(),
-        totals,
-        by_provider: by_provider
+        totals: view.totals,
+        by_provider: view
+            .by_provider
             .into_iter()
             .map(|u| {
-                let name = names
+                let name = view
+                    .names
                     .get(&u.provider_id)
                     .cloned()
                     .unwrap_or_else(|| u.provider_id.clone());

@@ -12,7 +12,6 @@
 
 use std::io::BufRead;
 
-use kiwano_core::vm;
 use serde_json::{json, Value};
 
 use crate::cmds::build_insights_report;
@@ -64,7 +63,7 @@ fn tools() -> Value {
 /// The failure text is a CLI error rather than a protocol message because it
 /// precedes the handshake — the client is not speaking MCP yet.
 pub fn mcp(ctx: &mut Ctx) -> Result<(), CliError> {
-    if !vm::ui_settings(ctx.store()?).feat_mcp_self_query {
+    if !ctx.api.get_settings()?.feat_mcp_self_query {
         return Err(CliError::usage(
             "agent self-query is off — enable it under Settings → Features",
         ));
@@ -156,21 +155,21 @@ fn call_tool(ctx: &mut Ctx, params: &Value) -> (String, bool) {
         .and_then(Value::as_i64)
         .unwrap_or(7)
         .clamp(1, 90);
-    let store = match ctx.store() {
-        Ok(s) => s,
-        Err(e) => return (e.message, true),
+    // The blob the daemon patches, asked for rather than read: the aux copy
+    // nothing writes any more would answer with a stale value.
+    let tuning = match ctx.api.get_settings() {
+        Ok(s) => s.feat_tuning_advice,
+        Err(e) => return (e, true),
     };
-    // From the store, like every other reader of the blob: the daemon patches
-    // that row, so the aux copy would answer with a stale value.
-    let tuning = vm::ui_settings(store).feat_tuning_advice;
+    let api = &ctx.api;
 
     let result: Result<Value, CliError> = match name {
-        "get_usage_summary" => usage_summary(store, days),
+        "get_usage_summary" => usage_summary(api, days),
         "get_insights" => {
             let agent = args.get("agent").and_then(Value::as_str).map(String::from);
-            build_insights_report(store, days, agent, tuning).map(|r| json!(r))
+            build_insights_report(api, days, agent, tuning).map(|r| json!(r))
         }
-        "get_session_growth" => build_insights_report(store, days, None, tuning)
+        "get_session_growth" => build_insights_report(api, days, None, tuning)
             .map(|r| json!({ "days": r.days, "top_sessions": r.top_sessions })),
         _ => return (format!("unknown tool: {name}"), true),
     };
@@ -181,14 +180,11 @@ fn call_tool(ctx: &mut Ctx, params: &Value) -> (String, bool) {
 }
 
 /// Windowed totals plus the cache hit rate, the answer to "how am I doing".
-fn usage_summary(store: &kiwanod::store::Store, days: i64) -> Result<Value, CliError> {
-    let since = vm::rfc3339(vm::unix_now() - days * 86_400);
-    let t = store
-        .usage_totals(None, None, Some(&since))
-        .map_err(|e| CliError::runtime(e.to_string()))?;
-    let cost = store
-        .usage_cost_by_currency(None, None, Some(&since))
-        .map_err(|e| CliError::runtime(e.to_string()))?;
+fn usage_summary(api: &kiwano_core::daemon_api::DaemonApi, days: i64) -> Result<Value, CliError> {
+    // The same aggregate `kiwano usage` prints, in one call.
+    let view = api.usage_report(days, None)?;
+    let t = view.totals;
+    let cost = view.cost_by_currency;
     let denom = t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens;
     let cache_hit_pct = if denom > 0 {
         (t.cache_read_tokens as f64 * 1000.0 / denom as f64).round() / 10.0

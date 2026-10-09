@@ -15,7 +15,7 @@ use kiwano_api::dashboard::{
     ProviderDistVm, TrendVm,
 };
 use kiwano_api::error::ApiError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::api::views::{chart_palette, fmt_tokens};
@@ -680,5 +680,73 @@ pub fn currency_meta(store: &crate::store::Store) -> Result<CurrencyMetaVm, ApiE
         currencies,
         exchange_rates: rates,
         preferred,
+    })
+}
+
+// ── The usage window, as one answer ──
+
+/// One provider's share of a usage window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderUsageVm {
+    pub provider_id: String,
+    pub totals: UsageTotals,
+}
+
+/// A usage window, whole: the totals, the breakdown, the names to label it with,
+/// and what it cost per currency.
+///
+/// Everything a client needs in **one** answer, because every part of it is the
+/// same aggregate over the same rows: `kiwano usage` renders all four, `kiwano
+/// mcp` reads two of them, and a report requested in pieces is the same query
+/// run three times (`migrate.local.md` §10.45).
+///
+/// `since` comes back as the daemon resolved it: the window is the daemon's
+/// clock's to draw, the same way the dashboard's is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageReportVm {
+    pub since: String,
+    pub totals: UsageTotals,
+    /// The window's spend per currency, as stored — never converted. A client
+    /// that wants one number has to choose a currency, and that is its call.
+    pub cost_by_currency: Vec<(Option<String>, f64)>,
+    pub by_provider: Vec<ProviderUsageVm>,
+    /// provider id → name, so a row can be labelled without a second read.
+    pub names: std::collections::BTreeMap<String, String>,
+}
+
+/// The usage window of the last `days`, for `agent` or for everything.
+pub fn usage_report(
+    store: &Store,
+    days: i64,
+    agent: Option<&str>,
+) -> Result<UsageReportVm, ApiError> {
+    let since = crate::store::rfc3339_from_unix(crate::store::unix_now() - days * 86_400);
+    let totals = store
+        .usage_totals(agent, None, Some(&since))
+        .map_err(ApiError::failed)?;
+    let cost_by_currency = store
+        .usage_cost_by_currency(agent, None, Some(&since))
+        .map_err(ApiError::failed)?;
+    let by_provider = store
+        .usage_by_provider(agent, None, Some(&since))
+        .map_err(ApiError::failed)?
+        .into_iter()
+        .map(|u| ProviderUsageVm {
+            provider_id: u.provider_id,
+            totals: u.totals,
+        })
+        .collect();
+    let names = store
+        .list_providers()
+        .map_err(ApiError::failed)?
+        .into_iter()
+        .map(|p| (p.id, p.name))
+        .collect();
+    Ok(UsageReportVm {
+        since,
+        totals,
+        cost_by_currency,
+        by_provider,
+        names,
     })
 }

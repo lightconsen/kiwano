@@ -24,7 +24,6 @@ use kiwano_core::auxiliary::Aux;
 use kiwano_core::daemon_api::DaemonApi;
 use kiwano_core::detect::{self, ShellVars};
 use kiwano_core::sidecar::{self, AdminEndpoint};
-use kiwanod::store::Store;
 
 use cli::{Cli, Command};
 use output::Out;
@@ -94,7 +93,6 @@ pub struct Ctx<'a> {
     /// Root the agent config files live under.
     pub home: PathBuf,
     pub out: Out<'a>,
-    store: OnceCell<Store>,
     aux: OnceCell<Aux>,
     /// The variables that move where an agent keeps its files, as the user's own
     /// login shell has them. Asked for at most once per invocation, and only by
@@ -130,21 +128,6 @@ impl Ctx<'_> {
             .gateway_base()
             .unwrap_or_else(|_| format!("http://127.0.0.1:{}", self.data_port))
     }
-    pub fn store(&self) -> Result<&Store, CliError> {
-        if self.store.get().is_none() {
-            if let Some(dir) = self.db.parent() {
-                if !dir.as_os_str().is_empty() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-            }
-            let store = Store::open(&self.db).map_err(|e| {
-                CliError::runtime(format!("cannot open database {}: {e}", self.db.display()))
-            })?;
-            let _ = self.store.set(store);
-        }
-        Ok(self.store.get().expect("just set"))
-    }
-
     /// The client's **own** database: this machine's facts — which directory an
     /// agent was found in, which had rules injected, the backups a takeover can
     /// be undone from (`migrate.local.md` §9.5 step 2).
@@ -273,7 +256,6 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         data_port: cli.data_port,
         home,
         out,
-        store: OnceCell::new(),
         aux: OnceCell::new(),
         config_vars: OnceCell::new(),
     };

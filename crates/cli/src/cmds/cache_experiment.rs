@@ -9,7 +9,10 @@ use kiwanod::store::RequestLogFilter;
 // ── cache experiment (Features: cache-shaping offline experiment) ────────────
 
 pub fn cache_experiment(args: &CacheExperimentArgs, ctx: &mut Ctx) -> Result<(), CliError> {
-    if !vm::ui_settings(ctx.store()?).feat_cache_experiment {
+    // The flag is the daemon's row, asked for over the wire. Checked here rather
+    // than by the daemon so it stays a *usage* error (exit 2) — and because the
+    // flag decides whether this machine runs the experiment at all.
+    if !ctx.api.get_settings()?.feat_cache_experiment {
         return Err(CliError::usage(
             "the cache-shaping experiment is off — enable it under Settings → Features",
         ));
@@ -18,9 +21,11 @@ pub fn cache_experiment(args: &CacheExperimentArgs, ctx: &mut Ctx) -> Result<(),
         return Err(CliError::usage("--days must be a positive number"));
     }
     let now = vm::unix_now();
-    let rows = ctx
-        .store()?
-        .export_request_logs_with_bodies(
+    // **With** bodies this time: they are the experiment's subject, which is why
+    // the rows endpoint asks separately rather than always carrying them.
+    let (rows, _truncated) = ctx
+        .api
+        .export_rows(
             RequestLogFilter {
                 agent: args.agent.as_deref(),
                 from: Some(&vm::rfc3339(now - args.days * 86_400)),
@@ -28,6 +33,7 @@ pub fn cache_experiment(args: &CacheExperimentArgs, ctx: &mut Ctx) -> Result<(),
                 ..Default::default()
             },
             kiwanod::store::EXPORT_ROW_CAP,
+            true,
         )
         .map_err(runtime)?;
     let report = kiwano_core::cache_experiment::run(args.days, &rows);

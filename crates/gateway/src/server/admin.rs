@@ -138,6 +138,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/providers/{id}/enabled", put(set_provider_enabled_route))
         .route("/usage-alerts", get(usage_alerts_route))
         .route("/dashboard", get(dashboard_route))
+        .route("/usage", get(usage_route))
         .route("/footer", get(footer_route))
         .route("/currency", get(currency_route))
         .route("/model-prices", get(list_model_prices_route))
@@ -158,6 +159,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/takeover/{agent}/key", delete(takeover_unregister_route))
         .route("/config/import", post(import_config_route))
         .route("/logs/export", get(export_logs_route))
+        .route("/logs/export-rows", get(export_rows_route))
         .route("/plan-quota/{provider_id}", get(plan_quota_route))
         .route("/probe", post(probe_route))
         .route(
@@ -1377,6 +1379,50 @@ async fn import_config_route(State(state): State<Arc<GatewayState>>, body: Strin
     }
 }
 
+/// `GET /api/logs/export-rows` — the export's rows, for a caller that computes
+/// over them instead of writing them out.
+///
+/// `bodies` decides whether each row carries its request and response bodies:
+/// `false` for the metadata a report scores, `true` for the experiment whose
+/// subject *is* the bodies.
+async fn export_rows_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<ExportRowsQuery>,
+) -> Response {
+    let filter = crate::store::RequestLogFilter {
+        agent: q.agent.as_deref(),
+        provider_id: q.provider_id.as_deref(),
+        status: q.status.as_deref(),
+        from: q.from.as_deref(),
+        to: q.to.as_deref(),
+    };
+    match crate::api::logs::export_rows(&state.store, filter, q.limit, q.bodies) {
+        Ok((rows, truncated)) => {
+            Json(json!({ "rows": rows, "truncated": truncated })).into_response()
+        }
+        Err(e) => resource_error(e),
+    }
+}
+
+/// The rows export's query string: the export's filters, plus how many rows and
+/// whether they carry their bodies.
+#[derive(serde::Deserialize)]
+struct ExportRowsQuery {
+    limit: i64,
+    #[serde(default)]
+    bodies: bool,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+}
+
 /// The export's query string: the list's filters, without the paging.
 ///
 /// An export is unpaged by definition — the page size is a display concern and
@@ -1636,6 +1682,30 @@ struct FooterQuery {
     /// The version the client is running — its own, not this daemon's. The
     /// footer names the app the user is looking at.
     version: String,
+}
+
+/// `GET /api/usage` — a usage window whole: totals, spend per currency, the
+/// per-provider breakdown, and the names to label it with.
+///
+/// One answer rather than four, because it is one aggregate over one set of
+/// rows, and `kiwano usage` and `kiwano mcp` read different parts of it.
+async fn usage_route(
+    State(state): State<Arc<GatewayState>>,
+    axum::extract::Query(q): axum::extract::Query<UsageQuery>,
+) -> Response {
+    match crate::api::dashboard::usage_report(&state.store, q.days, q.agent.as_deref()) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// The usage window's query string. `days` is required — "a window of
+/// unspecified length" is not a question this answers.
+#[derive(serde::Deserialize)]
+struct UsageQuery {
+    days: i64,
+    #[serde(default)]
+    agent: Option<String>,
 }
 
 /// `GET /api/footer` — today's totals and whether the Hub was synced today.

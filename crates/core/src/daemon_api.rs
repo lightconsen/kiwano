@@ -582,6 +582,41 @@ impl DaemonApi {
         )
     }
 
+    /// The export's rows, for a caller that computes over them instead of
+    /// writing them out — `kiwano insights` and the cache-shaping experiment.
+    ///
+    /// `bodies` says whether each row carries its request and response bodies.
+    /// The cap is the export's, and `truncated` travels with the answer so a
+    /// report can say its window was longer than the rows it saw rather than
+    /// imply it saw all of them.
+    pub fn export_rows(
+        &self,
+        filter: RequestLogFilter<'_>,
+        limit: i64,
+        bodies: bool,
+    ) -> Result<(Vec<kiwanod::store::RequestLogExportRow>, bool), String> {
+        let mut query = format!("limit={limit}&bodies={bodies}");
+        for (key, value) in [
+            ("agent", filter.agent),
+            ("provider_id", filter.provider_id),
+            ("status", filter.status),
+            ("from", filter.from),
+            ("to", filter.to),
+        ] {
+            if let Some(value) = value {
+                query.push_str(&format!("&{key}={}", encode_query(value)));
+            }
+        }
+        let page: serde_json::Value = sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/logs/export-rows?{query}"),
+        )?;
+        let rows = serde_json::from_value(page["rows"].clone())
+            .map_err(|e| format!("gateway answered rows that cannot be read: {e}"))?;
+        Ok((rows, page["truncated"].as_bool().unwrap_or(false)))
+    }
+
     /// The filtered log slice as CSV **text** — the content half of the export.
     /// The caller writes the file.
     pub fn export_request_logs(
@@ -830,6 +865,25 @@ impl DaemonApi {
             &self.endpoint,
             self.token.as_deref(),
             &format!("/api/dashboard?{query}"),
+        )
+    }
+
+    /// A usage window, whole — totals, spend per currency, per-provider
+    /// breakdown, provider names. One answer, because it is one aggregate over
+    /// one set of rows.
+    pub fn usage_report(
+        &self,
+        days: i64,
+        agent: Option<&str>,
+    ) -> Result<kiwanod::api::dashboard::UsageReportVm, String> {
+        let mut query = format!("days={days}");
+        if let Some(agent) = agent {
+            query.push_str(&format!("&agent={}", encode_query(agent)));
+        }
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/usage?{query}"),
         )
     }
 

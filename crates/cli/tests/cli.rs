@@ -656,6 +656,10 @@ fn a_moved_command_needs_the_daemon() {
         vec!["providers", "edit", provider.as_str(), "--name", "renamed"],
         vec!["catalog", "list"],
         vec!["catalog", "currency"],
+        vec!["usage", "--days", "7"],
+        vec!["insights", "--days", "7"],
+        vec!["cache-experiment", "--days", "7"],
+        vec!["rules", "apply", "claude"],
     ] {
         let (code, out, err) = run(&db, &args);
         assert_eq!(code, 3, "{args:?}\nstdout: {out}\nstderr: {err}");
@@ -704,7 +708,8 @@ fn a_takeover_needs_the_daemon_and_writes_no_config_without_one() {
 #[test]
 fn usage_reports_an_empty_window_without_failing() {
     let (_dir, db) = temp_db();
-    let (code, out, err) = run(&db, &["usage"]);
+    let daemon = support::serve(&db);
+    let (code, out, err) = run_served(&db, &daemon, &["usage"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("requests 0"), "{out}");
     assert!(out.contains("(no usage in window)"), "{out}");
@@ -1911,6 +1916,7 @@ fn seed_insight_row(
 #[test]
 fn insights_reports_a_retry_storm_with_evidence() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     // The shape the real log showed on 2026-09-09: one errored request, then
     // resends every few seconds inside the same minute.
     let base = now_unix() - 3600;
@@ -1927,7 +1933,7 @@ fn insights_reports_a_retry_storm_with_evidence() {
         );
     }
 
-    let (code, out, err) = run(&db, &["insights", "--days", "7"]);
+    let (code, out, err) = run_served(&db, &daemon, &["insights", "--days", "7"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("Kiwano insights"), "{out}");
     assert!(out.contains("Scorecard"), "{out}");
@@ -1940,7 +1946,7 @@ fn insights_reports_a_retry_storm_with_evidence() {
     assert!(out.contains("evidence #1 #2 #3 #4"), "{out}");
     assert!(out.contains("never leave this machine"), "{out}");
 
-    let (code, out, err) = run(&db, &["--json", "insights", "--days", "7"]);
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "insights", "--days", "7"]);
     assert_eq!(code, 0, "{err}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["totals"]["requests"], 4);
@@ -1958,6 +1964,7 @@ fn insights_reports_a_retry_storm_with_evidence() {
 #[test]
 fn insights_flags_a_session_that_never_compacted() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let base = now_unix() - 3600;
     for i in 0..5 {
         seed_insight_row(
@@ -1972,7 +1979,7 @@ fn insights_flags_a_session_that_never_compacted() {
         );
     }
 
-    let (code, out, err) = run(&db, &["insights"]);
+    let (code, out, err) = run_served(&db, &daemon, &["insights"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("Top sessions by context growth"), "{out}");
     assert!(out.contains("s-77"), "{out}");
@@ -1985,11 +1992,12 @@ fn insights_flags_a_session_that_never_compacted() {
 #[test]
 fn insights_honors_the_agent_filter_and_rejects_a_bad_window() {
     let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
     let base = now_unix() - 3600;
     seed_insight_row(&db, base, Some("codex"), None, 200, None, 1000, 0);
     seed_insight_row(&db, base + 1, Some("claude"), None, 200, None, 1000, 500);
 
-    let (code, out, err) = run(&db, &["insights", "--agent", "claude"]);
+    let (code, out, err) = run_served(&db, &daemon, &["insights", "--agent", "claude"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("claude"), "{out}");
     assert!(!out.contains("codex"), "{out}");
@@ -1997,11 +2005,11 @@ fn insights_honors_the_agent_filter_and_rejects_a_bad_window() {
     assert!(out.contains("33%"), "{out}");
 
     // An empty window says so instead of printing empty tables.
-    let (code, out, err) = run(&db, &["insights", "--agent", "nobody"]);
+    let (code, out, err) = run_served(&db, &daemon, &["insights", "--agent", "nobody"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("(no requests in window)"), "{out}");
 
-    let (code, _, err) = run(&db, &["insights", "--days", "0"]);
+    let (code, _, err) = run_served(&db, &daemon, &["insights", "--days", "0"]);
     assert_eq!(code, 2);
     assert!(err.contains("--days"), "{err}");
 }
@@ -2011,7 +2019,8 @@ fn insights_honors_the_agent_filter_and_rejects_a_bad_window() {
 #[test]
 fn mcp_is_gated_by_the_features_flag() {
     let (_dir, db) = temp_db();
-    let (code, _out, err) = run(&db, &["mcp"]);
+    let daemon = support::serve(&db);
+    let (code, _out, err) = run_served(&db, &daemon, &["mcp"]);
     assert_eq!(code, 2);
     assert!(err.contains("Features"), "{err}");
 }

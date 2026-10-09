@@ -18,7 +18,7 @@ use crate::state::AppState;
 use kiwano_core::daemon_api::DaemonApi;
 use kiwano_core::vm;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_agent_takeover(
     state: State<AppState>,
     agent: String,

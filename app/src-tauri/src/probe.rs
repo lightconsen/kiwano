@@ -6,6 +6,12 @@
 //! network I/O, and the health verdict the provider test writes is the Status
 //! column's, which the daemon owns. `test_latency` stays a plain function — a
 //! bare TCP connect needs no daemon, and the CLI calls it too.
+//!
+//! **The three are `(async)` commands with synchronous bodies**, which is the
+//! combination that is actually true: the work is a blocking socket call (so a
+//! body that `await`ed would be a lie), and the main thread must not run it (so
+//! the annotation moves it to Tauri's thread pool). An `async fn` here would
+//! block a runtime worker while looking like it yields.
 
 use kiwano_core::{sidecar, vm};
 
@@ -24,8 +30,8 @@ pub fn test_latency(endpoint: String) -> Result<u64, String> {
 /// configuration is what you are checking would otherwise probe anonymously and
 /// report `auth`. Only that provider's own endpoints qualify — see
 /// `vm::stored_key_for`.
-#[tauri::command]
-pub async fn test_endpoint(
+#[tauri::command(async)]
+pub fn test_endpoint(
     protocol: String,
     endpoint: String,
     api_key: Option<String>,
@@ -41,7 +47,6 @@ pub async fn test_endpoint(
             provider_id.as_deref(),
             "endpoint",
         )
-        .await
         .and_then(|v| serde_json::from_value(v).map_err(|e| e.to_string()))
 }
 
@@ -50,20 +55,18 @@ pub async fn test_endpoint(
 /// The provider is tested as it is stored: its own endpoint, its own key, and —
 /// when it has no default model — the model its catalog entry prices. Async:
 /// the round trip is an HTTP call, and a blocking client panics on the runtime.
-#[tauri::command]
-pub async fn test_provider_latency(id: String) -> Result<vm::PromptLatencyVm, String> {
+#[tauri::command(async)]
+pub fn test_provider_latency(id: String) -> Result<vm::PromptLatencyVm, String> {
     // Served by the daemon: the verdict it writes is the health row the Status
     // column reads, which the daemon owns.
-    kiwano_core::daemon_api::DaemonApi::connect()
-        .test_provider_latency(&id)
-        .await
+    kiwano_core::daemon_api::DaemonApi::connect().test_provider_latency(&id)
 }
 
 /// Live model-name list for the Default model picker (requires an API key:
 /// cloud providers reject anonymous /models calls). Same blank-key rule as the
 /// probe: a typed key wins, and the stored one stands in for an edit.
-#[tauri::command]
-pub async fn list_models(
+#[tauri::command(async)]
+pub fn list_models(
     protocol: String,
     endpoint: String,
     api_key: String,
@@ -71,14 +74,12 @@ pub async fn list_models(
 ) -> Result<Vec<String>, String> {
     // Served by the daemon. A blank key is filled in with the stored one — for
     // that provider's own endpoints only, on the daemon's side now.
-    let value = kiwano_core::daemon_api::DaemonApi::connect()
-        .probe(
-            &protocol,
-            &endpoint,
-            Some(api_key.as_str()).filter(|k| !k.trim().is_empty()),
-            provider_id.as_deref(),
-            "models",
-        )
-        .await?;
+    let value = kiwano_core::daemon_api::DaemonApi::connect().probe(
+        &protocol,
+        &endpoint,
+        Some(api_key.as_str()).filter(|k| !k.trim().is_empty()),
+        provider_id.as_deref(),
+        "models",
+    )?;
     serde_json::from_value(value).map_err(|e| e.to_string())
 }

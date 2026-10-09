@@ -17,12 +17,12 @@ use kiwano_core::vm;
 
 // ── Agent strategies (tech.md §4.7: strategy types / candidate ordering) ──
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_agent_routes() -> Result<Vec<vm::AgentRouteVm>, String> {
     DaemonApi::connect().list_agent_routes()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_agent_strategy(
     agent: String,
     strategy: String,
@@ -33,18 +33,18 @@ pub fn update_agent_strategy(
 
 /// Set or clear one agent's spend ceilings — the whole set at once, one window per
 /// entry. An empty list clears them.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_agent_limits(agent: String, limits: Vec<vm::AgentLimitVm>) -> Result<(), String> {
     DaemonApi::connect().set_agent_limits(&agent, &limits)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reorder_agent_bindings(agent: String, provider_ids: Vec<String>) -> Result<(), String> {
     DaemonApi::connect().reorder_agent_bindings(&agent, &provider_ids)
 }
 
 /// Patch one binding's strategy parameters (weight / local time window).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_agent_binding(
     agent: String,
     provider_id: String,
@@ -62,12 +62,12 @@ pub fn update_agent_binding(
 }
 
 /// Bind a provider to an agent (appended at the queue tail) and unbind it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_agent_binding(agent: String, provider_id: String) -> Result<(), String> {
     DaemonApi::connect().add_agent_binding(&agent, &provider_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_agent_binding(agent: String, provider_id: String) -> Result<(), String> {
     DaemonApi::connect().remove_agent_binding(&agent, &provider_id)
 }
@@ -82,7 +82,7 @@ pub fn remove_agent_binding(agent: String, provider_id: String) -> Result<(), St
 /// with the agent that exists (`migrate.local.md` §6.1). A label the user
 /// repeats is a fresh intent here, so it gets a fresh id — and therefore its own
 /// agent, which is the behaviour the Apps screen documents.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_custom_agent(
     label: String,
     note: Option<String>,
@@ -94,7 +94,7 @@ pub fn add_custom_agent(
 
 /// Rename a user-defined agent. Its id, route and key are untouched — only the
 /// name its user reads changes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_custom_agent(
     id: String,
     label: String,
@@ -106,14 +106,14 @@ pub fn update_custom_agent(
 
 /// Delete a user-defined agent along with its route and its key. Its usage and
 /// request logs stay, so the Dashboard keeps accounting for what ran.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_custom_agent(id: String) -> Result<(), String> {
     DaemonApi::connect().remove_custom_agent(&id)
 }
 
 /// Copy another agent's whole route (strategy + ordered candidates) onto
 /// this one, replacing whatever it had.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_agent_route(target: String, source: String) -> Result<(), String> {
     DaemonApi::connect().apply_agent_route(&target, &source)
 }

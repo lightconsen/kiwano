@@ -19,7 +19,7 @@ pub fn list_providers(state: State<AppState>) -> Result<Vec<vm::ProviderVm>, Str
     vm::build_provider_vms(&state.store, &state.aux, &home_dir(), state.shell_vars())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_provider(input: vm::NewProviderInput) -> Result<vm::ProviderVm, String> {
     // Served by the daemon. **This command mints the id**, which is what makes
     // a retried add idempotent: an id the daemon has already seen is answered
@@ -29,14 +29,14 @@ pub fn add_provider(input: vm::NewProviderInput) -> Result<vm::ProviderVm, Strin
     kiwano_core::daemon_api::DaemonApi::connect().add_provider(&id, &input)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_provider_enabled(id: String, enabled: bool) -> Result<(), String> {
     // Served by the daemon, which reloads its own route table — a provider that
     // is switched off must stop being a candidate immediately.
     kiwano_core::daemon_api::DaemonApi::connect().set_provider_enabled(&id, enabled)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_provider(
     state: State<AppState>,
     id: String,
@@ -53,7 +53,7 @@ pub fn update_provider(
         .ok_or_else(|| "provider vanished after update".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_provider(id: String) -> Result<bool, String> {
     // Served by the daemon: the promotion of a replacement primary is part of
     // the same operation, and it is the daemon that re-reads its route table.

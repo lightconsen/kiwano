@@ -22,11 +22,11 @@ pub fn ui_settings(store: &Store) -> Result<SettingsVm, ApiError> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
-    // Heal the one value known to be a bygone default. An endpoint the user
-    // chose — even a broken one — is left exactly as it is.
-    if s.hub_url == "https://hub.kiwano.cc/catalog.json" {
-        s.hub_url = kiwano_api::settings::default_hub_url();
-    }
+    // The heal lives in `kiwano-api` because both sides do it, and a literal
+    // copied by hand is how this compared against the *current* default instead
+    // of the legacy one — a heal that never fired, on the path the app and the
+    // sync both use (`migrate.local.md` §10.25).
+    kiwano_api::settings::heal_legacy_hub_url(&mut s);
     Ok(s)
 }
 

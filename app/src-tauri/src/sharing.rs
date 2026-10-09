@@ -35,7 +35,7 @@ pub fn import_config(path: String) -> Result<share::ImportReport, String> {
     kiwano_core::daemon_api::DaemonApi::connect().import_config(&json)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_cc_switch() -> import::ImportReportVm {
     // The same home every other read uses: cc-switch's files are the user's,
     // and a `HOME` that is not the profile directory would look for them in a

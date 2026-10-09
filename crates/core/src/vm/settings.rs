@@ -23,29 +23,18 @@ pub use kiwano_api::settings::{
     default_stream_idle_secs, default_true, SettingsVm, TakeoverVm,
 };
 
-// ── Settings ──
-
-/// The Hub endpoint older builds shipped as the default. That host no longer
-/// resolves, and `#[serde(default)]` cannot repair it: the value is already
-/// stored, so the default never applies again. Anyone who ran a build from
-/// before the domain change would keep failing to sync forever, and silently —
-/// a failed sync only logs, and the shelf stays empty.
-const LEGACY_HUB_URL: &str = "https://hub.kiwano.app/catalog.json";
-
-/// Read UI settings (used by Rust-side logic like tray/autostart; the
-/// store-free part of `build_settings`).
-pub fn ui_settings(aux: &Aux) -> SettingsVm {
-    let mut s: SettingsVm = aux
-        .load_settings_json()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-    // Heal the one value known to be a bygone default. An endpoint the user
-    // chose — even a broken one — is left exactly as it is.
-    if s.hub_url == LEGACY_HUB_URL {
-        s.hub_url = default_hub_url();
-    }
-    s
+/// The settings blob, read from the store — the row the daemon patches.
+///
+/// It used to read the blob out of the **aux** connection. Nothing writes that
+/// blob any more, so the callers still asking for it (the tray's close
+/// behaviour, `kiwano mcp`, two CLI features) were reading a value no one had
+/// written; the aux-shaped function is gone rather than left as a trap
+/// (`migrate.local.md` §10.25).
+pub fn ui_settings(store: &Store) -> SettingsVm {
+    kiwanod::api::settings::ui_settings(store).unwrap_or_default()
 }
+
+// ── Settings ──
 
 pub fn build_settings(store: &Store, aux: &Aux, vars: &ShellVars) -> Result<SettingsVm, String> {
     build_settings_with_home(store, aux, &kiwano_adapters::config::get_home_dir(), vars)
@@ -175,19 +164,21 @@ mod tests {
 
     #[test]
     fn legacy_hub_url_is_healed_on_load() {
-        let aux = Aux::open_in_memory().unwrap();
+        let s = store();
         let mut v = serde_json::to_value(SettingsVm::default()).unwrap();
 
         // A settings blob written by a build from before the domain change.
-        v["hub_url"] = serde_json::json!(LEGACY_HUB_URL);
-        aux.save_settings_json(&v).unwrap();
-        assert_eq!(ui_settings(&aux).hub_url, default_hub_url());
+        // Read through the **store**, which is where the daemon patches it and
+        // therefore the only row any reader should look at.
+        v["hub_url"] = serde_json::json!(kiwano_api::settings::LEGACY_HUB_URL);
+        s.save_settings_json(&v).unwrap();
+        assert_eq!(ui_settings(&s).hub_url, default_hub_url());
 
         // An endpoint the user picked is never rewritten, broken or not.
         v["hub_url"] = serde_json::json!("https://hub.example.com/catalog.json");
-        aux.save_settings_json(&v).unwrap();
+        s.save_settings_json(&v).unwrap();
         assert_eq!(
-            ui_settings(&aux).hub_url,
+            ui_settings(&s).hub_url,
             "https://hub.example.com/catalog.json"
         );
     }

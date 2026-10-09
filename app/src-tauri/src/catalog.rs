@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use kiwano_core::{pricing, vm};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_catalog() -> Result<vm::CatalogListVm, String> {
     // Served by the daemon: it owns the Hub cache and the endpoint matching that
     // marks an entry as already added (`migrate.local.md` §10.12).
@@ -15,7 +15,7 @@ pub fn list_catalog() -> Result<vm::CatalogListVm, String> {
 
 /// The price mirror — the rows the gateway charges with — so the Models page can
 /// price every model a provider serves, not just the entry's flagship.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_model_prices() -> Result<Vec<pricing::ModelPriceEntry>, String> {
     // Served by the daemon: it is the side that charges with this table.
     kiwano_core::daemon_api::DaemonApi::connect().list_model_prices()

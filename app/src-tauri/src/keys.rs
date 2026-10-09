@@ -10,7 +10,7 @@ use kiwano_core::vm;
 // ── Multi-key rotation (spec §4.1 P1) ──
 
 /// A provider's rotation keys (the ones besides the primary key).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_api_keys(provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
     // Served by the daemon (`migrate.local.md` §7 batch 1): no `AppState`, no
     // store — the signature lost its state parameter because the command no
@@ -21,7 +21,7 @@ pub fn list_api_keys(provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
 }
 
 /// Append a rotation key; triggers /reload so the gateway key pool picks it up immediately.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_api_key(
     provider_id: String,
     api_key: String,
@@ -38,7 +38,7 @@ pub fn add_api_key(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_api_key(id: i64) -> Result<bool, String> {
     kiwano_core::daemon_api::DaemonApi::connect().delete_api_key(id)
 }

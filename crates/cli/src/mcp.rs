@@ -64,7 +64,7 @@ fn tools() -> Value {
 /// The failure text is a CLI error rather than a protocol message because it
 /// precedes the handshake — the client is not speaking MCP yet.
 pub fn mcp(ctx: &mut Ctx) -> Result<(), CliError> {
-    if !vm::ui_settings(ctx.aux()?).feat_mcp_self_query {
+    if !vm::ui_settings(ctx.store()?).feat_mcp_self_query {
         return Err(CliError::usage(
             "agent self-query is off — enable it under Settings → Features",
         ));
@@ -160,10 +160,9 @@ fn call_tool(ctx: &mut Ctx, params: &Value) -> (String, bool) {
         Ok(s) => s,
         Err(e) => return (e.message, true),
     };
-    let tuning = ctx
-        .aux()
-        .map(|aux| vm::ui_settings(aux).feat_tuning_advice)
-        .unwrap_or(false);
+    // From the store, like every other reader of the blob: the daemon patches
+    // that row, so the aux copy would answer with a stale value.
+    let tuning = vm::ui_settings(store).feat_tuning_advice;
 
     let result: Result<Value, CliError> = match name {
         "get_usage_summary" => usage_summary(store, days),

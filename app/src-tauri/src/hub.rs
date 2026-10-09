@@ -63,7 +63,7 @@ pub(crate) fn spawn_hub_sync(handle: tauri::AppHandle) {
 /// be a synchronous one `block_on`-ing a blocking reqwest client on Tauri's
 /// blocking pool: the same work, on a thread of its own, to satisfy a client that
 /// panics if it is dropped inside a runtime.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_hub() -> Result<vm::SyncReportVm, String> {
     // Served by the daemon (`migrate.local.md` §10.14): it fetches, caches,
     // applies what changed, and re-reads its own route table — the whole of

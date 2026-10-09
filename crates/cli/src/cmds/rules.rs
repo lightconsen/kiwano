@@ -51,7 +51,7 @@ pub fn rules(cmd: &RulesCmd, ctx: &mut Ctx) -> Result<(), CliError> {
 /// file. Only findings about *this* agent (or about no agent in particular)
 /// contribute — another agent's lesson is not this one's to learn.
 fn rules_apply(agent: &str, days: i64, ctx: &mut Ctx) -> Result<(), CliError> {
-    if !vm::ui_settings(ctx.aux()?).feat_rule_injection {
+    if !vm::ui_settings(ctx.store()?).feat_rule_injection {
         return Err(CliError::usage(
             "rule injection is off — enable it under Settings → Features",
         ));
@@ -63,7 +63,7 @@ fn rules_apply(agent: &str, days: i64, ctx: &mut Ctx) -> Result<(), CliError> {
         ctx.store()?,
         days,
         Some(agent.to_string()),
-        vm::ui_settings(ctx.aux()?).feat_tuning_advice,
+        vm::ui_settings(ctx.store()?).feat_tuning_advice,
     )?;
     let mut rules: Vec<String> = Vec::new();
     for f in &report.findings {

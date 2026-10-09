@@ -21,7 +21,7 @@ use kiwano_core::vm;
 
 // ── Request logs (full data-plane audit trail, migration V5) ──
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn list_request_logs(
     page: i64,
@@ -78,12 +78,12 @@ pub fn export_request_logs(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_request_log(id: i64) -> Result<Option<vm::RequestLogDetailVm>, String> {
     DaemonApi::connect().get_request_log(id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_request_logs() -> Result<(), String> {
     DaemonApi::connect().clear_request_logs()
 }
@@ -93,14 +93,14 @@ pub fn clear_request_logs() -> Result<(), String> {
 /// The newest credential finding the user has not acknowledged — the banner's
 /// poll. Read-only on purpose: only an explicit dismiss/click acks, so the
 /// banner survives across polls and restarts until then.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_credential_finding() -> Result<Option<kiwanod::store::RequestLogEntry>, String> {
     DaemonApi::connect().check_credential_finding()
 }
 
 /// Banner dismissed or clicked: acknowledge that log id. A newer finding
 /// re-raises the banner.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ack_credential_finding(id: i64) -> Result<(), String> {
     DaemonApi::connect().ack_credential_finding(id)
 }

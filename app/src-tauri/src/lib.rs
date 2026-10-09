@@ -306,7 +306,9 @@ pub fn run() {
             // instead of quitting (toggleable in settings)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<AppState>();
-                if vm::ui_settings(&state.aux).close_to_tray {
+                // Read from the store: the daemon patches that row, and the aux blob
+                // nothing writes any more would answer with a stale value.
+                if vm::ui_settings(&state.store).close_to_tray {
                     api.prevent_close();
                     let _ = window.hide();
                 }

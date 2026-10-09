@@ -454,12 +454,18 @@ impl DaemonApi {
 
     /// The network half of a Test button — one of the three probes.
     ///
+    /// **Synchronous on purpose.** The transport underneath is a blocking
+    /// socket, so an `async fn` here would block a runtime worker while looking
+    /// like it yields; the caller is the one that knows whether it is on a
+    /// thread that may block (the app's commands are `(async)`, which is
+    /// Tauri's "not the main thread").
+    ///
     /// `action` is `latency` | `endpoint` | `models`. A blank `api_key` is
     /// filled in with the stored credential — for that provider's own endpoints
     /// only, on the daemon's side (`migrate.local.md` §10.15). The response is
     /// the probe's own shape: `{latency_ms}`, the `ProbeReport`, or the model
     /// list, so the caller deserializes what it asked for.
-    pub async fn probe(
+    pub fn probe(
         &self,
         protocol: &str,
         endpoint: &str,
@@ -491,7 +497,7 @@ impl DaemonApi {
 
     /// One prompt round trip against a stored provider — the Apps screen's Test
     /// button. The verdict is written to the health table, which the daemon owns.
-    pub async fn test_provider_latency(
+    pub fn test_provider_latency(
         &self,
         id: &str,
     ) -> Result<kiwano_api::agents::PromptLatencyVm, String> {

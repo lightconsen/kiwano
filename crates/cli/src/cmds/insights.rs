@@ -18,7 +18,7 @@ pub fn insights(args: &InsightsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     if args.days <= 0 {
         return Err(CliError::usage("--days must be a positive number"));
     }
-    let tuning = vm::ui_settings(ctx.aux()?).feat_tuning_advice;
+    let tuning = vm::ui_settings(ctx.store()?).feat_tuning_advice;
     let report = build_insights_report(ctx.store()?, args.days, args.agent.clone(), tuning)?;
     let text = render_insights(&report);
     ctx.out.emit(&report, || text);

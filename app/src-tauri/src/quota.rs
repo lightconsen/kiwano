@@ -5,7 +5,7 @@
 // ── Plan quota (the reader itself lives in the gateway crate: the same code
 //    enforces the ceiling, so the display and the block cannot disagree) ──
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_plan_quota(
     provider_id: String,
     force: Option<bool>,

@@ -131,7 +131,7 @@ fn the_app_does_not_open_a_database_of_its_own() {
 /// where it can be looked at, instead of appearing silently in a diff.
 #[test]
 fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
-    const KNOWN: [&str; 9] = [
+    const KNOWN: [&str; 10] = [
         "vm::build_dashboard",
         "vm::build_footer_stats",
         "vm::build_provider_vms",
@@ -141,6 +141,10 @@ fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
         "vm::update_provider",
         "vm::export_request_logs_csv",
         "pricing::currency_meta",
+        // Reads the settings blob — the row the daemon patches — for the tray's
+        // close behaviour. Added when the test caught it, which is the test
+        // doing its job rather than a reason to loosen it.
+        "vm::ui_settings",
     ];
     let mut found: Vec<String> = Vec::new();
     for (_, text) in app_sources() {
@@ -180,5 +184,76 @@ fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
         !found.is_empty(),
         "no store pass-throughs found at all — either the app stopped reading \
          the database (then delete this test) or the scan is broken"
+    );
+}
+
+/// The third thing this file is for: a command that talks to the daemon must not
+/// do it on the main thread.
+///
+/// `DaemonApi`'s transport is a blocking socket — that is deliberate, and the
+/// client methods say so — so a plain `#[tauri::command]` runs the whole round
+/// trip on the UI thread. It is invisible while the daemon answers from SQLite
+/// and obvious the moment it does not: `sync_hub`, `get_plan_quota` and the
+/// probes all reach the network on the far side, and a frozen window during a
+/// sync is the symptom.
+///
+/// `#[tauri::command(async)]` is Tauri's "not the main thread" (it spawns the
+/// call on a worker), and it is the right annotation for a *synchronous* body
+/// that blocks. An `async fn` would be the wrong one: it blocks a runtime worker
+/// while looking like it yields.
+#[test]
+fn every_command_that_reaches_the_daemon_is_off_the_main_thread() {
+    let mut violations = Vec::new();
+    for (path, text) in app_sources() {
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if !line.contains("DaemonApi::connect()") {
+                continue;
+            }
+            // The annotation above the function this call sits in — found by
+            // walking back to the function's own opening line first, since a
+            // body can be twenty lines long and a fixed look-back would miss
+            // the annotation entirely.
+            let enclosing_fn = (0..=i).rev().find(|&j| {
+                let l = lines[j].trim_start();
+                l.starts_with("pub fn ") || (l.starts_with("fn ") && !l.starts_with("fn main"))
+            });
+            let found = enclosing_fn.and_then(|f| {
+                (0..f).rev().take(8).find_map(|j| {
+                    (lines[j].contains("#[tauri::command")
+                        || !lines[j].trim_start().starts_with("#["))
+                    .then(|| lines[j].trim().to_string())
+                })
+            });
+            // The other legitimate escape: a call handed to `spawn_blocking`,
+            // which is off the main thread whatever encloses it — the startup
+            // sync is a spawned task rather than a command.
+            let handed_to_a_worker = lines[..=i]
+                .iter()
+                .rev()
+                .take(12)
+                .any(|l| l.contains("spawn_blocking"));
+            match found {
+                _ if handed_to_a_worker => {}
+                Some(attr) if attr.contains("async") => {}
+                Some(attr) => violations.push(format!(
+                    "{}:{} — `{attr}` runs on the main thread",
+                    path.display(),
+                    i + 1
+                )),
+                None => violations.push(format!(
+                    "{}:{} — a daemon call outside a command and outside \
+                     `spawn_blocking`?",
+                    path.display(),
+                    i + 1
+                )),
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "these commands make a blocking daemon round trip on the main thread \
+         (`migrate.local.md` §10.26). Annotate them `#[tauri::command(async)]`:\n  {}",
+        violations.join("\n  ")
     );
 }

@@ -218,3 +218,21 @@ impl Default for SettingsVm {
         }
     }
 }
+
+/// The Hub endpoint older builds shipped as the default. It no longer resolves,
+/// and `#[serde(default)]` cannot repair a value that is already stored, so
+/// readers heal it on the way out.
+///
+/// Here rather than on one side, because **both** sides heal: the daemon serves
+/// the settings blob and the client layers its own reading on top, and a
+/// hand-copied literal is how the two came to disagree once already
+/// (`migrate.local.md` §10.25).
+pub const LEGACY_HUB_URL: &str = "https://hub.kiwano.app/catalog.json";
+
+/// Heal the one value known to be a bygone default, leaving an endpoint the user
+/// chose — even a broken one — exactly as it is.
+pub fn heal_legacy_hub_url(s: &mut SettingsVm) {
+    if s.hub_url == LEGACY_HUB_URL {
+        s.hub_url = default_hub_url();
+    }
+}

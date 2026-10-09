@@ -9,7 +9,7 @@ use kiwanod::store::RequestLogFilter;
 // ── cache experiment (Features: cache-shaping offline experiment) ────────────
 
 pub fn cache_experiment(args: &CacheExperimentArgs, ctx: &mut Ctx) -> Result<(), CliError> {
-    if !vm::ui_settings(ctx.aux()?).feat_cache_experiment {
+    if !vm::ui_settings(ctx.store()?).feat_cache_experiment {
         return Err(CliError::usage(
             "the cache-shaping experiment is off — enable it under Settings → Features",
         ));

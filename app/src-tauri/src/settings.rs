@@ -14,7 +14,7 @@ pub fn get_settings(state: State<AppState>) -> Result<vm::SettingsVm, String> {
     vm::build_settings(&state.store, &state.aux, state.shell_vars())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_settings(
     app: tauri::AppHandle,
     state: State<AppState>,

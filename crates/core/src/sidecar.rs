@@ -198,9 +198,15 @@ pub fn admin_token_for(db: &Path) -> Option<String> {
     if !db.is_file() {
         return None;
     }
-    Store::open(db)
-        .ok()?
-        .app_setting(ADMIN_TOKEN_KEY)
+    let store = Store::open(db).ok()?;
+    // **New place first, old place second** (`migrate.local.md` §9.2.1): the
+    // token is moving from the app's KV to the daemon's, and the two sides are
+    // upgraded independently, so a client has to read whichever row its daemon
+    // wrote. The fallback is what makes an old daemon still work; it goes when
+    // nothing writes the old row any more.
+    store
+        .gateway_setting(ADMIN_TOKEN_KEY)
+        .or_else(|| store.app_setting(ADMIN_TOKEN_KEY))
         .filter(|t| !t.trim().is_empty())
 }
 

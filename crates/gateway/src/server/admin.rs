@@ -271,18 +271,39 @@ fn usage_events(
 /// restart must not rotate the secret out from under a GUI that is holding
 /// it, and `set_app_setting` is an upsert, so minting unconditionally would.
 pub fn ensure_admin_token(store: &Store) -> crate::error::Result<String> {
-    if let Some(existing) = store
-        .app_setting(ADMIN_TOKEN_KEY)
-        .filter(|t| !t.trim().is_empty())
-    {
+    if let Some(existing) = read_admin_token(store) {
+        // An install whose token lives only in the old place gets it copied to
+        // the new one on the next start, without minting a second: a fresh
+        // token would lock out every client holding the old one.
+        let _ = store.set_gateway_setting(ADMIN_TOKEN_KEY, &existing);
         return Ok(existing);
     }
     let token = uuid::Uuid::new_v4().simple().to_string();
+    // **Written to both places, and that is not redundancy** (`migrate.local.md`
+    // §9.2.1): the token is the one credential the app and the daemon share, and
+    // the two are upgraded independently. An app from before this change reads
+    // only the old row, a later one reads the new row first, and both have to
+    // work against whichever daemon is running. The double write lasts until no
+    // reader falls back any more.
     store.set_app_setting(ADMIN_TOKEN_KEY, &token)?;
+    store.set_gateway_setting(ADMIN_TOKEN_KEY, &token)?;
     // Re-read and prefer the stored value: if another gateway was starting at
     // the same moment, exactly one of us ends up bound to the endpoint, and
     // this is the value both sides will actually compare against from here on.
-    Ok(store.app_setting(ADMIN_TOKEN_KEY).unwrap_or(token))
+    Ok(read_admin_token(store).unwrap_or(token))
+}
+
+/// The token, from where it is now — falling back to where it used to be.
+///
+/// The fallback is what makes an old install keep working through the move, and
+/// it is the reason `ensure_admin_token` copies rather than re-mints. Both
+/// readers and the writer agree on this order; §9.2.1 step 4 deletes the old row
+/// once nothing falls back any more.
+fn read_admin_token(store: &Store) -> Option<String> {
+    store
+        .gateway_setting(ADMIN_TOKEN_KEY)
+        .or_else(|| store.app_setting(ADMIN_TOKEN_KEY))
+        .filter(|t| !t.trim().is_empty())
 }
 
 /// True when the request carries the stored admin token.
@@ -1518,6 +1539,52 @@ mod tests {
 
     /// Minted on first use, then adopted: a restart must not rotate the secret
     /// out from under a GUI that is holding the old one.
+    /// The token's move, in the four combinations that can actually happen.
+    ///
+    /// `migrate.local.md` §9.2.1 moves it from the app's KV to the daemon's, and
+    /// the two sides are upgraded independently — so "which row does this build
+    /// read" is not a detail, it is the difference between working and being
+    /// locked out of one's own gateway. The fallback is what makes the middle
+    /// two cases work, and it is why `ensure_admin_token` copies a token it
+    /// finds in the old place rather than minting a fresh one.
+    #[test]
+    fn the_token_is_read_from_whichever_place_wrote_it() {
+        // A daemon from before the move: the old row only.
+        let old_daemon = Store::open_in_memory().unwrap();
+        old_daemon
+            .set_app_setting(ADMIN_TOKEN_KEY, "tok-old")
+            .unwrap();
+        assert_eq!(ensure_admin_token(&old_daemon).unwrap(), "tok-old");
+        assert_eq!(
+            old_daemon.gateway_setting(ADMIN_TOKEN_KEY).as_deref(),
+            Some("tok-old"),
+            "and it is copied to the new place rather than re-minted — a fresh \
+             token would lock out every client holding this one"
+        );
+
+        // A daemon from after: the new row only. An old app reads the old row,
+        // so the copy is what keeps it working.
+        let new_daemon = Store::open_in_memory().unwrap();
+        new_daemon
+            .set_gateway_setting(ADMIN_TOKEN_KEY, "tok-new")
+            .unwrap();
+        assert_eq!(ensure_admin_token(&new_daemon).unwrap(), "tok-new");
+        assert_eq!(
+            new_daemon.app_setting(ADMIN_TOKEN_KEY).as_deref(),
+            None,
+            "a token that is already in the new place is not also written to the \
+             old one: nothing mints here, so nothing doubles"
+        );
+
+        // Both rows, disagreeing: the new one wins, because it is the one this
+        // build writes and the one a later build will keep.
+        let both = Store::open_in_memory().unwrap();
+        both.set_app_setting(ADMIN_TOKEN_KEY, "tok-stale").unwrap();
+        both.set_gateway_setting(ADMIN_TOKEN_KEY, "tok-current")
+            .unwrap();
+        assert_eq!(ensure_admin_token(&both).unwrap(), "tok-current");
+    }
+
     #[test]
     fn admin_token_is_minted_once_and_reused() {
         let store = Store::open_in_memory().unwrap();

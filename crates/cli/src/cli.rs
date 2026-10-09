@@ -16,9 +16,9 @@ use clap::{Args, Parser, Subcommand};
     version,
     about = "Manage Kiwano providers without the desktop app",
     long_about = "Manage Kiwano providers without the desktop app.\n\n\
-        Talks straight to the shared SQLite store (the same file the gateway and \
-        the desktop app use) and to the gateway's admin plane for status and hot \
-        reload, so it works on a headless server.",
+        Talks to the gateway's admin plane — the process that owns the \
+        database — so it works on a headless server, and against a daemon on \
+        another machine.",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -61,13 +61,6 @@ pub struct Cli {
 pub enum Command {
     /// Gateway, store and route summary (exit 1 when the gateway is down)
     Status,
-
-    /// Ask a running gateway to re-read its route table
-    ///
-    /// Nothing in this CLI needs it after a change any more — the daemon re-reads
-    /// its own table when a write lands. It is for the case this tool cannot see:
-    /// a row edited outside all three of them.
-    Reload,
 
     /// Providers: add, inspect, bind, delete
     #[command(subcommand)]

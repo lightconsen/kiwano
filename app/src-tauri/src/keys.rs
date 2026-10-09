@@ -20,7 +20,8 @@ pub fn list_api_keys(provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
     kiwano_core::daemon_api::DaemonApi::connect().list_api_keys(&provider_id)
 }
 
-/// Append a rotation key; triggers /reload so the gateway key pool picks it up immediately.
+/// Append a rotation key. The daemon re-reads its own key pool, so the new
+/// key is live as soon as this answers.
 #[tauri::command(async)]
 pub fn add_api_key(
     provider_id: String,

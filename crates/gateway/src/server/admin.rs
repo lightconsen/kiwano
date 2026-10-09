@@ -3,13 +3,12 @@
 //! ride on.
 //!
 //! Every write route re-reads the route table itself (`after_write`), so a
-//! mutation no longer ends with a ping: the process that wrote a binding is the
-//! process that routes by it (`migrate.local.md` §10.20). `POST /reload` stays
-//! as the **operator's** lever — an out-of-band edit to the database, a row
-//! changed by a tool that is not one of these three, and the gateway still needs
-//! telling. `GET /status` powers the first-screen gateway state chip and sidecar
-//! re-connect, and `GET /events` streams a tick per recorded request, which is
-//! what lets a screen re-read its numbers instead of polling for them.
+//! mutation does not end with a ping: the process that wrote a binding is the
+//! process that routes by it. That is why there is no `/reload` any more —
+//! nothing was left to call it (`migrate.local.md` §10.20, §10.46). `GET
+//! /status` powers the first-screen gateway state chip and sidecar re-connect,
+//! and `GET /events` streams a tick per recorded request, which is what lets a
+//! screen re-read its numbers instead of polling for them.
 //!
 //! # Transport
 //!
@@ -186,7 +185,6 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
     Router::new()
         .route("/status", get(status))
         .route("/events", get(events))
-        .route("/reload", post(reload))
         .route("/shutdown", post(shutdown))
         .nest("/api", api)
         .with_state(state)
@@ -541,34 +539,6 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         "blocked": blocked,
     }))
     .into_response()
-}
-
-/// `POST /reload` — rebuild the route table from SQLite. The powerful one:
-/// it decides which provider the operator's traffic is spent on, which is
-/// exactly what a token is for.
-///
-/// No route calls it any more — the writes that used to are the daemon's, and it
-/// re-reads its own table before answering (`migrate.local.md` §10.20). What is
-/// left is the manual case: the row changed somewhere this process cannot see.
-async fn reload(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> Response {
-    if !authorized(&state, &headers) {
-        tracing::warn!("reload refused: admin token missing or invalid");
-        return unauthorized();
-    }
-    match state.reload_routes() {
-        Ok(agents) => {
-            tracing::info!(agents_routed = agents, "route table reloaded");
-            Json(json!({ "ok": true, "agents_routed": agents })).into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "route table reload failed");
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "ok": false, "error": e.to_string() })),
-            )
-                .into_response()
-        }
-    }
 }
 
 /// A resource failure as a response: the **kind** picks the status, the
@@ -2822,79 +2792,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    async fn reload_picks_up_new_bindings() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("t.db")).unwrap();
-        seed(&store, false);
-        let state = Arc::new(GatewayState::new(store).unwrap());
-        let token = shared_token(&state);
-
-        // Before reload: no agents routed, requests would fail.
-        let v = body_json(
-            admin_plane_router(state.clone())
-                .oneshot(admin_request("GET", "/status", Some(&token)))
-                .await
-                .unwrap(),
-        )
-        .await;
-        assert_eq!(v["agents_routed"], 0);
-
-        // App writes the binding to SQLite then hot-reloads the gateway.
-        bind(&state.store, "claude", "p-ant");
-        let v = body_json(
-            admin_plane_router(state.clone())
-                .oneshot(admin_request("POST", "/reload", Some(&token)))
-                .await
-                .unwrap(),
-        )
-        .await;
-        assert_eq!(v["ok"], true);
-        assert_eq!(v["agents_routed"], 1);
-
-        // The data plane now resolves the binding without a restart.
-        let table = state.route_table();
-        let routed = table.select("claude").expect("route after reload");
-        assert_eq!(routed.id, "p-ant");
-    }
-
-    /// Reload decides which provider the operator's traffic is spent on, so
-    /// an unauthenticated caller must not reach it — and the route table must
-    /// be exactly as it was when it did not.
-    #[tokio::test]
-    async fn reload_without_the_token_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("t.db")).unwrap();
-        seed(&store, false);
-        let state = Arc::new(GatewayState::new(store).unwrap());
-        bind(&state.store, "claude", "p-ant");
-
-        for token in [None, Some("not-the-token")] {
-            let response = admin_plane_router(state.clone())
-                .oneshot(admin_request("POST", "/reload", token))
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        }
-        assert_eq!(
-            state.route_table().routes.len(),
-            0,
-            "the binding was written to SQLite, but nothing reloaded it"
-        );
-
-        // With the token the same call goes through.
-        let token = shared_token(&state);
-        let v = body_json(
-            admin_plane_router(state.clone())
-                .oneshot(admin_request("POST", "/reload", Some(&token)))
-                .await
-                .unwrap(),
-        )
-        .await;
-        assert_eq!(v["ok"], true);
-        assert_eq!(v["agents_routed"], 1);
-    }
-
     // ── the admin plane over its real transport ──────────────────────────
 
     /// Every route the app and the CLI use, over a real socket/pipe rather
@@ -2949,13 +2846,6 @@ mod tests {
         assert!(liveness.starts_with("HTTP/1.1 200 OK"), "{liveness}");
         assert!(liveness.contains("kiwanod"), "{liveness}");
         assert!(!liveness.contains("agents_routed"), "{liveness}");
-
-        // /reload, refused and then accepted.
-        let refused = post("/reload", None);
-        assert!(refused.starts_with("HTTP/1.1 401"), "{refused}");
-        let reloaded = post("/reload", Some(&token));
-        assert!(reloaded.starts_with("HTTP/1.1 200 OK"), "{reloaded}");
-        assert!(reloaded.contains("\"ok\":true"), "{reloaded}");
 
         // /shutdown last: it flips the stop signal, and everything above had to
         // happen while the gateway was still running.

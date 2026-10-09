@@ -1,10 +1,14 @@
 //! kiwano — manage Kiwano providers without the desktop app.
 //!
-//! Talks straight to the shared SQLite store (the same file the gateway and the
-//! desktop app use) and to the gateway's admin plane for status and hot reload,
-//! so it works on a headless server. Everything it does is a call into
-//! `kiwano-core`, the crate the desktop app also uses — a provider added here is
-//! the same row, written the same way, as one added there.
+//! **A client of the daemon's API**, like the desktop app: every read and write
+//! goes over the admin plane, and the daemon owns the database. That is what
+//! lets this work against a daemon on another machine as well as beside the one
+//! on this disk (`migrate.local.md` §14.1).
+//!
+//! What it still touches itself is this machine's own facts, and only those:
+//! where an agent's config lives and whether it carries our key, and the
+//! client-side file beside the database that holds the declared agent
+//! directories, the injected-rule marks and the takeover backups (`§9.5`).
 //!
 //! The entry point is [`run_with`], which takes its writers as arguments and
 //! never exits the process. `main.rs` is a three-line wrapper around it, and the
@@ -272,7 +276,6 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
 fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
     match command {
         Command::Status => cmds::status(ctx),
-        Command::Reload => cmds::reload(ctx),
         Command::Providers(cmd) => {
             cmds::providers(cmd, ctx)?;
             Ok(EXIT_OK)

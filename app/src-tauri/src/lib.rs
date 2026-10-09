@@ -1,18 +1,18 @@
 //! Kiwano GUI backend: Tauri commands backed by the gateway store + sidecar.
 //!
-//! Data flow (tech.md §4.1): UI → `invoke` → commands here → gateway Store
-//! (same SQLite file the sidecar reads) → `POST /reload` on the admin plane
-//! (a unix socket / named pipe, see `sidecar`) hot-swaps the gateway route
-//! table. The gateway process itself is spawned in `setup`.
+//! Data flow (tech.md §4.1): UI → `invoke` → commands here → the daemon's API
+//! over the admin plane (a unix socket / named pipe, or another machine — see
+//! `sidecar`). The daemon owns the database and re-reads its own route table
+//! after a write, so nothing pings it. The gateway process itself is spawned in
+//! `setup`.
 //!
 //! The module is split by domain. Every command keeps the name it had when this
 //! was one file: `generate_handler!` below names all 53 exactly as it did, and
 //! the facade re-exports each one, so the 53 `invoke` names in
 //! `app/src/api/tauri.ts` are untouched by the move.
 //!
-//! `state` and `paths` are the substrate the rest shares — the managed state
-//! and the reload ping a mutation sends, and where the database, the home
-//! directory and the data port come from. `daemon`, `tray`, `hub` and `updater`
+//! `state` and `paths` are the substrate the rest shares — the managed state,
+//! and where the database, the home directory and the data port come from. `daemon`, `tray`, `hub` and `updater`
 //! are the pieces the window does not call — the watchdog, the tray, the Hub
 //! sync and the update check — and the remaining modules are the command
 //! surface, one per screen or domain it serves.

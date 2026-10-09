@@ -38,7 +38,8 @@ fn e2s(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-// ── Mutations (called from commands; each ends with an admin /reload) ──
+// ── Mutations (called from commands; the daemon owns the write and re-reads
+// ── its own route table) ──
 
 // The rule moved to `kiwano-api` when the daemon started minting ids from it too
 // (a custom agent's id is derived from its label). Re-exported, not re-declared:

@@ -50,7 +50,7 @@ pub use providers::providers;
 pub use routes::routes;
 pub use rules::rules;
 pub use settings::{catalog, config, import, settings};
-pub use status::{reload, status};
+pub use status::status;
 pub use usage::usage;
 
 /// The runtime error every command maps a failure into.

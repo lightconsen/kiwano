@@ -77,7 +77,6 @@ list`),脚本也能借此刻意取得窄版布局。
 
 ```
 kiwano status              gateway, store, today's totals, and the blocked list
-kiwano reload              ask a running gateway to rebuild its route table
 kiwano gateway start       start one, adopting an already-running gateway
 kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
 kiwano gateway restart     stop and start

@@ -10,7 +10,7 @@
 //! client dependency is needed, and no other process on the machine can reach
 //! the plane to begin with.
 //!
-//! `/reload`, `/shutdown` and `/events` need the admin token the gateway minted
+//! `/shutdown` and `/events` need the admin token the gateway minted
 //! for itself ([`ADMIN_TOKEN_KEY`]); it is read from that same SQLite file, so
 //! the two processes agree without any new IPC. The one exception is the
 //! liveness probe — see [`ping_admin`].
@@ -363,7 +363,7 @@ fn remote_token() -> Option<String> {
 
 /// The token header for one raw request, or nothing when there is no token to
 /// send. A caller that has none is still answered — liveness-only `/status`, 401
-/// from `/reload` (see `server::admin`) — so a missing token is not an error
+/// from `/shutdown` (see `server::admin`) — so a missing token is not an error
 /// here. That is the fresh-install case, before the gateway has written its row.
 fn token_header(token: Option<&str>) -> String {
     match token {
@@ -403,13 +403,6 @@ fn status_request(token: Option<&str>) -> String {
 fn shutdown_request(token: Option<&str>) -> String {
     format!(
         "POST /shutdown HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
-        token_header(token)
-    )
-}
-
-fn reload_request(token: Option<&str>) -> String {
-    format!(
-        "POST /reload HTTP/1.1\r\nHost: {IPC_HOST}\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
         token_header(token)
     )
 }
@@ -828,33 +821,12 @@ pub fn restart(endpoint: &AdminEndpoint) -> std::io::Result<Child> {
     spawn()
 }
 
-/// `POST /reload` — ask the gateway to rebuild its route table from SQLite.
-/// Fire-and-forget: route hot-reload failures surface in gateway logs, and a
-/// refusal (no token readable) means the gateway keeps routing what it has
-/// until the next start, which is why this returns nothing to check.
-pub fn notify_reload(endpoint: &AdminEndpoint) {
-    let _ = reload(endpoint, admin_token().as_deref());
-}
-
-/// [`notify_reload`] with the token supplied by the caller, returning the
-/// gateway's answer.
-///
-/// The app can afford to discard the reply; a command-line caller cannot. It
-/// prints `agents_routed` on success or the refusal reason on failure, and its
-/// exit code depends on which it got — so this reads to EOF for the body rather
-/// than stopping at the status line.
-pub fn reload(endpoint: &AdminEndpoint, token: Option<&str>) -> Option<serde_json::Value> {
-    let body = endpoint_body(endpoint, &reload_request(token))?;
-    serde_json::from_str(&body).ok()
-}
-
 /// TCP connect-time probe of an endpoint (host or URL). Measures the
 /// handshake only — enough for the inline latency readout in the add dialog.
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(unix)]
-    use std::sync::atomic::{AtomicUsize, Ordering};
     #[cfg(unix)]
     use std::sync::{Arc, Mutex};
 
@@ -871,8 +843,8 @@ mod tests {
         AdminEndpoint::parse(&format!("kiwano-test-dead-{unique}"))
     }
 
-    /// The admin plane refuses `/reload` and `/shutdown` without the token, so
-    /// these four requests have to carry it — and must still be well-formed
+    /// The admin plane refuses `/shutdown` without the token, so these
+    /// requests have to carry it — and must still be well-formed
     /// when the app has none (a fresh install, before the gateway has written
     /// its row), rather than dropping the header line and the blank line with it.
     /// Pointing a client at another machine's daemon, which is what makes the
@@ -952,10 +924,6 @@ mod tests {
         assert!(shutdown.starts_with("POST /shutdown HTTP/1.1\r\n"));
         assert!(shutdown.contains(&header));
 
-        let reload = reload_request(Some("tok-123"));
-        assert!(reload.starts_with("POST /reload HTTP/1.1\r\n"));
-        assert!(reload.contains(&header));
-
         let events = events_request(Some("tok-123"));
         assert!(events.starts_with("GET /events HTTP/1.1\r\n"));
         assert!(events.contains(&header));
@@ -971,7 +939,6 @@ mod tests {
         for request in [
             status_request(None),
             shutdown_request(None),
-            reload_request(None),
             events_request(None),
         ] {
             assert!(!request.contains(ADMIN_TOKEN_HEADER));
@@ -1096,7 +1063,6 @@ mod tests {
             !request_shutdown(&endpoint),
             "nothing was stopped, so this is not a success"
         );
-        notify_reload(&endpoint); // must not panic
     }
 
     /// `restart` must not start a second gateway next to one it failed to stop —
@@ -1268,7 +1234,6 @@ mod tests {
     #[cfg(unix)]
     struct LiveGateway {
         endpoint: AdminEndpoint,
-        reloads: Arc<AtomicUsize>,
         requests: Arc<Mutex<Vec<String>>>,
     }
 
@@ -1279,9 +1244,8 @@ mod tests {
 
             let endpoint = AdminEndpoint::parse(&dir.join("admin.sock").to_string_lossy());
             let listener = UnixListener::bind(endpoint.path()).expect("bind the stub endpoint");
-            let reloads = Arc::new(AtomicUsize::new(0));
             let requests = Arc::new(Mutex::new(Vec::new()));
-            let (reload_count, seen) = (reloads.clone(), requests.clone());
+            let seen = requests.clone();
             let version = version.to_string();
 
             std::thread::spawn(move || {
@@ -1299,9 +1263,6 @@ mod tests {
                     let shutdown = request.starts_with("POST /shutdown");
                     let body = if shutdown {
                         r#"{"ok":true}"#.to_string()
-                    } else if request.starts_with("POST /reload") {
-                        reload_count.fetch_add(1, Ordering::SeqCst);
-                        r#"{"ok":true,"agents_routed":1}"#.to_string()
                     } else {
                         format!(
                             r#"{{"ok":true,"name":"kiwanod","version":"{version}","uptime_secs":1}}"#
@@ -1318,11 +1279,7 @@ mod tests {
                 }
             });
 
-            let gateway = LiveGateway {
-                endpoint,
-                reloads,
-                requests,
-            };
+            let gateway = LiveGateway { endpoint, requests };
             for _ in 0..100 {
                 if ping_admin(&gateway.endpoint) {
                     return gateway;
@@ -1344,7 +1301,7 @@ mod tests {
     }
 
     /// The whole admin client against a live endpoint: the liveness probe, the
-    /// status report, the reload, and the shutdown that takes the endpoint down.
+    /// status report, and the shutdown that takes the endpoint down.
     #[cfg(unix)]
     #[test]
     fn the_admin_client_talks_to_a_live_endpoint() {
@@ -1357,31 +1314,16 @@ mod tests {
         assert_eq!(status["name"], "kiwanod");
         assert_eq!(status["version"], "0.1.8");
 
-        notify_reload(&gw.endpoint);
-        assert_eq!(
-            gw.reloads.load(Ordering::SeqCst),
-            1,
-            "the reload request reached the gateway"
-        );
-
-        // The body-returning form is what a command-line caller needs: the app
-        // can discard the reply, but the CLI prints `agents_routed` and exits
-        // non-zero on a refusal, so `reload` has to read one.
-        let reply = reload(&gw.endpoint, None).expect("the reload reply");
-        assert_eq!(reply["ok"], true);
-        assert_eq!(reply["agents_routed"], 1);
-        assert_eq!(gw.reloads.load(Ordering::SeqCst), 2);
-
-        // The request on the wire is a complete, well-formed reload. What it
-        // carries *besides* the path is not asserted here: the token comes out
-        // of the database this machine happens to have, and
+        // The request on the wire is complete and well-formed. What it carries
+        // *besides* the path is not asserted here: the token comes out of the
+        // database this machine happens to have, and
         // `admin_requests_carry_the_token_when_we_have_one` is where that is
         // pinned. This test is about the transport.
-        let reload = gw
-            .request_starting_with("POST /reload")
-            .expect("the reload request was sent");
-        assert!(reload.contains("Host: localhost\r\n"), "{reload}");
-        assert!(reload.ends_with("\r\n\r\n"), "{reload}");
+        let status = gw
+            .request_starting_with("GET /status")
+            .expect("the status request was sent");
+        assert!(status.contains("Host: localhost\r\n"), "{status}");
+        assert!(status.ends_with("\r\n\r\n"), "{status}");
 
         assert!(
             request_shutdown(&gw.endpoint),

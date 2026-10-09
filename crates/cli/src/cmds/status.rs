@@ -1,15 +1,11 @@
-//! Status and reload: the two commands a shell runs first.
-//!
-//! `reload` is the operator's lever rather than a mutation's epilogue — every
-//! write route re-reads the table itself now (`migrate.local.md` §10.20).
+//! Status: the command a shell runs first.
 
 use super::render::render_status;
-use super::runtime;
 use crate::{CliError, Ctx, EXIT_NEGATIVE, EXIT_OK};
 use kiwano_core::sidecar;
 use kiwano_core::vm;
 
-// ── status / reload ─────────────────────────────────────────────────────────
+// ── status ──────────────────────────────────────────────────────────────────
 
 pub fn status(ctx: &mut Ctx) -> Result<i32, CliError> {
     let admin = ctx.admin.describe();
@@ -65,24 +61,4 @@ pub(crate) fn render_footer(footer: &vm::FooterStatsVm) -> String {
         },
         footer.version
     )
-}
-
-pub fn reload(ctx: &mut Ctx) -> Result<i32, CliError> {
-    match sidecar::reload(&ctx.admin, ctx.token.as_deref()) {
-        Some(v) if v["ok"].as_bool() == Some(true) => {
-            ctx.out.line(format!(
-                "reloaded: {} agents routed",
-                v["agents_routed"].as_u64().unwrap_or(0)
-            ));
-            Ok(EXIT_OK)
-        }
-        Some(v) => Err(runtime(format!(
-            "gateway refused the reload: {}",
-            v["error"].as_str().unwrap_or("no reason given")
-        ))),
-        None => Err(runtime(format!(
-            "gateway not reachable on {}",
-            ctx.admin.describe()
-        ))),
-    }
 }

@@ -1,5 +1,6 @@
 //! Provider write paths: the inputs the UI sends, their normalization, and the
-//! mutations that each end in an admin `/reload`.
+//! mutations — each of which the daemon performs and follows by re-reading its
+//! own route table.
 
 use crate::detect::ShellVars;
 use crate::vm::providers::{build_provider_vms, ProviderVm};

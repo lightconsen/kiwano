@@ -15,8 +15,8 @@
 //! miss a new provider is created (id regenerated to avoid clashing with
 //! local ids). Bindings are remapped from exported id → final id and
 //! upserted in order (priority = order); strategy rows are upserted
-//! directly; bindings of untouched agents are left alone. The caller is
-//! responsible for triggering admin /reload.
+//! directly; bindings of untouched agents are left alone. The daemon re-reads
+//! its own route table, so the caller has nothing to trigger.
 
 use kiwanod::store::Store;
 

@@ -746,7 +746,7 @@ async fn openai_path_without_key_is_refused() {
 }
 
 #[tokio::test]
-async fn admin_reload_switches_provider_without_restart() {
+async fn promoting_a_provider_switches_traffic_without_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
@@ -780,15 +780,12 @@ async fn admin_reload_switches_provider_without_restart() {
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(body["id"], "from-a");
 
-    // App demotes A, promotes B, then hot-reloads the route table.
-    state
-        .store
-        .upsert_binding(&bind("claude", "p-a", 1))
-        .unwrap();
-    state
-        .store
-        .upsert_binding(&bind("claude", "p-b", 0))
-        .unwrap();
+    // The operator promotes B, and the gateway starts spending traffic there
+    // without a restart.
+    //
+    // Through the API, which is the only way a binding gets written now: the
+    // write route re-reads the route table itself, so there is no separate
+    // reload step to forget (`migrate.local.md` §10.46).
     let token = state
         .store
         .app_setting(ADMIN_TOKEN_KEY)
@@ -798,9 +795,10 @@ async fn admin_reload_switches_provider_without_restart() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/reload")
+                .uri("/api/agents/claude/primary")
                 .header(ADMIN_TOKEN_HEADER, &token)
-                .body(Body::empty())
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"provider_id":"p-b"}"#))
                 .unwrap(),
         )
         .await
@@ -808,7 +806,6 @@ async fn admin_reload_switches_provider_without_restart() {
     assert_eq!(response.status(), StatusCode::OK);
     let v: Value = serde_json::from_slice(&response_body(response).await).unwrap();
     assert_eq!(v["ok"], true);
-    assert_eq!(v["agents_routed"], 1);
 
     // Next request reaches provider B; no restart happened.
     let response = post_json(

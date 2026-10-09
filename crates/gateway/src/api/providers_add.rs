@@ -435,6 +435,9 @@ pub fn add_provider(
 
     // compute view fields before partially moving `provider`
     let vm_name = provider.name.clone();
+    // The logo is derived from the stored name too — see where it is used.
+    let vm_logo_char = logo_char(&vm_name);
+    let vm_logo_color = palette_color(&vm_name).to_string();
     let vm_catalog_id = provider.catalog_id.clone();
     let vm_model_default = provider.model_default.clone();
     let vm_endpoint = display_endpoint(&provider);
@@ -469,8 +472,8 @@ pub fn add_provider(
     Ok(ProviderVm {
         id: id.to_string(),
         name: vm_name,
-        logo_char: logo_char(&input.name),
-        logo_color: palette_color(&input.name).to_string(),
+        logo_char: vm_logo_char,
+        logo_color: vm_logo_color,
         logo_border: false,
         catalog_id: vm_catalog_id,
         currency: vm_currency,
@@ -641,6 +644,33 @@ mod tests {
         let missing = update_provider(&store, "ghost", &edit).unwrap_err();
         assert_eq!(missing.kind(), kiwano_api::error::ApiErrorKind::NotFound);
         assert_eq!(missing.message(), "provider `ghost` not found");
+    }
+
+    /// The row's logo is derived from the name that was **stored**, so the
+    /// create response and every later read agree.
+    ///
+    /// They did not: the add response derived the glyph and colour from the raw
+    /// input while the row kept the trimmed name, so a provider added as
+    /// `"  Alpha  "` came back with one avatar and showed a different one from
+    /// the next refresh on.
+    #[test]
+    fn the_logo_matches_the_name_that_was_stored() {
+        let store = Store::open_in_memory().unwrap();
+        let id = kiwano_api::ids::mint_provider_id("Alpha");
+        let created =
+            add_provider(&store, &id, &input("  Alpha  ", "https://alpha.example")).unwrap();
+
+        assert_eq!(created.name, "Alpha", "the row keeps the trimmed name");
+        assert_eq!(created.logo_char, "A");
+        assert_eq!(
+            created.logo_color,
+            kiwano_api::logo::palette_color("Alpha"),
+            "the colour is the one the stored name picks"
+        );
+        // And the read path agrees, which is the property that was broken.
+        let stored = store.get_provider(&id).unwrap().unwrap();
+        assert_eq!(stored.name, created.name);
+        assert_eq!(kiwano_api::logo::logo_char(&stored.name), created.logo_char);
     }
 
     /// "Save & Enable": the agents the form named get this provider as their

@@ -182,6 +182,11 @@ pub fn apply_import(
             detail.push(format!("skip {id}: {e}"));
             continue;
         }
+        // **The map has to learn this row**, or a second entry in the same file
+        // that names the same upstream misses the lookup and inserts a second
+        // provider for it — the duplicate the reuse arm exists to prevent. It
+        // only ever knew about rows that were here *before* the run.
+        by_endpoint.insert(endpoint_key, id.clone());
         imported += 1;
         detail.push(format!(
             "import {id}: {} ({}){}",
@@ -238,4 +243,80 @@ pub fn apply_import(
         skipped,
         detail,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw(cc_id: &str, app: &str, base_url: &str) -> RawProvider {
+        RawProvider {
+            cc_id: cc_id.into(),
+            app: app.into(),
+            name: format!("{app}-{cc_id}"),
+            base_url: base_url.into(),
+            api_path: None,
+            api_key: Some(format!("sk-{cc_id}")),
+            is_current: false,
+        }
+    }
+
+    /// Two entries in one file naming the same upstream are **one** provider.
+    ///
+    /// The dedup map is what makes that true, and it is built from the rows that
+    /// exist before the run — so an import that adds a row has to tell it about
+    /// what it just added. Without that, the second entry misses the lookup and
+    /// inserts a duplicate of the first, which is the exact thing the reuse arm
+    /// exists to prevent.
+    #[test]
+    fn two_entries_for_one_upstream_are_one_provider() {
+        let store = Store::open_in_memory().unwrap();
+        // Same app (so the same protocol) and the same URL, two different
+        // cc-switch ids — which is how one upstream appears twice in one file.
+        let raws = [
+            raw("a", "claude", "https://api.same.example"),
+            raw("b", "claude", "https://api.same.example"),
+        ];
+
+        let report = apply_import(&store, &raws, &[]).unwrap();
+
+        assert_eq!(report.imported, 2, "both entries are accounted for");
+        assert_eq!(
+            store.list_providers().unwrap().len(),
+            1,
+            "but they are one upstream, so one row: {:#?}",
+            store.list_providers().unwrap()
+        );
+        assert!(
+            report
+                .detail
+                .iter()
+                .any(|d| d.contains("uses existing provider")),
+            "the second entry says it reused one: {:#?}",
+            report.detail
+        );
+    }
+
+    /// A row that is already here is reused rather than duplicated — the case
+    /// the map was built for, kept so the fix above cannot regress it.
+    #[test]
+    fn an_entry_matching_an_existing_provider_reuses_it() {
+        let store = Store::open_in_memory().unwrap();
+        apply_import(
+            &store,
+            &[raw("a", "claude", "https://api.here.example")],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(store.list_providers().unwrap().len(), 1);
+
+        let again = apply_import(
+            &store,
+            &[raw("a", "claude", "https://api.here.example")],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(again.imported, 1);
+        assert_eq!(store.list_providers().unwrap().len(), 1, "still one row");
+    }
 }

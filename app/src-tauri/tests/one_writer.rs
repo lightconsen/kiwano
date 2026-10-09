@@ -26,12 +26,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// Every method the app may call on its store or auxiliary handle.
-///
-/// Reads only, and deliberately short — it is the whole surface the app is
-/// allowed to touch, so growing it is a decision rather than an accident.
-const READ_ONLY_METHODS: [&str; 2] = ["manual_agent_dirs", "gateway_setting"];
-
 fn app_sources() -> Vec<(PathBuf, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut out = Vec::new();
@@ -50,48 +44,83 @@ fn app_sources() -> Vec<(PathBuf, String)> {
     out
 }
 
-/// The method a call names, when the receiver is one of the app's two handles.
+/// The calls the app makes on each of its two handles, as `(handle, method)`.
 ///
-/// Matches `state.store.<name>(` and `state.aux.<name>(` — the only way the app
-/// reaches either one, since both live in `AppState`.
-fn handle_calls(source: &str) -> Vec<String> {
+/// **Whitespace-insensitive on purpose.** The app writes
+/// `state` / `.aux` / `.clear_manual_agent_dir(…)` across three lines as often
+/// as it writes one, and a scanner that only knew the one-line form walked
+/// straight past the detect-dir calls when those moved to `aux` — which is
+/// exactly the kind of miss this file exists to prevent.
+///
+/// A commented-out call is not a call: whole-line comments are dropped, as
+/// before.
+fn handle_calls(source: &str) -> Vec<(String, String)> {
+    let code: String = source
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let flat: String = code.split_whitespace().collect::<Vec<_>>().join("");
+
     let mut found = Vec::new();
-    for line in source.lines() {
-        let line = line.trim_start();
-        // A commented-out call is not a call.
-        if line.starts_with("//") {
-            continue;
-        }
-        for handle in ["state.store.", "state.aux."] {
-            if let Some(rest) = line.split(handle).nth(1) {
-                let name: String = rest
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                if !name.is_empty() {
-                    found.push(name);
-                }
+    for handle in ["store", "aux"] {
+        for rest in flat.split(&format!("state.{handle}.")).skip(1) {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                found.push((handle.to_string(), name));
             }
         }
     }
     found
 }
 
+/// What the app may call on **each** handle.
+///
+/// The rule was never "no writes" — it is **no writes to the daemon's
+/// database**. `store` is that database, so only reads belong on it. `aux` is
+/// the client's own file since `migrate.local.md` §9.5 step 2 — this machine's
+/// declared agent directories, injected rules and takeover backups, none of
+/// which the daemon has ever read — so writing there is the app doing its job.
+///
+/// Per handle rather than one list, because the two answers are now different
+/// ones. A single list that allowed `set_manual_agent_dir` would allow it on the
+/// daemon's database too, which is the thing being forbidden.
+const ALLOWED: [(&str, &[&str]); 2] = [
+    ("store", &["gateway_setting"]),
+    (
+        "aux",
+        &[
+            "manual_agent_dirs",
+            "set_manual_agent_dir",
+            "clear_manual_agent_dir",
+        ],
+    ),
+];
+
 #[test]
-fn the_app_calls_only_reads_on_its_database_handles() {
+fn the_app_calls_only_known_methods_on_its_database_handles() {
     let mut violations = Vec::new();
     for (path, text) in app_sources() {
-        for name in handle_calls(&text) {
-            if !READ_ONLY_METHODS.contains(&name.as_str()) {
-                violations.push(format!("{}: state.store.{name}(…)", path.display()));
+        for (handle, name) in handle_calls(&text) {
+            let allowed = ALLOWED
+                .iter()
+                .find(|(h, _)| *h == handle)
+                .map(|(_, names)| names.contains(&name.as_str()))
+                .unwrap_or(false);
+            if !allowed {
+                violations.push(format!("{}: state.{handle}.{name}(…)", path.display()));
             }
         }
     }
     assert!(
         violations.is_empty(),
-        "the app wrote to the shared database — every write belongs to the \
-         daemon, which is what makes it the one writer (`migrate.local.md` \
-         §10.21). Found:\n  {}",
+        "the app reached for a handle method this test does not know. If it only \
+         reads, or writes to the client's own `aux` file, add it to ALLOWED; a \
+         write to `store` belongs to the daemon, which is what makes it the one \
+         writer (`migrate.local.md` §10.21). Found:\n  {}",
         violations.join("\n  ")
     );
 }
@@ -119,7 +148,9 @@ fn the_app_does_not_open_a_database_of_its_own() {
     assert!(
         violations.is_empty(),
         "the app opened a database handle of its own; only `run` does, and it \
-         hands the two connections to `AppState`. Found:\n  {}",
+         hands both connections to `AppState` — the daemon's database and this \
+         client's own file, two files since `migrate.local.md` §9.5 step 2. \
+         Found:\n  {}",
         violations.join("\n  ")
     );
 }
@@ -130,7 +161,7 @@ fn the_app_does_not_open_a_database_of_its_own() {
 /// Pinning the list is the next best thing — a new pass-through shows up here,
 /// where it can be looked at, instead of appearing silently in a diff.
 #[test]
-fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
+fn the_functions_the_app_hands_its_handles_to_are_the_known_ones() {
     const KNOWN: [&str; 11] = [
         "vm::build_dashboard",
         "vm::build_footer_stats",
@@ -155,13 +186,18 @@ fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
     for (_, text) in app_sources() {
         for line in text.lines() {
             let line = line.trim_start();
-            if line.starts_with("//") || !line.contains("&state.store") {
+            if line.starts_with("//") || !line.contains("&state.") {
                 continue;
             }
             // The callee is the token right before the argument, so a binding
             // (`let vms = vm::build_provider_vms(&state.store…`) reads as the
             // function rather than as the binding.
-            if let Some((before, _)) = line.split_once("(&state.store") {
+            let arg = if line.contains("(&state.store") {
+                "(&state.store"
+            } else {
+                "(&state.aux"
+            };
+            if let Some((before, _)) = line.split_once(arg) {
                 if let Some(callee) = before.split_whitespace().last() {
                     found.push(callee.trim_end_matches('(').to_string());
                 }

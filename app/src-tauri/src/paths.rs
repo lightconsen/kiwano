@@ -32,3 +32,13 @@ pub(crate) fn db_path() -> std::path::PathBuf {
 pub(crate) fn resolved_db() -> kiwano_core::paths::DbPath {
     kiwano_core::sidecar::db_path(None)
 }
+
+/// The **client's own** database: this machine's facts — which directory an
+/// agent was found in, which had rules injected, the backups a takeover can be
+/// undone from (`migrate.local.md` §9.4, §9.5 step 2).
+///
+/// A different file from [`db_path`], and deliberately so: the daemon owns that
+/// one, and none of this describes the daemon.
+pub(crate) fn local_db_path(shared: &std::path::Path) -> std::path::PathBuf {
+    kiwano_core::paths::local_db_path(shared).path
+}

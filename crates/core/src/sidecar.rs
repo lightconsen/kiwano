@@ -157,6 +157,10 @@ pub fn spawn() -> std::io::Result<Child> {
 pub fn db_path(explicit: Option<&Path>) -> DbPath {
     match explicit {
         Some(p) => DbPath {
+            // Named on the command line, so the variable is not what resolved
+            // it — this is only ever read back for a note about the *other*
+            // source, which cannot fire in this branch.
+            var: "KIWANO_DB_PATH",
             path: p.to_path_buf(),
             ignored: None,
             // Named on the command line in this very invocation, so there is

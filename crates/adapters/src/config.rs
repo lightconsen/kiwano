@@ -36,6 +36,44 @@ pub fn kiwano_db_path() -> DbPath {
     kiwano_db_path_from(std::env::var_os("KIWANO_DB_PATH").as_deref())
 }
 
+/// Environment variable naming the **client's own** database (`migrate.local.md`
+/// §9.5 step 2). Client-side only: the daemon has never heard of this file.
+pub const LOCAL_DB_ENV: &str = "KIWANO_LOCAL_DB_PATH";
+
+/// The SQLite file a **client** keeps for itself: `KIWANO_LOCAL_DB_PATH`, else
+/// `local.db` **beside the database it is a client of**.
+///
+/// Named for what it holds rather than for who reads it — everything in it is
+/// about *this machine*: which directory an agent was found in, which had rules
+/// injected, and the backups a takeover can be undone from. None of that is the
+/// daemon's, and none of it travels (`migrate.local.md` §9.4, §9.5 step 2).
+///
+/// A **separate file** rather than a table prefix, because the boundary is what
+/// makes a remote client possible: a client on another machine cannot open the
+/// daemon's database at all, and rows describing this machine have to survive
+/// that.
+///
+/// Beside `shared` rather than at a fixed `~/.kiwano/local.db`, because the two
+/// are resolved together and anything that moves one should move the other. A
+/// dev stack pointed at `/tmp/…/kiwano.db` that kept its client rows in the real
+/// `~/.kiwano` would be two installs sharing one file — which is the class of
+/// accident §13.1 exists to catch, and the reason the isolation script moves the
+/// database path rather than every path.
+pub fn kiwano_local_db_path(shared: &Path) -> DbPath {
+    local_db_path_from(std::env::var_os(LOCAL_DB_ENV).as_deref(), shared)
+}
+
+/// [`kiwano_local_db_path`] with the value passed in, for tests and for callers
+/// that already read the environment.
+pub fn local_db_path_from(value: Option<&std::ffi::OsStr>, shared: &Path) -> DbPath {
+    let fallback = shared
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("local.db");
+    resolve_db_path(value, LOCAL_DB_ENV, fallback)
+}
+
 /// The database path, and what had to be ignored to get it.
 ///
 /// The ignored value is *returned* rather than logged, because this is resolved
@@ -46,6 +84,8 @@ pub fn kiwano_db_path() -> DbPath {
 /// makes it visible.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbPath {
+    /// Which variable named it — carried so the note can say the right one.
+    pub var: &'static str,
     pub path: PathBuf,
     /// Set when `KIWANO_DB_PATH` named something unusable — the value itself,
     /// trimmed, for the message.
@@ -64,8 +104,9 @@ impl DbPath {
     /// What to tell the user, in one wording for the three front ends.
     pub fn ignored_note(&self) -> Option<String> {
         let ignored = self.ignored.as_ref()?;
+        let var = self.var;
         Some(format!(
-            "KIWANO_DB_PATH={ignored} is not an absolute path, so it would name a different \
+            "{var}={ignored} is not an absolute path, so it would name a different \
              file to each process; using {} instead",
             self.path.display()
         ))
@@ -73,19 +114,28 @@ impl DbPath {
 }
 
 fn kiwano_db_path_from(value: Option<&std::ffi::OsStr>) -> DbPath {
-    let default = || kiwano_data_dir().join("kiwano.db");
+    resolve_db_path(value, "KIWANO_DB_PATH", kiwano_data_dir().join("kiwano.db"))
+}
+
+/// One rule for both files, because they are resolved the same way and a second
+/// copy is a second answer (`migrate.local.md` §9.5).
+fn resolve_db_path(value: Option<&std::ffi::OsStr>, var: &'static str, default: PathBuf) -> DbPath {
+    let default = || default.clone();
     match classify_dir(value) {
         EnvDir::Absolute(path) => DbPath {
+            var,
             path,
             ignored: None,
             defaulted: false,
         },
         EnvDir::Unset => DbPath {
+            var,
             path: default(),
             ignored: None,
             defaulted: true,
         },
         EnvDir::Relative(relative) => DbPath {
+            var,
             path: default(),
             ignored: Some(relative),
             defaulted: true,
@@ -734,6 +784,7 @@ mod tests {
         assert_eq!(
             kiwano_db_path_from(Some(OsStr::new(&absolute_arg))),
             DbPath {
+                var: "KIWANO_DB_PATH",
                 path: absolute.clone(),
                 ignored: None,
                 // Named, so a daemon started from a different `$HOME` still

@@ -60,7 +60,7 @@ use vm::Aux;
 
 use crate::daemon::{spawn_usage_watch, spawn_watchdog};
 use crate::hub::spawn_hub_sync;
-use crate::paths::{db_path, env_port, resolved_db};
+use crate::paths::{db_path, env_port, local_db_path, resolved_db};
 use crate::state::AppState;
 use crate::tray::{setup_tray, sync_autostart};
 use crate::updater::record_update_check;
@@ -124,7 +124,24 @@ pub fn run() {
                     .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
             }
             let store = Store::open(&path).map_err(|e| e.to_string())?;
-            let aux = Aux::open(&path).map_err(|e| e.to_string())?;
+            // The client's own file, beside the daemon's rather than the same as
+            // it: everything in here describes *this machine*, and a client on
+            // another one would have none of it (`migrate.local.md` §9.5 step 2).
+            let local = local_db_path(&path);
+            if let Some(dir) = local.parent() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+            }
+            let aux = Aux::open(&local).map_err(|e| e.to_string())?;
+            // Bring across what an older build wrote into the shared file, once.
+            // Best-effort: a client that cannot do it keeps working from the
+            // daemon's rows for one more run rather than refusing to start.
+            if let Err(e) = aux.adopt_from(&path) {
+                tracing::warn!(
+                    "could not adopt the client rows from {}: {e}",
+                    path.display()
+                );
+            }
             let data_port = env_port("KIWANO_DATA_PORT", 8317);
             // Not a port: the admin plane is a socket beside the database, or a
             // per-user named pipe.

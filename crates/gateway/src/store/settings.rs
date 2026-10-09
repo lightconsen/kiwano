@@ -10,12 +10,6 @@ use crate::error::Result;
 use crate::store::Store;
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-
-/// `app_settings` key prefix for a directory a user declared for a built-in
-/// agent (`detect_dir:<agent id>`). One row per agent; see
-/// [`Store::manual_agent_dirs`].
-const MANUAL_AGENT_DIR_PREFIX: &str = "detect_dir:";
 
 /// The daemon's own copy of the user's UTC offset, in minutes east of UTC.
 ///
@@ -117,40 +111,6 @@ impl Store {
         Ok(conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])? > 0)
     }
 
-    /// The install directory a user declared for a built-in agent the detector
-    /// could not find on its own, keyed by agent id.
-    ///
-    /// One row per agent rather than a JSON blob: the value is a path, the key
-    /// names its owner, and a row that cannot be read can only ever lose
-    /// itself. Nothing here fails — a declaration is a hint, and a store that
-    /// cannot read one behaves exactly like a store that never had it.
-    pub fn manual_agent_dirs(&self) -> std::collections::BTreeMap<String, PathBuf> {
-        let Ok(rows) = self.app_settings_with_prefix(MANUAL_AGENT_DIR_PREFIX) else {
-            return Default::default();
-        };
-        rows.into_iter()
-            .filter_map(|(key, value)| {
-                let agent = key.strip_prefix(MANUAL_AGENT_DIR_PREFIX)?;
-                let dir = value.trim();
-                (!agent.is_empty() && !dir.is_empty())
-                    .then(|| (agent.to_string(), PathBuf::from(dir)))
-            })
-            .collect()
-    }
-
-    /// Record an agent's declared directory, replacing whatever was there.
-    pub fn set_manual_agent_dir(&self, agent: &str, dir: &Path) -> Result<()> {
-        self.set_app_setting(
-            &format!("{MANUAL_AGENT_DIR_PREFIX}{agent}"),
-            &dir.to_string_lossy(),
-        )
-    }
-
-    /// Forget it. `true` when there was one to forget.
-    pub fn clear_manual_agent_dir(&self, agent: &str) -> Result<bool> {
-        self.delete_app_setting(&format!("{MANUAL_AGENT_DIR_PREFIX}{agent}"))
-    }
-
     /// The user's UTC offset in minutes east, from the `ui` blob the GUI keeps
     /// current. Reset periods follow the user's clock — a monthly limit rolls
     /// over at their midnight, not UTC's — so the enforcement side needs it.
@@ -246,48 +206,5 @@ impl Store {
                 )
             })
             .unwrap_or_default()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::store::test_support::temp_store;
-
-    #[test]
-    fn manual_agent_dirs_round_trip_and_lose_only_their_own_bad_rows() {
-        let (_dir, store) = temp_store();
-        assert!(store.manual_agent_dirs().is_empty());
-
-        store
-            .set_manual_agent_dir("gemini", Path::new("/opt/custom/bin"))
-            .unwrap();
-        store
-            .set_manual_agent_dir("qwen", Path::new("/srv/qwen/bin"))
-            .unwrap();
-        let dirs = store.manual_agent_dirs();
-        assert_eq!(dirs.get("gemini"), Some(&PathBuf::from("/opt/custom/bin")));
-        assert_eq!(dirs.get("qwen"), Some(&PathBuf::from("/srv/qwen/bin")));
-
-        // Replacing one leaves its neighbour where it was.
-        store
-            .set_manual_agent_dir("gemini", Path::new("/elsewhere"))
-            .unwrap();
-        let dirs = store.manual_agent_dirs();
-        assert_eq!(dirs.get("gemini"), Some(&PathBuf::from("/elsewhere")));
-        assert_eq!(dirs.get("qwen"), Some(&PathBuf::from("/srv/qwen/bin")));
-
-        // A row with nothing usable in it drops out; the others stand.
-        store
-            .set_app_setting(&format!("{MANUAL_AGENT_DIR_PREFIX}broken"), "   ")
-            .unwrap();
-        let dirs = store.manual_agent_dirs();
-        assert!(!dirs.contains_key("broken"));
-        assert!(dirs.contains_key("qwen"));
-
-        // Clearing reports whether there was one, and is idempotent after.
-        assert!(store.clear_manual_agent_dir("gemini").unwrap());
-        assert!(!store.clear_manual_agent_dir("gemini").unwrap());
-        assert!(!store.manual_agent_dirs().contains_key("gemini"));
     }
 }

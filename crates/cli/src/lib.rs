@@ -77,6 +77,8 @@ impl From<String> for CliError {
 /// should not do.
 pub struct Ctx<'a> {
     pub db: PathBuf,
+    /// The client's own database, beside `db` (`migrate.local.md` §9.5 step 2).
+    pub local_db: PathBuf,
     pub admin: AdminEndpoint,
     pub token: Option<String>,
     /// The client of the daemon that `admin` and `token` resolve to.
@@ -144,10 +146,37 @@ impl Ctx<'_> {
         Ok(self.store.get().expect("just set"))
     }
 
+    /// The client's **own** database: this machine's facts — which directory an
+    /// agent was found in, which had rules injected, the backups a takeover can
+    /// be undone from (`migrate.local.md` §9.5 step 2).
+    ///
+    /// Lap: `self.db` is the *daemon's*, and this is beside it. A separate file
+    /// because a client on another machine cannot open the daemon's at all, and
+    /// these rows have to survive that.
     pub fn aux(&self) -> Result<&Aux, CliError> {
         if self.aux.get().is_none() {
-            let aux = Aux::open(&self.db).map_err(|e| {
-                CliError::runtime(format!("cannot open database {}: {e}", self.db.display()))
+            if let Some(dir) = self.local_db.parent() {
+                if !dir.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+            }
+            let aux = Aux::open(&self.local_db).map_err(|e| {
+                CliError::runtime(format!(
+                    "cannot open database {}: {e}",
+                    self.local_db.display()
+                ))
+            })?;
+            // Bring across what an older build wrote into the shared file,
+            // once. `adopt_from` answers `Ok(0)` for every benign case — no
+            // shared file, already adopted, not a database — so an error here is
+            // the rows genuinely failing to copy, and the command about to run is
+            // the one that reads them. Fatal rather than silent: an empty
+            // `rules status` and a missing one look the same.
+            aux.adopt_from(&self.db).map_err(|e| {
+                CliError::runtime(format!(
+                    "cannot bring this client's rows across from {}: {e}",
+                    self.db.display()
+                ))
             })?;
             let _ = self.aux.set(aux);
         }
@@ -257,9 +286,18 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         out.note(note);
     }
 
+    // Beside the shared one, so a `--db` that moves the database moves this too
+    // — which is what keeps a dev stack or a test from writing into the real
+    // `~/.kiwano` (`migrate.local.md` §9.5 step 2).
+    let local = kiwano_core::paths::local_db_path(&db.path);
+    if let Some(note) = local.ignored_note() {
+        out.note(note);
+    }
+
     let api = DaemonApi::with_token(admin.clone(), token.clone());
     let mut ctx = Ctx {
         db: db.path,
+        local_db: local.path,
         admin,
         token,
         api,

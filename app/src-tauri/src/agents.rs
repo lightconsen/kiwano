@@ -16,13 +16,13 @@ use kiwano_core::{detect, pricing};
 
 #[tauri::command(async)]
 pub fn detect_agents(state: State<'_, AppState>) -> Vec<detect::AgentDetectVm> {
-    let declared = state.store.manual_agent_dirs();
+    let declared = state.aux.manual_agent_dirs();
     detect::detect_agents(&home_dir(), &declared)
 }
 
 #[tauri::command(async)]
 pub fn probe_agent_versions(state: State<'_, AppState>) -> Vec<detect::AgentVersionVm> {
-    let declared = state.store.manual_agent_dirs();
+    let declared = state.aux.manual_agent_dirs();
     detect::probe_agent_versions(&home_dir(), &declared)
 }
 
@@ -42,7 +42,7 @@ pub fn set_agent_dir(
     let path = std::path::Path::new(&dir);
     let hit = detect::verify_manual_dir(&agent, path)?;
     state
-        .store
+        .aux
         .set_manual_agent_dir(&agent, path)
         .map_err(|e| e.to_string())?;
     Ok(hit)
@@ -67,7 +67,7 @@ pub fn verify_agent_dir(agent: String, dir: String) -> Result<detect::ManualHit,
 pub fn agent_search_dirs(state: State<'_, AppState>, agent: String) -> Vec<String> {
     let home = home_dir();
     let declared: Vec<std::path::PathBuf> = state
-        .store
+        .aux
         .manual_agent_dirs()
         .remove(&agent)
         .into_iter()
@@ -86,7 +86,7 @@ pub fn agent_search_dirs(state: State<'_, AppState>, agent: String) -> Vec<Strin
 #[tauri::command]
 pub fn clear_agent_dir(state: State<AppState>, agent: String) -> Result<(), String> {
     state
-        .store
+        .aux
         .clear_manual_agent_dir(&agent)
         .map_err(|e| e.to_string())?;
     Ok(())

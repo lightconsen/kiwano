@@ -77,8 +77,13 @@ fn import(agents: &[String], dry_run: bool, ctx: &mut Ctx) -> Result<(), CliErro
     }
 
     if dry_run {
+        // "read", not "would import": this side counts what the *files* hold, and
+        // the daemon then subtracts everything it already metered (the per-agent
+        // watermark). On a machine that has been routing through the gateway for
+        // months, most of what is read here is skipped there — so a number that
+        // promised an import would be wrong in the direction that matters.
         let text = format!(
-            "would import {} row(s) and {} session(s)",
+            "read {} row(s) and {} session(s); the gateway skips whatever it already metered",
             batch.usage.len(),
             batch.sessions.len()
         );

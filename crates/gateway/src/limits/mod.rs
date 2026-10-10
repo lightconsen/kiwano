@@ -90,6 +90,7 @@ pub(crate) mod test_support {
             // No declared prices: this fixture is priced by the Hub's table.
             prices: None,
             protocol: Protocol::Anthropic,
+            openai_wire: crate::store::OpenAiWire::Both,
             base_url: "https://a.example.com".into(),
             api_path: None,
             endpoints: Vec::new(),

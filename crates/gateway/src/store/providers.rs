@@ -3,7 +3,7 @@
 
 use crate::error::Result;
 use crate::store::time::now_rfc3339;
-use crate::store::types::{Billing, Protocol, Provider, ProviderEndpoint};
+use crate::store::types::{Billing, OpenAiWire, Protocol, Provider, ProviderEndpoint};
 use crate::store::Store;
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -14,17 +14,18 @@ impl Store {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
-            "INSERT INTO providers (id, name, catalog_id, protocol, base_url, api_path, api_key,
-                                    billing, period_limit, limit_unit, plan_query,
+            "INSERT INTO providers (id, name, catalog_id, protocol, openai_wire, base_url, api_path,
+                                    api_key, billing, period_limit, limit_unit, plan_query,
                                     plan_limits, timeout_secs, retries, headers,
                                     reset_period, enabled, created_at, updated_at, model_default,
                                     prices)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 p.id,
                 p.name,
                 p.catalog_id,
                 p.protocol.as_str(),
+                p.openai_wire.as_str(),
                 p.base_url,
                 p.api_path,
                 p.api_key,
@@ -56,7 +57,7 @@ impl Store {
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at, catalog_id,
-                    model_default, prices
+                    model_default, prices, openai_wire
              FROM providers WHERE id = ?1",
         )?;
         let mut provider = stmt.query_row(params![id], provider_from_row).optional()?;
@@ -73,7 +74,7 @@ impl Store {
                     period_limit, limit_unit, plan_query, plan_limits,
                     timeout_secs, retries, headers,
                     reset_period, enabled, created_at, updated_at, catalog_id,
-                    model_default, prices
+                    model_default, prices, openai_wire
              FROM providers ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], provider_from_row)?;
@@ -102,7 +103,7 @@ impl Store {
                     limit_unit = ?10, plan_query = ?11, plan_limits = ?12,
                     timeout_secs = ?13, retries = ?14, headers = ?15,
                     reset_period = ?16, enabled = ?17, updated_at = ?18, model_default = ?19,
-                    prices = ?20
+                    prices = ?20, openai_wire = ?21
              WHERE id = ?1",
             params![
                 p.id,
@@ -125,6 +126,7 @@ impl Store {
                 updated,
                 p.model_default,
                 p.prices,
+                p.openai_wire.as_str(),
             ],
         )?;
         write_endpoints(&tx, &p.id, &p.endpoints)?;
@@ -142,11 +144,13 @@ impl Store {
 fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Provider> {
     let protocol_str: String = row.get(2)?;
     let billing_str: String = row.get(6)?;
+    let wire_str: String = row.get(21)?;
     Ok(Provider {
         id: row.get(0)?,
         name: row.get(1)?,
         catalog_id: row.get(18)?,
         protocol: Protocol::parse_str(&protocol_str).unwrap_or(Protocol::Anthropic),
+        openai_wire: OpenAiWire::parse_str(&wire_str).unwrap_or(OpenAiWire::Both),
         base_url: row.get(3)?,
         api_path: row.get(4)?,
         endpoints: Vec::new(),

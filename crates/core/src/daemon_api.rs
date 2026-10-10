@@ -1254,6 +1254,7 @@ mod tests {
             api_key: "sk-test".into(),
             endpoint: "https://api.deepseek.com".into(),
             protocol: "openai".into(),
+            openai_wire: Default::default(),
             model_default: String::new(),
             billing: "payg".into(),
             billing_config: kiwano_api::providers::BillingConfigInput {

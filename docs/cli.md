@@ -105,6 +105,7 @@ On a systemd host, use `systemctl restart kiwanod` instead of the
 ```
 kiwano providers list [--agent AGENT]
 kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
+                     [--openai-wire chat|responses|both]
                      [--billing plan|payg|unl] [--limit N --unit U] [--reset R]
                      [--bind AGENT]...
 kiwano providers edit <ID> [any of the above]
@@ -114,6 +115,22 @@ kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers probe latency|endpoint|models
 ```
+
+`--openai-wire` says which of the OpenAI family's two request shapes an OpenAI
+provider serves, and it only matters when they differ:
+
+- **`chat`** — only `/v1/chat/completions`. An agent's `/v1/responses` request
+  (Codex, and whatever else speaks the Responses API) is converted to a Chat
+  Completions request on the way out and the answer converted back.
+- **`responses`** — only `/v1/responses`. A `/v1/chat/completions` request is
+  refused with a reason rather than guessed at; that direction is not implemented.
+- **`both`** (the default) — whatever arrives is passed through, and the vendor is
+  the authority on what it serves. Every provider added before this flag existed
+  is `both`, so nothing changes unless you say so.
+
+If a `/v1/responses` request gets a 404 from a `both` provider, the request log's
+notes say which declaration fixes it — that is the one failure here that only you
+can diagnose, because a `base_url` cannot be asked what it speaks.
 
 Both `add` and `edit` also take the forwarding and quota options:
 

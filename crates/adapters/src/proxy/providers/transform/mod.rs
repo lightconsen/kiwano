@@ -5,20 +5,24 @@
 
 //! Format conversion module
 //!
-//! One direction is converted, and it is worth naming plainly because the title
-//! "Anthropic ↔ OpenAI" suggests more: an Anthropic **request** becomes an OpenAI
-//! Chat Completions request (`anthropic_to_openai`), and an OpenAI Chat
-//! **response** — JSON or SSE — becomes an Anthropic one (`openai_to_anthropic`
-//! and the streaming converter behind [`create_anthropic_sse_stream`]).
+//! Two pairs are converted now, and the title is worth reading carefully because
+//! "Anthropic ↔ OpenAI" suggests a symmetry that is not there. A Claude Code
+//! client on an OpenAI-compatible provider gets `anthropic_to_openai` (request)
+//! and `openai_to_anthropic` (response, JSON or the SSE behind
+//! [`create_anthropic_sse_stream`]). A Codex client — which speaks the Responses
+//! API and nothing else — gets `responses_to_chat` (request),
+//! `chat_to_responses` (response) and the SSE adapter
+//! `responses_streaming::create_responses_sse_stream`.
 //!
-//! That is what a Claude Code→OpenAI-compatible provider needs, and it is the
-//! only pair this gateway converts. Not converted, and deliberately not built:
-//! the Responses API in either direction (`/v1/responses` reaches an
-//! OpenAI-speaking provider natively, and nothing else), an OpenAI Chat request
-//! arriving for an Anthropic provider, and `/v1/messages/count_tokens`. Each of
-//! those is refused with a reason rather than approximated — `resolve_inbound` in
-//! the gateway lists them — because a half-converted request is a wrong answer
-//! with no way to tell.
+//! The Responses forward direction was built because it has real users: refusing
+//! `/v1/responses` against a Chat-only provider meant refusing Codex outright.
+//! The **reverse** is still refused, deliberately: an OpenAI Chat request
+//! arriving for a Responses-only upstream would have to invent an `input` and a
+//! stored-response story no Chat client asked for, so nothing was built for it.
+//! Also not converted: an OpenAI Chat request arriving for an Anthropic provider,
+//! and `/v1/messages/count_tokens`. Each of those is refused with a reason rather
+//! than approximated — `resolve_inbound` in the gateway lists them — because a
+//! half-converted request is a wrong answer with no way to tell.
 //!
 //! Reference: anthropic-proxy-rs
 //!
@@ -33,13 +37,18 @@
 //! here may import one without an ordering worry. `message` turns one Anthropic
 //! message into the OpenAI messages it becomes, `request` composes the whole
 //! converted body out of those pieces, and `response` is the other direction: it
-//! shares nothing with either.
+//! shares nothing with either. `responses_request` and `responses_response` are
+//! the Responses pair; `responses_response` also exposes the shared usage and
+//! object builders the streaming adapter imports, so the chunked and whole
+//! responses stay in step.
 
 pub mod billing;
 pub mod message;
 pub mod reasoning;
 pub mod request;
 pub mod response;
+pub mod responses_request;
+pub mod responses_response;
 pub mod schema;
 pub mod stream_options;
 pub mod tool_choice;
@@ -50,5 +59,7 @@ pub use billing::strip_leading_anthropic_billing_header;
 pub use reasoning::{is_openai_o_series, resolve_reasoning_effort, supports_reasoning_effort};
 pub use request::{anthropic_to_openai, anthropic_to_openai_with_reasoning_content};
 pub use response::openai_to_anthropic;
+pub use responses_request::responses_to_chat;
+pub use responses_response::chat_to_responses;
 pub use schema::clean_schema;
 pub use stream_options::inject_openai_stream_include_usage;

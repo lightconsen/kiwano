@@ -561,6 +561,10 @@ pub struct EditArgs {
     #[arg(long, value_name = "PROTOCOL")]
     pub protocol: Option<String>,
 
+    /// Which OpenAI wire this endpoint serves: chat | responses | both
+    #[arg(long, value_name = "WIRE")]
+    pub openai_wire: Option<String>,
+
     #[arg(long, value_name = "BILLING")]
     pub billing: Option<String>,
 
@@ -613,6 +617,15 @@ pub struct AddArgs {
     /// anthropic | openai | gemini
     #[arg(long, default_value = "openai", value_name = "PROTOCOL")]
     pub protocol: String,
+
+    /// Which OpenAI wire this endpoint serves: chat | responses | both.
+    ///
+    /// `chat` means an agent's `/v1/responses` request (Codex) is converted to
+    /// Chat Completions for this provider; `responses` means the reverse is
+    /// refused rather than guessed; `both` (the default) passes whatever arrives
+    /// through and lets the vendor answer.
+    #[arg(long, value_name = "WIRE")]
+    pub openai_wire: Option<String>,
 
     /// plan | payg | unl (subscription | metered | unlimited also accepted)
     #[arg(long, default_value = "payg", value_name = "BILLING")]

@@ -58,6 +58,7 @@ pub(crate) fn new_provider_input(
         api_key: args.key.clone().unwrap_or_default(),
         endpoint: args.endpoint.trim().to_string(),
         protocol: protocol.to_string(),
+        openai_wire: args.openai_wire.clone(),
         model_default: String::new(),
         billing: billing.to_string(),
         billing_config: vm::BillingConfigInput {

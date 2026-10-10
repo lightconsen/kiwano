@@ -526,6 +526,7 @@ mod tests {
             name: "p".into(),
             catalog_id: None,
             protocol: Protocol::Anthropic,
+            openai_wire: Default::default(),
             base_url: base.into(),
             api_path: api_path.map(Into::into),
             endpoints: Vec::new(),

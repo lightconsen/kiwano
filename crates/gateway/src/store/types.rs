@@ -36,6 +36,63 @@ impl Protocol {
     }
 }
 
+/// The reading a provider with no `openai_wire` gets: serve both.
+fn default_openai_wire() -> OpenAiWire {
+    OpenAiWire::Both
+}
+
+/// Which of the OpenAI family's two wires a provider's endpoint serves
+/// (migration v30).
+///
+/// `Protocol::OpenAI` is a *family*: `/v1/chat/completions` and `/v1/responses`
+/// are two different request and response shapes inside it, and a provider may
+/// serve one and not the other. Until this existed there was no way to say
+/// which, so a request in the wire the provider does not speak was passed
+/// through verbatim and came back a 404 from the vendor — a failure with no
+/// explanation on our side.
+///
+/// A capability column rather than a fourth `Protocol` variant, deliberately:
+/// the family is what decides whether a request may be converted at all
+/// (`resolve_inbound`), and reinterpreting every existing `openai` row as
+/// chat-only would break the installs whose provider does serve Responses.
+/// `Both` is the default, and it is exactly the old behaviour: pass through
+/// whatever arrives, and let the vendor be the authority on what it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenAiWire {
+    /// Only `/v1/chat/completions`. A `/v1/responses` request is converted.
+    Chat,
+    /// Only `/v1/responses`. A `/v1/chat/completions` request is refused: the
+    /// reverse conversion is not implemented (see `forward::inbound`).
+    Responses,
+    /// Serve whatever arrives — the default (and so `Default`), which is also
+    /// every row that predates the column.
+    #[default]
+    Both,
+}
+
+impl OpenAiWire {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OpenAiWire::Chat => "chat",
+            OpenAiWire::Responses => "responses",
+            OpenAiWire::Both => "both",
+        }
+    }
+
+    /// Inverse of `as_str`. An unrecognized tag — a row written by a future
+    /// version — reads as `Both`, which is the pass-through reading rather than
+    /// a guess at a restriction the user never asked for.
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "chat" => Some(OpenAiWire::Chat),
+            "responses" => Some(OpenAiWire::Responses),
+            "both" => Some(OpenAiWire::Both),
+            _ => None,
+        }
+    }
+}
+
 /// Billing model of a provider (tech.md §2.4 A).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -163,6 +220,11 @@ pub struct Provider {
     #[serde(default)]
     pub catalog_id: Option<String>,
     pub protocol: Protocol,
+    /// Which OpenAI wire this endpoint serves (migration v30). Ignored for the
+    /// other families, and `Both` — what every pre-v30 row and every hand-added
+    /// provider starts as — means "pass through whatever arrives".
+    #[serde(default = "default_openai_wire")]
+    pub openai_wire: OpenAiWire,
     pub base_url: String,
     /// Optional upstream path prefix, e.g. `/anthropic` for compatible endpoints.
     pub api_path: Option<String>,

@@ -125,6 +125,7 @@ pub fn import_config(store: &Store, json: &str) -> Result<ImportReport, ApiError
                     // the same entry's rates as the one it came from.
                     catalog_id: sp.catalog_id.clone(),
                     protocol: sp.protocol,
+                    openai_wire: sp.openai_wire,
                     base_url: sp.base_url.clone(),
                     api_path: sp.api_path.clone(),
                     endpoints: sp.endpoints.clone(),
@@ -213,6 +214,7 @@ mod tests {
             name: name.into(),
             catalog_id: None,
             protocol: crate::store::Protocol::OpenAI,
+            openai_wire: crate::store::OpenAiWire::Both,
             base_url: "https://api.example.com".into(),
             api_path: None,
             endpoints: Vec::new(),

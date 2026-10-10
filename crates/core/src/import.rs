@@ -513,6 +513,7 @@ mod tests {
             prices: None,
             protocol,
             base_url: base_url.into(),
+            openai_wire: kiwanod::store::OpenAiWire::Both,
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some(key.into()),

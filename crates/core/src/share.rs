@@ -88,6 +88,7 @@ mod tests {
             // No declared prices: this fixture is priced by the Hub's table.
             prices: None,
             protocol: Protocol::OpenAI,
+            openai_wire: kiwanod::store::OpenAiWire::Both,
             base_url: base_url.into(),
             api_path: None,
             endpoints: Vec::new(),

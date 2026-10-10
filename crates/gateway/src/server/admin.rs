@@ -1842,6 +1842,7 @@ mod tests {
             prices: None,
             protocol,
             base_url: base_url.into(),
+            openai_wire: crate::store::OpenAiWire::Both,
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some(format!("sk-{id}")),

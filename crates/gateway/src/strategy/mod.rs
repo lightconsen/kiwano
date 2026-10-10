@@ -98,6 +98,7 @@ pub(crate) mod test_support {
             name: format!("prov-{id}"),
             catalog_id: None,
             protocol: Protocol::Anthropic,
+            openai_wire: Default::default(),
             base_url: format!("https://{id}.example.com"),
             api_path: None,
             endpoints: Vec::new(),

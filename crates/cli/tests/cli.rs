@@ -68,6 +68,7 @@ fn add_provider(db: &Path, name: &str, bind: &[&str]) -> String {
         api_key: "sk-test".into(),
         endpoint: format!("https://{name}.example.com"),
         protocol: "openai".into(),
+        openai_wire: Default::default(),
         model_default: String::new(),
         billing: "payg".into(),
         billing_config: kiwano_core::vm::BillingConfigInput {
@@ -2220,4 +2221,110 @@ fn client_keys_need_the_daemon() {
         !err.is_empty(),
         "a missing daemon is an error, not an empty list"
     );
+}
+
+// ── the OpenAI wire ─────────────────────────────────────────────────────────
+
+/// A wire is declared once and then visible in the listing — otherwise a user
+/// who set it could not tell it apart from never having set it.
+#[test]
+fn the_openai_wire_is_declared_and_listed() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "--json",
+            "providers",
+            "add",
+            "--name",
+            "relay",
+            "--endpoint",
+            "https://relay.example.com/v1",
+            "--protocol",
+            "openai",
+            "--openai-wire",
+            "chat",
+            "--bind",
+            "codex",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let created: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(created["openai_wire"], "chat");
+
+    // The list carries it as a restriction on the protocol, so the common case
+    // (`both`) stays unmarked.
+    let (code, out, err) = run_served(&db, &daemon, &["providers", "list"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("openai·chat"), "{out}");
+
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "--json",
+            "providers",
+            "edit",
+            created["id"].as_str().unwrap(),
+            "--openai-wire",
+            "both",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let edited: serde_json::Value = serde_json::from_str(&out).unwrap();
+    // Absent *is* `both`: the field reports a restriction, and clearing it
+    // clears the field. (`created["openai_wire"]` above works because it was
+    // set; an index into a missing key would be null.)
+    assert!(edited.get("openai_wire").is_none(), "{edited}");
+    let (_, out, _) = run_served(&db, &daemon, &["providers", "list"]);
+    assert!(!out.contains("openai·"), "both is not a restriction: {out}");
+}
+
+/// A wire on a provider that is not OpenAI, or a value that is not a wire, is
+/// refused — a stored restriction nothing reads is one nobody can be told about.
+#[test]
+fn a_wire_that_means_nothing_is_refused() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "add",
+            "--name",
+            "claude-direct",
+            "--endpoint",
+            "https://api.anthropic.com",
+            "--protocol",
+            "anthropic",
+            "--openai-wire",
+            "chat",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("OpenAI wire"), "{err}");
+
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "add",
+            "--name",
+            "relay",
+            "--endpoint",
+            "https://relay.example.com/v1",
+            "--protocol",
+            "openai",
+            "--openai-wire",
+            "chatty",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("expected chat"), "{err}");
 }

@@ -138,6 +138,7 @@ pub fn apply_import(
             catalog_id: None,
             protocol,
             base_url: raw.base_url.clone(),
+            openai_wire: crate::store::OpenAiWire::Both,
             api_path: raw.api_path.clone(),
             endpoints: Vec::new(),
             api_key: raw.api_key.clone(),

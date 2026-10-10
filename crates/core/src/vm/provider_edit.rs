@@ -422,6 +422,7 @@ mod tests {
             api_key: "sk-x".into(),
             endpoint: "https://api.new.example.com".into(),
             protocol: "openai".into(),
+            openai_wire: Default::default(),
             model_default: "new-chat".into(),
             billing: "plan".into(),
             billing_config: BillingConfigInput {
@@ -460,6 +461,7 @@ mod tests {
             api_key: "sk-x".into(),
             endpoint: "https://qianfan.baidubce.com/v2/tokenplan/personal".into(),
             protocol: "openai".into(),
+            openai_wire: Default::default(),
             model_default: "qianfan-code-latest".into(),
             billing: "payg".into(),
             billing_config: BillingConfigInput {
@@ -537,6 +539,7 @@ mod tests {
             api_key: "".into(), // blank = keep existing key
             endpoint: "https://p1.example.com/v2".into(),
             protocol: "openai".into(),
+            openai_wire: Default::default(),
             model_default: String::new(),
             billing: "unl".into(),
             billing_config: BillingConfigInput {

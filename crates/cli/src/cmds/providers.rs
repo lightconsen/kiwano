@@ -216,6 +216,7 @@ fn edit_patch(
             Some(raw) => Some(parse_protocol(raw)?.to_string()),
             None => None,
         },
+        openai_wire: args.openai_wire.clone(),
         // Not a flag here, and the old shape sent `""` — which *cleared* the
         // column. Silent data loss on an unrelated edit, and exactly what
         // "absent means keep" removes.

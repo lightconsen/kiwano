@@ -191,6 +191,7 @@ pub(crate) mod test_support {
             // No declared prices: this fixture is priced by the Hub's table.
             prices: None,
             protocol: kiwanod::store::Protocol::OpenAI,
+            openai_wire: kiwanod::store::OpenAiWire::Both,
             base_url: format!("https://{id}.example.com"),
             api_path: None,
             endpoints: Vec::new(),
@@ -270,6 +271,7 @@ pub(crate) mod test_support {
             api_key: "sk-test".into(),
             endpoint: endpoint.into(),
             protocol: "openai".into(),
+            openai_wire: Default::default(),
             model_default: String::new(),
             billing: "payg".into(),
             billing_config: BillingConfigInput {
@@ -298,6 +300,7 @@ pub(crate) mod test_support {
             api_key: Some(input.api_key),
             endpoint: Some(input.endpoint),
             protocol: Some(input.protocol),
+            openai_wire: None,
             model_default: Some(input.model_default),
             billing: Some(input.billing),
             billing_config: Some(BillingConfigPatch {

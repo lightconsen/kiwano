@@ -110,6 +110,7 @@ mod tests {
             catalog_id: None,
             prices: None,
             protocol: Protocol::Anthropic,
+            openai_wire: crate::store::OpenAiWire::Both,
             base_url: "http://127.0.0.1:1".into(), // port 1 always fails to connect
             api_path: None,
             endpoints: Vec::new(),

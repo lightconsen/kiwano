@@ -42,6 +42,37 @@ pub fn classify_path(path: &str) -> PathProtocol {
     }
 }
 
+/// Which of the OpenAI family's two wires an inbound path speaks.
+///
+/// The family is decided by [`classify_path`], and it is not enough to route by:
+/// `/v1/chat/completions` and `/v1/responses` are different request and response
+/// shapes, so a provider that serves one and not the other needs the difference
+/// named before a request is sent to it (`forward::inbound`).
+///
+/// `None` for anything that is not an OpenAI-family path. The router wires only
+/// `POST /v1/responses`, so the `GET`/`{id}` forms of the Responses API do not
+/// reach this — and if one did, it would read as `Responses` here and be refused
+/// downstream by the converter, which is the right answer for a shape nothing
+/// can convert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAiWirePath {
+    Chat,
+    Responses,
+}
+
+pub fn openai_wire_of_path(path: &str) -> Option<OpenAiWirePath> {
+    if path == "/v1/responses" || path.starts_with("/v1/responses/") {
+        Some(OpenAiWirePath::Responses)
+    } else if path == "/v1/chat/completions" {
+        Some(OpenAiWirePath::Chat)
+    } else {
+        // `/v1/completions` and `/v1/embeddings` are OpenAI-family paths that are
+        // neither wire: they have no Responses shape at all, so there is nothing
+        // to convert and nothing to refuse — they pass through as they always did.
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

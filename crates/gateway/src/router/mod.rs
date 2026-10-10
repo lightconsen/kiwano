@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::error::{GatewayError, Result};
-use crate::store::{ClientKey, Protocol, ProviderEndpoint, Store, StrategyType};
+use crate::store::{ClientKey, OpenAiWire, Protocol, ProviderEndpoint, Store, StrategyType};
 
 /// Canonical agent ids (tech.md §2.4 B: MVP takes over Claude Code + Codex).
 pub const AGENT_CLAUDE: &str = "claude";
@@ -28,6 +28,10 @@ pub struct UpstreamProvider {
     /// it is then priced at the general rate.
     pub catalog_id: Option<String>,
     pub protocol: Protocol,
+    /// Which OpenAI wire this provider serves (migration v30). Carried on the
+    /// route because the decision it feeds — pass through, convert, or refuse —
+    /// is made per attempt, in `forward::resolve_inbound`.
+    pub openai_wire: OpenAiWire,
     pub base_url: String,
     /// Optional upstream path prefix, e.g. `/anthropic` on compatible endpoints.
     pub api_path: Option<String>,
@@ -217,6 +221,7 @@ impl RouteTable {
                         name: p.name.clone(),
                         catalog_id: p.catalog_id.clone(),
                         protocol: p.protocol,
+                        openai_wire: p.openai_wire,
                         base_url: p.base_url.clone(),
                         api_path: p.api_path.clone(),
                         endpoints: p.endpoints.clone(),
@@ -412,6 +417,7 @@ mod tests {
             prices: None,
             protocol,
             base_url: format!("https://{id}.example.com"),
+            openai_wire: OpenAiWire::Both,
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some(format!("sk-{id}")),

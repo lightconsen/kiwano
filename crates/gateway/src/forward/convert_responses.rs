@@ -1,6 +1,19 @@
-//! The conversion path: an Anthropic `/v1/messages` inbound on an
-//! OpenAI-compatible provider goes through the adapters sublayer in both
-//! directions, and is metered from the upstream OpenAI usage fields.
+//! The second conversion path: an OpenAI **Responses** request inbound on a
+//! provider that serves only **Chat Completions**.
+//!
+//! The OpenAI family has two wires, and until now the gateway treated them as
+//! one: `/v1/chat/completions` and `/v1/responses` both classified as
+//! `Protocol::OpenAI`, both passed through verbatim, and a provider that serves
+//! only the first answered the second with a 404 of its own — a failure the
+//! gateway had no way to explain, because it had no way to notice. A provider
+//! can now say which wire it serves (`openai_wire`, migration v30), and when the
+//! answer is "Chat only", a Responses request is converted here instead.
+//!
+//! The shape mirrors `forward::convert` (the Anthropic leg) exactly, because the
+//! work is the same: convert the request in the adapters sublayer, send it to the
+//! endpoint the provider actually serves, and convert the answer back — with the
+//! metering scanner reading the *client-visible* bytes, so usage is counted from
+//! what the client was told rather than from an upstream shape it never sees.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,12 +24,13 @@ use axum::response::Response;
 use futures_util::StreamExt;
 
 use kiwano_adapters::proxy::model_mapper::strip_one_m_suffix_for_upstream_from_body;
-use kiwano_adapters::proxy::providers::streaming::create_anthropic_sse_stream;
+use kiwano_adapters::proxy::providers::responses_streaming::create_responses_sse_stream;
 use kiwano_adapters::proxy::providers::transform::{
-    anthropic_to_openai, inject_openai_stream_include_usage, openai_to_anthropic,
+    chat_to_responses, inject_openai_stream_include_usage, responses_to_chat,
 };
 
 use crate::error::GatewayError;
+use crate::forward::convert::proxy_error_into_response;
 use crate::forward::finish::{buffered_response, finish_log, log_failure, sse_response};
 use crate::forward::headers::{
     copy_response_headers, response_headers_text, upstream_key_and_headers,
@@ -31,17 +45,16 @@ use crate::server::data::upstream_url;
 use crate::server::{error_into_response, error_response, GatewayState};
 use crate::store::Protocol;
 
-/// Forward an Anthropic `/v1/messages` request to an OpenAI-compatible
-/// provider with protocol conversion (adapters sublayer).
+/// Forward a `/v1/responses` request to a Chat-Completions-only provider.
 ///
-/// Request: `anthropic_to_openai` + `stream_options.include_usage` injection +
-/// `model_mapper` 1M-context marker stripping. Response: non-SSE bodies go
-/// through `openai_to_anthropic`; SSE streams are converted to the Anthropic
-/// event stream by `create_anthropic_sse_stream` (whose emitted
-/// `message_start`/`message_delta` usage is what the metering scanner sees).
-/// Upstream error bodies are passed through unconverted.
+/// Request: `responses_to_chat` + `stream_options.include_usage` injection (a
+/// Chat upstream reports usage only when asked) + the 1M-context marker strip.
+/// Response: non-SSE bodies go through `chat_to_responses`; SSE streams are
+/// rebuilt as the Responses event sequence by `create_responses_sse_stream`,
+/// whose `response.completed` event is what the metering scanner reads. Upstream
+/// error bodies pass through unconverted, for the reason the Anthropic leg gives.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn forward_anthropic_via_openai(
+pub(crate) async fn forward_responses_via_chat(
     state: Arc<GatewayState>,
     method: Method,
     inbound_headers: HeaderMap,
@@ -54,10 +67,10 @@ pub(crate) async fn forward_anthropic_via_openai(
 ) -> Response {
     let provider = &routed.provider;
 
-    // The requested Anthropic model is authoritative for metering.
+    // The model the client asked for is authoritative for metering; the upstream
+    // names the same one back, and `model.or(upstream_model)` prefers the ask.
     let model = request_model(&body);
 
-    // Conversion failure is a client-shape problem (422) or an internal one.
     let converted_body = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -79,12 +92,12 @@ pub(crate) async fn forward_anthropic_via_openai(
             );
         }
     };
-    let mut openai_body = match anthropic_to_openai(converted_body) {
+    let mut chat_body = match responses_to_chat(converted_body) {
         Ok(v) => v,
         Err(e) => {
-            // The reason, not a summary of it: a conversion refusal exists to say
-            // what could not be carried across, and "conversion failed" leaves the
-            // reader with no way to find out.
+            // The reason, not a summary of it: the refusals in this direction
+            // exist to say what the Chat wire cannot carry (`previous_response_id`,
+            // a built-in tool), and that is the only thing the reader can act on.
             let reason = e.to_string();
             let resp = proxy_error_into_response(e, inbound);
             log_failure(
@@ -99,15 +112,15 @@ pub(crate) async fn forward_anthropic_via_openai(
             return resp;
         }
     };
-    inject_openai_stream_include_usage(&mut openai_body);
-    let openai_body = strip_one_m_suffix_for_upstream_from_body(openai_body);
+    inject_openai_stream_include_usage(&mut chat_body);
+    let chat_body = strip_one_m_suffix_for_upstream_from_body(chat_body);
     tracing::info!(
         provider = %provider.id,
         agent = %routed.agent,
         model = model.as_deref().unwrap_or("<none>"),
-        "converting Anthropic request to OpenAI chat completions"
+        "converting Responses request to OpenAI chat completions"
     );
-    let openai_bytes = match serde_json::to_vec(&openai_body) {
+    let chat_bytes = match serde_json::to_vec(&chat_body) {
         Ok(b) => b,
         Err(e) => {
             let resp = error_into_response(
@@ -127,8 +140,10 @@ pub(crate) async fn forward_anthropic_via_openai(
         }
     };
 
+    // The converted request is a Chat request whatever the client sent, so this
+    // is the path it goes to — not the one that arrived.
     let url = upstream_url(provider, "/v1/chat/completions");
-    // Query strings are meaningless across protocol conversion; drop them.
+    // Query strings are meaningless across the conversion; drop them.
     let headers = match upstream_key_and_headers(
         &state,
         provider,
@@ -149,7 +164,7 @@ pub(crate) async fn forward_anthropic_via_openai(
         method,
         &url,
         headers,
-        Bytes::from(openai_bytes),
+        Bytes::from(chat_bytes),
         inbound,
         log.as_ref().map(|l| &l.capture),
     )
@@ -172,16 +187,17 @@ pub(crate) async fn forward_anthropic_via_openai(
         agent = %routed.agent,
         upstream_status = status.as_u16(),
         sse = is_sse,
-        "upstream responded to converted request"
+        "upstream responded to converted Responses request"
     );
 
     let response_headers = copy_response_headers(upstream.headers());
 
     if is_sse {
-        // Convert the OpenAI chunk stream into an Anthropic event stream; the
-        // metering scanner then reads the converted Anthropic usage events
-        // and the capture tee records the client-visible stream.
-        let converted = create_anthropic_sse_stream(Box::pin(upstream.bytes_stream()));
+        // Rebuild the upstream chunks as the Responses event sequence. The
+        // scanner then reads `response.completed` — the shape it already
+        // understands, because this is the wire Codex sends when it is not
+        // converted at all.
+        let converted = create_responses_sse_stream(Box::pin(upstream.bytes_stream()));
         let max_body_bytes = state.log_config().max_body_bytes;
         sse_response(
             &state,
@@ -196,10 +212,11 @@ pub(crate) async fn forward_anthropic_via_openai(
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
-                // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
-                // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
+                // The upstream is OpenAI Chat, whose `prompt_tokens` is inclusive
+                // of the cache buckets — the same arithmetic the Anthropic leg
+                // applies, and the reason `chat_to_responses` keeps `input_tokens`
+                // inclusive.
                 cache_inclusive: true,
-                // Filled at `finish`, from what the scanner saw.
                 usage_missing: false,
                 log: log.map(|l| CompletedLog {
                     is_streaming: true,
@@ -244,8 +261,9 @@ pub(crate) async fn forward_anthropic_via_openai(
         let (usage, upstream_model) = parse_response_usage(Protocol::OpenAI, &bytes);
 
         if !status.is_success() {
-            // Pass upstream error bodies through unconverted (error shapes
-            // are not chat.completion objects; converting would corrupt them).
+            // An upstream error is the vendor's own shape (`{"error": {...}}`),
+            // not a chat.completion object; converting it would rewrite a message
+            // the client is meant to read verbatim.
             let log = finish_log(log, &bytes, status, Some(&response_headers), &state);
             let sample = UsageSample {
                 agent: routed.agent.clone(),
@@ -258,17 +276,16 @@ pub(crate) async fn forward_anthropic_via_openai(
                 usage: usage.unwrap_or_default(),
                 latency_ms,
                 status: "error",
-                // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
                 cache_inclusive: true,
                 log,
             };
             return buffered_response(&state, bytes, sample, status, response_headers);
         }
 
-        let anthropic = match serde_json::from_slice::<serde_json::Value>(&bytes)
+        let responses = match serde_json::from_slice::<serde_json::Value>(&bytes)
             .map_err(|e| GatewayError::Upstream(format!("upstream body is not JSON: {e}")))
             .and_then(|v| {
-                openai_to_anthropic(v)
+                chat_to_responses(v)
                     .map_err(|e| GatewayError::Upstream(format!("response conversion failed: {e}")))
             }) {
             Ok(v) => v,
@@ -287,7 +304,7 @@ pub(crate) async fn forward_anthropic_via_openai(
                 return resp;
             }
         };
-        let out = match serde_json::to_vec(&anthropic) {
+        let out = match serde_json::to_vec(&responses) {
             Ok(b) => b,
             Err(e) => {
                 let resp = error_into_response(
@@ -319,12 +336,11 @@ pub(crate) async fn forward_anthropic_via_openai(
             usage: usage.unwrap_or_default(),
             latency_ms,
             status: "ok",
-            // Outbound is always OpenAI here (Anthropic → OpenAI conversion).
             cache_inclusive: true,
             log,
         };
-        // The upstream headers were snapshotted for an OpenAI payload; the
-        // converted body is always JSON.
+        // The upstream headers described a Chat payload; the converted body is
+        // always JSON.
         let mut response =
             buffered_response(&state, Bytes::from(out), sample, status, response_headers);
         if let Ok(ct) = HeaderValue::from_str("application/json") {
@@ -334,20 +350,4 @@ pub(crate) async fn forward_anthropic_via_openai(
         }
         response
     }
-}
-
-/// Map a adapters `ProxyError` onto a gateway error response.
-pub(crate) fn proxy_error_into_response(
-    e: kiwano_adapters::proxy::ProxyError,
-    inbound: Option<Protocol>,
-) -> Response {
-    use kiwano_adapters::proxy::error_mapper::map_proxy_error_to_status;
-    let status =
-        StatusCode::from_u16(map_proxy_error_to_status(&e)).unwrap_or(StatusCode::BAD_GATEWAY);
-    error_response(
-        inbound,
-        status,
-        "conversion_failed",
-        &format!("kiwanod: adapters conversion failed: {e}"),
-    )
 }

@@ -17,7 +17,7 @@ use kiwanod::server::{
     admin_plane_router, data_plane_router, GatewayState, ADMIN_TOKEN_HEADER, ADMIN_TOKEN_KEY,
 };
 use kiwanod::store::{
-    now_rfc3339, Billing, Binding, LogConfig, Protocol, Provider, RequestLogEntry,
+    now_rfc3339, Billing, Binding, LogConfig, OpenAiWire, Protocol, Provider, RequestLogEntry,
     RequestLogFilter, Store, StrategyType,
 };
 use serde_json::{json, Value};
@@ -198,6 +198,9 @@ fn provider(id: &str, protocol: Protocol, base_url: String) -> Provider {
         // No declared prices: this fixture is priced by the Hub's table.
         prices: None,
         protocol,
+        // Serve both OpenAI wires unless a test says otherwise — the reading a
+        // hand-added provider gets, and the one every pre-v30 row has.
+        openai_wire: OpenAiWire::Both,
         base_url,
         api_path: None,
         endpoints: Vec::new(),
@@ -3145,4 +3148,292 @@ async fn a_provider_outside_a_client_keys_allowlist_is_pruned_not_fatal() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+// ── the OpenAI family's two wires (migration v30) ───────────────────────────
+
+/// A `/v1/responses` request against a provider declared as serving only Chat
+/// Completions: the request is converted in the adapters sublayer, the answer is
+/// converted back, and the meter counts what the client was told.
+///
+/// This is the cell that used to be silent. Both paths classify as
+/// `Protocol::OpenAI`, so a chat-only provider was sent a Responses body it had
+/// never heard of and answered 404 on its own — a failure the gateway had no way
+/// to explain, because it had no way to notice.
+#[tokio::test]
+async fn responses_inbound_converts_to_a_chat_only_provider() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let upstream_body = json!({
+        "id": "chatcmpl-1", "object": "chat.completion", "model": "gpt-5.5",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "hi from chat"},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 42, "completion_tokens": 7, "total_tokens": 49,
+            "prompt_tokens_details": {"cached_tokens": 32}
+        }
+    });
+    let (upstream_url, _captured, bodies) =
+        mock_openai_capturing_body(MockReply::Json(upstream_body)).await;
+
+    let mut p = provider("p-chat", Protocol::OpenAI, upstream_url);
+    p.openai_wire = OpenAiWire::Chat;
+    store.insert_provider(&p).unwrap();
+    store.upsert_binding(&bind("codex", "p-chat", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/responses",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"gpt-5.5","instructions":"be brief","input":"hello","max_output_tokens":64,"store":false}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["object"], "response");
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["output"][0]["type"], "message");
+    assert_eq!(body["output"][0]["content"][0]["type"], "output_text");
+    assert_eq!(body["output"][0]["content"][0]["text"], "hi from chat");
+    // The usage the meter reads: `input_tokens` stays inclusive of the cache
+    // bucket, which is what Chat's `prompt_tokens` means.
+    assert_eq!(body["usage"]["input_tokens"], 42);
+    assert_eq!(body["usage"]["output_tokens"], 7);
+    assert_eq!(body["usage"]["input_tokens_details"]["cached_tokens"], 32);
+
+    // The upstream got a Chat request: `instructions` became a system message,
+    // `input` a user message, and `max_output_tokens` is `max_tokens`.
+    let sent: Vec<Value> = bodies.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["max_tokens"], 64);
+    assert_eq!(sent[0]["messages"][0]["role"], "system");
+    assert_eq!(sent[0]["messages"][0]["content"], "be brief");
+    assert_eq!(sent[0]["messages"][1]["role"], "user");
+    assert_eq!(sent[0]["messages"][1]["content"], "hello");
+
+    let totals = wait_for_usage(&state, "codex", 1).await;
+    assert_eq!(totals.input_tokens, 42);
+    assert_eq!(totals.output_tokens, 7);
+    assert_eq!(totals.cache_read_tokens, 32);
+}
+
+/// The same conversion, streaming: the client gets the Responses event sequence
+/// and the metering scanner reads the `response.completed` event it already
+/// understands.
+#[tokio::test]
+async fn responses_inbound_converts_a_chat_sse_stream_to_responses_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (upstream_url, _captured, _bodies) = mock_openai_capturing_body(MockReply::Sse(vec![
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5.5\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"he\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5.5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"llo\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5.5\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5.5\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2,\"total_tokens\":13}}\n\n",
+        "data: [DONE]\n\n",
+    ]))
+    .await;
+
+    let mut p = provider("p-chat", Protocol::OpenAI, upstream_url);
+    p.openai_wire = OpenAiWire::Chat;
+    store.insert_provider(&p).unwrap();
+    store.upsert_binding(&bind("codex", "p-chat", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/responses",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"gpt-5.5","input":"hello","stream":true}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let text = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+
+    // The typed sequence, in order, and no chat.completion chunks leaking through.
+    for expected in [
+        "event: response.created",
+        "event: response.output_item.added",
+        "event: response.content_part.added",
+        "event: response.output_text.delta",
+        "event: response.output_text.done",
+        "event: response.completed",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+    assert!(!text.contains("chat.completion.chunk"), "{text}");
+    assert!(
+        text.find("response.created").unwrap() < text.find("response.completed").unwrap(),
+        "created comes first"
+    );
+    assert!(text.contains("\"text\":\"hello\""), "{text}");
+
+    let totals = wait_for_usage(&state, "codex", 1).await;
+    assert_eq!(totals.input_tokens, 11);
+    assert_eq!(totals.output_tokens, 2);
+}
+
+/// A provider that serves both wires is sent the request as it arrived — the
+/// behaviour every provider had before the column existed, and the reason its
+/// default is `both` rather than a guess.
+#[tokio::test]
+async fn responses_pass_through_when_the_provider_serves_both() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let captured: CapturedBodies = Arc::new(Mutex::new(Vec::new()));
+    let bodies = captured.clone();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(
+                move |AxumState(b): AxumState<CapturedBodies>, body: axum::body::Bytes| async move {
+                    if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                        b.lock().unwrap().push(v);
+                    }
+                    Json(json!({"id": "resp_1", "object": "response", "output": []}))
+                        .into_response()
+                },
+            ),
+        )
+        .with_state(captured);
+    let upstream_url = spawn(app).await;
+
+    // `provider()` leaves the wire at its default, which is the case under study.
+    store
+        .insert_provider(&provider("p-both", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-both", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/responses",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"gpt-5.5","input":"hello"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Cloned out of the guard: the assertions below await, and a std guard does
+    // not survive an await point.
+    let sent: Vec<Value> = bodies.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    // Unconverted: a Responses body is not a `messages` array.
+    assert_eq!(sent[0]["input"], "hello");
+    assert!(sent[0].get("messages").is_none(), "{:?}", sent[0]);
+}
+
+/// The reverse cell is refused with a reason rather than approximated: a Chat
+/// request against a Responses-only provider would have to invent an `input`.
+#[tokio::test]
+async fn chat_inbound_to_a_responses_only_provider_is_refused_without_a_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let (upstream_url, captured) = mock_openai(MockReply::Json(json!({}))).await;
+
+    let mut p = provider("p-resp", Protocol::OpenAI, upstream_url);
+    p.openai_wire = OpenAiWire::Responses;
+    store.insert_provider(&p).unwrap();
+    store.upsert_binding(&bind("claude", "p-resp", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Responses"),
+        "{body}"
+    );
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "the vendor is never asked a question it cannot answer"
+    );
+}
+
+/// A 404 from a provider declared as serving both wires leaves the fix in the
+/// log: the request went out unconverted, and only the user knows what their
+/// endpoint really serves.
+#[tokio::test]
+async fn a_404_on_responses_leaves_the_wire_declaration_in_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let captured: CapturedBodies = Arc::new(Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(
+                |AxumState(b): AxumState<CapturedBodies>, body: axum::body::Bytes| async move {
+                    if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                        b.lock().unwrap().push(v);
+                    }
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"error": {"message": "unknown endpoint"}})),
+                    )
+                        .into_response()
+                },
+            ),
+        )
+        .with_state(captured);
+    let upstream_url = spawn(app).await;
+
+    store
+        .insert_provider(&provider("p-both", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-both", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/responses",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"gpt-5.5","input":"hello"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let rows = wait_for_log(&state, 1).await;
+    let note = rows[0]
+        .request_notes
+        .as_deref()
+        .expect("the fix is written down");
+    assert!(note.contains("--openai-wire chat"), "{note}");
 }

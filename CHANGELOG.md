@@ -40,6 +40,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   plane's only bound was the network it sat on, and the credential that reached it
   could be used without limit, on any model, through any provider the agent had.
 
+- **The OpenAI family's two wires can be bridged: `providers --openai-wire`.** A
+  provider can now say which of the OpenAI family's request shapes it serves —
+  `/v1/chat/completions`, `/v1/responses`, or both. With `chat`, an agent's
+  `/v1/responses` request (which is what Codex sends) is converted to Chat
+  Completions on the way out and the answer converted back, streaming included.
+
+  Until now both paths classified as one protocol and both were passed through
+  verbatim, so a chat-only provider answered a Responses request with a 404 of
+  its own — a failure the gateway could not explain, because it could not notice.
+  `both` is the default and changes nothing, so no existing provider is
+  reinterpreted. The reverse direction is refused with a reason rather than
+  approximated: a Chat request for a Responses-only provider would have to invent
+  an `input`.
+
 ### Changed
 
 - **The placeholder key is the client key.** The table (`placeholder_keys` →

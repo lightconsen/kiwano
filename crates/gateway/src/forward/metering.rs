@@ -154,6 +154,7 @@ mod tests {
                 // No declared prices: this fixture is priced by the Hub's table.
                 prices: None,
                 protocol: Protocol::Anthropic,
+                openai_wire: crate::store::OpenAiWire::Both,
                 base_url: "https://a.example.com".into(),
                 api_path: None,
                 endpoints: Vec::new(),
@@ -256,6 +257,7 @@ mod tests {
                     // No declared prices: this fixture is priced by the Hub's table.
                     prices: None,
                     protocol: Protocol::Anthropic,
+                    openai_wire: crate::store::OpenAiWire::Both,
                     base_url: "https://a.example.com".into(),
                     api_path: None,
                     endpoints: Vec::new(),
@@ -373,6 +375,7 @@ mod tests {
                 catalog_id: catalog_id.map(str::to_string),
                 prices: prices.map(str::to_string),
                 protocol: Protocol::Anthropic,
+                openai_wire: crate::store::OpenAiWire::Both,
                 base_url: "https://a.example.com".into(),
                 api_path: None,
                 endpoints: Vec::new(),
@@ -490,6 +493,7 @@ mod tests {
                 catalog_id: None,
                 prices: None,
                 protocol: Protocol::OpenAI,
+                openai_wire: crate::store::OpenAiWire::Both,
                 base_url: "https://a.example.com".into(),
                 api_path: None,
                 endpoints: Vec::new(),
@@ -628,6 +632,7 @@ mod tests {
                     // No declared prices: this fixture is priced by the Hub's table.
                     prices: None,
                     protocol: Protocol::Anthropic,
+                    openai_wire: crate::store::OpenAiWire::Both,
                     base_url: "https://a.example.com".into(),
                     api_path: None,
                     endpoints: Vec::new(),
@@ -735,6 +740,7 @@ mod tests {
                     // No declared prices: this fixture is priced by the Hub's table.
                     prices: None,
                     protocol: Protocol::Anthropic,
+                    openai_wire: crate::store::OpenAiWire::Both,
                     base_url: "https://a.example.com".into(),
                     api_path: None,
                     endpoints: Vec::new(),

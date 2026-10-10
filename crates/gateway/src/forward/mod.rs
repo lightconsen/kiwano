@@ -35,6 +35,7 @@
 //! and `convert` are the two entry points, both of which end in `metering`.
 
 pub mod convert;
+pub mod convert_responses;
 pub mod finish;
 pub mod headers;
 pub mod inbound;
@@ -72,6 +73,7 @@ pub(crate) mod test_support {
             name: "p1".into(),
             catalog_id: None,
             protocol,
+            openai_wire: Default::default(),
             base_url: "https://up.example.com".into(),
             api_path: api_path.map(Into::into),
             endpoints: Vec::new(),

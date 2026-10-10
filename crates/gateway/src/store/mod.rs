@@ -59,8 +59,8 @@ pub use migrations::SCHEMA_VERSION;
 pub use time::{now_rfc3339, rfc3339_from_unix, unix_now};
 pub use types::{
     AgentLimit, ApiKeyRow, Billing, Binding, ClientKey, ClientKeyLimit, CostBucket, CustomAgent,
-    DailyUsage, Protocol, Provider, ProviderCostBucket, ProviderEndpoint, ProviderHealth,
-    ProviderUsage, Strategy, StrategyType, TrafficStats, UsageRecord, UsageTotals,
+    DailyUsage, OpenAiWire, Protocol, Provider, ProviderCostBucket, ProviderEndpoint,
+    ProviderHealth, ProviderUsage, Strategy, StrategyType, TrafficStats, UsageRecord, UsageTotals,
 };
 
 /// Thin handle around a SQLite connection (WAL, shared with the Tauri app).
@@ -85,6 +85,7 @@ pub(crate) mod test_support {
             prices: None,
             protocol,
             base_url: "https://api.example.com".to_string(),
+            openai_wire: crate::store::OpenAiWire::Both,
             api_path: None,
             endpoints: Vec::new(),
             api_key: Some("sk-upstream".to_string()),

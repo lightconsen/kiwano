@@ -93,7 +93,13 @@ pub(crate) fn render_providers(vms: &[vm::ProviderVm]) -> String {
             vec![
                 ellipsize(&p.id, 30),
                 ellipsize(&p.name, 24),
-                p.protocol.clone(),
+                // The declared wire rides the protocol cell, and only when it is
+                // a restriction: `both` is every provider that predates the
+                // column, and printing it in every row would be noise.
+                match p.openai_wire.as_deref() {
+                    Some(wire) => format!("{}·{wire}", p.protocol),
+                    None => p.protocol.clone(),
+                },
                 ellipsize(&p.endpoint, 40),
                 p.billing.clone(),
                 p.agents

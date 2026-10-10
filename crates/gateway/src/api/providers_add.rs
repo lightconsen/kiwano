@@ -101,6 +101,31 @@ pub fn absolute_endpoint(raw: &str) -> String {
     format!("{}{endpoint}", if local { "http://" } else { "https://" })
 }
 
+/// The wire a provider is declared to serve, from what the caller sent.
+///
+/// Refused rather than ignored when it is given for a provider that is not
+/// OpenAI: accepting it would store a restriction that nothing consults, and a
+/// user who typed `--openai-wire chat` on an Anthropic provider would have no way
+/// to find out it meant nothing. An unrecognised value is refused for the same
+/// reason — silently reading it as `both` would turn a typo into "no restriction".
+pub(crate) fn resolve_openai_wire(
+    raw: Option<&str>,
+    protocol: crate::store::Protocol,
+) -> Result<crate::store::OpenAiWire, String> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(crate::store::OpenAiWire::Both);
+    };
+    if protocol != crate::store::Protocol::OpenAI {
+        return Err(format!(
+            "`openai_wire` describes which OpenAI wire an endpoint serves, and this provider is \
+             `{}` — leave it unset",
+            protocol.as_str()
+        ));
+    }
+    crate::store::OpenAiWire::parse_str(raw)
+        .ok_or_else(|| format!("`{raw}` is not an OpenAI wire: expected chat, responses or both"))
+}
+
 pub fn input_endpoints(input: &NewProviderInput) -> Vec<crate::store::ProviderEndpoint> {
     endpoints_from(&input.endpoints)
 }
@@ -146,6 +171,8 @@ fn provider_vm(
         currency: provider_currency(provider, catalog_entries),
         endpoint: display_endpoint(provider),
         protocol: provider.protocol.as_str().to_string(),
+        openai_wire: (provider.openai_wire != crate::store::OpenAiWire::Both)
+            .then(|| provider.openai_wire.as_str().to_string()),
         endpoint_note: endpoint_note(provider),
         endpoints: vm_endpoints(provider),
         billing: billing_to_ui(provider.billing).to_string(),
@@ -198,6 +225,12 @@ pub fn update_provider(store: &Store, id: &str, patch: &ProviderPatch) -> Result
     if let Some(protocol) = &patch.protocol {
         p.protocol =
             crate::store::Protocol::parse_str(protocol).unwrap_or(crate::store::Protocol::OpenAI);
+    }
+    if let Some(wire) = &patch.openai_wire {
+        // Resolved against the protocol this row will have *after* the patch:
+        // one call that moves a provider to anthropic and sets a wire is a
+        // contradiction, and it is refused as one rather than stored half-applied.
+        p.openai_wire = resolve_openai_wire(Some(wire), p.protocol).map_err(ApiError::invalid)?;
     }
     if let Some(endpoints) = &patch.endpoints {
         p.endpoints = endpoints_from(endpoints);
@@ -425,6 +458,10 @@ pub fn add_provider(
         ));
     }
     let now = crate::store::now_rfc3339();
+    let protocol = crate::store::Protocol::parse_str(&input.protocol)
+        .unwrap_or(crate::store::Protocol::OpenAI);
+    let openai_wire =
+        resolve_openai_wire(input.openai_wire.as_deref(), protocol).map_err(ApiError::invalid)?;
     let reset_period = match input.billing_config.reset_period.as_deref() {
         Some("monthly") | Some("weekly") | Some("yearly") => {
             input.billing_config.reset_period.clone()
@@ -457,9 +494,9 @@ pub fn add_provider(
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .map(str::to_string),
-        protocol: crate::store::Protocol::parse_str(&input.protocol)
-            .unwrap_or(crate::store::Protocol::OpenAI),
+        protocol,
         base_url: absolute_endpoint(&input.endpoint),
+        openai_wire,
         api_path: None,
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
@@ -558,6 +595,8 @@ pub fn add_provider(
         currency: vm_currency,
         endpoint: vm_endpoint,
         protocol: vm_protocol,
+        openai_wire: (provider.openai_wire != crate::store::OpenAiWire::Both)
+            .then(|| provider.openai_wire.as_str().to_string()),
         endpoint_note: vm_note,
         endpoints: vm_endpoints,
         billing: vm_billing,
@@ -600,6 +639,7 @@ mod tests {
             api_key: "sk-test".into(),
             endpoint: endpoint.into(),
             protocol: "openai".into(),
+            openai_wire: Default::default(),
             model_default: String::new(),
             billing: "payg".into(),
             billing_config: BillingConfigInput {
@@ -846,6 +886,7 @@ mod tests {
                 name: "Old".into(),
                 catalog_id: None,
                 protocol: Protocol::OpenAI,
+                openai_wire: crate::store::OpenAiWire::Both,
                 base_url: "http://127.0.0.1:1".into(),
                 api_path: None,
                 endpoints: Vec::new(),

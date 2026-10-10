@@ -139,6 +139,7 @@ pub fn import_current_provider(store: &Store, creds: &CurrentCreds) -> Result<St
         protocol: crate::store::Protocol::parse_str(&creds.protocol)
             .unwrap_or(crate::store::Protocol::OpenAI),
         base_url: base.to_string(),
+        openai_wire: crate::store::OpenAiWire::Both,
         api_path: None,
         endpoints: Vec::new(),
         api_key: Some(creds.api_key.clone()),
@@ -234,6 +235,7 @@ mod tests {
                 id: "p-1".into(),
                 name: "Upstream".into(),
                 protocol: crate::store::Protocol::OpenAI,
+                openai_wire: crate::store::OpenAiWire::Both,
                 base_url: "https://api.upstream.example".into(),
                 api_path: None,
                 endpoints: Vec::new(),

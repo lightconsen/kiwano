@@ -628,6 +628,8 @@ fn provider_vm(ctx: &ProviderViewCtx, p: Provider, badges: BadgeSet) -> Provider
         currency: provider_currency(&p, ctx.catalog_entries),
         endpoint: display_endpoint(&p),
         protocol: p.protocol.as_str().to_string(),
+        openai_wire: (p.openai_wire != crate::store::OpenAiWire::Both)
+            .then(|| p.openai_wire.as_str().to_string()),
         endpoint_note: endpoint_note(&p),
         endpoints: vm_endpoints(&p),
         billing: billing_to_ui(p.billing).to_string(),

@@ -84,6 +84,20 @@ pub async fn forward(
             };
             &provider_for_alt
         }
+        InboundResolution::ConvertResponsesToChat => {
+            return crate::forward::convert_responses::forward_responses_via_chat(
+                state,
+                method,
+                inbound_headers,
+                body,
+                routed,
+                inbound,
+                started,
+                started_unix,
+                log,
+            )
+            .await;
+        }
         InboundResolution::ConvertAnthropicToOpenAI => {
             return forward_anthropic_via_openai(
                 state,
@@ -217,6 +231,37 @@ pub async fn forward(
         sse = is_sse,
         "upstream responded"
     );
+
+    // A 404 on a `/v1/responses` request to a provider declared as serving both
+    // wires is the one failure the user can fix and cannot diagnose: the request
+    // went out as it arrived, and the vendor's "no such endpoint" says nothing
+    // about a declaration the gateway offers. The note names the fix rather than
+    // the gateway guessing at it — a `base_url` we cannot see behind is not
+    // something to infer a wire from.
+    if status == StatusCode::NOT_FOUND
+        && provider.protocol == crate::store::Protocol::OpenAI
+        && provider.openai_wire == crate::store::OpenAiWire::Both
+        && crate::protocol::openai_wire_of_path(&path)
+            == Some(crate::protocol::OpenAiWirePath::Responses)
+    {
+        if let Some(l) = log.as_mut() {
+            let note = format!(
+                "provider `{}` answered 404 for `/v1/responses`; if it serves only Chat \
+                 Completions, declare that with `kiwano providers edit {} --openai-wire chat` and \
+                 the request will be converted instead",
+                provider.id, provider.id
+            );
+            l.request_notes = Some(match l.request_notes.take() {
+                Some(existing) => format!("{existing}\n{note}"),
+                None => note,
+            });
+        }
+        tracing::warn!(
+            provider = %provider.id,
+            agent = %routed.agent,
+            "404 on /v1/responses from a provider declared as serving both OpenAI wires"
+        );
+    }
 
     // reqwest consumes the Response on bytes()/bytes_stream(), so snapshot
     // the client-facing headers first.

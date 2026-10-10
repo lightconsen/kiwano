@@ -96,6 +96,13 @@ pub struct ProviderVm {
     /// Additional per-protocol endpoints (primary excluded).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<ProviderEndpointVm>,
+    /// The OpenAI wire this provider is declared as serving, when it is not
+    /// `both` (migration v30). Absent is the pass-through reading, which is every
+    /// provider that predates the column — so the field is a *restriction* being
+    /// reported, not a setting being echoed, and a caller that does not show it
+    /// shows the common case correctly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_wire: Option<String>,
     pub billing: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_price: Option<String>,
@@ -209,6 +216,17 @@ pub struct NewProviderInput {
     pub api_key: String,
     pub endpoint: String,
     pub protocol: String,
+    /// Which OpenAI wire this endpoint serves: `chat`, `responses`, or `both`
+    /// (migration v30). Absent means `both`, which is every provider added
+    /// before the field existed and the reading that changes nothing: whatever
+    /// arrives is passed through, and the vendor's own 404 is what tells a user
+    /// they declared it wrong.
+    ///
+    /// Only meaningful for an OpenAI-protocol provider; a value sent with any
+    /// other protocol is refused rather than stored, because a column nobody
+    /// reads is one nobody can be told about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_wire: Option<String>,
     /// The model the form collected as this provider's default.
     ///
     /// It was carried here for a long time and read by nothing — stored in no
@@ -337,6 +355,10 @@ pub struct ProviderPatch {
     pub endpoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
+    /// Which OpenAI wire the endpoint serves (migration v30). Absent keeps the
+    /// stored value; the same values `NewProviderInput` takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_wire: Option<String>,
     /// Empty clears the column (`model_default` stores NULL for none).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_default: Option<String>,

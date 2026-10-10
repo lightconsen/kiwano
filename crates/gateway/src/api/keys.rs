@@ -79,6 +79,7 @@ mod tests {
             name: id.into(),
             catalog_id: None,
             protocol: Protocol::OpenAI,
+            openai_wire: crate::store::OpenAiWire::Both,
             base_url: "http://127.0.0.1:1".into(),
             api_path: None,
             endpoints: Vec::new(),

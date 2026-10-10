@@ -23,6 +23,28 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         ProvidersCmd::Use { provider_id, agent } => providers_use(ctx, provider_id, agent),
         ProvidersCmd::Remove { provider_id } => providers_remove(ctx, provider_id),
         ProvidersCmd::Edit(args) => providers_edit(args, ctx),
+        ProvidersCmd::Price {
+            provider_id,
+            model,
+            input,
+            output,
+            cache_read,
+            cache_creation,
+            currency,
+            clear,
+        } => providers_price(
+            ctx,
+            provider_id,
+            PriceDeclaration {
+                model,
+                input: input.as_deref(),
+                output: output.as_deref(),
+                cache_read: cache_read.as_deref(),
+                cache_creation: cache_creation.as_deref(),
+                currency: currency.as_deref(),
+                clear: *clear,
+            },
+        ),
         ProvidersCmd::Enable { provider_id } => providers_set_enabled(ctx, provider_id, true),
         ProvidersCmd::Disable { provider_id } => providers_set_enabled(ctx, provider_id, false),
         ProvidersCmd::Probe(cmd) => providers_probe(cmd, ctx),
@@ -119,6 +141,115 @@ fn providers_remove(ctx: &mut Ctx, provider_id: &str) -> Result<(), CliError> {
         return Err(runtime(format!("provider not found: {provider_id}")));
     }
     ctx.out.line(format!("removed {provider_id}"));
+    Ok(())
+}
+
+/// One `providers price` call: which model, at what rates.
+struct PriceDeclaration<'a> {
+    model: &'a str,
+    input: Option<&'a str>,
+    output: Option<&'a str>,
+    cache_read: Option<&'a str>,
+    cache_creation: Option<&'a str>,
+    currency: Option<&'a str>,
+    clear: bool,
+}
+
+/// Declare, or drop, what a provider charges for one model.
+///
+/// A provider's declared prices are **one currency and a whole list of models**,
+/// and the write is a snapshot rather than a patch (`ProviderPatch::prices`:
+/// "a present bundle is an authoritative snapshot, so an empty model list clears
+/// the column"). So this reads the stored set, folds this model into it, and
+/// sends the result back whole — which is what keeps "declare a price for a
+/// second model" from quietly dropping the first.
+fn providers_price(
+    ctx: &mut Ctx,
+    provider_id: &str,
+    declared: PriceDeclaration<'_>,
+) -> Result<(), CliError> {
+    // Through the daemon, with this machine's evidence: nothing here reads a
+    // database (`migrate.local.md` §10.44).
+    let providers = vm::providers::provider_view(&ctx.api, &ctx.home, ctx.config_vars())?;
+    let provider = providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| runtime(format!("no provider `{provider_id}`")))?;
+
+    // The view carries the stored blob as JSON, so a declaration the user made in
+    // the app arrives here as the same shape this command writes. An unreadable
+    // one is refused rather than treated as empty: overwriting a set nobody can
+    // parse would destroy whatever it says.
+    let stored: Option<vm::ProviderPricesInput> = match provider.prices.as_ref() {
+        Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| {
+            runtime(format!(
+                "this provider's stored prices could not be read ({e}); edit them in the app \
+                 rather than replacing them from here"
+            ))
+        })?),
+        None => None,
+    };
+    let mut models = stored
+        .as_ref()
+        .map(|p| p.models.clone())
+        .unwrap_or_default();
+
+    // One currency per provider, because the stored shape has one. A new currency
+    // would re-denominate every other model's rates, so it is refused rather than
+    // applied to a set it does not describe.
+    let currency = match (
+        declared.currency,
+        stored.as_ref().map(|p| p.currency.as_str()),
+    ) {
+        (Some(wanted), Some(stored))
+            if !models.is_empty() && !wanted.eq_ignore_ascii_case(stored) =>
+        {
+            return Err(runtime(format!(
+                "this provider's declared prices are in {stored}; declaring {wanted} would \
+                 re-denominate the {} other model(s) already declared. Clear them first \
+                 (`--clear <model>` each), or keep the currency.",
+                models.len()
+            )));
+        }
+        (Some(wanted), _) => wanted.trim().to_ascii_uppercase(),
+        (None, Some(stored)) => stored.to_string(),
+        (None, None) => provider.currency.clone(),
+    };
+
+    // Replace-or-drop this model, leaving every other declaration alone.
+    models.retain(|m| m.model_id != declared.model);
+    if !declared.clear {
+        fn blank(v: Option<&str>) -> Option<&str> {
+            v.map(str::trim).filter(|s| !s.is_empty())
+        }
+        models.push(vm::ProviderPriceInput {
+            model_id: declared.model.to_string(),
+            input: blank(declared.input).unwrap_or_default().to_string(),
+            output: blank(declared.output).unwrap_or_default().to_string(),
+            // Blank is zero, not "charge the input rate": the field is omitted
+            // rather than defaulted to something the user did not say.
+            cache_read: blank(declared.cache_read).map(str::to_string),
+            cache_creation: blank(declared.cache_creation).map(str::to_string),
+        });
+    }
+
+    ctx.api.update_provider(
+        provider_id,
+        &vm::ProviderPatch {
+            prices: Some(vm::ProviderPricesInput { currency, models }),
+            ..Default::default()
+        },
+    )?;
+
+    let verb = if declared.clear {
+        "dropped"
+    } else {
+        "declared"
+    };
+    ctx.out.line(format!(
+        "{verb} a price for {} on {provider_id}",
+        declared.model
+    ));
     Ok(())
 }
 

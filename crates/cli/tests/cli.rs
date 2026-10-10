@@ -2504,3 +2504,207 @@ fn history_import_on_an_empty_home_says_so() {
     assert_ne!(code, 0);
     assert!(err.contains("no reader for"), "{err}");
 }
+
+/// Declaring a price for one model leaves the provider's other declarations
+/// alone — the write is a snapshot, so this command has to fold rather than
+/// replace.
+#[test]
+fn declaring_a_price_keeps_the_providers_other_declarations() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let provider = add_provider(&db, "relay", &[]);
+
+    for (model, input) in [("acme-large", "3"), ("acme-small", "0.5")] {
+        let (code, _, err) = run_served(
+            &db,
+            &daemon,
+            &[
+                "providers",
+                "price",
+                &provider,
+                "--model",
+                model,
+                "--input",
+                input,
+                "--output",
+                "15",
+                "--currency",
+                "USD",
+            ],
+        );
+        assert_eq!(code, 0, "{err}");
+    }
+
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "providers", "list"]);
+    let providers: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let prices = &providers[0]["prices"];
+    assert_eq!(prices["currency"], "USD");
+    let models: Vec<&str> = prices["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["model_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        models,
+        vec!["acme-large", "acme-small"],
+        "both, not just the last"
+    );
+
+    // Re-declaring one model updates it in place rather than adding a second row.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "acme-small",
+            "--input",
+            "0.9",
+            "--output",
+            "9",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "providers", "list"]);
+    let providers: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let models = providers[0]["prices"]["models"].as_array().unwrap();
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[1]["input"], "0.9");
+
+    // A different currency would re-denominate the first model's rates, so it is
+    // refused rather than silently applied.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "acme-third",
+            "--input",
+            "1",
+            "--output",
+            "2",
+            "--currency",
+            "CNY",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("declared prices are in USD"), "{err}");
+
+    // And clearing drops one, leaving the other.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "acme-large",
+            "--clear",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "providers", "list"]);
+    let providers: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let models = providers[0]["prices"]["models"].as_array().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["model_id"], "acme-small");
+}
+
+/// The loop the command exists for: a model the Hub cannot price is priced by a
+/// declaration, and the imported history shows the money.
+#[test]
+fn a_declared_price_prices_an_imported_models_rows() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let provider = add_provider(&db, "relay", &[]);
+    let home = tempfile::tempdir().unwrap();
+
+    // A transcript whose model name the Hub does not price.
+    let dir = home
+        .path()
+        .join(".claude")
+        .join("projects")
+        .join("-home-me-work-acme-api");
+    std::fs::create_dir_all(&dir).unwrap();
+    let record = serde_json::json!({
+        "type": "assistant",
+        "uuid": "r1",
+        "timestamp": "2026-01-02T10:00:00Z",
+        "sessionId": "22222222-3333-4444-5555-666666666666",
+        "cwd": home.path().to_string_lossy(),
+        "message": {
+            "model": "a-plan-name",
+            "usage": { "input_tokens": 1_000_000, "output_tokens": 0 },
+            "content": [],
+        },
+    });
+    std::fs::write(dir.join("s.jsonl"), format!("{record}\n")).unwrap();
+
+    let home_arg = home.path().display().to_string();
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "history", "import"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let first: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(first["unpriced"], 1);
+    assert_eq!(first["unpriced_models"][0]["model"], "a-plan-name");
+
+    // The report named it; now declare what it costs and import again.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "a-plan-name",
+            "--input",
+            "2",
+            "--output",
+            "10",
+            "--currency",
+            "USD",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "history", "import"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let second: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(second["priced"].as_i64(), Some(1));
+    assert_eq!(second["unpriced"].as_i64(), Some(0));
+
+    // A million input tokens at $2 per million, and it shows up as money the
+    // dashboard includes — in the bucket for spend that never came through the
+    // gateway, since that is what it is.
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "dashboard", "--window", "all"]);
+    let dashboard: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let cost = dashboard["cost"].as_f64().unwrap();
+    assert!(
+        (cost - 2.0).abs() < 1e-6,
+        "one million input at 2/million: {cost}"
+    );
+    let bucket = dashboard["by_provider"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "imported-history")
+        .expect("the imported bucket");
+    assert!(
+        (bucket["cost"].as_f64().unwrap() - 2.0).abs() < 1e-6,
+        "{bucket}"
+    );
+}

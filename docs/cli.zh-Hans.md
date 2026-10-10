@@ -106,8 +106,17 @@ kiwano providers use <ID> --agent AGENT      switch an agent, forcing single str
 kiwano providers enable <ID>                 make it the current route, keeping the strategy
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
+kiwano providers price <ID> --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W] [--currency CODE]
+kiwano providers price <ID> --model M --clear
 kiwano providers probe latency|endpoint|models
 ```
+
+`providers price` 声明某个供应商对某个模型的收费，按每百万 token —— 只有你能提供的数字，因为 Hub 给的是**它自己**目录条目的价，而没挂目录条目的供应商没有任何公布价。一个供应商的声明是**一个币种加一整张模型表**，所以这条命令会读出已存的、把这个模型折进去、再把整张表送回去：给第二个模型声明价**不会**丢掉第一个。`--clear` 丢掉其中一个。
+
+它同时也是 Hub 定不了价的那个模型名的出口 —— 比如计划自己的名字（它指的是订阅当时给你的那个模型）。`kiwano history import` 会报出它算不出价的模型名，给其中之一声明一个价，那些行才算得进钱。
+
+`--openai-wire` 说明一个 OpenAI 供应商服务的是**哪一种**请求形状，只在两者不一致时才有意义：`chat` 表示它只讲 `/v1/chat/completions`，于是 agent 发来的 `/v1/responses`（Codex）会在出去时被翻译成 Chat Completions、回来时再翻回去；`responses` 表示只讲 `/v1/responses`，此时 `/v1/chat/completions` 会**带理由拒绝**而不是猜；`both`（默认）原样透传，由厂商回答它到底服务什么。这个旗标出现之前加的供应商都是 `both`，所以不设即什么都不变。
 
 `add` 和 `edit` 也都接受转发与配额选项:
 

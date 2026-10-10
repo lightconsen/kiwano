@@ -113,8 +113,23 @@ kiwano providers use <ID> --agent AGENT      switch an agent, forcing single str
 kiwano providers enable <ID>                 make it the current route, keeping the strategy
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
+kiwano providers price <ID> --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W] [--currency CODE]
+kiwano providers price <ID> --model M --clear
 kiwano providers probe latency|endpoint|models
 ```
+
+`providers price` declares what a provider charges for one model, per million
+tokens — the rates only you can supply, because the Hub prices the models of *its*
+catalog entries and a provider that names none has no published price. A
+provider's declarations are one currency and a whole list of models, so this
+reads what is stored, folds the model in, and sends the set back whole:
+declaring a price for a second model does not drop the first. `--clear` drops one.
+
+It is also the escape hatch for a model name the Hub cannot price — a plan's own
+name, say, which stands for whatever model the subscription currently grants.
+`kiwano history import` reports the names it could not cost, and declaring a price
+for one of them is what makes those rows count.
 
 `--openai-wire` says which of the OpenAI family's two request shapes an OpenAI
 provider serves, and it only matters when they differ:

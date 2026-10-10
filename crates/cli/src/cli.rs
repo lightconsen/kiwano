@@ -522,6 +522,47 @@ pub enum ProvidersCmd {
     /// Change a provider in place, keeping its id — and so every binding to it
     Edit(Box<EditArgs>),
 
+    /// Declare what a provider charges for a model, per million tokens
+    ///
+    /// The rates only the user can supply: the Hub prices the models of *its*
+    /// catalog entries, so a provider that names none has no published price —
+    /// and an imported row, which names a model and no provider, has nothing else
+    /// to go on. This is therefore also the escape hatch for a model name the Hub
+    /// cannot price (a plan's own name, say), which is where `history import`
+    /// points when it reports rows it could not cost.
+    Price {
+        provider_id: String,
+
+        #[arg(long, value_name = "MODEL")]
+        model: String,
+
+        /// Input rate, per million tokens
+        #[arg(long, value_name = "AMOUNT", required_unless_present = "clear")]
+        input: Option<String>,
+
+        /// Output rate, per million tokens
+        #[arg(long, value_name = "AMOUNT", required_unless_present = "clear")]
+        output: Option<String>,
+
+        /// Cache-read rate. Omitted is zero, which is what a vendor that charges
+        /// nothing for that bucket means — not the input rate.
+        #[arg(long, value_name = "AMOUNT")]
+        cache_read: Option<String>,
+
+        /// Cache-write rate. Omitted is zero, as above.
+        #[arg(long, value_name = "AMOUNT")]
+        cache_creation: Option<String>,
+
+        /// The currency all of this provider's declared prices are in. Defaults
+        /// to the one already stored, or the provider's own.
+        #[arg(long, value_name = "CODE")]
+        currency: Option<String>,
+
+        /// Drop this model's declaration instead of setting one
+        #[arg(long, conflicts_with_all = ["input", "output", "cache_read", "cache_creation"])]
+        clear: bool,
+    },
+
     /// Park a provider: out of every route, keeping its row and its key
     ///
     /// The agents bound to it fall through to their next candidate, exactly as

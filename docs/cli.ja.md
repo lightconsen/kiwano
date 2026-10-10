@@ -111,8 +111,17 @@ kiwano providers use <ID> --agent AGENT      switch an agent, forcing single str
 kiwano providers enable <ID>                 make it the current route, keeping the strategy
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
+kiwano providers price <ID> --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W] [--currency CODE]
+kiwano providers price <ID> --model M --clear
 kiwano providers probe latency|endpoint|models
 ```
+
+`providers price` は、あるプロバイダーがあるモデルにいくら課金するかを百万トークン単位で宣言します —— あなたにしか出せない数字です。Hub が値付けするのは**自分**のカタログ項目のモデルで、項目を持たないプロバイダーには公表価格がありません。プロバイダーの宣言は**1 つの通貨とモデルの一覧全体**なので、このコマンドは保存済みの内容を読み、そのモデルを畳み込み、一覧ごと送り返します —— 2 つ目のモデルを宣言しても 1 つ目は消えません。`--clear` は 1 つを外します。
+
+Hub が値付けできないモデル名の逃げ道でもあります —— たとえばプラン自身の名前で、それはサブスクリプションが現在与えているモデルを指します。`kiwano history import` は値付けできなかった名前を報告するので、その 1 つに価格を宣言すれば、その行が金額に数えられます。
+
+`--openai-wire` は、OpenAI プロバイダーが**どちらの**リクエスト形状に対応するかを述べます。両者が食い違うときだけ意味を持ちます：`chat` は `/v1/chat/completions` のみ、つまり agent が送る `/v1/responses`（Codex）は送信時に Chat Completions へ翻訳され、応答は逆に翻訳されます。`responses` は `/v1/responses` のみで、この場合 `/v1/chat/completions` は推測せず**理由を添えて拒否**されます。`both`（既定）はそのまま通し、何に対応しているかはベンダーが答えます。このフラグ以前に追加されたプロバイダーはすべて `both` なので、指定しなければ何も変わりません。
 
 `add` と `edit` はどちらも、転送とクォータのオプションを取ります:
 

@@ -157,6 +157,55 @@ kiwano keys remove <KEY_ID>
 
 轮换密钥会在供应商的主密钥之后尝试,按每个请求逐一进行。
 
+### 本机历史
+
+```
+kiwano history import [--agent claude|codex]… [--dry-run]
+kiwano history sessions [--project P] [--agent A] [--days N]
+```
+
+Agent 自己的历史：从它们的会话文件里读出来并导入，于是一台今天早上才装 Kiwano 的机器，
+dashboard 上已经有昨天的花费。`import` 读 Claude Code 与 Codex 的记录文件并把它们说的
+东西送过去；App 会在首次启动时跑同一趟扫描。`--dry-run` 只读只报告、什么都不写 ——
+这是"我的 dashboard 怎么还是空的"唯一诚实的回答，因为文件可能根本不在这个机器期望的
+位置（那些行走 stderr：扫描正是你 `| jq` 的那种命令）。
+
+看数字之前要知道两件事：
+
+- **只导入早于网关的部分。** 接管之后的每个请求都已经在账本里，而 Agent 无论如何都会
+  写自己的文件；分界线是每个 Agent 自己最早那条计量行，所以同一个请求不会被数两次。
+  `import` 会报告这条线挡掉了多少行。
+- **花费是估算。** 文件里只有 token、没有钱，而导入的请求没有可以套用声明价的供应商 ——
+  所以每行按该模型的通用价估算。从未同步过 Hub 的机器干脆什么都定不了价（行会带着 token
+  落地、没有花费）；之后再跑一次 `history import` 会补上，因为导入是幂等的。
+
+`sessions` 列出导入了什么：项目、起止、轮次、token 与用过的工具。这里的项目是从记录里的
+工作目录推导出的**标签** —— 仓库的目录名，不是路径，因为网关从不被告知这台机器的布局。
+
+### 客户端密钥
+
+```
+kiwano clients list [--agent A]                 句柄、Agent、限额与白名单
+kiwano clients show <ID>                        按句柄（ck-…）看一把密钥
+kiwano clients add --agent A [--label L]        铸造一把；密钥只打印这一次
+                   [--model M]… [--provider P]… [--window PERIOD:LIMIT[:UNIT]]…
+kiwano clients remove <ID>
+kiwano clients rotate <ID>                      换新密钥，句柄与预算不变
+kiwano clients limits <ID> [--window PERIOD:LIMIT[:UNIT]]…   不给 --window 就清空
+kiwano clients policy <ID> [--label L] [--model M]… [--provider P]…
+```
+
+数据面的凭据：Agent 拿它来出示，也用它约束自己能做什么。一把密钥对应一个 Agent，
+而同一个 Agent 的第二把密钥就是第二份预算 —— 之所以要有两把，是一台笔记本和一台
+台式机在跑同一个 Agent。窗口写成 `day:200:requests`、`monthly:20:USD` 或
+`weekly:5:wan_tokens`；单位可以省略，省略即 `requests`。超出一个窗口，网关回 429 并带上
+`Retry-After`；模型或供应商落在白名单之外，回 403。已存的密钥**读不回来**：只有 `add`
+和 `rotate` 会打印一次。
+
+`list` 的最后一列是**最后使用** —— 这把密钥最近一次承载请求的时间，从未用过则显示
+`never`。撤销一把密钥靠的就是这一列，所以两种状态分开表达：`never` 是"铸出来还没用过"，
+有日期是"用过、之后可能闲置了"。它读的是计量行，因此只知道经过**本网关**的流量。
+
 ### Agent
 
 ```

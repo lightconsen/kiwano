@@ -661,13 +661,13 @@ impl PipeListener {
                 // Only reachable if the replace below itself failed. Rebuild
                 // rather than panic: a gateway that cannot create a pipe has
                 // nothing to serve, but it can still try again.
-                match create_pipe_instance(self.name()) {
+                match create_pipe_instance(self.name) {
                     Ok(next) => {
                         self.pending = Some(next);
                         continue;
                     }
                     Err(e) => {
-                        tracing::error!(pipe = %self.name(), error = %e, "cannot create the admin pipe; retrying");
+                        tracing::error!(pipe = %self.name, error = %e, "cannot create the admin pipe; retrying");
                         tokio::time::sleep(RETRY_DELAY).await;
                         continue;
                     }
@@ -678,18 +678,18 @@ impl PipeListener {
                     // Replace the instance *before* handing this one to axum:
                     // the connection is already established, so the next client
                     // must still find something listening when it arrives.
-                    match create_pipe_instance(self.name()) {
+                    match create_pipe_instance(self.name) {
                         Ok(next) => self.pending = Some(next),
                         Err(e) => {
                             tracing::error!(
-                                pipe = %self.name(),
+                                pipe = %self.name,
                                 error = %e,
                                 "cannot queue the next admin pipe instance; \
                                  the next connection may be refused"
                             );
                         }
                     }
-                    return (server, self.name().to_string());
+                    return (server, self.name.to_string());
                 }
                 Err(e) => {
                     // A client that vanished between CreateFileW and the connect
@@ -697,7 +697,7 @@ impl PipeListener {
                     // giving up the accept loop over. Drop this instance — that
                     // is what disconnects it — and let the top of the loop
                     // create a fresh one.
-                    tracing::warn!(pipe = %self.name(), error = %e, "admin pipe connect failed; retrying");
+                    tracing::warn!(pipe = %self.name, error = %e, "admin pipe connect failed; retrying");
                     drop(server);
                 }
             }

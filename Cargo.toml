@@ -3,7 +3,7 @@ resolver = "2"
 members = ["app/src-tauri", "crates/core", "crates/gateway", "crates/adapters", "crates/cli", "crates/api"]
 
 [workspace.package]
-version = "0.2.13"
+version = "0.3.0"
 edition = "2021"
 authors = ["john2ai <john@lightconsen.com>"]
 license = "Apache-2.0"

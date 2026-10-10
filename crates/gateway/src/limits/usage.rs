@@ -40,6 +40,15 @@ pub fn period_limit_usage(
         p.reset_period.as_deref(),
         store.ui_tz_offset_minutes(),
     );
+    // A limit with no reset period has no window to measure over, and that is
+    // the one case where the ceiling has to supply its own start. "Since the
+    // beginning of time" was that answer, and it made a cap count spend that
+    // happened before it existed: a provider with months of traffic behind it
+    // was over a total cap the moment the cap was typed in. A provider's own age
+    // is the natural start — the cap is about what *this* provider has served —
+    // and it is also why an imported history can never trip one: those rows are
+    // older than any row this gateway wrote.
+    let since = since.or_else(|| Some(p.created_at.clone()));
     let used = match unit {
         "wan_tokens" => {
             let t = store.usage_totals_for_provider(&p.id, since.as_deref())?;
@@ -104,6 +113,15 @@ pub fn agent_limit_usage(
     let reset = (limit.period != "all").then_some(limit.period.as_str());
     let (since, period_key) =
         period_start(Utc::now().timestamp(), reset, store.ui_tz_offset_minutes());
+    // `all` is the one window with no start of its own, so the ceiling supplies
+    // it: the moment it was set. Two things follow, and both are the point of
+    // having an `all` window at all — the count cannot include spend that
+    // happened before the user asked to be capped (setting a total cap used to
+    // put an agent at 90% on the spot), and an imported history lands before
+    // every ceiling's start by construction. A windowed ceiling is untouched:
+    // there the window *is* the boundary, and cutting it at `created_at` would
+    // make the day's cap and the day's dashboard two different numbers.
+    let since = since.or_else(|| Some(limit.created_at.clone()));
     let used = match unit {
         "wan_tokens" => {
             let t = store.usage_totals(Some(&limit.agent), None, since.as_deref())?;
@@ -166,6 +184,9 @@ pub fn client_key_limit_usage(
     let reset = (limit.period != "all").then_some(limit.period.as_str());
     let (since, period_key) =
         period_start(Utc::now().timestamp(), reset, store.ui_tz_offset_minutes());
+    // Same rule as an agent's ceiling, for the same reason: `all` measures from
+    // the moment it was set, and nothing older counts.
+    let since = since.or_else(|| Some(limit.created_at.clone()));
     let used = match unit {
         "wan_tokens" => {
             let t = store.usage_totals_for_client_key(&limit.key_id, since.as_deref())?;
@@ -320,5 +341,190 @@ mod tests {
         // A stored zero window is still no ceiling, and does not block.
         set_limits(&store, "claude", vec![zero]);
         assert!(evaluate(&store).agent_blocked("claude").is_none());
+    }
+}
+
+#[cfg(test)]
+mod all_window_tests {
+    use super::*;
+    use crate::limits::state::evaluate;
+    use crate::limits::test_support::{agent_limit, client_key, record_key_row, test_provider};
+    use crate::store::{AgentLimit, UsageRecord};
+
+    /// One request row at an explicit instant — the fixture the whole
+    /// distinction rests on, because "older than the ceiling" has to be a fact
+    /// about `ts` and not about the order rows were written in.
+    fn row_at(
+        store: &Store,
+        ts: &str,
+        agent: &str,
+        provider_id: &str,
+        client_key_id: Option<&str>,
+    ) {
+        store
+            .record_usage(&UsageRecord {
+                ts: ts.into(),
+                agent: agent.into(),
+                provider_id: provider_id.into(),
+                client_key_id: client_key_id.map(str::to_string),
+                model: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+            })
+            .unwrap();
+    }
+
+    /// A **total** ceiling measures from the moment it was set, so spend that
+    /// predates it does not count.
+    ///
+    /// It used to count everything ever recorded: a user who set "1000 requests,
+    /// no reset" on an agent that had already made 900 was over at once, and at
+    /// 1000 the gateway refused live traffic they had just asked to be allowed.
+    /// The same rule is what keeps an imported history — every row of it older
+    /// than any row this gateway wrote — from tripping any ceiling.
+    #[test]
+    fn an_all_ceiling_measures_from_when_it_was_set() {
+        let (_dir, store) = crate::limits::test_support::store_with_hub_rates(r#"{"USD":1.0}"#);
+        store.insert_provider(&test_provider("ds-1")).unwrap();
+
+        // Five requests made before anyone asked for a ceiling.
+        for _ in 0..5 {
+            row_at(&store, "2020-01-01T00:00:00+00:00", "claude", "ds-1", None);
+        }
+        store
+            .replace_agent_limits(
+                "claude",
+                &[AgentLimit {
+                    period: "all".into(),
+                    ..agent_limit("claude", 3.0, Some("requests"), "all")
+                }],
+            )
+            .unwrap();
+
+        // Under it: the five are older than the ceiling, so they are not its
+        // business. (Under the old reading this is 5 of 3 — already refused.)
+        assert!(
+            evaluate(&store).agent_blocked("claude").is_none(),
+            "spend that predates the ceiling does not count against it"
+        );
+        assert_eq!(
+            agent_limit_usage(
+                &store,
+                &AgentLimit {
+                    period: "all".into(),
+                    ..agent_limit("claude", 3.0, Some("requests"), "all")
+                }
+            )
+            .unwrap()
+            .unwrap()
+            .used,
+            0.0,
+            "and the number the ceiling reads is zero, not five"
+        );
+
+        // Three requests *after* it was set: now it is over, which is the other
+        // half of the claim — the ceiling still counts what it was written for.
+        for _ in 0..3 {
+            row_at(&store, &crate::store::now_rfc3339(), "claude", "ds-1", None);
+        }
+        assert!(evaluate(&store).agent_blocked("claude").is_some());
+    }
+
+    /// The same rule for a client key's total ceiling, and the reason it matters
+    /// here first: an imported history is exactly the case this exists for.
+    #[test]
+    fn a_client_keys_all_ceiling_measures_from_when_it_was_set() {
+        let (_dir, store) = crate::limits::test_support::store_with_hub_rates(r#"{"USD":1.0}"#);
+        store.insert_provider(&test_provider("ds-1")).unwrap();
+        let key = client_key(&store, "claude", "laptop");
+
+        // A year of history, imported as rows older than anything we wrote.
+        for _ in 0..500 {
+            row_at(
+                &store,
+                "2025-06-01T12:00:00+00:00",
+                "claude",
+                "ds-1",
+                Some(&key.id),
+            );
+        }
+        crate::limits::test_support::set_key_limits(
+            &store,
+            &key.id,
+            &[("all", 10.0, Some("requests"))],
+        );
+        assert!(
+            evaluate(&store).key_blocked(&key.id).is_none(),
+            "an imported history cannot trip a ceiling that was set after it"
+        );
+
+        // One real request through the key, and the ceiling that allows ten is
+        // one tenth spent rather than five thousand. The stored row is read back
+        // rather than rebuilt: its `created_at` is the boundary under test, and
+        // minting a fresh one here would race the row it is meant to bound.
+        record_key_row(&store, "claude", &key.id, "ds-1");
+        let stored = store.client_key_limits_for(&key.id).unwrap();
+        assert_eq!(
+            client_key_limit_usage(&store, &stored[0])
+                .unwrap()
+                .unwrap()
+                .used,
+            1.0
+        );
+    }
+
+    /// A provider with no reset period is the same case: no window, so its own
+    /// age is the start.
+    #[test]
+    fn a_provider_with_no_reset_period_measures_from_its_own_age() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("kiwano.db")).unwrap();
+        let mut p = test_provider("ds-1");
+        p.period_limit = Some(3.0);
+        p.limit_unit = Some("requests".into());
+        p.reset_period = None;
+        store.insert_provider(&p).unwrap();
+
+        for _ in 0..5 {
+            row_at(&store, "2020-01-01T00:00:00+00:00", "claude", "ds-1", None);
+        }
+        assert_eq!(
+            period_limit_usage(&store, &p).unwrap().unwrap().used,
+            0.0,
+            "a total cap on a provider does not count what predates the provider"
+        );
+
+        row_at(&store, &crate::store::now_rfc3339(), "claude", "ds-1", None);
+        assert_eq!(period_limit_usage(&store, &p).unwrap().unwrap().used, 1.0);
+    }
+
+    /// A window keeps its own boundary: cutting it at the ceiling's age would
+    /// make "the day's spend" and "the day's cap" two different numbers.
+    #[test]
+    fn a_windowed_ceiling_still_measures_the_whole_window() {
+        let (_dir, store) = crate::limits::test_support::store_with_hub_rates(r#"{"USD":1.0}"#);
+        store.insert_provider(&test_provider("ds-1")).unwrap();
+        let day = agent_limit("claude", 10.0, Some("requests"), "day");
+
+        // Five requests earlier today, before the ceiling existed.
+        let earlier = chrono::Utc::now() - chrono::Duration::hours(1);
+        for _ in 0..5 {
+            row_at(&store, &earlier.to_rfc3339(), "claude", "ds-1", None);
+        }
+        store
+            .replace_agent_limits("claude", std::slice::from_ref(&day))
+            .unwrap();
+        assert_eq!(
+            agent_limit_usage(&store, &day).unwrap().unwrap().used,
+            5.0,
+            "the day is the day: the window's own start is the boundary"
+        );
     }
 }

@@ -56,6 +56,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   approximated: a Chat request for a Responses-only provider would have to invent
   an `input`.
 
+### Fixed
+
+- **A ceiling with no reset period ("total") now counts from the moment it was
+  set, not from the beginning of time.** Selecting "no reset" stored the absence
+  of a window, and the reader turned that into "count every row ever recorded" —
+  so an agent with 900 requests behind it was over a "total 1000" cap the instant
+  the cap was typed in, and at 1000 the gateway refused traffic the user had just
+  asked to be allowed. A windowed ceiling is unchanged: there the window *is* the
+  boundary, and cutting it at the ceiling's age would make the day's spend and
+  the day's cap two different numbers.
+
+  A provider cap with no reset period measures from the provider's own age, for
+  the same reason at one remove: the cap is about what *this* provider has served.
+
 ### Changed
 
 - **The placeholder key is the client key.** The table (`placeholder_keys` →

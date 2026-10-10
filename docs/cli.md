@@ -148,6 +148,13 @@ Both `add` and `edit` also take the forwarding and quota options:
 
 `edit` additionally takes `--no-headers` and `--clear-plan-query`.
 
+A ceiling counts from where it can honestly start. With `--reset` (`monthly`,
+`weekly`, `yearly`) that is the current window — the month is the month. With
+**no reset** — a total — it is the moment you set the ceiling: it does not count
+what the provider or agent had already spent before you asked to be capped, which
+is also why imported history can never trip one. Editing a ceiling does not
+restart it: a window that survives an edit keeps the date it was first set.
+
 `providers edit` keeps the provider's **id**, which is why it exists: bindings,
 rotating keys and usage rows all reference it, so remove-and-add is a different
 operation. Only the flags you give are changed; everything else is carried over

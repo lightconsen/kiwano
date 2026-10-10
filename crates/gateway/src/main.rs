@@ -181,10 +181,13 @@ async fn main() {
     );
 
     // Sidecar stdout handshake (tech.md §4.6): one parseable ready line.
-    println!(
-        "ready data=127.0.0.1:{data_port} admin={}",
-        admin_endpoint.describe()
-    );
+    //
+    // `data_addr` rather than a literal: it was `127.0.0.1:{data_port}` while
+    // that was the only thing the data plane could be bound to, and it kept
+    // saying so after `KIWANO_DATA_ADDR` made it untrue. The line exists to be
+    // parsed by whoever started this process, so a line that names the wrong
+    // address is worse than no line.
+    println!("ready data={data_addr} admin={}", admin_endpoint.describe());
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 

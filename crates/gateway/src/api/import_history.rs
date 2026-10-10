@@ -408,6 +408,80 @@ mod tests {
         assert_eq!(by_provider[0].totals.requests, 1);
     }
 
+    /// A scan arrives in chunks, and **every** chunk lands.
+    ///
+    /// This is the case the first run against a real home failed: the watermark
+    /// was read per batch against a table the import itself was writing, so the
+    /// first chunk's rows became the boundary and the rest of the scan was
+    /// reported as traffic already metered (806 rows imported out of 118,784).
+    /// The fixture is therefore two calls — what the client does for one scan —
+    /// with the second chunk's rows *newer* than the first's, which is the shape
+    /// that exposes it.
+    #[test]
+    fn every_chunk_of_one_scan_lands() {
+        let store = store_priced();
+        let first = HistoryBatch {
+            usage: vec![
+                row("codex", "2026-01-01T00:00:00+00:00", "codex:s:1"),
+                row("codex", "2026-01-02T00:00:00+00:00", "codex:s:2"),
+            ],
+            sessions: vec![],
+        };
+        let second = HistoryBatch {
+            usage: vec![
+                row("codex", "2026-01-03T00:00:00+00:00", "codex:s:3"),
+                row("codex", "2026-01-04T00:00:00+00:00", "codex:s:4"),
+            ],
+            sessions: vec![],
+        };
+        let a = apply_history(&store, &pricing_of(&store), &first).unwrap();
+        let b = apply_history(&store, &pricing_of(&store), &second).unwrap();
+        assert_eq!((a.usage_rows, a.skipped_by_watermark), (2, 0));
+        assert_eq!(
+            (b.usage_rows, b.skipped_by_watermark),
+            (2, 0),
+            "the second chunk is not skipped: imported rows do not move the watermark"
+        );
+        assert_eq!(
+            store
+                .usage_totals(Some("codex"), None, None)
+                .unwrap()
+                .requests,
+            4
+        );
+
+        // And the gateway's own row still draws the line where it should: a
+        // request it metered on the 3rd makes that day and later the agent's own
+        // traffic, so a re-scan of the same files imports only what is older.
+        store
+            .record_usage(&UsageRecord {
+                ts: "2026-01-03T00:00:00+00:00".into(),
+                agent: "codex".into(),
+                provider_id: Some("p1".into()),
+                client_key_id: None,
+                model: Some("gpt-4o".into()),
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
+            })
+            .unwrap();
+        let again = apply_history(&store, &pricing_of(&store), &second).unwrap();
+        assert_eq!(
+            (again.usage_rows, again.skipped_by_watermark),
+            (0, 2),
+            "the gateway metered that traffic, so the files' copy of it is skipped"
+        );
+    }
+
     /// The session half lands too, counts and all.
     #[test]
     fn sessions_are_written_with_their_counts() {

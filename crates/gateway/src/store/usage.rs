@@ -287,7 +287,7 @@ impl Store {
         Ok(rows)
     }
 
-    /// The instant this agent's first **metered** row was written, if it has one.
+    /// The instant this gateway's **own** first row for this agent was written.
     ///
     /// The watermark an import measures against: everything older than this
     /// happened before this gateway was in the path, so it is the agent's own
@@ -296,12 +296,20 @@ impl Store {
     /// The agents write their session files either way, which is what makes the
     /// overlap real rather than theoretical.
     ///
+    /// **`import_key IS NULL` is the load-bearing half of that query.** An
+    /// imported row is not evidence that the agent was ever metered, and if one
+    /// counted, an import would move its own watermark: the first chunk's rows
+    /// would become the boundary, and every later chunk of the same scan would be
+    /// "already metered" and skipped. That is not a hypothetical — it is what the
+    /// first run against a real home did, importing 806 rows out of 118,784 and
+    /// reporting the rest as traffic it had already counted.
+    ///
     /// `None` for an agent this gateway has never served: all of its history is
     /// pre-gateway, and all of it is importable.
     pub fn first_usage_at(&self, agent: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT MIN(ts) FROM usage WHERE agent = ?1",
+            "SELECT MIN(ts) FROM usage WHERE agent = ?1 AND import_key IS NULL",
             params![agent],
             |row| row.get::<_, Option<String>>(0),
         )?)

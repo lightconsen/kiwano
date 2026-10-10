@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A gateway on another machine — Kiwano Docs</title>
+<meta name="description" content="Kiwano runs as two halves: a gateway (the daemon that owns the database, routes your agents' traffic and meters it) and a client (the desktop app or the CLI)…">
+<link rel="canonical" href="https://kiwano.cc/docs/remote-gateway/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/remote-gateway/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/remote-gateway/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/remote-gateway/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/remote-gateway/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/remote-gateway/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/remote-gateway/">
+<meta property="og:title" content="A gateway on another machine">
+<meta property="og:description" content="Kiwano runs as two halves: a gateway (the daemon that owns the database, routes your agents' traffic and meters it) and a client (the desktop app or the CLI)…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta property="og:locale:alternate" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+/* The language row, above the page list: this page's other languages, in the
+   same weight as the crumb. The current one is a span, not a link — it is not
+   somewhere to go, and a link to where you already are reads as broken. */
+/* The language row, first in the top bar's right cluster: the three links
+   beside it lead off-site, this one stays in the docs, so it is the one that
+   belongs with navigation rather than at the edge where the external ones sit.
+   A flat row of names, no dropdown — four short names fit, and the docs pages
+   carry no script to open a menu with. */
+.langs { display: flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 13px; color: var(--mut); }
+/* Scoped to .side, and with the font size restated: .side a (13.5px, padding
+   12px) sits *later* in this stylesheet at the same specificity, so a plain
+   .langs a loses to it — which is how the row came to wrap in a 216px column
+   while the same markup fitted one line on the hubs. (No backticks in here:
+   this stylesheet is a JS template literal.) */
+.langs a { padding: 6px 8px; border-radius: 8px; color: var(--mut); }
+.langs a:hover { color: var(--ink); background: var(--surface2); }
+.langs .on { color: var(--kiwi); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  /* The top bar wraps rather than dropping anything: with a language row in it
+     the right cluster is wider than a phone, and the three links beside it are
+     the only way off the docs — hiding them to save a row would cost more than
+     the row. */
+  .topbar-in { flex-wrap: wrap; height: auto; min-height: 56px; row-gap: 4px; padding-top: 8px; padding-bottom: 8px; }
+  .top-links { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  /* The language row is not part of that scroller: it is a small list that
+     wraps, and inside a nowrap flex row it would stretch to one long line. */
+  .langs { margin-left: 0; }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "A gateway on another machine",
+      "item": "https://kiwano.cc/docs/remote-gateway/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <div class="langs" role="group" aria-label="Language"><span class="on">English</span><a href="/docs/zh-Hans/remote-gateway/">简体中文</a><a href="/docs/zh-Hant/remote-gateway/">繁體中文</a><a href="/docs/ja/remote-gateway/">日本語</a></div>
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/">Docs</a>
+    <nav><a href="/docs/getting-started/">Getting started</a>
+<a href="/docs/agent-takeover/">Agent takeover</a>
+<a href="/docs/strategies/">Strategies and limits</a>
+<a href="/docs/remote-gateway/" class="on">A gateway on another machine</a>
+<a href="/docs/cli/">The kiwano command line</a></nav>
+  </aside>
+  <main class="content">
+<h1>A gateway on another machine</h1>
+<p class="lede">Kiwano runs as two halves: a gateway (the daemon that owns the database, routes your agents' traffic and meters it) and a client (the desktop app or the CLI) that manages it. By default both are on the same computer, and the client reaches the gateway through a socket beside the database.</p>
+<p>This page is about the other arrangement: the gateway on one machine, the client
+on another. It is for the shape where the machine that is always on is not the
+one you are sitting at — a home server, a mini PC, a box in a cupboard — and you
+want to add providers, watch usage and take agents over from your laptop.</p>
+<p>Nothing here is required for a single-machine install. Every setting on this page
+is unset by default and the default behaviour is what it always was.</p>
+<h2 id="two-planes-and-they-are-separate-on-purpose">Two planes, and they are separate on purpose</h2>
+<p>The gateway listens on two:</p>
+<table>
+<thead>
+<tr>
+<th>Plane</th>
+<th>What travels on it</th>
+<th>Where a client reaches it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Admin</strong></td>
+<td>provider rows, routes, logs, quotas, probes — everything the app and the CLI read or write</td>
+<td><code>/status</code> and every <code>/api/…</code> endpoint</td>
+</tr>
+<tr>
+<td><strong>Data</strong></td>
+<td>your agents&#39; actual requests and responses</td>
+<td>the URL your agents are configured with</td>
+</tr>
+</tbody></table>
+<p>They are configured separately, and that is the point: they carry different
+things. The admin plane carries credentials — the keys you stored. The data
+plane carries the requests themselves — your prompts and the answers, in the
+clear, because <strong>Kiwano does not do TLS</strong> (see <a href="#the-deployment-requirement">the deployment
+requirement</a> below).</p>
+<h2 id="on-the-machine-that-runs-the-gateway">On the machine that runs the gateway</h2>
+<p>Give the admin plane an address to listen on, and the data plane one too:</p>
+<pre><code class="language-sh">KIWANO_ADMIN_ADDR=100.64.0.5:8318 \   # management: host:port
+KIWANO_DATA_ADDR=100.64.0.5 \         # agents&#39; traffic: an address, not host:port
+KIWANO_DATA_PORT=8317 \               # optional; 8317 is the default
+kiwanod
+</code></pre>
+<ul>
+<li><strong><code>KIWANO_ADMIN_ADDR</code></strong> — unset means no TCP listener at all: the admin plane
+is a socket beside the database, which only this machine can reach.</li>
+<li><strong><code>KIWANO_DATA_ADDR</code></strong> — unset means <code>127.0.0.1</code>: the agents on this machine,
+and nobody else&#39;s. Its value is an <strong>IP address, not <code>host:port</code></strong>, because the
+port has its own variable (<a href="#ports"><code>KIWANO_DATA_PORT</code></a>) and two sources for
+one number is how they come to disagree.</li>
+<li>Both refuse an address that is reachable from anywhere (a public address, or
+<code>0.0.0.0</code>) unless you say you mean it — see <a href="#the-two-switches">the two switches</a>.</li>
+</ul>
+<h2 id="on-the-machine-you-manage-from">On the machine you manage from</h2>
+<pre><code class="language-sh">KIWANO_DAEMON_ADDR=100.64.0.5:8318 \
+KIWANO_DAEMON_TOKEN=&lt;the gateway&#39;s admin token&gt; \
+kiwano status
+</code></pre>
+<p>The same two variables point the <strong>desktop app</strong> at a remote gateway, with one
+practical caveat: a GUI app started by double-clicking does not inherit your
+shell&#39;s environment. Launch it from a terminal, or set the variables where
+macOS looks for them (<code>launchctl setenv KIWANO_DAEMON_ADDR …</code> before launching,
+or an <code>LSEnvironment</code> entry in its <code>Info.plist</code>).</p>
+<p><strong>Where the token comes from.</strong> The gateway mints it on first start and keeps it
+in its own database. On the gateway&#39;s machine:</p>
+<pre><code class="language-sh">sqlite3 ~/.kiwano/kiwano.db \
+  &quot;select value from gateway_settings where key = &#39;gateway.admin_token&#39;&quot;
+</code></pre>
+<p>There is no command that prints it; that one-liner, or <code>scp</code>, is the path.</p>
+<p>Two rules about that token, both deliberate:</p>
+<ul>
+<li><strong>It is only ever read from the environment when a remote is named.</strong> A remote
+client never falls back to the token row on its <em>own</em> machine — that row
+belongs to a different gateway, and sending it to another host is a credential
+handed to the wrong place.</li>
+<li><strong>A malformed address is refused, not fallen back from.</strong> <code>KIWANO_DAEMON_ADDR</code>
+that is not <code>host:port</code> stops the command with an error rather than quietly
+talking to the local gateway, which would be a client silently using a
+different daemon than the one you named.</li>
+</ul>
+<h2 id="the-two-switches">The two switches</h2>
+<p>Addresses that stop at your own network — RFC1918 (<code>10.</code>, <code>192.168.</code>, <code>172.16.</code>–<code>172.31.</code>),
+loopback, link-local, and the <code>100.64/10</code> range Tailscale uses — are accepted as
+they are. An address reachable from anywhere needs a second variable:</p>
+<pre><code class="language-sh">KIWANO_ADMIN_ALLOW_ANY=1   # the admin plane carries credentials
+KIWANO_DATA_ALLOW_ANY=1    # the data plane carries your prompts and completions
+</code></pre>
+<p><strong>They are separate, and one does not imply the other.</strong> An operator who has
+decided their admin plane may face the network has not thereby decided that the
+traffic plane may — what leaks there is different in kind. It is the one-character
+mistake (<code>0.0.0.0</code> for <code>127.0.0.1</code>) that these catch.</p>
+<h2 id="the-deployment-requirement">The deployment requirement</h2>
+<p>The cross-machine transport is <strong>plaintext with a token</strong>. That is a deliberate
+decision, not an omission, and it comes with a requirement:</p>
+<blockquote>
+<p>The gateway&#39;s listeners <strong>must not be exposed on a network you do not control</strong>.
+For that, use a VPN — Tailscale, WireGuard, anything — and give the gateway the
+VPN address.</p>
+</blockquote>
+<p>The reasoning: TLS with a self-signed certificate that is not verified is not
+encryption; a self-signed certificate that <em>is</em> pinned cannot be rotated and has
+to be re-paired on every reinstall. Both cost something real and buy protection
+against an attacker the model does not contain — you, on your own network. Under
+that model, the honest answer is a private network and a token, rather than
+cryptography against nobody.</p>
+<p>So: <code>100.64.0.5</code> (a tailnet address) is the value these variables are designed
+for. A public address needs both switches <em>and</em> a good reason.</p>
+<h2 id="ports">Ports</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>What it names</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>KIWANO_ADMIN_ADDR</code></td>
+<td>unset (no TCP listener)</td>
+<td>the admin plane&#39;s <code>host:port</code></td>
+</tr>
+<tr>
+<td><code>KIWANO_DATA_ADDR</code></td>
+<td><code>127.0.0.1</code></td>
+<td>the interface the data plane binds</td>
+</tr>
+<tr>
+<td><code>KIWANO_DATA_PORT</code></td>
+<td><code>8317</code></td>
+<td>the data plane&#39;s port</td>
+</tr>
+<tr>
+<td><code>KIWANO_DAEMON_ADDR</code></td>
+<td>unset (local socket)</td>
+<td>client → the gateway&#39;s admin <code>host:port</code></td>
+</tr>
+<tr>
+<td><code>KIWANO_DAEMON_TOKEN</code></td>
+<td>unset</td>
+<td>client → that gateway&#39;s admin token</td>
+</tr>
+</tbody></table>
+<p>A client does <strong>not</strong> need to be told the data port. <code>/status</code> reports both the
+address and the port the gateway&#39;s data plane is on, and a takeover writes <em>that</em>
+into the agent&#39;s config — which is how an agent on your laptop ends up pointed at
+the gateway on your server rather than at its own loopback.</p>
+<h2 id="checking-it">Checking it</h2>
+<p>On the machine you manage from:</p>
+<pre><code class="language-sh">kiwano status
+</code></pre>
+<p><code>gateway: running</code> with the remote&#39;s version means the admin plane is reachable
+and authenticated. Then take one agent over — <code>kiwano agents takeover claude</code> —
+which rewrites that agent&#39;s config to the address the gateway reported, and send
+it a request. If the agent answers, both planes are working.</p>
+<p>If <code>kiwano status</code> says the gateway is not running while the daemon is up, the
+address or the token is wrong, not the network: the CLI says which of the two it
+could not use.</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/strategies/"><div class="dir">← Previous</div><div class="t">Strategies and limits</div></a>
+<a class="next" href="/docs/cli/"><div class="dir">Next →</div><div class="t">The kiwano command line</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · Apache-2.0</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

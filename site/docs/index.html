@@ -303,7 +303,8 @@ code, pre { font-family: var(--font-mono); }
   <a class="card" href="/docs/getting-started/"><h2>Getting started</h2><p>Kiwano sits between your coding agents and your AI providers: you register providers once, it runs a local gateway on 127.0.0.1, and every agent talks to…</p></a>
   <a class="card" href="/docs/agent-takeover/"><h2>Agent takeover</h2><p>Takeover is how an agent ends up routed through the local gateway: Kiwano rewrites the agent's own config file under the agent's own $HOME, with the original…</p></a>
   <a class="card" href="/docs/strategies/"><h2>Strategies and limits</h2><p>Every agent routes through an ordered candidate queue — the providers bound to it. A strategy decides which candidate serves the next request; the rest of…</p></a>
-  <a class="card" href="/docs/cli/"><h2>The kiwano command line</h2><p>kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…</p></a>
+  <a class="card" href="/docs/remote-gateway/"><h2>A gateway on another machine</h2><p>Kiwano runs as two halves: a gateway (the daemon that owns the database, routes your agents' traffic and meters it) and a client (the desktop app or the CLI)…</p></a>
+  <a class="card" href="/docs/cli/"><h2>The kiwano command line</h2><p>kiwano manages providers, agents and routes without the desktop app. It is a client of the gateway, the same way the app is: everything it reads and writes…</p></a>
   </div>
   <p class="gh-note"><a href="/docs/zh-Hans/">简体中文</a> · <a href="/docs/zh-Hant/">繁體中文</a> · <a href="/docs/ja/">日本語</a></p>
   <p class="gh-note">Design and planning notes (contributor-facing) live in <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>

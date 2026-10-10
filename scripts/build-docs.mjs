@@ -97,6 +97,15 @@ const PAGES = [
     },
   },
   {
+    slug: "remote-gateway",
+    file: "remote-gateway.md",
+    translated: {
+      "zh-Hans": "remote-gateway.zh-Hans.md",
+      "zh-Hant": "remote-gateway.zh-Hant.md",
+      ja: "remote-gateway.ja.md",
+    },
+  },
+  {
     slug: "cli",
     file: "cli.md",
     // The command reference: the commands themselves stay English (the CLI

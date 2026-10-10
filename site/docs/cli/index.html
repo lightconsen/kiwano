@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The `kiwano` command line — Kiwano Docs</title>
-<meta name="description" content="kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…">
+<meta name="description" content="kiwano manages providers, agents and routes without the desktop app. It is a client of the gateway, the same way the app is: everything it reads and writes…">
 <link rel="canonical" href="https://kiwano.cc/docs/cli/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/cli/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/cli/">
@@ -15,7 +15,7 @@
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://kiwano.cc/docs/cli/">
 <meta property="og:title" content="The `kiwano` command line">
-<meta property="og:description" content="kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's…">
+<meta property="og:description" content="kiwano manages providers, agents and routes without the desktop app. It is a client of the gateway, the same way the app is: everything it reads and writes…">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
 <meta property="og:locale" content="en_US">
@@ -183,15 +183,16 @@ code, pre { font-family: var(--font-mono); }
     <nav><a href="/docs/getting-started/">Getting started</a>
 <a href="/docs/agent-takeover/">Agent takeover</a>
 <a href="/docs/strategies/">Strategies and limits</a>
+<a href="/docs/remote-gateway/">A gateway on another machine</a>
 <a href="/docs/cli/" class="on">The kiwano command line</a></nav>
   </aside>
   <main class="content">
 <h1>The <code>kiwano</code> command line</h1>
-<p class="lede">kiwano manages providers, agents and routes without the desktop app. It talks to the same SQLite store the app and the gateway use, and to the gateway's admin plane for status and hot reload, so it works on a host with no display at all.</p>
-<p>It shares its implementation with the app rather than reimplementing it: every
-command in this document is a call into <code>kiwano-core</code>, the crate the desktop app
-also links. A provider added here is the same row, written the same way, as one
-added there.</p>
+<p class="lede">kiwano manages providers, agents and routes without the desktop app. It is a client of the gateway, the same way the app is: everything it reads and writes goes over the admin plane, and the gateway is the only process that opens the shared database. It works on a host with no display at all — and, with two environment variables, against a gateway on another machine.</p>
+<p>What it touches itself is this machine&#39;s own facts: where an agent&#39;s config lives
+and whether it carries the gateway&#39;s key, and a small client-side database beside
+the shared one for the directories you declared and the backups a takeover can be
+undone from.</p>
 <h2 id="installing">Installing</h2>
 <p>On a Linux or macOS server, one command does the whole thing — binaries,
 checksum verification, and the gateway registered as a service for your user:</p>
@@ -631,7 +632,7 @@ after the JSON.</p>
 still exits <code>1</code> when the gateway is down.</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/strategies/"><div class="dir">← Previous</div><div class="t">Strategies and limits</div></a>
+<a class="prev" href="/docs/remote-gateway/"><div class="dir">← Previous</div><div class="t">A gateway on another machine</div></a>
 
 </div>
   </main>

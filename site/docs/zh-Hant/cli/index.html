@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>`kiwano` 命令列 — Kiwano Docs</title>
-<meta name="description" content="kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它存取的 是應用程式與閘道共用的同一個 SQLite 儲存區,並透過閘道的管理平面取得狀態 與熱重載,因此在完全沒有顯示器的機器上也能運作。">
+<meta name="description" content="kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它和 app 一樣 是閘道的用戶端:讀寫都經管理面 API,共享庫唯一的寫入者是閘道。因此在完全沒有 顯示器的機器上也能運作 —— 而且配上兩個環境變數,還能管另一台 機器上的閘道。">
 <link rel="canonical" href="https://kiwano.cc/docs/zh-Hant/cli/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/cli/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/cli/">
@@ -15,7 +15,7 @@
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://kiwano.cc/docs/zh-Hant/cli/">
 <meta property="og:title" content="`kiwano` 命令列">
-<meta property="og:description" content="kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它存取的 是應用程式與閘道共用的同一個 SQLite 儲存區,並透過閘道的管理平面取得狀態 與熱重載,因此在完全沒有顯示器的機器上也能運作。">
+<meta property="og:description" content="kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它和 app 一樣 是閘道的用戶端:讀寫都經管理面 API,共享庫唯一的寫入者是閘道。因此在完全沒有 顯示器的機器上也能運作 —— 而且配上兩個環境變數,還能管另一台 機器上的閘道。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
 <meta property="og:locale" content="zh_TW">
@@ -183,11 +183,14 @@ code, pre { font-family: var(--font-mono); }
     <nav><a href="/docs/zh-Hant/getting-started/">快速上手</a>
 <a href="/docs/zh-Hant/agent-takeover/">Agent 接管</a>
 <a href="/docs/zh-Hant/strategies/">策略與限額</a>
+<a href="/docs/zh-Hant/remote-gateway/">把閘道放在另一台機器上</a>
 <a href="/docs/zh-Hant/cli/" class="on">kiwano 命令列</a></nav>
   </aside>
   <main class="content">
 <h1><code>kiwano</code> 命令列</h1>
-<p class="lede">kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它存取的 是應用程式與閘道共用的同一個 SQLite 儲存區,並透過閘道的管理平面取得狀態 與熱重載,因此在完全沒有顯示器的機器上也能運作。</p>
+<p class="lede">kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它和 app 一樣 是閘道的用戶端:讀寫都經管理面 API,共享庫唯一的寫入者是閘道。因此在完全沒有 顯示器的機器上也能運作 —— 而且配上兩個環境變數,還能管另一台 機器上的閘道。</p>
+<p>它自己碰的只有這台機器的事實:某個 Agent 的設定在哪、有沒有帶著閘道的 key,以及
+共享庫旁邊那個小庫(你宣告過的目錄、接管可以撤銷所依賴的備份)。</p>
 <p>它與應用程式共用實作,而不是另外重寫一份:本文件裡的每個命令都是對
 <code>kiwano-core</code> 的呼叫,桌面應用程式連結的也是同一個 crate。在這裡新增的
 供應商,與在那裡新增的是同一列,寫法也相同。</p>
@@ -598,7 +601,7 @@ plan query,而那些旗標過去會寫入應用程式從不讀取的欄位。</p
 <p>結束碼是新的,但重要的那個精神上不變:閘道停止時,<code>status</code> 仍以 <code>1</code> 結束。</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/zh-Hant/strategies/"><div class="dir">← Previous</div><div class="t">策略與限額</div></a>
+<a class="prev" href="/docs/zh-Hant/remote-gateway/"><div class="dir">← Previous</div><div class="t">把閘道放在另一台機器上</div></a>
 
 </div>
   </main>

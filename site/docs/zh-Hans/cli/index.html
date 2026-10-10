@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>`kiwano` 命令行 — Kiwano Docs</title>
-<meta name="description" content="kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它读写的是应用和网关 共用的同一个 SQLite 存储,并通过网关的管理平面获取状态与热重载,所以在完全 没有显示器的机器上也能用。">
+<meta name="description" content="kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它和 app 一样是网关的 客户端:读写都经管理面 API,共享库唯一的写入者是网关。所以在完全没有显示器的 机器上也能用 —— 而且配上两个环境变量,还能管另一台机器上的 网关。">
 <link rel="canonical" href="https://kiwano.cc/docs/zh-Hans/cli/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/cli/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/cli/">
@@ -15,7 +15,7 @@
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://kiwano.cc/docs/zh-Hans/cli/">
 <meta property="og:title" content="`kiwano` 命令行">
-<meta property="og:description" content="kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它读写的是应用和网关 共用的同一个 SQLite 存储,并通过网关的管理平面获取状态与热重载,所以在完全 没有显示器的机器上也能用。">
+<meta property="og:description" content="kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它和 app 一样是网关的 客户端:读写都经管理面 API,共享库唯一的写入者是网关。所以在完全没有显示器的 机器上也能用 —— 而且配上两个环境变量,还能管另一台机器上的 网关。">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
 <meta property="og:locale" content="zh_CN">
@@ -183,11 +183,14 @@ code, pre { font-family: var(--font-mono); }
     <nav><a href="/docs/zh-Hans/getting-started/">快速上手</a>
 <a href="/docs/zh-Hans/agent-takeover/">Agent 接管</a>
 <a href="/docs/zh-Hans/strategies/">策略与限额</a>
+<a href="/docs/zh-Hans/remote-gateway/">把网关放在另一台机器上</a>
 <a href="/docs/zh-Hans/cli/" class="on">kiwano 命令行</a></nav>
   </aside>
   <main class="content">
 <h1><code>kiwano</code> 命令行</h1>
-<p class="lede">kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它读写的是应用和网关 共用的同一个 SQLite 存储,并通过网关的管理平面获取状态与热重载,所以在完全 没有显示器的机器上也能用。</p>
+<p class="lede">kiwano 让你不用桌面应用就能管理供应商、Agent 和路由。它和 app 一样是网关的 客户端:读写都经管理面 API,共享库唯一的写入者是网关。所以在完全没有显示器的 机器上也能用 —— 而且配上两个环境变量,还能管另一台机器上的 网关。</p>
+<p>它自己碰的只有这台机器的事实:某个 Agent 的配置在哪、有没有带着网关的 key,以及
+共享库旁边那个小库(你声明过的目录、接管可以撤销所依赖的备份)。</p>
 <p>它与应用共用同一份实现,而不是重新实现一遍:本文档里的每条命令都是对
 <code>kiwano-core</code> 的一次调用,桌面应用链接的也是同一个 crate。在这里添加的供应商,
 和在那里添加的是同一行,写法也相同。</p>
@@ -598,7 +601,7 @@ plan query,而那些标志过去会写入应用从不读取的列。</p>
 <p>退出码是新的,但重要的那个在精神上没变:网关停止时,<code>status</code> 仍以 <code>1</code> 退出。</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/zh-Hans/strategies/"><div class="dir">← Previous</div><div class="t">策略与限额</div></a>
+<a class="prev" href="/docs/zh-Hans/remote-gateway/"><div class="dir">← Previous</div><div class="t">把网关放在另一台机器上</div></a>
 
 </div>
   </main>

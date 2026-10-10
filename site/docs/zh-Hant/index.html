@@ -303,7 +303,8 @@ code, pre { font-family: var(--font-mono); }
   <a class="card" href="/docs/zh-Hant/getting-started/"><h2>快速上手</h2><p>Kiwano 位於你的編碼 Agent 與 AI 供應商之間:供應商註冊一次,本機閘道跑在 127.0.0.1,所有 Agent 都指向這一個連接埠。本頁從安裝帶到第一條被計量的 請求。Key 永遠不離開你的機器。</p></a>
   <a class="card" href="/docs/zh-Hant/agent-takeover/"><h2>Agent 接管</h2><p>接管是讓 Agent 走本機閘道的方式:Kiwano 改寫 Agent 自己在其 $HOME 下的設定檔,改寫前先備份,關閉接管時按位元組還原。不注入代理二進位檔,不 替你匯出環境變數——Agent 照常讀自己的設定,發現閘道就在那裡。</p></a>
   <a class="card" href="/docs/zh-Hant/strategies/"><h2>策略與限額</h2><p>每個 Agent 的路由是一個有序候選佇列——綁定到它的供應商們。策略決定 下一個請求由哪個候選服務;佇列的其餘部分是本次嘗試中途失敗時的重放順序。 本頁涵蓋策略、花費限額,以及方案用量的讀取方式。</p></a>
-  <a class="card" href="/docs/zh-Hant/cli/"><h2>kiwano 命令列</h2><p>kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它存取的 是應用程式與閘道共用的同一個 SQLite 儲存區,並透過閘道的管理平面取得狀態 與熱重載,因此在完全沒有顯示器的機器上也能運作。</p></a>
+  <a class="card" href="/docs/zh-Hant/remote-gateway/"><h2>把閘道放在另一台機器上</h2><p>Kiwano 由兩半組成:閘道(擁有資料庫、路由 Agent 流量並計量的那個守護行程)與 用戶端(管理它的桌面應用程式或 CLI)。預設兩半在同一台電腦上,用戶端透過資料庫旁邊 的 socket 找到閘道。</p></a>
+  <a class="card" href="/docs/zh-Hant/cli/"><h2>kiwano 命令列</h2><p>kiwano 讓你在沒有桌面應用程式的情況下管理供應商、Agent 與路由。它和 app 一樣 是閘道的用戶端:讀寫都經管理面 API,共享庫唯一的寫入者是閘道。因此在完全沒有 顯示器的機器上也能運作 —— 而且配上兩個環境變數,還能管另一台 機器上的閘道。</p></a>
   </div>
   <p class="gh-note"><a href="/docs/">English</a> · <a href="/docs/zh-Hans/">简体中文</a> · <a href="/docs/ja/">日本語</a></p>
   <p class="gh-note">面向貢獻者的設計與規劃筆記見 <a href="https://github.com/lightconsen/kiwano/blob/main/docs" target="_blank" rel="noopener">GitHub 的 docs/ 目錄</a>。</p>

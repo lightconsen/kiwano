@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把閘道放在另一台機器上 — Kiwano Docs</title>
+<meta name="description" content="Kiwano 由兩半組成:閘道(擁有資料庫、路由 Agent 流量並計量的那個守護行程)與 用戶端(管理它的桌面應用程式或 CLI)。預設兩半在同一台電腦上,用戶端透過資料庫旁邊 的 socket 找到閘道。">
+<link rel="canonical" href="https://kiwano.cc/docs/zh-Hant/remote-gateway/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/remote-gateway/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/remote-gateway/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/remote-gateway/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/remote-gateway/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/remote-gateway/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/zh-Hant/remote-gateway/">
+<meta property="og:title" content="把閘道放在另一台機器上">
+<meta property="og:description" content="Kiwano 由兩半組成:閘道(擁有資料庫、路由 Agent 流量並計量的那個守護行程)與 用戶端(管理它的桌面應用程式或 CLI)。預設兩半在同一台電腦上,用戶端透過資料庫旁邊 的 socket 找到閘道。">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:locale:alternate" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+/* The language row, above the page list: this page's other languages, in the
+   same weight as the crumb. The current one is a span, not a link — it is not
+   somewhere to go, and a link to where you already are reads as broken. */
+/* The language row, first in the top bar's right cluster: the three links
+   beside it lead off-site, this one stays in the docs, so it is the one that
+   belongs with navigation rather than at the edge where the external ones sit.
+   A flat row of names, no dropdown — four short names fit, and the docs pages
+   carry no script to open a menu with. */
+.langs { display: flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 13px; color: var(--mut); }
+/* Scoped to .side, and with the font size restated: .side a (13.5px, padding
+   12px) sits *later* in this stylesheet at the same specificity, so a plain
+   .langs a loses to it — which is how the row came to wrap in a 216px column
+   while the same markup fitted one line on the hubs. (No backticks in here:
+   this stylesheet is a JS template literal.) */
+.langs a { padding: 6px 8px; border-radius: 8px; color: var(--mut); }
+.langs a:hover { color: var(--ink); background: var(--surface2); }
+.langs .on { color: var(--kiwi); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  /* The top bar wraps rather than dropping anything: with a language row in it
+     the right cluster is wider than a phone, and the three links beside it are
+     the only way off the docs — hiding them to save a row would cost more than
+     the row. */
+  .topbar-in { flex-wrap: wrap; height: auto; min-height: 56px; row-gap: 4px; padding-top: 8px; padding-bottom: 8px; }
+  .top-links { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  /* The language row is not part of that scroller: it is a small list that
+     wraps, and inside a nowrap flex row it would stretch to one long line. */
+  .langs { margin-left: 0; }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "把閘道放在另一台機器上",
+      "item": "https://kiwano.cc/docs/zh-Hant/remote-gateway/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <div class="langs" role="group" aria-label="Language"><a href="/docs/remote-gateway/">English</a><a href="/docs/zh-Hans/remote-gateway/">简体中文</a><span class="on">繁體中文</span><a href="/docs/ja/remote-gateway/">日本語</a></div>
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/zh-Hant/">Docs</a>
+    <nav><a href="/docs/zh-Hant/getting-started/">快速上手</a>
+<a href="/docs/zh-Hant/agent-takeover/">Agent 接管</a>
+<a href="/docs/zh-Hant/strategies/">策略與限額</a>
+<a href="/docs/zh-Hant/remote-gateway/" class="on">把閘道放在另一台機器上</a>
+<a href="/docs/zh-Hant/cli/">kiwano 命令列</a></nav>
+  </aside>
+  <main class="content">
+<h1>把閘道放在另一台機器上</h1>
+<p class="lede">Kiwano 由兩半組成:閘道(擁有資料庫、路由 Agent 流量並計量的那個守護行程)與 用戶端(管理它的桌面應用程式或 CLI)。預設兩半在同一台電腦上,用戶端透過資料庫旁邊 的 socket 找到閘道。</p>
+<p>這一頁講的是另一種安排:閘道在一台機器上,用戶端在另一台。它針對的是「常開的那台不是
+你正坐著的這台」這種形狀 —— 家裡的伺服器、迷你主機、塞在櫃子裡的機器 —— 而你想在筆電
+上新增供應商、看用量、接管 Agent。</p>
+<p>單機安裝不需要這一頁的任何東西。這裡每個設定預設都沒設,預設行為與以前完全一致。</p>
+<h2 id="兩個平面-刻意分開">兩個平面,刻意分開</h2>
+<p>閘道監聽兩個:</p>
+<table>
+<thead>
+<tr>
+<th>平面</th>
+<th>上面走什麼</th>
+<th>用戶端從哪兒夠到它</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>管理面</strong></td>
+<td>供應商、路由、日誌、配額、探測 —— app 與 CLI 讀寫的全部</td>
+<td><code>/status</code> 與每一個 <code>/api/…</code> 端點</td>
+</tr>
+<tr>
+<td><strong>資料面</strong></td>
+<td>你的 Agent 真正的請求與回應</td>
+<td>你給 Agent 設定的那個 URL</td>
+</tr>
+</tbody></table>
+<p>兩者分開設定,而這正是重點:它們走的東西不一樣。管理面上走的是<strong>憑證</strong>(你存下的 key),
+資料面上走的是<strong>請求本身</strong> —— 你的 prompt 與回答,而且是明文,因為 <strong>Kiwano 不做 TLS</strong>
+(見下面的<a href="#%E9%83%A8%E7%BD%B2%E8%A6%81%E6%B1%82">部署要求</a>)。</p>
+<h2 id="在跑閘道的那台機器上">在跑閘道的那台機器上</h2>
+<p>給管理面一個監聽位址,也給資料面一個:</p>
+<pre><code class="language-sh">KIWANO_ADMIN_ADDR=100.64.0.5:8318 \   # 管理:host:port
+KIWANO_DATA_ADDR=100.64.0.5 \         # Agent 流量:是一個位址,不是 host:port
+KIWANO_DATA_PORT=8317 \               # 可選,預設就是 8317
+kiwanod
+</code></pre>
+<ul>
+<li><strong><code>KIWANO_ADMIN_ADDR</code></strong> —— 不設就完全不監聽 TCP:管理面是資料庫旁邊的 socket,
+只有本機能到。</li>
+<li><strong><code>KIWANO_DATA_ADDR</code></strong> —— 不設就是 <code>127.0.0.1</code>:只有這台機器上的 Agent,別人的
+進不來。它的值是<strong>一個 IP 位址,不是 <code>host:port</code></strong>,因為埠有自己的變數
+(<a href="#%E5%9F%A0"><code>KIWANO_DATA_PORT</code></a>),一個數字兩個來源就是它們對不上的開始。</li>
+<li>兩者都會拒絕「誰都能連到」的位址(公網位址,或者 <code>0.0.0.0</code>)—— 除非你明說你就是要 ——
+見<a href="#%E5%85%A9%E5%80%8B%E9%96%8B%E9%97%9C">兩個開關</a>。</li>
+</ul>
+<h2 id="在你用來管理的那台機器上">在你用來管理的那台機器上</h2>
+<pre><code class="language-sh">KIWANO_DAEMON_ADDR=100.64.0.5:8318 \
+KIWANO_DAEMON_TOKEN=&lt;閘道的管理 token&gt; \
+kiwano status
+</code></pre>
+<p>同樣這兩個變數也能把<strong>桌面應用程式</strong>指向遠端閘道,但有一個實際前提:雙擊啟動的 GUI
+應用程式<strong>不繼承</strong>你 shell 的環境。要麼從終端啟動它,要麼把變數放到 macOS 會讀的地方
+(啟動前 <code>launchctl setenv KIWANO_DAEMON_ADDR …</code>,或在它的 <code>Info.plist</code> 裡加一條
+<code>LSEnvironment</code>)。</p>
+<p><strong>token 從哪兒來。</strong> 閘道首次啟動時鑄一個,存在自己的庫裡。在閘道那台機器上:</p>
+<pre><code class="language-sh">sqlite3 ~/.kiwano/kiwano.db \
+  &quot;select value from gateway_settings where key = &#39;gateway.admin_token&#39;&quot;
+</code></pre>
+<p>沒有哪條命令會印它;這個一行命令(或者 <code>scp</code>)就是路徑。</p>
+<p>關於這個 token 有兩條規矩,都是刻意的:</p>
+<ul>
+<li><strong>只有在命名了遠端時才從環境變數讀。</strong> 遠端用戶端絕不回落到<strong>自己</strong>那台機器上的
+token 列 —— 那是另一個閘道的列,把它送到別的主機上就是把憑證交給了錯誤的地方。</li>
+<li><strong>位址寫錯是拒絕,不是回落。</strong> <code>KIWANO_DAEMON_ADDR</code> 不是 <code>host:port</code> 時,命令報錯
+停下,而不是悄悄去連本機閘道 —— 那會變成「用戶端用了另一個 daemon,而你以為是你點名
+的那個」。</li>
+</ul>
+<h2 id="兩個開關">兩個開關</h2>
+<p>止步於你自己網路的位址 —— RFC1918(<code>10.</code>、<code>192.168.</code>、<code>172.16.</code>–<code>172.31.</code>)、loopback、
+連結本地、以及 Tailscale 用的 <code>100.64/10</code> —— 直接可用。誰都能連到的位址需要第二個變數:</p>
+<pre><code class="language-sh">KIWANO_ADMIN_ALLOW_ANY=1   # 管理面上走的是憑證
+KIWANO_DATA_ALLOW_ANY=1    # 資料面上走的是你的 prompt 與回答
+</code></pre>
+<p><strong>兩者是分開的,一個不等於另一個。</strong> 一個決定讓管理面面對網路的人,並沒有因此決定讓
+流量面也面對 —— 那邊漏出去的東西性質不同。這兩個開關攔的正是那個一字之差
+(<code>0.0.0.0</code> 寫成 <code>127.0.0.1</code>)。</p>
+<h2 id="部署要求">部署要求</h2>
+<p>跨機的傳輸是<strong>明文 + token</strong>。這是刻意決定而非疏漏,它帶一條要求:</p>
+<blockquote>
+<p>閘道的這些監聽<strong>不得暴露在你不控制的網路上</strong>。要跨這種網路,用 VPN —— Tailscale、
+WireGuard,什麼都行 —— 並把閘道的 VPN 位址給這些變數。</p>
+</blockquote>
+<p>理由是:自簽憑證<strong>不加驗證等於沒有</strong>;自簽<strong>加釘指紋</strong>則不能輪換、每次重裝都要重新配對。
+兩者都付出真實代價,防的卻是威脅模型裡不存在的對手 —— 你自己、在你自己的網路上。在這個
+模型下,誠實的答案是私有網路加一個 token,而不是對著空氣上密碼學。</p>
+<p>所以 <code>100.64.0.5</code>(tailnet 位址)正是這些變數為之設計的值。公網位址需要兩個開關<strong>並且</strong>
+一個過硬的理由。</p>
+<h2 id="埠">埠</h2>
+<table>
+<thead>
+<tr>
+<th>變數</th>
+<th>預設</th>
+<th>它命名什麼</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>KIWANO_ADMIN_ADDR</code></td>
+<td>不設(不監聽 TCP)</td>
+<td>管理面的 <code>host:port</code></td>
+</tr>
+<tr>
+<td><code>KIWANO_DATA_ADDR</code></td>
+<td><code>127.0.0.1</code></td>
+<td>資料面綁哪個介面</td>
+</tr>
+<tr>
+<td><code>KIWANO_DATA_PORT</code></td>
+<td><code>8317</code></td>
+<td>資料面的埠</td>
+</tr>
+<tr>
+<td><code>KIWANO_DAEMON_ADDR</code></td>
+<td>不設(本機 socket)</td>
+<td>用戶端 → 閘道管理面的 <code>host:port</code></td>
+</tr>
+<tr>
+<td><code>KIWANO_DAEMON_TOKEN</code></td>
+<td>不設</td>
+<td>用戶端 → 那台閘道的管理 token</td>
+</tr>
+</tbody></table>
+<p>用戶端<strong>不需要</strong>被告知資料埠。<code>/status</code> 會報出閘道資料面所在的<strong>位址與埠</strong>,接管時
+寫進 Agent 設定的就是那一對 —— 於是你筆電上的 Agent 最終指向的是你伺服器上的閘道,而
+不是它自己的 loopback。</p>
+<h2 id="驗證一下">驗證一下</h2>
+<p>在你用來管理的那台機器上:</p>
+<pre><code class="language-sh">kiwano status
+</code></pre>
+<p><code>gateway: running</code> 帶著遠端的版本號,說明管理面可達且認證通過。然後接管一個 Agent ——
+<code>kiwano agents takeover claude</code> —— 它會把那個 Agent 的設定改寫成閘道報出的位址,再發一個
+請求。Agent 有回答,兩個平面就都通了。</p>
+<p>如果 daemon 明明在跑,<code>kiwano status</code> 卻說閘道不在,那是位址或 token 錯了,不是網路:CLI
+會說清楚它用不了的是哪一個。</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/zh-Hant/strategies/"><div class="dir">← Previous</div><div class="t">策略與限額</div></a>
+<a class="next" href="/docs/zh-Hant/cli/"><div class="dir">Next →</div><div class="t">kiwano 命令列</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · Apache-2.0</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

@@ -1,13 +1,16 @@
 # The `kiwano` command line
 
-`kiwano` manages providers, agents and routes without the desktop app. It talks
-to the same SQLite store the app and the gateway use, and to the gateway's admin
-plane for status and hot reload, so it works on a host with no display at all.
+`kiwano` manages providers, agents and routes without the desktop app. It is a
+client of the gateway, the same way the app is: everything it reads and writes
+goes over the admin plane, and the gateway is the only process that opens the
+shared database. It works on a host with no display at all — and, with
+[two environment variables](remote-gateway.md), against a gateway on another
+machine.
 
-It shares its implementation with the app rather than reimplementing it: every
-command in this document is a call into `kiwano-core`, the crate the desktop app
-also links. A provider added here is the same row, written the same way, as one
-added there.
+What it touches itself is this machine's own facts: where an agent's config lives
+and whether it carries the gateway's key, and a small client-side database beside
+the shared one for the directories you declared and the backups a takeover can be
+undone from.
 
 ## Installing
 

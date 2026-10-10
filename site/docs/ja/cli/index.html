@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>`kiwano` コマンドライン — Kiwano Docs</title>
-<meta name="description" content="kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。">
+<meta name="description" content="kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 app と同じくゲートウェイのクライアントです — 読み書きはすべて管理面の API を 通り、共有データベースに書き込むのはゲートウェイだけです。ディスプレイの無いホスト でも動作し、2…">
 <link rel="canonical" href="https://kiwano.cc/docs/ja/cli/">
 <link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/cli/">
 <link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/cli/">
@@ -15,7 +15,7 @@
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://kiwano.cc/docs/ja/cli/">
 <meta property="og:title" content="`kiwano` コマンドライン">
-<meta property="og:description" content="kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。">
+<meta property="og:description" content="kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 app と同じくゲートウェイのクライアントです — 読み書きはすべて管理面の API を 通り、共有データベースに書き込むのはゲートウェイだけです。ディスプレイの無いホスト でも動作し、2…">
 <meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
 <meta property="og:site_name" content="Kiwano">
 <meta property="og:locale" content="ja_JP">
@@ -183,11 +183,16 @@ code, pre { font-family: var(--font-mono); }
     <nav><a href="/docs/ja/getting-started/">はじめに</a>
 <a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>
 <a href="/docs/ja/strategies/">ストラテジーと上限</a>
+<a href="/docs/ja/remote-gateway/">ゲートウェイを別のマシンに置く</a>
 <a href="/docs/ja/cli/" class="on">kiwano コマンドライン</a></nav>
   </aside>
   <main class="content">
 <h1><code>kiwano</code> コマンドライン</h1>
-<p class="lede">kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 アプリとゲートウェイが使うのと同じ SQLite ストア、およびステータスとホットリロード用の ゲートウェイの管理プレーンと通信するため、ディスプレイの無いホストでも動作します。</p>
+<p class="lede">kiwano はデスクトップアプリなしでプロバイダー、エージェント、ルートを管理します。 app と同じくゲートウェイのクライアントです — 読み書きはすべて管理面の API を 通り、共有データベースに書き込むのはゲートウェイだけです。ディスプレイの無いホスト でも動作し、2 つの環境変数を設定すれば別のマシンの ゲートウェイも管理できます。</p>
+<p>このツール自身が触るのは、このマシンについての事実だけです — エージェントの設定が
+どこにあり、ゲートウェイのキーを持っているかどうか、そして共有データベースの隣にある
+小さなクライアント側データベース(宣言したディレクトリと、テイクオーバーを取り消す
+ためのバックアップ)。</p>
 <p>再実装するのではなく、アプリと実装を共有しています。本書のすべてのコマンドは、
 デスクトップアプリもリンクしているクレート <code>kiwano-core</code> への呼び出しです。ここで
 追加したプロバイダーは、あちらで追加したものと同じ行として、同じ方法で書き込まれます。</p>
@@ -619,7 +624,7 @@ CLI が意図的に持たない便宜であって、欠いている機能では�
 ゲートウェイが停止しているとき、<code>status</code> は今も <code>1</code> で終了します。</p>
 
 <div class="pn-nav">
-<a class="prev" href="/docs/ja/strategies/"><div class="dir">← Previous</div><div class="t">ストラテジーと上限</div></a>
+<a class="prev" href="/docs/ja/remote-gateway/"><div class="dir">← Previous</div><div class="t">ゲートウェイを別のマシンに置く</div></a>
 
 </div>
   </main>

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ゲートウェイを別のマシンに置く — Kiwano Docs</title>
+<meta name="description" content="Kiwano は二つの半分でできています。ゲートウェイ(データベースを所有し、エージェントの トラフィックをルーティングして計量するデーモン)と、それを管理するクライアント (デスクトップアプリまたは CLI)です。既定では両方は同じコンピューター上にあり、クライアント…">
+<link rel="canonical" href="https://kiwano.cc/docs/ja/remote-gateway/">
+<link rel="alternate" hreflang="en" href="https://kiwano.cc/docs/remote-gateway/">
+<link rel="alternate" hreflang="zh-Hans" href="https://kiwano.cc/docs/zh-Hans/remote-gateway/">
+<link rel="alternate" hreflang="zh-Hant" href="https://kiwano.cc/docs/zh-Hant/remote-gateway/">
+<link rel="alternate" hreflang="ja" href="https://kiwano.cc/docs/ja/remote-gateway/">
+<link rel="alternate" hreflang="x-default" href="https://kiwano.cc/docs/remote-gateway/">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://kiwano.cc/docs/ja/remote-gateway/">
+<meta property="og:title" content="ゲートウェイを別のマシンに置く">
+<meta property="og:description" content="Kiwano は二つの半分でできています。ゲートウェイ(データベースを所有し、エージェントの トラフィックをルーティングして計量するデーモン)と、それを管理するクライアント (デスクトップアプリまたは CLI)です。既定では両方は同じコンピューター上にあり、クライアント…">
+<meta property="og:image" content="https://kiwano.cc/assets/app-providers.png">
+<meta property="og:site_name" content="Kiwano">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:locale:alternate" content="zh_TW">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/assets/kiwano-logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000;
+  --surface: oklch(0.145 0.008 260 / 0.55);
+  --surface2: oklch(0.205 0.01 260 / 0.6);
+  --line: oklch(0.27 0.012 260 / 0.7);
+  --line-strong: oklch(0.32 0.014 260 / 0.8);
+  --ink: oklch(0.93 0.005 260);
+  --mut: oklch(0.58 0.01 260);
+  --kiwi: oklch(0.80 0.19 132);
+  --kiwi-soft: oklch(0.80 0.19 132 / 0.13);
+  --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+.topbar { border-bottom: 1px solid var(--line); background: oklch(0 0 0 / 0.72); }
+.topbar-in { max-width: 1100px; margin: 0 auto; padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.brand img { width: 22px; height: 22px; border-radius: 6px; }
+.top-links { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.top-links a { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--mut); }
+.top-links a:hover { color: var(--ink); background: var(--surface2); }
+
+.doc { max-width: 1100px; margin: 0 auto; padding: 36px 28px 90px; display: grid; grid-template-columns: 216px 1fr; gap: 44px; }
+.side { align-self: start; position: sticky; top: 24px; }
+.side .crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--kiwi); margin-bottom: 14px; }
+.side a { display: block; padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--mut); line-height: 1.45; }
+.side a:hover { color: var(--ink); background: var(--surface2); }
+.side a.on { color: var(--kiwi); background: var(--kiwi-soft); font-weight: 500; }
+/* The language row, above the page list: this page's other languages, in the
+   same weight as the crumb. The current one is a span, not a link — it is not
+   somewhere to go, and a link to where you already are reads as broken. */
+/* The language row, first in the top bar's right cluster: the three links
+   beside it lead off-site, this one stays in the docs, so it is the one that
+   belongs with navigation rather than at the edge where the external ones sit.
+   A flat row of names, no dropdown — four short names fit, and the docs pages
+   carry no script to open a menu with. */
+.langs { display: flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 13px; color: var(--mut); }
+/* Scoped to .side, and with the font size restated: .side a (13.5px, padding
+   12px) sits *later* in this stylesheet at the same specificity, so a plain
+   .langs a loses to it — which is how the row came to wrap in a 216px column
+   while the same markup fitted one line on the hubs. (No backticks in here:
+   this stylesheet is a JS template literal.) */
+.langs a { padding: 6px 8px; border-radius: 8px; color: var(--mut); }
+.langs a:hover { color: var(--ink); background: var(--surface2); }
+.langs .on { color: var(--kiwi); font-weight: 500; }
+
+.content { min-width: 0; }
+.content h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.content .lede { margin-top: 10px; color: var(--mut); font-size: 14.5px; }
+.content h2 { margin: 44px 0 14px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding-top: 22px; border-top: 1px solid var(--line); }
+.content h3 { margin: 28px 0 10px; font-size: 16px; font-weight: 600; }
+.content p { margin: 12px 0; color: oklch(0.78 0.01 260); }
+.content ul, .content ol { margin: 12px 0; padding-left: 24px; color: oklch(0.78 0.01 260); }
+.content li { margin: 5px 0; }
+.content a { color: var(--kiwi); }
+.content a:hover { text-decoration: underline; }
+.content code { font-size: 12.5px; color: oklch(0.72 0.02 260); background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+.content pre { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.09 0.006 260 / 0.85); overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+.content pre code { background: none; padding: 0; color: oklch(0.85 0.01 260); }
+.content table { margin: 16px 0; border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+.content th { background: var(--surface2); font-weight: 600; }
+.content blockquote { margin: 16px 0; padding: 10px 18px; border-left: 3px solid oklch(0.55 0.14 132 / 0.55); background: var(--kiwi-soft); border-radius: 0 10px 10px 0; color: var(--mut); }
+.content blockquote p { margin: 4px 0; }
+.content hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.content img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  margin: 22px auto 10px; background: oklch(0.09 0.006 260);
+}
+.content p:has(> img) { margin: 0; }
+.content p:has(> img) + p:has(> em) {
+  margin: 0 0 22px; font-size: 12.5px; color: var(--mut); text-align: center;
+}
+
+.pn-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
+.pn-nav a { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; transition: border-color .15s; }
+.pn-nav a:hover { border-color: oklch(0.40 0.03 132 / 0.65); }
+.pn-nav .dir { font-family: var(--font-mono); font-size: 10.5px; color: var(--mut); letter-spacing: 0.08em; text-transform: uppercase; }
+.pn-nav .t { margin-top: 4px; font-size: 13.5px; font-weight: 500; }
+.pn-nav a.next { text-align: right; }
+
+.foot { border-top: 1px solid var(--line); }
+.foot-in { max-width: 1100px; margin: 0 auto; padding: 20px 28px; display: flex; gap: 18px; font-size: 12px; color: oklch(0.48 0.008 260); flex-wrap: wrap; }
+.foot-in a:hover { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .doc { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
+  /* The top bar wraps rather than dropping anything: with a language row in it
+     the right cluster is wider than a phone, and the three links beside it are
+     the only way off the docs — hiding them to save a row would cost more than
+     the row. */
+  .topbar-in { flex-wrap: wrap; height: auto; min-height: 56px; row-gap: 4px; padding-top: 8px; padding-bottom: 8px; }
+  .top-links { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
+  .side { position: static; }
+  .side nav { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; padding-bottom: 6px; }
+  .side nav::-webkit-scrollbar { display: none; }
+  .side a { flex: none; border: 1px solid var(--line); }
+  /* The language row is not part of that scroller: it is a small list that
+     wraps, and inside a nowrap flex row it would stretch to one long line. */
+  .langs { margin-left: 0; }
+  .pn-nav { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Kiwano",
+      "item": "https://kiwano.cc/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://kiwano.cc/docs/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "ゲートウェイを別のマシンに置く",
+      "item": "https://kiwano.cc/docs/ja/remote-gateway/"
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<div class="topbar"><div class="topbar-in">
+  <a class="brand" href="/"><img src="/assets/kiwano-logo.svg" alt="">Kiwano</a>
+  <div class="top-links">
+    <div class="langs" role="group" aria-label="Language"><a href="/docs/remote-gateway/">English</a><a href="/docs/zh-Hans/remote-gateway/">简体中文</a><a href="/docs/zh-Hant/remote-gateway/">繁體中文</a><span class="on">日本語</span></div>
+    <a href="/">kiwano.cc</a>
+    <a href="https://github.com/lightconsen/kiwano" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://x.com/kiwano_cc" target="_blank" rel="noopener">X</a>
+  </div>
+</div></div>
+<div class="doc">
+  <aside class="side">
+    <a class="crumb" href="/docs/ja/">Docs</a>
+    <nav><a href="/docs/ja/getting-started/">はじめに</a>
+<a href="/docs/ja/agent-takeover/">エージェントの引き継ぎ</a>
+<a href="/docs/ja/strategies/">ストラテジーと上限</a>
+<a href="/docs/ja/remote-gateway/" class="on">ゲートウェイを別のマシンに置く</a>
+<a href="/docs/ja/cli/">kiwano コマンドライン</a></nav>
+  </aside>
+  <main class="content">
+<h1>ゲートウェイを別のマシンに置く</h1>
+<p class="lede">Kiwano は二つの半分でできています。ゲートウェイ(データベースを所有し、エージェントの トラフィックをルーティングして計量するデーモン)と、それを管理するクライアント (デスクトップアプリまたは CLI)です。既定では両方は同じコンピューター上にあり、クライアント はデータベースの隣のソケットを通してゲートウェイに到達します。</p>
+<p>このページはもう一方の配置についてです。ゲートウェイが一方のマシン、クライアントが別の
+マシン。「いつも起きているマシンが、自分が今座っているマシンではない」という形 —— 自宅
+サーバー、ミニ PC、戸棚の中の箱 —— のためにあり、ノート PC からプロバイダーを追加し、
+使用量を見て、エージェントをテイクオーバーしたいときのものです。</p>
+<p>単一マシンのインストールにこのページの内容は一切必要ありません。ここにある設定はすべて
+既定で未設定で、既定の挙動はこれまでとまったく同じです。</p>
+<h2 id="二-意図的-別">二つのプレーンは、意図的に別です</h2>
+<p>ゲートウェイは二つをリッスンします。</p>
+<table>
+<thead>
+<tr>
+<th>プレーン</th>
+<th>何が流れるか</th>
+<th>クライアントはどこから届くか</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>管理プレーン</strong></td>
+<td>プロバイダー、ルート、ログ、クォータ、プローブ —— app と CLI が読み書きするすべて</td>
+<td><code>/status</code> とすべての <code>/api/…</code> エンドポイント</td>
+</tr>
+<tr>
+<td><strong>データプレーン</strong></td>
+<td>エージェントの実際のリクエストとレスポンス</td>
+<td>エージェントに設定された URL</td>
+</tr>
+</tbody></table>
+<p>別々に設定します。それが要点です。流れるものが違うからです。管理プレーンを流れるのは
+<strong>資格情報</strong>(保存したキー)。データプレーンを流れるのは<strong>リクエストそのもの</strong> —— あなたの
+プロンプトと回答で、しかも平文です。<strong>Kiwano は TLS を行いません</strong>(下記の
+<a href="#%E3%83%87%E3%83%97%E3%83%AD%E3%82%A4%E8%A6%81%E4%BB%B6">デプロイ要件</a>を参照)。</p>
+<h2 id="動">ゲートウェイを動かすマシンで</h2>
+<p>管理プレーンにリッスンするアドレスを、データプレーンにも一つ与えます。</p>
+<pre><code class="language-sh">KIWANO_ADMIN_ADDR=100.64.0.5:8318 \   # 管理:host:port
+KIWANO_DATA_ADDR=100.64.0.5 \         # エージェントのトラフィック:アドレスであり host:port ではない
+KIWANO_DATA_PORT=8317 \               # 任意。既定は 8317
+kiwanod
+</code></pre>
+<ul>
+<li><strong><code>KIWANO_ADMIN_ADDR</code></strong> —— 未設定なら TCP リスナーはまったく立ちません。管理プレーンは
+データベースの隣のソケットで、このマシンからしか届きません。</li>
+<li><strong><code>KIWANO_DATA_ADDR</code></strong> —— 未設定なら <code>127.0.0.1</code>。このマシン上のエージェントだけで、
+他人のものは入りません。値は <strong>IP アドレスであり <code>host:port</code> ではありません</strong>。ポートには
+専用の変数(<a href="#%E3%83%9D%E3%83%BC%E3%83%88"><code>KIWANO_DATA_PORT</code></a>)があり、一つの数字に二つの出所があることが、
+それらが食い違う始まりだからです。</li>
+<li>どちらも「どこからでも到達できる」アドレス(公開アドレス、または <code>0.0.0.0</code>)を、そう
+意図していると明示しない限り拒否します —— <a href="#%E4%BA%8C%E3%81%A4%E3%81%AE%E3%82%B9%E3%82%A4%E3%83%83%E3%83%81">二つのスイッチ</a>を参照。</li>
+</ul>
+<h2 id="管理-側">管理する側のマシンで</h2>
+<pre><code class="language-sh">KIWANO_DAEMON_ADDR=100.64.0.5:8318 \
+KIWANO_DAEMON_TOKEN=&lt;ゲートウェイの管理トークン&gt; \
+kiwano status
+</code></pre>
+<p>同じ二つの変数で<strong>デスクトップアプリ</strong>も遠隔のゲートウェイに向けられますが、実際上の
+注意が一つあります。ダブルクリックで起動した GUI アプリは、あなたのシェルの環境を
+<strong>継承しません</strong>。ターミナルから起動するか、macOS が読む場所に置いてください
+(起動前に <code>launchctl setenv KIWANO_DAEMON_ADDR …</code>、または <code>Info.plist</code> に
+<code>LSEnvironment</code> の項目)。</p>
+<p><strong>トークンはどこから来るか。</strong> ゲートウェイが初回起動時に鋳造し、自分のデータベースに
+保管します。ゲートウェイのマシンで:</p>
+<pre><code class="language-sh">sqlite3 ~/.kiwano/kiwano.db \
+  &quot;select value from gateway_settings where key = &#39;gateway.admin_token&#39;&quot;
+</code></pre>
+<p>これを表示するコマンドはありません。この一行(または <code>scp</code>)がその経路です。</p>
+<p>このトークンについて二つの規則があり、どちらも意図的です。</p>
+<ul>
+<li><strong>遠隔を名指ししたときにだけ、環境変数から読みます。</strong> 遠隔クライアントは<strong>自分</strong>の
+マシンのトークン行にフォールバックしません —— その行は別のゲートウェイのもので、
+それを別のホストへ送るのは、資格情報を間違った場所に渡すことです。</li>
+<li><strong>書式の違うアドレスは拒否で、フォールバックではありません。</strong> <code>KIWANO_DAEMON_ADDR</code> が
+<code>host:port</code> でなければ、コマンドはエラーで止まります。黙ってローカルのゲートウェイと
+話すことはしません —— それは「名指ししたのとは別のデーモンを、クライアントが黙って
+使った」ということだからです。</li>
+</ul>
+<h2 id="二">二つのスイッチ</h2>
+<p>自分のネットワークで止まるアドレス —— RFC1918(<code>10.</code>、<code>192.168.</code>、<code>172.16.</code>–<code>172.31.</code>)、
+loopback、リンクローカル、Tailscale が使う <code>100.64/10</code> —— はそのまま使えます。どこからでも
+到達できるアドレスには二つ目の変数が要ります。</p>
+<pre><code class="language-sh">KIWANO_ADMIN_ALLOW_ANY=1   # 管理プレーンを流れるのは資格情報
+KIWANO_DATA_ALLOW_ANY=1    # データプレーンを流れるのはプロンプトと回答
+</code></pre>
+<p><strong>両者は別で、一方が他方を意味しません。</strong> 管理プレーンをネットワークに晒すと決めた人が、
+それによってトラフィックのプレーンも晒すと決めたことにはなりません —— 漏れるものの性質が
+違うからです。この二つのスイッチが捕まえるのは、あの一文字の間違い(<code>127.0.0.1</code> を
+<code>0.0.0.0</code> と書く)です。</p>
+<h2 id="要件">デプロイ要件</h2>
+<p>マシンをまたぐ転送は<strong>平文 + トークン</strong>です。これは省略ではなく意図的な決定で、一つの要件を
+伴います。</p>
+<blockquote>
+<p>ゲートウェイのこれらのリスナーは、<strong>あなたが制御しないネットワークに晒してはいけません</strong>。
+またぐ必要があるなら VPN を使ってください —— Tailscale、WireGuard、何でも —— そして
+ゲートウェイの VPN アドレスをこれらの変数に与えてください。</p>
+</blockquote>
+<p>理由: 検証されない自己署名証明書は暗号化ではありません。ピン留めする自己署名証明書は
+ローテーションできず、再インストールのたびに再ペアリングが要ります。どちらも実際の代償を
+払い、脅威モデルに存在しない相手 —— 自分自身、自分のネットワーク上の —— に対する防御を
+買います。このモデルでは、正直な答えはプライベートネットワークとトークンであり、誰も
+いない相手に向けた暗号技術ではありません。</p>
+<p>つまり <code>100.64.0.5</code>(tailnet のアドレス)が、これらの変数が想定している値です。公開
+アドレスには二つのスイッチ<strong>と</strong>、それに見合う理由が要ります。</p>
+<h2 id="section">ポート</h2>
+<table>
+<thead>
+<tr>
+<th>変数</th>
+<th>既定</th>
+<th>何を名指しするか</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>KIWANO_ADMIN_ADDR</code></td>
+<td>未設定(TCP リスナーなし)</td>
+<td>管理プレーンの <code>host:port</code></td>
+</tr>
+<tr>
+<td><code>KIWANO_DATA_ADDR</code></td>
+<td><code>127.0.0.1</code></td>
+<td>データプレーンが束縛するインターフェース</td>
+</tr>
+<tr>
+<td><code>KIWANO_DATA_PORT</code></td>
+<td><code>8317</code></td>
+<td>データプレーンのポート</td>
+</tr>
+<tr>
+<td><code>KIWANO_DAEMON_ADDR</code></td>
+<td>未設定(ローカルソケット)</td>
+<td>クライアント → ゲートウェイ管理プレーンの <code>host:port</code></td>
+</tr>
+<tr>
+<td><code>KIWANO_DAEMON_TOKEN</code></td>
+<td>未設定</td>
+<td>クライアント → そのゲートウェイの管理トークン</td>
+</tr>
+</tbody></table>
+<p>クライアントはデータポートを<strong>知らされる必要がありません</strong>。<code>/status</code> がゲートウェイの
+データプレーンがある<strong>アドレスとポート</strong>を報告し、テイクオーバーはその組をエージェントの
+設定に書き込みます —— こうしてノート PC 上のエージェントは、自分の loopback ではなく
+サーバー上のゲートウェイを指すことになります。</p>
+<h2 id="確認">確認する</h2>
+<p>管理する側のマシンで:</p>
+<pre><code class="language-sh">kiwano status
+</code></pre>
+<p><code>gateway: running</code> と遠隔のバージョンが出れば、管理プレーンに到達し認証も通っています。
+次にエージェントを一つテイクオーバーします —— <code>kiwano agents takeover claude</code> ——
+ゲートウェイが報告したアドレスにそのエージェントの設定が書き換わり、リクエストを送ります。
+エージェントが答えたら、両方のプレーンが動いています。</p>
+<p>デーモンが動いているのに <code>kiwano status</code> がゲートウェイ不在と言うなら、それはアドレスか
+トークンの誤りで、ネットワークではありません。CLI はどちらを使えなかったかを言います。</p>
+
+<div class="pn-nav">
+<a class="prev" href="/docs/ja/strategies/"><div class="dir">← Previous</div><div class="t">ストラテジーと上限</div></a>
+<a class="next" href="/docs/ja/cli/"><div class="dir">Next →</div><div class="t">kiwano コマンドライン</div></a>
+</div>
+  </main>
+</div>
+<div class="foot"><div class="foot-in">
+  <span>© 2026 Kiwano · Apache-2.0</span>
+  <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
+</div></div>
+</body>
+</html>

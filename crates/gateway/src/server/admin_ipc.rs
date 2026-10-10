@@ -321,17 +321,25 @@ impl AdminEndpoint {
     ///
     /// Requires a tokio runtime: the listener registers with the reactor.
     pub async fn bind(&self) -> std::io::Result<AdminListener> {
+        // **Before the platform split, on purpose.** A TCP endpoint is bound by
+        // `AdminTcp::bind`, which has the address and the discipline that goes
+        // with it — and asking the wrong one is a named refusal. This used to
+        // sit inside the unix `match`, so on Windows the same call fell through
+        // to the pipe branch and tried to create a pipe named "" (`the
+        // endpoint_is_a_per_user_pipe`'s sibling test is what noticed). One
+        // answer on both platforms, or it is not an answer.
+        if let AdminEndpoint::Tcp(addr) = self {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{addr} is a TCP endpoint; bind it through AdminTcp"),
+            ));
+        }
+
         #[cfg(unix)]
         let path = match self {
             AdminEndpoint::Local(path) => path,
-            // A TCP endpoint is bound by `AdminTcp::bind`, which has the address
-            // and the discipline that goes with it.
-            AdminEndpoint::Tcp(addr) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("{addr} is a TCP endpoint; bind it through AdminTcp"),
-                ))
-            }
+            // Answered above; this arm exists so the match is total.
+            AdminEndpoint::Tcp(_) => unreachable!("refused before the platform split"),
         };
         #[cfg(unix)]
         {
@@ -385,10 +393,15 @@ impl AdminEndpoint {
             // kernel object, not a file, so it disappears with its last handle
             // and a crashed gateway leaves nothing behind to collide with. The
             // unix branch's unlink-and-rebind dance has no counterpart.
+            //
+            // A `Tcp` endpoint never reaches this: it was refused above.
+            let AdminEndpoint::Local(name) = self else {
+                unreachable!("refused before the platform split")
+            };
             Ok(AdminListener {
                 inner: PipeListener {
-                    name: self.name().to_string(),
-                    pending: Some(create_pipe_instance(self.name())?),
+                    name: name.clone(),
+                    pending: Some(create_pipe_instance(name)?),
                 },
                 describe: self.describe(),
             })

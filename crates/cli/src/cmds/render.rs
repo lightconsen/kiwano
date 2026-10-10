@@ -605,6 +605,71 @@ fn list_text(list: &[String]) -> String {
     }
 }
 
+/// What an import did: what landed, what the watermark kept out, and what came
+/// out unpriced — the last of which is the one a user has to be told about,
+/// because it is a number that is missing rather than wrong.
+pub(crate) fn render_history_import(report: &vm::HistoryImportReport, read: usize) -> String {
+    let mut out = format!(
+        "imported {} row(s) and {} session(s) from {read} row(s) read\n",
+        report.usage_rows, report.sessions
+    );
+    if report.skipped_by_watermark > 0 {
+        out.push_str(&format!(
+            "  {} row(s) skipped: this gateway already metered that traffic\n",
+            report.skipped_by_watermark
+        ));
+    }
+    out.push_str(&format!("  priced {} row(s)", report.priced));
+    if report.unpriced > 0 {
+        out.push_str(&format!(
+            ", {} unpriced (no rate for the model yet — a Hub sync, then a re-import, fills them in)",
+            report.unpriced
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// The imported sessions, one row each, with the counts a reader scans for.
+pub(crate) fn render_sessions(rows: &[vm::SessionRow]) -> String {
+    if rows.is_empty() {
+        return "no imported sessions: `kiwano history import` reads the agents' own files"
+            .to_string();
+    }
+    let head = ["STARTED", "AGENT", "PROJECT", "TURNS", "TOKENS", "TOOLS"];
+    let body: Vec<Vec<String>> = rows
+        .iter()
+        .map(|s| {
+            vec![
+                s.started_at.clone(),
+                s.agent.clone(),
+                s.project.clone().unwrap_or_else(|| "-".to_string()),
+                s.turns.to_string(),
+                (s.input_tokens + s.output_tokens).to_string(),
+                top_names(s.tool_calls.as_deref()),
+            ]
+        })
+        .collect();
+    render_table(&head, &body, &[])
+}
+
+/// The first few names of a stored count array, as `name×n`.
+fn top_names(json: Option<&str>) -> String {
+    let Some(counts) = json.and_then(|j| serde_json::from_str::<Vec<vm::HistoryCount>>(j).ok())
+    else {
+        return "-".to_string();
+    };
+    if counts.is_empty() {
+        return "-".to_string();
+    }
+    counts
+        .iter()
+        .take(3)
+        .map(|c| format!("{}×{}", c.name, c.count))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub(crate) fn render_usage(report: &UsageReport) -> String {
     let mut out = format!(
         "usage ({}d{})",

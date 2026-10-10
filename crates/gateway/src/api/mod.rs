@@ -41,6 +41,7 @@ pub mod client_keys;
 pub mod csv;
 pub mod dashboard;
 pub mod import;
+pub mod import_history;
 pub mod keys;
 pub mod limits;
 pub mod logs;

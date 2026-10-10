@@ -70,7 +70,10 @@ pub use keys::{add_api_key, delete_api_key, list_api_keys, ApiKeyVm};
 pub use kiwano_api::client_keys::{
     ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeyVm, NewClientKeyInput,
 };
+pub use kiwano_api::history::HistoryCount;
 pub use kiwano_api::providers::{ProviderPriceInput, ProviderPricesInput};
+pub use kiwanod::api::import_history::HistoryImportReport;
+pub use kiwanod::store::sessions::SessionRow;
 pub use limits::{
     import_declared_prices, known_limit_currencies, normalize_declared_prices, normalize_limit_unit,
 };

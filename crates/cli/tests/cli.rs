@@ -2338,3 +2338,169 @@ fn a_wire_that_means_nothing_is_refused() {
     assert_ne!(code, 0);
     assert!(err.contains("expected chat"), "{err}");
 }
+
+// ── history ─────────────────────────────────────────────────────────────────
+
+/// The whole chain once: a home with a transcript in it, the CLI reading it, the
+/// daemon storing it, and the dashboard seeing the spend — while the *request*
+/// count stays what the gateway actually routed.
+///
+/// This is the feature's promise in one test: a fresh install's dashboard is not
+/// empty, because the agent's own files were read. It is also where the two
+/// halves of "体感一样" are pinned: the money includes the imported history, the
+/// request count does not, and the imported rows appear as their own bucket
+/// rather than being folded into a provider's.
+#[test]
+fn history_import_fills_a_fresh_install_and_the_dashboard_shows_it() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let home = tempfile::tempdir().unwrap();
+
+    // A Claude Code transcript, written the way the agent writes one: the
+    // directory is a slug of the project path, each line a record, and the token
+    // counts live in `message.usage`.
+    let project = home.path().join("work").join("acme-api");
+    std::fs::create_dir_all(&project).unwrap();
+    let dir = home
+        .path()
+        .join(".claude")
+        .join("projects")
+        .join("-home-me-work-acme-api");
+    std::fs::create_dir_all(&dir).unwrap();
+    let record = |uuid: &str, ts: &str, input: i64, output: i64| {
+        serde_json::json!({
+            "type": "assistant",
+            "uuid": uuid,
+            "timestamp": ts,
+            "sessionId": "11111111-2222-3333-4444-555555555555",
+            "cwd": project.to_string_lossy(),
+            "gitBranch": "main",
+            "message": {
+                "model": "claude-sonnet-4-5",
+                "usage": { "input_tokens": input, "output_tokens": output },
+                "content": [{ "type": "tool_use", "name": "Bash" }],
+            },
+        })
+    };
+    let lines = [
+        record("r1", "2026-01-02T10:00:00Z", 1_000, 200),
+        record("r2", "2026-01-02T10:05:00Z", 500, 100),
+    ];
+    let mut body = String::new();
+    for line in &lines {
+        body.push_str(&line.to_string());
+        body.push('\n');
+    }
+    std::fs::write(dir.join("session.jsonl"), body).unwrap();
+
+    // `--dry-run` first: it must report what it found without writing anything.
+    let home_arg = home.path().display().to_string();
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--home",
+            &home_arg,
+            "--json",
+            "history",
+            "import",
+            "--dry-run",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let dry: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(dry["usage"].as_array().unwrap().len(), 2);
+    // Nothing was written, so the daemon has no scan stamp and no sessions.
+    let (code, out, _) = run_served(&db, &daemon, &["--json", "history", "sessions"]);
+    assert_eq!(code, 0);
+    assert_eq!(out.trim(), "[]");
+
+    // Now the real import.
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "history", "import"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(report["usage_rows"], 2);
+    assert_eq!(report["sessions"], 1);
+    assert_eq!(report["skipped_by_watermark"], 0, "nothing was metered yet");
+
+    // The dashboard's spend includes the imported rows...
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "dashboard", "--window", "all"]);
+    assert_eq!(code, 0, "{err}");
+    let dashboard: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        dashboard["input_tokens"].as_i64().unwrap() + dashboard["output_tokens"].as_i64().unwrap(),
+        1_800,
+        "1000+200+500+100 tokens of history: {dashboard}"
+    );
+    // ...and the request count does not: that tile is what this gateway routed.
+    assert_eq!(
+        dashboard["requests"].as_i64().unwrap_or(0),
+        0,
+        "imported rows are not gateway-routed requests: {dashboard}"
+    );
+
+    // The sessions list has it, with the project label rather than a path.
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "history", "sessions"]);
+    assert_eq!(code, 0, "{err}");
+    let sessions: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent"], "claude");
+    assert_eq!(sessions[0]["turns"], 2);
+    assert!(
+        sessions[0]["tool_calls"].as_str().unwrap().contains("Bash"),
+        "{}",
+        sessions[0]
+    );
+    let project = sessions[0]["project"].as_str().unwrap();
+    assert_eq!(project, "acme-api", "the label, not the path");
+    assert!(
+        !project.contains('/'),
+        "a path must not cross the interface"
+    );
+
+    // A second run changes nothing: the rows are identified by their import keys.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "--json", "history", "import"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "dashboard", "--window", "all"]);
+    let again: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        again["input_tokens"].as_i64().unwrap() + again["output_tokens"].as_i64().unwrap(),
+        1_800,
+        "a re-import refreshes rather than doubles: {again}"
+    );
+}
+
+/// A home with nothing to read is not an error: it says so and exits 0, because
+/// "this machine has no transcripts" is a normal state, not a failure.
+#[test]
+fn history_import_on_an_empty_home_says_so() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let home = tempfile::tempdir().unwrap();
+    let home_arg = home.path().display().to_string();
+
+    let (code, out, err) = run_served(&db, &daemon, &["--home", &home_arg, "history", "import"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("nothing to import"), "{out}");
+
+    // And an agent this build cannot read is refused rather than ignored.
+    let (code, _, err) = run_served(&db, &daemon, &["clients", "list", "--agent", "nope"]);
+    assert_eq!(
+        code, 0,
+        "an unknown agent is an empty list, not an error: {err}"
+    );
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "history", "import", "--agent", "nope"],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("no reader for"), "{err}");
+}

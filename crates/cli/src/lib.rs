@@ -288,6 +288,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::clients(cmd, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::History(cmd) => {
+            cmds::history(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
         Command::Usage(args) => {
             cmds::usage(args, ctx)?;
             Ok(EXIT_OK)

@@ -24,6 +24,7 @@ use kiwano_api::providers::{
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
 use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
+use kiwanod::api::import_history::HistoryImportReport;
 use kiwanod::api::logs::RequestLogListVm;
 use kiwanod::api::share::ImportReport;
 use kiwanod::plan_quota::PlanQuotaReport;
@@ -225,6 +226,54 @@ impl DaemonApi {
             &format!("/api/client-keys/{id}/policy"),
             policy,
         ))
+    }
+
+    /// Import a batch of an agent's own history — `api::import_history`.
+    ///
+    /// One request carries one chunk (`history::chunks`); the caller loops. The
+    /// report it returns is per chunk, and the caller sums them.
+    pub fn import_history(
+        &self,
+        batch: &kiwano_api::history::HistoryBatch,
+    ) -> Result<HistoryImportReport, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/import/history",
+            batch,
+        )
+    }
+
+    /// The imported sessions, newest first.
+    pub fn list_sessions(
+        &self,
+        agent: Option<&str>,
+        project: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<kiwanod::store::sessions::SessionRow>, String> {
+        // Absent filters are omitted rather than sent empty: the far end reads an
+        // empty value as a filter that matches nothing.
+        let mut query: Vec<String> = Vec::new();
+        for (key, value) in [("agent", agent), ("project", project), ("since", since)] {
+            if let Some(value) = value {
+                query.push(format!("{key}={}", encode_query(value)));
+            }
+        }
+        let path = if query.is_empty() {
+            "/api/history/sessions".to_string()
+        } else {
+            format!("/api/history/sessions?{}", query.join("&"))
+        };
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), &path)
+    }
+
+    /// When this machine's history was last imported, if it ever has.
+    pub fn history_scanned_at(&self) -> Result<Option<String>, String> {
+        let v: serde_json::Value =
+            sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/history/scan")?;
+        Ok(v.get("scanned_at")
+            .and_then(|s| s.as_str())
+            .map(str::to_string))
     }
 
     /// Rewrite the candidate order — `vm::reorder_agent_bindings`.

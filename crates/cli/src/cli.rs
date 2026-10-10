@@ -76,6 +76,11 @@ pub enum Command {
     #[command(subcommand)]
     Clients(ClientsCmd),
 
+    /// The agents' own history, read from their session files and imported, so a
+    /// fresh install's dashboard is not empty
+    #[command(subcommand)]
+    History(HistoryCmd),
+
     /// Usage totals
     Usage(UsageArgs),
 
@@ -708,6 +713,39 @@ pub enum KeysCmd {
 
     /// Delete a rotating key by its numeric id
     Remove { key_id: i64 },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HistoryCmd {
+    /// Read the agents' session files and send what they say to the gateway.
+    ///
+    /// Only what predates the gateway is imported: every request served since a
+    /// takeover is already in the ledger, and the agents write their files either
+    /// way, so importing those would count them twice.
+    Import {
+        /// Only these agents (claude | codex; repeatable). Omitted: all of them.
+        #[arg(long = "agent", value_name = "AGENT")]
+        agent: Vec<String>,
+
+        /// Read and report, send nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// The imported sessions: project, span, turns, tools
+    Sessions {
+        /// Only this project (the label the files imply, e.g. a repo directory)
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+
+        /// Only this agent
+        #[arg(long, value_name = "AGENT")]
+        agent: Option<String>,
+
+        /// Only sessions that started within this many days
+        #[arg(long, value_name = "DAYS")]
+        days: Option<i64>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

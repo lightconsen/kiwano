@@ -48,6 +48,7 @@ pub mod agents;
 pub mod client_keys;
 pub mod dashboard;
 pub mod error;
+pub mod history;
 pub mod ids;
 pub mod keys;
 pub mod logo;

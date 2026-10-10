@@ -28,6 +28,7 @@ pub mod creds;
 pub mod csv;
 pub mod daemon_api;
 pub mod detect;
+pub mod history;
 pub mod import;
 pub mod insights;
 pub mod paths;

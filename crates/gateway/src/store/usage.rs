@@ -287,6 +287,81 @@ impl Store {
         Ok(rows)
     }
 
+    /// The instant this agent's first **metered** row was written, if it has one.
+    ///
+    /// The watermark an import measures against: everything older than this
+    /// happened before this gateway was in the path, so it is the agent's own
+    /// history and nobody else has counted it — and everything at or after it is
+    /// already in this table, so importing it would count the same request twice.
+    /// The agents write their session files either way, which is what makes the
+    /// overlap real rather than theoretical.
+    ///
+    /// `None` for an agent this gateway has never served: all of its history is
+    /// pre-gateway, and all of it is importable.
+    pub fn first_usage_at(&self, agent: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT MIN(ts) FROM usage WHERE agent = ?1",
+            params![agent],
+            |row| row.get::<_, Option<String>>(0),
+        )?)
+    }
+
+    /// Write a batch of imported rows, refreshing any the store already has.
+    ///
+    /// Upsert on `import_key`, which is what makes an import repeatable: the key
+    /// is derived from the file the row came out of, so a second scan of the same
+    /// session refreshes those rows instead of adding a second copy of them. The
+    /// refresh is worth something on its own — a machine that had no prices the
+    /// first time gets its costs filled in — and it is why the conflict clause
+    /// carries the priced columns and not just the tokens.
+    ///
+    /// The gateway's own rows are never touched: their `import_key` is NULL, and
+    /// SQLite treats NULLs in a unique index as distinct.
+    ///
+    /// Returns how many rows the batch wrote (inserted or refreshed).
+    pub fn upsert_imported_usage(&self, rows: &[UsageRecord]) -> Result<usize> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let mut written = 0usize;
+        for u in rows {
+            tx.execute(
+                "INSERT INTO usage (ts, agent, provider_id, client_key_id, model, input_tokens,
+                                    output_tokens, cache_read_tokens, cache_creation_tokens,
+                                    latency_ms, status, cost, cost_currency, cost_off_peak,
+                                    project, session_id, import_key)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                 ON CONFLICT(import_key) DO UPDATE SET
+                     ts = ?1, agent = ?2, provider_id = ?3, client_key_id = ?4, model = ?5,
+                     input_tokens = ?6, output_tokens = ?7, cache_read_tokens = ?8,
+                     cache_creation_tokens = ?9, latency_ms = ?10, status = ?11, cost = ?12,
+                     cost_currency = ?13, cost_off_peak = ?14, project = ?15, session_id = ?16",
+                params![
+                    u.ts,
+                    u.agent,
+                    u.provider_id,
+                    u.client_key_id,
+                    u.model,
+                    u.input_tokens,
+                    u.output_tokens,
+                    u.cache_read_tokens,
+                    u.cache_creation_tokens,
+                    u.latency_ms,
+                    u.status,
+                    u.cost,
+                    u.cost_currency,
+                    u.cost_off_peak,
+                    u.project,
+                    u.session_id,
+                    u.import_key,
+                ],
+            )?;
+            written += 1;
+        }
+        tx.commit()?;
+        Ok(written)
+    }
+
     /// When each client key last carried a request, by handle.
     ///
     /// The question a key list has to answer before anyone revokes one, and the

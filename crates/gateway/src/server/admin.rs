@@ -74,7 +74,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -163,6 +163,13 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         )
         .route("/config/export", get(export_config_route))
         .route("/import/cc-switch", post(import_cc_switch_route))
+        // The one write whose subject is the past. The client read the agents'
+        // own files — which the daemon never does (§5 #2) — and sends rows; what
+        // arrives here is priced, measured against each agent's watermark, and
+        // written idempotently (`api::import_history`).
+        .route("/import/history", post(import_history_route))
+        .route("/history/sessions", get(list_sessions_route))
+        .route("/history/scan", get(history_scan_route))
         .route(
             "/takeover/{agent}/state",
             get(takeover_state_read_route)
@@ -1641,6 +1648,55 @@ async fn provider_ref_route(
 /// The rows, not the paths: those files are in the user's home and one of them
 /// is a SQLite database, so reading them is the client's (`migrate.local.md`
 /// §10.19). The split falls where the reading stops.
+/// `GET /api/history/sessions` — the imported sessions, newest first.
+async fn list_sessions_route(
+    State(state): State<Arc<GatewayState>>,
+    Query(query): Query<SessionQuery>,
+) -> Response {
+    let since = query
+        .days
+        .map(|d| crate::store::rfc3339_from_unix(crate::store::unix_now() - d.max(0) * 86_400));
+    match state.store.list_sessions(
+        query.agent.as_deref(),
+        query.project.as_deref(),
+        since.as_deref(),
+    ) {
+        Ok(rows) => Json(rows).into_response(),
+        Err(e) => resource_error(kiwano_api::error::ApiError::failed(e)),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SessionQuery {
+    agent: Option<String>,
+    project: Option<String>,
+    days: Option<i64>,
+}
+
+/// `GET /api/history/scan` — when this machine's history was last imported, so a
+/// client can tell "never scanned" from "scanned, and there was nothing".
+async fn history_scan_route(State(state): State<Arc<GatewayState>>) -> Response {
+    Json(serde_json::json!({ "scanned_at": state.store.last_history_scan() })).into_response()
+}
+
+/// `POST /api/import/history` — an agent's own history, as the client parsed it.
+///
+/// The batch is chunked by the caller (`kiwano_core::history::chunks`) because
+/// axum caps a JSON body at 2 MiB, so one request is one piece of a scan.
+async fn import_history_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(batch): Json<kiwano_api::history::HistoryBatch>,
+) -> Response {
+    // One snapshot of the price table for the whole batch: it is cloned out of
+    // its lock per call, and a scan prices thousands of rows.
+    let pricing = state.pricing();
+    let result = crate::api::import_history::apply_history(&state.store, &pricing, &batch);
+    // `after_write_with` reloads the route table and the limit snapshot, which is
+    // what makes the imported rows visible to the dashboard and countable by a
+    // ceiling without a restart.
+    after_write_with(&state, result)
+}
+
 #[derive(serde::Deserialize)]
 struct CcSwitchBody {
     raws: Vec<crate::api::import::RawProvider>,

@@ -477,6 +477,30 @@ pub struct UsageRecord {
     pub import_key: Option<String>,
 }
 
+/// One session an agent's own files reported (migration v31).
+///
+/// Session-shaped, not request-shaped: this is the half that `usage` must not
+/// hold. `tool_calls` and `skills` are JSON arrays of `{"name","count"}` — a list
+/// of names is a payload, not a column — and there is deliberately no working
+/// directory here: the client turns the path it read into a `project` label
+/// before sending anything (`migrate.local.md` §5 #1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedSession {
+    pub import_key: String,
+    pub agent: String,
+    pub project: Option<String>,
+    pub session_id: String,
+    pub started_at: String,
+    pub ended_at: String,
+    pub turns: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub tool_calls: Option<String>,
+    pub skills: Option<String>,
+}
+
 /// A cost summed over a window, with what the same rows would have cost at
 /// their off-peak rates (migration v13). The two are equal for a model with no
 /// published schedule.

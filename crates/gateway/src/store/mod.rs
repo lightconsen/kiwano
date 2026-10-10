@@ -39,6 +39,7 @@ pub mod permissions;
 pub mod pricing;
 pub mod providers;
 pub mod routing;
+pub mod sessions;
 pub mod settings;
 pub mod time;
 pub mod types;
@@ -59,8 +60,9 @@ pub use migrations::SCHEMA_VERSION;
 pub use time::{now_rfc3339, rfc3339_from_unix, unix_now};
 pub use types::{
     AgentLimit, ApiKeyRow, Billing, Binding, ClientKey, ClientKeyLimit, CostBucket, CustomAgent,
-    DailyUsage, OpenAiWire, Protocol, Provider, ProviderCostBucket, ProviderEndpoint,
-    ProviderHealth, ProviderUsage, Strategy, StrategyType, TrafficStats, UsageRecord, UsageTotals,
+    DailyUsage, ImportedSession, OpenAiWire, Protocol, Provider, ProviderCostBucket,
+    ProviderEndpoint, ProviderHealth, ProviderUsage, Strategy, StrategyType, TrafficStats,
+    UsageRecord, UsageTotals,
 };
 
 /// Thin handle around a SQLite connection (WAL, shared with the Tauri app).

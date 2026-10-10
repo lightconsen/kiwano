@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::error::{GatewayError, Result};
-use crate::store::{Protocol, ProviderEndpoint, Store, StrategyType};
+use crate::store::{ClientKey, Protocol, ProviderEndpoint, Store, StrategyType};
 
 /// Canonical agent ids (tech.md §2.4 B: MVP takes over Claude Code + Codex).
 pub const AGENT_CLAUDE: &str = "claude";
@@ -86,11 +86,13 @@ pub struct AgentRoute {
 }
 
 /// In-memory snapshot of `providers` + `agent_strategies` + `agent_bindings`
-/// + `placeholder_keys`, rebuilt on `/reload`.
+/// + `client_keys`, rebuilt on `/reload`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RouteTable {
-    /// Placeholder key → agent (attribution map, tech.md §4.6).
-    pub keys: HashMap<String, String>,
+    /// Client key → the key row (which names its agent, and what that client may
+    /// spend and use). The whole row, not just the agent, because the ceilings
+    /// and allowlists are checked on the request path (limits v29).
+    pub keys: HashMap<String, ClientKey>,
     /// agent → route (strategy + ordered candidates).
     pub routes: HashMap<String, AgentRoute>,
 }
@@ -98,8 +100,8 @@ pub struct RouteTable {
 /// How the agent of a request was determined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Attribution {
-    /// A registered placeholder key in the auth headers.
-    PlaceholderKey,
+    /// A registered client key in the auth headers.
+    ClientKey,
     /// Key missing/unknown → fell back by path protocol (+ warning log).
     ///
     /// No longer produced: the fallback was an open door on a loopback port
@@ -114,6 +116,10 @@ pub enum Attribution {
 pub struct RoutedRequest {
     pub agent: String,
     pub attribution: Attribution,
+    /// The handle of the client key that carried the request (limits v29). It
+    /// rides the attempt so the metered row can name the credential that spent
+    /// it — without which a key's ceiling would have nothing to count.
+    pub client_key_id: String,
     pub provider: UpstreamProvider,
 }
 
@@ -129,6 +135,10 @@ pub struct RoutedRequest {
 pub struct RoutedPlan {
     pub agent: String,
     pub attribution: Attribution,
+    /// The handle of the client key this request presented. Carried on the plan
+    /// rather than re-read per attempt: every attempt of one request is the same
+    /// credential, and a re-read could disagree with what was authorised.
+    pub client_key_id: String,
     /// Ordered, best first; never empty on `Ok`.
     pub candidates: Vec<UpstreamProvider>,
 }
@@ -139,6 +149,7 @@ impl RoutedPlan {
         self.candidates.get(tried).map(|c| RoutedRequest {
             agent: self.agent.clone(),
             attribution: self.attribution,
+            client_key_id: self.client_key_id.clone(),
             provider: c.clone(),
         })
     }
@@ -173,9 +184,9 @@ impl RouteTable {
         let mut keys = HashMap::new();
         let mut agents: BTreeSet<String> = BTreeSet::new();
 
-        for k in store.list_placeholder_keys()? {
-            keys.insert(k.key, k.agent.clone());
-            agents.insert(k.agent);
+        for k in store.list_client_keys()? {
+            agents.insert(k.agent.clone());
+            keys.insert(k.key.clone(), k);
         }
         for a in store.bound_agents()? {
             agents.insert(a);
@@ -249,9 +260,14 @@ impl RouteTable {
         Ok(RouteTable { keys, routes })
     }
 
-    /// Attribute a placeholder key to its agent, if registered.
+    /// The client key row a value names, if this gateway minted it.
+    pub fn client_for_key(&self, key: &str) -> Option<&ClientKey> {
+        self.keys.get(key)
+    }
+
+    /// Attribute a client key to its agent, if registered.
     pub fn agent_for_key(&self, key: &str) -> Option<&str> {
-        self.keys.get(key).map(String::as_str)
+        self.keys.get(key).map(|k| k.agent.as_str())
     }
 
     /// Select the upstream provider for an agent under its strategy.
@@ -271,7 +287,7 @@ impl RouteTable {
     }
 }
 
-/// Attribute an inbound request to its agent by placeholder key, or refuse it.
+/// Attribute an inbound request to its agent by client key, or refuse it.
 ///
 /// The key is the *only* attribution source. A request that carries no key, or
 /// one this gateway did not mint, is rejected here and is never forwarded —
@@ -285,7 +301,7 @@ impl RouteTable {
 /// Nothing legitimate relied on the fallback. An agent only reaches this port
 /// after a takeover, and `takeover::enable` always does two things together:
 /// it rewrites the agent's config to point here and injects the key it minted
-/// into that same config (`kw-ag-<agent>-<rand>`, the `placeholder_keys` row
+/// into that same config (`kw-ag-<agent>-<rand>`, the `client_keys` row
 /// this lookup reads). An agent that was never taken over talks to its real
 /// upstream directly and never touches the gateway at all. The one header
 /// shape to watch is a client that carries its key somewhere the gateway does
@@ -296,16 +312,23 @@ impl RouteTable {
 /// The inbound protocol is no longer consulted: it never decided *which* agent
 /// to charge, only *which guess* to make when the key was unusable. Which
 /// upstream speaks it is still decided downstream, in `crate::forward`.
-fn route_agent<'t>(table: &'t RouteTable, placeholder_key: Option<&str>) -> Result<&'t AgentRoute> {
-    let agent = placeholder_key
-        .and_then(|k| table.agent_for_key(k))
+///
+/// The returned row is the whole key, not just its agent: what the client may
+/// spend and which models it may name are properties of this credential, and
+/// [`crate::strategy::StrategyEngine::plan`] is where they are enforced.
+fn route_agent<'t>(
+    table: &'t RouteTable,
+    placeholder_key: Option<&str>,
+) -> Result<(&'t ClientKey, &'t AgentRoute)> {
+    let client = placeholder_key
+        .and_then(|k| table.client_for_key(k))
         .ok_or_else(|| {
             // The key itself is never logged: an agent pointed at the wrong
             // port (or an operator pasting a real upstream key) would otherwise
             // write a live credential into the gateway log.
             tracing::warn!(
                 key_present = placeholder_key.is_some(),
-                "data-plane request refused: placeholder key missing or unknown"
+                "data-plane request refused: client key missing or unknown"
             );
             GatewayError::Unauthorized(if placeholder_key.is_some() {
                 "unknown API key".to_string()
@@ -313,14 +336,28 @@ fn route_agent<'t>(table: &'t RouteTable, placeholder_key: Option<&str>) -> Resu
                 "missing API key".to_string()
             })
         })?;
-    table
+    let route = table
         .routes
-        .get(agent)
-        .ok_or_else(|| GatewayError::NoBinding(agent.to_string()))
+        .get(&client.agent)
+        .ok_or_else(|| GatewayError::NoBinding(client.agent.clone()))?;
+    Ok((client, route))
 }
 
 /// Resolve agent attribution + provider selection for one inbound request
 /// via the strategy engine (tech.md §4.7: the live data-plane path).
+///
+/// `model` is what the client asked for, read from the body before this point
+/// because a client key may allow-list models — and an allowlist has to be
+/// consulted before the upstream call, not after it.
+///
+/// The credential's own contract is checked **here**, before the engine is
+/// asked for a plan, and that is the layering: a key may be limited or scoped in
+/// ways the agent is not, so it is the outer gate, and a request its own key
+/// refuses never reaches the agent's budget or a provider's. Putting the checks
+/// inside `plan` was the alternative; it would have threaded a credential and a
+/// model through a function whose subject is strategy, and left the door open
+/// for the next strategy-selection caller to forget both.
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_via_engine(
     table: &RouteTable,
     engine: &crate::strategy::StrategyEngine,
@@ -328,14 +365,22 @@ pub async fn resolve_via_engine(
     limits: &crate::limits::LimitState,
     placeholder_key: Option<&str>,
     session: Option<&str>,
+    model: Option<&str>,
 ) -> Result<RoutedPlan> {
-    let route = route_agent(table, placeholder_key)?;
-    let candidates = engine.plan(store, route, session, limits).await?;
+    let (client, route) = route_agent(table, placeholder_key)?;
+    crate::limits::check_client_key(limits, client, model)?;
+    // A provider this key was not granted is not a candidate at all — pruned
+    // rather than refused, so a multi-provider route can still serve the request
+    // through one it may use (and `single`, which names one provider on purpose,
+    // is refused instead of being promoted to a backup).
+    let route = crate::limits::route_without_disallowed_providers(route, client)?;
+    let candidates = engine.plan(store, &route, session, limits).await?;
     Ok(RoutedPlan {
         agent: route.agent.clone(),
         // The only attribution a routed request can have now; the variant
         // remains for historical `request_logs` rows.
-        attribution: Attribution::PlaceholderKey,
+        attribution: Attribution::ClientKey,
+        client_key_id: client.id.clone(),
         candidates,
     })
 }
@@ -343,11 +388,12 @@ pub async fn resolve_via_engine(
 /// Attribution-only resolution with single-strategy selection (kept for
 /// tests and tooling; the data plane routes through the strategy engine).
 pub fn resolve(table: &RouteTable, placeholder_key: Option<&str>) -> Result<RoutedRequest> {
-    let route = route_agent(table, placeholder_key)?;
+    let (client, route) = route_agent(table, placeholder_key)?;
     let provider = table.select(&route.agent)?.clone();
     Ok(RoutedRequest {
         agent: route.agent.clone(),
-        attribution: Attribution::PlaceholderKey,
+        attribution: Attribution::ClientKey,
+        client_key_id: client.id.clone(),
         provider,
     })
 }
@@ -434,10 +480,10 @@ mod tests {
             .unwrap();
 
         store
-            .upsert_placeholder_key("kw-ag-claude-abc123", AGENT_CLAUDE)
+            .upsert_client_key("kw-ag-claude-abc123", AGENT_CLAUDE)
             .unwrap();
         store
-            .upsert_placeholder_key("kw-ag-codex-xyz789", AGENT_CODEX)
+            .upsert_client_key("kw-ag-codex-xyz789", AGENT_CODEX)
             .unwrap();
         store
     }
@@ -539,7 +585,7 @@ mod tests {
 
         let routed = resolve(&table, Some("kw-ag-claude-abc123")).unwrap();
         assert_eq!(routed.agent, AGENT_CLAUDE);
-        assert_eq!(routed.attribution, Attribution::PlaceholderKey);
+        assert_eq!(routed.attribution, Attribution::ClientKey);
         assert_eq!(routed.provider.id, "p-ant");
 
         // Disabling the primary promotes the backup on the next reload.
@@ -584,7 +630,7 @@ mod tests {
         // Key registered but agent has no bindings → a clean 503, not a 401:
         // the caller is identified, it simply has nothing to route to.
         store
-            .upsert_placeholder_key("kw-ag-codex-unbound", AGENT_CODEX)
+            .upsert_client_key("kw-ag-codex-unbound", AGENT_CODEX)
             .unwrap();
         let table = RouteTable::load(&store).unwrap();
         let err = resolve(&table, Some("kw-ag-codex-unbound")).unwrap_err();

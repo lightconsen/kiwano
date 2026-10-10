@@ -32,6 +32,10 @@ pub(crate) struct CompletedLog {
 pub(crate) struct UsageSample {
     pub(crate) agent: String,
     pub(crate) provider_id: String,
+    /// The handle of the client key that carried the request (limits v29). It
+    /// is what a credential's own ceiling counts, so a metered row that left it
+    /// out would make that ceiling unenforceable.
+    pub(crate) client_key_id: String,
     /// The catalog entry the provider was added from, when it came from the
     /// shelf. That — not the local row id — is the key its price is published
     /// under; None is priced at the general rate, which is what a hand-added
@@ -74,6 +78,7 @@ impl UsageSample {
             ts: now_rfc3339(),
             agent: self.agent,
             provider_id: self.provider_id,
+            client_key_id: Some(self.client_key_id),
             model: self.model,
             input_tokens: self.usage.input_tokens,
             output_tokens: self.usage.output_tokens,
@@ -91,7 +96,7 @@ impl UsageSample {
 /// How the agent was attributed, as stored in `request_logs.attribution`.
 pub(crate) fn attribution_str(a: crate::router::Attribution) -> String {
     match a {
-        crate::router::Attribution::PlaceholderKey => "key".to_string(),
+        crate::router::Attribution::ClientKey => "key".to_string(),
         crate::router::Attribution::PathFallback => "path_fallback".to_string(),
     }
 }

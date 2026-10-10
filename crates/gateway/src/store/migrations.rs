@@ -21,7 +21,17 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 28;
+pub const SCHEMA_VERSION: i32 = 30;
+
+/// v1's SQL, for a test that needs a database of that vintage to open.
+///
+/// A test standing up "an install from before vN" has to give it the tables the
+/// migrations above N will touch, and the honest way to do that is to run the
+/// store's own SQL rather than to keep a second copy of the schema in a fixture
+/// (`migrate.local.md` §10.14). The version stamp is the caller's business: this
+/// is only the base tables.
+#[cfg(test)]
+pub(crate) const BASE_SCHEMA_SQL: &str = MIGRATION_V1;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -724,6 +734,68 @@ CREATE TABLE IF NOT EXISTS hub_models_cache (
 );
 "#;
 
+/// v29: the placeholder key becomes the client key — the data plane's one
+/// credential, now carrying its own spend windows and allowlists.
+///
+/// A rename plus `ADD COLUMN`s, not a rebuild: no CHECK is widened, and a
+/// rebuild would have to re-copy every key the takeover has already written
+/// into an agent's config. Keeping those rows is the requirement — a key that
+/// is live in a config file must keep working, and it earns no limits by
+/// having existed before they did.
+///
+/// `id` is a **handle**, not a credential. The secret is `key`; `id` is what
+/// `usage` carries, so a rotated key keeps the spend it already accumulated
+/// and no ledger row quotes something that can be presented. A row that
+/// predates the column gets a random one, because there is nothing in the old
+/// shape to derive it from — and a value derived from the key would be a value
+/// derived from the secret.
+///
+/// No CHECK on `client_key_limits.period`, for the reason [`MIGRATION_V19`]
+/// gives about `agent_limits`: the window vocabulary grows.
+const MIGRATION_V29: &str = r#"
+ALTER TABLE placeholder_keys RENAME TO client_keys;
+ALTER TABLE client_keys ADD COLUMN id TEXT;
+ALTER TABLE client_keys ADD COLUMN label TEXT;
+ALTER TABLE client_keys ADD COLUMN model_allow TEXT;
+ALTER TABLE client_keys ADD COLUMN provider_allow TEXT;
+ALTER TABLE client_keys ADD COLUMN updated_at TEXT;
+UPDATE client_keys SET id = 'ck-' || lower(hex(randomblob(6))) WHERE id IS NULL;
+UPDATE client_keys SET updated_at = created_at WHERE updated_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_client_keys_id ON client_keys(id);
+
+CREATE TABLE IF NOT EXISTS client_key_limits (
+    key_id       TEXT NOT NULL REFERENCES client_keys(id) ON DELETE CASCADE,
+    period       TEXT NOT NULL,
+    period_limit REAL NOT NULL,
+    limit_unit   TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (key_id, period)
+);
+
+ALTER TABLE usage ADD COLUMN client_key_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_usage_client_key_ts ON usage(client_key_id, ts);
+"#;
+
+/// v30: which OpenAI-family wire a provider's endpoint serves.
+///
+/// `providers.protocol` is a *family* — `openai` covers both `/v1/chat/completions`
+/// and `/v1/responses`, and one provider may serve one and not the other. Until
+/// this column there was no way to say which: a request in the wire the provider
+/// does not speak was passed through verbatim and came back a 404 from the
+/// vendor, which is a failure with no explanation on our side.
+///
+/// Defaults to `both`, which is exactly today's behaviour — pass through
+/// whatever arrives. That default is deliberate: reinterpreting every existing
+/// `openai` row as chat-only would break the installations whose provider does
+/// serve Responses, and the vendor's own 404 is a better teacher than a guess
+/// about a `base_url` we cannot see behind.
+///
+/// No CHECK, for the reason [`MIGRATION_V19`] gives: the set of wires can grow.
+const MIGRATION_V30: &str = r#"
+ALTER TABLE providers ADD COLUMN openai_wire TEXT NOT NULL DEFAULT 'both';
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -867,6 +939,12 @@ impl Store {
         }
         if version < 28 {
             conn.execute_batch(MIGRATION_V28)?;
+        }
+        if version < 29 {
+            conn.execute_batch(MIGRATION_V29)?;
+        }
+        if version < 30 {
+            conn.execute_batch(MIGRATION_V30)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -1033,7 +1111,7 @@ mod tests {
             "providers",
             "agent_strategies",
             "agent_bindings",
-            "placeholder_keys",
+            "client_keys",
             "usage",
             "request_logs",
             "request_bodies",
@@ -1155,7 +1233,7 @@ mod tests {
         assert!(store.bindings_for_agent("gemini").unwrap().is_empty());
         assert!(store.get_strategy("gemini").unwrap().is_none());
         assert!(store
-            .list_placeholder_keys()
+            .list_client_keys()
             .unwrap()
             .iter()
             .all(|k| k.agent != "gemini"));

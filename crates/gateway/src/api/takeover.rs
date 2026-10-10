@@ -209,9 +209,13 @@ pub fn phase_state(
         // immediately by real requests.
         let _ = super::catalog::link_providers(store);
     }
+    // The handle the registration returned is the management surface's, not the
+    // takeover's: the config file carries the value, and nothing here needs to
+    // name the row again.
     store
-        .upsert_placeholder_key(key, agent)
-        .map_err(ApiError::failed)
+        .upsert_client_key(key, agent)
+        .map_err(ApiError::failed)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -264,7 +268,7 @@ mod tests {
             .upsert_strategy("claude", StrategyType::Single, None)
             .unwrap();
         store
-            .upsert_placeholder_key("kw-ag-claude-ab12", "claude")
+            .upsert_client_key("kw-ag-claude-ab12", "claude")
             .unwrap();
         store
     }
@@ -294,7 +298,7 @@ mod tests {
         let store = taken_over();
 
         assert!(unregister_key(&store, "claude").unwrap());
-        assert!(store.list_placeholder_keys().unwrap().is_empty());
+        assert!(store.list_client_keys().unwrap().is_empty());
         assert!(
             !store.bindings_for_agent("claude").unwrap().is_empty(),
             "the route stays: phase one may not have created it"
@@ -304,10 +308,10 @@ mod tests {
 
         // And the full teardown is the one that clears the route.
         store
-            .upsert_placeholder_key("kw-ag-claude-ab12", "claude")
+            .upsert_client_key("kw-ag-claude-ab12", "claude")
             .unwrap();
         teardown(&store, "claude").unwrap();
-        assert!(store.list_placeholder_keys().unwrap().is_empty());
+        assert!(store.list_client_keys().unwrap().is_empty());
         assert!(store.bindings_for_agent("claude").unwrap().is_empty());
         assert!(store.get_strategy("claude").unwrap().is_none());
         assert!(
@@ -404,7 +408,7 @@ pub fn rebuild_route(store: &Store, agent: &str) -> Result<Option<TakeoverRebuil
 /// client makes about an agent's takeover state.
 pub fn takeover_state(store: &Store, agent: &str) -> Result<TakeoverStateVm, ApiError> {
     let key = store
-        .list_placeholder_keys()
+        .list_client_keys()
         .map_err(ApiError::failed)?
         .into_iter()
         .find(|k| k.agent == agent)
@@ -425,11 +429,9 @@ pub fn takeover_state(store: &Store, agent: &str) -> Result<TakeoverStateVm, Api
 /// rows, with their keys, plans and usage history, and they are what a later
 /// takeover re-imports and binds again.
 pub fn teardown(store: &Store, agent: &str) -> Result<(), ApiError> {
-    for k in store.list_placeholder_keys().map_err(ApiError::failed)? {
+    for k in store.list_client_keys().map_err(ApiError::failed)? {
         if k.agent == agent {
-            store
-                .delete_placeholder_key(&k.key)
-                .map_err(ApiError::failed)?;
+            store.delete_client_key(&k.id).map_err(ApiError::failed)?;
         }
     }
     for b in store.bindings_for_agent(agent).map_err(ApiError::failed)? {
@@ -463,11 +465,9 @@ fn join_provider_url(base_url: &str, api_path: Option<&str>) -> String {
 /// before Kiwano was involved.
 pub fn unregister_key(store: &Store, agent: &str) -> Result<bool, ApiError> {
     let mut removed = false;
-    for k in store.list_placeholder_keys().map_err(ApiError::failed)? {
+    for k in store.list_client_keys().map_err(ApiError::failed)? {
         if k.agent == agent {
-            removed |= store
-                .delete_placeholder_key(&k.key)
-                .map_err(ApiError::failed)?;
+            removed |= store.delete_client_key(&k.id).map_err(ApiError::failed)?;
         }
     }
     Ok(removed)

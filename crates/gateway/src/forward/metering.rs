@@ -178,6 +178,7 @@ mod tests {
         let sample = |model: Option<&'static str>| UsageSample {
             agent: "claude".into(),
             provider_id: "p1".into(),
+            client_key_id: "ck-test".to_string(),
             catalog_id: None,
             started_unix: TEST_AT,
             model: model.map(str::to_string),
@@ -280,6 +281,7 @@ mod tests {
         let sample = |provider_id: &str, catalog_id: Option<&str>| UsageSample {
             agent: "claude".into(),
             provider_id: provider_id.into(),
+            client_key_id: "ck-test".to_string(),
             catalog_id: catalog_id.map(str::to_string),
             started_unix: TEST_AT,
             model: Some("m1".into()),
@@ -412,6 +414,7 @@ mod tests {
         let sample = |provider_id: &str, catalog_id: Option<&str>, model: &str| UsageSample {
             agent: "claude".into(),
             provider_id: provider_id.into(),
+            client_key_id: "ck-test".to_string(),
             catalog_id: catalog_id.map(str::to_string),
             started_unix: TEST_AT,
             model: Some(model.into()),
@@ -511,6 +514,7 @@ mod tests {
         let sample = UsageSample {
             agent: "claude".into(),
             provider_id: "p-own".into(),
+            client_key_id: "ck-test".to_string(),
             catalog_id: None,
             started_unix: TEST_AT,
             model: Some("m1".into()),
@@ -649,6 +653,7 @@ mod tests {
         let sample = |provider_id: &str, started_unix: i64| UsageSample {
             agent: "claude".into(),
             provider_id: provider_id.into(),
+            client_key_id: "ck-test".to_string(),
             catalog_id: None,
             started_unix,
             model: Some("m1".into()),
@@ -755,6 +760,7 @@ mod tests {
         let sample = |provider_id: &str, input_tokens: i64| UsageSample {
             agent: "claude".into(),
             provider_id: provider_id.into(),
+            client_key_id: "ck-test".to_string(),
             catalog_id: None,
             started_unix: 1_788_919_200,
             model: Some("m1".into()),

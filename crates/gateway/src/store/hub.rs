@@ -156,6 +156,13 @@ mod tests {
             // An install from before v28: the app's schema, a synced payload,
             // and the version it was stamped with.
             let conn = rusqlite::Connection::open(&path).unwrap();
+            // The base tables first. A real v27 install has them all — they come
+            // from v1 — and the migrations that run from 27 touch some of them
+            // (`client_keys` is renamed, `usage` and `providers` gain a column),
+            // so a fixture carrying only the hub tables would be testing a
+            // database no install ever had.
+            conn.execute_batch(crate::store::migrations::BASE_SCHEMA_SQL)
+                .unwrap();
             conn.execute_batch(
                 "CREATE TABLE hub_cache (
                      id        INTEGER PRIMARY KEY CHECK (id = 1),

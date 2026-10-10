@@ -145,6 +145,7 @@ mod tests {
                 ts: crate::store::rfc3339_from_unix(crate::store::unix_now() - secs),
                 agent: "claude".into(),
                 provider_id: provider_id.into(),
+                client_key_id: None,
                 model: Some("m".into()),
                 input_tokens: 10,
                 output_tokens: 1,

@@ -22,14 +22,15 @@ impl Store {
     pub fn record_usage(&self, u: &UsageRecord) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO usage (ts, agent, provider_id, model, input_tokens, output_tokens,
-                                cache_read_tokens, cache_creation_tokens, latency_ms, status,
-                                cost, cost_currency, cost_off_peak)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO usage (ts, agent, provider_id, client_key_id, model, input_tokens,
+                                output_tokens, cache_read_tokens, cache_creation_tokens,
+                                latency_ms, status, cost, cost_currency, cost_off_peak)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 u.ts,
                 u.agent,
                 u.provider_id,
+                u.client_key_id,
                 u.model,
                 u.input_tokens,
                 u.output_tokens,
@@ -236,6 +237,52 @@ impl Store {
         Ok(stmt.query_row(params![provider_id, since], UsageTotals::from_row)?)
     }
 
+    /// Aggregated totals for one client key, optionally since a timestamp.
+    /// Read by the client-key spend ceilings (limits v29).
+    ///
+    /// A sibling of `usage_totals_for_provider` rather than a ninth filter on
+    /// `usage_filters`: that helper has eight readers, none of which asked for
+    /// this one, and widening it would put the credential in the WHERE clause of
+    /// every dashboard query. Rows written before the column are NULL and belong
+    /// to nobody's key, which is also the reading that keeps a pre-v29 database
+    /// from suddenly charging its history to a key.
+    pub fn usage_totals_for_client_key(
+        &self,
+        client_key_id: &str,
+        since: Option<&str>,
+    ) -> Result<UsageTotals> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0)
+             FROM usage WHERE client_key_id = ?1 AND (?2 IS NULL OR ts >= ?2)",
+        )?;
+        Ok(stmt.query_row(params![client_key_id, since], UsageTotals::from_row)?)
+    }
+
+    /// Cost sums of one client key, grouped by currency. The money half of
+    /// [`Store::usage_totals_for_client_key`], and grouped for the same reason
+    /// the agent-keyed one is: one key's traffic can span providers, and those
+    /// bill in different currencies.
+    pub fn usage_cost_by_currency_for_client_key(
+        &self,
+        client_key_id: &str,
+        since: Option<&str>,
+    ) -> Result<Vec<(Option<String>, f64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT cost_currency, SUM(cost) FROM usage
+             WHERE client_key_id = ?1 AND (?2 IS NULL OR ts >= ?2) AND cost IS NOT NULL
+             GROUP BY cost_currency",
+        )?;
+        let rows = stmt
+            .query_map(params![client_key_id, since], |row| {
+                Ok((row.get::<_, Option<String>>(0)?, row.get::<_, f64>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Totals grouped by provider, optionally filtered by agent, provider
     /// and/or since.
     pub fn usage_by_provider(
@@ -438,6 +485,7 @@ mod tests {
             ts: ts.to_string(),
             agent: "claude".to_string(),
             provider_id: provider.to_string(),
+            client_key_id: None,
             model: Some("claude-sonnet-4-5".to_string()),
             input_tokens: input,
             output_tokens: output,
@@ -464,6 +512,7 @@ mod tests {
                 ts: "2026-09-07T12:00:00+00:00".into(),
                 agent: "codex".into(),
                 provider_id: "p1".into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 5,
                 output_tokens: 5,

@@ -30,6 +30,7 @@ mod tests {
             ts: rfc3339(now - 60),
             agent: "claude".into(),
             provider_id: "payg-1".into(),
+            client_key_id: None,
             model: Some("demo-model".into()),
             input_tokens: 1_000,
             output_tokens: 200,

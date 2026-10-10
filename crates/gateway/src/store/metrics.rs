@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct StoreMetrics {
     pub providers: i64,
     pub bindings: i64,
-    pub placeholder_keys: i64,
+    pub client_keys: i64,
     pub usage_rows: i64,
     pub request_log_rows: i64,
 }
@@ -23,7 +23,7 @@ impl Store {
         Ok(StoreMetrics {
             providers: count("SELECT COUNT(*) FROM providers")?,
             bindings: count("SELECT COUNT(*) FROM agent_bindings")?,
-            placeholder_keys: count("SELECT COUNT(*) FROM placeholder_keys")?,
+            client_keys: count("SELECT COUNT(*) FROM client_keys")?,
             usage_rows: count("SELECT COUNT(*) FROM usage")?,
             request_log_rows: count("SELECT COUNT(*) FROM request_logs")?,
         })
@@ -43,7 +43,7 @@ mod tests {
             .insert_provider(&sample_provider("p1", Protocol::Anthropic))
             .unwrap();
         store
-            .upsert_placeholder_key("kw-ag-claude-abc", "claude")
+            .upsert_client_key("kw-ag-claude-abc", "claude")
             .unwrap();
         store
             .upsert_binding(&Binding {
@@ -61,6 +61,7 @@ mod tests {
                 ts: now_rfc3339(),
                 agent: "claude".into(),
                 provider_id: "p1".into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 1,
                 output_tokens: 1,
@@ -77,7 +78,7 @@ mod tests {
         let m = store.metrics().unwrap();
         assert_eq!(m.providers, 1);
         assert_eq!(m.bindings, 1);
-        assert_eq!(m.placeholder_keys, 1);
+        assert_eq!(m.client_keys, 1);
         assert_eq!(m.usage_rows, 1);
     }
 }

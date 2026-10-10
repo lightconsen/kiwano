@@ -167,6 +167,27 @@ kiwano keys remove <KEY_ID>
 
 Rotating keys are tried after the provider's primary key, per request.
 
+### Client keys
+
+```
+kiwano clients list [--agent A]                 handles, agents, limits and allowlists
+kiwano clients show <ID>                        one key by its handle (ck-…)
+kiwano clients add --agent A [--label L]        mint one; the key is printed once
+                   [--model M]… [--provider P]… [--window PERIOD:LIMIT[:UNIT]]…
+kiwano clients remove <ID>
+kiwano clients rotate <ID>                      new secret, same handle and budget
+kiwano clients limits <ID> [--window PERIOD:LIMIT[:UNIT]]…   no --window clears them
+kiwano clients policy <ID> [--label L] [--model M]… [--provider P]…
+```
+
+The data plane's credential: what an agent presents, and what it may do. One key
+names one agent, and a second key for the same agent is a second budget — the
+reason to have two is a laptop and a desktop running the same agent. A window is
+`day:200:requests`, `monthly:20:USD` or `weekly:5:wan_tokens`; the unit may be
+left off, which is `requests`. Over a window the gateway answers 429 with a
+`Retry-After`; a model or provider outside a key's allowlists is 403. Nothing
+reads a stored key back: only `add` and `rotate` print one.
+
 ### Agents
 
 ```

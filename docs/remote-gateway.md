@@ -28,6 +28,19 @@ plane carries the requests themselves — your prompts and the answers, in the
 clear, because **Kiwano does not do TLS** (see [the deployment
 requirement](#the-deployment-requirement) below).
 
+Each plane also has its **own credential**, and they are not the same one:
+
+| Plane | What a caller presents | How many |
+|---|---|---|
+| Admin | `KIWANO_DAEMON_TOKEN` — the gateway's admin token | one per gateway, for the operator |
+| Data | a **client key** (`kw-ag-…`), one per agent | one per agent, and more per agent if you want them |
+
+The admin token is one secret for one operator. A client key is what an agent's
+config carries, it is minted *for* that agent, and it can be limited: what it may
+spend, which models it may name, which providers it may use. That is the section
+below, and it is why a leaked client key is bounded in a way a leaked admin token
+is not.
+
 ## On the machine that runs the gateway
 
 Give the admin plane an address to listen on, and the data plane one too:
@@ -83,6 +96,42 @@ Two rules about that token, both deliberate:
   talking to the local gateway, which would be a client silently using a
   different daemon than the one you named.
 
+## What a client key may do
+
+A key is the data plane's credential. It names one agent (that is what routing
+needs), and it can carry three restrictions, all of them checked **before the
+request reaches a provider**:
+
+```sh
+kiwano clients list                                  # handles, agents, what each may do
+kiwano clients add --agent claude --label "laptop"   # the key is printed once
+kiwano clients limits ck-1a2b3c4d --window day:200:requests --window monthly:20:USD
+kiwano clients policy ck-1a2b3c4d --model claude-sonnet-4-5 --provider p-work
+kiwano clients rotate ck-1a2b3c4d                    # new secret, same handle and budget
+```
+
+- **spend windows** — `day` / `weekly` / `monthly` / `yearly` / `all`, in
+  `requests`, `wan_tokens` (万 tokens), or a currency. Measured against the same
+  local-calendar boundaries an agent's ceiling uses. Over any window: **429**, with
+  a `Retry-After` naming the rest of it.
+- **models** — only the listed model ids, matched case-insensitively. A model
+  outside the list: **403**. A request whose model cannot be read while a list is
+  in force is refused too, because an allowance that cannot be checked is not one.
+- **providers** — only the listed provider ids. A key that may not use the agent's
+  primary is routed to one it may (multi-provider strategies) or refused (403)
+  when the strategy is `single` — "this one provider, no failover" is not a
+  statement a key can promote its way out of.
+
+Two keys for one agent are two clients with two budgets, which is the point: a
+laptop and a desktop running the same agent can be limited separately. Rotating a
+key keeps the handle, the policy and the spend already recorded, so it is not a
+way to clear a ceiling.
+
+The key itself is stored the way a provider's key is — in the clear, because it is
+in the clear in the agent's config file too — and it is scrubbed out of captured
+bodies like every other credential. A management surface never prints a stored
+key: only `add` and `rotate` show one, once, when they mint it.
+
 ## The two switches
 
 Addresses that stop at your own network — RFC1918 (`10.`, `192.168.`, `172.16.`–`172.31.`),
@@ -117,6 +166,11 @@ cryptography against nobody.
 
 So: `100.64.0.5` (a tailnet address) is the value these variables are designed
 for. A public address needs both switches *and* a good reason.
+
+A client key does not change that requirement, but it does bound what a leak
+costs: the holder can spend what that key's windows allow, on the models and
+providers it names, as that one agent — rather than holding the admin token, which
+reads your stored keys and edits everything.
 
 ## Ports
 

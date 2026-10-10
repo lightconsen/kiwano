@@ -383,6 +383,14 @@ impl Redactor {
                 secrets.push(k.api_key);
             }
         }
+        // And the client keys, which are the credentials this gateway *hands
+        // out*: an agent's config carries one, so a captured body, a header dump
+        // or an echoed error can carry one too. They are stored in the clear for
+        // the reasons `store::ClientKey` gives, and this is the other half of
+        // that bargain — the copy that would otherwise survive in a log.
+        for k in store.list_client_keys().unwrap_or_default() {
+            secrets.push(k.key);
+        }
         Redactor::from_values(secrets)
     }
 

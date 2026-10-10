@@ -284,6 +284,10 @@ fn dispatch(command: &Command, ctx: &mut Ctx) -> Result<i32, CliError> {
             cmds::keys(cmd, ctx)?;
             Ok(EXIT_OK)
         }
+        Command::Clients(cmd) => {
+            cmds::clients(cmd, ctx)?;
+            Ok(EXIT_OK)
+        }
         Command::Usage(args) => {
             cmds::usage(args, ctx)?;
             Ok(EXIT_OK)

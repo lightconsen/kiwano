@@ -33,7 +33,7 @@ use std::path::Path;
 /// use* by it, which is what the list claimed for every binding row.
 ///
 /// Recognition is by the live file (`kw-ag-<agent>-…` in the config the takeover
-/// wrote), never by the `placeholder_keys` table: a key row can outlive its
+/// wrote), never by the `client_keys` table: a key row can outlive its
 /// rewrite. The takeover panel reads the same files and counts *more* agents
 /// than this on purpose — it also accepts a restorable backup, which is a claim
 /// about being able to undo a takeover, not about traffic arriving here.
@@ -345,6 +345,7 @@ mod tests {
                 ts: rfc3339(unix_now()),
                 agent: "claude".into(),
                 provider_id: "a1".into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 10,
                 output_tokens: 0,

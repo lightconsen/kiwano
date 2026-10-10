@@ -37,6 +37,7 @@
 pub mod agents;
 pub mod alerts;
 pub mod catalog;
+pub mod client_keys;
 pub mod csv;
 pub mod dashboard;
 pub mod import;

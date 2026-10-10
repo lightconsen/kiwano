@@ -226,6 +226,12 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
     if let Some(c) = capture.as_mut() {
         c.session_id = session.clone();
     }
+    // The model the client asked for, read before resolution because a client
+    // key may allow-list models and an allowlist has to be consulted before the
+    // upstream call. The forward leg parses the model again for metering, and it
+    // is the same function on the same bytes, so the two cannot disagree.
+    let model =
+        crate::meter::request_model(&body_bytes).or_else(|| crate::meter::model_from_path(&path));
     // The inbound protocol is passed to `forward` below, not to attribution:
     // it decides which upstream endpoint is spoken to, never which agent pays.
     let plan = match resolve_via_engine(
@@ -235,6 +241,7 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
         &state.limits(),
         key.as_deref(),
         session.as_deref(),
+        model.as_deref(),
     )
     .await
     {
@@ -251,6 +258,19 @@ async fn handle(state: Arc<GatewayState>, req: Request) -> Response {
                 // about: the store holds no provider for it.
                 crate::error::GatewayError::AgentOverLimit { agent, .. } => {
                     (Some(agent.clone()), "agent_over_limit")
+                }
+                // The three credential refusals are attributed the same way, and
+                // each keeps its own kind so the log says which list or which
+                // ceiling refused — the same string the client was told.
+                crate::error::GatewayError::ClientOverLimit { agent, .. } => {
+                    (Some(agent.clone()), "client_over_limit")
+                }
+                crate::error::GatewayError::ModelNotAllowed { agent, .. }
+                | crate::error::GatewayError::ModelUnverifiable { agent } => {
+                    (Some(agent.clone()), "model_not_allowed")
+                }
+                crate::error::GatewayError::ProviderNotAllowed { agent, .. } => {
+                    (Some(agent.clone()), "provider_not_allowed")
                 }
                 _ => (None, "routing_error"),
             };

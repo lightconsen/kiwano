@@ -22,6 +22,7 @@ use crate::CliError;
 
 pub mod agents;
 pub mod cache_experiment;
+pub mod clients;
 pub mod dashboard;
 pub mod gateway;
 pub mod input;
@@ -40,6 +41,7 @@ pub mod usage;
 
 pub use agents::agents;
 pub use cache_experiment::cache_experiment;
+pub use clients::clients;
 pub use dashboard::{alerts, dashboard};
 pub use gateway::gateway;
 pub(crate) use insights::build_insights_report;

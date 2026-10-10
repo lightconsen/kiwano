@@ -175,6 +175,7 @@ mod tests {
             ts: now_rfc3339(),
             agent: "claude".into(),
             provider_id: provider_id.into(),
+            client_key_id: None,
             model: None,
             input_tokens: 0,
             output_tokens: 0,

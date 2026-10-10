@@ -246,12 +246,59 @@ pub struct Binding {
     pub enabled: bool,
 }
 
-/// Placeholder key `kw-ag-<agent>-<rand>` mapped to an agent (tech.md §4.6).
+/// The data plane's credential: `kw-ag-<agent>-<rand>`, plus what this client
+/// may do (migration v29; the placeholder key of tech.md §4.6, grown up).
+///
+/// One key names one agent, because that is what routing needs — bindings,
+/// strategies and providers are the agent's. What is new is that the key, not
+/// the agent, is what a limit can be written against: the same agent reached
+/// from two machines can hold two keys with two budgets, which is the only way
+/// to say "the office box may spend this much".
+///
+/// `key` is the secret and is stored the way a provider's `api_key` is
+/// (cleartext — it is written into the agent's own config file in cleartext
+/// too, so hashing this copy would protect nothing and would stop the log
+/// redactor from scrubbing it out of a captured body). `id` is a handle and not
+/// a credential: it is what `usage` records, so a rotated key keeps its spend
+/// history and no ledger row quotes something presentable.
+///
+/// Both allowlists are JSON arrays of strings, and `None` is "no restriction" —
+/// which is the reading every row that predates this table gets, and the only
+/// one that makes the migration behaviour-preserving. An empty array is read as
+/// `None` as well: nothing writes one (clearing writes NULL), and `[]` meaning
+/// "refuse everything" would be a footgun with no legitimate use.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PlaceholderKey {
+pub struct ClientKey {
+    pub id: String,
     pub key: String,
     pub agent: String,
+    /// A human name for the client this key was issued to ("office laptop").
+    /// Free text, and the one field here that carries no behaviour.
+    pub label: Option<String>,
+    pub model_allow: Option<String>,
+    pub provider_allow: Option<String>,
     pub created_at: String,
+    pub updated_at: String,
+}
+
+/// What one client key may spend, measured over a reset period.
+///
+/// Mirrors [`AgentLimit`] column for column — the same three units, the same
+/// period vocabulary, the same `period_start` boundary — but keyed by the
+/// credential rather than the agent, because the limit belongs to the key. Two
+/// keys of one agent are two budgets; that is what makes a key more than a way
+/// to spell the agent's name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClientKeyLimit {
+    /// The handle of the key this window belongs to (`client_keys.id`).
+    pub key_id: String,
+    /// `day` | `weekly` | `monthly` | `yearly` | `all`, and half the key — see
+    /// [`AgentLimit::period`] for why `all` is spelled rather than NULL.
+    pub period: String,
+    pub period_limit: f64,
+    pub limit_unit: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// An agent the user defined (migration v16): a name for a route, and nothing
@@ -325,6 +372,13 @@ pub struct UsageRecord {
     pub ts: String,
     pub agent: String,
     pub provider_id: String,
+    /// The handle of the client key that carried this request (migration v29).
+    ///
+    /// A handle, not the key: a rotated key must keep the spend it already
+    /// accumulated, or rotation would be a way to clear a budget, and a ledger
+    /// that quotes a live credential is a ledger that leaks one. NULL for a row
+    /// written before the column — those are the agent's rows and nobody's key's.
+    pub client_key_id: Option<String>,
     pub model: Option<String>,
     pub input_tokens: i64,
     pub output_tokens: i64,

@@ -780,6 +780,7 @@ fn status_reports_the_daemons_totals_when_it_answers() {
                 ts: kiwanod::store::now_rfc3339(),
                 agent: "claude".into(),
                 provider_id: "alpha".into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 100,
                 output_tokens: 20,
@@ -1209,7 +1210,7 @@ fn takeover_routes_an_agent_and_restore_puts_it_back() {
     // anything else is a 401 waiting to happen.
     let store = Store::open(&db).unwrap();
     let minted = store
-        .list_placeholder_keys()
+        .list_client_keys()
         .unwrap()
         .into_iter()
         .find(|k| k.agent == "claude")
@@ -1352,7 +1353,7 @@ fn agents_add_list_bind_and_remove_a_custom_agent() {
     assert!(store.bindings_for_agent(&id).unwrap().is_empty());
     assert!(store.get_strategy(&id).unwrap().is_none());
     assert!(store
-        .list_placeholder_keys()
+        .list_client_keys()
         .unwrap()
         .iter()
         .all(|k| k.agent != id));
@@ -2089,4 +2090,134 @@ fn cache_experiment_is_gated_and_reports_empty_windows() {
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("pairs 0"), "{out}");
     assert!(out.contains("too little data"), "{out}");
+}
+
+// ── client keys ─────────────────────────────────────────────────────────────
+
+/// Minting a key prints the secret once, and nothing after that does.
+///
+/// The asymmetry is the contract: `add` and `rotate` are the two operations that
+/// create a credential, so they are the two that may show it. Every read answers
+/// with a mask, which is what makes a `clients list` safe to paste into a chat.
+#[test]
+fn clients_add_list_rotate_roundtrips_and_only_shows_the_secret_once() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "--json",
+            "clients",
+            "add",
+            "--agent",
+            "claude",
+            "--label",
+            "office laptop",
+            "--model",
+            "claude-sonnet-4-5",
+            "--window",
+            "day:100:requests",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let created: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let id = created["id"].as_str().expect("handle").to_string();
+    let key = created["key"].as_str().expect("secret").to_string();
+    assert!(key.starts_with("kw-ag-claude-"), "{key}");
+    assert!(id.starts_with("ck-"), "{id}");
+
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "clients", "list"]);
+    assert_eq!(code, 0, "{err}");
+    let listed: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], id.as_str());
+    assert_eq!(listed[0]["agent"], "claude");
+    assert_eq!(listed[0]["label"], "office laptop");
+    assert_eq!(listed[0]["model_allow"][0], "claude-sonnet-4-5");
+    assert_eq!(listed[0]["limits"][0]["period"], "day");
+    // The read carries no secret, and the mask is not a prefix of nothing: it is
+    // shorter than the key and elides its middle.
+    let masked = listed[0]["masked"].as_str().unwrap();
+    assert_ne!(masked, key);
+    assert!(!masked.contains(&key[7..]), "{masked}");
+    assert!(masked.contains('…'), "{masked}");
+
+    // Rotating hands back a new secret under the same handle, and keeps what the
+    // key was allowed to do.
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "clients", "rotate", &id]);
+    assert_eq!(code, 0, "{err}");
+    let rotated: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(rotated["id"], id.as_str());
+    assert_ne!(rotated["key"].as_str().unwrap(), key);
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "clients", "show", &id]);
+    let shown: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(shown["label"], "office laptop");
+    assert_eq!(shown["limits"].as_array().unwrap().len(), 1);
+
+    // Clearing a window set and a policy is how a key is un-restricted, and the
+    // listing then says so rather than showing an empty cell.
+    let (code, _, err) = run_served(&db, &daemon, &["clients", "limits", &id]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["clients", "policy", &id, "--provider", "p-anything"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "clients", "show", &id]);
+    let shown: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(shown["limits"].as_array().unwrap().is_empty());
+    assert_eq!(shown["provider_allow"][0], "p-anything");
+    // Omitting --model on that call cleared the model list, which is what a flag
+    // that names a list means.
+    assert!(shown["model_allow"].as_array().unwrap().is_empty());
+
+    let (code, _, err) = run_served(&db, &daemon, &["clients", "remove", &id]);
+    assert_eq!(code, 0, "{err}");
+    let (_, out, _) = run_served(&db, &daemon, &["--json", "clients", "list"]);
+    assert_eq!(out.trim(), "[]");
+}
+
+/// A window that means nothing is refused at the command line, because the store
+/// would drop it and the user would believe a limit they do not have.
+#[test]
+fn a_client_key_window_of_zero_is_refused() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "clients",
+            "add",
+            "--agent",
+            "claude",
+            "--window",
+            "day:0:requests",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("not a ceiling"), "{err}");
+
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &["clients", "add", "--agent", "claude", "--window", "day"],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("PERIOD:LIMIT"), "{err}");
+}
+
+/// Client keys are served by the daemon, so a CLI without one says so.
+#[test]
+fn client_keys_need_the_daemon() {
+    let (_dir, db) = temp_db();
+    let (code, _, err) = run(&db, &["clients", "list"]);
+    assert_ne!(code, 0);
+    assert!(
+        !err.is_empty(),
+        "a missing daemon is an error, not an empty list"
+    );
 }

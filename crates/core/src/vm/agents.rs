@@ -324,7 +324,7 @@ mod tests {
         assert!(s.bindings_for_agent(&a.id).unwrap().is_empty());
         assert!(s.get_strategy(&a.id).unwrap().is_none());
         assert!(s
-            .list_placeholder_keys()
+            .list_client_keys()
             .unwrap()
             .iter()
             .all(|k| k.agent != a.id));

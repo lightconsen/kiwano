@@ -22,7 +22,7 @@
 //! this file is Kiwano-authored, so it carries no derived-from header)
 //!
 //! Three things can claim a takeover: this module's backup row, the
-//! `placeholder_keys` table, and the agent's live config. They can disagree —
+//! `client_keys` table, and the agent's live config. They can disagree —
 //! a rolled-back key registration over a rewritten config, a delete that
 //! failed, a `~/.codex` restored by hand or rewritten by another tool — so
 //! **state is derived from the live file and nothing else**:

@@ -19,6 +19,37 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A client key is a credential with limits: `kiwano clients`.** The data plane
+  has always had a key per agent (`kw-ag-…`, written into the agent's config by a
+  takeover), which is what tells the gateway whose request it is. It is now also
+  what tells the gateway **how much that client may spend and what it may use** —
+  spend windows (`day` / `weekly` / `monthly` / `yearly` / `all`, in `requests`,
+  `wan_tokens` or a currency), a model allowlist, and a provider allowlist, all
+  checked before any upstream call. Over a window: **429** with a `Retry-After`
+  naming the rest of it. Outside a list: **403**.
+
+  Two keys may name one agent, and each carries its own budget — a laptop and a
+  desktop running the same agent, limited separately. `clients rotate` mints a new
+  secret while keeping the handle, the policy and the spend already recorded, so
+  rotating a leaked key is not a way to clear a ceiling. A read never prints a
+  stored key: only `add` and `rotate` show one, once.
+
+  This is the guardrail 0.3.0's cross-machine work was missing. Until now the data
+  plane's only bound was the network it sat on, and the credential that reached it
+  could be used without limit, on any model, through any provider the agent had.
+
+### Changed
+
+- **The placeholder key is the client key.** The table (`placeholder_keys` →
+  `client_keys`), the store methods and the type are renamed after what the thing
+  became; the value an agent carries is unchanged, so every existing takeover keeps
+  working, with no limits and no allowlist — the reading that makes the migration
+  behaviour-preserving. A metered row now records the key's **handle** (`ck-…`)
+  rather than nothing, which is what a per-key ceiling counts; the handle survives
+  a rotation and is not a credential, so no ledger or export quotes one.
+
 ## [0.3.0] - 2026-10-10
 
 **The version that declares the split.** 0.2.13 made the app and the CLI clients

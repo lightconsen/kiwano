@@ -60,7 +60,7 @@ pub fn build_settings_with_home(
 /// The **only** machine fact the settings screen carries, and the reason the
 /// assembly is split: a takeover *is* its rewrite — the agent's config carries
 /// our placeholder key, which is also how its requests get attributed. Neither
-/// of the other two possible claims counts here: not the `placeholder_keys`
+/// of the other two possible claims counts here: not the `client_keys`
 /// table (a row can outlive its rewrite), and not the backup (it is the escape
 /// hatch, and it outlives the rewrite by design). Counting the backup answered
 /// "is this agent ours?" with "we could undo a takeover", which is how an agent
@@ -392,7 +392,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(s
-            .list_placeholder_keys()
+            .list_client_keys()
             .unwrap()
             .iter()
             .all(|k| k.agent != "claude"));
@@ -465,9 +465,9 @@ mod tests {
         // The registration disappears (a rolled-back key row) while the config
         // stays rewritten: the reader must still report the takeover, because
         // that is the state the user has to be able to undo.
-        for k in s.list_placeholder_keys().unwrap() {
+        for k in s.list_client_keys().unwrap() {
             if k.agent == "claude" {
-                s.delete_placeholder_key(&k.key).unwrap();
+                s.delete_client_key(&k.id).unwrap();
             }
         }
         let v = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
@@ -487,7 +487,7 @@ mod tests {
         // takeover.
         std::fs::write(&settings, "{}").unwrap();
         aux.delete_takeover_backup("claude").unwrap();
-        s.upsert_placeholder_key("kw-ag-claude-orphan", "claude")
+        s.upsert_client_key("kw-ag-claude-orphan", "claude")
             .unwrap();
         let v = build_settings_with_home(&s, &aux, tmp.path(), &no_vars()).unwrap();
         let claude = v.takeovers.iter().find(|t| t.agent == "claude").unwrap();

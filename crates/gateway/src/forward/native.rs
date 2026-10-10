@@ -240,6 +240,7 @@ pub async fn forward(
             UsageSample {
                 agent: routed.agent.clone(),
                 provider_id: provider.id.clone(),
+                client_key_id: routed.client_key_id.clone(),
                 catalog_id: provider.catalog_id.clone(),
                 started_unix,
                 model,
@@ -296,6 +297,7 @@ pub async fn forward(
         let sample = UsageSample {
             agent: routed.agent.clone(),
             provider_id: provider.id.clone(),
+            client_key_id: routed.client_key_id.clone(),
             catalog_id: provider.catalog_id.clone(),
             started_unix,
             model: model.or(upstream_model),

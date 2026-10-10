@@ -137,6 +137,65 @@ pub fn agent_limit_usage(
     }))
 }
 
+/// Read one client key's spend over one of its windows.
+///
+/// The same three units and the same period boundaries as
+/// [`agent_limit_usage`], scoped to the credential: the limit belongs to the key,
+/// so two keys of one agent are two budgets. That is the whole difference from
+/// the agent's ceiling, and the reason a key is more than a way to spell the
+/// agent's name.
+///
+/// Spent by the handle (`usage.client_key_id`), never by the secret — so a
+/// rotation keeps the budget it already spent, and a row written before the
+/// column (NULL) counts toward nobody's key rather than toward whichever key
+/// happens to look like it.
+pub fn client_key_limit_usage(
+    store: &Store,
+    limit: &crate::store::ClientKeyLimit,
+) -> crate::error::Result<Option<PeriodLimit>> {
+    // `is_finite` as well: a NaN would slip through every comparison and
+    // become a ceiling that is never reached.
+    if !limit.period_limit.is_finite() || limit.period_limit <= 0.0 {
+        return Ok(None);
+    }
+    let unit = match limit.limit_unit.as_deref() {
+        Some("wan_tokens") => "wan_tokens",
+        Some(u) if u.len() == 3 => u,
+        _ => "requests",
+    };
+    let reset = (limit.period != "all").then_some(limit.period.as_str());
+    let (since, period_key) =
+        period_start(Utc::now().timestamp(), reset, store.ui_tz_offset_minutes());
+    let used = match unit {
+        "wan_tokens" => {
+            let t = store.usage_totals_for_client_key(&limit.key_id, since.as_deref())?;
+            (t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                as f64
+                / 10_000.0
+        }
+        u if u.len() == 3 => {
+            let buckets =
+                store.usage_cost_by_currency_for_client_key(&limit.key_id, since.as_deref())?;
+            kiwano_adapters::model_pricing::convert_cost_buckets(
+                &buckets,
+                u,
+                &store.hub_exchange_rates(),
+            )
+        }
+        _ => {
+            store
+                .usage_totals_for_client_key(&limit.key_id, since.as_deref())?
+                .requests as f64
+        }
+    };
+    Ok(Some(PeriodLimit {
+        used,
+        limit: limit.period_limit,
+        unit: unit.to_string(),
+        period_key,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +251,7 @@ mod tests {
                 ts: crate::store::now_rfc3339(),
                 agent: agent.into(),
                 provider_id: provider_id.into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 0,
                 output_tokens: 0,

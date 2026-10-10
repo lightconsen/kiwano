@@ -67,6 +67,9 @@ pub use dashboard::{
 };
 pub use fmt::fmt_tokens;
 pub use keys::{add_api_key, delete_api_key, list_api_keys, ApiKeyVm};
+pub use kiwano_api::client_keys::{
+    ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeyVm, NewClientKeyInput,
+};
 pub use kiwano_api::providers::{ProviderPriceInput, ProviderPricesInput};
 pub use limits::{
     import_declared_prices, known_limit_currencies, normalize_declared_prices, normalize_limit_unit,
@@ -334,6 +337,7 @@ pub(crate) mod test_support {
                 ts: ts.clone(),
                 agent: "claude".into(),
                 provider_id: "demo-alpha".into(),
+                client_key_id: None,
                 model: Some("demo-model".into()),
                 input_tokens: tokens,
                 output_tokens: 0,
@@ -391,6 +395,7 @@ pub(crate) mod test_support {
             ts: rfc3339(unix_now()),
             agent: "claude".into(),
             provider_id: provider_id.into(),
+            client_key_id: None,
             model: None,
             input_tokens: 1_000,
             output_tokens: 100,

@@ -70,6 +70,12 @@ pub enum Command {
     #[command(subcommand)]
     Keys(KeysCmd),
 
+    /// The data plane's client keys: what an agent presents, what it may spend,
+    /// and what it may name. (Not `keys` — that one rotates a *provider's*
+    /// credentials; these are the credentials the gateway checks on the way in.)
+    #[command(subcommand)]
+    Clients(ClientsCmd),
+
     /// Usage totals
     Usage(UsageArgs),
 
@@ -689,6 +695,72 @@ pub enum KeysCmd {
 
     /// Delete a rotating key by its numeric id
     Remove { key_id: i64 },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ClientsCmd {
+    /// Every client key: handle, agent, label, limits and allowlists. Masks.
+    List {
+        /// Only keys that route as this agent
+        #[arg(long, value_name = "AGENT")]
+        agent: Option<String>,
+    },
+
+    /// One client key, by its handle (ck-…)
+    Show { id: String },
+
+    /// Mint a key for an agent. The key itself is printed once — copy it into
+    /// the agent's config; nothing reads it back.
+    Add {
+        /// The agent this key routes as
+        #[arg(long, value_name = "AGENT")]
+        agent: String,
+
+        /// A name for this client ("office laptop")
+        #[arg(long, value_name = "LABEL")]
+        label: Option<String>,
+
+        /// Only these models (repeatable, case-insensitive). Omit for no
+        /// restriction.
+        #[arg(long = "model", value_name = "MODEL")]
+        model: Vec<String>,
+
+        /// Only these providers (repeatable, by provider id). Omit for no
+        /// restriction.
+        #[arg(long = "provider", value_name = "PROVIDER_ID")]
+        provider: Vec<String>,
+
+        /// A spend window, `PERIOD:LIMIT:UNIT` (repeatable) — e.g.
+        /// day:100:requests, monthly:20:USD, weekly:5:wan_tokens. PERIOD is
+        /// day|weekly|monthly|yearly|all; UNIT is requests|wan_tokens|<CUR>.
+        #[arg(long = "window", value_name = "PERIOD:LIMIT:UNIT")]
+        window: Vec<String>,
+    },
+
+    /// Drop a key, and with it its windows
+    Remove { id: String },
+
+    /// Give a key a new secret, keeping its handle, policy and spend history
+    Rotate { id: String },
+
+    /// Replace a key's spend windows. No --window clears them.
+    Limits {
+        id: String,
+        #[arg(long = "window", value_name = "PERIOD:LIMIT:UNIT")]
+        window: Vec<String>,
+    },
+
+    /// Set a key's name and allowlists. Omitting --model/--provider clears that
+    /// list; omitting --label leaves the name alone.
+    Policy {
+        id: String,
+        #[arg(long, value_name = "LABEL")]
+        label: Option<String>,
+        #[arg(long = "model", value_name = "MODEL")]
+        model: Vec<String>,
+        #[arg(long = "provider", value_name = "PROVIDER_ID")]
+        provider: Vec<String>,
+    },
 }
 
 #[derive(Debug, Args)]

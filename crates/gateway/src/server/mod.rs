@@ -527,6 +527,15 @@ pub fn error_response(
 
 /// Map a [`GatewayError`] onto a client-facing response.
 pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Response {
+    // The one refusal with a clock attached: a ceiling that lifts when its
+    // window rolls over can say when, and a client that knows when is a client
+    // that stops retrying until then.
+    let retry_after = match &err {
+        GatewayError::ClientOverLimit {
+            retry_after_secs, ..
+        } => *retry_after_secs,
+        _ => None,
+    };
     let (status, kind) = match &err {
         // The data plane's inbound auth: no placeholder key, or not one of
         // ours. 401 so an agent client reports an auth problem instead of
@@ -539,6 +548,18 @@ pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Resp
         // Same status as a provider ceiling and its own kind: "this agent has
         // spent what it was allowed" is a different story to tell a reader.
         GatewayError::AgentOverLimit { .. } => (StatusCode::TOO_MANY_REQUESTS, "agent_over_limit"),
+        // The credential's own ceiling: 429 like the other two, and the only one
+        // that can name a wait.
+        GatewayError::ClientOverLimit { .. } => {
+            (StatusCode::TOO_MANY_REQUESTS, "client_over_limit")
+        }
+        // 403, not 429, for both allowlists: retrying will never help, and a 429
+        // would invite a client to back off and try the same forbidden request
+        // again. The kind names which list refused.
+        GatewayError::ModelNotAllowed { .. } | GatewayError::ModelUnverifiable { .. } => {
+            (StatusCode::FORBIDDEN, "model_not_allowed")
+        }
+        GatewayError::ProviderNotAllowed { .. } => (StatusCode::FORBIDDEN, "provider_not_allowed"),
         // 503, not 502: nothing upstream went wrong, the provider is simply not
         // being asked right now (open, or a recovery probe is already in
         // flight). It clears itself once the breaker's timeout elapses.
@@ -561,7 +582,18 @@ pub fn error_into_response(err: GatewayError, inbound: Option<Protocol>) -> Resp
     } else {
         tracing::error!(error = %err, status = %status, "request failed");
     }
-    error_response(inbound, status, kind, &err.to_string())
+    let mut response = error_response(inbound, status, kind, &err.to_string());
+    if let Some(secs) = retry_after {
+        // A header the protocol speaks: `Retry-After` is plain HTTP, so it
+        // reaches an Anthropic, OpenAI or Gemini client all the same, and the
+        // delta-seconds form needs no date arithmetic on either side.
+        if let Ok(value) = axum::http::HeaderValue::from_str(&secs.to_string()) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+    }
+    response
 }
 
 #[cfg(test)]

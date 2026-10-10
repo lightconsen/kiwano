@@ -6,7 +6,7 @@
 //! Grouping them any other way would mean widening the fields to `pub(crate)`.
 
 use crate::limits::plan::{window_over, PlanLimits};
-use crate::limits::usage::{agent_limit_usage, period_limit_usage};
+use crate::limits::usage::{agent_limit_usage, client_key_limit_usage, period_limit_usage};
 use crate::store::Store;
 
 /// Why a provider is out of service.
@@ -60,6 +60,11 @@ pub struct LimitState {
     /// provider being blocked routes around it; an agent being over its own
     /// ceiling is the end of the request.
     agents_over: std::collections::HashMap<String, BlockReason>,
+    /// Client keys over their own ceiling, keyed by the key's handle. A third
+    /// map rather than a special case of the other two: an agent being over and
+    /// a *client* of that agent being over are different claims, and the client
+    /// one is checked first — it is the caller's own contract.
+    keys_over: std::collections::HashMap<String, BlockReason>,
     /// The user's UTC offset, carried along so the routing path can work out
     /// what "today" means without reading settings on every request. It rides
     /// the snapshot, so it is at worst one refresh interval stale — and it
@@ -83,6 +88,16 @@ impl LimitState {
         self.agents_over.get(agent)
     }
 
+    /// Whether this client key has spent its own allowance. Keyed by the handle
+    /// (`ClientKey::id`), which is what a metered row carries.
+    pub fn key_blocked(&self, key_id: &str) -> Option<&BlockReason> {
+        self.keys_over.get(key_id)
+    }
+
+    pub fn keys_over_entries(&self) -> impl Iterator<Item = (&str, &BlockReason)> {
+        self.keys_over.iter().map(|(k, r)| (k.as_str(), r))
+    }
+
     pub fn agents_over_entries(&self) -> impl Iterator<Item = (&str, &BlockReason)> {
         self.agents_over.iter().map(|(a, r)| (a.as_str(), r))
     }
@@ -98,6 +113,7 @@ impl LimitState {
         LimitState {
             blocked: reasons.into_iter().collect(),
             agents_over: std::collections::HashMap::new(),
+            keys_over: std::collections::HashMap::new(),
             tz_offset_minutes: 0,
         }
     }
@@ -119,9 +135,154 @@ impl LimitState {
         LimitState {
             blocked: std::collections::HashMap::new(),
             agents_over: reasons.into_iter().collect(),
+            keys_over: std::collections::HashMap::new(),
             tz_offset_minutes: 0,
         }
     }
+
+    /// A snapshot with exactly these client keys over their own ceiling.
+    #[cfg(test)]
+    pub fn with_keys_over(reasons: impl IntoIterator<Item = (String, BlockReason)>) -> Self {
+        LimitState {
+            blocked: std::collections::HashMap::new(),
+            agents_over: std::collections::HashMap::new(),
+            keys_over: reasons.into_iter().collect(),
+            tz_offset_minutes: 0,
+        }
+    }
+}
+
+/// Seconds until the window a block names ends, or `None` when there is nothing
+/// to wait for.
+///
+/// Derived from [`crate::limits::period_span_secs`] — the same boundary
+/// `period_start` measures against, on the same clock — so a `Retry-After`
+/// cannot disagree with the limit it explains. A provider's block names no
+/// window (`BlockReason::Spend { window: None }`) and an `all` window has no
+/// reset at all, so both answer `None` rather than a fabricated hour.
+pub fn retry_after_for(reason: &BlockReason, tz_offset_minutes: i64) -> Option<u64> {
+    let window = match reason {
+        // `all` is the stored spelling of "no reset" — the very thing that makes
+        // it a ceiling worth having — so there is no end to wait for. It has to
+        // be named here because `period_start` reads an unrecognised window as
+        // monthly rather than as open-ended.
+        BlockReason::Spend {
+            window: Some(w), ..
+        } if w != "all" => w.as_str(),
+        // A plan window is a vendor's own rolling window with its own
+        // `resets_at`; what we know here is only that it is over, and inventing
+        // a duration for it would be worse than saying nothing.
+        _ => return None,
+    };
+    let now = chrono::Utc::now().timestamp();
+    let (_, end) = crate::limits::period_span_secs(now, Some(window), tz_offset_minutes)?;
+    Some((end - now).max(1) as u64)
+}
+
+/// Whether a client key may name this model.
+///
+/// Case-insensitive, which is the house's model-matching convention (the
+/// declared-price path keys model ids the same way). A key with no allowlist
+/// allows everything — the reading every row that predates the column gets.
+///
+/// `model: None` with an allowlist in force is a refusal, not a wave-through: an
+/// allowance that cannot be checked is not an allowance, and the alternative
+/// reading would make "send a body we cannot parse" a way around the list.
+pub fn check_model(
+    client: &crate::store::ClientKey,
+    model: Option<&str>,
+) -> Result<(), crate::error::GatewayError> {
+    let allowed = crate::limits::allowlist(client.model_allow.as_deref());
+    if allowed.is_empty() {
+        return Ok(());
+    }
+    let Some(model) = model else {
+        return Err(crate::error::GatewayError::ModelUnverifiable {
+            agent: client.agent.clone(),
+        });
+    };
+    let wanted = model.to_ascii_lowercase();
+    if allowed.iter().any(|a| a.eq_ignore_ascii_case(&wanted)) {
+        return Ok(());
+    }
+    Err(crate::error::GatewayError::ModelNotAllowed {
+        agent: client.agent.clone(),
+        model: model.to_string(),
+        allowed,
+    })
+}
+
+/// Take the providers a client key may not use out of a route's candidates.
+///
+/// The provider half of a key's contract, and a pruning exactly like
+/// [`without_blocked`] rather than a check inside the selection: the same
+/// reasoning applies, which is that `timewindow` and the no-backup fallbacks
+/// index `candidates` directly and would otherwise serve a provider this client
+/// was never granted.
+///
+/// `single` is the exception, and for the reason [`without_blocked`] records: it
+/// means "this one provider, deliberately", so a disallowed primary is a refusal
+/// rather than a promotion of the backup the user chose not to fail over to.
+pub fn route_without_disallowed_providers<'r>(
+    route: &'r crate::router::AgentRoute,
+    client: &crate::store::ClientKey,
+) -> Result<std::borrow::Cow<'r, crate::router::AgentRoute>, crate::error::GatewayError> {
+    let allowed = crate::limits::allowlist(client.provider_allow.as_deref());
+    if allowed.is_empty() {
+        return Ok(std::borrow::Cow::Borrowed(route));
+    }
+    let permits = |id: &str| allowed.iter().any(|a| a.eq_ignore_ascii_case(id));
+    if matches!(route.strategy, crate::store::StrategyType::Single) {
+        let primary = route.candidates.first();
+        if primary.is_some_and(|c| !permits(&c.id)) {
+            return Err(crate::error::GatewayError::ProviderNotAllowed {
+                agent: client.agent.clone(),
+                allowed,
+            });
+        }
+        return Ok(std::borrow::Cow::Borrowed(route));
+    }
+    let kept: Vec<_> = route
+        .candidates
+        .iter()
+        .filter(|c| permits(&c.id))
+        .cloned()
+        .collect();
+    if kept.len() == route.candidates.len() {
+        return Ok(std::borrow::Cow::Borrowed(route));
+    }
+    if kept.is_empty() {
+        return Err(crate::error::GatewayError::ProviderNotAllowed {
+            agent: client.agent.clone(),
+            allowed,
+        });
+    }
+    Ok(std::borrow::Cow::Owned(crate::router::AgentRoute {
+        candidates: kept,
+        ..route.clone()
+    }))
+}
+
+/// A key's whole contract, checked where the key is resolved and before any
+/// ceiling the agent carries.
+///
+/// The order is the point: a client that is out of its own budget or asking for
+/// a model it was not granted never reaches the agent's accounting, so the two
+/// refusals stay distinguishable in the log and the more specific one wins.
+pub fn check_client_key(
+    limits: &LimitState,
+    client: &crate::store::ClientKey,
+    model: Option<&str>,
+) -> Result<(), crate::error::GatewayError> {
+    if let Some(reason) = limits.key_blocked(&client.id) {
+        return Err(crate::error::GatewayError::ClientOverLimit {
+            agent: client.agent.clone(),
+            key_id: client.id.clone(),
+            reason: reason.describe(),
+            retry_after_secs: retry_after_for(reason, limits.tz_offset_minutes()),
+        });
+    }
+    check_model(client, model)
 }
 
 /// Take the providers that are over a limit out of a route's candidate list.
@@ -238,9 +399,40 @@ pub fn evaluate(store: &Store) -> LimitState {
         }
         Err(e) => tracing::warn!(error = %e, "agent limits unreadable; none enforced"),
     }
+    // A client key's own windows, read the same way and for the same reason: the
+    // request path stays a snapshot lookup. A key with no windows never appears
+    // here, which is every key that predates the table.
+    let mut keys_over = std::collections::HashMap::new();
+    match store.list_client_key_limits() {
+        Ok(limits) => {
+            for limit in limits {
+                match client_key_limit_usage(store, &limit) {
+                    Ok(Some(pl)) if pl.used >= pl.limit => {
+                        keys_over.entry(limit.key_id.clone()).or_insert_with(|| {
+                            BlockReason::Spend {
+                                used: pl.used,
+                                limit: pl.limit,
+                                unit: pl.unit,
+                                window: Some(limit.period.clone()),
+                            }
+                        });
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(
+                        key_id = %limit.key_id,
+                        period = %limit.period,
+                        error = %e,
+                        "client-key limit not evaluated this tick; the key stays usable"
+                    ),
+                }
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "client-key limits unreadable; none enforced"),
+    }
     LimitState {
         blocked,
         agents_over,
+        keys_over,
         tz_offset_minutes,
     }
 }
@@ -249,7 +441,8 @@ pub fn evaluate(store: &Store) -> LimitState {
 mod tests {
     use super::*;
     use crate::limits::test_support::{
-        agent_limit, set_limits, store_with_hub_rates, store_with_spend, test_provider,
+        agent_limit, client_key, record_key_row, set_key_limits, set_limits, store_with_hub_rates,
+        store_with_spend, test_provider,
     };
 
     /// The percent half of `evaluate`: a plan window whose live utilization has
@@ -407,6 +600,7 @@ mod tests {
                 ts: crate::store::now_rfc3339(),
                 agent: agent.into(),
                 provider_id: provider_id.into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 0,
                 output_tokens: 0,
@@ -419,6 +613,205 @@ mod tests {
                 cost_off_peak: None,
             })
             .unwrap();
+    }
+
+    /// A client key's windows are the credential's, not the agent's: two keys of
+    /// one agent spend against two budgets, and the agent's own ceiling is a
+    /// third thing again.
+    #[test]
+    fn a_client_key_is_over_when_any_of_its_windows_is_and_its_siblings_are_not() {
+        let (_dir, store) = store_with_hub_rates(r#"{"USD":1.0}"#);
+        store.insert_provider(&test_provider("ds-1")).unwrap();
+
+        let laptop = client_key(&store, "claude", "laptop");
+        let desktop = client_key(&store, "claude", "desktop");
+        assert_ne!(laptop.id, desktop.id, "two keys, two handles");
+
+        set_key_limits(&store, &laptop.id, &[("day", 3.0, Some("requests"))]);
+        set_key_limits(&store, &desktop.id, &[("day", 100.0, Some("requests"))]);
+
+        for _ in 0..3 {
+            record_key_row(&store, "claude", &laptop.id, "ds-1");
+        }
+        // At the ceiling is over it (the agent ceilings read the same way), and
+        // the sibling key — whose own window is nowhere near — is untouched.
+        let state = evaluate(&store);
+        let reason = state
+            .key_blocked(&laptop.id)
+            .expect("3 requests is at a daily ceiling of 3");
+        assert!(
+            reason.describe().contains("this day"),
+            "the refusal names the window that tripped: {}",
+            reason.describe()
+        );
+        assert!(state.key_blocked(&desktop.id).is_none());
+        assert!(state.agent_blocked("claude").is_none());
+
+        // A key that has spent nothing is never blocked, even under a ceiling.
+        let idle = client_key(&store, "codex", "one");
+        set_key_limits(&store, &idle.id, &[("day", 1.0, Some("requests"))]);
+        assert!(evaluate(&store).key_blocked(&idle.id).is_none());
+    }
+
+    /// The wait a 429 can name comes from the same boundary the window is
+    /// measured against, and windows with no reset name none.
+    #[test]
+    fn retry_after_is_the_rest_of_the_window_or_nothing() {
+        let day = BlockReason::Spend {
+            used: 5.0,
+            limit: 5.0,
+            unit: "requests".into(),
+            window: Some("day".into()),
+        };
+        let secs = retry_after_for(&day, 0).expect("a day rolls over");
+        assert!((1..=86_400).contains(&secs), "{secs}");
+
+        // A month is a month, so the wait is longer than a day's — the number is
+        // derived, not a constant.
+        let monthly = BlockReason::Spend {
+            used: 5.0,
+            limit: 5.0,
+            unit: "requests".into(),
+            window: Some("monthly".into()),
+        };
+        assert!(retry_after_for(&monthly, 0).unwrap() >= secs);
+
+        // `all` never resets, and a provider's ceiling names no window at all.
+        let all = BlockReason::Spend {
+            used: 5.0,
+            limit: 5.0,
+            unit: "requests".into(),
+            window: Some("all".into()),
+        };
+        assert_eq!(retry_after_for(&all, 0), None);
+        let provider = BlockReason::Spend {
+            used: 5.0,
+            limit: 5.0,
+            unit: "requests".into(),
+            window: None,
+        };
+        assert_eq!(retry_after_for(&provider, 0), None);
+    }
+
+    /// The three refusals a credential can produce, in the order they are asked.
+    #[test]
+    fn a_keys_own_contract_is_checked_before_the_agents() {
+        use crate::error::GatewayError;
+        use crate::store::ClientKey;
+
+        let key = |model_allow: Option<&str>| ClientKey {
+            id: "ck-1".into(),
+            key: "kw-ag-claude-1".into(),
+            agent: "claude".into(),
+            label: None,
+            model_allow: model_allow.map(str::to_string),
+            provider_allow: None,
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+        };
+
+        // Over the key's own ceiling: the wait rides the error.
+        let limits = LimitState::with_keys_over([(
+            "ck-1".to_string(),
+            BlockReason::Spend {
+                used: 5.0,
+                limit: 5.0,
+                unit: "requests".into(),
+                window: Some("day".into()),
+            },
+        )]);
+        match check_client_key(&limits, &key(None), Some("gpt-5.5")) {
+            Err(GatewayError::ClientOverLimit {
+                retry_after_secs, ..
+            }) => assert!(retry_after_secs.is_some()),
+            other => panic!("expected ClientOverLimit, got {other:?}"),
+        }
+
+        // No ceiling on the key, an allowlist that names the model: allowed.
+        let none = LimitState::default();
+        assert!(check_client_key(&none, &key(Some(r#"["gpt-5.5"]"#)), Some("GPT-5.5")).is_ok());
+        // Case-insensitive, like every other model match in the tree.
+        assert!(check_client_key(&none, &key(Some(r#"["gpt-5.5"]"#)), Some("gpt-5.5")).is_ok());
+
+        // A model the list does not name, and a request that names none at all.
+        assert!(matches!(
+            check_client_key(&none, &key(Some(r#"["gpt-5.5"]"#)), Some("opus")),
+            Err(GatewayError::ModelNotAllowed { .. })
+        ));
+        assert!(matches!(
+            check_client_key(&none, &key(Some(r#"["gpt-5.5"]"#)), None),
+            Err(GatewayError::ModelUnverifiable { .. })
+        ));
+
+        // No list is no restriction, and an unreadable one is read as absent —
+        // the migration's promise for every row that predates the column.
+        assert!(check_client_key(&none, &key(None), Some("anything")).is_ok());
+        assert!(check_client_key(&none, &key(Some("not json")), Some("anything")).is_ok());
+    }
+
+    /// A provider allowlist prunes like a ceiling does — except for `single`,
+    /// where the one provider is the strategy's whole meaning.
+    #[test]
+    fn a_provider_allowlist_prunes_and_single_is_refused_rather_than_promoted() {
+        use crate::error::GatewayError;
+        use crate::store::ClientKey;
+
+        let key = |provider_allow: Option<&str>| ClientKey {
+            id: "ck-1".into(),
+            key: "kw-ag-claude-1".into(),
+            agent: "claude".into(),
+            label: None,
+            model_allow: None,
+            provider_allow: provider_allow.map(str::to_string),
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+        };
+        let route = |strategy| {
+            crate::strategy::test_support::route(
+                strategy,
+                vec![
+                    crate::strategy::test_support::candidate("a", 1, None),
+                    crate::strategy::test_support::candidate("b", 1, None),
+                ],
+            )
+        };
+
+        // No list: the route comes back borrowed, untouched.
+        let r = route(crate::store::StrategyType::Failover);
+        assert!(matches!(
+            route_without_disallowed_providers(&r, &key(None)),
+            Ok(std::borrow::Cow::Borrowed(_))
+        ));
+
+        // A list that excludes the primary leaves the backup as the candidate.
+        let pruned =
+            route_without_disallowed_providers(&r, &key(Some(r#"["b"]"#))).expect("something left");
+        assert_eq!(
+            pruned
+                .candidates
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b"]
+        );
+
+        // A list that excludes everything is a refusal, not an empty plan.
+        assert!(matches!(
+            route_without_disallowed_providers(&r, &key(Some(r#"["z"]"#))),
+            Err(GatewayError::ProviderNotAllowed { .. })
+        ));
+
+        // `single` names one provider on purpose: refusing beats serving the
+        // backup the user chose not to fail over to.
+        let single = route(crate::store::StrategyType::Single);
+        assert!(matches!(
+            route_without_disallowed_providers(&single, &key(Some(r#"["b"]"#))),
+            Err(GatewayError::ProviderNotAllowed { .. })
+        ));
+        assert!(
+            route_without_disallowed_providers(&single, &key(Some(r#"["a"]"#))).is_ok(),
+            "the provider it does name is still served"
+        );
     }
 
     #[test]

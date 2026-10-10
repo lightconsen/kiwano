@@ -27,6 +27,47 @@ pub enum GatewayError {
     #[error("agent `{agent}` is over its own limit ({reason})")]
     AgentOverLimit { agent: String, reason: String },
 
+    /// The credential has spent its own allowance. A third limit and a third
+    /// refusal, because it is the caller's own contract rather than anything
+    /// about the agent or a provider: another key for the same agent would be
+    /// still be fine, which is exactly what makes it worth naming.
+    ///
+    /// `retry_after_secs` is the wait until the window it tripped ends, on the
+    /// user's clock, and rides the error because only the evaluator knows which
+    /// window tripped.
+    #[error("client key `{key_id}` is over its own limit ({reason})")]
+    ClientOverLimit {
+        /// The agent the key routes as, so the refusal is attributed in the log
+        /// like every other one. The key is what tripped, but a reader looking
+        /// for "what is failing" is looking by agent.
+        agent: String,
+        key_id: String,
+        reason: String,
+        retry_after_secs: Option<u64>,
+    },
+
+    /// The credential may not name this model. Refused before the upstream is
+    /// asked, which is the only place an allowlist can be enforced — after the
+    /// call it would be a report rather than a restriction.
+    #[error("client key for agent `{agent}` may not use model `{model}` (allowed: {})", allowed.join(", "))]
+    ModelNotAllowed {
+        agent: String,
+        model: String,
+        allowed: Vec<String>,
+    },
+
+    /// The key carries a model allowlist and the request's model could not be
+    /// read. Refused rather than waved through: an allowance that cannot be
+    /// checked is not an allowance, and the other reading makes an unparseable
+    /// body a way around the list.
+    #[error("client key for agent `{agent}` allows only some models and this request names none")]
+    ModelUnverifiable { agent: String },
+
+    /// The credential may not use any provider this route offers. The provider
+    /// counterpart of `ModelNotAllowed`, and equally terminal.
+    #[error("client key for agent `{agent}` may not use any of the providers bound to it (allowed: {})", allowed.join(", "))]
+    ProviderNotAllowed { agent: String, allowed: Vec<String> },
+
     /// The provider's breaker is not admitting requests: it is open, or another
     /// request already holds the single HalfOpen probe permit. Distinct from
     /// `Upstream` on purpose — nothing was sent, and sending again right now is

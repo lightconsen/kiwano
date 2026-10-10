@@ -96,7 +96,7 @@ impl Fixture {
 
     fn keys_for(&self, store: &Store, agent: &str) -> Vec<String> {
         store
-            .list_placeholder_keys()
+            .list_client_keys()
             .unwrap()
             .into_iter()
             .filter(|k| k.agent == agent)
@@ -333,7 +333,7 @@ fn reconcile_leaves_agents_without_an_operation_row_alone() {
     let store = f.store();
     let aux = f.aux();
     store
-        .upsert_placeholder_key("kw-ag-claude-legacy", AGENT)
+        .upsert_client_key("kw-ag-claude-legacy", AGENT)
         .unwrap();
 
     let findings = reconcile_takeovers(

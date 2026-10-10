@@ -23,7 +23,7 @@ pub const GATEWAY_PLACEHOLDER_PREFIX: &str = "kw-ag-";
 /// The placeholder key a Codex config text carries, if any.
 ///
 /// The takeover state reader needs to recognize its own route in a live file;
-/// that cannot be an exact lookup in the `placeholder_keys` table, because the
+/// that cannot be an exact lookup in the `client_keys` table, because the
 /// table row and the file can disagree (a rolled-back registration over a
 /// rewritten config, or a `~/.codex` restored by hand). Values are read from
 /// the same slots the injector writes — the active custom table's

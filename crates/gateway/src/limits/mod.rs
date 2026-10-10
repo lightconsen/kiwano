@@ -40,8 +40,39 @@ pub mod usage;
 pub use patrol::{clear_legacy_disables, publish, refresh_plan_reports, run, LIMIT_INTERVAL};
 pub use period::{period_span_secs, period_start, PeriodLimit};
 pub use plan::{window_over, PlanLimits, WindowHit};
-pub use state::{evaluate, without_blocked, BlockReason, LimitState};
-pub use usage::{agent_limit_usage, period_limit_usage};
+pub use state::{
+    check_client_key, check_model, evaluate, retry_after_for, route_without_disallowed_providers,
+    without_blocked, BlockReason, LimitState,
+};
+pub use usage::{agent_limit_usage, client_key_limit_usage, period_limit_usage};
+
+/// A stored allowlist as the list it stands for.
+///
+/// `None` — and a list that parses to nothing — means "no restriction", which is
+/// the reading every row that predates the columns gets and the only one that
+/// makes the migration behaviour-preserving. An **empty** list deliberately reads
+/// the same way: nothing writes one (clearing writes NULL), and `[]` as "allow
+/// nothing" would be a footgun with no legitimate use.
+pub fn allowlist(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<String>>(raw)
+        .map(|v| {
+            v.into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|e| {
+            // A list we cannot read is not a licence to ignore it, but it is also
+            // not worth taking the request down for: an unreadable allowlist can
+            // only come from a hand-edited database, and the admin API refuses to
+            // write one.
+            tracing::warn!(error = %e, raw = %raw, "unreadable allowlist; treating it as absent");
+            Vec::new()
+        })
+}
 
 /// Fixtures more than one submodule's tests need.
 #[cfg(test)]
@@ -101,6 +132,7 @@ pub(crate) mod test_support {
                 ts: crate::store::now_rfc3339(),
                 agent: "claude".into(),
                 provider_id: provider_id.into(),
+                client_key_id: None,
                 model: None,
                 input_tokens: 0,
                 output_tokens: 0,
@@ -134,6 +166,63 @@ pub(crate) mod test_support {
     /// One agent's ceilings, as the screen would save them.
     pub(crate) fn set_limits(store: &Store, agent: &str, limits: Vec<crate::store::AgentLimit>) {
         store.replace_agent_limits(agent, &limits).unwrap();
+    }
+
+    /// A registered client key for `agent`, returning its row — the handle and
+    /// the value, since a test needs the handle to write windows against and the
+    /// value to present on a request.
+    ///
+    /// `suffix` distinguishes two keys of one agent, which is the case a
+    /// key-scoped ceiling exists for: registration is idempotent on the value, so
+    /// the same suffix names the same key.
+    pub(crate) fn client_key(store: &Store, agent: &str, suffix: &str) -> crate::store::ClientKey {
+        let value = format!("kw-ag-{agent}-{suffix}");
+        let id = store.upsert_client_key(&value, agent).unwrap();
+        store.get_client_key(&id).unwrap().unwrap()
+    }
+
+    /// One key's windows, as `clients limits` would save them.
+    pub(crate) fn set_key_limits(
+        store: &Store,
+        key_id: &str,
+        periods: &[(&str, f64, Option<&str>)],
+    ) {
+        let now = crate::store::now_rfc3339();
+        let limits: Vec<crate::store::ClientKeyLimit> = periods
+            .iter()
+            .map(|(period, limit, unit)| crate::store::ClientKeyLimit {
+                key_id: key_id.to_string(),
+                period: (*period).to_string(),
+                period_limit: *limit,
+                limit_unit: unit.map(str::to_string),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .collect();
+        store.replace_client_key_limits(key_id, &limits).unwrap();
+    }
+
+    /// One metered row attributed to a client key.
+    pub(crate) fn record_key_row(store: &Store, agent: &str, key_id: &str, provider_id: &str) {
+        use crate::store::UsageRecord;
+        store
+            .record_usage(&UsageRecord {
+                ts: crate::store::now_rfc3339(),
+                agent: agent.into(),
+                provider_id: provider_id.into(),
+                client_key_id: Some(key_id.into()),
+                model: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+            })
+            .unwrap();
     }
 
     pub(crate) fn store_with_spend(provider_id: &str, limit: f64, spent: f64) -> Store {

@@ -498,6 +498,7 @@ mod tests {
             UsageSample {
                 agent: "claude".into(),
                 provider_id: "p1".into(),
+                client_key_id: "ck-test".to_string(),
                 catalog_id: None,
                 started_unix: TEST_AT,
                 model: None,
@@ -580,6 +581,7 @@ mod tests {
             UsageSample {
                 agent: "claude".into(),
                 provider_id: "p1".into(),
+                client_key_id: "ck-test".to_string(),
                 catalog_id: None,
                 started_unix: TEST_AT,
                 model: None,

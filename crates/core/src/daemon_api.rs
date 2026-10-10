@@ -13,6 +13,9 @@
 
 use kiwano_adapters::model_pricing::ModelPriceEntry;
 use kiwano_api::agents::CustomAgentVm;
+use kiwano_api::client_keys::{
+    ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeyVm, NewClientKeyInput,
+};
 use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm, UsageAlertVm};
 use kiwano_api::keys::ApiKeyVm;
 use kiwano_api::providers::{
@@ -147,6 +150,80 @@ impl DaemonApi {
             self.token.as_deref(),
             &format!("/api/agents/{agent}/limits"),
             &limits,
+        ))
+    }
+
+    /// Every client key, masked, with its windows and allowlists.
+    pub fn list_client_keys(&self) -> Result<Vec<ClientKeyVm>, String> {
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/client-keys")
+    }
+
+    /// One client key by its handle (`ck-…`).
+    pub fn get_client_key(&self, id: &str) -> Result<ClientKeyVm, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/client-keys/{id}"),
+        )
+    }
+
+    /// Mint a key. The response is the one place the secret appears.
+    pub fn add_client_key(&self, input: &NewClientKeyInput) -> Result<ClientKeyCreatedVm, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            "/api/client-keys",
+            input,
+        )
+    }
+
+    /// Drop a key, and with it its windows. Idempotent at the store; a missing
+    /// handle answers not-found, which is what tells a caller a typo from a
+    /// success.
+    pub fn delete_client_key(&self, id: &str) -> Result<(), String> {
+        wrote(sidecar::admin_delete_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/client-keys/{id}"),
+        ))
+    }
+
+    /// A new secret for the same key: same handle, same spend history.
+    pub fn rotate_client_key(&self, id: &str) -> Result<ClientKeyCreatedVm, String> {
+        sidecar::admin_post_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/client-keys/{id}/rotate"),
+            &serde_json::json!({}),
+        )
+    }
+
+    /// Replace a key's whole window set — a `PUT`, like the agent ceilings: an
+    /// empty array clears it.
+    pub fn set_client_key_limits(
+        &self,
+        id: &str,
+        limits: &[ClientKeyLimitVm],
+    ) -> Result<(), String> {
+        wrote(sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/client-keys/{id}/limits"),
+            &limits,
+        ))
+    }
+
+    /// Replace a key's allowlists (and its label, when one is sent).
+    pub fn set_client_key_policy(
+        &self,
+        id: &str,
+        policy: &ClientKeyPolicyInput,
+    ) -> Result<(), String> {
+        wrote(sidecar::admin_put_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/client-keys/{id}/policy"),
+            policy,
         ))
     }
 

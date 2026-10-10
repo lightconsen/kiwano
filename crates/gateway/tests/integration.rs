@@ -308,7 +308,7 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -372,7 +372,7 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -427,7 +427,7 @@ async fn a_client_that_hangs_up_still_leaves_a_record() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -500,7 +500,7 @@ async fn a_chat_client_that_does_not_ask_for_usage_is_metered_and_sees_no_extra_
         .unwrap();
     store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .upsert_client_key("kw-ag-codex-test", "codex")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -552,7 +552,7 @@ async fn a_chat_client_that_asks_for_usage_gets_its_bytes_verbatim() {
         .unwrap();
     store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .upsert_client_key("kw-ag-codex-test", "codex")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -596,7 +596,7 @@ async fn a_retried_attempt_gets_its_own_row() {
     store.insert_provider(&p).unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -680,7 +680,7 @@ async fn a_streamed_response_is_intact_for_the_client_and_scrubbed_in_the_log() 
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -761,7 +761,7 @@ async fn promoting_a_provider_switches_traffic_without_a_restart() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -837,7 +837,7 @@ async fn openai_inbound_to_anthropic_provider_still_fails_cleanly() {
         .unwrap();
     store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .upsert_client_key("kw-ag-codex-test", "codex")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -882,7 +882,7 @@ async fn anthropic_inbound_converts_non_streaming_to_openai_upstream() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -961,7 +961,7 @@ async fn anthropic_inbound_converts_openai_sse_stream_to_anthropic_events() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1072,7 +1072,7 @@ async fn a_user_defined_agents_key_routes_and_meters() {
         })
         .unwrap();
     store
-        .upsert_placeholder_key("kw-ag-long-tasks-3f9a-0001", agent)
+        .upsert_client_key("kw-ag-long-tasks-3f9a-0001", agent)
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1128,7 +1128,7 @@ async fn gemini_inbound_passthrough_meters_usage_metadata() {
         .unwrap();
     store.upsert_binding(&bind("gemini", "p-gem", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-gemini-test", "gemini")
+        .upsert_client_key("kw-ag-gemini-test", "gemini")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1255,7 +1255,7 @@ async fn request_log_captures_bodies_and_metadata() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1328,11 +1328,11 @@ async fn request_log_records_failures_without_usage() {
         .unwrap();
     store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-codex-test", "codex")
+        .upsert_client_key("kw-ag-codex-test", "codex")
         .unwrap();
     // Registered, but no binding: identified, with nothing to route to.
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1419,7 +1419,7 @@ async fn request_log_disabled_records_nothing() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1469,7 +1469,7 @@ async fn request_log_captures_client_visible_sse_stream() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1526,7 +1526,7 @@ async fn query_credentials_are_redacted_in_the_log_and_the_error_message() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1580,7 +1580,7 @@ async fn a_document_on_the_conversion_path_is_refused_not_dropped() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1638,7 +1638,7 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     store
         .upsert_strategy("claude", StrategyType::Single, None)
@@ -1663,6 +1663,7 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
             ts: now,
             agent: "claude".into(),
             provider_id: "p-ant".into(),
+            client_key_id: None,
             model: Some("m".into()),
             input_tokens: 1,
             output_tokens: 1,
@@ -1752,7 +1753,7 @@ async fn an_oversize_non_streaming_response_is_refused_not_buffered() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1798,7 +1799,7 @@ async fn health_and_metrics_answer_without_a_key_and_leave_no_trace() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1922,7 +1923,7 @@ async fn a_stalled_stream_is_abandoned_and_recorded() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -1975,7 +1976,7 @@ async fn a_failing_primary_is_replayed_against_the_next_candidate() {
     store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
     store.upsert_binding(&bind("claude", "p-b", 1)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     // Failover is what makes the backup a fallback at all; the `single` case
     // below is the other half of that rule.
@@ -2064,7 +2065,7 @@ async fn a_single_strategy_never_replays_against_the_backup() {
     store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
     store.upsert_binding(&bind("claude", "p-b", 1)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     store
         .upsert_strategy("claude", StrategyType::Single, None)
@@ -2109,7 +2110,7 @@ async fn an_open_breaker_refuses_before_anything_is_sent() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -2175,7 +2176,7 @@ async fn consecutive_auth_rejections_open_the_circuit_and_surface_the_key() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
 
     let state = Arc::new(GatewayState::new(store).unwrap());
@@ -2396,7 +2397,7 @@ async fn the_shim_strips_adaptive_thinking_and_records_what_it_did() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2444,7 +2445,7 @@ async fn the_credential_detector_notes_what_is_leaving() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2484,7 +2485,7 @@ async fn a_finding_and_a_shim_rewrite_share_the_note() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2528,7 +2529,7 @@ async fn the_shim_strips_thinking_history_once_thinking_is_not_requested() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2575,7 +2576,7 @@ async fn the_shim_fills_a_null_tool_schema_for_openai_native() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-oai", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2620,7 +2621,7 @@ async fn with_the_shim_off_the_body_is_forwarded_exactly_as_sent() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     // Off before the state snapshots its config — `new` is the read.
     store
@@ -2661,7 +2662,7 @@ async fn a_body_with_nothing_to_sanitize_is_forwarded_byte_identical() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2703,7 +2704,7 @@ async fn failover_replays_the_sanitized_body_and_notes_both_attempts() {
     store.upsert_binding(&bind("claude", "p-a", 0)).unwrap();
     store.upsert_binding(&bind("claude", "p-b", 1)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     store
         .upsert_strategy("claude", StrategyType::Failover, None)
@@ -2774,7 +2775,7 @@ async fn get_models_with_an_empty_body_is_a_noop() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2806,7 +2807,7 @@ async fn count_tokens_is_sanitized_like_messages() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2847,7 +2848,7 @@ async fn streaming_requests_carry_the_notes_through_the_sse_path() {
         .unwrap();
     store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
     store
-        .upsert_placeholder_key("kw-ag-claude-test", "claude")
+        .upsert_client_key("kw-ag-claude-test", "claude")
         .unwrap();
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
@@ -2870,4 +2871,278 @@ async fn streaming_requests_carry_the_notes_through_the_sse_path() {
         rows[0].request_notes.as_deref(),
         Some("thinking: removed unsupported type \"adaptive\"")
     );
+}
+
+/// A client key that has spent its own window is refused with 429 and a
+/// `Retry-After` naming the rest of that window — before the upstream is asked,
+/// which is the whole point of a ceiling the gateway can enforce by itself.
+#[tokio::test]
+async fn a_client_key_over_its_own_ceiling_is_429_with_retry_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let upstream = json!({
+        "id": "msg_1", "type": "message", "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 10, "output_tokens": 2}
+    });
+    let (upstream_url, captured) = mock_anthropic(MockReply::Json(upstream)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+
+    // Two keys of one agent: the ceiling is the credential's, so the one that
+    // has spent is refused and its sibling is not.
+    let spent = store
+        .upsert_client_key("kw-ag-claude-spent", "claude")
+        .unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-fresh", "claude")
+        .unwrap();
+    store
+        .replace_client_key_limits(
+            &spent,
+            &[kiwanod::store::ClientKeyLimit {
+                key_id: spent.clone(),
+                period: "day".into(),
+                period_limit: 1.0,
+                limit_unit: Some("requests".into()),
+                created_at: now_rfc3339(),
+                updated_at: now_rfc3339(),
+            }],
+        )
+        .unwrap();
+    // One metered request against that key: at the ceiling, which is over it.
+    store
+        .record_usage(&kiwanod::store::UsageRecord {
+            ts: now_rfc3339(),
+            agent: "claude".into(),
+            provider_id: "p-ant".into(),
+            client_key_id: Some(spent.clone()),
+            model: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: None,
+            status: "ok".into(),
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+        })
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    // The snapshot is rebuilt on a tick and on every admin write; a test states
+    // it outright rather than waiting 30 seconds for the patrol.
+    state.reload_routes().unwrap();
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-spent"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry_after = response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .expect("a ceiling that lifts at a known time says when");
+    assert!((1..=86_400).contains(&retry_after), "{retry_after}");
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["error"]["type"], "client_over_limit");
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "the upstream is never asked for a request its key refuses"
+    );
+
+    // The sibling key, same agent, has its own budget: it is served.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-fresh"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // And the refusal is in the log, with the kind the client was told.
+    let rows = wait_for_log(&state, 2).await;
+    let refused = rows
+        .iter()
+        .find(|r| r.error_kind.as_deref() == Some("client_over_limit"))
+        .expect("the refusal is a row, not only a response");
+    assert_eq!(refused.agent.as_deref(), Some("claude"));
+}
+
+/// A model outside a key's allowlist is refused with 403 — not 429, because
+/// retrying never helps — and the allowlist does not touch a sibling key.
+#[tokio::test]
+async fn a_model_outside_a_client_keys_allowlist_is_403() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let upstream = json!({
+        "id": "msg_1", "type": "message", "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 10, "output_tokens": 2}
+    });
+    let (upstream_url, captured) = mock_anthropic(MockReply::Json(upstream)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+
+    let scoped = store
+        .upsert_client_key("kw-ag-claude-scoped", "claude")
+        .unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-open", "claude")
+        .unwrap();
+    store
+        .set_client_key_allowlists(&scoped, Some(r#"["claude-haiku-4-5"]"#), None)
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    state.reload_routes().unwrap();
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-scoped"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["error"]["type"], "model_not_allowed");
+    assert!(captured.lock().unwrap().is_empty());
+
+    // The model the list does name is served, and a key with no list is not
+    // restricted at all.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-scoped"),
+        r#"{"model":"claude-haiku-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-open"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let rows = wait_for_log(&state, 3).await;
+    assert!(rows
+        .iter()
+        .any(|r| r.error_kind.as_deref() == Some("model_not_allowed")));
+}
+
+/// A provider outside a key's allowlist is not a candidate: the request goes to
+/// the provider the key does allow, on the same failover shape a ceiling uses.
+#[tokio::test]
+async fn a_provider_outside_a_client_keys_allowlist_is_pruned_not_fatal() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let upstream = json!({
+        "id": "msg_1", "type": "message", "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 10, "output_tokens": 2}
+    });
+    let (allowed_url, allowed_calls) = mock_anthropic(MockReply::Json(upstream.clone())).await;
+    let (denied_url, denied_calls) = mock_anthropic(MockReply::Json(upstream)).await;
+    store
+        .insert_provider(&provider("p-allowed", Protocol::Anthropic, allowed_url))
+        .unwrap();
+    store
+        .insert_provider(&provider("p-denied", Protocol::Anthropic, denied_url))
+        .unwrap();
+    // The denied provider is the primary.
+    store
+        .upsert_binding(&bind("claude", "p-denied", 0))
+        .unwrap();
+    store
+        .upsert_binding(&bind("claude", "p-allowed", 1))
+        .unwrap();
+    // `failover`, because pruning is a *candidate* decision: under `single` the
+    // one named provider is the strategy's whole meaning, and a key that
+    // excludes it is refused rather than promoted (asserted below).
+    store
+        .upsert_strategy("claude", StrategyType::Failover, None)
+        .unwrap();
+
+    let key = store
+        .upsert_client_key("kw-ag-claude-scoped", "claude")
+        .unwrap();
+    store
+        .set_client_key_allowlists(&key, None, Some(r#"["p-allowed"]"#))
+        .unwrap();
+    // A key whose list names nothing that is bound: refused outright, since no
+    // candidate survives the pruning.
+    let nowhere = store
+        .upsert_client_key("kw-ag-claude-nowhere", "claude")
+        .unwrap();
+    store
+        .set_client_key_allowlists(&nowhere, None, Some(r#"["p-elsewhere"]"#))
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    state.reload_routes().unwrap();
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-scoped"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        denied_calls.lock().unwrap().is_empty(),
+        "a provider the key may not use is never asked"
+    );
+    assert_eq!(allowed_calls.lock().unwrap().len(), 1);
+
+    // A key whose list names nothing that is bound is refused outright.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-nowhere"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["error"]["type"], "provider_not_allowed");
+
+    // Under `single` the same key is refused rather than served by the backup:
+    // "this one provider, no failover" is what the strategy says, and a key that
+    // excludes that provider cannot be answered by switching to the one the user
+    // deliberately did not make primary.
+    state
+        .store
+        .upsert_strategy("claude", StrategyType::Single, None)
+        .unwrap();
+    state.reload_routes().unwrap();
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-scoped"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

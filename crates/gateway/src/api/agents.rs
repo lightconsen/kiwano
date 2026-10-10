@@ -25,7 +25,7 @@ fn agent_vm(store: &Store, a: CustomAgent) -> Result<CustomAgentVm, ApiError> {
     // The key rides with the agent (minted at create, deleted at remove), so a
     // read of it is the same read the dialog's settings panel makes.
     let placeholder_key = store
-        .list_placeholder_keys()
+        .list_client_keys()
         .map_err(ApiError::failed)?
         .into_iter()
         .find(|k| k.agent == a.id)
@@ -100,7 +100,7 @@ pub fn create_custom_agent(
     let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
     let key = format!("kw-ag-{id}-{rand}");
     store
-        .upsert_placeholder_key(&key, id)
+        .upsert_client_key(&key, id)
         .map_err(ApiError::failed)?;
     // A route with no strategy still routes (the engine reads `single` for a
     // missing row), but writing it here is what makes the agent's tab show the
@@ -183,11 +183,9 @@ pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), ApiError> {
             .map_err(ApiError::failed)?;
     }
     store.delete_strategy(id).map_err(ApiError::failed)?;
-    for k in store.list_placeholder_keys().map_err(ApiError::failed)? {
+    for k in store.list_client_keys().map_err(ApiError::failed)? {
         if k.agent == id {
-            store
-                .delete_placeholder_key(&k.key)
-                .map_err(ApiError::failed)?;
+            store.delete_client_key(&k.id).map_err(ApiError::failed)?;
         }
     }
     store.delete_custom_agent(id).map_err(ApiError::failed)?;
@@ -217,7 +215,7 @@ pub fn list_agents(store: &Store) -> Result<Vec<(String, String)>, ApiError> {
 /// (`migrate.local.md` §10.44): it is the daemon's rows, and a client that
 /// assembles the settings screen needs them to be told.
 pub fn custom_agents_with_keys(store: &Store) -> Result<Vec<CustomAgentVm>, ApiError> {
-    let keys = store.list_placeholder_keys().map_err(ApiError::failed)?;
+    let keys = store.list_client_keys().map_err(ApiError::failed)?;
     Ok(store
         .list_custom_agents()
         .map_err(ApiError::failed)?
@@ -262,7 +260,7 @@ mod tests {
         );
         assert_eq!(store.list_custom_agents().unwrap().len(), 1);
         assert_eq!(
-            store.list_placeholder_keys().unwrap().len(),
+            store.list_client_keys().unwrap().len(),
             1,
             "one agent, one key"
         );
@@ -297,7 +295,7 @@ mod tests {
         assert_ne!(a.id, b.id);
         assert_ne!(a.placeholder_key, b.placeholder_key);
         assert_eq!(store.list_custom_agents().unwrap().len(), 2);
-        assert_eq!(store.list_placeholder_keys().unwrap().len(), 2);
+        assert_eq!(store.list_client_keys().unwrap().len(), 2);
     }
 
     /// The refusals carry the kind the status is picked from, and the sentences
@@ -426,7 +424,7 @@ mod tests {
         assert!(store.bindings_for_agent(&id).unwrap().is_empty());
         assert!(store.get_strategy(&id).unwrap().is_none());
         assert!(store
-            .list_placeholder_keys()
+            .list_client_keys()
             .unwrap()
             .iter()
             .all(|k| k.agent != id));

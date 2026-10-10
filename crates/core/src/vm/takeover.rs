@@ -118,7 +118,7 @@ impl StateHalf<'_> {
     fn registered_key(&self, agent: &str) -> Result<Option<String>, String> {
         match self {
             StateHalf::InProcess(store) => Ok(store
-                .list_placeholder_keys()
+                .list_client_keys()
                 .map_err(e2s)?
                 .into_iter()
                 .find(|k| k.agent == agent)
@@ -488,7 +488,7 @@ mod tests {
         std::fs::write(&settings, reverted).unwrap();
         assert!(aux.load_takeover_backup("claude").is_some());
         assert!(s
-            .list_placeholder_keys()
+            .list_client_keys()
             .unwrap()
             .iter()
             .any(|k| k.agent == "claude"));

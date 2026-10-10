@@ -28,8 +28,8 @@ pub(crate) fn render_status(
     // read as a store that has nothing in it.
     if v.get("providers").is_some() {
         out.push_str(&format!(
-            "\nstore: providers {} · bindings {} · placeholder_keys {} · usage_rows {}",
-            v["providers"], v["bindings"], v["placeholder_keys"], v["usage_rows"]
+            "\nstore: providers {} · bindings {} · client_keys {} · usage_rows {}",
+            v["providers"], v["bindings"], v["client_keys"], v["usage_rows"]
         ));
     } else {
         // Two causes, and they need different advice: a local client whose
@@ -506,6 +506,87 @@ pub(crate) fn render_keys(keys: &[vm::ApiKeyVm], provider_id: &str) -> String {
     render_table(&head, &rows, &[])
 }
 
+/// Every client key, in one table. Two columns hold `-` rather than an empty
+/// cell when nothing restricts the key, because "no limit" and "a limit I have
+/// not read" must not look the same in a listing.
+pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm]) -> String {
+    if keys.is_empty() {
+        return "no client keys: none has been minted, and an agent's own key arrives with its \
+                takeover"
+            .to_string();
+    }
+    let head = [
+        "HANDLE",
+        "AGENT",
+        "LABEL",
+        "KEY",
+        "LIMITS",
+        "MODELS",
+        "PROVIDERS",
+    ];
+    let rows: Vec<Vec<String>> = keys
+        .iter()
+        .map(|k| {
+            vec![
+                k.id.clone(),
+                k.agent.clone(),
+                k.label.clone().unwrap_or_else(|| "-".to_string()),
+                k.masked.clone(),
+                windows_text(k),
+                list_text(&k.model_allow),
+                list_text(&k.provider_allow),
+            ]
+        })
+        .collect();
+    render_table(&head, &rows, &[])
+}
+
+/// One key in full: what it is, and what it may do.
+pub(crate) fn render_client_key(key: &vm::ClientKeyVm) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("handle   {}\n", key.id));
+    out.push_str(&format!("agent    {}\n", key.agent));
+    out.push_str(&format!(
+        "label    {}\n",
+        key.label.as_deref().unwrap_or("(none)")
+    ));
+    out.push_str(&format!("key      {}\n", key.masked));
+    out.push_str(&format!("created  {}\n", key.created_at));
+    out.push_str(&format!("limits   {}\n", windows_text(key)));
+    out.push_str(&format!("models   {}\n", list_text(&key.model_allow)));
+    out.push_str(&format!("providers {}\n", list_text(&key.provider_allow)));
+    out.push_str(
+        "\nThe key itself is not readable: it was shown once, when it was minted or rotated.\n",
+    );
+    out
+}
+
+fn windows_text(key: &vm::ClientKeyVm) -> String {
+    if key.limits.is_empty() {
+        return "-".to_string();
+    }
+    key.limits
+        .iter()
+        .map(|l| {
+            format!(
+                "{}:{:.0}:{}",
+                l.period,
+                l.period_limit,
+                l.limit_unit.as_deref().unwrap_or("requests")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn list_text(list: &[String]) -> String {
+    if list.is_empty() {
+        "-".to_string()
+    } else {
+        list.join(", ")
+    }
+}
+
 pub(crate) fn render_usage(report: &UsageReport) -> String {
     let mut out = format!(
         "usage ({}d{})",
@@ -733,7 +814,7 @@ mod tests {
             "uptime_secs": 12,
             "providers": 2,
             "bindings": 1,
-            "placeholder_keys": 1,
+            "client_keys": 1,
             "usage_rows": 5,
             "blocked": [
                 { "provider_id": "capped-1", "reason": "1.00 of 1.00 requests this period" }

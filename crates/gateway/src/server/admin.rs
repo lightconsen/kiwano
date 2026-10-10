@@ -125,6 +125,20 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         .route("/agents/{agent}/primary", post(bind_as_primary_route))
         .route("/catalog/link", post(link_providers_route))
         .route("/limit-currencies", get(limit_currencies_route))
+        // Client keys are addressed by their handle (`ck-…`) and never by their
+        // value: a route that took the secret would put a live credential in a
+        // request line, and from there into whatever logs the request line.
+        .route(
+            "/client-keys",
+            get(list_client_keys_route).post(add_client_key_route),
+        )
+        .route(
+            "/client-keys/{id}",
+            get(get_client_key_route).delete(delete_client_key_route),
+        )
+        .route("/client-keys/{id}/rotate", post(rotate_client_key_route))
+        .route("/client-keys/{id}/limits", put(set_client_key_limits_route))
+        .route("/client-keys/{id}/policy", put(set_client_key_policy_route))
         .route("/providers", post(add_provider_route))
         // One route per path: axum panics on a second `route()` for the same
         // path, and the two verbs here are one resource's.
@@ -544,7 +558,7 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         "data_host": state.data_addr().ip().to_string(),
         "providers": metrics.providers,
         "bindings": metrics.bindings,
-        "placeholder_keys": metrics.placeholder_keys,
+        "client_keys": metrics.client_keys,
         "usage_rows": metrics.usage_rows,
         "agents_routed": table.routes.len(),
         "routes": routes,
@@ -729,6 +743,85 @@ async fn set_agent_limits_route(
 #[derive(serde::Deserialize)]
 struct BindBody {
     provider_id: String,
+}
+
+/// `GET /api/client-keys` — every key, masked, with its windows and allowlists.
+async fn list_client_keys_route(State(state): State<Arc<GatewayState>>) -> Response {
+    match crate::api::client_keys::list_client_keys(&state.store) {
+        Ok(keys) => Json(keys).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/client-keys/{id}` — one key by its handle.
+async fn get_client_key_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match crate::api::client_keys::get_client_key(&state.store, &id) {
+        Ok(key) => Json(key).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `POST /api/client-keys` — mint one. The only response that carries a secret,
+/// and it is returned once: there is no endpoint that reads it back.
+async fn add_client_key_route(
+    State(state): State<Arc<GatewayState>>,
+    Json(input): Json<kiwano_api::client_keys::NewClientKeyInput>,
+) -> Response {
+    after_write_with(
+        &state,
+        crate::api::client_keys::add_client_key(&state.store, &input),
+    )
+}
+
+/// `DELETE /api/client-keys/{id}` — drop a key and, by cascade, its windows.
+async fn delete_client_key_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    after_write(
+        &state,
+        crate::api::client_keys::delete_client_key(&state.store, &id).map(|_| ()),
+    )
+}
+
+/// `POST /api/client-keys/{id}/rotate` — a new secret for the same key: same
+/// handle, same agent, same policy, same spend history.
+async fn rotate_client_key_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    after_write_with(
+        &state,
+        crate::api::client_keys::rotate_client_key(&state.store, &id),
+    )
+}
+
+/// `PUT /api/client-keys/{id}/limits` — the key's whole window set. An empty
+/// array clears it, which is how a caller says "no ceiling".
+async fn set_client_key_limits_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(limits): Json<Vec<kiwano_api::client_keys::ClientKeyLimitVm>>,
+) -> Response {
+    after_write(
+        &state,
+        crate::api::client_keys::set_client_key_limits(&state.store, &id, limits),
+    )
+}
+
+/// `PUT /api/client-keys/{id}/policy` — the allowlists, and the label when sent.
+async fn set_client_key_policy_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(policy): Json<kiwano_api::client_keys::ClientKeyPolicyInput>,
+) -> Response {
+    after_write(
+        &state,
+        crate::api::client_keys::set_client_key_policy(&state.store, &id, &policy),
+    )
 }
 
 /// `POST /api/agents/{agent}/bindings` — add a candidate at the queue tail.
@@ -1807,10 +1900,10 @@ mod tests {
         bind(store, "claude", "p-claude");
         bind(store, "codex", "p-codex");
         store
-            .upsert_placeholder_key("kw-ag-claude-abc123", "claude")
+            .upsert_client_key("kw-ag-claude-abc123", "claude")
             .unwrap();
         store
-            .upsert_placeholder_key("kw-ag-codex-xyz789", "codex")
+            .upsert_client_key("kw-ag-codex-xyz789", "codex")
             .unwrap();
     }
 

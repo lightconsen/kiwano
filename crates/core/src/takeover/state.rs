@@ -58,7 +58,7 @@ pub fn restorable_backup(aux: &Aux, agent: &str) -> bool {
 ///
 /// This is the evidence half of takeover state: recognition is by the
 /// `kw-ag-<agent>-<rand>` shape (or, for a Codex config, the parsed token
-/// slots), never by a lookup in the `placeholder_keys` table, which can be
+/// slots), never by a lookup in the `client_keys` table, which can be
 /// rolled back while the files stay rewritten.
 pub fn live_placeholder_key(agent: &str, home: &Path, vars: &ShellVars) -> Option<String> {
     let paths = takeover_paths(agent, home, vars).ok()?;

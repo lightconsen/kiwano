@@ -655,11 +655,24 @@ fn list_text(list: &[String]) -> String {
 /// What an import did: what landed, what the watermark kept out, and what came
 /// out unpriced — the last of which is the one a user has to be told about,
 /// because it is a number that is missing rather than wrong.
-pub(crate) fn render_history_import(report: &vm::HistoryImportReport, read: usize) -> String {
+pub(crate) fn render_history_import(
+    report: &vm::HistoryImportReport,
+    read: usize,
+    machine: Option<&str>,
+) -> String {
     let mut out = format!(
         "imported {} row(s) and {} session(s) from {read} row(s) read\n",
         report.usage_rows, report.sessions
     );
+    // Which machine these rows are recorded as coming from (migration v32): the
+    // label a merged gateway shows beside each session, and the thing that tells
+    // two laptops' imports apart. Named even when it is `None` — "unnamed" is a
+    // fact, and a line that vanished would leave the reader wondering whether the
+    // machine was recorded at all.
+    out.push_str(&format!(
+        "  from machine {}\n",
+        machine.unwrap_or("unnamed")
+    ));
     if report.skipped_by_watermark > 0 {
         out.push_str(&format!(
             "  {} row(s) skipped: this gateway already metered that traffic\n",
@@ -718,6 +731,7 @@ pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
     // `--json` is there for anything narrower.
     let head = [
         "PROJECT",
+        "MACHINE",
         "AGENT",
         "SOURCE",
         "SPAN",
@@ -733,6 +747,13 @@ pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
         .map(|s| {
             vec![
                 s.project.clone().unwrap_or_else(|| "-".to_string()),
+                // Which machine imported this row, named even when unknown: an
+                // imported row whose machine could not name itself reads
+                // "unnamed" rather than a blank, so a reader can tell "we did not
+                // record it" from "there was nothing to record". The visible word
+                // is the convention here (`never` for a limit that cannot fire) —
+                // traffic-only rows have no machine at all and say so the same way.
+                s.machine.clone().unwrap_or_else(|| "unnamed".to_string()),
                 s.agent.clone(),
                 s.source.clone(),
                 format!(

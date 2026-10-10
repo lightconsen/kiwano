@@ -122,6 +122,9 @@ pub fn apply_history(
     // The watermark per agent, read once per batch rather than per row.
     let mut watermarks: std::collections::HashMap<String, Option<String>> =
         std::collections::HashMap::new();
+    // The machine every row in this batch came from: one fact about the scan, so
+    // it is read once and stamped on both halves (usage and sessions).
+    let machine = batch.source_machine.as_deref();
     let mut priceable = Vec::with_capacity(batch.usage.len());
     for row in &batch.usage {
         let watermark = match watermarks.get(&row.agent) {
@@ -138,7 +141,7 @@ pub fn apply_history(
             report.skipped_by_watermark += 1;
             continue;
         }
-        let priced = price_row(pricing, declared, row);
+        let priced = price_row(pricing, declared, row, machine);
         match &priced.cost {
             Some(_) => report.priced += 1,
             None => {
@@ -167,8 +170,11 @@ pub fn apply_history(
     report.usage_rows = store
         .upsert_imported_usage(&priceable)
         .map_err(ApiError::failed)?;
-    let sessions: Vec<crate::store::ImportedSession> =
-        batch.sessions.iter().map(session_row).collect();
+    let sessions: Vec<crate::store::ImportedSession> = batch
+        .sessions
+        .iter()
+        .map(|row| session_row(row, machine))
+        .collect();
     report.sessions = store
         .upsert_imported_sessions(&sessions)
         .map_err(ApiError::failed)?;
@@ -196,6 +202,7 @@ fn price_row(
     pricing: &kiwano_adapters::model_pricing::PricingTable,
     declared: &kiwano_adapters::model_pricing::PricingTable,
     row: &HistoryUsageRow,
+    machine: Option<&str>,
 ) -> UsageRecord {
     // No model, or no rate for it anywhere: NULL, which is what "unpriced" looks
     // like everywhere else in the ledger.
@@ -243,6 +250,9 @@ fn price_row(
         project: row.project.clone(),
         session_id: row.session_id.clone(),
         import_key: Some(row.import_key.clone()),
+        // The machine this scan came from — one label for every row the batch
+        // produced (v32). `None` for a client that could not name itself.
+        imported_from: machine.map(str::to_string),
     }
 }
 
@@ -258,7 +268,7 @@ fn unix_of(ts: &str) -> i64 {
 
 /// A session row as the store wants it: the counts become JSON, because a
 /// per-session list of names is a payload and not a column.
-fn session_row(row: &HistorySessionRow) -> crate::store::ImportedSession {
+fn session_row(row: &HistorySessionRow, machine: Option<&str>) -> crate::store::ImportedSession {
     let encode = |counts: &[kiwano_api::history::HistoryCount]| -> Option<String> {
         (!counts.is_empty())
             .then(|| serde_json::to_string(counts).unwrap_or_else(|_| "[]".to_string()))
@@ -277,6 +287,8 @@ fn session_row(row: &HistorySessionRow) -> crate::store::ImportedSession {
         cache_creation_tokens: row.cache_creation_tokens,
         tool_calls: encode(&row.tool_calls),
         skills: encode(&row.skills),
+        // The same batch-level machine as the usage rows, for the same reason.
+        imported_from: machine.map(str::to_string),
     }
 }
 
@@ -391,6 +403,7 @@ mod tests {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
 
@@ -405,6 +418,7 @@ mod tests {
             ],
             sessions: vec![session("claude-code:s")],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         let report = apply_history(
             &store,
@@ -436,6 +450,7 @@ mod tests {
             usage: vec![row("codex", "2026-01-01T00:00:00+00:00", "codex:s:1")],
             sessions: vec![],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         let first = apply_history(
             &store,
@@ -491,6 +506,7 @@ mod tests {
             usage: vec![row("codex", "2026-01-01T00:00:00+00:00", "codex:s:1")],
             sessions: vec![],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         apply_history(
             &store,
@@ -525,6 +541,7 @@ mod tests {
             ],
             sessions: vec![],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         let second = HistoryBatch {
             usage: vec![
@@ -533,6 +550,7 @@ mod tests {
             ],
             sessions: vec![],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         let hub = pricing_of(&store);
         let none = kiwano_adapters::model_pricing::PricingTable::default();
@@ -574,6 +592,7 @@ mod tests {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
         let again = apply_history(&store, &hub, &none, &second).unwrap();
@@ -599,6 +618,7 @@ mod tests {
             usage: vec![unknown, unknown2, nameless],
             sessions: vec![],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         let report = apply_history(
             &store,
@@ -644,6 +664,7 @@ mod tests {
                 ],
                 sessions: vec![],
                 scanned_agents: Vec::new(),
+                source_machine: None,
             },
         )
         .unwrap();
@@ -658,6 +679,7 @@ mod tests {
                 ],
                 sessions: vec![],
                 scanned_agents: Vec::new(),
+                source_machine: None,
             },
         )
         .unwrap();
@@ -700,6 +722,7 @@ mod tests {
             usage: vec![r],
             sessions: vec![],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         // The Hub's table is empty here: the declaration is the only thing that
         // can price it, which is exactly the case this exists for.
@@ -732,6 +755,7 @@ mod tests {
             usage: vec![],
             sessions: vec![],
             scanned_agents: vec!["claude".into()],
+            source_machine: None,
         };
         apply_history(
             &store,
@@ -757,6 +781,7 @@ mod tests {
             usage: vec![],
             sessions: vec![session("claude-code:s")],
             scanned_agents: Vec::new(),
+            source_machine: None,
         };
         let report = apply_history(
             &store,
@@ -772,5 +797,73 @@ mod tests {
         assert_eq!(listed[0].project.as_deref(), Some("kiwano"));
         assert!(listed[0].tool_calls.as_deref().unwrap().contains("Bash"));
         assert!(listed[0].skills.as_deref().unwrap().contains("tweet"));
+    }
+
+    /// The machine a batch names reaches **both** halves it writes — every row
+    /// comes from the one scan, so the label is stamped on the usage rows and the
+    /// session rows alike. A batch that named no machine leaves NULL, which is
+    /// what an unnamed client produces.
+    #[test]
+    fn the_machine_a_batch_names_reaches_both_halves() {
+        let store = store_priced();
+        let named = HistoryBatch {
+            usage: vec![row("codex", "2026-01-01T00:00:00+00:00", "codex:s:1")],
+            sessions: vec![session("claude-code:s")],
+            scanned_agents: Vec::new(),
+            source_machine: Some("buildbox".into()),
+        };
+        apply_history(
+            &store,
+            &pricing_of(&store),
+            &kiwano_adapters::model_pricing::PricingTable::default(),
+            &named,
+        )
+        .unwrap();
+
+        let listed = store.list_sessions(None, None, None).unwrap();
+        assert_eq!(
+            listed[0].imported_from.as_deref(),
+            Some("buildbox"),
+            "the session row carries the scan's machine"
+        );
+        let conn = store.conn.lock().unwrap();
+        let usage_machine: Option<String> = conn
+            .query_row(
+                "SELECT imported_from FROM usage WHERE import_key IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            usage_machine.as_deref(),
+            Some("buildbox"),
+            "and so does the usage row"
+        );
+        drop(conn);
+
+        // A second scan from a machine that could not name itself: the columns
+        // are NULL rather than empty text.
+        let unnamed = HistoryBatch {
+            usage: vec![row("codex", "2026-01-02T00:00:00+00:00", "codex:s:2")],
+            sessions: vec![],
+            scanned_agents: Vec::new(),
+            source_machine: None,
+        };
+        apply_history(
+            &store,
+            &pricing_of(&store),
+            &kiwano_adapters::model_pricing::PricingTable::default(),
+            &unnamed,
+        )
+        .unwrap();
+        let conn = store.conn.lock().unwrap();
+        let unnamed_machine: Option<String> = conn
+            .query_row(
+                "SELECT imported_from FROM usage WHERE import_key = 'codex:s:2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unnamed_machine, None);
     }
 }

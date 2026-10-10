@@ -40,6 +40,13 @@ pub struct SessionVm {
     /// none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    /// Which machine's files this session was imported from, **imported side
+    /// only** — the same label as the row it came from (`imported_from`,
+    /// migration v32), `None` for a traffic-only session or one whose machine
+    /// could not name itself. A **label, not an identity**: two machines can
+    /// share it, so a reader is told rather than a key being joined on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
     /// When the session ran. The **imported** span wins when there is one: it is
     /// the session's whole life, where the traffic span only covers what the
     /// gateway saw — and starts at the takeover, not at the session.

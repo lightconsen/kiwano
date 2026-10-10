@@ -101,6 +101,21 @@ pub struct HistoryBatch {
     /// stamps each name it is given (`Store::mark_history_scanned`).
     #[serde(default)]
     pub scanned_agents: Vec<String>,
+    /// The **machine** this batch was read on, as a label the client found for
+    /// itself (`paths::machine_name`); `None` when it could not name itself.
+    ///
+    /// A fact about the **scan**, not about a row — the same kind of thing as
+    /// `scanned_agents`, and for the same reason it cannot be derived from the
+    /// rows: it names the machine that connected, which the daemon cannot know,
+    /// and a batch is always from one machine. It lands on every row the batch
+    /// writes (`usage.imported_from`, `sessions.imported_from`, migration v32),
+    /// so two laptops importing into one gateway stay tellable apart.
+    ///
+    /// A **label, not an identity**: two machines can share a name, a name can
+    /// change, and `None` is honest rather than a guess. The display has a word
+    /// for it ("unnamed") rather than a blank.
+    #[serde(default)]
+    pub source_machine: Option<String>,
 }
 
 #[cfg(test)]
@@ -147,6 +162,7 @@ mod tests {
             usage: vec![row],
             sessions: vec![session],
             scanned_agents: Vec::new(),
+            source_machine: Some("buildbox".into()),
         };
         let json = serde_json::to_string(&batch).unwrap();
         let back: HistoryBatch = serde_json::from_str(&json).unwrap();

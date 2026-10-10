@@ -21,12 +21,16 @@ impl Store {
 
     pub fn record_usage(&self, u: &UsageRecord) -> Result<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // `imported_from` is bound from the record, and a **gateway row always
+        // carries NULL** there (v32): this insert is the metering hot path, and a
+        // request it records came through the gateway rather than out of a file,
+        // so it has no importing machine to name.
         conn.execute(
             "INSERT INTO usage (ts, agent, provider_id, client_key_id, model, input_tokens,
                                 output_tokens, cache_read_tokens, cache_creation_tokens,
                                 latency_ms, status, cost, cost_currency, cost_off_peak,
-                                project, session_id, import_key)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                                project, session_id, import_key, imported_from)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 u.ts,
                 u.agent,
@@ -45,6 +49,7 @@ impl Store {
                 u.project,
                 u.session_id,
                 u.import_key,
+                u.imported_from,
             ],
         )?;
         Ok(())
@@ -337,13 +342,14 @@ impl Store {
                 "INSERT INTO usage (ts, agent, provider_id, client_key_id, model, input_tokens,
                                     output_tokens, cache_read_tokens, cache_creation_tokens,
                                     latency_ms, status, cost, cost_currency, cost_off_peak,
-                                    project, session_id, import_key)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                                    project, session_id, import_key, imported_from)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                  ON CONFLICT(import_key) DO UPDATE SET
                      ts = ?1, agent = ?2, provider_id = ?3, client_key_id = ?4, model = ?5,
                      input_tokens = ?6, output_tokens = ?7, cache_read_tokens = ?8,
                      cache_creation_tokens = ?9, latency_ms = ?10, status = ?11, cost = ?12,
-                     cost_currency = ?13, cost_off_peak = ?14, project = ?15, session_id = ?16",
+                     cost_currency = ?13, cost_off_peak = ?14, project = ?15, session_id = ?16,
+                     imported_from = ?18",
                 params![
                     u.ts,
                     u.agent,
@@ -362,6 +368,7 @@ impl Store {
                     u.project,
                     u.session_id,
                     u.import_key,
+                    u.imported_from,
                 ],
             )?;
             written += 1;
@@ -653,6 +660,7 @@ fn last_used_is_the_latest_request_per_key_and_absent_for_an_idle_one() {
         project: None,
         session_id: None,
         import_key: None,
+        imported_from: None,
     };
     store
         .record_usage(&row("2026-01-01T00:00:00+00:00", Some(&id)))
@@ -705,6 +713,7 @@ mod tests {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         };
 
         store
@@ -735,6 +744,7 @@ mod tests {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
 
@@ -786,5 +796,79 @@ mod tests {
         let empty = store.usage_totals(Some("gemini"), None, None).unwrap();
         assert_eq!(empty.requests, 0);
         assert_eq!(empty.input_tokens, 0);
+    }
+
+    /// v32: the machine an import came from round-trips through the upsert — and
+    /// is **refreshed** there, because it is a fact about the scan, and a re-import
+    /// from a machine that has since been renamed should say so. A row the gateway
+    /// itself wrote carries NULL: it came through the gateway, not out of a file.
+    #[test]
+    fn imported_from_round_trips_and_the_gateways_own_rows_are_null() {
+        let (_dir, store) = temp_store();
+        let imported = |key: &str, machine: Option<&str>, ts: &str| UsageRecord {
+            ts: ts.into(),
+            agent: "claude".into(),
+            provider_id: None,
+            client_key_id: None,
+            model: None,
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: None,
+            status: "ok".into(),
+            cost: None,
+            cost_currency: None,
+            cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: Some(key.into()),
+            imported_from: machine.map(str::to_string),
+        };
+        let machine_of = |key: &str| -> Option<String> {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT imported_from FROM usage WHERE import_key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        store
+            .upsert_imported_usage(&[imported(
+                "k1",
+                Some("buildbox"),
+                "2026-01-01T00:00:00+00:00",
+            )])
+            .unwrap();
+        assert_eq!(machine_of("k1").as_deref(), Some("buildbox"));
+
+        // The same row re-imported from a machine that has since been renamed:
+        // the upsert refreshes the machine, like it refreshes the price.
+        store
+            .upsert_imported_usage(&[imported("k1", Some("renamed"), "2026-01-01T00:00:00+00:00")])
+            .unwrap();
+        assert_eq!(machine_of("k1").as_deref(), Some("renamed"));
+
+        // A row imported by a machine that could not name itself is NULL, not "".
+        store
+            .upsert_imported_usage(&[imported("k2", None, "2026-01-02T00:00:00+00:00")])
+            .unwrap();
+        assert_eq!(machine_of("k2"), None);
+
+        // And the gateway's own row (no import key) carries NULL too.
+        let mut gateway = imported("ignored", None, "2026-01-03T00:00:00+00:00");
+        gateway.import_key = None;
+        store.record_usage(&gateway).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let own: Option<String> = conn
+            .query_row(
+                "SELECT imported_from FROM usage WHERE import_key IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(own, None, "a metered request names no importing machine");
     }
 }

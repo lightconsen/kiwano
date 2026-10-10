@@ -357,6 +357,7 @@ pub(crate) mod test_support {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
             // The headline count reads request_logs, not usage: seed both, as
@@ -418,6 +419,7 @@ pub(crate) mod test_support {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         }
     }
 

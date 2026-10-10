@@ -231,6 +231,13 @@ Two things to know before reading the numbers:
   at the general rate for its model. On a machine that has never synced the Hub
   nothing is priced at all (the rows land with tokens and no cost); a later
   `history import` fills those in, because the import is idempotent.
+- **Rows remember which machine they came from.** Two laptops can import into one
+  gateway, and when they do, a merged ledger needs a way to tell whose rows are
+  whose. The import records a machine **label** — whatever this machine could find
+  about itself (its hostname, best effort) — and the report names it. It is a
+  label, not an identity: two machines can share a name, a name can change, and a
+  machine that cannot name itself records nothing (shown as `unnamed`). Traffic
+  the gateway routed has no importing machine at all.
 
 What came in is listed by `kiwano sessions` (below), beside the traffic the
 gateway itself routed.
@@ -261,7 +268,7 @@ token column is the gateway's count, not the file's plus the gateway's.
 The columns are:
 
 ```
-PROJECT  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+PROJECT  MACHINE  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
 ```
 
 `REQ` is 0 for an `imported` row and `TURNS` is 0 for a `gateway` row: neither
@@ -270,6 +277,12 @@ never converted; `-` means the files knew of no traffic (not "free"), and a
 session whose rows could not all be priced says so (`2.50 USD (+3 unpriced)`).
 `SPAN` is the session's whole life from the file when there is one, and the span
 of the requests the gateway saw otherwise.
+
+`MACHINE` is the machine an imported row came from (see **History** above): the
+label the importing client recorded for itself, `unnamed` when it could not name
+itself, and `unnamed` again for a `gateway`-only row, which came through the
+gateway rather than out of a file. It is a label for a reader, not an identity
+two machines are told apart by with certainty.
 
 A project is a **label** derived from the working directory the transcript
 recorded — the repository's directory name, not a path, because the gateway is

@@ -73,6 +73,7 @@ pub fn chunks(batch: &HistoryBatch, max_rows: usize) -> Vec<HistoryBatch> {
             usage: Vec::new(),
             sessions: batch.sessions.clone(),
             scanned_agents: batch.scanned_agents.clone(),
+            source_machine: batch.source_machine.clone(),
         }];
     }
     batch
@@ -90,6 +91,11 @@ pub fn chunks(batch: &HistoryBatch, max_rows: usize) -> Vec<HistoryBatch> {
             // first one and re-stamping is idempotent, and a chunk without it
             // would leave the scan looking partial.
             scanned_agents: batch.scanned_agents.clone(),
+            // The machine travels with every chunk for the same reason, and it is
+            // the one fact that is the *same* on all of them: one scan is one
+            // machine, and a chunk that dropped it would import its rows as if
+            // they came from nowhere.
+            source_machine: batch.source_machine.clone(),
         })
         .collect()
 }
@@ -110,6 +116,11 @@ impl HistoryRead {
                 // Named at the start, not derived at the end: the point is that an
                 // agent which yielded nothing is still recorded as read.
                 scanned_agents: agents.to_vec(),
+                // Left `None` on purpose: `read_history` reads files, and which
+                // machine it did that on is the *sender's* fact to attach before
+                // chunking. A test can therefore build a batch without this
+                // machine's name in it.
+                source_machine: None,
             },
             detail: Vec::new(),
             skips: Vec::new(),

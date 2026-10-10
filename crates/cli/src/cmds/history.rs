@@ -46,10 +46,16 @@ fn import(agents: &[String], dry_run: bool, ctx: &mut Ctx) -> Result<(), CliErro
     };
 
     let HistoryRead {
-        batch,
+        mut batch,
         detail,
         skips,
     } = history::read_history(&ctx.home, ctx.config_vars(), &wanted);
+    // Attached here, after the read and before the split, because it is the
+    // *sender's* fact: `read_history` reads files and cannot know which machine it
+    // ran on, and `chunks` copies it into every piece, so naming it once here is
+    // what stamps the whole import. Best effort — `None` when this machine cannot
+    // name itself, which the report shows as "unnamed" rather than a blank.
+    batch.source_machine = kiwano_core::paths::machine_name();
     // Detail and skips are the client's own account of *this machine* — which
     // roots were looked at, which files answered, which could not be opened —
     // and they are diagnostics, so they go to stderr. Under `--json` stdout has
@@ -87,7 +93,7 @@ fn import(agents: &[String], dry_run: bool, ctx: &mut Ctx) -> Result<(), CliErro
         let report = ctx.api.import_history(&piece)?;
         total.add(report);
     }
-    let text = render_history_import(&total, batch.usage.len());
+    let text = render_history_import(&total, batch.usage.len(), batch.source_machine.as_deref());
     ctx.out.emit(&total, || text);
     Ok(())
 }

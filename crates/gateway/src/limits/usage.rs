@@ -286,6 +286,7 @@ mod tests {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
     }
@@ -383,6 +384,7 @@ mod all_window_tests {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
     }

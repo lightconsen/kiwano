@@ -1680,6 +1680,7 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         })
         .unwrap();
 
@@ -2939,6 +2940,7 @@ async fn a_client_key_over_its_own_ceiling_is_429_with_retry_after() {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         })
         .unwrap();
 

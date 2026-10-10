@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 31;
+pub const SCHEMA_VERSION: i32 = 32;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -902,6 +902,32 @@ CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project, started_at);
 "#;
 
+/// v32: a row remembers which machine's files it was imported from.
+///
+/// The history import reads an agent's session files **on the client**, and the
+/// gateway may be on another machine (`docs/remote-gateway.md`). Two laptops
+/// importing into one gateway therefore merge into one ledger, and without this
+/// column there is no way to tell them apart: the sessions list shows projects
+/// and spans, and two machines' histories interleave indistinguishably.
+///
+/// A **label, not an identity**. `UsageRecord::imported_from` says why in full;
+/// the short of it is that the name is whatever the client
+/// could find about itself (a hostname, best effort), two machines can share one,
+/// and a name can change. It is the same kind of fact the client-keys feature
+/// asks ("who is spending") but a weaker one: an imported row has no key and
+/// predates this gateway, so a name is all there is. NULL is honest — it is what
+/// the gateway's own rows carry, and what an import from a machine that could not
+/// name itself carries too; the display has a word for it ("unnamed") rather than
+/// a blank.
+///
+/// Plain `ADD COLUMN`s on both tables: neither needs a constraint changed, so
+/// there is nothing to rebuild (v31 rebuilt `usage` because it had to drop a
+/// NOT NULL — this does not).
+const MIGRATION_V32: &str = r#"
+ALTER TABLE usage ADD COLUMN imported_from TEXT;
+ALTER TABLE sessions ADD COLUMN imported_from TEXT;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1054,6 +1080,9 @@ impl Store {
         }
         if version < 31 {
             conn.execute_batch(MIGRATION_V31)?;
+        }
+        if version < 32 {
+            conn.execute_batch(MIGRATION_V32)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

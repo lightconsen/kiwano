@@ -44,6 +44,16 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   "Not via the gateway" bucket, and **not** in the request count: that tile is
   what this gateway routed.
 
+- **Imported rows remember which machine they came from: `MACHINE`.** Two laptops
+  can import into one gateway, and a merged ledger needs a way to tell whose rows
+  are whose. The import now records a machine **label** — whatever the client
+  could find about itself (its hostname, best effort) — on every row it writes
+  (`usage.imported_from`, `sessions.imported_from`; migration v32), names it in
+  the import report, and `kiwano sessions` shows it in a `MACHINE` column.
+  A **label, not an identity**: two machines can share a name, a name can change,
+  and a machine that cannot name itself records nothing — shown as `unnamed`,
+  the same word a traffic-only row gets because it never came out of a file.
+
 ### Added
 
 - **A client key is a credential with limits: `kiwano clients`.** The data plane

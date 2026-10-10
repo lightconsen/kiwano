@@ -44,6 +44,7 @@ mod tests {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         })
         .unwrap();
         let totals = s.usage_totals(None, Some("payg-1"), Some(&since7)).unwrap();

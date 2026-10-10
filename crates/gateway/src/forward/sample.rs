@@ -95,6 +95,9 @@ impl UsageSample {
             project: None,
             session_id: None,
             import_key: None,
+            // And no importing machine (v32): this row came through the gateway,
+            // not out of a file, so there is no machine to name.
+            imported_from: None,
         }
     }
 }

@@ -177,7 +177,12 @@ fn scan_once(
     // The agents the caller asked for, not every readable one: a launch that is
     // only backfilling a newly added reader should not re-read the others.
     tracing::info!(agents = ?agents, "scanning agent history");
-    let read = history::read_history(&home, &vars, agents);
+    let mut read = history::read_history(&home, &vars, agents);
+    // The sender's fact, attached after the read and before the split: which
+    // machine these transcripts came from (`imported_from`, migration v32), so a
+    // gateway another laptop also imports into can tell the two apart. Best
+    // effort — `None` when this machine cannot name itself.
+    read.batch.source_machine = kiwano_core::paths::machine_name();
     if !read.skips.is_empty() {
         // A file that could not be opened: worth a line, never a failure — the
         // rest of the scan is every bit as valid without it.

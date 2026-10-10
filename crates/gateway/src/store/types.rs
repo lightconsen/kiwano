@@ -475,6 +475,16 @@ pub struct UsageRecord {
     /// row the gateway wrote. Unique when set, which is what makes a re-import
     /// refresh rather than double-count.
     pub import_key: Option<String>,
+    /// Which machine's files this row was imported from (migration v32), as a
+    /// **label and never an identity**: whatever the client could find about
+    /// itself (a hostname, best effort), `None` when it could not name itself at
+    /// all.
+    ///
+    /// The gateway's own rows are always `None`: a request it metered came
+    /// through it, not out of a file, so it has no importing machine. Two
+    /// machines can share a name and a name can change, so this is a hint for a
+    /// human reading the list, not a key anything joins on.
+    pub imported_from: Option<String>,
 }
 
 /// One session an agent's own files reported (migration v31).
@@ -499,6 +509,10 @@ pub struct ImportedSession {
     pub cache_creation_tokens: i64,
     pub tool_calls: Option<String>,
     pub skills: Option<String>,
+    /// Which machine's files this session was imported from (migration v32).
+    /// See [`UsageRecord::imported_from`] — the same label, the same caveats, and
+    /// `None` for the same reasons.
+    pub imported_from: Option<String>,
 }
 
 /// One client key's spend in one currency (`Store::client_key_spend`).

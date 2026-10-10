@@ -273,6 +273,7 @@ mod tests {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         })
         .unwrap();
         // Seed the request-log rows the headline counts: the forwarded request
@@ -462,6 +463,7 @@ mod tests {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
         }

@@ -147,6 +147,7 @@ pub(crate) mod test_support {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
     }
@@ -228,6 +229,7 @@ pub(crate) mod test_support {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
     }

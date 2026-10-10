@@ -796,6 +796,7 @@ fn status_reports_the_daemons_totals_when_it_answers() {
                 project: None,
                 session_id: None,
                 import_key: None,
+                imported_from: None,
             })
             .unwrap();
     }
@@ -1484,8 +1485,16 @@ fn seed_session_log(
 }
 
 /// An imported session as `kiwano history import` would have written it: the
-/// project, the turns and the tools, which only the agent's own file knows.
-fn seed_imported_session(db: &Path, agent: &str, session: &str, project: &str) {
+/// project, the turns and the tools, which only the agent's own file knows, and
+/// the **machine** it was imported from (v32) — `None` for a client that could
+/// not name itself.
+fn seed_imported_session(
+    db: &Path,
+    agent: &str,
+    session: &str,
+    project: &str,
+    machine: Option<&str>,
+) {
     let store = Store::open(db).unwrap();
     store
         .upsert_imported_sessions(&[kiwanod::store::ImportedSession {
@@ -1502,6 +1511,7 @@ fn seed_imported_session(db: &Path, agent: &str, session: &str, project: &str) {
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":2}]"#.into()),
             skills: None,
+            imported_from: machine.map(str::to_string),
         }])
         .unwrap();
 }
@@ -1581,8 +1591,8 @@ fn sessions_merge_the_gateways_traffic_with_the_agents_own_files() {
     seed_session_log(&db, "claude", "s-1", None, None);
     // `s-2` only the gateway saw; `s-3` only the file has.
     seed_session_log(&db, "codex", "s-2", Some(1.0), Some("USD"));
-    seed_imported_session(&db, "claude", "s-1", "acme-api");
-    seed_imported_session(&db, "claude", "s-3", "other-repo");
+    seed_imported_session(&db, "claude", "s-1", "acme-api", None);
+    seed_imported_session(&db, "claude", "s-3", "other-repo", None);
 
     let (code, out, err) = run_served(&db, &daemon, &["--json", "sessions"]);
     assert_eq!(code, 0, "{err}");
@@ -2700,6 +2710,99 @@ fn history_import_on_an_empty_home_says_so() {
     assert!(err.contains("no reader for"), "{err}");
 }
 
+/// v32: a session's machine is the label the importing client sent, shown as-is
+/// when there is one and as `unnamed` when the client could not name itself —
+/// never a blank cell, which a reader could not tell from a column that was not
+/// filled. A traffic-only session has no machine at all and says so the same way.
+#[test]
+fn a_sessions_machine_is_the_label_the_import_sent() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    seed_imported_session(&db, "claude", "s-named", "acme-api", Some("buildbox"));
+    seed_imported_session(&db, "claude", "s-unnamed", "acme-api", None);
+    // Only the gateway saw this one: it came through the gateway, not out of a
+    // file, so there is no importing machine to name.
+    seed_session_log(&db, "claude", "s-traffic", Some(1.0), Some("USD"));
+
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "sessions"]);
+    assert_eq!(code, 0, "{err}");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let by_id = |id: &str| {
+        rows.iter()
+            .find(|r| r["session_id"] == id)
+            .unwrap_or_else(|| panic!("no {id} in {rows:?}"))
+            .clone()
+    };
+    assert_eq!(by_id("s-named")["machine"], "buildbox");
+    // Absent from the JSON rather than an empty string: the label is optional
+    // and serializes away when there is none.
+    assert_eq!(by_id("s-unnamed")["machine"], serde_json::Value::Null);
+    assert_eq!(by_id("s-traffic")["machine"], serde_json::Value::Null);
+
+    // The table names the machine, and reads `unnamed` where there is none.
+    let (code, text, err) = run_served(&db, &daemon, &["sessions"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(text.contains("MACHINE"), "the column is there: {text}");
+    let named = text.lines().find(|l| l.contains("s-named")).unwrap();
+    assert!(named.contains("buildbox"), "{named}");
+    let unnamed = text.lines().find(|l| l.contains("s-unnamed")).unwrap();
+    assert!(unnamed.contains("unnamed"), "{unnamed}");
+    let traffic = text.lines().find(|l| l.contains("s-traffic")).unwrap();
+    assert!(traffic.contains("unnamed"), "{traffic}");
+}
+
+/// The import names the machine its rows are recorded as coming from (v32), so
+/// two laptops importing into one gateway can be told apart. `HOSTNAME` is
+/// pinned for the run — the first place `paths::machine_name` looks — and the
+/// real value put back immediately, because the tests here share the process
+/// environment.
+#[test]
+fn history_import_names_the_machine_it_imported_from() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let home = tempfile::tempdir().unwrap();
+    // One Claude Code transcript, written the way the agent writes one.
+    let project = home.path().join("work").join("acme-api");
+    std::fs::create_dir_all(&project).unwrap();
+    let dir = home
+        .path()
+        .join(".claude")
+        .join("projects")
+        .join("-home-me-work-acme-api");
+    std::fs::create_dir_all(&dir).unwrap();
+    let line = serde_json::json!({
+        "type": "assistant",
+        "uuid": "r1",
+        "timestamp": "2026-01-02T10:00:00Z",
+        "sessionId": "11111111-2222-3333-4444-555555555555",
+        "cwd": project.to_string_lossy(),
+        "message": {
+            "model": "claude-sonnet-4-5",
+            "usage": { "input_tokens": 1_000, "output_tokens": 200 },
+            "content": [{ "type": "tool_use", "name": "Bash" }],
+        },
+    });
+    std::fs::write(dir.join("session.jsonl"), format!("{line}\n")).unwrap();
+
+    let home_arg = home.path().display().to_string();
+    let prior = std::env::var_os("HOSTNAME");
+    std::env::set_var("HOSTNAME", "buildbox");
+    let (code, out, err) = run_served(&db, &daemon, &["--home", &home_arg, "history", "import"]);
+    match prior {
+        Some(value) => std::env::set_var("HOSTNAME", value),
+        None => std::env::remove_var("HOSTNAME"),
+    }
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("from machine buildbox"), "{out}");
+
+    // And the label reached the rows: the merged session shows the machine.
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "sessions"]);
+    assert_eq!(code, 0, "{err}");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["machine"], "buildbox");
+}
+
 /// Declaring a price for one model leaves the provider's other declarations
 /// alone — the write is a snapshot, so this command has to fold rather than
 /// replace.
@@ -2941,6 +3044,7 @@ fn clients_list_reports_what_each_key_spent() {
             project: None,
             session_id: None,
             import_key: None,
+            imported_from: None,
         }
     };
     // The laptop spent in two currencies and had one row nobody could price; the

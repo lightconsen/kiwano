@@ -148,6 +148,10 @@ fn merge(imported: Option<&SessionRow>, traffic: Option<&TrafficSession>) -> Ses
         source: source.to_string(),
         agent,
         project: imported.and_then(|i| i.project.clone()),
+        // Which machine the files came from: the imported row's own label, and
+        // nothing else — the traffic side has no files to have come from, so a
+        // gateway-only session reads `None` (the display's "unnamed").
+        machine: imported.and_then(|i| i.imported_from.clone()),
         started_at,
         ended_at,
         requests: traffic.map(|t| t.requests).unwrap_or(0),
@@ -198,6 +202,7 @@ mod tests {
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":4},{"name":"Read","count":9}]"#.into()),
             skills: Some(r#"[{"name":"tweet","count":1}]"#.into()),
+            imported_from: None,
         }
     }
 
@@ -317,6 +322,27 @@ mod tests {
             row.started_at, "2026-09-03T10:00:00+00:00",
             "the traffic span"
         );
+    }
+
+    /// v32: the machine a session was imported from reaches the view, and it
+    /// comes from the imported side alone — a traffic-only session has no origin
+    /// machine to show, so it reads `None` rather than borrowing another row's.
+    #[test]
+    fn the_machine_comes_from_the_imported_row_and_only_from_it() {
+        let (_dir, store) = store_with_traffic();
+        let mut frombox = imported("claude", "s-both", Some("kiwano"));
+        frombox.imported_from = Some("buildbox".into());
+        store.upsert_imported_sessions(&[frombox]).unwrap();
+
+        let rows = list_sessions(&store, None, None, None).unwrap();
+        let both = rows.iter().find(|r| r.session_id == "s-both").unwrap();
+        assert_eq!(
+            both.machine.as_deref(),
+            Some("buildbox"),
+            "the imported row's label survives the merge"
+        );
+        let gateway = rows.iter().find(|r| r.session_id == "s-gateway").unwrap();
+        assert_eq!(gateway.machine, None, "traffic alone never names a machine");
     }
 
     /// Under a project filter a traffic-only session is not shown: it has no

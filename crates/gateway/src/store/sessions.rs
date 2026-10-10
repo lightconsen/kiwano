@@ -37,6 +37,10 @@ pub struct SessionRow {
     /// JSON arrays of `{"name","count"}`, as stored.
     pub tool_calls: Option<String>,
     pub skills: Option<String>,
+    /// Which machine's files this session was imported from (migration v32) — a
+    /// best-effort **label**, `None` for a machine that could not name itself.
+    /// Only an imported row has one; the traffic half never does.
+    pub imported_from: Option<String>,
 }
 
 /// One session as the **traffic** side sees it: what the gateway routed under
@@ -86,7 +90,8 @@ pub struct SessionCurrencyCost {
 
 /// The columns every read shares, in the order `session_from_row` expects.
 const SESSION_COLUMNS: &str = "agent, project, session_id, started_at, ended_at, turns,
-     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, tool_calls, skills";
+     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, tool_calls, skills,
+     imported_from";
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
@@ -102,6 +107,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         cache_creation_tokens: row.get(9)?,
         tool_calls: row.get(10)?,
         skills: row.get(11)?,
+        imported_from: row.get(12)?,
     })
 }
 
@@ -119,12 +125,13 @@ impl Store {
             tx.execute(
                 "INSERT INTO sessions (import_key, agent, project, session_id, started_at, ended_at,
                                        turns, input_tokens, output_tokens, cache_read_tokens,
-                                       cache_creation_tokens, tool_calls, skills)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                                       cache_creation_tokens, tool_calls, skills, imported_from)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT(import_key) DO UPDATE SET
                      agent = ?2, project = ?3, session_id = ?4, started_at = ?5, ended_at = ?6,
                      turns = ?7, input_tokens = ?8, output_tokens = ?9, cache_read_tokens = ?10,
-                     cache_creation_tokens = ?11, tool_calls = ?12, skills = ?13",
+                     cache_creation_tokens = ?11, tool_calls = ?12, skills = ?13,
+                     imported_from = ?14",
                 params![
                     r.import_key,
                     r.agent,
@@ -139,6 +146,7 @@ impl Store {
                     r.cache_creation_tokens,
                     r.tool_calls,
                     r.skills,
+                    r.imported_from,
                 ],
             )?;
             written += 1;
@@ -364,6 +372,7 @@ mod tests {
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":2}]"#.into()),
             skills: None,
+            imported_from: None,
         }
     }
 
@@ -400,6 +409,39 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    /// v32: the machine a session was imported from round-trips through the
+    /// session upsert, and a **re-import refreshes it** — the label is a fact
+    /// about the scan, so it must be refreshed on conflict like the counts are.
+    #[test]
+    fn a_sessions_machine_round_trips_and_is_refreshed_on_re_import() {
+        let (_dir, store) = crate::store::test_support::temp_store();
+        let mut row = session("claude-code:a", "kiwano", "2026-01-01T00:00:00+00:00");
+        row.imported_from = Some("buildbox".into());
+        store.upsert_imported_sessions(&[row]).unwrap();
+        let listed = store.list_sessions(None, None, None).unwrap();
+        assert_eq!(listed[0].imported_from.as_deref(), Some("buildbox"));
+
+        // The same session, re-imported from a machine that has since been
+        // renamed: the upsert replaces the label rather than leaving the first.
+        let mut renamed = session("claude-code:a", "kiwano", "2026-01-01T00:00:00+00:00");
+        renamed.imported_from = Some("renamed".into());
+        store.upsert_imported_sessions(&[renamed]).unwrap();
+        let listed = store.list_sessions(None, None, None).unwrap();
+        assert_eq!(listed.len(), 1, "still one session");
+        assert_eq!(listed[0].imported_from.as_deref(), Some("renamed"));
+
+        // A session from a machine that could not name itself reads NULL.
+        let mut unnamed = session("claude-code:b", "acme", "2026-02-01T00:00:00+00:00");
+        unnamed.imported_from = None;
+        store.upsert_imported_sessions(&[unnamed]).unwrap();
+        let listed = store.list_sessions(None, None, None).unwrap();
+        let b = listed
+            .iter()
+            .find(|s| s.session_id == "s-claude-code:b")
+            .unwrap();
+        assert_eq!(b.imported_from, None);
     }
 
     /// Scan stamps are **per agent**, which is what lets a reader added later be

@@ -22,6 +22,7 @@ use kiwano_api::providers::{
     NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, SyncReportVm,
 };
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
+use kiwano_api::sessions::SessionVm;
 use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::import_history::HistoryImportReport;
@@ -249,25 +250,29 @@ impl DaemonApi {
         )
     }
 
-    /// The imported sessions, newest first.
-    pub fn list_sessions(
+    /// Every session this machine knows, from both the gateway's traffic and the
+    /// agent files the import wrote, merged and newest first.
+    pub fn sessions(
         &self,
         agent: Option<&str>,
         project: Option<&str>,
-        since: Option<&str>,
-    ) -> Result<Vec<kiwanod::store::sessions::SessionRow>, String> {
+        days: Option<i64>,
+    ) -> Result<Vec<SessionVm>, String> {
         // Absent filters are omitted rather than sent empty: the far end reads an
         // empty value as a filter that matches nothing.
         let mut query: Vec<String> = Vec::new();
-        for (key, value) in [("agent", agent), ("project", project), ("since", since)] {
+        for (key, value) in [("agent", agent), ("project", project)] {
             if let Some(value) = value {
                 query.push(format!("{key}={}", encode_query(value)));
             }
         }
+        if let Some(days) = days {
+            query.push(format!("days={days}"));
+        }
         let path = if query.is_empty() {
-            "/api/history/sessions".to_string()
+            "/api/sessions".to_string()
         } else {
-            format!("/api/history/sessions?{}", query.join("&"))
+            format!("/api/sessions?{}", query.join("&"))
         };
         sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), &path)
     }
@@ -498,6 +503,7 @@ impl DaemonApi {
             ("status", filter.status),
             ("from", filter.from),
             ("to", filter.to),
+            ("session_id", filter.session_id),
         ] {
             if let Some(value) = value {
                 query.push_str(&format!("&{key}={}", encode_query(value)));
@@ -733,6 +739,7 @@ impl DaemonApi {
             ("status", filter.status),
             ("from", filter.from),
             ("to", filter.to),
+            ("session_id", filter.session_id),
         ] {
             if let Some(value) = value {
                 query.push_str(&format!("&{key}={}", encode_query(value)));
@@ -761,6 +768,7 @@ impl DaemonApi {
             ("status", filter.status),
             ("from", filter.from),
             ("to", filter.to),
+            ("session_id", filter.session_id),
         ] {
             if let Some(value) = value {
                 if !query.is_empty() {
@@ -1260,6 +1268,7 @@ mod tests {
                     status: Some("error"),
                     from: Some("2026-10-01T00:00:00+08:00"),
                     to: None,
+                    session_id: Some("s-1"),
                 },
             )
             .unwrap();
@@ -1278,6 +1287,10 @@ mod tests {
         assert!(
             !line.contains("provider_id") && !line.contains("to="),
             "an absent filter is omitted, not sent empty: {line}"
+        );
+        assert!(
+            line.contains("session_id=s-1"),
+            "the session filter travels with the rest: {line}"
         );
     }
 

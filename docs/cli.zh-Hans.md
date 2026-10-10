@@ -170,7 +170,6 @@ kiwano keys remove <KEY_ID>
 
 ```
 kiwano history import [--agent claude|codex]… [--dry-run]
-kiwano history sessions [--project P] [--agent A] [--days N]
 ```
 
 Agent 自己的历史：从它们的会话文件里读出来并导入，于是一台今天早上才装 Kiwano 的机器，
@@ -188,8 +187,42 @@ dashboard 上已经有昨天的花费。`import` 读 Claude Code 与 Codex 的�
   所以每行按该模型的通用价估算。从未同步过 Hub 的机器干脆什么都定不了价（行会带着 token
   落地、没有花费）；之后再跑一次 `history import` 会补上，因为导入是幂等的。
 
-`sessions` 列出导入了什么：项目、起止、轮次、token 与用过的工具。这里的项目是从记录里的
-工作目录推导出的**标签** —— 仓库的目录名，不是路径，因为网关从不被告知这台机器的布局。
+导入进来的是什么，由 `kiwano sessions`（见下）列出，和网关自己路由的流量并排在一起。
+
+### 会话
+
+```
+kiwano sessions [--project P] [--agent A] [--days N]
+```
+
+每个会话一行，来自**两个来源**，`SOURCE` 列说明是哪一个：
+
+- `gateway` —— 这个会话的请求是网关路由的。它知道请求数、token 与花费，但对项目、
+  轮次和工具一无所知。
+- `imported` —— 只有 Agent 自己的文件里有它（由 `kiwano history import` 读入）。它知道
+  项目、轮次与工具，却没有钱：文件里只有 token，没有花费。
+- `both` —— 两边都有这个 id，这是接管之后跑过的会话的常见状态。
+
+**两个来源从不相加。** 它们描述的是相互重叠但不相等的事 —— 一次重试在文件里是一轮、
+在网关里是两个请求 —— 所以两边都有某个字段时，由其中一边胜出、另一边的值被舍弃而不是
+相加：请求数、token 与花费以**流量**为准，项目、起止、轮次与工具以**文件**为准。`both`
+行的 token 列是网关数出来的那个数，不是文件数加网关数。
+
+各列如下：
+
+```
+PROJECT  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+```
+
+`imported` 行的 `REQ` 是 0，`gateway` 行的 `TURNS` 是 0：哪一边都不会替另一边编一个数。
+`COST` 是流量花的钱，按币种分别给出、从不换算；`-` 表示文件里没有流量（不是"免费"），
+如果某个会话的请求没能全部定价，会写明（`2.50 USD (+3 unpriced)`）。有文件时 `SPAN`
+是会话的完整生命期，否则是网关看到的请求跨度。
+
+项目是从记录里的工作目录推导出的**标签** —— 仓库的目录名，不是路径，因为网关从不被告知
+这台机器的布局。也正因为只有网关看到的行没有项目，`--project` 只会列出文件放得下的会话。
+
+末尾一行会说明文件上次扫描的时间（或从未扫过：请跑 `kiwano history import`）。
 
 ### 客户端密钥
 
@@ -276,14 +309,17 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show <ID>
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
 kiwano logs dir
 ```
 
-`--from` 为包含、`--to` 为排除,与存储的半开区间一致。
+`--from` 为包含、`--to` 为排除,与存储的半开区间一致。`--session` 收下某个请求携带
+的会话 id —— 也就是 `kiwano sessions` 列出它的那个字符串 —— 于是那里的某一行可以
+在这里打开。
 
 `insights` 是一页式的报告,说明 token *如何*被花掉:每个 Agent 的记分卡(缓存
 命中率、会话上下文增长、推理占比、重试)、标上 `cache` / `bloat` / `retry` /

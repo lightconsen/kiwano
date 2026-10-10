@@ -169,7 +169,6 @@ kiwano keys remove <KEY_ID>
 
 ```
 kiwano history import [--agent claude|codex]… [--dry-run]
-kiwano history sessions [--project P] [--agent A] [--days N]
 ```
 
 Agent 自己的歷史：從它們的會話檔讀出來並匯入，於是一台今天早上才裝 Kiwano 的機器，
@@ -187,8 +186,43 @@ dashboard 上已經有昨天的花費。`import` 讀 Claude Code 與 Codex 的�
   所以每列按該模型的通用價估算。從未同步過 Hub 的機器乾脆什麼都定不了價（列會帶著 token
   落地、沒有花費）；之後再跑一次 `history import` 會補上，因為匯入是冪等的。
 
-`sessions` 列出匯入了什麼：專案、起止、輪次、token 與用過的工具。這裡的專案是從紀錄裡的
-工作目錄推導出的**標籤** —— 倉庫的目錄名，不是路徑，因為閘道從不被告知這台機器的配置。
+匯入進來的是什麼，由 `kiwano sessions`（見下）列出，和閘道自己路由的流量並排在一起。
+
+### 工作階段
+
+```
+kiwano sessions [--project P] [--agent A] [--days N]
+```
+
+每個工作階段一列，來自**兩個來源**，`SOURCE` 欄說明是哪一個：
+
+- `gateway` —— 這個工作階段的請求是閘道路由的。它知道請求數、token 與花費，但對專案、
+  輪次和工具有一無所知。
+- `imported` —— 只有 Agent 自己的檔案裡有它（由 `kiwano history import` 讀入）。它知道
+  專案、輪次與工具，卻沒有錢：檔案裡只有 token，沒有花費。
+- `both` —— 兩邊都有這個 id，這是接管之後跑過的工作階段的常見狀態。
+
+**兩個來源從不相加。** 它們描述的是相互重疊但不相等的事 —— 一次重試在檔案裡是一輪、
+在閘道裡是兩個請求 —— 所以兩邊都有某個欄位時，由其中一邊勝出、另一邊的值被捨棄而不是
+相加：請求數、token 與花費以**流量**為準，專案、起止、輪次與工具以**檔案**為準。`both`
+列的 token 欄是閘道數出來的那個數，不是檔案數加閘道數。
+
+各欄如下：
+
+```
+PROJECT  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+```
+
+`imported` 列的 `REQ` 是 0，`gateway` 列的 `TURNS` 是 0：哪一邊都不會替另一邊編一個數。
+`COST` 是流量花的錢，依幣別分別給出、從不換算；`-` 表示檔案裡沒有流量（不是「免費」），
+如果某個工作階段的請求沒能全部定價，會寫明（`2.50 USD (+3 unpriced)`）。有檔案時 `SPAN`
+是工作階段的完整生命期，否則就是閘道看到的請求跨度。
+
+專案是從紀錄裡的工作目錄推導出的**標籤** —— 倉庫的目錄名，不是路徑，因為閘道從不被告知
+這台機器的配置。也正因為只有閘道看到的列沒有專案，`--project` 只會列出檔案放得下的
+工作階段。
+
+結尾一列會說明檔案上次掃描的時間（或從未掃過：請跑 `kiwano history import`）。
 
 ### 用戶端金鑰
 
@@ -274,14 +308,17 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show <ID>
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
 kiwano logs dir
 ```
 
-`--from` 為包含、`--to` 為排除,與儲存區的半開區間一致。
+`--from` 為包含、`--to` 為排除,與儲存區的半開區間一致。`--session` 收下某個請求攜帶
+的工作階段 id —— 也就是 `kiwano sessions` 列出它的那個字串 —— 於是那裡的一列可以在
+這裡打開。
 
 `insights` 是一頁式的報告,說明 token *如何*被花掉:每個 Agent 的計分卡
 (快取命中率、工作階段上下文成長、推理佔比、重試),標上 `cache` /

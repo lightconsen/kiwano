@@ -8,7 +8,7 @@
 //! honest answer to "why is my dashboard still empty?" — the files may simply not
 //! be where this machine expects them.
 
-use super::render::{render_history_import, render_sessions};
+use super::render::render_history_import;
 use super::runtime;
 use crate::cli::HistoryCmd;
 use crate::{CliError, Ctx};
@@ -22,28 +22,11 @@ use kiwano_core::history::{self, HistoryRead};
 const READABLE: [&str; 2] = ["claude", "codex"];
 
 pub fn history(cmd: &HistoryCmd, ctx: &mut Ctx) -> Result<(), CliError> {
+    // One arm: the sessions listing that used to live here is `kiwano sessions`
+    // now, where it shows the gateway's traffic beside the files' rows rather
+    // than the files' rows alone. See `cmds::sessions`.
     match cmd {
         HistoryCmd::Import { agent, dry_run } => import(agent, *dry_run, ctx),
-        HistoryCmd::Sessions {
-            project,
-            agent,
-            days,
-        } => {
-            let since = days.map(|d| {
-                kiwano_core::vm::time::rfc3339(kiwano_core::vm::unix_now() - d.max(0) * 86_400)
-            });
-            let rows =
-                ctx.api
-                    .list_sessions(agent.as_deref(), project.as_deref(), since.as_deref())?;
-            let scanned = ctx.api.history_scanned_at().unwrap_or(None);
-            let text = render_sessions(&rows);
-            let text = match scanned {
-                Some(at) => format!("{text}last scan: {at}\n"),
-                None => format!("{text}never scanned: run `kiwano history import`\n"),
-            };
-            ctx.out.emit(&rows, || text);
-            Ok(())
-        }
     }
 }
 

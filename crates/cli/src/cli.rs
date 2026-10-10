@@ -81,6 +81,12 @@ pub enum Command {
     #[command(subcommand)]
     History(HistoryCmd),
 
+    /// Sessions, from both ledgers: what the gateway routed and what the agents'
+    /// own files say. One row per session id, saying which side it came from.
+    /// (The two sides are never added — see the docs' "which numbers come from
+    /// where".)
+    Sessions(SessionsArgs),
+
     /// Usage totals
     Usage(UsageArgs),
 
@@ -315,6 +321,11 @@ pub struct LogFilterArgs {
     /// RFC3339, exclusive
     #[arg(long, value_name = "RFC3339")]
     pub to: Option<String>,
+
+    /// Only the traffic one session id named (the same id `kiwano sessions`
+    /// lists)
+    #[arg(long, value_name = "ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -772,21 +783,24 @@ pub enum HistoryCmd {
         #[arg(long)]
         dry_run: bool,
     },
+}
 
-    /// The imported sessions: project, span, turns, tools
-    Sessions {
-        /// Only this project (the label the files imply, e.g. a repo directory)
-        #[arg(long, value_name = "PROJECT")]
-        project: Option<String>,
+/// The filters `kiwano sessions` reads with. All optional; an omitted one is no
+/// filter at all.
+#[derive(Debug, Args)]
+pub struct SessionsArgs {
+    /// Only this project (the label the files imply, e.g. a repo directory).
+    /// A session only the gateway saw has no project, so it is not shown.
+    #[arg(long, value_name = "PROJECT")]
+    pub project: Option<String>,
 
-        /// Only this agent
-        #[arg(long, value_name = "AGENT")]
-        agent: Option<String>,
+    /// Only this agent
+    #[arg(long, value_name = "AGENT")]
+    pub agent: Option<String>,
 
-        /// Only sessions that started within this many days
-        #[arg(long, value_name = "DAYS")]
-        days: Option<i64>,
-    },
+    /// Only sessions with activity in the last this many days
+    #[arg(long, value_name = "DAYS")]
+    pub days: Option<i64>,
 }
 
 #[derive(Debug, Subcommand)]

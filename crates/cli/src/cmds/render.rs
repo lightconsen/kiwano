@@ -695,35 +695,105 @@ pub(crate) fn render_history_import(report: &vm::HistoryImportReport, read: usiz
     out
 }
 
-/// The imported sessions, one row each, with the counts a reader scans for.
-pub(crate) fn render_sessions(rows: &[vm::SessionRow]) -> String {
+/// The merged session list, one row each: where it ran, which side knows it,
+/// what it cost.
+///
+/// The two sources are **not** added — the row's `source` says which side each
+/// number came from, and its own docs say which side wins per field
+/// (`kiwano_api::sessions::SessionVm`). The money keeps the CLI's standing rule:
+/// per currency, never converted, and rows that could not be priced named rather
+/// than folded silently into a total that is short.
+pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
     if rows.is_empty() {
-        return "no imported sessions: `kiwano history import` reads the agents' own files"
+        return "no sessions: `kiwano history import` reads the agents' own files, and a \
+                request through the gateway appears here on its own"
             .to_string();
     }
-    let head = ["STARTED", "AGENT", "PROJECT", "TURNS", "TOKENS", "TOOLS"];
+    // `TOKENS` names its four buckets in the header rather than printing bare
+    // digits: they are not one comparable figure (cache reads dwarf the rest on
+    // a long session), and a column that hid that would invite adding them.
+    // `SESSION` is last and whole, not truncated: it is the id `logs list
+    // --session` takes, and an ellipsised id is one nobody can paste. The wide
+    // table is the price of a view whose rows are meant to be cross-referenced —
+    // `--json` is there for anything narrower.
+    let head = [
+        "PROJECT",
+        "AGENT",
+        "SOURCE",
+        "SPAN",
+        "REQ",
+        "TURNS",
+        "TOKENS (in/out/read/write)",
+        "COST",
+        "TOOLS",
+        "SESSION",
+    ];
     let body: Vec<Vec<String>> = rows
         .iter()
         .map(|s| {
             vec![
-                s.started_at.clone(),
-                s.agent.clone(),
                 s.project.clone().unwrap_or_else(|| "-".to_string()),
+                s.agent.clone(),
+                s.source.clone(),
+                format!(
+                    "{} → {}",
+                    minute_stamp(&s.started_at),
+                    minute_stamp(&s.ended_at)
+                ),
+                s.requests.to_string(),
                 s.turns.to_string(),
-                (s.input_tokens + s.output_tokens).to_string(),
-                top_names(s.tool_calls.as_deref()),
+                format!(
+                    "{}/{}/{}/{}",
+                    vm::fmt_tokens(s.input_tokens),
+                    vm::fmt_tokens(s.output_tokens),
+                    vm::fmt_tokens(s.cache_read_tokens),
+                    vm::fmt_tokens(s.cache_creation_tokens)
+                ),
+                session_cost_text(s),
+                top_names(&s.tool_calls),
+                s.session_id.clone(),
             ]
         })
         .collect();
     render_table(&head, &body, &[])
 }
 
-/// The first few names of a stored count array, as `name×n`.
-fn top_names(json: Option<&str>) -> String {
-    let Some(counts) = json.and_then(|j| serde_json::from_str::<Vec<vm::HistoryCount>>(j).ok())
-    else {
-        return "-".to_string();
-    };
+/// What one session's traffic cost, in the monies it cost them in.
+///
+/// Never summed across currencies and never converted (the dashboard is the one
+/// place a single figure exists). A session with no traffic at all — imported
+/// only — shows `-` rather than `0`: the files carry tokens, not money, and a
+/// zero would read as "this was free".
+fn session_cost_text(row: &vm::SessionVm) -> String {
+    if row.cost.is_empty() {
+        return match row.unpriced_rows {
+            0 => "-".to_string(),
+            n => format!("unpriced ({n} rows)"),
+        };
+    }
+    let amounts: Vec<String> = row
+        .cost
+        .iter()
+        .map(|c| format!("{} {}", fmt_amount(c.amount, 2), c.currency))
+        .collect();
+    match row.unpriced_rows {
+        0 => amounts.join(" + "),
+        n => format!("{} (+{n} unpriced)", amounts.join(" + ")),
+    }
+}
+
+/// An RFC3339 stamp as the `YYYY-MM-DD HH:MM` a table column can hold. The
+/// seconds and the offset go: two rows in one listing differ by the minute, and
+/// the full stamp is a third wider for nothing.
+fn minute_stamp(ts: &str) -> String {
+    match ts.get(..16) {
+        Some(s) => s.replacen('T', " ", 1),
+        None => ts.to_string(),
+    }
+}
+
+/// The first few names of a count list, as `name×n`.
+fn top_names(counts: &[vm::HistoryCount]) -> String {
     if counts.is_empty() {
         return "-".to_string();
     }

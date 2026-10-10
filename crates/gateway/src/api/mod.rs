@@ -52,6 +52,7 @@ pub mod providers;
 pub mod providers_add;
 pub mod providers_view;
 pub mod routes;
+pub mod sessions;
 pub mod settings;
 pub mod share;
 pub mod sync;

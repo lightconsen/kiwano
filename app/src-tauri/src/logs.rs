@@ -41,6 +41,9 @@ pub fn list_request_logs(
             status: status.as_deref(),
             from: from.as_deref(),
             to: to.as_deref(),
+            // The log screen has no session filter of its own yet; the field is
+            // here because the filter is one shape for every caller.
+            session_id: None,
         },
     )
 }
@@ -70,6 +73,7 @@ pub fn export_request_logs(
             status: status.as_deref(),
             from: from.as_deref(),
             to: to.as_deref(),
+            session_id: None,
         })?;
     std::fs::write(&path, &csv).map_err(|e| format!("cannot write {path}: {e}"))?;
     Ok(vm::RequestLogExportVm {

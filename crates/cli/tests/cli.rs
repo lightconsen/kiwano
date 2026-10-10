@@ -647,6 +647,7 @@ fn a_moved_command_needs_the_daemon() {
         vec!["logs", "list"],
         vec!["logs", "show", "1"],
         vec!["logs", "clear", "--yes"],
+        vec!["sessions"],
         vec!["dashboard", "--window", "today"],
         vec!["alerts"],
         vec!["agents", "add", "--name", "night batch"],
@@ -1434,6 +1435,77 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
         .unwrap();
 }
 
+/// A traffic row under a session id — what the sessions merge keys on, and what
+/// `logs list --session` filters by.
+fn seed_session_log(
+    db: &Path,
+    agent: &str,
+    session: &str,
+    cost: Option<f64>,
+    currency: Option<&str>,
+) {
+    let store = Store::open(db).unwrap();
+    store
+        .insert_request_log(&kiwanod::store::RequestLogNew {
+            ts: kiwanod::store::now_rfc3339(),
+            method: "POST".into(),
+            path: "/v1/messages".into(),
+            query: None,
+            agent: Some(agent.into()),
+            attribution: Some("key".into()),
+            provider_id: Some("p1".into()),
+            model: Some("claude-opus-4-8".into()),
+            status_code: 200,
+            error_kind: None,
+            error_message: None,
+            session_id: Some(session.into()),
+            is_streaming: false,
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            reasoning_tokens: 0,
+            usage_missing: false,
+            latency_ms: Some(42),
+            first_token_ms: None,
+            request_headers: None,
+            response_headers: None,
+            request_body: None,
+            response_body: None,
+            request_size: 10,
+            response_size: 20,
+            truncated: false,
+            cost,
+            cost_currency: currency.map(str::to_string),
+            cost_off_peak: None,
+            request_notes: None,
+        })
+        .unwrap();
+}
+
+/// An imported session as `kiwano history import` would have written it: the
+/// project, the turns and the tools, which only the agent's own file knows.
+fn seed_imported_session(db: &Path, agent: &str, session: &str, project: &str) {
+    let store = Store::open(db).unwrap();
+    store
+        .upsert_imported_sessions(&[kiwanod::store::ImportedSession {
+            import_key: format!("{agent}:{session}"),
+            agent: agent.into(),
+            project: Some(project.into()),
+            session_id: session.into(),
+            started_at: "2026-01-01T00:00:00+00:00".into(),
+            ended_at: "2026-01-01T02:00:00+00:00".into(),
+            turns: 5,
+            input_tokens: 900,
+            output_tokens: 90,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            tool_calls: Some(r#"[{"name":"Bash","count":2}]"#.into()),
+            skills: None,
+        }])
+        .unwrap();
+}
+
 #[test]
 fn logs_list_filters_by_status_and_reports_the_total() {
     let (_dir, db) = temp_db();
@@ -1464,6 +1536,110 @@ fn logs_list_filters_by_status_and_reports_the_total() {
     let (code, _, err) = run_served(&db, &daemon, &["logs", "list", "--page", "0"]);
     assert_eq!(code, 2);
     assert!(err.contains("1-based"), "{err}");
+}
+
+/// `--session` narrows the trail to the requests one session named — the same
+/// id `kiwano sessions` lists, so a row there can be opened here.
+#[test]
+fn logs_list_filters_by_the_session_an_agent_named() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    seed_session_log(&db, "claude", "s-1", None, None);
+    seed_session_log(&db, "claude", "s-1", None, None);
+    seed_session_log(&db, "claude", "s-2", None, None);
+    // A request nobody attributed to a session: it is in no session's list.
+    seed_log(&db, "claude", 200);
+
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--json", "logs", "list", "--session", "s-1"],
+    );
+    assert_eq!(code, 0, "{err}");
+    let list: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(list["total"], 2, "{list}");
+    assert!(
+        list["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["session_id"] == "s-1"),
+        "{list}"
+    );
+}
+
+/// One session id in both ledgers is one row that says `both`, and each field
+/// comes from the side that can know it. The two are **not** added: the traffic
+/// numbers win where both have one.
+#[test]
+fn sessions_merge_the_gateways_traffic_with_the_agents_own_files() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    // `s-1` is in both: the gateway routed two of its requests, one of them
+    // priced, and the agent's file has the project and the turns.
+    seed_session_log(&db, "claude", "s-1", Some(2.5), Some("USD"));
+    seed_session_log(&db, "claude", "s-1", None, None);
+    // `s-2` only the gateway saw; `s-3` only the file has.
+    seed_session_log(&db, "codex", "s-2", Some(1.0), Some("USD"));
+    seed_imported_session(&db, "claude", "s-1", "acme-api");
+    seed_imported_session(&db, "claude", "s-3", "other-repo");
+
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "sessions"]);
+    assert_eq!(code, 0, "{err}");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let by_id = |id: &str| {
+        rows.iter()
+            .find(|r| r["session_id"] == id)
+            .unwrap_or_else(|| panic!("no {id} in {rows:?}"))
+            .clone()
+    };
+
+    let both = by_id("s-1");
+    assert_eq!(both["source"], "both");
+    assert_eq!(both["project"], "acme-api", "the files' project wins");
+    assert_eq!(both["turns"], 5, "only the files count turns");
+    assert_eq!(both["requests"], 2, "only the traffic counts requests");
+    assert_eq!(
+        both["input_tokens"], 200,
+        "the traffic's metered tokens, not the file's 900 added to them: {both}"
+    );
+    assert_eq!(both["unpriced_rows"], 1, "the costless row is counted");
+    assert_eq!(both["cost"][0]["currency"], "USD");
+    assert_eq!(both["cost"][0]["amount"], 2.5);
+    assert_eq!(both["tool_calls"][0]["name"], "Bash");
+
+    let gateway = by_id("s-2");
+    assert_eq!(gateway["source"], "gateway");
+    assert!(gateway["project"].is_null(), "no file placed it: {gateway}");
+    assert_eq!(gateway["requests"], 1);
+    assert_eq!(gateway["turns"], 0);
+
+    let imported = by_id("s-3");
+    assert_eq!(imported["source"], "imported");
+    assert_eq!(imported["requests"], 0);
+    assert_eq!(imported["turns"], 5);
+    assert!(
+        imported["cost"].as_array().unwrap().is_empty(),
+        "the files carry tokens, not money: {imported}"
+    );
+
+    // The filters are exact, and `--project` is the files' dimension: a session
+    // with no project cannot be said to match one.
+    let (_code, out, _) = run_served(
+        &db,
+        &daemon,
+        &["--json", "sessions", "--project", "acme-api"],
+    );
+    let placed: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(placed.len(), 1);
+    assert_eq!(placed[0]["session_id"], "s-1");
+
+    // And the table renders without the JSON.
+    let (code, out, err) = run_served(&db, &daemon, &["sessions"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("SOURCE"), "{out}");
+    assert!(out.contains("both"), "{out}");
+    assert!(out.contains("2.50 USD"), "{out}");
 }
 
 #[test]
@@ -2410,7 +2586,7 @@ fn history_import_fills_a_fresh_install_and_the_dashboard_shows_it() {
     let dry: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(dry["usage"].as_array().unwrap().len(), 2);
     // Nothing was written, so the daemon has no scan stamp and no sessions.
-    let (code, out, _) = run_served(&db, &daemon, &["--json", "history", "sessions"]);
+    let (code, out, _) = run_served(&db, &daemon, &["--json", "sessions"]);
     assert_eq!(code, 0);
     assert_eq!(out.trim(), "[]");
 
@@ -2443,15 +2619,23 @@ fn history_import_fills_a_fresh_install_and_the_dashboard_shows_it() {
     );
 
     // The sessions list has it, with the project label rather than a path.
-    let (code, out, err) = run_served(&db, &daemon, &["--json", "history", "sessions"]);
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "sessions"]);
     assert_eq!(code, 0, "{err}");
     let sessions: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["agent"], "claude");
+    assert_eq!(
+        sessions[0]["source"], "imported",
+        "no traffic ran through this daemon: {sessions:?}"
+    );
+    assert_eq!(
+        sessions[0]["requests"], 0,
+        "requests are the gateway's count"
+    );
     assert_eq!(sessions[0]["turns"], 2);
     assert!(
-        sessions[0]["tool_calls"].as_str().unwrap().contains("Bash"),
-        "{}",
+        sessions[0]["tool_calls"][0]["name"] == "Bash",
+        "the tools are a list of names and counts: {}",
         sessions[0]
     );
     let project = sessions[0]["project"].as_str().unwrap();

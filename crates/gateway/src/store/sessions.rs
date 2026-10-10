@@ -1,12 +1,18 @@
-//! The `sessions` table: what an agent's own files said about one session.
+//! The two halves of "a session".
 //!
 //! Session-shaped facts — how many turns, which tools, which skills — have no
 //! home in `usage`, whose row is a request. Keeping them apart is what stops
 //! either table from becoming the house of two different things.
 //!
-//! Everything here is **imported**: the gateway does not write this table. Its
-//! own notion of a session lives in `request_logs.session_id`, per request, and
-//! that is the traffic's story rather than the agent's.
+//! The `sessions` table below is the **imported** half: what an agent's own
+//! files said, and the gateway does not write it. Its own notion of a session
+//! lives in `request_logs.session_id`, per request — the **traffic** half, read
+//! back as an aggregate by [`Store::traffic_sessions`]. That read lives here,
+//! beside the imported one, because the two are the inputs of one merged view
+//! (`api::sessions`): a reader can see both sources of a session without leaving
+//! the module. `store::logs` is the wrong home for it — that module is one
+//! request row and its full capture, and its column list and WHERE fragment are
+//! a single unit whose own doc warns against splitting them.
 
 use crate::error::Result;
 use crate::store::time::now_rfc3339;
@@ -31,6 +37,51 @@ pub struct SessionRow {
     /// JSON arrays of `{"name","count"}`, as stored.
     pub tool_calls: Option<String>,
     pub skills: Option<String>,
+}
+
+/// One session as the **traffic** side sees it: what the gateway routed under
+/// one `request_logs.session_id` (migration v9).
+///
+/// This is the precise record — provider, cost, tokens, status, per request —
+/// and it is deliberately a different shape from [`SessionRow`]: a row here is a
+/// session's *traffic*, and only the files can say its project, its turns or the
+/// tools it used.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrafficSession {
+    pub session_id: String,
+    /// The span of the rows the gateway saw (`MIN`/`MAX` of their `ts`). Not the
+    /// session's whole life: one that began before a takeover has imported rows
+    /// older than this, which is why the merge prefers the imported span.
+    pub first_ts: String,
+    pub last_ts: String,
+    pub requests: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    /// The distinct agent labels involved, sorted. Usually one; a session whose
+    /// id two agents happened to share is why this is a list rather than a field.
+    pub agents: Vec<String>,
+    /// The distinct provider ids involved, sorted. Usually one. A pre-forward
+    /// failure's row has no provider and contributes none.
+    pub providers: Vec<String>,
+    /// What the session cost, per currency. Never converted, and never added
+    /// across currencies — the amounts are in the money they were spent in.
+    pub cost: Vec<SessionCurrencyCost>,
+    /// Rows that carry tokens but no cost. They are part of `requests` and their
+    /// tokens are in the buckets above; `cost` is short by them, and this is how
+    /// the reader is told rather than shown a total that is quietly too small.
+    pub unpriced_rows: i64,
+}
+
+/// One session's spend in one currency — the money half of a [`TrafficSession`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionCurrencyCost {
+    /// `None` for a row that has a cost but no recorded currency; the merge
+    /// drops those from the money list (there is no currency to show it in)
+    /// while the tokens still count.
+    pub currency: Option<String>,
+    pub cost: f64,
 }
 
 /// The columns every read shares, in the order `session_from_row` expects.
@@ -121,6 +172,89 @@ impl Store {
         Ok(rows)
     }
 
+    /// The gateway's own sessions, most recently active first.
+    ///
+    /// Grouped by `session_id`, skipping NULL: a request with no session is not
+    /// a session, and the files' own sessions are in `sessions`, not here.
+    /// Bounded by `agent` and by `since` — both applied to the *rows*, so a
+    /// session with any activity in the window appears whole within it.
+    ///
+    /// Two reads rather than one. Tokens sum per session; money sums per
+    /// (session, currency). A single `GROUP BY` cannot carry both without
+    /// repeating the token totals once per currency, and un-repeating that in
+    /// Rust is exactly where such an aggregate silently double-counts.
+    pub fn traffic_sessions(
+        &self,
+        agent: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<Vec<TrafficSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut sessions: Vec<TrafficSession> = {
+            let mut stmt = conn.prepare(
+                "SELECT session_id, MIN(ts), MAX(ts), COUNT(*),
+                        COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(cache_read_tokens), 0),
+                        COALESCE(SUM(cache_creation_tokens), 0),
+                        COALESCE(SUM(CASE WHEN cost IS NULL THEN 1 ELSE 0 END), 0),
+                        GROUP_CONCAT(DISTINCT agent), GROUP_CONCAT(DISTINCT provider_id)
+                 FROM request_logs
+                 WHERE session_id IS NOT NULL
+                   AND (?1 IS NULL OR agent = ?1)
+                   AND (?2 IS NULL OR ts >= ?2)
+                 GROUP BY session_id
+                 ORDER BY MAX(ts) DESC, session_id ASC",
+            )?;
+            let rows = stmt.query_map(params![agent, since], |row| {
+                Ok(TrafficSession {
+                    session_id: row.get(0)?,
+                    first_ts: row.get(1)?,
+                    last_ts: row.get(2)?,
+                    requests: row.get(3)?,
+                    input_tokens: row.get(4)?,
+                    output_tokens: row.get(5)?,
+                    cache_read_tokens: row.get(6)?,
+                    cache_creation_tokens: row.get(7)?,
+                    unpriced_rows: row.get(8)?,
+                    agents: split_distinct(row.get::<_, Option<String>>(9)?),
+                    providers: split_distinct(row.get::<_, Option<String>>(10)?),
+                    cost: Vec::new(),
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        let mut money = conn.prepare(
+            "SELECT session_id, cost_currency, COALESCE(SUM(cost), 0)
+             FROM request_logs
+             WHERE session_id IS NOT NULL AND cost IS NOT NULL
+               AND (?1 IS NULL OR agent = ?1)
+               AND (?2 IS NULL OR ts >= ?2)
+             GROUP BY session_id, cost_currency",
+        )?;
+        let mut by_session: std::collections::HashMap<String, Vec<SessionCurrencyCost>> =
+            std::collections::HashMap::new();
+        let rows = money.query_map(params![agent, since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                SessionCurrencyCost {
+                    currency: row.get(1)?,
+                    cost: row.get(2)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (id, bucket) = row?;
+            by_session.entry(id).or_default().push(bucket);
+        }
+        for session in &mut sessions {
+            if let Some(mut buckets) = by_session.remove(&session.session_id) {
+                buckets.sort_by(|a, b| a.currency.cmp(&b.currency));
+                session.cost = buckets;
+            }
+        }
+        Ok(sessions)
+    }
+
     /// How many sessions this store holds, and when the newest one ran — the pair
     /// a caller reporting "what is in here" wants.
     pub fn session_summary(&self) -> Result<(i64, Option<String>)> {
@@ -150,6 +284,22 @@ impl Store {
         self.record_history_scan(&now)?;
         Ok(now)
     }
+}
+
+/// A `GROUP_CONCAT(DISTINCT x)` cell as a sorted, de-duplicated list.
+///
+/// NULLs are already dropped by the aggregate; an empty cell means no row had
+/// the value. The separator is the comma `GROUP_CONCAT` uses by default, which
+/// is safe here because neither an agent label nor a provider id can contain
+/// one.
+fn split_distinct(joined: Option<String>) -> Vec<String> {
+    let mut seen: Vec<String> = joined
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split(',').map(str::to_string).collect())
+        .unwrap_or_default();
+    seen.sort();
+    seen.dedup();
+    seen
 }
 
 /// Where the last history scan's timestamp lives (`gateway_settings`).
@@ -222,5 +372,85 @@ mod tests {
         assert_eq!(store.last_history_scan(), None);
         let stamped = store.mark_history_scanned().unwrap();
         assert_eq!(store.last_history_scan().as_deref(), Some(stamped.as_str()));
+    }
+
+    /// The traffic aggregate's numbers, including the two cases the money rules
+    /// exist for: a row with no cost (tokens, no money — counted as unpriced) and
+    /// a session that spent in two currencies (two amounts, never one sum).
+    #[test]
+    fn the_traffic_aggregate_counts_a_session_and_keeps_its_money_split() {
+        let (_dir, store) = crate::store::test_support::temp_store();
+        let row = |ts: &str, session: Option<&str>, cost: Option<f64>, currency: Option<&str>| {
+            let mut log = crate::store::test_support::sample_log(ts, Some("claude"), 200);
+            log.session_id = session.map(str::to_string);
+            log.provider_id = Some("p-1".into());
+            log.input_tokens = 100;
+            log.output_tokens = 10;
+            log.cost = cost;
+            log.cost_currency = currency.map(str::to_string);
+            log
+        };
+        for log in [
+            row(
+                "2026-09-07T10:00:00+00:00",
+                Some("s-1"),
+                Some(1.5),
+                Some("USD"),
+            ),
+            row(
+                "2026-09-07T11:00:00+00:00",
+                Some("s-1"),
+                Some(9.0),
+                Some("CNY"),
+            ),
+            // The unpriced row: its tokens count, its money does not.
+            row("2026-09-07T12:00:00+00:00", Some("s-1"), None, None),
+            row(
+                "2026-09-08T10:00:00+00:00",
+                Some("s-2"),
+                Some(2.0),
+                Some("USD"),
+            ),
+        ] {
+            store.insert_request_log(&log).unwrap();
+        }
+        // A request the gateway could not attribute to any session: nobody's.
+        let mut orphan = row("2026-09-09T10:00:00+00:00", None, None, None);
+        orphan.input_tokens = 7;
+        store.insert_request_log(&orphan).unwrap();
+
+        let sessions = store.traffic_sessions(None, None).unwrap();
+        assert_eq!(sessions.len(), 2, "the session-less row is not a session");
+        assert_eq!(sessions[0].session_id, "s-2", "most recently active first");
+
+        let s1 = sessions.iter().find(|s| s.session_id == "s-1").unwrap();
+        assert_eq!(s1.requests, 3);
+        assert_eq!(s1.input_tokens, 300);
+        assert_eq!(s1.output_tokens, 30);
+        assert_eq!(s1.first_ts, "2026-09-07T10:00:00+00:00");
+        assert_eq!(s1.last_ts, "2026-09-07T12:00:00+00:00");
+        assert_eq!(s1.agents, vec!["claude".to_string()]);
+        assert_eq!(s1.providers, vec!["p-1".to_string()]);
+        assert_eq!(
+            s1.unpriced_rows, 1,
+            "the costless row is counted, not hidden"
+        );
+        // Two currencies, kept apart and sorted; never added.
+        assert_eq!(s1.cost.len(), 2);
+        assert_eq!(s1.cost[0].currency.as_deref(), Some("CNY"));
+        assert!((s1.cost[0].cost - 9.0).abs() < 1e-9);
+        assert_eq!(s1.cost[1].currency.as_deref(), Some("USD"));
+        assert!((s1.cost[1].cost - 1.5).abs() < 1e-9);
+
+        // The window and the agent bound the rows the aggregate sees.
+        let recent = store
+            .traffic_sessions(None, Some("2026-09-08T00:00:00+00:00"))
+            .unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].session_id, "s-2");
+        assert!(store
+            .traffic_sessions(Some("codex"), None)
+            .unwrap()
+            .is_empty());
     }
 }

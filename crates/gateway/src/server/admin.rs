@@ -168,7 +168,11 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         // arrives here is priced, measured against each agent's watermark, and
         // written idempotently (`api::import_history`).
         .route("/import/history", post(import_history_route))
-        .route("/history/sessions", get(list_sessions_route))
+        // One read for both of a session's sources — the gateway's own traffic
+        // and the agent files the import wrote — merged by session id
+        // (`api::sessions`). It replaced `/history/sessions`, which showed only
+        // the imported half: the two are one list now, and the row says which.
+        .route("/sessions", get(list_sessions_route))
         .route("/history/scan", get(history_scan_route))
         .route(
             "/takeover/{agent}/state",
@@ -1053,6 +1057,10 @@ struct LogQuery {
     from: Option<String>,
     #[serde(default)]
     to: Option<String>,
+    /// The session an agent named on its request, exact — the same string
+    /// `GET /api/sessions` keys its rows on.
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 /// `GET /api/logs` — one page of the audit trail. A read, so a `GET`: the
@@ -1067,6 +1075,7 @@ async fn list_logs_route(
         status: q.status.as_deref(),
         from: q.from.as_deref(),
         to: q.to.as_deref(),
+        session_id: q.session_id.as_deref(),
     };
     match crate::api::logs::list_request_logs(&state.store, q.page, q.page_size, filter) {
         Ok(page) => Json(page).into_response(),
@@ -1484,6 +1493,7 @@ async fn export_rows_route(
         status: q.status.as_deref(),
         from: q.from.as_deref(),
         to: q.to.as_deref(),
+        session_id: q.session_id.as_deref(),
     };
     match crate::api::logs::export_rows(&state.store, filter, q.limit, q.bodies) {
         Ok((rows, truncated)) => {
@@ -1510,6 +1520,8 @@ struct ExportRowsQuery {
     from: Option<String>,
     #[serde(default)]
     to: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 /// The export's query string: the list's filters, without the paging.
@@ -1533,6 +1545,8 @@ struct ExportQuery {
     from: Option<String>,
     #[serde(default)]
     to: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 /// `GET /api/logs/export` — the filtered slice as CSV text.
@@ -1550,6 +1564,7 @@ async fn export_logs_route(
         status: q.status.as_deref(),
         from: q.from.as_deref(),
         to: q.to.as_deref(),
+        session_id: q.session_id.as_deref(),
     };
     match crate::api::logs::export_request_logs_csv(&state.store, filter) {
         Ok((csv, rows_written, truncated)) => Json(json!({
@@ -1655,27 +1670,35 @@ async fn provider_ref_route(
 /// The rows, not the paths: those files are in the user's home and one of them
 /// is a SQLite database, so reading them is the client's (`migrate.local.md`
 /// §10.19). The split falls where the reading stops.
-/// `GET /api/history/sessions` — the imported sessions, newest first.
+/// `GET /api/sessions` — every session this machine knows, newest first, from
+/// both the gateway's traffic and the agent files the import wrote.
+///
+/// The merge itself is `api::sessions`; this is the query string and the call.
+/// `days` is a window like every other read's, and `project` is the files'
+/// dimension — a traffic-only session has no project and is not shown under one.
 async fn list_sessions_route(
     State(state): State<Arc<GatewayState>>,
     Query(query): Query<SessionQuery>,
 ) -> Response {
-    let since = query
-        .days
-        .map(|d| crate::store::rfc3339_from_unix(crate::store::unix_now() - d.max(0) * 86_400));
-    match state.store.list_sessions(
+    let since = query.days.map(days_ago);
+    match crate::api::sessions::list_sessions(
+        &state.store,
         query.agent.as_deref(),
         query.project.as_deref(),
         since.as_deref(),
     ) {
         Ok(rows) => Json(rows).into_response(),
-        Err(e) => resource_error(kiwano_api::error::ApiError::failed(e)),
+        Err(e) => resource_error(e),
     }
 }
 
+/// The session list's query string. All three are optional, and an absent one
+/// means "no filter" — the same contract as [`LogQuery`].
 #[derive(serde::Deserialize)]
 struct SessionQuery {
+    #[serde(default)]
     agent: Option<String>,
+    #[serde(default)]
     project: Option<String>,
     days: Option<i64>,
 }

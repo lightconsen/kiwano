@@ -152,6 +152,10 @@ pub struct RequestLogDetail {
 /// `from`/`to` are RFC3339 UTC bounds, half-open (`from <= ts < to`) — stored
 /// timestamps are RFC3339 text, which orders lexicographically, so the range is
 /// a plain string comparison.
+///
+/// `session_id` is an exact match, like `agent`: the id is a label an agent
+/// writes, not a pattern, and the traffic side's ids are the same strings the
+/// `kiwano sessions` merge keys on.
 #[derive(Debug, Clone, Default)]
 pub struct RequestLogFilter<'a> {
     pub agent: Option<&'a str>,
@@ -159,17 +163,24 @@ pub struct RequestLogFilter<'a> {
     pub status: Option<&'a str>,
     pub from: Option<&'a str>,
     pub to: Option<&'a str>,
+    pub session_id: Option<&'a str>,
 }
 
 /// The WHERE every request-log read shares, so a page and an export can never
 /// disagree about which rows they cover. Fixed positional params keep the SQL
 /// simple: an absent filter binds NULL and drops out.
+///
+/// The numbering of the trailing `LIMIT`/`OFFSET` placeholders is owned by each
+/// caller and follows this fragment: it binds `?1..?6`, so a page's `LIMIT` is
+/// `?7` and an export's is `?7`. Adding a filter here means bumping every one of
+/// them — a stale number silently binds a page size into a `session_id`.
 const REQUEST_LOG_WHERE: &str = " WHERE (?1 IS NULL OR agent = ?1)
                                   AND (?2 IS NULL OR provider_id = ?2)
                                   AND (?3 IS NULL OR (?3 = 'ok' AND status_code < 400)
                                                    OR (?3 = 'error' AND status_code >= 400))
                                   AND (?4 IS NULL OR ts >= ?4)
-                                  AND (?5 IS NULL OR ts < ?5)";
+                                  AND (?5 IS NULL OR ts < ?5)
+                                  AND (?6 IS NULL OR session_id = ?6)";
 
 /// The columns `request_log_from_row` reads, in the order it reads them.
 const REQUEST_LOG_COLUMNS: &str = "id, ts, method, path, query, agent, attribution, provider_id,
@@ -272,14 +283,15 @@ impl Store {
                 filter.provider_id,
                 filter.status,
                 filter.from,
-                filter.to
+                filter.to,
+                filter.session_id
             ],
             |r| r.get(0),
         )?;
 
         let mut stmt = conn.prepare(&format!(
             "SELECT {REQUEST_LOG_COLUMNS} FROM request_logs{REQUEST_LOG_WHERE}
-             ORDER BY id DESC LIMIT ?6 OFFSET ?7",
+             ORDER BY id DESC LIMIT ?7 OFFSET ?8",
         ))?;
         let offset = (page - 1).max(0) * page_size;
         let rows = stmt
@@ -290,6 +302,7 @@ impl Store {
                     filter.status,
                     filter.from,
                     filter.to,
+                    filter.session_id,
                     page_size,
                     offset
                 ],
@@ -311,7 +324,7 @@ impl Store {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT {REQUEST_LOG_COLUMNS} FROM request_logs{REQUEST_LOG_WHERE}
-             ORDER BY id DESC LIMIT ?6",
+             ORDER BY id DESC LIMIT ?7",
         ))?;
         let rows = stmt
             .query_map(
@@ -321,6 +334,7 @@ impl Store {
                     filter.status,
                     filter.from,
                     filter.to,
+                    filter.session_id,
                     limit
                 ],
                 request_log_from_row,
@@ -348,7 +362,7 @@ impl Store {
             "SELECT {REQUEST_LOG_COLUMNS}, b.request_body, b.response_body
              FROM request_logs LEFT JOIN request_bodies b ON b.log_id = request_logs.id
              {REQUEST_LOG_WHERE}
-             ORDER BY request_logs.id DESC LIMIT ?6",
+             ORDER BY request_logs.id DESC LIMIT ?7",
         ))?;
         let rows = stmt
             .query_map(
@@ -358,6 +372,7 @@ impl Store {
                     filter.status,
                     filter.from,
                     filter.to,
+                    filter.session_id,
                     limit
                 ],
                 |row| {
@@ -764,6 +779,65 @@ mod tests {
         assert_eq!(detail.response_body, None);
 
         assert!(store.get_request_log(9999).unwrap().is_none());
+    }
+
+    #[test]
+    fn request_logs_filter_by_the_session_an_agent_named() {
+        let (_dir, store) = temp_store();
+        // Two rows of one session (across two agents, which the traffic side
+        // allows), one of another, and one with no session at all — the NULL
+        // rows are nobody's and must never come back for any id.
+        let mut a = sample_log("2026-09-07T10:00:00+00:00", Some("claude"), 200);
+        a.session_id = Some("s-alpha".into());
+        let mut b = sample_log("2026-09-07T11:00:00+00:00", Some("claude"), 200);
+        b.session_id = Some("s-beta".into());
+        let mut c = sample_log("2026-09-07T12:00:00+00:00", Some("codex"), 200);
+        c.session_id = Some("s-alpha".into());
+        let mut d = sample_log("2026-09-07T13:00:00+00:00", Some("claude"), 200);
+        d.session_id = None;
+        for log in [&a, &b, &c, &d] {
+            store.insert_request_log(log).unwrap();
+        }
+
+        let by_session = |id: &'static str| RequestLogFilter {
+            session_id: Some(id),
+            ..Default::default()
+        };
+
+        let (rows, total) = store
+            .list_request_logs(1, 10, by_session("s-alpha"))
+            .unwrap();
+        assert_eq!(total, 2, "both rows of the session, and neither other");
+        assert_eq!(rows.len(), 2);
+
+        // It composes with the other predicates, each on its own positional
+        // param — the reason the export shares the fragment rather than a
+        // hand-written WHERE.
+        let (_, one) = store
+            .list_request_logs(
+                1,
+                10,
+                RequestLogFilter {
+                    session_id: Some("s-alpha"),
+                    agent: Some("codex"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(one, 1);
+
+        // The export reads the same rows through the same `?6`.
+        assert_eq!(
+            store
+                .export_request_logs(by_session("s-alpha"), 100)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(store
+            .export_request_logs(by_session("no-such-session"), 100)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

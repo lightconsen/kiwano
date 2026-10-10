@@ -104,5 +104,6 @@ fn log_filter(args: &LogFilterArgs) -> Result<RequestLogFilter<'_>, CliError> {
         status,
         from: args.from.as_deref(),
         to: args.to.as_deref(),
+        session_id: args.session.as_deref(),
     })
 }

@@ -210,7 +210,6 @@ Rotating keys are tried after the provider's primary key, per request.
 
 ```
 kiwano history import [--agent claude|codex]… [--dry-run]
-kiwano history sessions [--project P] [--agent A] [--days N]
 ```
 
 The agents' own history, read from their session files and imported, so the
@@ -233,10 +232,52 @@ Two things to know before reading the numbers:
   nothing is priced at all (the rows land with tokens and no cost); a later
   `history import` fills those in, because the import is idempotent.
 
-`sessions` lists what came in: project, span, turns, tokens, and the tools used.
-A project here is a **label** derived from the working directory the transcript
+What came in is listed by `kiwano sessions` (below), beside the traffic the
+gateway itself routed.
+
+### Sessions
+
+```
+kiwano sessions [--project P] [--agent A] [--days N]
+```
+
+One row per session, from **two sources**, and the `SOURCE` column says which:
+
+- `gateway` — the gateway routed its requests. It knows the requests, the tokens
+  and the cost, and nothing about the project, the turns or the tools.
+- `imported` — only the agent's own file has it (read by `kiwano history
+  import`). It knows the project, the turns and the tools, and has no money: the
+  files carry tokens, not cost.
+- `both` — the id appears in both ledgers, which is the usual state of a session
+  that ran after a takeover.
+
+**The two sides are never added.** They describe overlapping-but-not-equal work —
+a retry is one turn in the file and two requests in the gateway — so where both
+have a field, one side wins and the others are left out rather than summed:
+the **traffic** numbers win for requests, tokens and cost, and the **file**
+numbers win for the project, the span, the turns and the tools. A `both` row's
+token column is the gateway's count, not the file's plus the gateway's.
+
+The columns are:
+
+```
+PROJECT  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+```
+
+`REQ` is 0 for an `imported` row and `TURNS` is 0 for a `gateway` row: neither
+side invents the other's count. `COST` is the traffic's spend, per currency and
+never converted; `-` means the files knew of no traffic (not "free"), and a
+session whose rows could not all be priced says so (`2.50 USD (+3 unpriced)`).
+`SPAN` is the session's whole life from the file when there is one, and the span
+of the requests the gateway saw otherwise.
+
+A project is a **label** derived from the working directory the transcript
 recorded — the repository's directory name, not a path, because the gateway is
-never told this machine's layout.
+never told this machine's layout. Because a `gateway`-only row has no project,
+`--project` shows only sessions the files placed.
+
+A footer says when the files were last scanned (or that they never were: run
+`kiwano history import`).
 
 ### Client keys
 
@@ -330,7 +371,8 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show <ID>
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
@@ -338,7 +380,8 @@ kiwano logs dir
 ```
 
 `--from` is inclusive and `--to` exclusive, matching the store's half-open
-range.
+range. `--session` takes the id one request carried — the same string `kiwano
+sessions` lists it under — so a row there can be opened here.
 
 `insights` is the one-page report about *how* the tokens are being spent: a
 per-agent scorecard (cache hit rate, session context growth, reasoning share,

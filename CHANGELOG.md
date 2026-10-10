@@ -29,7 +29,7 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   and those hold what was spent **before Kiwano existed**, plus a **project**
   dimension the gateway can never observe: it sees requests, not the repository
   they came from. `history import` reads them (the app does it once on first
-  launch) and `history sessions` lists what came in, by project, span, turns and
+  launch) and `kiwano sessions` lists what came in, by project, span, turns and
   tools.
 
   Three rules make it honest. Only what **predates** the gateway is imported —
@@ -104,6 +104,28 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   behaviour-preserving. A metered row now records the key's **handle** (`ck-…`)
   rather than nothing, which is what a per-key ceiling counts; the handle survives
   a rotation and is not a credential, so no ledger or export quotes one.
+
+### Added
+
+- **One session list, two sources: `kiwano sessions`.** The gateway had two
+  unrelated notions of "session" and neither could show a machine's sessions
+  whole: the traffic it routed (one row per request, keyed by the session id an
+  agent named) and the agents' own files (`kiwano history import`, which knows
+  the project, the turns and the tools the gateway can never see). `kiwano
+  sessions` merges them into one row per session id and says which side each row
+  came from — `gateway`, `imported` or `both`.
+
+  **The two sides are never added.** They describe overlapping-but-not-equal
+  work (a retry is one turn in the file and two requests in the gateway), so
+  where both have a field one side wins and the other's value is dropped: the
+  **traffic** numbers win for requests, tokens and cost, the **file** numbers for
+  the project, the span, the turns and the tools. Money stays per currency and is
+  never converted, and rows that could not be priced are named
+  (`2.50 USD (+3 unpriced)`) rather than folded into a total that is quietly
+  short. It replaces `history sessions`, which showed the imported half alone —
+  a session that ran entirely through the gateway was invisible there.
+  `kiwano logs list` gained `--session` to open that session's requests, and
+  `GET /api/sessions` is the endpoint both the CLI and a later app screen read.
 
 ## [0.3.0] - 2026-10-10
 

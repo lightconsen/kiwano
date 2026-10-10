@@ -286,6 +286,20 @@ impl AdminEndpoint {
         }
     }
 
+    /// The pipe name, on Windows — the counterpart of [`Self::path`].
+    ///
+    /// `Local` holds it directly there: a pipe is a kernel object whose name
+    /// *is* its address, so there is no directory to join it to and no file to
+    /// leave behind when the process dies.
+    #[cfg(windows)]
+    pub fn name(&self) -> &str {
+        match self {
+            AdminEndpoint::Local(name) => name.as_str(),
+            // Only a local plane has a name; see `path`.
+            AdminEndpoint::Tcp(_) => "",
+        }
+    }
+
     /// The socket file, on unix. Tests assert on its mode; nothing on the
     /// serving side needs it.
     #[cfg(unix)]
@@ -373,8 +387,8 @@ impl AdminEndpoint {
             // unix branch's unlink-and-rebind dance has no counterpart.
             Ok(AdminListener {
                 inner: PipeListener {
-                    name: self.name.clone(),
-                    pending: Some(create_pipe_instance(&self.name)?),
+                    name: self.name().to_string(),
+                    pending: Some(create_pipe_instance(self.name())?),
                 },
                 describe: self.describe(),
             })
@@ -453,7 +467,7 @@ impl AdminEndpoint {
             };
             use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 
-            let name = wide(&self.name);
+            let name = wide(self.name());
             // A pipe that exists with every instance busy fails CreateFileW
             // with ERROR_PIPE_BUSY; waiting up to `timeout` for an instance to
             // free up is the only part of this that can block. A pipe that does
@@ -647,13 +661,13 @@ impl PipeListener {
                 // Only reachable if the replace below itself failed. Rebuild
                 // rather than panic: a gateway that cannot create a pipe has
                 // nothing to serve, but it can still try again.
-                match create_pipe_instance(&self.name) {
+                match create_pipe_instance(self.name()) {
                     Ok(next) => {
                         self.pending = Some(next);
                         continue;
                     }
                     Err(e) => {
-                        tracing::error!(pipe = %self.name, error = %e, "cannot create the admin pipe; retrying");
+                        tracing::error!(pipe = %self.name(), error = %e, "cannot create the admin pipe; retrying");
                         tokio::time::sleep(RETRY_DELAY).await;
                         continue;
                     }
@@ -664,18 +678,18 @@ impl PipeListener {
                     // Replace the instance *before* handing this one to axum:
                     // the connection is already established, so the next client
                     // must still find something listening when it arrives.
-                    match create_pipe_instance(&self.name) {
+                    match create_pipe_instance(self.name()) {
                         Ok(next) => self.pending = Some(next),
                         Err(e) => {
                             tracing::error!(
-                                pipe = %self.name,
+                                pipe = %self.name(),
                                 error = %e,
                                 "cannot queue the next admin pipe instance; \
                                  the next connection may be refused"
                             );
                         }
                     }
-                    return (server, self.name.clone());
+                    return (server, self.name().to_string());
                 }
                 Err(e) => {
                     // A client that vanished between CreateFileW and the connect
@@ -683,7 +697,7 @@ impl PipeListener {
                     // giving up the accept loop over. Drop this instance — that
                     // is what disconnects it — and let the top of the loop
                     // create a fresh one.
-                    tracing::warn!(pipe = %self.name, error = %e, "admin pipe connect failed; retrying");
+                    tracing::warn!(pipe = %self.name(), error = %e, "admin pipe connect failed; retrying");
                     drop(server);
                 }
             }

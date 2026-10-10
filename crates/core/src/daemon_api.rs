@@ -941,7 +941,13 @@ fn wrote(result: Result<serde_json::Value, String>) -> Result<(), String> {
     result.map(|_| ())
 }
 
-#[cfg(test)]
+// Unix-only, like the stub in `sidecar`: the far end of these tests is a
+// `UnixListener`, and a Windows named pipe cannot be created from `std`. What
+// is checked here is the client's half of the transport — framing, the token
+// header, the status check, the error envelope — and `kiwanod`'s own
+// `admin_routes_answer_over_the_ipc_endpoint` covers the same ground on both
+// platforms.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::io::{Read, Write};

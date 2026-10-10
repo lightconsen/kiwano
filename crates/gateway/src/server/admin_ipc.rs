@@ -661,7 +661,7 @@ impl PipeListener {
                 // Only reachable if the replace below itself failed. Rebuild
                 // rather than panic: a gateway that cannot create a pipe has
                 // nothing to serve, but it can still try again.
-                match create_pipe_instance(self.name) {
+                match create_pipe_instance(&self.name) {
                     Ok(next) => {
                         self.pending = Some(next);
                         continue;
@@ -678,7 +678,7 @@ impl PipeListener {
                     // Replace the instance *before* handing this one to axum:
                     // the connection is already established, so the next client
                     // must still find something listening when it arrives.
-                    match create_pipe_instance(self.name) {
+                    match create_pipe_instance(&self.name) {
                         Ok(next) => self.pending = Some(next),
                         Err(e) => {
                             tracing::error!(

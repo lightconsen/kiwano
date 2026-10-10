@@ -205,6 +205,12 @@ left off, which is `requests`. Over a window the gateway answers 429 with a
 `Retry-After`; a model or provider outside a key's allowlists is 403. Nothing
 reads a stored key back: only `add` and `rotate` print one.
 
+`list` ends with **last used** — the last request the key carried, or `never` if
+it has carried none. That is the column a revocation decision turns on, so the
+two states are kept apart: `never` is a key that was minted and not used, while a
+date is a key that was used and may have stopped. It is read from the metered
+rows, so it only knows traffic that went through this gateway.
+
 ### Agents
 
 ```

@@ -21,7 +21,15 @@ use kiwano_api::client_keys::{
 use kiwano_api::error::ApiError;
 
 /// One stored key as a reader sees it: identity and policy, secret masked.
-fn key_vm(store: &crate::store::Store, key: ClientKey) -> Result<ClientKeyVm, ApiError> {
+///
+/// `last_used` is passed in rather than looked up here: a listing of N keys must
+/// not become N queries, and the caller already has the one grouped answer
+/// (`Store::client_key_last_used`).
+fn key_vm(
+    store: &crate::store::Store,
+    key: ClientKey,
+    last_used: Option<&str>,
+) -> Result<ClientKeyVm, ApiError> {
     let limits = store
         .client_key_limits_for(&key.id)
         .map_err(ApiError::failed)?
@@ -41,15 +49,20 @@ fn key_vm(store: &crate::store::Store, key: ClientKey) -> Result<ClientKeyVm, Ap
         provider_allow: crate::limits::allowlist(key.provider_allow.as_deref()),
         limits,
         created_at: key.created_at,
+        last_used_at: last_used.map(str::to_string),
     })
 }
 
 pub fn list_client_keys(store: &crate::store::Store) -> Result<Vec<ClientKeyVm>, ApiError> {
+    let last_used = store.client_key_last_used().map_err(ApiError::failed)?;
     store
         .list_client_keys()
         .map_err(ApiError::failed)?
         .into_iter()
-        .map(|k| key_vm(store, k))
+        .map(|k| {
+            let at = last_used.get(&k.id).map(String::as_str);
+            key_vm(store, k, at)
+        })
         .collect()
 }
 
@@ -58,7 +71,9 @@ pub fn get_client_key(store: &crate::store::Store, id: &str) -> Result<ClientKey
         .get_client_key(id)
         .map_err(ApiError::failed)?
         .ok_or_else(|| ApiError::not_found(format!("no client key `{id}`")))?;
-    key_vm(store, key)
+    let last_used = store.client_key_last_used().map_err(ApiError::failed)?;
+    let at = last_used.get(&key.id).map(String::as_str);
+    key_vm(store, key, at)
 }
 
 /// Mint a key for an agent, with whatever policy came with it.

@@ -3437,3 +3437,94 @@ async fn a_404_on_responses_leaves_the_wire_declaration_in_the_log() {
         .expect("the fix is written down");
     assert!(note.contains("--openai-wire chat"), "{note}");
 }
+
+/// A key's "last used" is fed by real traffic, and the two states a reader has to
+/// tell apart — never used, and used — are told apart.
+///
+/// The field exists for one decision, which is whether a key can be revoked, and
+/// a value that only ever came from a fixture would not answer it.
+#[tokio::test]
+async fn a_client_key_reports_when_it_last_carried_a_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let upstream_body = json!({
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "m",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 10, "output_tokens": 2}
+    });
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Json(upstream_body)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    let used = store
+        .upsert_client_key("kw-ag-claude-used", "claude")
+        .unwrap();
+    let idle = store
+        .upsert_client_key("kw-ag-claude-idle", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let data = data_plane_router(state.clone());
+    let admin = admin_plane_router(state.clone());
+
+    // Before any traffic, both keys say "never".
+    let keys = admin_get(&admin, &state, "/api/client-keys").await;
+    for key in keys.as_array().unwrap() {
+        assert!(key.get("last_used_at").is_none(), "{key}");
+    }
+
+    let response = post_json(
+        &data,
+        "/v1/messages",
+        Some("kw-ag-claude-used"),
+        r#"{"model":"m","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let totals = wait_for_usage(&state, "claude", 1).await;
+    assert_eq!(totals.requests, 1);
+
+    let keys = admin_get(&admin, &state, "/api/client-keys").await;
+    let by_id: std::collections::HashMap<&str, &Value> = keys
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| (k["id"].as_str().unwrap(), k))
+        .collect();
+    let stamped = by_id[used.as_str()]["last_used_at"]
+        .as_str()
+        .expect("the key that carried the request is dated");
+    // The row's `ts` is the write time of that request, so it is recent — and
+    // compared as a string, which is how every `ts` filter in the store works.
+    assert!(
+        stamped.starts_with(&now_rfc3339()[..10]),
+        "expected today, got {stamped}"
+    );
+    assert!(
+        by_id[idle.as_str()].get("last_used_at").is_none(),
+        "a key that has carried nothing is not dated"
+    );
+}
+
+/// `GET /api/…` with the token the gateway minted, as a JSON value.
+async fn admin_get(admin: &Router, state: &GatewayState, path: &str) -> Value {
+    let token = state
+        .store
+        .app_setting(ADMIN_TOKEN_KEY)
+        .expect("the gateway mints its admin token at startup");
+    let response = admin
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header(ADMIN_TOKEN_HEADER, &token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{path}");
+    serde_json::from_slice(&response_body(response).await).unwrap()
+}

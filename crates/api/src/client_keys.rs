@@ -53,6 +53,15 @@ pub struct ClientKeyVm {
     #[serde(default)]
     pub limits: Vec<ClientKeyLimitVm>,
     pub created_at: String,
+    /// When this key last carried a request, RFC3339 — `None` when it never has.
+    ///
+    /// The two states are different and a reader has to render them differently:
+    /// a key minted a minute ago and a key minted a year ago have both "never
+    /// been used", and neither is a key that stopped being used. Derived from the
+    /// metered rows rather than stamped on the key, so nothing writes to the key's
+    /// row on the request path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
 }
 
 /// The one response that carries a secret: the result of minting one.

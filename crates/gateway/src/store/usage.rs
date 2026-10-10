@@ -283,6 +283,36 @@ impl Store {
         Ok(rows)
     }
 
+    /// When each client key last carried a request, by handle.
+    ///
+    /// The question a key list has to answer before anyone revokes one, and the
+    /// only honest source for it: the credential itself carries no timestamp, and
+    /// a key's own row cannot say whether it is in use. A key that never made a
+    /// request is simply absent — which is a state a reader has to render
+    /// differently from "unknown", and the reason this returns a map rather than
+    /// giving every key a value.
+    ///
+    /// One query for the whole listing rather than one per key: the group is the
+    /// shape the caller wants, and `idx_usage_client_key_ts` (v29) is exactly
+    /// this pair. Rows written before the column carry no handle and so answer
+    /// for nobody.
+    pub fn client_key_last_used(&self) -> Result<std::collections::HashMap<String, String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT client_key_id, MAX(ts) FROM usage
+             WHERE client_key_id IS NOT NULL GROUP BY client_key_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let (key_id, ts) = row?;
+            out.insert(key_id, ts);
+        }
+        Ok(out)
+    }
+
     /// Totals grouped by provider, optionally filtered by agent, provider
     /// and/or since.
     pub fn usage_by_provider(
@@ -471,6 +501,53 @@ impl Store {
             Err(_) => Vec::new(),
         }
     }
+}
+
+/// The listing question: which key is still in use, and which has never been.
+#[test]
+fn last_used_is_the_latest_request_per_key_and_absent_for_an_idle_one() {
+    use crate::store::UsageRecord;
+    let (_dir, store) = crate::store::test_support::temp_store();
+    let id = store.upsert_client_key("kw-ag-claude-a", "claude").unwrap();
+    let row = |ts: &str, key: Option<&str>| UsageRecord {
+        ts: ts.into(),
+        agent: "claude".into(),
+        provider_id: "p1".into(),
+        client_key_id: key.map(str::to_string),
+        model: None,
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        latency_ms: None,
+        status: "ok".into(),
+        cost: None,
+        cost_currency: None,
+        cost_off_peak: None,
+    };
+    store
+        .record_usage(&row("2026-01-01T00:00:00+00:00", Some(&id)))
+        .unwrap();
+    store
+        .record_usage(&row("2026-03-01T00:00:00+00:00", Some(&id)))
+        .unwrap();
+    // A row from before the column exists attributes to no key at all, so it
+    // cannot make a key look used.
+    store
+        .record_usage(&row("2026-09-01T00:00:00+00:00", None))
+        .unwrap();
+
+    let seen = store.client_key_last_used().unwrap();
+    assert_eq!(
+        seen.get(&id).map(String::as_str),
+        Some("2026-03-01T00:00:00+00:00"),
+        "the latest request, not the first"
+    );
+
+    // A key nobody has used is absent rather than dated — the state a reader has
+    // to be able to tell from "used a long time ago".
+    let idle = store.upsert_client_key("kw-ag-claude-b", "claude").unwrap();
+    assert!(!store.client_key_last_used().unwrap().contains_key(&idle));
 }
 
 #[cfg(test)]

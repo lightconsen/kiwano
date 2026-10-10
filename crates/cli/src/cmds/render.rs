@@ -529,6 +529,7 @@ pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm]) -> String {
         "LIMITS",
         "MODELS",
         "PROVIDERS",
+        "LAST USED",
     ];
     let rows: Vec<Vec<String>> = keys
         .iter()
@@ -541,6 +542,13 @@ pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm]) -> String {
                 windows_text(k),
                 list_text(&k.model_allow),
                 list_text(&k.provider_allow),
+                // `never`, not the `-` the other empty cells use: there, `-` means
+                // "no restriction"; here the two states are "has never carried a
+                // request" and "stopped being used at some point", and telling
+                // them apart is the whole reason the column exists.
+                k.last_used_at
+                    .clone()
+                    .unwrap_or_else(|| "never".to_string()),
             ]
         })
         .collect();
@@ -561,6 +569,10 @@ pub(crate) fn render_client_key(key: &vm::ClientKeyVm) -> String {
     out.push_str(&format!("limits   {}\n", windows_text(key)));
     out.push_str(&format!("models   {}\n", list_text(&key.model_allow)));
     out.push_str(&format!("providers {}\n", list_text(&key.provider_allow)));
+    out.push_str(&format!(
+        "last used {}\n",
+        key.last_used_at.as_deref().unwrap_or("never")
+    ));
     out.push_str(
         "\nThe key itself is not readable: it was shown once, when it was minted or rotated.\n",
     );

@@ -2133,6 +2133,13 @@ fn clients_add_list_rotate_roundtrips_and_only_shows_the_secret_once() {
     assert_eq!(code, 0, "{err}");
     let listed: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(listed.len(), 1);
+    // A key that has carried nothing is *not dated* rather than dated blankly:
+    // "never used" and "used, then idle" are the two answers a revocation
+    // decision turns on.
+    assert!(listed[0].get("last_used_at").is_none(), "{}", listed[0]);
+    let (_, text, _) = run_served(&db, &daemon, &["clients", "list"]);
+    assert!(text.contains("LAST USED"), "{text}");
+    assert!(text.contains("never"), "{text}");
     assert_eq!(listed[0]["id"], id.as_str());
     assert_eq!(listed[0]["agent"], "claude");
     assert_eq!(listed[0]["label"], "office laptop");

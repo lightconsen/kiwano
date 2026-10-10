@@ -34,7 +34,9 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   desktop running the same agent, limited separately. `clients rotate` mints a new
   secret while keeping the handle, the policy and the spend already recorded, so
   rotating a leaked key is not a way to clear a ceiling. A read never prints a
-  stored key: only `add` and `rotate` show one, once.
+  stored key: only `add` and `rotate` show one, once. `clients list` reports when
+  each key last carried a request (or `never`), which is what makes revoking one a
+  decision rather than a guess.
 
   This is the guardrail 0.3.0's cross-machine work was missing. Until now the data
   plane's only bound was the network it sat on, and the credential that reached it

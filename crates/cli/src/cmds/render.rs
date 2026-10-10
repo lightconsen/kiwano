@@ -621,12 +621,30 @@ pub(crate) fn render_history_import(report: &vm::HistoryImportReport, read: usiz
     }
     out.push_str(&format!("  priced {} row(s)", report.priced));
     if report.unpriced > 0 {
-        out.push_str(&format!(
-            ", {} unpriced (no rate for the model yet — a Hub sync, then a re-import, fills them in)",
-            report.unpriced
-        ));
+        out.push_str(&format!(", {} unpriced", report.unpriced));
     }
     out.push('\n');
+    if report.unpriced > 0 {
+        // The names, because they are the only actionable part: they say whether
+        // this is a model nobody prices yet, a plan's own name for whatever model
+        // the plan grants (`kimi-for-coding`), or the placeholder a client writes
+        // when it is not talking to a model at all (`<synthetic>`, which nobody
+        // should price and which carries no tokens).
+        let names: Vec<String> = report
+            .unpriced_models
+            .iter()
+            .map(|u| match &u.model {
+                Some(model) => format!("{model}×{}", u.rows),
+                None => format!("(no model)×{}", u.rows),
+            })
+            .collect();
+        out.push_str(&format!("  unpriced by model: {}\n", names.join(", ")));
+        out.push_str(
+            "  (a Hub sync prices the rest; a plan's own name can be priced by declaring a \
+             price for that model on one of your providers — see `kiwano providers` in the \
+             app's form)\n",
+        );
+    }
     out
 }
 

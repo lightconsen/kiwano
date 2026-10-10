@@ -1687,10 +1687,18 @@ async fn import_history_route(
     State(state): State<Arc<GatewayState>>,
     Json(batch): Json<kiwano_api::history::HistoryBatch>,
 ) -> Response {
-    // One snapshot of the price table for the whole batch: it is cloned out of
-    // its lock per call, and a scan prices thousands of rows.
+    // One snapshot of each price table for the whole batch: both are cloned out
+    // of their locks per call, and a scan prices thousands of rows. The declared
+    // one is consulted first — for an imported row, which names no provider, the
+    // user's own statement about a model is the more specific of the two.
     let pricing = state.pricing();
-    let result = crate::api::import_history::apply_history(&state.store, &pricing, &batch);
+    let declared = state
+        .declared
+        .read()
+        .expect("declared pricing lock poisoned")
+        .clone();
+    let result =
+        crate::api::import_history::apply_history(&state.store, &pricing, &declared, &batch);
     // `after_write_with` reloads the route table and the limit snapshot, which is
     // what makes the imported rows visible to the dashboard and countable by a
     // ceiling without a restart.

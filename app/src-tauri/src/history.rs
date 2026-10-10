@@ -175,7 +175,7 @@ fn scan_once(
         rows = total.usage_rows,
         sessions = total.sessions,
         skipped_by_watermark = total.skipped_by_watermark,
-        unpriced = total.unpriced,
+        unpriced = total.unpriced, unpriced_models = ?total.unpriced_models,
         "history backfill finished"
     );
     Ok(total)

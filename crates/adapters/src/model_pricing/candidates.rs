@@ -71,9 +71,42 @@ pub fn pricing_candidates(model_id: &str) -> Vec<String> {
         if candidate.starts_with("claude-") && candidate.contains('.') {
             queue.push(candidate.replace('.', "-"));
         }
+        if let Some(aliased) = plan_model_alias(&candidate) {
+            queue.push(aliased);
+        }
     }
 
     candidates
+}
+
+/// A model id a **plan's own client** uses, mapped to the API model the Hub
+/// prices.
+///
+/// A coding plan does not have to call its models what the vendor's API calls
+/// them: Kimi for Coding's client asks for `k3`, and the Hub's row — the one the
+/// gateway would find for a direct API request — is `kimi-k3`. Nothing in the
+/// request says which of the two vocabularies it is speaking, so the mapping has
+/// to live here, beside the other candidate reductions, where both readers of the
+/// ladder get it: a request through the gateway and a row imported from a
+/// transcript.
+///
+/// An **alias is a reduction, not an override**: it is tried after the exact id
+/// has failed to resolve, so a row priced under the plan's own name would still
+/// win, and a model nobody prices is still a miss.
+///
+/// Deliberately short, and deliberately not guessed at. `kimi-for-coding` is the
+/// other name these transcripts carry and it is **not** here: the plan uses it
+/// for whichever model the subscription currently grants, and pricing it as any
+/// one API model would be picking a rate the request never named. A row that
+/// cannot be priced says so (no cost), which is a better answer than a plausible
+/// wrong one.
+fn plan_model_alias(model_id: &str) -> Option<String> {
+    match model_id {
+        // The K3 family, with and without the context-length marker its client
+        // appends. One target: the Hub prices the model, not its context window.
+        "k3" | "k3-256k" => Some("kimi-k3".to_string()),
+        _ => None,
+    }
 }
 
 fn push_unique_candidate(candidates: &mut Vec<String>, candidate: String) -> bool {

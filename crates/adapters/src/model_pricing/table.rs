@@ -221,6 +221,25 @@ mod tests {
         assert_eq!(entry.model_id, "claude-3-5-haiku");
     }
 
+    /// A plan's own client name resolves to the API model the Hub prices, and
+    /// says which rate it was: this is the difference between 3,818 rows of real
+    /// history being counted and being skipped.
+    #[test]
+    fn find_resolves_a_plans_own_model_name_to_the_api_model() {
+        let t = table();
+        let entry = t.find("", "k3").expect("the plan's name resolves");
+        assert_eq!(entry.model_id, "kimi-k3");
+        assert_eq!(entry.input, "20");
+        // The context marker its client appends names the same model.
+        assert_eq!(t.find("", "k3-256k").unwrap().model_id, "kimi-k3");
+
+        // An alias is a reduction, not an override, and it invents nothing: a
+        // name the plan is the only source of stays unpriced rather than being
+        // charged at somebody else's rate.
+        assert!(t.find("", "kimi-for-coding").is_none());
+        assert!(t.find("", "k4").is_none());
+    }
+
     #[test]
     fn find_unknown_model_is_none() {
         let t = table();
@@ -229,6 +248,23 @@ mod tests {
         assert!(t.find("", "").is_none());
         // A known provider asking for a model nobody prices is still a miss.
         assert!(t.find("kimi", "totally-made-up-model").is_none());
+    }
+
+    /// A model **no general row prices** still resolves for a provider-less
+    /// lookup, falling back to the first provider that does.
+    ///
+    /// This is the shape an imported row meets: it names a model and no provider,
+    /// because the request went to a vendor before this gateway existed. `kimi-k2`
+    /// in the fixture is priced only under `kimi` and `moonshot`, and the sorted
+    /// first of those is the answer.
+    #[test]
+    fn a_provider_only_model_resolves_without_a_provider() {
+        let t = table();
+        let entry = t
+            .find("", "kimi-k2")
+            .expect("the fallback reaches a provider's row");
+        assert_eq!(entry.provider_id, "kimi");
+        assert_eq!(entry.input, "1");
     }
 
     /// The reason the key carries a provider at all: two providers may price the

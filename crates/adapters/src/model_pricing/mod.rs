@@ -77,7 +77,10 @@ pub(crate) mod test_support {
                  "cache_read": "0.1", "cache_creation": "1", "currency": "USD"},
                 {"provider_id": "moonshot", "model_id": "kimi-k2",
                  "display_name": "Kimi K2 (Moonshot)", "input": "2", "output": "8",
-                 "cache_read": "0.2", "cache_creation": "2", "currency": "USD"}
+                 "cache_read": "0.2", "cache_creation": "2", "currency": "USD"},
+                {"provider_id": "kimi", "model_id": "kimi-k3",
+                 "display_name": "Kimi K3 (Kimi)", "input": "20", "output": "100",
+                 "cache_read": "2", "cache_creation": "20", "currency": "USD"}
             ]
         }"#
         .parse()

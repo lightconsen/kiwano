@@ -1125,7 +1125,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_endpoint_is_a_per_user_pipe() {
-        let name = AdminEndpoint::beside_db(Path::new("C:\\Users\\u\\.kiwano\\kiwano.db")).name;
+        let endpoint = AdminEndpoint::beside_db(Path::new("C:\\Users\\u\\.kiwano\\kiwano.db"));
+        let name = endpoint.name();
         assert!(name.starts_with(r"\\.\pipe\kiwano-admin-"), "{name}");
         // Two derivations agree, and neither is the machine-global name.
         assert_eq!(name, user_pipe_name());
@@ -1133,11 +1134,11 @@ mod tests {
 
         // An explicit value gets the namespace prefix when it lacks one.
         assert_eq!(
-            AdminEndpoint::parse("some-pipe").name,
+            AdminEndpoint::parse("some-pipe").name(),
             r"\\.\pipe\some-pipe"
         );
         assert_eq!(
-            AdminEndpoint::parse(r"\\.\pipe\some-pipe").name,
+            AdminEndpoint::parse(r"\\.\pipe\some-pipe").name(),
             r"\\.\pipe\some-pipe"
         );
     }

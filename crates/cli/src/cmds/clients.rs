@@ -48,19 +48,19 @@ fn parse_windows(raw: &[String]) -> Result<Vec<ClientKeyLimitVm>, CliError> {
 
 pub fn clients(cmd: &ClientsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
-        ClientsCmd::List { agent } => {
-            let keys = ctx.api.list_client_keys()?;
+        ClientsCmd::List { agent, days } => {
+            let keys = ctx.api.list_client_keys(Some(*days))?;
             let keys: Vec<_> = match agent {
                 Some(a) => keys.into_iter().filter(|k| &k.agent == a).collect(),
                 None => keys,
             };
-            let text = render_client_keys(&keys);
+            let text = render_client_keys(&keys, *days);
             ctx.out.emit(&keys, || text);
             Ok(())
         }
-        ClientsCmd::Show { id } => {
-            let key = ctx.api.get_client_key(id)?;
-            let text = render_client_key(&key);
+        ClientsCmd::Show { id, days } => {
+            let key = ctx.api.get_client_key(id, Some(*days))?;
+            let text = render_client_key(&key, *days);
             ctx.out.emit(&key, || text);
             Ok(())
         }

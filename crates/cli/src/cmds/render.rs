@@ -515,18 +515,23 @@ pub(crate) fn render_keys(keys: &[vm::ApiKeyVm], provider_id: &str) -> String {
 /// Every client key, in one table. Two columns hold `-` rather than an empty
 /// cell when nothing restricts the key, because "no limit" and "a limit I have
 /// not read" must not look the same in a listing.
-pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm]) -> String {
+pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm], days: i64) -> String {
     if keys.is_empty() {
         return "no client keys: none has been minted, and an agent's own key arrives with its \
                 takeover"
             .to_string();
     }
+    // The spend column's header names its window: "spent 42" means nothing
+    // without knowing over what, and a bare number in a table gets read as
+    // all-time soon enough.
+    let spend_head = format!("SPENT {days}D");
     let head = [
         "HANDLE",
         "AGENT",
         "LABEL",
         "KEY",
         "LIMITS",
+        &spend_head,
         "MODELS",
         "PROVIDERS",
         "LAST USED",
@@ -540,6 +545,7 @@ pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm]) -> String {
                 k.label.clone().unwrap_or_else(|| "-".to_string()),
                 k.masked.clone(),
                 windows_text(k),
+                spend_text(k),
                 list_text(&k.model_allow),
                 list_text(&k.provider_allow),
                 // `never`, not the `-` the other empty cells use: there, `-` means
@@ -555,8 +561,34 @@ pub(crate) fn render_client_keys(keys: &[vm::ClientKeyVm]) -> String {
     render_table(&head, &rows, &[])
 }
 
-/// One key in full: what it is, and what it may do.
-pub(crate) fn render_client_key(key: &vm::ClientKeyVm) -> String {
+/// What one key spent, in the monies it spent them in.
+///
+/// **Never summed across currencies and never converted** — this is not the
+/// dashboard, and a single figure here would be either a conversion or a lie.
+/// Rows that could not be priced are named rather than folded in: a total that is
+/// quietly short is worse than one that says it is short.
+fn spend_text(key: &vm::ClientKeyVm) -> String {
+    let spend = &key.spend;
+    if spend.requests == 0 {
+        return "-".to_string();
+    }
+    if spend.cost.is_empty() {
+        // Tokens but no money: every row landed unpriced.
+        return format!("unpriced ({} rows)", spend.requests);
+    }
+    let amounts: Vec<String> = spend
+        .cost
+        .iter()
+        .map(|c| format!("{} {}", fmt_amount(c.amount, 2), c.currency))
+        .collect();
+    match spend.unpriced_rows {
+        0 => amounts.join(" + "),
+        n => format!("{} (+{n} unpriced)", amounts.join(" + ")),
+    }
+}
+
+/// One key in full: what it is, what it may do, and what it has cost.
+pub(crate) fn render_client_key(key: &vm::ClientKeyVm, days: i64) -> String {
     let mut out = String::new();
     out.push_str(&format!("handle   {}\n", key.id));
     out.push_str(&format!("agent    {}\n", key.agent));
@@ -573,6 +605,21 @@ pub(crate) fn render_client_key(key: &vm::ClientKeyVm) -> String {
         "last used {}\n",
         key.last_used_at.as_deref().unwrap_or("never")
     ));
+    out.push_str(&format!("spent ({days}d) {}\n", spend_text(key)));
+    out.push_str(&format!(
+        "  {} request(s), {} token(s){}",
+        key.spend.requests,
+        key.spend.tokens,
+        if key.spend.unpriced_rows > 0 {
+            format!(
+                " — {} of them carry no cost (no price for the model)",
+                key.spend.unpriced_rows
+            )
+        } else {
+            String::new()
+        }
+    ));
+    out.push('\n');
     out.push_str(
         "\nThe key itself is not readable: it was shown once, when it was minted or rotated.\n",
     );

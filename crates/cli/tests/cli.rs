@@ -2708,3 +2708,95 @@ fn a_declared_price_prices_an_imported_models_rows() {
         "{bucket}"
     );
 }
+
+/// What each key spent, in the money it was spent in — and the rows that could
+/// not be priced are named rather than folded into a total that is quietly short.
+#[test]
+fn clients_list_reports_what_each_key_spent() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let store = Store::open(&db).unwrap();
+    let laptop = store
+        .upsert_client_key("kw-ag-claude-laptop", "claude")
+        .unwrap();
+    let desktop = store
+        .upsert_client_key("kw-ag-claude-desktop", "claude")
+        .unwrap();
+    store.set_client_key_label(&laptop, Some("laptop")).unwrap();
+    store
+        .set_client_key_label(&desktop, Some("desktop"))
+        .unwrap();
+
+    let row = |key_id: &str, cost: Option<f64>, currency: Option<&str>, tokens: i64| {
+        kiwanod::store::UsageRecord {
+            ts: kiwanod::store::now_rfc3339(),
+            agent: "claude".into(),
+            provider_id: Some("p1".into()),
+            client_key_id: Some(key_id.into()),
+            model: Some("claude-sonnet-4-5".into()),
+            input_tokens: tokens,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            latency_ms: None,
+            status: "ok".into(),
+            cost,
+            cost_currency: currency.map(str::to_string),
+            cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
+        }
+    };
+    // The laptop spent in two currencies and had one row nobody could price; the
+    // desktop spent nothing at all.
+    store
+        .record_usage(&row(&laptop, Some(1.5), Some("USD"), 1_000))
+        .unwrap();
+    store
+        .record_usage(&row(&laptop, Some(20.0), Some("CNY"), 2_000))
+        .unwrap();
+    store
+        .record_usage(&row(&laptop, None, None, 3_000))
+        .unwrap();
+
+    let (code, out, err) = run_served(&db, &daemon, &["--json", "clients", "list"]);
+    assert_eq!(code, 0, "{err}");
+    let keys: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    let by_name: std::collections::HashMap<&str, &serde_json::Value> = keys
+        .iter()
+        .map(|k| (k["label"].as_str().unwrap_or(""), k))
+        .collect();
+    let laptop_json = by_name["laptop"];
+    assert_eq!(laptop_json["spend"]["requests"], 3);
+    assert_eq!(laptop_json["spend"]["tokens"], 6_000);
+    assert_eq!(
+        laptop_json["spend"]["unpriced_rows"], 1,
+        "the row nobody could price is counted and named, not hidden"
+    );
+    let cost = laptop_json["spend"]["cost"].as_array().unwrap();
+    assert_eq!(cost.len(), 2, "two currencies, kept apart");
+    assert_eq!(cost[0]["currency"], "CNY");
+    assert_eq!(cost[0]["amount"], 20.0);
+    assert_eq!(cost[1]["currency"], "USD");
+    assert_eq!(cost[1]["amount"], 1.5);
+
+    // The text rendering says the same thing, and folds the shortfall into a
+    // parenthetical rather than into the amount.
+    let (_, text, _) = run_served(&db, &daemon, &["clients", "list", "--days", "7"]);
+    assert!(
+        text.contains("SPENT 7D"),
+        "the header names its window: {text}"
+    );
+    assert!(
+        text.contains("20.00 CNY + 1.50 USD (+1 unpriced)"),
+        "{text}"
+    );
+    // A key that spent nothing shows the same `-` its other empty cells do,
+    // rather than a zero that would read as "spent nothing, and that is a figure".
+    let desktop_row = text
+        .lines()
+        .find(|l| l.contains("desktop"))
+        .expect("the desktop's row");
+    assert!(desktop_row.contains("| -  "), "{desktop_row}");
+}

@@ -31,6 +31,30 @@ pub struct ClientKeyLimitVm {
     pub limit_unit: Option<String>,
 }
 
+/// One currency's total. Never converted, and never added to another's: the
+/// figure is shown in the money it was spent in (the dashboard is the one place
+/// that converts, and this is not it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CurrencyAmountVm {
+    pub currency: String,
+    pub amount: f64,
+}
+
+/// What one key spent over the window the caller asked for.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClientKeySpendVm {
+    pub requests: i64,
+    /// All four token buckets, summed: a list column is not the place for four
+    /// numbers, and the split is in `usage` for anyone who wants it.
+    pub tokens: i64,
+    /// Rows in `requests` that carry no cost at all, so a reader can see that the
+    /// money below is short rather than believe it is complete.
+    #[serde(default)]
+    pub unpriced_rows: i64,
+    #[serde(default)]
+    pub cost: Vec<CurrencyAmountVm>,
+}
+
 /// A client key as the CLI lists it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClientKeyVm {
@@ -62,6 +86,9 @@ pub struct ClientKeyVm {
     /// row on the request path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<String>,
+    /// What this key spent over the window the read asked for.
+    #[serde(default)]
+    pub spend: ClientKeySpendVm,
 }
 
 /// The one response that carries a secret: the result of minting one.

@@ -791,15 +791,26 @@ pub enum HistoryCmd {
 
 #[derive(Debug, Subcommand)]
 pub enum ClientsCmd {
-    /// Every client key: handle, agent, label, limits and allowlists. Masks.
+    /// Every client key: handle, agent, label, limits, allowlists, and what it
+    /// spent. Masks.
     List {
         /// Only keys that route as this agent
         #[arg(long, value_name = "AGENT")]
         agent: Option<String>,
+
+        /// Window the spend column covers
+        #[arg(long, default_value_t = 30, value_name = "DAYS")]
+        days: i64,
     },
 
     /// One client key, by its handle (ck-…)
-    Show { id: String },
+    Show {
+        id: String,
+
+        /// Window the spend figures cover
+        #[arg(long, default_value_t = 30, value_name = "DAYS")]
+        days: i64,
+    },
 
     /// Mint a key for an agent. The key itself is printed once — copy it into
     /// the agent's config; nothing reads it back.

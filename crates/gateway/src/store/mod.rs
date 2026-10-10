@@ -59,8 +59,8 @@ pub use metrics::StoreMetrics;
 pub use migrations::SCHEMA_VERSION;
 pub use time::{now_rfc3339, rfc3339_from_unix, unix_now};
 pub use types::{
-    AgentLimit, ApiKeyRow, Billing, Binding, ClientKey, ClientKeyLimit, CostBucket, CustomAgent,
-    DailyUsage, ImportedSession, OpenAiWire, Protocol, Provider, ProviderCostBucket,
+    AgentLimit, ApiKeyRow, Billing, Binding, ClientKey, ClientKeyLimit, ClientKeySpend, CostBucket,
+    CustomAgent, DailyUsage, ImportedSession, OpenAiWire, Protocol, Provider, ProviderCostBucket,
     ProviderEndpoint, ProviderHealth, ProviderUsage, Strategy, StrategyType, TrafficStats,
     UsageRecord, UsageTotals,
 };

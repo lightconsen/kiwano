@@ -154,18 +154,23 @@ impl DaemonApi {
         ))
     }
 
-    /// Every client key, masked, with its windows and allowlists.
-    pub fn list_client_keys(&self) -> Result<Vec<ClientKeyVm>, String> {
-        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/client-keys")
+    /// Every client key, masked, with its windows, its allowlists and what it
+    /// spent over `days` (None = all time).
+    pub fn list_client_keys(&self, days: Option<i64>) -> Result<Vec<ClientKeyVm>, String> {
+        let path = match days {
+            Some(days) => format!("/api/client-keys?days={days}"),
+            None => "/api/client-keys".to_string(),
+        };
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), &path)
     }
 
     /// One client key by its handle (`ck-…`).
-    pub fn get_client_key(&self, id: &str) -> Result<ClientKeyVm, String> {
-        sidecar::admin_get_json(
-            &self.endpoint,
-            self.token.as_deref(),
-            &format!("/api/client-keys/{id}"),
-        )
+    pub fn get_client_key(&self, id: &str, days: Option<i64>) -> Result<ClientKeyVm, String> {
+        let path = match days {
+            Some(days) => format!("/api/client-keys/{id}?days={days}"),
+            None => format!("/api/client-keys/{id}"),
+        };
+        sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), &path)
     }
 
     /// Mint a key. The response is the one place the secret appears.

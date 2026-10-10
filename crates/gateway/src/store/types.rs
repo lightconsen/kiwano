@@ -501,6 +501,25 @@ pub struct ImportedSession {
     pub skills: Option<String>,
 }
 
+/// One client key's spend in one currency (`Store::client_key_spend`).
+///
+/// One row per key **and currency**, not per key: a key whose traffic spanned two
+/// billing currencies has two facts, and folding them into one number would be
+/// adding different monies.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientKeySpend {
+    pub key_id: String,
+    /// `None` for the rows that were never priced — the tokens they used are in
+    /// `tokens`, and `cost` misses them.
+    pub currency: Option<String>,
+    pub requests: i64,
+    pub tokens: i64,
+    /// How many of `requests` carry no cost at all. A spend figure missing rows
+    /// must say so (see the import report's own rule).
+    pub unpriced_rows: i64,
+    pub cost: f64,
+}
+
 /// A cost summed over a window, with what the same rows would have cost at
 /// their off-peak rates (migration v13). The two are equal for a model with no
 /// published schedule.

@@ -752,9 +752,14 @@ struct BindBody {
     provider_id: String,
 }
 
-/// `GET /api/client-keys` — every key, masked, with its windows and allowlists.
-async fn list_client_keys_route(State(state): State<Arc<GatewayState>>) -> Response {
-    match crate::api::client_keys::list_client_keys(&state.store) {
+/// `GET /api/client-keys` — every key, masked, with its windows, its allowlists
+/// and what it spent over `?days=` (absent = all time).
+async fn list_client_keys_route(
+    State(state): State<Arc<GatewayState>>,
+    Query(query): Query<DaysQuery>,
+) -> Response {
+    let since = query.days.map(days_ago);
+    match crate::api::client_keys::list_client_keys(&state.store, since.as_deref()) {
         Ok(keys) => Json(keys).into_response(),
         Err(e) => resource_error(e),
     }
@@ -764,8 +769,10 @@ async fn list_client_keys_route(State(state): State<Arc<GatewayState>>) -> Respo
 async fn get_client_key_route(
     State(state): State<Arc<GatewayState>>,
     Path(id): Path<String>,
+    Query(query): Query<DaysQuery>,
 ) -> Response {
-    match crate::api::client_keys::get_client_key(&state.store, &id) {
+    let since = query.days.map(days_ago);
+    match crate::api::client_keys::get_client_key(&state.store, &id, since.as_deref()) {
         Ok(key) => Json(key).into_response(),
         Err(e) => resource_error(e),
     }
@@ -1671,6 +1678,18 @@ struct SessionQuery {
     agent: Option<String>,
     project: Option<String>,
     days: Option<i64>,
+}
+
+/// `?days=N` — the window a read's figures cover. Shared by the reads that report
+/// a spend, so they all measure the same span from the same place.
+#[derive(serde::Deserialize)]
+struct DaysQuery {
+    days: Option<i64>,
+}
+
+/// The instant `days` ago, as the store's `ts` filters want it.
+fn days_ago(days: i64) -> String {
+    crate::store::rfc3339_from_unix(crate::store::unix_now() - days.max(0) * 86_400)
 }
 
 /// `GET /api/history/scan` — when this machine's history was last imported, so a

@@ -16,7 +16,8 @@
 
 use crate::store::{ClientKey, ClientKeyLimit};
 use kiwano_api::client_keys::{
-    ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeyVm, NewClientKeyInput,
+    ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeySpendVm, ClientKeyVm,
+    CurrencyAmountVm, NewClientKeyInput,
 };
 use kiwano_api::error::ApiError;
 
@@ -29,6 +30,7 @@ fn key_vm(
     store: &crate::store::Store,
     key: ClientKey,
     last_used: Option<&str>,
+    spend: Option<ClientKeySpendVm>,
 ) -> Result<ClientKeyVm, ApiError> {
     let limits = store
         .client_key_limits_for(&key.id)
@@ -50,30 +52,77 @@ fn key_vm(
         limits,
         created_at: key.created_at,
         last_used_at: last_used.map(str::to_string),
+        spend: spend.unwrap_or_default(),
     })
 }
 
-pub fn list_client_keys(store: &crate::store::Store) -> Result<Vec<ClientKeyVm>, ApiError> {
+/// The per-key spend over `since`, folded from the store's per-currency rows.
+///
+/// Folding here rather than in SQL because the *shape* the reader wants is one
+/// row per key with a currency list inside it, and because the unpriced count has
+/// to survive the fold: a key whose rows could not all be costed understates, and
+/// the caller is told by how much.
+fn spend_by_key(
+    store: &crate::store::Store,
+    since: Option<&str>,
+) -> Result<std::collections::HashMap<String, ClientKeySpendVm>, ApiError> {
+    let rows = store.client_key_spend(since).map_err(ApiError::failed)?;
+    let mut folded: std::collections::HashMap<String, ClientKeySpendVm> =
+        std::collections::HashMap::new();
+    for row in rows {
+        let entry = folded.entry(row.key_id).or_default();
+        entry.requests += row.requests;
+        entry.tokens += row.tokens;
+        entry.unpriced_rows += row.unpriced_rows;
+        if let Some(currency) = row.currency {
+            entry.cost.push(CurrencyAmountVm {
+                currency,
+                amount: row.cost,
+            });
+        }
+    }
+    for entry in folded.values_mut() {
+        entry.cost.sort_by(|a, b| a.currency.cmp(&b.currency));
+    }
+    Ok(folded)
+}
+
+/// Every key, with what each spent over `since`.
+///
+/// `since` is the caller's window — the CLI's `--days` — and `None` is all time.
+/// The figure travels with the window that produced it rather than being a bare
+/// number: "spent 42" means nothing without knowing over what.
+pub fn list_client_keys(
+    store: &crate::store::Store,
+    since: Option<&str>,
+) -> Result<Vec<ClientKeyVm>, ApiError> {
     let last_used = store.client_key_last_used().map_err(ApiError::failed)?;
+    let spend = spend_by_key(store, since)?;
     store
         .list_client_keys()
         .map_err(ApiError::failed)?
         .into_iter()
         .map(|k| {
             let at = last_used.get(&k.id).map(String::as_str);
-            key_vm(store, k, at)
+            let spent = spend.get(&k.id).cloned();
+            key_vm(store, k, at, spent)
         })
         .collect()
 }
 
-pub fn get_client_key(store: &crate::store::Store, id: &str) -> Result<ClientKeyVm, ApiError> {
+pub fn get_client_key(
+    store: &crate::store::Store,
+    id: &str,
+    since: Option<&str>,
+) -> Result<ClientKeyVm, ApiError> {
     let key = store
         .get_client_key(id)
         .map_err(ApiError::failed)?
         .ok_or_else(|| ApiError::not_found(format!("no client key `{id}`")))?;
     let last_used = store.client_key_last_used().map_err(ApiError::failed)?;
     let at = last_used.get(&key.id).map(String::as_str);
-    key_vm(store, key, at)
+    let spent = spend_by_key(store, since)?.remove(&key.id);
+    key_vm(store, key, at, spent)
 }
 
 /// Mint a key for an agent, with whatever policy came with it.
@@ -285,7 +334,7 @@ mod tests {
         )
         .unwrap();
 
-        let listed = list_client_keys(&s).unwrap();
+        let listed = list_client_keys(&s, None).unwrap();
         assert_eq!(listed.len(), 1);
         let vm = &listed[0];
         assert_eq!(vm.id, created.id);
@@ -316,7 +365,7 @@ mod tests {
             },
         )
         .unwrap();
-        let after = list_client_keys(&s).unwrap();
+        let after = list_client_keys(&s, None).unwrap();
         assert!(after[0].model_allow.is_empty());
         assert_eq!(after[0].label, None);
         let stored = s.get_client_key(&created.id).unwrap().unwrap();
@@ -383,7 +432,7 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("needs an agent"), "{err}");
 
-        assert!(get_client_key(&s, "ck-nope").is_err());
+        assert!(get_client_key(&s, "ck-nope", None).is_err());
         assert!(rotate_client_key(&s, "ck-nope").is_err());
         assert!(delete_client_key(&s, "ck-nope").is_err());
         assert!(set_client_key_limits(&s, "ck-nope", vec![]).is_err());

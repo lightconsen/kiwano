@@ -10,8 +10,8 @@
 
 use crate::error::Result;
 use crate::store::types::{
-    CostBucket, DailyUsage, ProviderCostBucket, ProviderUsage, TrafficStats, UsageRecord,
-    UsageTotals,
+    ClientKeySpend, CostBucket, DailyUsage, ProviderCostBucket, ProviderUsage, TrafficStats,
+    UsageRecord, UsageTotals,
 };
 use crate::store::Store;
 use rusqlite::params;
@@ -398,6 +398,45 @@ impl Store {
             out.insert(key_id, ts);
         }
         Ok(out)
+    }
+
+    /// What each client key spent, per currency, over a window.
+    ///
+    /// The other half of a key's row: the windows it may spend *within* are in
+    /// `client_key_limits`, and this is what it has spent. Grouped by currency
+    /// because a key can spend in more than one — its traffic spans providers, and
+    /// those bill in different monies — and the caller renders each in its own
+    /// rather than adding them (which is adding dollars to yuan).
+    ///
+    /// `unpriced_rows` rides along for the same reason the import report names its
+    /// failures: a spend figure with rows that could not be costed in it
+    /// understates, and the reader is owed that fact rather than a number that is
+    /// quietly short.
+    pub fn client_key_spend(&self, since: Option<&str>) -> Result<Vec<ClientKeySpend>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT client_key_id, cost_currency, COUNT(*),
+                    COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens
+                                 + cache_creation_tokens), 0),
+                    COALESCE(SUM(CASE WHEN cost IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(cost), 0)
+             FROM usage
+             WHERE client_key_id IS NOT NULL AND (?1 IS NULL OR ts >= ?1)
+             GROUP BY client_key_id, cost_currency",
+        )?;
+        let rows = stmt
+            .query_map(params![since], |row| {
+                Ok(ClientKeySpend {
+                    key_id: row.get(0)?,
+                    currency: row.get(1)?,
+                    requests: row.get(2)?,
+                    tokens: row.get(3)?,
+                    unpriced_rows: row.get(4)?,
+                    cost: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     /// Totals grouped by provider, optionally filtered by agent, provider

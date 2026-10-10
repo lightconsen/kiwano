@@ -19,6 +19,56 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
+**The version that declares the split.** 0.2.13 made the app and the CLI clients
+of the gateway — reads and writes over its admin API, the gateway the only writer
+of the shared database, `kiwano reload` gone. That is a breaking change and it
+shipped under a patch number; 0.3.0 is where the line is drawn, and it is also
+where the other half of the cross-machine story landed.
+
+### Added
+
+- **The data plane can listen beyond loopback: `KIWANO_DATA_ADDR`.** Unset is
+  `127.0.0.1`, which is every install today, so nothing changes unless you ask.
+  Set it to a private address and the agents on *another* machine can reach a
+  gateway on this one — which is what 0.2.13's release note described and could
+  not deliver: a takeover issued from the second machine wrote the far machine's
+  address, and the far machine was listening on its own loopback, so the address
+  it wrote answered nothing.
+
+- **`KIWANO_DATA_ALLOW_ANY`**, an address reachable from anywhere needs it. The
+  private-range rule is the one the admin plane already applies (RFC1918,
+  loopback, link-local, and the `100.64/10` a tailnet uses). The switch is
+  **separate from the admin plane's** on purpose: that one is about credentials,
+  this listener carries the requests and responses themselves, and an operator
+  who has decided one may face the network has not thereby decided the other.
+
+- **`/status` reports `data_host`** alongside `data_port`. A client used to
+  compose an agent's URL from its own idea of where the daemon is, which stays
+  wrong whenever the two planes are not on the same interface — and which is
+  exactly how the bug above was possible.
+
+### Fixed
+
+- **A takeover from another machine now points the agent at an address that
+  answers.** See `KIWANO_DATA_ADDR` above; this is the user-visible half of it,
+  and the change is verifiable by taking one agent over and sending it a request.
+
+- **The daemon's parseable ready line names the address it actually bound.** It
+  said `127.0.0.1` because that was once the only possibility, and went on saying
+  it after it was not. The line exists to be parsed by whoever started the
+  process, so naming the wrong address is worse than not printing it.
+
+### Changed
+
+- **The cross-machine setup has a page:**
+  [A gateway on another machine](docs/remote-gateway.md) — both planes, the five
+  environment variables, where the admin token comes from, and the deployment
+  requirement that comes with a plaintext transport: a private network or a VPN,
+  never a public address. The `kiwano` CLI reference links to it, and so does the
+  README.
+
 ## [0.2.13] - 2026-10-10
 
 ### Added

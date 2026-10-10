@@ -2,7 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -55,6 +55,7 @@ export const tauriApi: KiwanoApi = {
 
   getSettings: () => invoke<AppSettings>("get_settings"),
   syncHub: () => invoke<HubSyncReport>("sync_hub"),
+  historyImport: () => invoke<HistoryImportReport>("history_import"),
 
   checkUsageAlerts: () => invoke<UsageAlert[]>("check_usage_alerts"),
 

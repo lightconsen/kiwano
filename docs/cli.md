@@ -191,6 +191,38 @@ kiwano keys remove <KEY_ID>
 
 Rotating keys are tried after the provider's primary key, per request.
 
+### History
+
+```
+kiwano history import [--agent claude|codex]… [--dry-run]
+kiwano history sessions [--project P] [--agent A] [--days N]
+```
+
+The agents' own history, read from their session files and imported, so the
+dashboard of a machine that installed Kiwano this morning has yesterday's spend on
+it. `import` reads Claude Code's and Codex's transcripts and sends what they say;
+the app runs the same scan once, on first launch. `--dry-run` reads and reports
+without writing anything — the honest answer to "why is my dashboard still
+empty?", since the files may simply not be where this machine expects them
+(those lines go to stderr: a scan is exactly the command you pipe into `jq`).
+
+Two things to know before reading the numbers:
+
+- **Only what predates the gateway is imported.** Every request served since a
+  takeover is already in the ledger, and the agents write their files either way;
+  the boundary is each agent's own first metered row, so the same request is never
+  counted twice. `import` reports how many rows that kept out.
+- **The cost is an estimate.** The files carry tokens, not money, and an imported
+  request has no provider whose declared price would apply — so each row is priced
+  at the general rate for its model. On a machine that has never synced the Hub
+  nothing is priced at all (the rows land with tokens and no cost); a later
+  `history import` fills those in, because the import is idempotent.
+
+`sessions` lists what came in: project, span, turns, tokens, and the tools used.
+A project here is a **label** derived from the working directory the transcript
+recorded — the repository's directory name, not a path, because the gateway is
+never told this machine's layout.
+
 ### Client keys
 
 ```

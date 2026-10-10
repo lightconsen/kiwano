@@ -30,6 +30,7 @@ pub mod alerts;
 pub mod catalog;
 pub mod daemon;
 pub mod dashboard;
+pub mod history;
 pub mod hub;
 pub mod keys;
 pub mod logs;
@@ -59,6 +60,7 @@ use kiwano_core::{sidecar, vm};
 use vm::Aux;
 
 use crate::daemon::{spawn_usage_watch, spawn_watchdog};
+use crate::history::spawn_history_backfill;
 use crate::hub::spawn_hub_sync;
 use crate::paths::{db_path, env_port, local_db_path, resolved_db};
 use crate::state::AppState;
@@ -79,6 +81,7 @@ pub use alerts::check_usage_alerts;
 pub use catalog::{list_catalog, list_model_prices, open_url};
 pub use daemon::get_gateway_status;
 pub use dashboard::get_dashboard;
+pub use history::history_import;
 pub use hub::sync_hub;
 pub use keys::{add_api_key, delete_api_key, list_api_keys};
 pub use logs::{
@@ -228,6 +231,11 @@ pub fn run() {
             // the manifest sha matches the cache). Silent, opt-out-free, and
             // failure-tolerant — a failed sync just leaves the cache as it was.
             spawn_hub_sync(app.handle().clone());
+            // The agents' own history: a first-launch backfill of what predates
+            // the gateway, gated on the daemon's scan stamp so the common launch
+            // costs one HTTP call. It is not a sync — the daemon's watermark
+            // keeps the gateway's own traffic out, and nothing here re-reads it.
+            spawn_history_backfill(app.handle().clone());
 
             // Tray + login items (the autostart/close_to_tray settings become real from here on)
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -319,6 +327,7 @@ pub fn run() {
             check_app_update,
             update::download_and_install_app_update,
             get_pending_update,
+            history_import,
             get_currency_meta,
             get_plan_quota,
             open_log_folder,

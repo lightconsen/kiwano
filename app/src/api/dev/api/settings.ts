@@ -1,7 +1,7 @@
 // Settings, and everything that lives in them: the custom agents, the
 // takeovers, the cc-switch import and the Hub sync.
 
-import type { AgentId, AppSettings, CustomAgent, HubSyncReport, ImportReport, KiwanoApi, Protocol } from "../../types";
+import type { AgentId, AppSettings, CustomAgent, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, Protocol } from "../../types";
 import { delay } from "../delay";
 import { agentRoutes } from "../routes";
 import { settings } from "../settings";
@@ -19,6 +19,7 @@ export const settingsApi: Pick<
   | "setTakeover"
   | "importCcSwitch"
   | "syncHub"
+  | "historyImport"
 > = {
   async getSettings(): Promise<AppSettings> {
     await delay();
@@ -146,6 +147,20 @@ export const settingsApi: Pick<
       unchanged,
       pricing_version: 1,
       pricing_unchanged: unchanged,
+    };
+  },
+
+  async historyImport(): Promise<HistoryImportReport> {
+    await delay(400);
+    // The dev fixtures are the dashboard's own; a scan here imports nothing, so
+    // the honest mock answer is the empty one the backend reports for a machine
+    // whose transcripts predate nothing.
+    return {
+      usage_rows: 0,
+      sessions: 0,
+      skipped_by_watermark: 0,
+      priced: 0,
+      unpriced: 0,
     };
   },
 };

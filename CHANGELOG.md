@@ -21,6 +21,31 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **A fresh install's dashboard is not empty: `kiwano history import`.** Kiwano
+  only ever knew the traffic that went through it, so the first screen of a new
+  install stayed empty until the user happened to route something. The agents
+  write their own session files either way — Claude Code's
+  `~/.claude/projects/*/*.jsonl`, Codex's `~/.codex/sessions/**/rollout-*.jsonl` —
+  and those hold what was spent **before Kiwano existed**, plus a **project**
+  dimension the gateway can never observe: it sees requests, not the repository
+  they came from. `history import` reads them (the app does it once on first
+  launch) and `history sessions` lists what came in, by project, span, turns and
+  tools.
+
+  Three rules make it honest. Only what **predates** the gateway is imported —
+  everything served since a takeover is already in the ledger, and both agents
+  write their files regardless, so importing it would count the same request
+  twice; the boundary is each agent's own first metered row. Costs are an
+  **estimate** at the general rate for the model, because an imported request has
+  no provider to have declared a price — and a machine that has never synced the
+  Hub prices nothing rather than guessing (a later re-import fills those in,
+  which is safe because the import is idempotent, keyed by a value derived from
+  the file). Imported spend appears in the dashboard's money as its own
+  "Not via the gateway" bucket, and **not** in the request count: that tile is
+  what this gateway routed.
+
+### Added
+
 - **A client key is a credential with limits: `kiwano clients`.** The data plane
   has always had a key per agent (`kw-ag-…`, written into the agent's config by a
   takeover), which is what tells the gateway whose request it is. It is now also

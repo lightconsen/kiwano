@@ -716,6 +716,19 @@ export interface ImportReport {
   detail: string[];
 }
 
+/** What a history backfill imported, summed over the request-sized chunks
+ *  (`kiwanod::api::import_history::HistoryImportReport`). */
+export interface HistoryImportReport {
+  usage_rows: number;
+  sessions: number;
+  /** Rows the watermark kept out: traffic the gateway had already metered */
+  skipped_by_watermark: number;
+  /** Rows priced at the general rate — the ones whose figure is an estimate */
+  priced: number;
+  /** Rows left unpriced because the Hub's table has no rate for the model */
+  unpriced: number;
+}
+
 /** Config-plan import result (spec §4.1 P1 config sharing) */
 export interface ConfigShareReport {
   providers_added: number;
@@ -974,6 +987,8 @@ export interface KiwanoApi {
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   /** Fetch the Provider catalog from the Hub into the local cache (Models page prefers cache, falls back to static) */
   syncHub(): Promise<HubSyncReport>;
+  /** Scan this machine's agent transcripts once and import what predates the gateway (the "scan now" button) */
+  historyImport(): Promise<HistoryImportReport>;
   /** Cost alert patrol (backend KV dedupe: returned at most once per Provider per reset period) */
   checkUsageAlerts(): Promise<UsageAlert[]>;
   /** Token-plan quota query; 5-min backend cache, force bypasses it */

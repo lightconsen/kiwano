@@ -19,6 +19,26 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-10-10
+
+### Added
+
+- **A daemon on another machine.** A client can now be pointed at a gateway that
+  is not on the computer it runs on — `KIWANO_DAEMON_ADDR` for the address and
+  `KIWANO_DAEMON_TOKEN` for its admin token — and everything the app and the CLI
+  do travels over that connection. The admin plane gains a plaintext TCP form for
+  it (see the deployment note below), and the data plane reports the port agents
+  should be pointed at, so a takeover performed from the second machine writes
+  *the far* machine's address rather than its own loopback.
+
+- **The client keeps its own database.** A second file, `local.db`, appears
+  beside `kiwano.db`, holding what is true of *this machine* and of nothing else:
+  the directories you have declared for agents the detector cannot find, the
+  marks that say which agents have had rules injected, and the backups a takeover
+  can be undone from. On first launch those rows are adopted from the shared file
+  — a one-time copy, idempotent, that leaves the originals where they are so a
+  downgrade still finds them.
+
 ### Changed
 
 - **Kiwano is Apache-2.0 from this version on.** It was GPL-3.0-or-later since
@@ -30,6 +50,28 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   `THIRD-PARTY-NOTICES` is unchanged, because what Kiwano ports and depends on is
   MIT and ISC, both of which this licence can be combined with.
 
+- **The app and the CLI are clients of the daemon now.** Both read and write
+  through its admin API, and the daemon is the only process that opens the shared
+  database for writing. Nothing on screen changes; what changes is who owns each
+  row, which is what makes the cross-machine case above possible at all.
+
+- **`kiwano status` with no gateway running says so and stops.** It used to read
+  the local database and print how many providers, bindings and usage rows were
+  configured. A client that answers from a database of its own is answering about
+  a different machine the moment it is pointed at one, so the report is gone —
+  exit code 1, unchanged, is still how a script tells the two states apart.
+
+- **`kiwano providers edit` sends only the fields you name.** Editing a provider's
+  name no longer re-sends its limits, its bindings or its advanced settings on
+  the way past; the daemon applies what the command says and leaves the rest.
+
+### Removed
+
+- **`kiwano reload`, the global `--no-reload` flag, and the admin plane's
+  `POST /reload`.** Every write route re-reads the route table itself — the
+  process that writes a binding is the process that routes by it — so the command
+  had nothing left to ask for. Scripts that called it can drop the call.
+
 ### Fixed
 
 - **The provider screen no longer promises something the vendors forbid.** Adding
@@ -39,6 +81,10 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   Pro and Max credentials to Claude's own apps, and routing requests on a
   subscriber's behalf is named as the thing that is not allowed. The note now
   says that, and points at the path that is open — a provider with an API Key.
+
+- **`kiwano providers edit` no longer clears the provider's default model.** The
+  command has no flag for it, and the row it rebuilt always sent an empty one —
+  so any edit, of any field, silently dropped it.
 
 ## [0.2.12] - 2026-10-07
 

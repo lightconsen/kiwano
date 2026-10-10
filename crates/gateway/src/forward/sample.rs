@@ -77,7 +77,7 @@ impl UsageSample {
         UsageRecord {
             ts: now_rfc3339(),
             agent: self.agent,
-            provider_id: self.provider_id,
+            provider_id: Some(self.provider_id),
             client_key_id: Some(self.client_key_id),
             model: self.model,
             input_tokens: self.usage.input_tokens,
@@ -89,6 +89,12 @@ impl UsageSample {
             cost,
             cost_currency,
             cost_off_peak,
+            // A row the gateway wrote: it knows its request, so it has no
+            // project and no import key, and its session id already lives in
+            // `request_logs`.
+            project: None,
+            session_id: None,
+            import_key: None,
         }
     }
 }

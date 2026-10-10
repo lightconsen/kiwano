@@ -56,9 +56,12 @@ pub async fn run(store: Arc<Store>, interval: Duration) {
 /// of their own inside the window. A store that cannot be read yields none —
 /// a failed read must not turn into probing everything.
 fn needs_probing(store: &Store, since: &str) -> Vec<crate::store::Provider> {
+    // `None` is the bucket of rows that never named a provider — an imported
+    // history. It cannot speak for a provider, so it is dropped rather than
+    // turned into a name no provider row answers to.
     let spoken_for: std::collections::HashSet<String> = store
         .usage_by_provider(None, None, Some(since))
-        .map(|rows| rows.into_iter().map(|r| r.provider_id).collect())
+        .map(|rows| rows.into_iter().filter_map(|r| r.provider_id).collect())
         .unwrap_or_default();
     store
         .list_providers()
@@ -145,7 +148,7 @@ mod tests {
             .record_usage(&crate::store::UsageRecord {
                 ts: crate::store::rfc3339_from_unix(crate::store::unix_now() - secs),
                 agent: "claude".into(),
-                provider_id: provider_id.into(),
+                provider_id: Some(provider_id.into()),
                 client_key_id: None,
                 model: Some("m".into()),
                 input_tokens: 10,
@@ -157,6 +160,9 @@ mod tests {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
     }

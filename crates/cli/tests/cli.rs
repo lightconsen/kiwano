@@ -780,7 +780,7 @@ fn status_reports_the_daemons_totals_when_it_answers() {
             .record_usage(&kiwanod::store::UsageRecord {
                 ts: kiwanod::store::now_rfc3339(),
                 agent: "claude".into(),
-                provider_id: "alpha".into(),
+                provider_id: Some("alpha".into()),
                 client_key_id: None,
                 model: None,
                 input_tokens: 100,
@@ -792,6 +792,9 @@ fn status_reports_the_daemons_totals_when_it_answers() {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
     }

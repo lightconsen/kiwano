@@ -339,7 +339,7 @@ pub(crate) mod test_support {
             s.record_usage(&kiwanod::store::UsageRecord {
                 ts: ts.clone(),
                 agent: "claude".into(),
-                provider_id: "demo-alpha".into(),
+                provider_id: Some("demo-alpha".into()),
                 client_key_id: None,
                 model: Some("demo-model".into()),
                 input_tokens: tokens,
@@ -351,6 +351,9 @@ pub(crate) mod test_support {
                 cost: Some(0.5),
                 cost_currency: Some("USD".into()),
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
             // The headline count reads request_logs, not usage: seed both, as
@@ -397,7 +400,7 @@ pub(crate) mod test_support {
         UsageRecord {
             ts: rfc3339(unix_now()),
             agent: "claude".into(),
-            provider_id: provider_id.into(),
+            provider_id: Some(provider_id.into()),
             client_key_id: None,
             model: None,
             input_tokens: 1_000,
@@ -409,6 +412,9 @@ pub(crate) mod test_support {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
         }
     }
 

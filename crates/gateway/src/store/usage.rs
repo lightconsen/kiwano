@@ -24,8 +24,9 @@ impl Store {
         conn.execute(
             "INSERT INTO usage (ts, agent, provider_id, client_key_id, model, input_tokens,
                                 output_tokens, cache_read_tokens, cache_creation_tokens,
-                                latency_ms, status, cost, cost_currency, cost_off_peak)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                                latency_ms, status, cost, cost_currency, cost_off_peak,
+                                project, session_id, import_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 u.ts,
                 u.agent,
@@ -41,6 +42,9 @@ impl Store {
                 u.cost,
                 u.cost_currency,
                 u.cost_off_peak,
+                u.project,
+                u.session_id,
+                u.import_key,
             ],
         )?;
         Ok(())
@@ -512,7 +516,7 @@ fn last_used_is_the_latest_request_per_key_and_absent_for_an_idle_one() {
     let row = |ts: &str, key: Option<&str>| UsageRecord {
         ts: ts.into(),
         agent: "claude".into(),
-        provider_id: "p1".into(),
+        provider_id: Some("p1".into()),
         client_key_id: key.map(str::to_string),
         model: None,
         input_tokens: 1,
@@ -524,6 +528,9 @@ fn last_used_is_the_latest_request_per_key_and_absent_for_an_idle_one() {
         cost: None,
         cost_currency: None,
         cost_off_peak: None,
+        project: None,
+        session_id: None,
+        import_key: None,
     };
     store
         .record_usage(&row("2026-01-01T00:00:00+00:00", Some(&id)))
@@ -561,7 +568,7 @@ mod tests {
         let mk = |ts: &str, provider: &str, input: i64, output: i64| UsageRecord {
             ts: ts.to_string(),
             agent: "claude".to_string(),
-            provider_id: provider.to_string(),
+            provider_id: Some(provider.to_string()),
             client_key_id: None,
             model: Some("claude-sonnet-4-5".to_string()),
             input_tokens: input,
@@ -573,6 +580,9 @@ mod tests {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
         };
 
         store
@@ -588,7 +598,7 @@ mod tests {
             .record_usage(&UsageRecord {
                 ts: "2026-09-07T12:00:00+00:00".into(),
                 agent: "codex".into(),
-                provider_id: "p1".into(),
+                provider_id: Some("p1".into()),
                 client_key_id: None,
                 model: None,
                 input_tokens: 5,
@@ -600,6 +610,9 @@ mod tests {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
 
@@ -630,13 +643,13 @@ mod tests {
 
         let by_provider = store.usage_by_provider(Some("claude"), None, None).unwrap();
         assert_eq!(by_provider.len(), 2);
-        assert_eq!(by_provider[0].provider_id, "p1");
+        assert_eq!(by_provider[0].provider_id.as_deref(), Some("p1"));
         assert_eq!(by_provider[0].totals.requests, 2);
         assert_eq!(by_provider[0].totals.output_tokens, 220);
 
         let one_provider = store.usage_by_provider(None, Some("p2"), None).unwrap();
         assert_eq!(one_provider.len(), 1);
-        assert_eq!(one_provider[0].provider_id, "p2");
+        assert_eq!(one_provider[0].provider_id.as_deref(), Some("p2"));
 
         // tz 0 = UTC: the timestamps below are already UTC dates, so the
         // buckets are unchanged. A non-zero offset is covered by the dashboard

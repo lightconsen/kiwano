@@ -14,6 +14,35 @@ use kiwano_api::dashboard::{
     AgentDistVm, BlockedProviderVm, CurrencyMetaVm, DashboardVm, FilterOptionVm, FooterStatsVm,
     ProviderDistVm, TrendVm,
 };
+
+/// The bucket a row with no provider is reported under.
+///
+/// A row imported from an agent's own session files never named a provider, and
+/// the store keeps that as NULL (migration v31) — the distinction is in the
+/// type, which is what stops a phantom provider from appearing in every
+/// breakdown. The dashboard's shapes, though, are keyed by a string (a display
+/// VM, a `HashMap`), so the conversion happens here and only here: one reserved
+/// id that a user's provider cannot collide with (ids are `slug-hex`), paired
+/// with a name that says what it is. Dropping the bucket instead would make the
+/// parts sum to less than the whole, which is the one thing a spend breakdown
+/// must not do.
+pub(crate) const UNGATEWAYED_PROVIDER_ID: &str = "imported-history";
+pub(crate) const UNGATEWAYED_PROVIDER_NAME: &str = "Not via the gateway";
+
+/// The display id for a bucket whose provider is `None`.
+fn bucket_id(provider_id: Option<&str>) -> String {
+    provider_id.unwrap_or(UNGATEWAYED_PROVIDER_ID).to_string()
+}
+
+/// The display name for a bucket, from the provider roster when it is a real
+/// provider and from the constant when it is not.
+fn bucket_name(names: &HashMap<String, String>, provider_id: Option<&str>) -> String {
+    match provider_id {
+        Some(id) => names.get(id).cloned().unwrap_or_else(|| id.to_string()),
+        None => UNGATEWAYED_PROVIDER_NAME.to_string(),
+    }
+}
+
 use kiwano_api::error::ApiError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -175,8 +204,12 @@ fn dashboard_costs(
             Some(cur) => kiwano_adapters::model_pricing::convert_amount(c, cur, &preferred, &rates),
             None => 0.0,
         };
-        *by_pid.entry(b.provider_id.clone()).or_default() += convert(b.cost);
-        *off_peak_by_pid.entry(b.provider_id).or_default() += convert(b.cost_off_peak);
+        *by_pid
+            .entry(bucket_id(b.provider_id.as_deref()))
+            .or_default() += convert(b.cost);
+        *off_peak_by_pid
+            .entry(bucket_id(b.provider_id.as_deref()))
+            .or_default() += convert(b.cost_off_peak);
     }
 
     Ok(DashboardCosts {
@@ -311,26 +344,19 @@ fn provider_distribution(
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
         .map(|pu| {
-            let name = names
-                .get(&pu.provider_id)
-                .cloned()
-                .unwrap_or(pu.provider_id.clone());
+            let id = bucket_id(pu.provider_id.as_deref());
+            let name = bucket_name(names, pu.provider_id.as_deref());
+            let cost = (costs.by_pid.get(&id).copied().unwrap_or(0.0) * 1e6).round() / 1e6;
+            let cost_off_peak =
+                (costs.off_peak_by_pid.get(&id).copied().unwrap_or(0.0) * 1e6).round() / 1e6;
             ProviderDistVm {
-                id: pu.provider_id.clone(),
+                id,
                 name,
                 color: String::new(), // assigned below, once the list is fixed
                 requests: pu.totals.requests,
                 pct: pu.totals.requests * 100 / total_req,
-                cost: (costs.by_pid.get(&pu.provider_id).copied().unwrap_or(0.0) * 1e6).round()
-                    / 1e6,
-                cost_off_peak: (costs
-                    .off_peak_by_pid
-                    .get(&pu.provider_id)
-                    .copied()
-                    .unwrap_or(0.0)
-                    * 1e6)
-                    .round()
-                    / 1e6,
+                cost,
+                cost_off_peak,
             }
         })
         .collect();
@@ -450,11 +476,8 @@ fn filter_options(
         .into_iter()
         .filter(|pu| pu.totals.requests > 0)
         .map(|pu| FilterOptionVm {
-            id: pu.provider_id.clone(),
-            label: names
-                .get(&pu.provider_id)
-                .cloned()
-                .unwrap_or(pu.provider_id.clone()),
+            id: bucket_id(pu.provider_id.as_deref()),
+            label: bucket_name(names, pu.provider_id.as_deref()),
         })
         .collect();
     let agents: Vec<FilterOptionVm> = roster
@@ -732,7 +755,10 @@ pub fn usage_report(
         .map_err(ApiError::failed)?
         .into_iter()
         .map(|u| ProviderUsageVm {
-            provider_id: u.provider_id,
+            // The report reconciles with the totals above it, so the
+            // no-provider bucket is named rather than dropped — the same
+            // reserved id the dashboard's split uses.
+            provider_id: bucket_id(u.provider_id.as_deref()),
             totals: u.totals,
         })
         .collect();

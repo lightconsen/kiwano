@@ -344,7 +344,7 @@ mod tests {
             s.record_usage(&kiwanod::store::UsageRecord {
                 ts: rfc3339(unix_now()),
                 agent: "claude".into(),
-                provider_id: "a1".into(),
+                provider_id: Some("a1".into()),
                 client_key_id: None,
                 model: None,
                 input_tokens: 10,
@@ -356,6 +356,9 @@ mod tests {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
         }

@@ -21,17 +21,31 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 30;
+pub const SCHEMA_VERSION: i32 = 31;
 
-/// v1's SQL, for a test that needs a database of that vintage to open.
+/// The schema as it stood at v27, for a test that needs a database of that
+/// vintage to open.
 ///
-/// A test standing up "an install from before vN" has to give it the tables the
-/// migrations above N will touch, and the honest way to do that is to run the
-/// store's own SQL rather than to keep a second copy of the schema in a fixture
-/// (`migrate.local.md` §10.14). The version stamp is the caller's business: this
-/// is only the base tables.
+/// A test standing up "an install from before v28" has to give it every table the
+/// migrations above 27 will touch — and by v31 that means all of them, because a
+/// table rebuild reads every column. The honest way is to run the store's own
+/// migration chain up to that version rather than to keep a second copy of the
+/// schema in a fixture (`migrate.local.md` §10.14): the blocks below are the very
+/// ones `migrate` runs, called with the version forced to 0.
+///
+/// The version *stamp* stays the caller's business — it is what decides which
+/// migrations run when the fixture is opened.
 #[cfg(test)]
-pub(crate) const BASE_SCHEMA_SQL: &str = MIGRATION_V1;
+pub(crate) fn apply_schema_through_v27(conn: &Connection) -> Result<()> {
+    let version = 0;
+    Store::apply_migrations_v1_through_v5(conn, version)?;
+    Store::replay_migrations_an_early_build_stamped_over(conn)?;
+    Store::apply_migrations_v7_through_v14(conn, version)?;
+    Store::remove_gemini_providers(conn)?;
+    Store::apply_migrations_v16_through_v26(conn, version)?;
+    conn.execute_batch(MIGRATION_V27)?;
+    Ok(())
+}
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -796,6 +810,98 @@ const MIGRATION_V30: &str = r#"
 ALTER TABLE providers ADD COLUMN openai_wire TEXT NOT NULL DEFAULT 'both';
 "#;
 
+/// v31: the ledger learns about traffic that did not come through us.
+///
+/// A fresh install's dashboard is empty, and it stays empty until the user
+/// happens to route something through the gateway — while the agents' own
+/// session files, sitting right there, hold the history of what they spent
+/// before Kiwano existed and, in the `project` dimension, a fact this gateway
+/// can never observe (it sees requests, not the repository they came from).
+/// Reading those files is the client's job (`migrate.local.md` §5 #1/#2: no
+/// paths in an API payload, and the daemon never touches user files); what lands
+/// here are the parsed rows.
+///
+/// That needs three things of this table, and the rebuild is how SQLite gets
+/// them:
+///
+/// * **`provider_id` may be NULL.** An imported row has no provider — the
+///   request went straight to a vendor, before the gateway existed. An empty
+///   string would satisfy the old NOT NULL and quietly become a provider named
+///   "" in every `GROUP BY provider_id` there is (the dashboard's split, the
+///   Providers screen, the prober). The distinction has to be in the type, and
+///   NULL is the type.
+/// * **`project` and `session_id`**, so the spend can be read back the way the
+///   files record it. Both nullable: no gateway-written row has either, and
+///   `project` is a **label the client derived** (the repository's directory
+///   name) rather than a path — a path is the one thing §5 #1 keeps out of an API
+///   payload, and the client is where it is turned into a name a user reads.
+/// * **`import_key`**, a deterministic id for a row that came out of a file —
+///   `claude-code:<session>:<message>`. With a unique index on it, re-running an
+///   import cannot double-count: the upsert refreshes the row instead. SQLite
+///   treats NULLs in a unique index as distinct, so the gateway's own rows
+///   (always NULL here) are unaffected — the hot path keeps its plain INSERT.
+///
+/// Rebuilt rather than `ALTER`ed because NOT NULL cannot be dropped in place;
+/// the pattern is [`MIGRATION_V4`]'s (FKs off, named-column copy, drop, rename).
+/// `id` is copied, so a row's identity survives, and the four indexes are
+/// recreated because dropping a table drops them with it.
+const MIGRATION_V31: &str = r#"
+PRAGMA foreign_keys=OFF;
+CREATE TABLE usage_new (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                    TEXT NOT NULL,
+    agent                 TEXT NOT NULL,
+    provider_id           TEXT,
+    model                 TEXT,
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms            INTEGER,
+    status                TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok','error')),
+    cost                  REAL,
+    cost_currency         TEXT,
+    cost_off_peak         REAL,
+    client_key_id         TEXT,
+    project               TEXT,
+    session_id            TEXT,
+    import_key            TEXT
+);
+INSERT INTO usage_new (id, ts, agent, provider_id, model, input_tokens, output_tokens,
+                       cache_read_tokens, cache_creation_tokens, latency_ms, status,
+                       cost, cost_currency, cost_off_peak, client_key_id)
+    SELECT id, ts, agent, provider_id, model, input_tokens, output_tokens,
+           cache_read_tokens, cache_creation_tokens, latency_ms, status,
+           cost, cost_currency, cost_off_peak, client_key_id FROM usage;
+DROP TABLE usage;
+ALTER TABLE usage_new RENAME TO usage;
+CREATE INDEX IF NOT EXISTS idx_usage_ts            ON usage(ts);
+CREATE INDEX IF NOT EXISTS idx_usage_provider_ts   ON usage(provider_id, ts);
+CREATE INDEX IF NOT EXISTS idx_usage_agent_ts      ON usage(agent, ts);
+CREATE INDEX IF NOT EXISTS idx_usage_client_key_ts ON usage(client_key_id, ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_import_key ON usage(import_key);
+CREATE INDEX IF NOT EXISTS idx_usage_project_ts    ON usage(project, ts);
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS sessions (
+    import_key            TEXT PRIMARY KEY NOT NULL,
+    agent                 TEXT NOT NULL,
+    project               TEXT,
+    session_id            TEXT NOT NULL,
+    started_at            TEXT NOT NULL,
+    ended_at              TEXT NOT NULL,
+    turns                 INTEGER NOT NULL DEFAULT 0,
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    tool_calls            TEXT,
+    skills                TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project, started_at);
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -945,6 +1051,9 @@ impl Store {
         }
         if version < 30 {
             conn.execute_batch(MIGRATION_V30)?;
+        }
+        if version < 31 {
+            conn.execute_batch(MIGRATION_V31)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -1340,6 +1449,20 @@ mod tests {
                      note       TEXT,
                      created_at TEXT NOT NULL
                  );",
+            )
+            .unwrap();
+            // `usage` needs the same treatment as `providers` above: v9 and v13
+            // add its cost columns, and this fixture's stamp skips them. The
+            // rebuild in v31 then reads every column of the table — a rebuild
+            // cannot add-and-copy in one step — which is why anything a *later*
+            // migration adds (v29's `client_key_id`) has to arrive through its own
+            // migration rather than from here. One consequence worth stating: a
+            // fixture cannot pre-add a column that a migration in its own ladder
+            // will add, or that migration fails on the duplicate.
+            conn.execute_batch(
+                "ALTER TABLE usage ADD COLUMN cost REAL;
+                 ALTER TABLE usage ADD COLUMN cost_currency TEXT;
+                 ALTER TABLE usage ADD COLUMN cost_off_peak REAL;",
             )
             .unwrap();
             conn.execute_batch(

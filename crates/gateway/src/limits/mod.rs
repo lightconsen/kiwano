@@ -132,7 +132,7 @@ pub(crate) mod test_support {
             .record_usage(&UsageRecord {
                 ts: crate::store::now_rfc3339(),
                 agent: "claude".into(),
-                provider_id: provider_id.into(),
+                provider_id: Some(provider_id.into()),
                 client_key_id: None,
                 model: None,
                 input_tokens: 0,
@@ -144,6 +144,9 @@ pub(crate) mod test_support {
                 cost: Some(cost),
                 cost_currency: Some(currency.into()),
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
     }
@@ -210,7 +213,7 @@ pub(crate) mod test_support {
             .record_usage(&UsageRecord {
                 ts: crate::store::now_rfc3339(),
                 agent: agent.into(),
-                provider_id: provider_id.into(),
+                provider_id: Some(provider_id.into()),
                 client_key_id: Some(key_id.into()),
                 model: None,
                 input_tokens: 0,
@@ -222,6 +225,9 @@ pub(crate) mod test_support {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
     }

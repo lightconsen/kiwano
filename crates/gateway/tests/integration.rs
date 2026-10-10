@@ -350,7 +350,7 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
         .usage_by_provider(Some("claude"), None, None)
         .unwrap();
     assert_eq!(by_provider.len(), 1);
-    assert_eq!(by_provider[0].provider_id, "p-ant");
+    assert_eq!(by_provider[0].provider_id.as_deref(), Some("p-ant"));
 }
 
 #[tokio::test]
@@ -1182,7 +1182,7 @@ async fn gemini_inbound_passthrough_meters_usage_metadata() {
         .usage_by_provider(Some("gemini"), None, None)
         .unwrap();
     assert_eq!(by_provider.len(), 1);
-    assert_eq!(by_provider[0].provider_id, "p-gem");
+    assert_eq!(by_provider[0].provider_id.as_deref(), Some("p-gem"));
 }
 
 /// Spawn a mock Gemini upstream on 127.0.0.1:0 (`{model}:{method}` segment).
@@ -1665,7 +1665,7 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
         .record_usage(&kiwanod::store::UsageRecord {
             ts: now,
             agent: "claude".into(),
-            provider_id: "p-ant".into(),
+            provider_id: Some("p-ant".into()),
             client_key_id: None,
             model: Some("m".into()),
             input_tokens: 1,
@@ -1677,6 +1677,9 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
         })
         .unwrap();
 
@@ -2921,7 +2924,7 @@ async fn a_client_key_over_its_own_ceiling_is_429_with_retry_after() {
         .record_usage(&kiwanod::store::UsageRecord {
             ts: now_rfc3339(),
             agent: "claude".into(),
-            provider_id: "p-ant".into(),
+            provider_id: Some("p-ant".into()),
             client_key_id: Some(spent.clone()),
             model: None,
             input_tokens: 0,
@@ -2933,6 +2936,9 @@ async fn a_client_key_over_its_own_ceiling_is_429_with_retry_after() {
             cost: None,
             cost_currency: None,
             cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
         })
         .unwrap();
 

@@ -29,7 +29,7 @@ mod tests {
         s.record_usage(&kiwanod::store::UsageRecord {
             ts: rfc3339(now - 60),
             agent: "claude".into(),
-            provider_id: "payg-1".into(),
+            provider_id: Some("payg-1".into()),
             client_key_id: None,
             model: Some("demo-model".into()),
             input_tokens: 1_000,
@@ -41,6 +41,9 @@ mod tests {
             cost: Some(30.0),
             cost_currency: Some("CNY".into()),
             cost_off_peak: None,
+            project: None,
+            session_id: None,
+            import_key: None,
         })
         .unwrap();
         let totals = s.usage_totals(None, Some("payg-1"), Some(&since7)).unwrap();

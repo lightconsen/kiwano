@@ -31,7 +31,7 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
     let record = sample.into_record(cost, cost_off_peak, cost_currency);
     tracing::info!(
         agent = %record.agent,
-        provider_id = %record.provider_id,
+        provider_id = %record.provider_id.as_deref().unwrap_or("(none)"),
         input = record.input_tokens,
         output = record.output_tokens,
         cache_read = record.cache_read_tokens,
@@ -65,7 +65,7 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
             query: log.capture.query,
             agent: Some(record.agent.clone()),
             attribution: Some(log.attribution),
-            provider_id: Some(record.provider_id.clone()),
+            provider_id: record.provider_id.clone(),
             model: record.model,
             status_code: log.status_code as i64,
             error_kind: log.error_kind,
@@ -108,7 +108,7 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
             state.notify_event(crate::server::GatewayEvent::DlpFinding {
                 log_id,
                 agent: record.agent,
-                provider_id: Some(record.provider_id),
+                provider_id: record.provider_id,
                 note,
             });
         }

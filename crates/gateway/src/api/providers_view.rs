@@ -510,7 +510,12 @@ fn load_usage(store: &Store, since7: &str) -> Result<HashMap<String, UsageTotals
         .usage_by_provider(None, None, Some(since7))
         .map_err(ApiError::failed)?
     {
-        usage_by_id.insert(pu.provider_id, pu.totals);
+        // This map is keyed by real providers: there is no row to hang an
+        // imported history's spend on, and inventing one would put a phantom
+        // card on the Providers screen.
+        if let Some(provider_id) = pu.provider_id {
+            usage_by_id.insert(provider_id, pu.totals);
+        }
     }
     Ok(usage_by_id)
 }

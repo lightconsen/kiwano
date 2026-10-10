@@ -430,10 +430,15 @@ pub struct ApiKeyRow {
 /// One metered request (tech.md §4.3 request flow, usage capture).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsageRecord {
-    /// RFC3339 UTC timestamp of the request.
+    /// RFC3339 UTC timestamp of the request — and, for an imported row, the
+    /// timestamp the *file* recorded, which is the whole point of importing it.
     pub ts: String,
     pub agent: String,
-    pub provider_id: String,
+    /// The provider that served it. `None` for a row that came out of an agent's
+    /// own session file (migration v31): that request went straight to a vendor,
+    /// before this gateway existed, and inventing a provider for it would put a
+    /// phantom row in every `GROUP BY provider_id` there is.
+    pub provider_id: Option<String>,
     /// The handle of the client key that carried this request (migration v29).
     ///
     /// A handle, not the key: a rotated key must keep the spend it already
@@ -458,6 +463,18 @@ pub struct UsageRecord {
     /// so `cost - cost_off_peak` is a sum over every priced row. NULL exactly
     /// when `cost` is NULL.
     pub cost_off_peak: Option<f64>,
+    /// The repository the work belonged to (migration v31). Only an imported row
+    /// has one: the gateway sees requests and never learns which checkout they
+    /// came from.
+    pub project: Option<String>,
+    /// The agent's own session id, for an imported row (migration v31). The
+    /// gateway's rows carry theirs in `request_logs`; this column is what lets
+    /// an imported row be read back per session and per project.
+    pub session_id: Option<String>,
+    /// A deterministic id for a row that came out of a file — `None` on every
+    /// row the gateway wrote. Unique when set, which is what makes a re-import
+    /// refresh rather than double-count.
+    pub import_key: Option<String>,
 }
 
 /// A cost summed over a window, with what the same rows would have cost at
@@ -473,7 +490,9 @@ pub struct CostBucket {
 /// The same pair, split per provider.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderCostBucket {
-    pub provider_id: String,
+    /// `None` is the bucket of rows that never named a provider — an imported
+    /// history, which the caller renders as its own line rather than dropping.
+    pub provider_id: Option<String>,
     pub currency: Option<String>,
     pub cost: f64,
     pub cost_off_peak: f64,
@@ -514,7 +533,8 @@ pub struct TrafficStats {
 /// Per-provider aggregation result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderUsage {
-    pub provider_id: String,
+    /// See [`ProviderCostBucket::provider_id`]: `None` is "not through us".
+    pub provider_id: Option<String>,
     pub totals: UsageTotals,
 }
 

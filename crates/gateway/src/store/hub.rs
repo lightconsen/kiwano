@@ -161,8 +161,7 @@ mod tests {
             // (`client_keys` is renamed, `usage` and `providers` gain a column),
             // so a fixture carrying only the hub tables would be testing a
             // database no install ever had.
-            conn.execute_batch(crate::store::migrations::BASE_SCHEMA_SQL)
-                .unwrap();
+            crate::store::migrations::apply_schema_through_v27(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TABLE hub_cache (
                      id        INTEGER PRIMARY KEY CHECK (id = 1),

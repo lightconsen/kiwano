@@ -271,7 +271,7 @@ mod tests {
             .record_usage(&UsageRecord {
                 ts: crate::store::now_rfc3339(),
                 agent: agent.into(),
-                provider_id: provider_id.into(),
+                provider_id: Some(provider_id.into()),
                 client_key_id: None,
                 model: None,
                 input_tokens: 0,
@@ -283,6 +283,9 @@ mod tests {
                 cost: Some(cost),
                 cost_currency: Some(currency.into()),
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
     }
@@ -365,7 +368,7 @@ mod all_window_tests {
             .record_usage(&UsageRecord {
                 ts: ts.into(),
                 agent: agent.into(),
-                provider_id: provider_id.into(),
+                provider_id: Some(provider_id.into()),
                 client_key_id: client_key_id.map(str::to_string),
                 model: None,
                 input_tokens: 0,
@@ -377,6 +380,9 @@ mod all_window_tests {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
     }

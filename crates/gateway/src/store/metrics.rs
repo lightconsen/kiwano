@@ -60,7 +60,7 @@ mod tests {
             .record_usage(&UsageRecord {
                 ts: now_rfc3339(),
                 agent: "claude".into(),
-                provider_id: "p1".into(),
+                provider_id: Some("p1".into()),
                 client_key_id: None,
                 model: None,
                 input_tokens: 1,
@@ -72,6 +72,9 @@ mod tests {
                 cost: None,
                 cost_currency: None,
                 cost_off_peak: None,
+                project: None,
+                session_id: None,
+                import_key: None,
             })
             .unwrap();
 

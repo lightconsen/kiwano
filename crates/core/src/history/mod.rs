@@ -72,6 +72,7 @@ pub fn chunks(batch: &HistoryBatch, max_rows: usize) -> Vec<HistoryBatch> {
         return vec![HistoryBatch {
             usage: Vec::new(),
             sessions: batch.sessions.clone(),
+            scanned_agents: batch.scanned_agents.clone(),
         }];
     }
     batch
@@ -85,6 +86,10 @@ pub fn chunks(batch: &HistoryBatch, max_rows: usize) -> Vec<HistoryBatch> {
             } else {
                 Vec::new()
             },
+            // Every chunk carries the same set: the daemon stamps per agent on the
+            // first one and re-stamping is idempotent, and a chunk without it
+            // would leave the scan looking partial.
+            scanned_agents: batch.scanned_agents.clone(),
         })
         .collect()
 }
@@ -97,11 +102,14 @@ pub struct HistoryRead {
 }
 
 impl HistoryRead {
-    fn new() -> Self {
+    fn new(agents: &[String]) -> Self {
         Self {
             batch: HistoryBatch {
                 usage: Vec::new(),
                 sessions: Vec::new(),
+                // Named at the start, not derived at the end: the point is that an
+                // agent which yielded nothing is still recorded as read.
+                scanned_agents: agents.to_vec(),
             },
             detail: Vec::new(),
             skips: Vec::new(),
@@ -121,7 +129,15 @@ impl HistoryRead {
 /// Ordering is deterministic: sessions sort by `started_at`, usage rows by
 /// `(ts, import_key)`.
 pub fn read_history(home: &Path, vars: &ShellVars, agents: &[String]) -> HistoryRead {
-    let mut read = HistoryRead::new();
+    // Only the agents a reader exists for are *read*, and only those are named in
+    // the batch: the daemon stamps what it is told, so passing through a name like
+    // `gemini` would record that agent as scanned when nothing looked at it.
+    let read_agents: Vec<String> = agents
+        .iter()
+        .filter(|a| matches!(a.as_str(), "claude" | "codex"))
+        .cloned()
+        .collect();
+    let mut read = HistoryRead::new(&read_agents);
     if agents.iter().any(|a| a == "claude") {
         claude_code::read(home, vars, &mut read);
     }

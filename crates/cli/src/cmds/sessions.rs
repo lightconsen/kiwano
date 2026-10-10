@@ -23,11 +23,25 @@ pub fn sessions(args: &SessionsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
         .api
         .sessions(args.agent.as_deref(), args.project.as_deref(), args.days)?;
     let text = render_sessions(&rows);
-    // The scan stamp is text-only, on purpose: it is a note about the *imported*
-    // half, and under `--json` stdout has to be the rows and nothing else.
-    let text = match ctx.api.history_scanned_at().unwrap_or(None) {
-        Some(at) => format!("{text}last scan: {at}\n"),
-        None => format!("{text}never scanned: run `kiwano history import`\n"),
+    // The scan stamps are text-only, on purpose: they are a note about the
+    // *imported* half, and under `--json` stdout has to be the rows and nothing
+    // else. Listed per agent, because "which agents have been read" is the
+    // question — one that a single "last scan" line answered for the wrong
+    // subject. The leading newline is not decoration: `render_table` returns no
+    // trailing one, so a footer appended without it lands on the table's own
+    // bottom border.
+    let scans = ctx.api.history_scans().unwrap_or_default();
+    let mut scanned: Vec<(&String, &String)> = scans.iter().collect();
+    scanned.sort();
+    let text = if scanned.is_empty() {
+        format!("{text}\nnever scanned: run `kiwano history import`\n")
+    } else {
+        let listed = scanned
+            .iter()
+            .map(|(agent, at)| format!("{agent} {at}"))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        format!("{text}\nscanned: {listed}\n")
     };
     ctx.out.emit(&rows, || text);
     Ok(())

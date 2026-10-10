@@ -173,9 +173,10 @@ pub fn apply_history(
         .upsert_imported_sessions(&sessions)
         .map_err(ApiError::failed)?;
     // The daemon stamps the scan itself rather than taking the client's word for
-    // it: what the stamp means is "this ledger has been backfilled", which is a
-    // fact about what just landed here.
-    if let Err(e) = store.mark_history_scanned() {
+    // *when* — but it stamps only the agents the client says it read, because only
+    // the client knows that. A row-less agent still gets stamped: "read it, there
+    // was nothing" is a fact, and without it the client re-reads it every launch.
+    if let Err(e) = store.mark_history_scanned(&batch.scanned_agents) {
         tracing::warn!(error = %e, "could not record the history scan time");
     }
     Ok(report)
@@ -403,6 +404,7 @@ mod tests {
                 row("codex", "2026-04-01T00:00:00+00:00", "codex:s:1"),
             ],
             sessions: vec![session("claude-code:s")],
+            scanned_agents: Vec::new(),
         };
         let report = apply_history(
             &store,
@@ -433,6 +435,7 @@ mod tests {
         let batch = HistoryBatch {
             usage: vec![row("codex", "2026-01-01T00:00:00+00:00", "codex:s:1")],
             sessions: vec![],
+            scanned_agents: Vec::new(),
         };
         let first = apply_history(
             &store,
@@ -487,6 +490,7 @@ mod tests {
         let batch = HistoryBatch {
             usage: vec![row("codex", "2026-01-01T00:00:00+00:00", "codex:s:1")],
             sessions: vec![],
+            scanned_agents: Vec::new(),
         };
         apply_history(
             &store,
@@ -520,6 +524,7 @@ mod tests {
                 row("codex", "2026-01-02T00:00:00+00:00", "codex:s:2"),
             ],
             sessions: vec![],
+            scanned_agents: Vec::new(),
         };
         let second = HistoryBatch {
             usage: vec![
@@ -527,6 +532,7 @@ mod tests {
                 row("codex", "2026-01-04T00:00:00+00:00", "codex:s:4"),
             ],
             sessions: vec![],
+            scanned_agents: Vec::new(),
         };
         let hub = pricing_of(&store);
         let none = kiwano_adapters::model_pricing::PricingTable::default();
@@ -592,6 +598,7 @@ mod tests {
         let batch = HistoryBatch {
             usage: vec![unknown, unknown2, nameless],
             sessions: vec![],
+            scanned_agents: Vec::new(),
         };
         let report = apply_history(
             &store,
@@ -636,6 +643,7 @@ mod tests {
                     unpriced("codex:b", "a-plan-name"),
                 ],
                 sessions: vec![],
+                scanned_agents: Vec::new(),
             },
         )
         .unwrap();
@@ -649,6 +657,7 @@ mod tests {
                     unpriced("codex:d", "other"),
                 ],
                 sessions: vec![],
+                scanned_agents: Vec::new(),
             },
         )
         .unwrap();
@@ -690,6 +699,7 @@ mod tests {
         let batch = HistoryBatch {
             usage: vec![r],
             sessions: vec![],
+            scanned_agents: Vec::new(),
         };
         // The Hub's table is empty here: the declaration is the only thing that
         // can price it, which is exactly the case this exists for.
@@ -713,6 +723,32 @@ mod tests {
         );
     }
 
+    /// Only the agents the batch names are recorded as scanned — the fact the
+    /// daemon cannot derive, because an agent with no history produces no rows.
+    #[test]
+    fn a_scan_is_stamped_for_the_agents_the_batch_names() {
+        let store = store_unpriced();
+        let batch = HistoryBatch {
+            usage: vec![],
+            sessions: vec![],
+            scanned_agents: vec!["claude".into()],
+        };
+        apply_history(
+            &store,
+            &pricing_of(&store),
+            &kiwano_adapters::model_pricing::PricingTable::default(),
+            &batch,
+        )
+        .unwrap();
+        let scans = store.history_scans().unwrap();
+        assert!(scans.contains_key("claude"), "{scans:?}");
+        assert!(
+            !scans.contains_key("codex"),
+            "an agent nobody read is not recorded as read: that stamp is what a \
+             later reader checks"
+        );
+    }
+
     /// The session half lands too, counts and all.
     #[test]
     fn sessions_are_written_with_their_counts() {
@@ -720,6 +756,7 @@ mod tests {
         let batch = HistoryBatch {
             usage: vec![],
             sessions: vec![session("claude-code:s")],
+            scanned_agents: Vec::new(),
         };
         let report = apply_history(
             &store,

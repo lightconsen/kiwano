@@ -2645,6 +2645,17 @@ fn history_import_fills_a_fresh_install_and_the_dashboard_shows_it() {
         "a path must not cross the interface"
     );
 
+    // The scan is stamped **per agent**, and the list says so: a reader added to
+    // a later build reads its own stamp and backfills, instead of being suppressed
+    // by a flag that was set before it existed.
+    let (_, text, _) = run_served(&db, &daemon, &["sessions", "--days", "400"]);
+    let stamped = text
+        .lines()
+        .find(|l| l.starts_with("scanned:"))
+        .expect("the stamps are listed");
+    assert!(stamped.contains("claude"), "{stamped}");
+    assert!(stamped.contains("codex"), "{stamped}");
+
     // A second run changes nothing: the rows are identified by their import keys.
     let (code, _, err) = run_served(
         &db,

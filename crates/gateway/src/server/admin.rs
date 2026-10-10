@@ -1715,10 +1715,17 @@ fn days_ago(days: i64) -> String {
     crate::store::rfc3339_from_unix(crate::store::unix_now() - days.max(0) * 86_400)
 }
 
-/// `GET /api/history/scan` — when this machine's history was last imported, so a
-/// client can tell "never scanned" from "scanned, and there was nothing".
+/// `GET /api/history/scan` — which agents have been scanned, and when.
+///
+/// Per agent, so a client can tell "scanned, and there was nothing" from "never
+/// scanned" *for one agent at a time* — which is what makes adding a reader for a
+/// new agent backfill it, rather than be skipped because the ledger was read once
+/// before that reader existed.
 async fn history_scan_route(State(state): State<Arc<GatewayState>>) -> Response {
-    Json(serde_json::json!({ "scanned_at": state.store.last_history_scan() })).into_response()
+    match state.store.history_scans() {
+        Ok(scans) => Json(serde_json::json!({ "scans": scans })).into_response(),
+        Err(e) => resource_error(kiwano_api::error::ApiError::failed(e)),
+    }
 }
 
 /// `POST /api/import/history` — an agent's own history, as the client parsed it.

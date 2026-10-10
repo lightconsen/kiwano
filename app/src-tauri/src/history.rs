@@ -49,7 +49,7 @@ const READABLE: [&str; 2] = ["claude", "codex"];
 pub(crate) fn spawn_history_backfill(handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         const RETRY_SECS: [u64; 5] = [0, 2, 6, 20, 60];
-        let mut scan_needed = false;
+        let mut missing: Vec<String> = Vec::new();
         for (attempt, delay) in RETRY_SECS.iter().enumerate() {
             if *delay > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(*delay)).await;
@@ -57,16 +57,25 @@ pub(crate) fn spawn_history_backfill(handle: tauri::AppHandle) {
             // The stamp check is a synchronous admin-plane call, so it goes on
             // the blocking pool like every other blocking call here.
             let outcome = tokio::task::spawn_blocking(|| {
-                kiwano_core::daemon_api::DaemonApi::connect().history_scanned_at()
+                kiwano_core::daemon_api::DaemonApi::connect().history_scans()
             })
             .await;
             match outcome {
-                Ok(Ok(Some(scanned_at))) => {
-                    tracing::debug!(scanned_at = %scanned_at, "history already backfilled");
-                    return;
-                }
-                Ok(Ok(None)) => {
-                    scan_needed = true;
+                // Which agents have *not* been read, asked per agent on purpose:
+                // "the ledger was read once" is not the question — a reader added
+                // since then has never run, and a single flag would suppress it
+                // forever. An empty answer here means every reader this build has
+                // has already been through.
+                Ok(Ok(scans)) => {
+                    missing = READABLE
+                        .iter()
+                        .filter(|agent| !scans.contains_key(**agent))
+                        .map(|agent| (*agent).to_string())
+                        .collect();
+                    if missing.is_empty() {
+                        tracing::debug!("history already backfilled by every reader");
+                        return;
+                    }
                     break;
                 }
                 // The daemon has not come up yet (launched at login, this beats
@@ -84,12 +93,17 @@ pub(crate) fn spawn_history_backfill(handle: tauri::AppHandle) {
                 }
             }
         }
-        if !scan_needed {
+        if missing.is_empty() {
             return;
         }
+        tracing::info!(agents = ?missing, "history backfill needed for");
         let app = handle.clone();
         match tokio::task::spawn_blocking(move || {
-            scan_once(&app, &kiwano_core::daemon_api::DaemonApi::connect())
+            scan_once(
+                &app,
+                &kiwano_core::daemon_api::DaemonApi::connect(),
+                &missing,
+            )
         })
         .await
         {
@@ -114,8 +128,16 @@ pub(crate) fn spawn_history_backfill(handle: tauri::AppHandle) {
 /// reaches the daemon without the annotation (`migrate.local.md` §10.26).
 #[tauri::command(async)]
 pub async fn history_import(app: tauri::AppHandle) -> Result<vm::HistoryImportReport, String> {
+    // Every reader this build has: the command is the "scan now" button, and a
+    // button that scanned only *some* agents would be a button nobody could
+    // predict.
+    let agents: Vec<String> = READABLE.iter().map(|a| (*a).to_string()).collect();
     tokio::task::spawn_blocking(move || {
-        scan_once(&app, &kiwano_core::daemon_api::DaemonApi::connect())
+        scan_once(
+            &app,
+            &kiwano_core::daemon_api::DaemonApi::connect(),
+            &agents,
+        )
     })
     .await
     .map_err(|e| format!("the history scan did not finish: {e}"))?
@@ -139,6 +161,7 @@ pub async fn history_import(app: tauri::AppHandle) -> Result<vm::HistoryImportRe
 fn scan_once(
     app: &tauri::AppHandle,
     api: &kiwano_core::daemon_api::DaemonApi,
+    agents: &[String],
 ) -> Result<vm::HistoryImportReport, String> {
     let state = app
         .try_state::<AppState>()
@@ -151,9 +174,10 @@ fn scan_once(
     // to learn where an agent keeps its files.
     let vars = state.shell_vars().clone();
 
-    tracing::info!(agents = ?READABLE, "scanning agent history");
-    let agents: Vec<String> = READABLE.iter().map(|a| (*a).to_string()).collect();
-    let read = history::read_history(&home, &vars, &agents);
+    // The agents the caller asked for, not every readable one: a launch that is
+    // only backfilling a newly added reader should not re-read the others.
+    tracing::info!(agents = ?agents, "scanning agent history");
+    let read = history::read_history(&home, &vars, agents);
     if !read.skips.is_empty() {
         // A file that could not be opened: worth a line, never a failure — the
         // rest of the scan is every bit as valid without it.

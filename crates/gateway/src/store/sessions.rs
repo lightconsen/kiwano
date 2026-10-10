@@ -266,23 +266,50 @@ impl Store {
         )
     }
 
-    /// When this store last imported anything, if it ever has — the marker a
-    /// client uses to decide whether a scan is worth running again.
-    pub fn record_history_scan(&self, at: &str) -> Result<()> {
-        self.set_gateway_setting(HISTORY_SCAN_KEY, at)
+    /// Record that `agent`'s history has been scanned, as of `at`.
+    ///
+    /// **Per agent**, and that is the whole point: what a client needs to know is
+    /// not "has this ledger been backfilled" but "which agents have I already
+    /// read". A single flag would answer the first question and quietly mean "and
+    /// never read the rest": adding a reader for a third agent would leave every
+    /// install that had already scanned never scanning it, because the flag was
+    /// set before that reader existed.
+    pub fn record_history_scan(&self, agent: &str, at: &str) -> Result<()> {
+        self.set_gateway_setting(&history_scan_key(agent), at)
     }
 
-    pub fn last_history_scan(&self) -> Option<String> {
-        self.gateway_setting(HISTORY_SCAN_KEY)
-            .filter(|v| !v.trim().is_empty())
+    /// Which agents have been scanned, and when.
+    pub fn history_scans(&self) -> Result<std::collections::HashMap<String, String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT key, value FROM gateway_settings
+             WHERE key LIKE ?1 ESCAPE '\\'",
+        )?;
+        let prefix = format!("{HISTORY_SCAN_PREFIX}%");
+        let rows = stmt.query_map(params![prefix], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let (key, value) = row?;
+            if let Some(agent) = key.strip_prefix(HISTORY_SCAN_PREFIX) {
+                if !agent.is_empty() && !value.trim().is_empty() {
+                    out.insert(agent.to_string(), value);
+                }
+            }
+        }
+        Ok(out)
     }
 
-    /// Stamp a scan that just happened. Convenience for the caller that only has
-    /// the store.
-    pub fn mark_history_scanned(&self) -> Result<String> {
+    /// Stamp a scan that just happened, for each agent it covered.
+    pub fn mark_history_scanned(&self, agents: &[String]) -> Result<()> {
         let now = now_rfc3339();
-        self.record_history_scan(&now)?;
-        Ok(now)
+        for agent in agents {
+            if !agent.trim().is_empty() {
+                self.record_history_scan(agent, &now)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -302,12 +329,21 @@ fn split_distinct(joined: Option<String>) -> Vec<String> {
     seen
 }
 
-/// Where the last history scan's timestamp lives (`gateway_settings`).
+/// The prefix one agent's scan stamp lives under, in `gateway_settings`
+/// (`history.scan.<agent>`).
 ///
 /// Daemon-side rather than in the client's own database, because the *fact* it
 /// records is about the daemon's ledger: what was scanned is what was imported,
-/// and a client that reinstalled should not have to be told twice.
-pub const HISTORY_SCAN_KEY: &str = "history.last_scan_at";
+/// and a client that reinstalled should not have to be told twice. It is also
+/// **per client machine**, which is why two machines do not suppress each other's
+/// scans — each has its own client asking, and a machine that has just installed
+/// has no stamps here at all.
+pub const HISTORY_SCAN_PREFIX: &str = "history.scan.";
+
+/// The settings key one agent's scan stamp lives under.
+fn history_scan_key(agent: &str) -> String {
+    format!("{HISTORY_SCAN_PREFIX}{agent}")
+}
 
 #[cfg(test)]
 mod tests {
@@ -366,12 +402,27 @@ mod tests {
         );
     }
 
+    /// Scan stamps are **per agent**, which is what lets a reader added later be
+    /// backfilled instead of being skipped because the ledger was read once before
+    /// that reader existed.
     #[test]
-    fn a_scan_timestamp_is_recorded_only_once_it_happens() {
+    fn a_scan_stamp_is_recorded_per_agent() {
         let (_dir, store) = crate::store::test_support::temp_store();
-        assert_eq!(store.last_history_scan(), None);
-        let stamped = store.mark_history_scanned().unwrap();
-        assert_eq!(store.last_history_scan().as_deref(), Some(stamped.as_str()));
+        assert!(store.history_scans().unwrap().is_empty());
+
+        store.mark_history_scanned(&["claude".to_string()]).unwrap();
+        let scans = store.history_scans().unwrap();
+        assert_eq!(scans.len(), 1);
+        assert!(scans.contains_key("claude"), "the agent that was read");
+        assert!(
+            !scans.contains_key("codex"),
+            "and not one that was not: a new reader has to be able to tell"
+        );
+
+        // An agent that yielded nothing is still stamped — the fact is "read it,
+        // there was nothing", and without it the client re-reads it every launch.
+        store.mark_history_scanned(&["codex".to_string()]).unwrap();
+        assert_eq!(store.history_scans().unwrap().len(), 2);
     }
 
     /// The traffic aggregate's numbers, including the two cases the money rules

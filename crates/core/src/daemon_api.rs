@@ -277,13 +277,18 @@ impl DaemonApi {
         sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), &path)
     }
 
-    /// When this machine's history was last imported, if it ever has.
-    pub fn history_scanned_at(&self) -> Result<Option<String>, String> {
-        let v: serde_json::Value =
+    /// Which agents' history this ledger has had imported, and when — per agent,
+    /// so a client can ask "have *I* read this one" rather than "has anything been
+    /// read here".
+    pub fn history_scans(&self) -> Result<std::collections::HashMap<String, String>, String> {
+        #[derive(serde::Deserialize)]
+        struct Body {
+            #[serde(default)]
+            scans: std::collections::HashMap<String, String>,
+        }
+        let body: Body =
             sidecar::admin_get_json(&self.endpoint, self.token.as_deref(), "/api/history/scan")?;
-        Ok(v.get("scanned_at")
-            .and_then(|s| s.as_str())
-            .map(str::to_string))
+        Ok(body.scans)
     }
 
     /// Rewrite the candidate order — `vm::reorder_agent_bindings`.

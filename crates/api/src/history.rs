@@ -93,6 +93,14 @@ pub struct HistoryBatch {
     pub usage: Vec<HistoryUsageRow>,
     #[serde(default)]
     pub sessions: Vec<HistorySessionRow>,
+    /// The agents this batch is the result of scanning.
+    ///
+    /// Not derivable from the rows: an agent with no history produces none, and
+    /// "I read it and there was nothing" is exactly the fact a client needs
+    /// recorded — without it, that agent is re-read on every launch. The daemon
+    /// stamps each name it is given (`Store::mark_history_scanned`).
+    #[serde(default)]
+    pub scanned_agents: Vec<String>,
 }
 
 #[cfg(test)]
@@ -138,6 +146,7 @@ mod tests {
         let batch = HistoryBatch {
             usage: vec![row],
             sessions: vec![session],
+            scanned_agents: Vec::new(),
         };
         let json = serde_json::to_string(&batch).unwrap();
         let back: HistoryBatch = serde_json::from_str(&json).unwrap();

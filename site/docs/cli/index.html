@@ -225,10 +225,6 @@ for what it does step by step, and for the machine-wide alternative.</p>
 <td>Suppress informational notes</td>
 </tr>
 <tr>
-<td><code>--no-reload</code></td>
-<td>Do not ask a running gateway to reload after a change</td>
-</tr>
-<tr>
 <td><code>--data-port &lt;PORT&gt;</code></td>
 <td>The port an agent&#39;s config is pointed at when it is taken over. Default 8317, or <code>KIWANO_DATA_PORT</code></td>
 </tr>
@@ -291,7 +287,6 @@ reading, and the exit code already carries the answer:</p>
 shape, not every flag.</p>
 <h3 id="status">Status</h3>
 <pre><code>kiwano status              gateway, store, today&#39;s totals, and the blocked list
-kiwano reload              ask a running gateway to rebuild its route table
 kiwano gateway start       start one, adopting an already-running gateway
 kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
 kiwano gateway restart     stop and start

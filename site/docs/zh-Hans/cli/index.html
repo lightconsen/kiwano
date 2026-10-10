@@ -225,10 +225,6 @@ code, pre { font-family: var(--font-mono); }
 <td>抑制信息性提示</td>
 </tr>
 <tr>
-<td><code>--no-reload</code></td>
-<td>变更后不要求运行中的网关重载</td>
-</tr>
-<tr>
 <td><code>--data-port &lt;PORT&gt;</code></td>
 <td>接管 Agent 时,其配置被指向的端口。默认 8317,或 <code>KIWANO_DATA_PORT</code></td>
 </tr>
@@ -285,7 +281,6 @@ code, pre { font-family: var(--font-mono); }
 标志。</p>
 <h3 id="状态">状态</h3>
 <pre><code>kiwano status              gateway, store, today&#39;s totals, and the blocked list
-kiwano reload              ask a running gateway to rebuild its route table
 kiwano gateway start       start one, adopting an already-running gateway
 kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
 kiwano gateway restart     stop and start

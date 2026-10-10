@@ -225,10 +225,6 @@ code, pre { font-family: var(--font-mono); }
 <td>情報メッセージを抑制</td>
 </tr>
 <tr>
-<td><code>--no-reload</code></td>
-<td>変更後に稼働中のゲートウェイへリロードを要求しない</td>
-</tr>
-<tr>
 <td><code>--data-port &lt;PORT&gt;</code></td>
 <td>エージェントを引き継ぐ際に、その設定が指す先のポート。既定は 8317、または <code>KIWANO_DATA_PORT</code></td>
 </tr>
@@ -288,7 +284,6 @@ code, pre { font-family: var(--font-mono); }
 示すもので、すべてのフラグではありません。</p>
 <h3 id="section-4">ステータス</h3>
 <pre><code>kiwano status              gateway, store, today&#39;s totals, and the blocked list
-kiwano reload              ask a running gateway to rebuild its route table
 kiwano gateway start       start one, adopting an already-running gateway
 kiwano gateway stop        ask the running gateway to stop (graceful: it checkpoints its WAL)
 kiwano gateway restart     stop and start

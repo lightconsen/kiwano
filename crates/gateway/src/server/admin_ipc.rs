@@ -78,35 +78,6 @@ pub const ADMIN_ADDR_ENV: &str = "KIWANO_ADMIN_ADDR";
 /// a decision someone makes rather than a typo someone makes.
 pub const ADMIN_ALLOW_ANY_ENV: &str = "KIWANO_ADMIN_ALLOW_ANY";
 
-/// Whether an address is one a daemon may bind without being told twice.
-///
-/// Private, loopback, and link-local — the ranges a home network and a
-/// tailnet live in. Anything else (a public address, an all-interfaces one, a
-/// ULA) needs [`ADMIN_ALLOW_ANY_ENV`].
-fn is_private(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-    match ip {
-        IpAddr::V4(v4) => {
-            // `is_private` is RFC1918 only, and **the tailnet range is not in
-            // it**: `100.64.0.0/10` is the carrier-grade NAT block, which is
-            // where Tailscale puts every device. It is the single most likely
-            // address this listener is configured with, so it is checked by
-            // hand rather than assumed to be covered.
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]))
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                // `fc00::/7` is every unique-local address, which is where the
-                // v6 side of a tailnet lives.
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
-        }
-    }
-}
-
 /// Where the cross-machine listener goes, resolved once at startup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdminTcp {
@@ -156,7 +127,7 @@ impl AdminTcp {
                 value: value.to_string(),
                 detail: format!("{e} (expected host:port, e.g. 192.168.1.5:8318)"),
             })?;
-        if !is_private(addr.ip()) && !allow_any {
+        if !super::is_private_bind_target(addr.ip()) && !allow_any {
             return Err(AdminAddrError::TooPublic { addr });
         }
         Ok(Some(Self { addr }))

@@ -17,7 +17,7 @@ pub use admin_ipc::{
     AdminAddrError, AdminEndpoint, AdminListener, AdminStream, AdminTcp, ADMIN_ADDR_ENV,
     ADMIN_ALLOW_ANY_ENV, ADMIN_SOCKET_ENV,
 };
-pub use data::data_plane_router;
+pub use data::{data_plane_router, DataAddr, DataAddrError, DATA_ADDR_ENV, DATA_ALLOW_ANY_ENV};
 
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -96,7 +96,10 @@ pub struct GatewayState {
     /// dialled it — and only the daemon knows the port. The default is the
     /// conventional one, so a state built by a test that never serves a data
     /// plane still answers sensibly.
-    pub data_port: std::sync::atomic::AtomicU16,
+    /// The data plane's bound address. Written once by `main` after the
+    /// listener is up, read by `/status` — which is how a client on another
+    /// machine learns both halves of the URL it should write into an agent.
+    pub data_addr: std::sync::RwLock<std::net::SocketAddr>,
     /// Optional bearer token guarding `/metrics` (KIW-PRIV-001). Set by the
     /// daemon from `KIWANO_METRICS_TOKEN`. Absent, `/metrics` stays open to any
     /// loopback caller but serves per-agent labels redacted; configured, only a
@@ -198,9 +201,18 @@ fn resolve_declared_pricing(store: &Store) -> kiwano_adapters::model_pricing::Pr
 impl GatewayState {
     /// Record the port the data plane actually bound — called by `main`, which
     /// is the only place that knows it.
-    pub fn set_data_port(&self, port: u16) {
-        self.data_port
-            .store(port, std::sync::atomic::Ordering::Relaxed);
+    pub fn set_data_addr(&self, addr: std::net::SocketAddr) {
+        if let Ok(mut slot) = self.data_addr.write() {
+            *slot = addr;
+        }
+    }
+
+    /// The data plane's address, as `/status` reports it.
+    pub fn data_addr(&self) -> std::net::SocketAddr {
+        self.data_addr
+            .read()
+            .map(|a| *a)
+            .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], DEFAULT_DATA_PORT)))
     }
 
     pub fn new(store: Store) -> Result<GatewayState> {
@@ -250,7 +262,10 @@ impl GatewayState {
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
             install_id,
-            data_port: std::sync::atomic::AtomicU16::new(crate::server::DEFAULT_DATA_PORT),
+            data_addr: std::sync::RwLock::new(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                crate::server::DEFAULT_DATA_PORT,
+            ))),
             metrics_token: None,
             shutdown,
             usage_ticks,
@@ -419,6 +434,38 @@ impl GatewayState {
 
 /// Extract the local placeholder key from inbound auth headers
 /// (tech.md §4.6: `x-api-key` / `Authorization: Bearer` / `x-goog-api-key`).
+/// Whether an address is one a daemon may bind without being told twice.
+///
+/// Shared by both planes: the admin listener (`admin_ipc`) and the data
+/// listener (`main`). The *policy* is one rule — private, loopback, link-local —
+/// while what each plane exposes differs, so each names its own refusal and its
+/// own second switch. This used to live in `admin_ipc`, which the data plane
+/// would then have had to reach into for a rule that was never about the admin
+/// plane.
+pub(crate) fn is_private_bind_target(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            // `is_private` is RFC1918 only, and **the tailnet range is not in
+            // it**: `100.64.0.0/10` is the carrier-grade NAT block, which is
+            // where Tailscale puts every device. It is the single most likely
+            // address either listener is configured with, so it is checked by
+            // hand rather than assumed to be covered.
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]))
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                // `fc00::/7` is every unique-local address, which is where the
+                // v6 side of a tailnet lives.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 pub fn extract_placeholder_key(headers: &HeaderMap) -> Option<String> {
     if let Some(v) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
         let v = v.trim();

@@ -106,10 +106,23 @@ async fn main() {
         }
     };
 
-    let data_addr = std::net::SocketAddr::from(([127, 0, 0, 1], data_port));
+    // Which interface agents may reach this plane on. Loopback unless the
+    // operator names a private address, and refused outright when it would be
+    // reachable from anywhere without them saying so — the same discipline the
+    // admin plane applies, with its own switch and its own refusal, because what
+    // this one exposes is different.
+    let data_addr = match kiwanod::server::DataAddr::from_env(data_port) {
+        Ok(a) => a.addr,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+    };
     // What `/status` reports, so a client on another machine can point an agent
-    // here. The port may not be the conventional one.
-    state.set_data_port(data_port);
+    // here. The address is reported as well as the port: a client that composed
+    // the URL from *its own* idea of the host would write an address this
+    // listener may not be on.
+    state.set_data_addr(data_addr);
     let data_listener = match tokio::net::TcpListener::bind(data_addr).await {
         Ok(l) => l,
         Err(e) => {

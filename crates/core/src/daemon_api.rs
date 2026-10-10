@@ -826,7 +826,19 @@ impl DaemonApi {
         let port = status["data_port"]
             .as_u64()
             .unwrap_or(kiwanod::server::DEFAULT_DATA_PORT as u64);
-        Ok(format!("http://{}:{port}", self.endpoint.host()))
+        // The daemon says which interface its data plane is on. A client that
+        // used its own idea of the host instead would write an address nothing
+        // listens on whenever the two planes are not on the same one — which is
+        // the shape of the bug §10.30 shipped with, where the client composed
+        // the far host and the listener was on loopback. A daemon too old to
+        // report it falls back to the host this client dialled.
+        let host = status["data_host"]
+            .as_str()
+            .map(str::trim)
+            .filter(|h| !h.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.endpoint.host());
+        Ok(format!("http://{host}:{port}"))
     }
     /// The Apps list, assembled by the daemon — `vm::build_provider_vms`.
     ///

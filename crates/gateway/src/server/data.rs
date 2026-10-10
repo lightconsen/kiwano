@@ -695,3 +695,199 @@ mod tests {
         );
     }
 }
+
+// ── Where this plane listens ──
+
+/// Environment variable naming the **interface** the data plane binds.
+///
+/// Unset — the default, and every install today — is loopback: the agents on
+/// this machine, and nobody else's. Set it to a private address so agents on
+/// *another* machine can reach the gateway they were taken over by
+/// (`migrate.local.md` §10.30 wanted exactly this and could not have it: the
+/// client composed `http://<the far host>:<port>` while this listener was
+/// bound to `127.0.0.1`, so the address it wrote answered nothing).
+///
+/// The value is an **IP address, not `host:port`** — unlike its admin-plane
+/// sibling. The port has its own variable, [`DATA_PORT_ENV`], because the port
+/// is also what `/status` reports and what a client composes an agent's URL
+/// from; two sources for one number is how they come to disagree.
+pub const DATA_ADDR_ENV: &str = "KIWANO_DATA_ADDR";
+
+/// Environment variable an operator sets to say they mean `0.0.0.0` here too.
+///
+/// **Deliberately separate from the admin plane's.** That one is about
+/// credentials; this listener carries the requests and responses themselves —
+/// prompts and completions, in the clear, because there is no TLS
+/// (`migrate.local.md` §13.4). Someone who has decided their admin plane may
+/// face the network has not thereby decided that this one may.
+pub const DATA_ALLOW_ANY_ENV: &str = "KIWANO_DATA_ALLOW_ANY";
+
+/// The port, when nothing names one.
+pub const DATA_PORT_ENV: &str = "KIWANO_DATA_PORT";
+
+/// The address the data plane listens on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataAddr {
+    pub addr: std::net::SocketAddr,
+}
+
+/// Why a configured bind address was refused.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DataAddrError {
+    /// Not an IP address at all.
+    Unparseable { value: String, detail: String },
+    /// Reachable from anywhere, and nobody said that was meant.
+    TooPublic { addr: std::net::IpAddr },
+}
+
+impl std::fmt::Display for DataAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unparseable { value, detail } => write!(
+                f,
+                "{DATA_ADDR_ENV} = \"{value}\" is not an address: {detail}"
+            ),
+            Self::TooPublic { addr } => write!(
+                f,
+                "{DATA_ADDR_ENV} = {addr} is reachable from any network, and this is the plane \
+                 your prompts and completions travel through — in the clear, since Kiwano does \
+                 not do TLS. Binding it where anyone can reach it is a decision rather than a \
+                 default: set {DATA_ALLOW_ANY_ENV}=1 if that is what you mean, or bind a private \
+                 address (or put the daemon on a VPN)."
+            ),
+        }
+    }
+}
+
+impl DataAddr {
+    /// Resolve the bind address: `host` when given, loopback otherwise.
+    ///
+    /// `allow_any` is passed in rather than read here, so the decision is
+    /// testable without an environment — the same shape the admin plane's
+    /// resolver has, for the same reason.
+    pub fn resolve(host: Option<&str>, port: u16, allow_any: bool) -> Result<Self, DataAddrError> {
+        let ip = match host.map(str::trim).filter(|v| !v.is_empty()) {
+            Some(value) => {
+                value
+                    .parse::<std::net::IpAddr>()
+                    .map_err(|e| DataAddrError::Unparseable {
+                        value: value.to_string(),
+                        detail: format!(
+                            "{e} (expected an IP address, e.g. 100.64.0.5 — the port is \
+                         {DATA_PORT_ENV})"
+                        ),
+                    })?
+            }
+            None => std::net::IpAddr::from([127, 0, 0, 1]),
+        };
+        if !super::is_private_bind_target(ip) && !allow_any {
+            return Err(DataAddrError::TooPublic { addr: ip });
+        }
+        Ok(Self {
+            addr: std::net::SocketAddr::new(ip, port),
+        })
+    }
+
+    /// [`resolve`](Self::resolve) against the real environment.
+    pub fn from_env(port: u16) -> Result<Self, DataAddrError> {
+        let value = std::env::var(DATA_ADDR_ENV).ok();
+        let allow_any = std::env::var(DATA_ALLOW_ANY_ENV)
+            .map(|v| !v.trim().is_empty() && v.trim() != "0")
+            .unwrap_or(false);
+        Self::resolve(value.as_deref(), port, allow_any)
+    }
+}
+
+#[cfg(test)]
+mod data_addr_tests {
+    use super::*;
+
+    /// The data plane's bind address follows the admin plane's rule, and this is
+    /// the half of it that matters: what a *different* plane's switch says about
+    /// this one.
+    ///
+    /// Nothing here checks who connects — this plane's inbound auth is the
+    /// placeholder key. What it checks is the address reaching further than the
+    /// operator meant, and it is the same one-character mistake (`0.0.0.0`) with
+    /// a different thing behind it.
+    #[test]
+    fn the_data_plane_binds_a_private_address_or_nothing_at_all() {
+        // Unconfigured: loopback, which is every install today.
+        assert_eq!(
+            DataAddr::resolve(None, 8317, false),
+            Ok(DataAddr {
+                addr: "127.0.0.1:8317".parse().unwrap()
+            })
+        );
+        assert_eq!(
+            DataAddr::resolve(Some("   "), 8317, false),
+            Ok(DataAddr {
+                addr: "127.0.0.1:8317".parse().unwrap()
+            })
+        );
+
+        // The home network and the tailnet, which is the case that exists.
+        for (host, expected) in [
+            ("192.168.1.5", "192.168.1.5:8317"),
+            ("10.0.0.7", "10.0.0.7:8317"),
+            ("100.101.102.103", "100.101.102.103:8317"), // tailnet
+            ("::1", "[::1]:8317"),
+            ("fd7a:115c:a1e0::1", "[fd7a:115c:a1e0::1]:8317"), // tailnet, v6
+        ] {
+            assert_eq!(
+                DataAddr::resolve(Some(host), 8317, false),
+                Ok(DataAddr {
+                    addr: expected.parse().unwrap()
+                }),
+                "{host} should be bindable without the second switch"
+            );
+        }
+
+        // All-interfaces and public addresses need it.
+        for host in ["0.0.0.0", "::", "203.0.113.9"] {
+            assert_eq!(
+                DataAddr::resolve(Some(host), 8317, false),
+                Err(DataAddrError::TooPublic {
+                    addr: host.parse().unwrap()
+                }),
+                "{host} should need the second switch"
+            );
+            assert!(DataAddr::resolve(Some(host), 8317, true).is_ok());
+        }
+
+        // The port is not part of this value, and saying so is the refusal: the
+        // admin plane takes `host:port`, and writing that here is the mistake
+        // worth catching by name rather than by a mysterious parse failure.
+        let err = DataAddr::resolve(Some("100.64.0.5:8317"), 8317, false).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains(DATA_ADDR_ENV), "{message}");
+        assert!(message.contains(DATA_PORT_ENV), "{message}");
+        assert!(message.contains("100.64.0.5"), "{message}");
+    }
+
+    /// The refusal names **this** plane's cost, not the admin plane's.
+    ///
+    /// They are the same rule with different stakes: one exposes credentials,
+    /// the other the prompts and completions themselves. A shared message would
+    /// have to pick one of them to be wrong about, which is why the two switches
+    /// and the two sentences are separate even though the predicate is shared.
+    #[test]
+    fn the_refusal_says_what_this_plane_exposes() {
+        let message = DataAddr::resolve(Some("203.0.113.9"), 8317, false)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains(DATA_ALLOW_ANY_ENV), "{message}");
+        assert!(message.contains("prompts"), "{message}");
+        assert!(
+            !message.contains(&kiwanod_admin_allow_any()),
+            "the data plane must not tell an operator to set the admin plane's \
+             switch: one decision does not imply the other. {message}"
+        );
+    }
+
+    /// The admin plane's switch, spelled here so the assertion above cannot
+    /// drift from it silently.
+    fn kiwanod_admin_allow_any() -> String {
+        crate::server::ADMIN_ALLOW_ANY_ENV.to_string()
+    }
+}

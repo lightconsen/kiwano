@@ -448,7 +448,13 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         // provider list is. A client on another machine needs it to point an
         // agent here — it knows the host, having dialled it, and only the daemon
         // knows the port (`migrate.local.md` §10.30).
-        "data_port": state.data_port.load(std::sync::atomic::Ordering::Relaxed),
+        "data_port": state.data_addr().port(),
+        // Both halves of the URL an agent should be pointed at. The host is
+        // reported rather than assumed: a client composes it from its own idea
+        // of where the daemon is, and if the data plane is bound to another
+        // interface that guess writes an address nothing answers on — which is
+        // what `migrate.local.md` §10.30's fix shipped with.
+        "data_host": state.data_addr().ip().to_string(),
         "api": {
             "min": kiwano_api::version::MIN_SUPPORTED,
             "max": kiwano_api::version::CURRENT,
@@ -529,7 +535,13 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         // was a mistake worth naming: the endpoint looked right to a bare
         // `curl` and was invisible to every real caller (`migrate.local.md`
         // §10.30).
-        "data_port": state.data_port.load(std::sync::atomic::Ordering::Relaxed),
+        "data_port": state.data_addr().port(),
+        // Both halves of the URL an agent should be pointed at. The host is
+        // reported rather than assumed: a client composes it from its own idea
+        // of where the daemon is, and if the data plane is bound to another
+        // interface that guess writes an address nothing answers on — which is
+        // what `migrate.local.md` §10.30's fix shipped with.
+        "data_host": state.data_addr().ip().to_string(),
         "providers": metrics.providers,
         "bindings": metrics.bindings,
         "placeholder_keys": metrics.placeholder_keys,
@@ -1974,7 +1986,7 @@ mod tests {
         let state = Arc::new(GatewayState::new(store).unwrap());
         // What `main` does once the listener is bound; a non-default port so the
         // assertion cannot pass by coincidence.
-        state.set_data_port(9317);
+        state.set_data_addr("127.0.0.1:9317".parse().unwrap());
 
         // **With the token**, because that is what a real client sends — and the
         // first version of this test asked without one, so it passed against the

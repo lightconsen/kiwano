@@ -147,6 +147,15 @@ impl AdminTcp {
 #[cfg(unix)]
 const SOCKET_FILE_NAME: &str = "admin.sock";
 
+/// How long a request may take to be answered, once it is connected.
+///
+/// Generous on purpose, and not a liveness check: a daemon that is *gone* is
+/// detected by the connect failing (a refused socket, instantly) or by the app's
+/// watchdog, neither of which needs this number. What it must not do is fire
+/// while the daemon is working — the whole point of a budget is to distinguish
+/// "slow" from "dead", and the old one could not.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// The named-pipe namespace. A Windows pipe name without this prefix is
 /// completed with it.
 #[cfg(windows)]
@@ -389,8 +398,19 @@ impl AdminEndpoint {
     /// exercised on the machine this was written on — and its failure mode is a
     /// wedged gateway hanging a caller that is only ever reading one small
     /// local response.
+    /// Connect within `timeout`, then let the request take
+    /// [`REQUEST_TIMEOUT`] to be answered.
+    ///
+    /// The two budgets are separate because they answer different questions.
+    /// Connecting to a local socket is instant or a refusal; *answering* can take
+    /// seconds without anything being wrong — an aggregate over a ledger with a
+    /// hundred thousand rows, or the Hub sync fetching over the network. This used
+    /// to pass `timeout` for both, so a slow answer arrived as `Resource
+    /// temporarily unavailable` and the client reported "gateway stopped
+    /// answering", which is a lie: the gateway was answering, and the number it
+    /// was computing is the one the user asked for.
     pub fn connect(&self, timeout: Duration) -> std::io::Result<AdminStream> {
-        self.connect_with(timeout, Some(timeout))
+        self.connect_with(timeout, Some(REQUEST_TIMEOUT))
     }
 
     /// A blocking connection for a reader that is following a stream rather than
@@ -1093,6 +1113,44 @@ mod tests {
     use super::*;
 
     // ── the endpoint itself ─────────────────────────────────────────────
+
+    /// A slow answer is an answer. Connecting is instant or a refusal, and the
+    /// request that follows may take seconds without anything being wrong — so
+    /// the client must not give up on it and call the gateway dead.
+    ///
+    /// This is what a fresh install hits: importing the agents' history is what
+    /// puts a hundred thousand rows in the ledger, and the first `dashboard` over
+    /// that ledger takes longer than the old shared budget allowed (the client
+    /// reported `Resource temporarily unavailable` on a gateway that was busy
+    /// answering).
+    #[cfg(unix)]
+    #[test]
+    fn a_request_may_outlive_the_connect_budget() {
+        use std::io::{BufReader, Read, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = test_endpoint(dir.path());
+        let router = axum::Router::new().route(
+            "/slow",
+            axum::routing::get(|| async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                "answered"
+            }),
+        );
+        serve_in_background(&endpoint, router);
+
+        let mut stream = endpoint
+            .connect(Duration::from_millis(50))
+            .expect("a live endpoint connects");
+        stream
+            .write_all(b"GET /slow HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .expect("the request is written");
+        let mut raw = String::new();
+        BufReader::new(stream)
+            .read_to_string(&mut raw)
+            .expect("reading the answer must not fail on its own budget");
+        assert!(raw.contains("answered"), "{raw}");
+    }
 
     #[cfg(unix)]
     #[test]

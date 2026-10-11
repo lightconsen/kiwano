@@ -3536,3 +3536,70 @@ async fn admin_get(admin: &Router, state: &GatewayState, path: &str) -> Value {
     assert_eq!(response.status(), StatusCode::OK, "{path}");
     serde_json::from_slice(&response_body(response).await).unwrap()
 }
+
+/// A model allowlist written as a family serves every model in it — including
+/// ones the vendor released after the list was written, which is the whole point
+/// of a trailing `*`.
+#[tokio::test]
+async fn a_model_family_allowlist_serves_the_family_and_refuses_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    let upstream = json!({
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "m",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 10, "output_tokens": 2}
+    });
+    let (upstream_url, captured) = mock_anthropic(MockReply::Json(upstream)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    let scoped = store
+        .upsert_client_key("kw-ag-claude-scoped", "claude")
+        .unwrap();
+    store
+        .set_client_key_allowlists(&scoped, Some(r#"["claude-haiku-*"]"#), None)
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    state.reload_routes().unwrap();
+    let app = data_plane_router(state.clone());
+
+    // The family, including a model id that did not exist when the list was
+    // written: the request is served.
+    for model in ["claude-haiku-4-5", "claude-haiku-9-9-99999999"] {
+        let response = post_json(
+            &app,
+            "/v1/messages",
+            Some("kw-ag-claude-scoped"),
+            &format!(r#"{{"model":"{model}","stream":false,"messages":[]}}"#),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK, "{model}");
+        let _ = response_body(response).await;
+    }
+
+    // Another family: refused, and the message shows the rule that refused it.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-scoped"),
+        r#"{"model":"claude-opus-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["error"]["type"], "model_not_allowed");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("claude-haiku-*"),
+        "the reader can see which rule refused them: {body}"
+    );
+    assert_eq!(
+        captured.lock().unwrap().len(),
+        2,
+        "only the family was asked for"
+    );
+}

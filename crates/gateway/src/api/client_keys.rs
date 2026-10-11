@@ -142,6 +142,11 @@ pub fn add_client_key(
             "a key needs an agent: it is how its traffic routes",
         ));
     }
+    // Everything that can be refused is refused **before** anything is written.
+    // The first version of this validated the allowlists after minting the row,
+    // so a typo in a model pattern left an orphan key behind — a key the caller
+    // never saw, with no policy on it, that `clients list` would show.
+    let (models, providers) = normalize_allowlists(&input.model_allow, &input.provider_allow)?;
     // The same shape a takeover mints, so nothing downstream can tell where a
     // row came from.
     let rand = &uuid::Uuid::new_v4().simple().to_string()[..4];
@@ -154,7 +159,6 @@ pub fn add_client_key(
             .set_client_key_label(&id, Some(label.trim()))
             .map_err(ApiError::failed)?;
     }
-    let (models, providers) = normalize_allowlists(&input.model_allow, &input.provider_allow);
     if models.is_some() || providers.is_some() {
         store
             .set_client_key_allowlists(&id, models.as_deref(), providers.as_deref())
@@ -239,7 +243,7 @@ pub fn set_client_key_policy(
     {
         return Err(ApiError::not_found(format!("no client key `{id}`")));
     }
-    let (models, providers) = normalize_allowlists(&input.model_allow, &input.provider_allow);
+    let (models, providers) = normalize_allowlists(&input.model_allow, &input.provider_allow)?;
     store
         .set_client_key_allowlists(id, models.as_deref(), providers.as_deref())
         .map_err(ApiError::failed)?;
@@ -262,20 +266,39 @@ pub fn set_client_key_policy(
 fn normalize_allowlists(
     models: &[String],
     providers: &[String],
-) -> (Option<String>, Option<String>) {
-    let clean = |xs: &[String]| -> Option<String> {
+) -> Result<(Option<String>, Option<String>), ApiError> {
+    let clean = |xs: &[String], what: &str| -> Result<Option<String>, ApiError> {
         let mut seen: Vec<String> = Vec::new();
         for x in xs {
             let x = x.trim();
             if x.is_empty() || seen.iter().any(|s| s.eq_ignore_ascii_case(x)) {
                 continue;
             }
+            // The pattern rule, enforced where the entry is written rather than
+            // where it is matched: a `*` anywhere but the end used to be stored
+            // as written and then match nothing, which turns "the cheap family"
+            // into "no model at all" with no error to notice. Refusing here means
+            // the only patterns that exist are the ones that work.
+            if let Some(pos) = x.find('*') {
+                if pos != x.len() - 1 {
+                    return Err(ApiError::invalid(format!(
+                        "`{x}` is not a pattern this understands: a `*` is only a wildcard at \
+                         the **end** of an entry (e.g. `claude-haiku-*`). Remove it, or move it \
+                         to the end — anything else would be stored literally and match no {what}."
+                    )));
+                }
+                if pos == 0 {
+                    return Err(ApiError::invalid(format!(
+                        "`{x}` would allow every {what}; leave the list out entirely for that."
+                    )));
+                }
+            }
             seen.push(x.to_string());
         }
-        (!seen.is_empty())
-            .then(|| serde_json::to_string(&seen).unwrap_or_else(|_| "[]".to_string()))
+        Ok((!seen.is_empty())
+            .then(|| serde_json::to_string(&seen).unwrap_or_else(|_| "[]".to_string())))
     };
-    (clean(models), clean(providers))
+    Ok((clean(models, "model")?, clean(providers, "provider")?))
 }
 
 /// The windows to store, dropping the ones that mean nothing.
@@ -414,6 +437,63 @@ mod tests {
         assert_eq!(row.label.as_deref(), Some("laptop"));
         assert_eq!(row.model_allow.as_deref(), Some(r#"["gpt-5.5"]"#));
         assert_eq!(s.client_key_limits_for(&created.id).unwrap().len(), 1);
+    }
+
+    /// A pattern that is not a pattern is refused where it is written, with the
+    /// rule said out loud — because the alternative is the trap: stored as
+    /// written, matching nothing, and looking exactly like a correct entry.
+    #[test]
+    fn a_star_that_is_not_a_trailing_one_is_refused() {
+        let s = store_with_agent("claude");
+        let err = add_client_key(
+            &s,
+            &NewClientKeyInput {
+                agent: "claude".into(),
+                model_allow: vec!["claude-*-4-5".into()],
+                provider_allow: vec![],
+                label: None,
+                limits: vec![],
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("only a wildcard at"), "{err}");
+        assert!(
+            err.contains("claude-haiku-*"),
+            "and shows a form that works: {err}"
+        );
+
+        // The whole list is one entry: allowing everything is said by leaving it
+        // out, not by writing `*`.
+        let err = add_client_key(
+            &s,
+            &NewClientKeyInput {
+                agent: "claude".into(),
+                model_allow: vec!["*".into()],
+                provider_allow: vec![],
+                label: None,
+                limits: vec![],
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("every model"), "{err}");
+
+        // And a trailing one is stored, trimmed, as written.
+        let created = add_client_key(
+            &s,
+            &NewClientKeyInput {
+                agent: "claude".into(),
+                model_allow: vec![" claude-haiku-* ".into()],
+                provider_allow: vec![],
+                label: None,
+                limits: vec![],
+            },
+        )
+        .unwrap();
+        let listed = list_client_keys(&s, None).unwrap();
+        assert_eq!(listed[0].id, created.id);
+        assert_eq!(listed[0].model_allow, vec!["claude-haiku-*".to_string()]);
     }
 
     #[test]

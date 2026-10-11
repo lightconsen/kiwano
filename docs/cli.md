@@ -337,7 +337,10 @@ names one agent, and a second key for the same agent is a second budget — the
 reason to have two is a laptop and a desktop running the same agent. A window is
 `day:200:requests`, `monthly:20:USD` or `weekly:5:wan_tokens`; the unit may be
 left off, which is `requests`. Over a window the gateway answers 429 with a
-`Retry-After`; a model or provider outside a key's allowlists is 403. Nothing
+`Retry-After`; a model or provider outside a key's allowlists is 403. A model entry
+may end in `*` to name a family (`claude-haiku-*`) — the only pattern form there
+is; a `*` anywhere else is refused when you write it rather than stored as an entry
+that matches nothing. Nothing
 reads a stored key back: only `add` and `rotate` print one.
 
 `list` ends with **last used** — the last request the key carried, or `never` if

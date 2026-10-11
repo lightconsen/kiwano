@@ -46,6 +46,29 @@ pub use state::{
 };
 pub use usage::{agent_limit_usage, client_key_limit_usage, period_limit_usage};
 
+/// Whether an allowlist permits `value`.
+///
+/// **One form of wildcard, and only one: a trailing `*`**, which matches any
+/// suffix — `claude-haiku-*`, `gpt-5.*`. Nothing else is a pattern.
+///
+/// That narrowness is the point. An entry that *looks* like a pattern without
+/// being one is the failure this exists to close: `claude-*-4-5` used to be
+/// stored as written (nothing checked) and then matched nothing at all, so a key
+/// whose owner meant "the cheap family" silently refused every model. An interior
+/// `*` is refused at write time (`api::client_keys`), and treated literally here
+/// — a hand-edited database cannot turn a typo into a policy.
+///
+/// Case-insensitive in both forms, like every other model-id comparison in the
+/// tree.
+pub fn allows(rules: &[String], value: &str) -> bool {
+    rules.iter().any(|rule| match rule.strip_suffix('*') {
+        Some(prefix) => value
+            .to_ascii_lowercase()
+            .starts_with(&prefix.to_ascii_lowercase()),
+        None => rule.eq_ignore_ascii_case(value),
+    })
+}
+
 /// A stored allowlist as the list it stands for.
 ///
 /// `None` — and a list that parses to nothing — means "no restriction", which is

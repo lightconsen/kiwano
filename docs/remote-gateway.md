@@ -114,9 +114,15 @@ kiwano clients rotate ck-1a2b3c4d                    # new secret, same handle a
   `requests`, `wan_tokens` (万 tokens), or a currency. Measured against the same
   local-calendar boundaries an agent's ceiling uses. Over any window: **429**, with
   a `Retry-After` naming the rest of it.
-- **models** — only the listed model ids, matched case-insensitively. A model
-  outside the list: **403**. A request whose model cannot be read while a list is
-  in force is refused too, because an allowance that cannot be checked is not one.
+- **models** — only the listed model ids, matched case-insensitively. A trailing
+  `*` makes an entry a **family**: `claude-haiku-*` allows every model whose id
+  starts with `claude-haiku-`, including ones released after you wrote the list —
+  which is the difference between a rule and a list that expires. It is the only
+  pattern form there is: a `*` anywhere else is refused when you write it, because
+  an entry that looks like a pattern and matches nothing is a key that silently
+  refuses every model. A model outside the list: **403**, and the message names the
+  rule. A request whose model cannot be read while a list is in force is refused
+  too, because an allowance that cannot be checked is not one.
 - **providers** — only the listed provider ids. A key that may not use the agent's
   primary is routed to one it may (multi-provider strategies) or refused (403)
   when the strategy is `single` — "this one provider, no failover" is not a

@@ -201,8 +201,10 @@ pub fn check_model(
             agent: client.agent.clone(),
         });
     };
-    let wanted = model.to_ascii_lowercase();
-    if allowed.iter().any(|a| a.eq_ignore_ascii_case(&wanted)) {
+    // `allows` rather than an equality test: an entry may be a trailing-`*`
+    // pattern, which is how "the cheap family" is written without listing every
+    // model id the vendor has released since.
+    if crate::limits::allows(&allowed, model) {
         return Ok(());
     }
     Err(crate::error::GatewayError::ModelNotAllowed {
@@ -231,7 +233,7 @@ pub fn route_without_disallowed_providers<'r>(
     if allowed.is_empty() {
         return Ok(std::borrow::Cow::Borrowed(route));
     }
-    let permits = |id: &str| allowed.iter().any(|a| a.eq_ignore_ascii_case(id));
+    let permits = |id: &str| crate::limits::allows(&allowed, id);
     if matches!(route.strategy, crate::store::StrategyType::Single) {
         let primary = route.candidates.first();
         if primary.is_some_and(|c| !permits(&c.id)) {
@@ -864,5 +866,82 @@ mod tests {
         s.update_provider(&p).unwrap();
         assert!(evaluate(&s).blocked("payg-1").is_none());
         let _ = &mut s;
+    }
+}
+
+#[cfg(test)]
+mod allowlist_pattern_tests {
+    use super::*;
+    use crate::error::GatewayError;
+    use crate::store::ClientKey;
+
+    fn key(model_allow: Option<&str>) -> ClientKey {
+        ClientKey {
+            id: "ck-1".into(),
+            key: "kw-ag-claude-1".into(),
+            agent: "claude".into(),
+            label: None,
+            model_allow: model_allow.map(str::to_string),
+            provider_allow: None,
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+        }
+    }
+
+    /// A trailing `*` means the family, which is the whole reason it exists: a
+    /// model the vendor released after the list was written is still allowed.
+    #[test]
+    fn a_trailing_star_allows_the_family_and_nothing_else() {
+        let rules = vec!["claude-haiku-*".to_string()];
+        assert!(crate::limits::allows(&rules, "claude-haiku-4-5"));
+        assert!(crate::limits::allows(&rules, "claude-haiku-4-5-20251001"));
+        assert!(
+            crate::limits::allows(&rules, "CLAUDE-HAIKU-9"),
+            "case-insensitive"
+        );
+        assert!(
+            !crate::limits::allows(&rules, "claude-sonnet-4-5"),
+            "a different family is not this one"
+        );
+        assert!(
+            !crate::limits::allows(&rules, "claude-haiku"),
+            "the prefix itself is `claude-haiku-`, dash included"
+        );
+
+        // And through the check a request meets: a family rule lets the family
+        // through and refuses the rest, with the rule itself in the message so
+        // the reader can see what refused them.
+        assert!(check_model(
+            &key(Some(r#"["claude-haiku-*"]"#)),
+            Some("claude-haiku-4-6")
+        )
+        .is_ok());
+        match check_model(&key(Some(r#"["claude-haiku-*"]"#)), Some("claude-opus-5")) {
+            Err(GatewayError::ModelNotAllowed { allowed, .. }) => {
+                assert_eq!(allowed, vec!["claude-haiku-*".to_string()]);
+            }
+            other => panic!("expected ModelNotAllowed, got {other:?}"),
+        }
+    }
+
+    /// An entry with a `*` that is not a trailing one is treated **literally** —
+    /// the defensive half of the write-time refusal. A hand-edited database gets
+    /// a rule that matches nothing rather than one that matches everything.
+    #[test]
+    fn a_star_anywhere_else_is_not_a_wildcard() {
+        let rules = vec!["claude-*-4-5".to_string()];
+        assert!(!crate::limits::allows(&rules, "claude-haiku-4-5"));
+        assert!(!crate::limits::allows(&rules, "claude-*-4-5x"));
+        assert!(crate::limits::allows(&rules, "claude-*-4-5"));
+    }
+
+    /// Exact entries keep behaving exactly as they did — the pattern is an
+    /// addition, not a change of meaning.
+    #[test]
+    fn a_literal_entry_is_still_an_exact_match() {
+        let rules = vec!["claude-sonnet-4-5".to_string()];
+        assert!(crate::limits::allows(&rules, "claude-sonnet-4-5"));
+        assert!(crate::limits::allows(&rules, "Claude-Sonnet-4-5"));
+        assert!(!crate::limits::allows(&rules, "claude-sonnet-4-5-20250929"));
     }
 }

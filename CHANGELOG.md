@@ -21,6 +21,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **A model allowlist can name a family: a trailing `*`.** `clients policy <id>
+  --model 'claude-haiku-*'` allows every model whose id starts with that prefix —
+  including ones the vendor releases after the list was written, which is the
+  difference between a rule and a list that expires. It is the only pattern form
+  there is, and a `*` anywhere else is **refused when you write it**: an entry that
+  looks like a pattern and matches nothing would be a key that silently refuses
+  every model. The 403 names the rule that refused, so "why was I refused" stays
+  answerable with patterns in play.
+
 - **Your own rules, written into every agent's instruction file: `kiwano rules user`.**
   A rule you write once — "answer in Chinese", "never commit without asking" — kept in
   this machine's local library and written into `CLAUDE.md` / `AGENTS.md` by

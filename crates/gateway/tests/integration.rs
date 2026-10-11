@@ -354,6 +354,65 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
 }
 
 #[tokio::test]
+async fn a_forwarded_response_says_who_served_it_and_a_refusal_says_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1}
+    })))
+    .await;
+
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    // A served response carries the receipt — the same attribution the
+    // request is metered with, so what the header says is what the ledger
+    // records.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-kiwano-provider").unwrap(),
+        "p-ant"
+    );
+    assert_eq!(
+        response.headers().get("x-kiwano-model").unwrap(),
+        "claude-sonnet-4-5"
+    );
+
+    // A request the gateway itself refused names nobody: nothing served it.
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        None,
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(response.headers().get("x-kiwano-provider").is_none());
+    assert!(response.headers().get("x-kiwano-model").is_none());
+}
+
+#[tokio::test]
 async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
@@ -396,6 +455,15 @@ async fn sse_stream_passthrough_is_byte_exact_and_metered() {
         .to_str()
         .unwrap()
         .contains("text/event-stream"));
+    // The receipt rides a stream too: it names who is serving it.
+    assert_eq!(
+        response.headers().get("x-kiwano-provider").unwrap(),
+        "p-ant"
+    );
+    assert_eq!(
+        response.headers().get("x-kiwano-model").unwrap(),
+        "claude-sonnet-4-5"
+    );
 
     let body = response_body(response).await;
     let expected: String = chunks.concat();

@@ -32,6 +32,23 @@ Two properties hold across all of them:
   a request that fails is replayed against the next candidate in the queue
   instead of being handed back to your agent as an error.
 
+## Which provider answered: the receipt headers
+
+Every response the gateway forwards carries two headers of its own:
+
+| Header | What it names |
+| --- | --- |
+| `X-Kiwano-Provider` | the id of the provider that served the request |
+| `X-Kiwano-Model` | the model the request was metered under |
+
+Under `single` they tell you nothing new. Under `failover` or any strategy
+with a standby queue they answer, on the response itself, the question you
+otherwise dig out of the Logs screen afterwards: **this answer — who actually
+served it?** The values are the same attribution the request is metered with,
+so what the header says is what the ledger records. A request the gateway
+itself refused — a spend ceiling, a client key's policy — carries no receipt:
+nothing served it.
+
 ## Spend ceilings (agent limits)
 
 An agent can carry ceilings per period — `day`, `weekly`, `monthly`,

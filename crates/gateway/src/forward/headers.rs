@@ -164,6 +164,29 @@ pub(crate) fn upstream_key_and_headers(
     }
 }
 
+/// The receipt headers a forwarded response carries: which provider answered,
+/// and the model the request was metered under. They answer "this response —
+/// who actually served it?" at the moment it matters; under failover or a
+/// standby queue the agent otherwise learns it only by digging through the
+/// Logs screen afterwards.
+pub(crate) const RECEIPT_PROVIDER_HEADER: &str = "x-kiwano-provider";
+pub(crate) const RECEIPT_MODEL_HEADER: &str = "x-kiwano-model";
+
+/// Stamp the attribution receipt onto a client-facing response. The gateway's
+/// own statement wins over an upstream header of the same name — a provider
+/// could echo one, and only the gateway knows which provider it chose. A value
+/// that cannot be a header value is skipped rather than failing the response.
+pub(crate) fn stamp_receipt(headers: &mut HeaderMap, provider_id: &str, model: Option<&str>) {
+    if let Ok(v) = HeaderValue::from_str(provider_id) {
+        headers.insert(RECEIPT_PROVIDER_HEADER, v);
+    }
+    if let Some(model) = model {
+        if let Ok(v) = HeaderValue::from_str(model) {
+            headers.insert(RECEIPT_MODEL_HEADER, v);
+        }
+    }
+}
+
 /// Copy upstream response headers onto a gateway response, dropping framing
 /// headers that hyper/axum will regenerate for the client side.
 pub(crate) fn copy_response_headers(src: &HeaderMap) -> HeaderMap {
@@ -333,6 +356,30 @@ mod tests {
         assert!(out.get(axum::http::header::CONTENT_TYPE).is_some());
         assert!(out.get(axum::http::header::CONTENT_LENGTH).is_none());
         assert!(out.get(axum::http::header::TRANSFER_ENCODING).is_none());
+    }
+
+    /// The receipt is the gateway's own statement: it is always stamped, the
+    /// model is stamped when the request named one, and it overrides an
+    /// upstream header of the same name rather than the other way around.
+    #[test]
+    fn receipt_stamps_attribution_and_wins_over_an_upstream_spoof() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            RECEIPT_PROVIDER_HEADER,
+            HeaderValue::from_static("upstream-lie"),
+        );
+        stamp_receipt(&mut headers, "p-work", Some("claude-haiku-4-5"));
+        assert_eq!(headers.get(RECEIPT_PROVIDER_HEADER).unwrap(), "p-work");
+        assert_eq!(
+            headers.get(RECEIPT_MODEL_HEADER).unwrap(),
+            "claude-haiku-4-5"
+        );
+
+        // A request whose model could not be read still says who served it.
+        let mut headers = HeaderMap::new();
+        stamp_receipt(&mut headers, "p-work", None);
+        assert_eq!(headers.get(RECEIPT_PROVIDER_HEADER).unwrap(), "p-work");
+        assert!(headers.get(RECEIPT_MODEL_HEADER).is_none());
     }
 
     /// An upstream response carries credentials of its own — a session cookie

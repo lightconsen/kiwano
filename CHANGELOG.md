@@ -21,6 +21,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **Every forwarded response says who served it: `X-Kiwano-Provider` and
+  `X-Kiwano-Model`.** Under `failover` or any strategy with a standby queue,
+  "this answer — which provider actually served it?" used to be a question
+  only the Logs screen could answer afterwards. The receipt headers answer it
+  on the response itself, with the same attribution the request is metered
+  under, so what the header says is what the ledger records. A request the
+  gateway itself refused — a spend ceiling, a client key's policy — carries
+  no receipt: nothing served it.
+
 - **A model allowlist can name a family: a trailing `*`.** `clients policy <id>
   --model 'claude-haiku-*'` allows every model whose id starts with that prefix —
   including ones the vendor releases after the list was written, which is the

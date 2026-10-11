@@ -12,7 +12,7 @@ use axum::response::Response;
 use futures_util::Stream;
 use tokio::sync::mpsc;
 
-use crate::forward::headers::response_headers_text;
+use crate::forward::headers::{response_headers_text, stamp_receipt};
 use crate::forward::metering::{record_pending_usage, record_sample};
 use crate::forward::sample::{attribution_str, CompletedLog, UsageSample};
 use crate::forward::stream::{SseUsageStream, StreamPolicy};
@@ -96,6 +96,12 @@ pub(crate) fn sse_response(
     status: StatusCode,
     response_headers: HeaderMap,
 ) -> Response {
+    let mut response_headers = response_headers;
+    stamp_receipt(
+        &mut response_headers,
+        &sample.provider_id,
+        sample.model.as_deref(),
+    );
     let (tx, rx) = mpsc::channel::<UsageSample>(1);
     tokio::spawn(record_pending_usage(state.clone(), rx));
     let stream = SseUsageStream::new(
@@ -118,6 +124,12 @@ pub(crate) fn buffered_response(
     status: StatusCode,
     response_headers: HeaderMap,
 ) -> Response {
+    let mut response_headers = response_headers;
+    stamp_receipt(
+        &mut response_headers,
+        &sample.provider_id,
+        sample.model.as_deref(),
+    );
     record_sample(state, sample);
     response_with(Body::from(body), status, response_headers)
 }

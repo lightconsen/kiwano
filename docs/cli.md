@@ -206,6 +206,33 @@ kiwano keys remove <KEY_ID>
 
 Rotating keys are tried after the provider's primary key, per request.
 
+### Rules
+
+```
+kiwano rules user [--rule TEXT]… [--clear]     the rules you write yourself
+kiwano rules apply <AGENT> [--days N]          write them (and the insights advice) in
+kiwano rules status <AGENT>                    what is in the file now
+kiwano rules remove <AGENT>                    take both blocks back out
+```
+
+`rules apply` writes into the agent's own instruction file — `CLAUDE.md` for Claude
+Code, `AGENTS.md` for the rest — inside marker comments, so removing is a strip
+rather than a restore whenever the markers survive. Two blocks live there and they
+are independent: **`insights`** (the advice `kiwano insights` derived, gated by
+Settings → Features → rule injection) and **`yours`** (what you wrote). Removing one
+leaves the other, and re-applying one cannot touch the other's lines.
+
+**Your rules are one set per machine**, not per agent: a rule someone writes is
+usually a convention they hold everywhere ("answer in Chinese", "never commit
+without asking"). Which agents it reaches is `rules apply <agent>`'s decision — so
+the library is written once and applied where you want it. `rules remove` takes
+both blocks out but keeps the library, so the next `apply` puts them back;
+`rules user --clear` is the act that empties the library itself.
+
+Your rules do **not** depend on the insights half: they reach the file with no
+findings and with rule injection switched off. That flag is about advice Kiwano
+derived, not about what you wrote.
+
 ### History
 
 ```

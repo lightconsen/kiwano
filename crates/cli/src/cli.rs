@@ -246,6 +246,21 @@ pub enum RulesCmd {
         agent: String,
     },
 
+    /// The rules **you** write: kept in this machine's local library, written
+    /// into an agent's instruction file by `rules apply` (its own marked block,
+    /// so removing one never removes the other).
+    ///
+    /// No flags prints the library; `--rule` replaces it; `--clear` empties it.
+    User {
+        /// One rule (repeatable). Replaces the library.
+        #[arg(long = "rule", value_name = "TEXT")]
+        rule: Vec<String>,
+
+        /// Empty the library instead of replacing it
+        #[arg(long, conflicts_with = "rule")]
+        clear: bool,
+    },
+
     /// Whether rules are applied to the agent, and which
     Status {
         /// The agent to report on

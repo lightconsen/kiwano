@@ -21,6 +21,19 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **Your own rules, written into every agent's instruction file: `kiwano rules user`.**
+  A rule you write once — "answer in Chinese", "never commit without asking" — kept in
+  this machine's local library and written into `CLAUDE.md` / `AGENTS.md` by
+  `kiwano rules apply <agent>`, inside its **own** marker block. The advice
+  `kiwano insights` derives has its block too, and the two are independent: removing
+  one leaves the other, re-applying one cannot touch the other's lines.
+  `rules status` reports both. The library is one set per **machine**, because that
+  is what such a rule is; which agents it reaches stays a per-agent decision.
+
+  Your rules do not depend on the insights half: they are written with no findings
+  and with rule injection switched off, because that flag is about advice Kiwano
+  derived and not about what you wrote.
+
 - **A fresh install's dashboard is not empty: `kiwano history import`.** Kiwano
   only ever knew the traffic that went through it, so the first screen of a new
   install stayed empty until the user happened to route something. The agents

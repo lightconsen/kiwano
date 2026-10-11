@@ -166,6 +166,29 @@ kiwano keys remove <KEY_ID>
 
 轮换密钥会在供应商的主密钥之后尝试,按每个请求逐一进行。
 
+### 规则
+
+```
+kiwano rules user [--rule TEXT]… [--clear]     你自己写的规则
+kiwano rules apply <AGENT> [--days N]          把它们（以及 insights 的建议）写进去
+kiwano rules status <AGENT>                    文件里现在有什么
+kiwano rules remove <AGENT>                    把两块都摘掉
+```
+
+`rules apply` 写进 agent 自己的指令文件 —— Claude Code 是 `CLAUDE.md`，其余是
+`AGENTS.md` —— 用注释标记包起来，所以只要标记还在，移除就是"剥掉一段"而不是"整份还原"。
+文件里住着**两块、彼此独立**：**`insights`**（`kiwano insights` 找出来的建议，受
+设置 → 功能 → 规则注入 的开关管）与 **`yours`**（你自己写的）。摘掉一块不动另一块，
+重写一块也碰不到另一块的行。
+
+**你写的规则是"每台机器一套"**，不是每个 agent 一套：一个人写下的规则通常是他到处都遵守的
+约定（"用中文回答""没有问过就不要提交"）。它会写进**哪些** agent 由 `rules apply <agent>`
+决定 —— 所以规则只写一次，在你想用到的地方应用。`rules remove` 会把两块都摘掉但**保留规则库**，
+下次 `apply` 就装回去；`rules user --clear` 才是清空规则库本身的那一下。
+
+你的规则**不依赖 insights 那一半**：没有发现、规则注入关着，它们照样能写进文件。那个开关说的是
+Kiwano 推导出来的建议，不是你写的东西。
+
 ### 本机历史
 
 ```

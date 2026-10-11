@@ -2257,7 +2257,11 @@ fn rules_apply_is_gated_and_honest_about_empty_windows() {
         &["--home", &home_arg, "rules", "status", "claude"],
     );
     assert_eq!(code, 0, "{err}");
-    assert!(out.contains("no rules applied"), "{out}");
+    // Status reports the two blocks separately, and an empty block says so
+    // rather than being omitted — "none" is a fact about the file, and a missing
+    // line would be indistinguishable from a command that forgot to look.
+    assert!(out.contains("insights: none"), "{out}");
+    assert!(out.contains("yours: none"), "{out}");
 }
 
 /// The cache experiment is an opt-in feature: gated off it refuses, and on it
@@ -3098,4 +3102,88 @@ fn clients_list_reports_what_each_key_spent() {
         .find(|l| l.contains("desktop"))
         .expect("the desktop's row");
     assert!(desktop_row.contains("| -  "), "{desktop_row}");
+}
+
+/// The loop the user's own rules exist for: write them once, apply them to an
+/// agent, see them in the file and in `status`, take them back out.
+///
+/// It runs with **no insights findings and rule injection off**, which is the
+/// case that matters: rules the user wrote are not advice Kiwano derived, and
+/// they must not need a finding — or a Features flag — to reach the file.
+#[test]
+fn a_users_own_rules_reach_the_instruction_file_and_come_back_out() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let home = tempfile::tempdir().unwrap();
+    let home_arg = home.path().display().to_string();
+    std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+    std::fs::write(home.path().join(".claude").join("CLAUDE.md"), "# mine\n").unwrap();
+
+    // Nothing written yet: the library says so rather than printing nothing.
+    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "user"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("no rules of your own"), "{out}");
+
+    let (code, out, err) = run(
+        &db,
+        &[
+            "--home",
+            &home_arg,
+            "rules",
+            "user",
+            "--rule",
+            "Answer in Chinese",
+            "--rule",
+            "Never commit without asking",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("2 rule(s) stored"), "{out}");
+
+    // `apply` writes them, with no findings and the feature off.
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &["--home", &home_arg, "rules", "apply", "claude"],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("2 of yours"), "{out}");
+    let file = std::fs::read_to_string(home.path().join(".claude").join("CLAUDE.md")).unwrap();
+    assert!(
+        file.contains("# mine"),
+        "the user's own text survives: {file}"
+    );
+    assert!(file.contains("<!-- kiwano:user-rules begin -->"), "{file}");
+    assert!(file.contains("Answer in Chinese"), "{file}");
+    assert!(
+        !file.contains("kiwano:rules begin"),
+        "with no findings there is no insights block, and an empty one would be a \\
+         line saying nothing: {file}"
+    );
+
+    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "status", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("yours: 2 rule(s)"), "{out}");
+    assert!(out.contains("insights: none"), "{out}");
+
+    // Removing takes the block out and leaves the library alone.
+    let (code, _, err) = run(&db, &["--home", &home_arg, "rules", "remove", "claude"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(home.path().join(".claude").join("CLAUDE.md")).unwrap(),
+        "# mine\n"
+    );
+    let (code, out, _) = run(&db, &["--home", &home_arg, "rules", "user"]);
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("Answer in Chinese"),
+        "the library keeps them: {out}"
+    );
+
+    // And clearing is the other act: `--clear` empties the library.
+    let (code, out, err) = run(&db, &["--home", &home_arg, "rules", "user", "--clear"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("cleared your rules"), "{out}");
+    let (_, out, _) = run(&db, &["--json", "rules", "user"]);
+    assert_eq!(out.trim(), "[]");
 }

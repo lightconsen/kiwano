@@ -393,8 +393,12 @@ describe("the sessions view", () => {
     await screen.findByTitle(rowTitle("both-1"));
 
     // The title is the row's leading column — what a reader scans for, and the
-    // id never was.
-    expect(screen.getByText("session both-1")).toBeInTheDocument();
+    // id never was — and it is shown **whole**: a title is the one field here a
+    // reader has to read rather than compare, so it wraps onto as many lines as
+    // it needs instead of ellipsising. Rows are as tall as their titles.
+    const titleCell = screen.getByText("session both-1");
+    expect(titleCell.className).toContain("break-words");
+    expect(titleCell.className).not.toContain("truncate");
     // Two currencies are two amounts. Adding them would be adding dollars to
     // yuan, and only the Dashboard converts.
     expect(screen.getByText("$1.5 + ¥7.25 (+2 unpriced)")).toBeInTheDocument();

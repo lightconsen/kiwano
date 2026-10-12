@@ -83,10 +83,10 @@ export function SessionsTable({
           value that a narrow window cannot show. */}
       <table className="w-full table-fixed text-[11.5px]">
         <colgroup>
-          <col className="w-[28%]" />
+          <col className="w-[34%]" />
           <col className="w-[76px]" />
           <col className="w-[46px]" />
-          <col className="w-[16%]" />
+          <col className="w-[13%]" />
           <col className="w-[54px]" />
           <col className="w-[38px]" />
           <col className="w-[42px]" />
@@ -122,13 +122,18 @@ export function SessionsTable({
               title={t("logs.sessionRowTitle", { id: r.session_id })}
               onClick={() => onOpenSession(r.session_id)}
             >
-              {/* What this conversation was about. The agent's own title where
-                  its file carries one, else the opening message — and `—` for a
-                  session only the gateway saw, which has no file to ask. */}
-              <td className="px-3 py-1.5 font-sans">
+              {/* What this conversation was about, **in full**: the agent's own
+                  title where its file carries one, else the opening message — and
+                  `—` for a session only the gateway saw, which has no file to ask.
+                  A title is the one thing in this row a reader has to read rather
+                  than compare, so it wraps instead of ellipsising: rows are as
+                  tall as their titles, which is the price. `break-words` is not
+                  decoration — a title can hold a URL, and an unbreakable word
+                  wider than a fixed column would leave the cell rather than the
+                  line. */}
+              <td className="px-3 py-1.5 align-top font-sans">
                 <span
-                  className={`block truncate${r.title ? "" : " text-mut"}`}
-                  title={r.title ?? undefined}
+                  className={`block break-words leading-snug${r.title ? "" : " text-mut"}`}
                 >
                   {r.title ?? "—"}
                 </span>
@@ -136,17 +141,17 @@ export function SessionsTable({
               {/* When it was last active — the figure the list is ordered by,
                   and the one a reader scanning it is after. The start is a
                   separate question, and `--json` still carries it. */}
-              <td className="whitespace-nowrap px-1.5 py-1.5 font-sans text-mut">
+              <td className="whitespace-nowrap px-1.5 py-1.5 align-top font-sans text-mut">
                 {fmtStamp(r.ended_at)}
               </td>
-              <td className="truncate px-1.5 py-1.5 font-sans" title={r.agent}>
+              <td className="truncate px-1.5 py-1.5 align-top font-sans" title={r.agent}>
                 {r.agent}
               </td>
               {/* The project is the files' dimension — the gateway sees requests,
                   not the checkout they came from — so a traffic-only row has
                   none, and `—` says "no side knew", not "none". */}
               <td
-                className="truncate px-1.5 py-1.5 font-sans"
+                className="truncate px-1.5 py-1.5 align-top font-sans"
                 title={[
                   r.project,
                   r.machine ? `${t("logs.colMachine")}: ${r.machine}` : null,
@@ -156,15 +161,15 @@ export function SessionsTable({
               >
                 {r.project ?? "—"}
               </td>
-              <td className="px-1.5 py-1.5 font-sans">
+              <td className="px-1.5 py-1.5 align-top font-sans">
                 <SourceBadge source={r.source} />
               </td>
               {/* A turn in a file is not a request, and a request the files never
                   saw is not a turn. Whichever side is absent shows `—`. */}
-              <td className="px-1.5 py-1.5 text-right">
+              <td className="px-1.5 py-1.5 text-right align-top">
                 {r.source === "imported" ? "—" : r.requests}
               </td>
-              <td className="px-1.5 py-1.5 text-right">
+              <td className="px-1.5 py-1.5 text-right align-top">
                 {r.source === "gateway" ? "—" : r.turns}
               </td>
               {/* Two of the four buckets, and the other two on hover: cache reads
@@ -172,7 +177,7 @@ export function SessionsTable({
                   comparing spend, not for reading four numbers per row. Nothing is
                   lost — the cell's title names all four, labelled. */}
               <td
-                className="truncate px-1.5 py-1.5 text-right"
+                className="truncate px-1.5 py-1.5 text-right align-top"
                 title={t("logs.tokensCellTitle", {
                   input: fmtTokens(r.input_tokens),
                   output: fmtTokens(r.output_tokens),
@@ -183,7 +188,7 @@ export function SessionsTable({
                 {fmtTokens(r.input_tokens)} / {fmtTokens(r.output_tokens)}
               </td>
               <td
-                className="truncate px-1.5 py-1.5 text-right"
+                className="truncate px-1.5 py-1.5 text-right align-top"
                 title={fmtSessionCost(r)}
               >
                 {fmtSessionCost(r)}

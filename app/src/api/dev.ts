@@ -12,6 +12,7 @@ import { routesApi } from "./dev/api/routes";
 import { appApi } from "./dev/api/app";
 import { agentsApi } from "./dev/api/agents";
 import { logsApi } from "./dev/api/logs";
+import { sessionsApi } from "./dev/api/sessions";
 
 export const devApi: KiwanoApi = {
   ...providersApi,
@@ -24,4 +25,5 @@ export const devApi: KiwanoApi = {
   ...appApi,
   ...agentsApi,
   ...logsApi,
+  ...sessionsApi,
 };

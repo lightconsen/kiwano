@@ -21,6 +21,27 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **Sessions in the desktop app: the Dashboard's request card has two views.**
+  `kiwano sessions` has been merging the gateway's traffic with the agents' own
+  files for a while; the app had no way to read it, and a fifth navigation entry
+  would have been a different product shape. Instead the card at the foot of the
+  Dashboard now switches between **Logs** and **Sessions** — the audit trail it
+  has always been, and the same machine's conversations beside it.
+
+  Both views answer the page's agent filter. The sessions view follows the
+  Dashboard's **own window selector**, measured over the same local calendar days
+  those figures are (a new `since` bound on the sessions read, so the two panels
+  cannot disagree at the day boundary), and it says plainly that the *provider*
+  filter does not apply to a conversation rather than looking like it does. The
+  two ledgers are kept apart in the table exactly as in the CLI: a dash where a
+  side never saw the session, and money per currency, never converted.
+
+  Clicking a session narrows the Logs view to that conversation — which is the
+  filter the log screen has always accepted and never had a way to set — and a
+  chip beside the status tabs is the way back out. A session that came only from
+  a file says so instead of showing an empty table that would read as a broken
+  filter.
+
 - **The provider form shows what each key of the pool spent.** The desktop app
   could already add and remove a provider's rotating keys; now each one carries
   its own figure, and the provider's own key gets a line of its own — the half of

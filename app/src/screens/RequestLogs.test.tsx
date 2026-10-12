@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/i18n/en";
-import type { RequestLogEntry } from "@/api/types";
+import type { RequestLogEntry, Session } from "@/api/types";
 
 import RequestLogs from "./RequestLogs";
 
@@ -20,6 +20,7 @@ const { apiMock, saveMock } = vi.hoisted(() => ({
     listRequestLogs: vi.fn(),
     getRequestLog: vi.fn(),
     exportRequestLogs: vi.fn(),
+    listSessions: vi.fn(),
   },
   saveMock: vi.fn(),
 }));
@@ -80,9 +81,36 @@ async function openExportDialog() {
   return { user, dialog: await screen.findByRole("dialog") };
 }
 
+/** ONE_SHAPE: a session the gateway routed *and* the files recorded — the
+    ordinary state after a takeover, and the one whose numbers come from both
+    sides. */
+function session(id: string, over: Partial<Session> = {}): Session {
+  return {
+    session_id: id,
+    source: "both",
+    agent: "claude",
+    project: "acme-api",
+    machine: "buildbox",
+    started_at: "2026-09-14T09:00:00Z",
+    ended_at: "2026-09-14T10:00:00Z",
+    requests: 2,
+    turns: 5,
+    input_tokens: 1_000,
+    output_tokens: 200,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    cost: [{ currency: "USD", amount: 2.5 }],
+    unpriced_rows: 0,
+    tool_calls: [],
+    skills: [],
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.listRequestLogs.mockResolvedValue(page([1, 2, 3], 25));
+  apiMock.listSessions.mockResolvedValue([]);
   saveMock.mockResolvedValue("/tmp/kiwano-logs.csv");
   apiMock.exportRequestLogs.mockResolvedValue({ rows_written: 3, truncated: false });
 });
@@ -230,5 +258,141 @@ describe("the request log table", () => {
     // Still, a moment later, nothing re-raises it.
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+// ── The sessions view (the card's second tab) ──
+//
+// The window it reads over is the Dashboard's, and these pin the two things
+// that would be silent if they broke: that the log table is what opens, and
+// that a session row's click actually becomes a filter on it.
+
+describe("the sessions view", () => {
+  it("reads nothing until it is opened, then reads over the Dashboard's window", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogs agent="claude" window="7d" />);
+
+    // The card opens on the audit trail, and a view nobody has asked for must
+    // not cost a query.
+    await waitFor(() => expect(apiMock.listRequestLogs).toHaveBeenCalled());
+    expect(apiMock.listSessions).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    // The bound is an instant, not a day count: the dashboard's figures above
+    // this card are whole local days, and the rolling reading would disagree
+    // with them at the day boundary. So: an agent, and a `since` that is this
+    // local midnight six days back.
+    await waitFor(() => expect(apiMock.listSessions).toHaveBeenCalled());
+    const [agent, project, days, since] = apiMock.listSessions.mock.calls[0];
+    expect(agent).toBe("claude");
+    expect(project).toBeUndefined();
+    expect(days).toBeUndefined();
+    // A local midnight — the bound the dashboard's own window starts at, and
+    // therefore usually not midnight UTC (this file's midnight is +16:00Z on a
+    // UTC+8 machine). Six days back, because "7d" counts today as one of them.
+    const start = new Date(since as string);
+    expect(start.getHours()).toBe(0);
+    expect(start.getMinutes()).toBe(0);
+    const sixDaysBack = new Date(start);
+    sixDaysBack.setDate(sixDaysBack.getDate() + 6);
+    const todayLocal = new Date();
+    expect(sixDaysBack.toDateString()).toBe(todayLocal.toDateString());
+  });
+
+  it("all time sends no bound at all", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogs window="all" />);
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    await waitFor(() => expect(apiMock.listSessions).toHaveBeenCalled());
+    expect(apiMock.listSessions.mock.calls[0][3]).toBeUndefined();
+  });
+
+  it("narrows the log table to a session, and the chip is the way back", async () => {
+    apiMock.listSessions.mockResolvedValue([session("s-1"), session("s-2")]);
+    const user = userEvent.setup();
+    render(<RequestLogs window="7d" />);
+
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    await user.click(await screen.findByText("s-2"));
+
+    // Back on the audit trail, filtered — and starting at page one, because the
+    // result set changed under the pager.
+    await waitFor(() =>
+      expect(apiMock.listRequestLogs).toHaveBeenLastCalledWith(
+        1,
+        10,
+        expect.objectContaining({ session_id: "s-2" }),
+      ),
+    );
+    expect(screen.getByRole("tab", { name: en.logs.title })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTitle("s-2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: en.logs.clearSessionFilter }));
+    await waitFor(() =>
+      expect(apiMock.listRequestLogs).toHaveBeenLastCalledWith(
+        1,
+        10,
+        expect.not.objectContaining({ session_id: expect.anything() }),
+      ),
+    );
+    expect(screen.queryByTitle("s-2")).toBeNull();
+  });
+
+  it("says so when a session has no gateway traffic, rather than looking broken", async () => {
+    apiMock.listSessions.mockResolvedValue([
+      session("imported-1", { source: "imported", requests: 0, cost: [] }),
+    ]);
+    apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
+    const user = userEvent.setup();
+    render(<RequestLogs window="7d" />);
+
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    await user.click(await screen.findByText("imported-1"));
+
+    // An empty result that is *correct* must not read as a broken filter: the
+    // session came out of a file, so the gateway has nothing to show for it.
+    expect(await screen.findByText(en.logs.sessionNoTraffic)).toBeInTheDocument();
+    expect(screen.queryByText(en.logs.empty)).toBeNull();
+  });
+
+  it("keeps the two sides apart in the row it draws", async () => {
+    apiMock.listSessions.mockResolvedValue([
+      session("both-1", {
+        source: "both",
+        cost: [
+          { currency: "USD", amount: 1.5 },
+          { currency: "CNY", amount: 7.25 },
+        ],
+        unpriced_rows: 2,
+      }),
+      session("imported-1", { source: "imported", requests: 0, cost: [] }),
+      session("gateway-1", { source: "gateway", project: null, turns: 0 }),
+    ]);
+    const user = userEvent.setup();
+    render(<RequestLogs window="7d" />);
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    await screen.findByText("both-1");
+
+    // Two currencies are two amounts. Adding them would be adding dollars to
+    // yuan, and only the Dashboard converts.
+    expect(screen.getByText("$1.5 + ¥7.25 (+2 unpriced)")).toBeInTheDocument();
+    // A side that never saw the session shows a dash rather than a zero: the
+    // files carry no money, so `0` there would read as "this was free".
+    expect(screen.getByText(en.logs.sourceImported)).toBeInTheDocument();
+    expect(screen.getByText(en.logs.sourceGateway)).toBeInTheDocument();
+  });
+
+  it("says the provider filter does not apply here instead of pretending it does", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogs providerId="deepseek" window="7d" />);
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    expect(
+      await screen.findByText(en.logs.sessionsProviderNotApplied),
+    ).toBeInTheDocument();
+    // Structurally too: the call has no provider to filter by.
+    expect(apiMock.listSessions.mock.calls[0].length).toBeLessThanOrEqual(4);
   });
 });

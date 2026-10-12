@@ -35,6 +35,7 @@ export const logs = {
   logTitle: "日志 #{id}",
 
   detailSession: "会话",
+  detailUpstreamKey: "上游密钥",
   detailNotes: "网关记录：",
   dlpBadge: "凭证",
   detailCredentialWatch: "凭证监视：此请求中有 API key 或私钥离开了本机。",
@@ -52,5 +53,31 @@ export const logs = {
   exportNote: "范围内每个请求都会写入，而不仅是屏幕上的 {n} 条。",
   exporting: "导出中…",
   exported: "已导出 {n} 行",
-  exportCapped: "已截断至 {n} 行 — 请缩小范围以导出其余部分。",
+  exportCapped: "上限 {n} 行——缩小范围以导出其余部分。",
+
+  // ── 会话视图(这张卡的第二个 tab) ──
+  tabSessions: "会话",
+  sessionsCount: "{n} 个会话",
+  sessionsWindowTitle: "窗口取自 Dashboard 顶部的选择器",
+  sessionsProviderNotApplied: "供应商筛选不适用于会话",
+  sessionsEmpty:
+    "这个窗口里没有会话 —— 网关自己的流量会随发生出现,更早的历史来自 `kiwano history import`",
+  colRequests: "请求",
+  colSpan: "时段",
+  colProject: "项目",
+  colMachine: "机器",
+  colSource: "来源",
+  colTurns: "轮次",
+  colCost: "花费",
+  colSession: "会话",
+  colTokensTitle: "输入 / 输出 / 缓存读 / 缓存写 —— 只取一侧的数字,绝不相加",
+  sourceGateway: "流量",
+  sourceImported: "文件",
+  sourceBoth: "两者",
+  sourceTitle:
+    "这个会话是在哪本账里找到的。两侧绝不相加:requests、token 与花费来自流量侧,项目、时段、轮次与工具来自 agent 自己的文件 —— 破折号表示那一侧从未见过它。",
+  sessionFilter: "会话",
+  clearSessionFilter: "清除会话筛选",
+  sessionNoTraffic: "这个会话没有网关流量 —— 它来自 agent 自己的文件",
+  sessionRowTitle: "只看这个会话的请求",
 };

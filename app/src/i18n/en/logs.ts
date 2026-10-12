@@ -44,6 +44,7 @@ export const logs = {
   logTitle: "Log #{id}",
 
   detailSession: "Session",
+  detailUpstreamKey: "Upstream key",
   detailNotes: "Gateway notes:",
   /** Row badge + detail block for a credential-watch finding (dlp:* notes). */
   dlpBadge: "key",
@@ -63,4 +64,31 @@ export const logs = {
   exporting: "Exporting…",
   exported: "Exported {n} rows",
   exportCapped: "Capped at {n} rows — narrow the range for the rest.",
+
+  // ── The sessions view (the card's second tab) ──
+  tabSessions: "Sessions",
+  sessionsCount: "{n} sessions",
+  sessionsWindowTitle: "The window the Dashboard's selector is set to",
+  sessionsProviderNotApplied: "The provider filter does not apply to sessions",
+  sessionsEmpty:
+    "No sessions in this window — the gateway's own traffic appears as it happens, and the agents' earlier history comes from `kiwano history import`",
+  colRequests: "REQ",
+  colSpan: "SPAN",
+  colProject: "PROJECT",
+  colMachine: "machine",
+  colSource: "SOURCE",
+  colTurns: "TURNS",
+  colCost: "COST",
+  colSession: "SESSION",
+  colTokensTitle: "in / out / cache read / cache write — one side's numbers, never added",
+  sourceGateway: "gateway",
+  sourceImported: "imported",
+  sourceBoth: "both",
+  sourceTitle:
+    "Which ledger this session was found in. The two are never added: traffic supplies the requests, the tokens and the cost, the agent's files supply the project, the span, the turns and the tools — and a dash marks the side that never saw it.",
+  sessionFilter: "Session",
+  clearSessionFilter: "Clear the session filter",
+  sessionNoTraffic:
+    "No gateway traffic for this session — it came from the agent's own files",
+  sessionRowTitle: "Show this session's requests",
 };

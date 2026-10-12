@@ -4,7 +4,7 @@
 // record (redacted headers + bodies) and a Copy button that puts the whole
 // log as plain text on the clipboard.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, Copy, Download } from "lucide-react";
+import { Check, ChevronRight, Copy, Download, X as XIcon } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,12 +24,20 @@ import {
 import { api } from "../api/client";
 import { errText } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
-import type { RequestLogDetail, RequestLogEntry, RequestLogFilter } from "../api/types";
+import type {
+  DashboardWindow,
+  RequestLogDetail,
+  RequestLogEntry,
+  RequestLogFilter,
+  Session,
+} from "../api/types";
+import { SessionsTable } from "./RequestLogs/SessionsTable";
 import {
   localMidnightUtc,
   localMidnightUtcAfter,
   shiftLocalDate,
   todayLocalDate,
+  windowSince,
 } from "../lib/daterange";
 import { fmtLatency, fmtTokens } from "../lib/format";
 import { useT, type KeyPath, type Messages } from "../i18n";
@@ -45,6 +53,34 @@ const FILTERS: { id: StatusFilter; labelKey: KeyPath<Messages> }[] = [
   { id: "ok", labelKey: "logs.filterOk" },
   { id: "error", labelKey: "logs.filterError" },
 ];
+
+type Tab = "logs" | "sessions";
+
+/** The card's two views. The first is the audit trail this card has always
+    been; the second is the same machine's sessions, which the gateway's traffic
+    and the agents' own files each know half of. */
+const TABS: { id: Tab; labelKey: KeyPath<Messages> }[] = [
+  { id: "logs", labelKey: "logs.title" },
+  { id: "sessions", labelKey: "logs.tabSessions" },
+];
+
+/** The Dashboard window's own name, for the sessions view's caption.
+ *
+ * The labels are the dashboard's, reused on purpose: this list is measured over
+ * the same span those figures are (`windowSince`), so a second set of words for
+ * it would be a second claim about the same window. */
+function windowLabel(t: (k: KeyPath<Messages>) => string, win: DashboardWindow): string {
+  switch (win) {
+    case "today":
+      return t("dashboard.windowToday");
+    case "30d":
+      return t("dashboard.window30d");
+    case "all":
+      return t("dashboard.windowAll");
+    default:
+      return t("dashboard.window7d");
+  }
+}
 
 type RangeId = "any" | "today" | "7d" | "30d" | "custom";
 
@@ -212,6 +248,15 @@ function Detail({ d }: { d: RequestLogDetail | null }) {
             <span className="font-mono text-ink">{d.session_id}</span>
           </span>
         )}
+        {/* Which entry of the provider's key pool carried it (v33) — a label,
+            `#<id>` or `primary`, never the key. Absent on rows written before
+            that migration, which is why this is conditional and not a dash. */}
+        {d.upstream_key && (
+          <span>
+            {t("logs.detailUpstreamKey")}{" "}
+            <span className="font-mono text-ink">{d.upstream_key}</span>
+          </span>
+        )}
         {d.is_streaming && d.first_token_ms != null && (
           <span>
             {t("logs.firstToken")}{" "}
@@ -346,6 +391,7 @@ export default function RequestLogs({
   agent,
   providerId,
   initialOpenId,
+  window: win = "7d",
 }: {
   /** The page's provider/agent filters. They narrow this table the same way
    *  they narrow the cards above it — the reader set one slice and expects
@@ -357,8 +403,27 @@ export default function RequestLogs({
    *  page. Consumed on open — the hash is rewritten so a refresh or a
    *  screen switch does not spring the dialog back up. */
   initialOpenId?: number;
+  /** The Dashboard's own window selector, which the **sessions** view follows
+   *  and the log table deliberately does not (the table is an audit trail with
+   *  its own range, in the export dialog). It is passed down rather than
+   *  re-derived so the two panels cannot end up measuring different spans. */
+  window?: DashboardWindow;
 } = {}) {
   const t = useT();
+  // Which of the two views this card is showing. The card owns it rather than
+  // the Dashboard: it is the card's own state, and the header row that carries
+  // the switch also carries each view's count and controls.
+  const [tab, setTab] = useState<"logs" | "sessions">("logs");
+  // One conversation's requests, set by the session view's drill-down and
+  // cleared by the chip beside the status filter. It lives here because it is
+  // part of the log filter — the same query, one more bound.
+  const [sessionFilter, setSessionFilter] = useState<string | null>(null);
+  // The sessions view's own read: the rows, whether one has landed, its error,
+  // and a sequence guard for the same reason the log table has one.
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [sessionsErr, setSessionsErr] = useState<string | null>(null);
+  const seqSessions = useRef(0);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<RequestLogEntry[]>([]);
@@ -389,6 +454,9 @@ export default function RequestLogs({
     ...(filter === "all" ? {} : { status: filter }),
     agent,
     provider_id: providerId,
+    // The session view's drill-down; absent unless a row there was clicked, so
+    // the export dialog's own filter is unchanged for every other reader.
+    ...(sessionFilter ? { session_id: sessionFilter } : {}),
   });
 
   // What the file covers: the above, narrowed by the range chosen in the
@@ -413,7 +481,7 @@ export default function RequestLogs({
   // The page filters change what the result set is, not just which rows of it
   // are on screen, so the pager has to go back to the start. Keyed by value
   // because the props are plain strings by the time they arrive.
-  const scope = `${agent ?? ""} ${providerId ?? ""}`;
+  const scope = `${agent ?? ""} ${providerId ?? ""} ${sessionFilter ?? ""}`;
   useEffect(() => {
     setPage(1);
     setOpenId(null);
@@ -512,15 +580,53 @@ export default function RequestLogs({
       });
   };
 
-  // This table is part of what the Dashboard is showing, so the app's ⟳ has to
-  // reach it too — it is embedded there (`Dashboard.tsx`). `page` is not
-  // captured stale: `useReload` keeps the latest render's closure.
-  useReload(() => fetchPage(page));
+  /** Read the sessions view's rows. The window is the Dashboard's, expressed as
+      an instant (`windowSince`) rather than a day count: the figures above this
+      card are whole local days, and a list measured in rolling hours would
+      disagree with them at the day boundary. */
+  const fetchSessions = () => {
+    const seq = ++seqSessions.current;
+    setSessionsErr(null);
+    api
+      .listSessions(agent, undefined, undefined, windowSince(win))
+      .then((rows) => {
+        if (seq !== seqSessions.current) return;
+        setSessions(rows);
+        setSessionsLoaded(true);
+      })
+      .catch((e) => {
+        if (seq !== seqSessions.current) return;
+        setSessionsErr(errText(e));
+        setSessionsLoaded(true);
+      });
+  };
+
+  // This card is part of what the Dashboard is showing, so the app's ⟳ has to
+  // reach it too — it is embedded there (`Dashboard.tsx`). `page` and `tab` are
+  // not captured stale: `useReload` keeps the latest render's closure. A ⟳ on
+  // the Logs view does not refresh the sessions view (it is not mounted); that
+  // view reads when it is next opened.
+  useReload(() => {
+    if (tab === "sessions") {
+      fetchSessions();
+      return Promise.resolve();
+    }
+    return fetchPage(page);
+  });
 
   useEffect(() => {
+    if (tab !== "logs") return;
     void fetchPage(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, filter, scope]);
+  }, [page, filter, scope, tab]);
+
+  // The sessions view reads on every open, so it can never show rows from a
+  // window or an agent the reader has since changed.
+  useEffect(() => {
+    if (tab !== "sessions") return;
+    void fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, agent, win]);
 
   // Presets move both ends at once, so React batches them into one refetch.
   const applyRange = (id: RangeId) => {
@@ -579,22 +685,74 @@ export default function RequestLogs({
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3.5 py-2.5">
-        <h3 className="text-[12.5px] font-semibold">{t("logs.title")}</h3>
-        <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
-          {FILTERS.map((f, i) => (
+        {/* The two views of this card. `h-7` and the active tab's weight keep
+            this switch from reading as one control with the status filter
+            beside it, which is the same `.seg` idiom one size down. */}
+        <div
+          role="tablist"
+          className="flex overflow-hidden rounded-lg border border-line text-[12px]"
+        >
+          {TABS.map((x, i) => (
             <button
-              key={f.id}
-              className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${filter === f.id ? " active" : ""}`}
+              key={x.id}
+              role="tab"
+              aria-selected={tab === x.id}
+              className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${tab === x.id ? " active font-semibold" : ""}`}
               onClick={() => {
-                setFilter(f.id);
-                setPage(1);
+                setTab(x.id);
+                // A tab switch is a change of view, not of result set: the
+                // pager and the open dialog belong to the view being left.
                 setOpenId(null);
+                setErr(null);
+                setNotice(null);
+                setExportOpen(false);
               }}
             >
-              {t(f.labelKey)}
+              {t(x.labelKey)}
             </button>
           ))}
         </div>
+        {tab === "logs" && (
+          <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
+            {FILTERS.map((f, i) => (
+              <button
+                key={f.id}
+                className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${filter === f.id ? " active" : ""}`}
+                onClick={() => {
+                  setFilter(f.id);
+                  setPage(1);
+                  setOpenId(null);
+                }}
+              >
+                {t(f.labelKey)}
+              </button>
+            ))}
+          </div>
+        )}
+        {tab === "logs" && sessionFilter && (
+          // Which conversation is being shown, and the way out of it. The id is
+          // shortened for the chip; the full value is its title, because the id
+          // is what a reader greps for.
+          <span className="flex items-center gap-1.5 rounded-md border border-line px-2 py-0.5 text-[11px] text-mut">
+            {t("logs.sessionFilter")}
+            <span className="max-w-[180px] truncate font-mono" title={sessionFilter}>
+              {sessionFilter}
+            </span>
+            <button
+              className="text-mut hover:text-fg"
+              aria-label={t("logs.clearSessionFilter")}
+              onClick={() => setSessionFilter(null)}
+            >
+              <XIcon className="h-3 w-3" />
+            </button>
+          </span>
+        )}
+        {tab === "sessions" && providerId && (
+          // The provider filter above has no meaning here and must not look
+          // like it does: a session is a conversation, and an imported one was
+          // never routed by this gateway at all.
+          <span className="text-[11px] text-mut">{t("logs.sessionsProviderNotApplied")}</span>
+        )}
         <span className="ml-auto flex items-center gap-3 text-[11px] text-mut">
           {/* Feedback lives here rather than in a toast: a transient clip that
               fades, or the error until the next attempt. The read's failure and
@@ -606,25 +764,58 @@ export default function RequestLogs({
           )}
           {err && <span style={{ color: "var(--red)" }}>{err}</span>}
           {notice && <span style={{ color: "var(--kiwi)" }}>{notice}</span>}
-          <span>{t("logs.requestCount", { n: total.toLocaleString() })}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 gap-1 px-2 text-[11px]"
-            disabled={!loaded}
-            onClick={() => {
-              setErr(null);
-              setNotice(null);
-              setExportOpen(true);
-            }}
-            title={t("logs.exportTitle")}
-          >
-            <Download className="h-3 w-3" />
-            {t("logs.exportCsv")}
-          </Button>
+          {tab === "sessions" && sessionsErr && (
+            <span style={{ color: "var(--red)" }} title={sessionsErr}>
+              {t("common.loadFailed")}
+            </span>
+          )}
+          {tab === "logs" ? (
+            <>
+              <span>{t("logs.requestCount", { n: total.toLocaleString() })}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 gap-1 px-2 text-[11px]"
+                disabled={!loaded}
+                onClick={() => {
+                  setErr(null);
+                  setNotice(null);
+                  setExportOpen(true);
+                }}
+                title={t("logs.exportTitle")}
+              >
+                <Download className="h-3 w-3" />
+                {t("logs.exportCsv")}
+              </Button>
+            </>
+          ) : (
+            // No export here: there is no sessions export endpoint, and a button
+            // that had to invent one would be a second code path pretending to
+            // be the first. The window is named because the reader cannot see
+            // it — the selector it follows is above the card.
+            <>
+              <span title={t("logs.sessionsWindowTitle")}>{windowLabel(t, win)}</span>
+              <span>{t("logs.sessionsCount", { n: sessions.length.toLocaleString() })}</span>
+            </>
+          )}
         </span>
       </div>
 
+      {tab === "sessions" ? (
+        <SessionsTable
+          rows={sessions}
+          loaded={sessionsLoaded}
+          onOpenSession={(id) => {
+            // A row click is the one place the session id a reader can see
+            // becomes a filter they can use: the log table has had a
+            // `session_id` bound all along and no way to set it.
+            setSessionFilter(id);
+            setTab("logs");
+            setPage(1);
+            setOpenId(null);
+          }}
+        />
+      ) : (
       <div>
         <div className="overflow-hidden">
           <table className="w-full text-[11.5px]">
@@ -679,7 +870,12 @@ export default function RequestLogs({
             </tbody>
           </table>
           {loaded && rows.length === 0 && (
-            <div className="p-8 text-center text-[12px] text-mut">{t("logs.empty")}</div>
+            <div className="p-8 text-center text-[12px] text-mut">
+              {/* A session the gateway never routed has no rows here, and that
+                  empty result is correct — saying "no requests recorded yet"
+                  would read as a filter that failed. */}
+              {sessionFilter ? t("logs.sessionNoTraffic") : t("logs.empty")}
+            </div>
           )}
         </div>
 
@@ -805,6 +1001,7 @@ export default function RequestLogs({
           </DialogContent>
         </Dialog>
       </div>
+      )}
     </div>
   );
 }

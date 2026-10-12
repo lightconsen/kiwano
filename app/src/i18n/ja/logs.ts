@@ -35,6 +35,7 @@ export const logs = {
   logTitle: "ログ #{id}",
 
   detailSession: "セッション",
+  detailUpstreamKey: "上流キー",
   detailNotes: "ゲートウェイの記録：",
   dlpBadge: "キー",
   detailCredentialWatch: "認証情報の監視：このリクエストで API キーまたは秘密鍵が本機の外に出ました。",
@@ -52,5 +53,31 @@ export const logs = {
   exportNote: "範囲内のすべてのリクエストが書き出されます。画面に表示されている {n} 件だけではありません。",
   exporting: "エクスポート中…",
   exported: "{n} 行をエクスポートしました",
-  exportCapped: "{n} 行で打ち切りました — 残りは範囲を狭めてください。",
+  exportCapped: "{n} 行で上限 — 残りは範囲を狭めてください。",
+
+  // ── セッション表示（このカードの 2 つ目のタブ） ──
+  tabSessions: "セッション",
+  sessionsCount: "{n} セッション",
+  sessionsWindowTitle: "ウィンドウは Dashboard 上部のセレクターに従います",
+  sessionsProviderNotApplied: "プロバイダーのフィルタはセッションには適用されません",
+  sessionsEmpty:
+    "このウィンドウにセッションはありません — ゲートウェイ自身のトラフィックは随時現れ、それ以前の履歴は `kiwano history import` が取り込みます",
+  colRequests: "REQ",
+  colSpan: "期間",
+  colProject: "プロジェクト",
+  colMachine: "マシン",
+  colSource: "ソース",
+  colTurns: "ターン",
+  colCost: "コスト",
+  colSession: "セッション",
+  colTokensTitle: "入力 / 出力 / キャッシュ読 / キャッシュ書 — 片側の数字のみで、決して合算しません",
+  sourceGateway: "ゲートウェイ",
+  sourceImported: "ファイル",
+  sourceBoth: "両方",
+  sourceTitle:
+    "このセッションがどちらの台帳にあったか。両側は決して合算されません: リクエスト・トークン・コストはトラフィック側、プロジェクト・期間・ターン・ツールはエージェント自身のファイル側で、ダッシュは見ていない側を示します。",
+  sessionFilter: "セッション",
+  clearSessionFilter: "セッションのフィルタを解除",
+  sessionNoTraffic: "このセッションにゲートウェイのトラフィックはありません — エージェント自身のファイル由来です",
+  sessionRowTitle: "このセッションのリクエストだけを表示",
 };

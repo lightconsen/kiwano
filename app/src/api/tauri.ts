@@ -2,7 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, UpstreamKeySpendEntry, AppSettings, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, UpstreamKeySpendEntry, AppSettings, Session, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -149,6 +149,14 @@ export const tauriApi: KiwanoApi = {
 
   probeAgentVersions: () => invoke<AgentVersionEntry[]>("probe_agent_versions"),
 
+  listSessions: (agent?: string, project?: string, days?: number, since?: string) =>
+    invoke<Session[]>("list_sessions", {
+      agent: agent ?? null,
+      project: project ?? null,
+      days: days ?? null,
+      since: since ?? null,
+    }),
+
   listRequestLogs: (page: number, pageSize: number, filter?: RequestLogFilter) =>
     invoke<RequestLogList>("list_request_logs", {
       page,
@@ -158,6 +166,9 @@ export const tauriApi: KiwanoApi = {
       status: filter?.status ?? null,
       from: filter?.from ?? null,
       to: filter?.to ?? null,
+      // The session list's drill-down sets this; `useEffect` in the table
+      // re-reads when it changes, the same as every other filter.
+      sessionId: filter?.session_id ?? null,
     }),
 
   getRequestLog: (id: number) => invoke<RequestLogDetail | null>("get_request_log", { id }),
@@ -172,6 +183,9 @@ export const tauriApi: KiwanoApi = {
       status: filter?.status ?? null,
       from: filter?.from ?? null,
       to: filter?.to ?? null,
+      // The session list's drill-down sets this; `useEffect` in the table
+      // re-reads when it changes, the same as every other filter.
+      sessionId: filter?.session_id ?? null,
     }),
 
   clearRequestLogs: () => invoke<void>("clear_request_logs"),

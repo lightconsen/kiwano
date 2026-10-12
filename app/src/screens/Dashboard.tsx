@@ -671,6 +671,7 @@ export default function Dashboard({
           agent={agentFilter === "all" ? undefined : agentFilter}
           providerId={providerFilter === "all" ? undefined : providerFilter}
           initialOpenId={openLogId}
+          window={win}
         />
       </div>
     </section>

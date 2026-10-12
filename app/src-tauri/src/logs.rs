@@ -31,6 +31,7 @@ pub fn list_request_logs(
     status: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    session_id: Option<String>,
 ) -> Result<vm::RequestLogListVm, String> {
     DaemonApi::connect().list_request_logs(
         page,
@@ -41,9 +42,10 @@ pub fn list_request_logs(
             status: status.as_deref(),
             from: from.as_deref(),
             to: to.as_deref(),
-            // The log screen has no session filter of its own yet; the field is
-            // here because the filter is one shape for every caller.
-            session_id: None,
+            // Set from the session list's own drill-down: a row there narrows
+            // this table to that conversation, which is the one place the id a
+            // reader can see becomes a filter they can use.
+            session_id: session_id.as_deref(),
         },
     )
 }
@@ -63,6 +65,7 @@ pub fn export_request_logs(
     status: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    session_id: Option<String>,
 ) -> Result<vm::RequestLogExportVm, String> {
     // The rows and their spelling are the daemon's; the **file** is this side's,
     // because the path came from the user's save dialog.
@@ -73,7 +76,7 @@ pub fn export_request_logs(
             status: status.as_deref(),
             from: from.as_deref(),
             to: to.as_deref(),
-            session_id: None,
+            session_id: session_id.as_deref(),
         })?;
     std::fs::write(&path, &csv).map_err(|e| format!("cannot write {path}: {e}"))?;
     Ok(vm::RequestLogExportVm {

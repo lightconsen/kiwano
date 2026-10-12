@@ -55,6 +55,7 @@ const { apiMock } = vi.hoisted(() => ({
     // The Dashboard screen the banner navigates to reads all of these.
     getDashboard: vi.fn(),
     listRequestLogs: vi.fn(),
+    listSessions: vi.fn(),
     getRequestLog: vi.fn(),
   },
 }));

@@ -763,6 +763,56 @@ export interface UpstreamKeySpendEntry {
   cost: number;
 }
 
+/** An amount in the currency it was billed in — the shape `SessionVm.cost` uses.
+    Never converted outside the Dashboard (see `lib/format.ts`'s rule). */
+export interface CurrencyAmount {
+  currency: string;
+  amount: number;
+}
+
+/** A count of one tool or skill, as the agents' own files recorded it. */
+export interface HistoryCount {
+  name: string;
+  count: number;
+}
+
+/** One session, from the gateway's traffic, the agent's files, or both.
+ *
+ * The two sides are **never summed**: where both have a field one side wins
+ * (traffic for requests/tokens/cost, files for project/span/turns/tools) and
+ * the `source` field says which. A `0` on the side that never saw the session
+ * means "not measured here", not "measured zero" — which is why the table
+ * prints `—` for those cells rather than the number.
+ *
+ * Mirrors `kiwano_api::sessions::SessionVm`. */
+export interface Session {
+  session_id: string;
+  /** The wire says `String`; the three values are what the daemon writes. */
+  source: "gateway" | "imported" | "both";
+  agent: string;
+  /** Files only: the gateway sees requests, not the checkout they came from. */
+  project?: string | null;
+  /** Files only: the label the importing machine gave itself (v32). */
+  machine?: string | null;
+  started_at: string;
+  ended_at: string;
+  /** Traffic only — a turn in a file is not a request. */
+  requests: number;
+  /** Files only. */
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  /** Traffic only: the files carry tokens, not money. Empty for an
+      imported-only session, and one entry per currency — never summed. */
+  cost: CurrencyAmount[];
+  /** Of `requests`, the ones with no cost: the figure above is short by them. */
+  unpriced_rows: number;
+  tool_calls: HistoryCount[];
+  skills: HistoryCount[];
+}
+
 /** Cost alert hit (backend already dedupes per period; the frontend just forwards it as a system notification) */
 export interface UsageAlert {
   provider_id: string;
@@ -895,6 +945,10 @@ export interface RequestLogEntry {
   /** What the compat shim changed about the request, one line per action
    *  (null when nothing was touched). */
   request_notes: string | null;
+  /** Which entry of the provider's key pool carried it (migration v33): a
+   *  label, `#<id>`, or `primary` for the provider's own key — a display name,
+   *  never the key. Absent on rows written before that migration. */
+  upstream_key?: string | null;
 }
 
 /** Detail view: metadata + the captured request/response bodies */
@@ -919,6 +973,9 @@ export interface RequestLogFilter {
   /** RFC3339 UTC instant, EXCLUSIVE upper bound — `localMidnightUtcAfter` of
    *  the last day you want to see. */
   to?: string;
+  /** One conversation, as `listSessions` spells it. This is the filter the
+   *  session list's drill-down sets. */
+  session_id?: string;
 }
 
 /** What one export wrote, so the UI can say so and warn when the slice was
@@ -1012,6 +1069,16 @@ export interface KiwanoApi {
   getPlanQuota(providerId: string, force?: boolean): Promise<PlanQuotaReport>;
   /** Currency metadata for the Settings selector + client-side conversion */
   getCurrencyMeta(): Promise<CurrencyMeta>;
+  /** Sessions this machine knows, newest first, from the gateway's traffic and
+      the agents' own files. `since` is an instant (the app's local-day window);
+      `days` is the rolling span the CLI uses. The daemon prefers `since`. */
+  listSessions(
+    agent?: string,
+    project?: string,
+    days?: number,
+    since?: string,
+  ): Promise<Session[]>;
+
   /** A Provider's list of rotating keys (excluding the primary key) */
   listApiKeys(providerId: string): Promise<ApiKeyEntry[]>;
   /** What each entry of that pool spent over the last `days`, per currency */

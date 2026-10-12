@@ -38,6 +38,7 @@ pub mod paths;
 pub mod probe;
 pub mod providers;
 pub mod quota;
+pub mod sessions;
 pub mod settings;
 pub mod sharing;
 pub mod state;
@@ -93,6 +94,7 @@ pub use providers::{
     add_provider, delete_provider, list_providers, set_provider_enabled, update_provider,
 };
 pub use quota::get_plan_quota;
+pub use sessions::list_sessions;
 pub use settings::{get_settings, update_settings};
 pub use sharing::{export_config, import_cc_switch, import_config};
 pub use strategies::{
@@ -293,6 +295,7 @@ pub fn run() {
             update_settings,
             list_request_logs,
             export_request_logs,
+            list_sessions,
             get_request_log,
             clear_request_logs,
             check_credential_finding,

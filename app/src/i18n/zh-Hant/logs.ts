@@ -35,6 +35,7 @@ export const logs = {
   logTitle: "日誌 #{id}",
 
   detailSession: "工作階段",
+  detailUpstreamKey: "上游金鑰",
   detailNotes: "閘道記錄：",
   dlpBadge: "憑證",
   detailCredentialWatch: "憑證監控：此請求中有 API 金鑰或私密金鑰離開了本機。",
@@ -52,5 +53,31 @@ export const logs = {
   exportNote: "範圍內的每個請求都會寫入，不只是畫面上的 {n} 筆。",
   exporting: "匯出中…",
   exported: "已匯出 {n} 列",
-  exportCapped: "已截斷至 {n} 列 — 請縮小範圍以匯出其餘部分。",
+  exportCapped: "上限 {n} 列——縮小範圍以匯出其餘部分。",
+
+  // ── 工作階段檢視(這張卡的第二個 tab) ──
+  tabSessions: "工作階段",
+  sessionsCount: "{n} 個工作階段",
+  sessionsWindowTitle: "視窗取自 Dashboard 頂部的選擇器",
+  sessionsProviderNotApplied: "供應商篩選不適用於工作階段",
+  sessionsEmpty:
+    "這個視窗裡沒有工作階段 —— 閘道自己的流量會隨發生出現,更早的歷史來自 `kiwano history import`",
+  colRequests: "請求",
+  colSpan: "時段",
+  colProject: "專案",
+  colMachine: "機器",
+  colSource: "來源",
+  colTurns: "輪次",
+  colCost: "花費",
+  colSession: "工作階段",
+  colTokensTitle: "輸入 / 輸出 / 快取讀 / 快取寫 —— 只取一側的數字,絕不相加",
+  sourceGateway: "流量",
+  sourceImported: "檔案",
+  sourceBoth: "兩者",
+  sourceTitle:
+    "這個工作階段是在哪本帳裡找到的。兩側絕不相加:requests、token 與花費來自流量側,專案、時段、輪次與工具來自 agent 自己的檔案 —— 破折號表示那一側從未見過它。",
+  sessionFilter: "工作階段",
+  clearSessionFilter: "清除工作階段篩選",
+  sessionNoTraffic: "這個工作階段沒有閘道流量 —— 它來自 agent 自己的檔案",
+  sessionRowTitle: "只看這個工作階段的請求",
 };

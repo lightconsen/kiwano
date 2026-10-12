@@ -154,6 +154,10 @@ export function matchingLogs(filter?: RequestLogFilter): RequestLogEntry[] {
         (filter.status === "error" && r.status_code >= 400) ||
         (filter.status === "ok" && r.status_code < 400)) &&
       (!filter?.from || r.ts >= filter.from) &&
-      (!filter?.to || r.ts < filter.to),
+      (!filter?.to || r.ts < filter.to) &&
+      // The session drill-down's filter. Without it the mock would ignore the
+      // one control the feature adds, which is how a dev session reports a
+      // screen as working when it is not.
+      (!filter?.session_id || r.session_id === filter.session_id),
   );
 }

@@ -53,3 +53,20 @@ export function shiftLocalDate(date: string, days: number): string {
   const [y, m, d] = date.split("-").map(Number);
   return toDateInput(new Date(y, m - 1, d + days));
 }
+
+/** The Dashboard's window, as the instant it starts — the same bound
+ *  `crates/gateway/src/api/dashboard.rs::resolve_window` computes, so a list
+ *  below those figures is measured over the same span they are.
+ *
+ * `today` is the local day, not the last 24 hours: the rolling reading is what
+ * the daemon's `?days=N` means, and it disagrees with the dashboard at the day
+ * boundary. `all` has no bound at all — the caller omits the parameter rather
+ * than sending a zero, which would collapse the window to "now".
+ *
+ * `days - 1` because today counts as one of them: "7d" is today plus the six
+ * before it, exactly as the daemon's window is. */
+export function windowSince(win: "today" | "7d" | "30d" | "all"): string | undefined {
+  const span = { today: 1, "7d": 7, "30d": 30 } as const;
+  if (win === "all") return undefined;
+  return localMidnightUtc(shiftLocalDate(todayLocalDate(), -(span[win] - 1)));
+}

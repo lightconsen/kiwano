@@ -22,6 +22,7 @@ const { apiMock } = vi.hoisted(() => ({
     getCurrencyMeta: vi.fn(),
     getDashboard: vi.fn(),
     listRequestLogs: vi.fn(),
+    listSessions: vi.fn(),
     getRequestLog: vi.fn(),
     exportRequestLogs: vi.fn(),
   },

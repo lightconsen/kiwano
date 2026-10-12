@@ -766,8 +766,15 @@ pub struct ForwardArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum KeysCmd {
-    /// List a provider's rotating keys (never printed in full)
-    List { provider_id: String },
+    /// List a provider's rotating keys (never printed in full), and what each
+    /// entry of the pool has spent
+    List {
+        provider_id: String,
+
+        /// Window for the spend column, in days. Omitted: 30 days.
+        #[arg(long, value_name = "N")]
+        days: Option<i64>,
+    },
 
     /// Add a rotating key
     Add {

@@ -8,9 +8,38 @@
 
 use crate::store::{now_rfc3339, Store};
 use kiwano_api::error::ApiError;
-use kiwano_api::keys::{mask_key, ApiKeyVm};
+use kiwano_api::keys::{mask_key, ApiKeyVm, UpstreamKeySpendVm};
 
 // ── Multi-key rotation (spec §4.1 P1: auto-rotate multiple API keys per provider) ──
+
+/// What each entry of a provider's pool has spent over a window.
+///
+/// A separate call rather than a field on [`list_api_keys`]: a pool listing is
+/// read by the provider form on every open, and a spend aggregate is not what
+/// that form is asking for. The window is the caller's (`None` = all time), and
+/// it is the *same* window the dashboard's own "spent" figures use, so two
+/// screens answering "what did this cost" cannot disagree about the period.
+pub fn list_upstream_key_spend(
+    store: &Store,
+    provider_id: &str,
+    since: Option<&str>,
+) -> Result<Vec<UpstreamKeySpendVm>, ApiError> {
+    store
+        .upstream_key_spend(provider_id, since)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| UpstreamKeySpendVm {
+                    upstream_key: r.upstream_key,
+                    currency: r.currency,
+                    requests: r.requests,
+                    tokens: r.tokens,
+                    unpriced_rows: r.unpriced_rows,
+                    cost: r.cost,
+                })
+                .collect()
+        })
+        .map_err(ApiError::failed)
+}
 
 pub fn list_api_keys(store: &Store, provider_id: &str) -> Result<Vec<ApiKeyVm>, ApiError> {
     store

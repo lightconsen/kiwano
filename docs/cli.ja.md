@@ -167,7 +167,7 @@ Hub が値付けできないモデル名の逃げ道でもあります —— �
 ### キーのローテーション
 
 ```
-kiwano keys list <PROVIDER_ID>            masked; the key is never printed in full
+kiwano keys list <PROVIDER_ID> [--days N]   masked; also what each entry spent
 kiwano keys add <PROVIDER_ID> --key K [--label L]
 kiwano keys remove <KEY_ID>
 ```
@@ -177,6 +177,12 @@ kiwano keys remove <KEY_ID>
 prompt cache はキーが属するアカウントごとに分かれているため）、新しいセッションが
 プール全体に分散されます。セッションを名乗らないリクエストは従来どおり
 リクエストごとにローテーションします。
+
+プールには**別々のアカウント**のキーを入れてかまいません——それぞれに `--label` を
+付ければ、支出テーブルがどのアカウントがいくら使ったかを、実際に使った通貨ごとに
+示します（ここでは**通貨をまたいで合算しません**。換算するのは Dashboard だけです）。
+レポートに出る名前はラベル、なければ `#<id>`、プロバイダー自身のプライマリキーは
+`primary` です。キーそのものは決して表示・エクスポート・記帳されません。
 
 ### ルール
 

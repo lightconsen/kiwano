@@ -17,7 +17,7 @@ use kiwano_api::client_keys::{
     ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeyVm, NewClientKeyInput,
 };
 use kiwano_api::dashboard::{CurrencyMetaVm, DashboardVm, FooterStatsVm, UsageAlertVm};
-use kiwano_api::keys::ApiKeyVm;
+use kiwano_api::keys::{ApiKeyVm, UpstreamKeySpendVm};
 use kiwano_api::providers::{
     NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, SyncReportVm,
 };
@@ -76,6 +76,24 @@ impl DaemonApi {
             &self.endpoint,
             self.token.as_deref(),
             &format!("/api/providers/{provider_id}/keys"),
+        )
+    }
+
+    /// What each entry of a provider's key pool spent, per currency, over a
+    /// window — `vm::list_upstream_key_spend`. `days` is `None` for all time.
+    pub fn list_upstream_key_spend(
+        &self,
+        provider_id: &str,
+        days: Option<i64>,
+    ) -> Result<Vec<UpstreamKeySpendVm>, String> {
+        let query = match days {
+            Some(d) => format!("?days={d}"),
+            None => String::new(),
+        };
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/providers/{provider_id}/key-spend{query}"),
         )
     }
 

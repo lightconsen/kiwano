@@ -62,6 +62,10 @@ pub struct RequestLogNew {
     /// What the compat shim changed about this request, one line per action
     /// (migration v26). `None` when nothing was touched — the common case.
     pub request_notes: Option<String>,
+    /// Which entry of the provider's key pool served it (migration v33) — see
+    /// [`UsageRecord::upstream_key`]. Frozen at write time, and `None` for a
+    /// request that never reached a provider.
+    pub upstream_key: Option<String>,
 }
 
 /// Metadata row of `request_logs` (list view — never includes bodies).
@@ -113,6 +117,10 @@ pub struct RequestLogEntry {
     /// What the compat shim changed about this request (migration v26), one
     /// line per action; `None` when nothing was touched.
     pub request_notes: Option<String>,
+    /// Which entry of the provider's key pool served it (migration v33) — the
+    /// `label` of the key, `#<id>` when it has none, or `primary` for the
+    /// provider's own key. `None` on a request that never reached a provider.
+    pub upstream_key: Option<String>,
 }
 
 /// One row of an export: the metadata every export carries, plus the captured
@@ -189,13 +197,14 @@ const REQUEST_LOG_COLUMNS: &str = "id, ts, method, path, query, agent, attributi
                                    cache_creation_tokens, latency_ms, first_token_ms,
                                    request_headers, response_headers, request_size, response_size,
                                    truncated, cost, cost_currency, cost_off_peak,
-                                   reasoning_tokens, usage_missing, request_notes";
+                                   reasoning_tokens, usage_missing, request_notes,
+                                   upstream_key";
 
 /// How many columns [`REQUEST_LOG_COLUMNS`] names. The body join appends two
 /// more, and the only way to read them by index without counting commas is to
 /// count them here — an off-by-one silently reads the wrong field into
 /// `request_body` (the CSV export test caught exactly that when v13 added one).
-const REQUEST_LOG_COLUMN_COUNT: usize = 31;
+const REQUEST_LOG_COLUMN_COUNT: usize = 32;
 
 /// Ceiling on one export. A local log can be large, and the CSV is built in
 /// memory before it is written, so the read is capped rather than unbounded;
@@ -219,10 +228,11 @@ impl Store {
                                        request_headers, response_headers,
                                        request_size, response_size, truncated,
                                        cost, cost_currency, cost_off_peak,
-                                       reasoning_tokens, usage_missing, request_notes)
+                                       reasoning_tokens, usage_missing, request_notes,
+                                       upstream_key)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                      ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-                     ?28, ?29, ?30)",
+                     ?28, ?29, ?30, ?31)",
             params![
                 r.ts,
                 r.method,
@@ -254,6 +264,7 @@ impl Store {
                 r.reasoning_tokens,
                 r.usage_missing as i64,
                 r.request_notes,
+                r.upstream_key,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -514,6 +525,7 @@ fn request_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogE
         reasoning_tokens: row.get(28)?,
         usage_missing: row.get::<_, i64>(29)? != 0,
         request_notes: row.get(30)?,
+        upstream_key: row.get(31)?,
     })
 }
 

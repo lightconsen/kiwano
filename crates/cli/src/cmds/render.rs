@@ -283,6 +283,11 @@ pub(crate) fn render_log_detail(detail: &kiwanod::store::RequestLogDetail) -> St
         e.provider_id.as_deref().unwrap_or("-"),
         e.model.as_deref().unwrap_or("-")
     ));
+    // Which pool entry carried it — the answer to "on whose account", which a
+    // multi-key provider makes a different question from "which provider".
+    if let Some(key) = &e.upstream_key {
+        out.push_str(&format!("\nupstream key {key}"));
+    }
     out.push_str(&format!(
         "\ntokens in {} · out {} · cache_read {} · size {}→{}",
         e.input_tokens, e.output_tokens, e.cache_read_tokens, e.request_size, e.response_size
@@ -493,23 +498,93 @@ pub(crate) fn render_versions(versions: &[detect::AgentVersionVm]) -> String {
     render_table(&head, &rows, &[])
 }
 
-pub(crate) fn render_keys(keys: &[vm::ApiKeyVm], provider_id: &str) -> String {
-    if keys.is_empty() {
-        return format!("(no rotation keys for {provider_id})");
+pub(crate) fn render_keys(
+    keys: &[vm::ApiKeyVm],
+    spend: &[vm::UpstreamKeySpendVm],
+    provider_id: &str,
+    days: i64,
+) -> String {
+    let mut out = if keys.is_empty() {
+        format!("(no rotation keys for {provider_id})")
+    } else {
+        let head = ["ID", "KEY", "LABEL", "CREATED"];
+        let rows: Vec<Vec<String>> = keys
+            .iter()
+            .map(|k| {
+                vec![
+                    k.id.to_string(),
+                    k.masked.clone(),
+                    k.label.clone().unwrap_or_else(|| "-".to_string()),
+                    k.created_at.clone(),
+                ]
+            })
+            .collect();
+        render_table(&head, &rows, &[])
+    };
+    // The spend table is a second, not a column: its rows include `primary`,
+    // the one pool entry that has no row above — and a pool whose keys are
+    // different accounts is exactly the case where "which of these spent what"
+    // is the question being asked.
+    if let Some(table) = render_key_spend(spend, days) {
+        out.push('\n');
+        out.push_str(&table);
     }
-    let head = ["ID", "KEY", "LABEL", "CREATED"];
-    let rows: Vec<Vec<String>> = keys
+    out
+}
+
+/// What each pool entry spent, in the monies it spent them in — the upstream
+/// half of the client keys' own spend column, and it follows the same rules:
+/// **never summed across currencies and never converted** (this is not the
+/// Dashboard), and rows that could not be priced are named rather than folded
+/// into a total that would be quietly short.
+fn render_key_spend(spend: &[vm::UpstreamKeySpendVm], days: i64) -> Option<String> {
+    if spend.is_empty() {
+        return None;
+    }
+    let spend_head = format!("SPENT {days}D");
+    let head = ["ENTRY", "REQUESTS", "TOKENS", &spend_head];
+    // One row per entry, with its currencies joined — an entry that spent in
+    // two is one line and two amounts, not two lines.
+    let mut order: Vec<&str> = Vec::new();
+    let mut by_key: std::collections::HashMap<&str, Vec<&vm::UpstreamKeySpendVm>> =
+        std::collections::HashMap::new();
+    for row in spend {
+        if !by_key.contains_key(row.upstream_key.as_str()) {
+            order.push(&row.upstream_key);
+        }
+        by_key.entry(&row.upstream_key).or_default().push(row);
+    }
+    let rows: Vec<Vec<String>> = order
         .iter()
-        .map(|k| {
+        .map(|name| {
+            let group = &by_key[*name];
+            let requests: i64 = group.iter().map(|r| r.requests).sum();
+            let tokens: i64 = group.iter().map(|r| r.tokens).sum();
+            let unpriced: i64 = group.iter().map(|r| r.unpriced_rows).sum();
+            let amounts: Vec<String> = group
+                .iter()
+                .filter_map(|r| {
+                    r.currency
+                        .as_ref()
+                        .map(|c| format!("{} {}", fmt_amount(r.cost, 2), c))
+                })
+                .collect();
+            let money = if amounts.is_empty() {
+                "unpriced".to_string()
+            } else if unpriced > 0 {
+                format!("{} (+{unpriced} unpriced)", amounts.join(" + "))
+            } else {
+                amounts.join(" + ")
+            };
             vec![
-                k.id.to_string(),
-                k.masked.clone(),
-                k.label.clone().unwrap_or_else(|| "-".to_string()),
-                k.created_at.clone(),
+                (*name).to_string(),
+                requests.to_string(),
+                tokens.to_string(),
+                money,
             ]
         })
         .collect();
-    render_table(&head, &rows, &[])
+    Some(render_table(&head, &rows, &[]))
 }
 
 /// Every client key, in one table. Two columns hold `-` rather than an empty

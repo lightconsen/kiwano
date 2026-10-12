@@ -27,6 +27,21 @@ pub struct PoolKey {
     /// conversation onto another account, and with it onto a cold prompt cache.
     pub id: i64,
     pub key: String,
+    /// The operator's own name for this key's account, when they gave it one.
+    /// It is what the ledger records: a human reading "which account spent
+    /// this" recognizes "personal" and not `#3`.
+    pub label: Option<String>,
+}
+
+impl PoolKey {
+    /// What this entry is called in a report or a receipt: the label, else the
+    /// row id, and never the key itself.
+    pub fn account_name(&self) -> String {
+        match self.label.as_deref().map(str::trim) {
+            Some(l) if !l.is_empty() => l.to_string(),
+            _ => format!("#{}", self.id),
+        }
+    }
 }
 
 /// Which entry of a provider's pool a session is pinned to: the `api_keys`
@@ -279,6 +294,7 @@ impl RouteTable {
                             .map(|k| PoolKey {
                                 id: k.id,
                                 key: k.api_key,
+                                label: k.label,
                             })
                             .collect(),
                         weight: b.weight,

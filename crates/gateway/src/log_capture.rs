@@ -637,6 +637,8 @@ pub fn persist_attempt_failure(
         // attempt or a pre-forward failure); the request-level row carries
         // the notes, if any.
         request_notes: None,
+        // No pool entry: these rows are failures, and nothing served them.
+        upstream_key: None,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist attempt log");
@@ -698,6 +700,8 @@ pub fn persist_failure(
         // attempt or a pre-forward failure); the request-level row carries
         // the notes, if any.
         request_notes: None,
+        // No pool entry: these rows are failures, and nothing served them.
+        upstream_key: None,
     };
     if let Err(e) = store.insert_request_log(&record) {
         tracing::warn!(error = %e, "failed to persist request log");

@@ -254,6 +254,7 @@ mod tests {
             cost_currency: None,
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         }
     }
 

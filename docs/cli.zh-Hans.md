@@ -159,7 +159,7 @@ Hub 公布汇率所参照的两种货币。
 ### 轮换密钥
 
 ```
-kiwano keys list <PROVIDER_ID>            masked; the key is never printed in full
+kiwano keys list <PROVIDER_ID> [--days N]   masked; also what each entry spent
 kiwano keys add <PROVIDER_ID> --key K [--label L]
 kiwano keys remove <KEY_ID>
 ```
@@ -167,6 +167,11 @@ kiwano keys remove <KEY_ID>
 轮换密钥跟在供应商的主密钥之后。轮换**按会话**进行:一次会话保持它开始时
 用的那把密钥(上游的 prompt cache 按密钥所属的账号隔离),新会话在整个池上
 摊开。不带会话标识的请求仍按每个请求轮换。
+
+池子里可以放**不同账号**的密钥——给每把加个 `--label`,花费表就会说明哪个
+账号花了多少,并按它实际花掉的币种列出(这里**绝不跨币种相加**;唯一做换算
+的地方是 Dashboard)。报表里显示的名字是标签,没有标签就是 `#<id>`,供应商
+自己的主钥则是 `primary`。密钥本身永远不会被打印、导出,也不会进账本。
 
 ### 规则
 

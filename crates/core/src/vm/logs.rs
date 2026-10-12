@@ -188,6 +188,7 @@ mod tests {
             cost_currency: None,
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         })
         .unwrap();
 
@@ -247,6 +248,7 @@ mod tests {
                 cost_currency: None,
                 cost_off_peak: None,
                 request_notes: notes.map(str::to_string),
+                upstream_key: None,
             };
             s.insert_request_log(&log).unwrap()
         };

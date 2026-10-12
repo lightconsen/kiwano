@@ -613,15 +613,63 @@ fn keys_add_list_remove_roundtrips() {
     assert!(masked.starts_with("sk-rot"), "head kept, got {masked}");
 
     let (_, out, _) = run_served(&db, &daemon, &["--json", "keys", "list", &provider]);
-    let keys: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    // An object since v33: the pool, plus what each entry spent and over which
+    // window.
+    let listed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(listed["days"], 30, "the spend window is named, not implied");
+    let keys = listed["keys"].as_array().unwrap();
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0]["label"], "spare");
+    assert!(listed["spend"].is_array());
+
+    // The spend table names each pool entry, per currency, over a window it
+    // states — the answer to "which account paid", which stops at the provider
+    // everywhere else.
+    {
+        let store = Store::open(&db).unwrap();
+        store
+            .record_usage(&kiwanod::store::UsageRecord {
+                ts: kiwanod::store::now_rfc3339(),
+                agent: "claude".into(),
+                provider_id: Some(provider.clone()),
+                client_key_id: None,
+                model: None,
+                input_tokens: 10,
+                output_tokens: 10,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost: Some(2.5),
+                cost_currency: Some("USD".into()),
+                cost_off_peak: Some(2.5),
+                project: None,
+                session_id: None,
+                import_key: None,
+                imported_from: None,
+                upstream_key: Some("spare".into()),
+            })
+            .unwrap();
+    }
+    let (code, out, err) = run_served(&db, &daemon, &["keys", "list", &provider]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("SPENT 30D"), "{out}");
+    assert!(out.contains("spare"), "{out}");
+    assert!(out.contains("2.50 USD"), "{out}");
+    // Never the credential, in either direction.
+    assert!(!out.contains("sk-rotating-key-0001"), "{out}");
+
+    // The window is the caller's, and the header says which one it read: a
+    // figure whose period is implicit gets read as all-time soon enough.
+    let (code, out, err) = run_served(&db, &daemon, &["keys", "list", &provider, "--days", "7"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("SPENT 7D"), "{out}");
 
     let (code, _, err) = run_served(&db, &daemon, &["keys", "remove", &key_id.to_string()]);
     assert_eq!(code, 0, "{err}");
     let (_, out, _) = run_served(&db, &daemon, &["--json", "keys", "list", &provider]);
-    let keys: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
-    assert!(keys.is_empty());
+    let listed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(listed["keys"].as_array().unwrap().is_empty());
 }
 
 /// A command that has moved answers **only** through the daemon, and says so
@@ -797,6 +845,7 @@ fn status_reports_the_daemons_totals_when_it_answers() {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
     }
@@ -1432,6 +1481,7 @@ fn seed_log(db: &Path, agent: &str, status_code: i64) {
             cost_currency: None,
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         })
         .unwrap();
 }
@@ -1480,6 +1530,7 @@ fn seed_session_log(
             cost_currency: currency.map(str::to_string),
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         })
         .unwrap();
 }
@@ -2100,6 +2151,7 @@ fn seed_insight_row(
             cost_currency: None,
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         })
         .unwrap()
 }
@@ -3049,6 +3101,7 @@ fn clients_list_reports_what_each_key_spent() {
             session_id: None,
             import_key: None,
             imported_from: None,
+            upstream_key: None,
         }
     };
     // The laptop spent in two currencies and had one row nobody could price; the

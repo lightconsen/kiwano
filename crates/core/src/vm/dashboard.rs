@@ -274,6 +274,7 @@ mod tests {
             session_id: None,
             import_key: None,
             imported_from: None,
+            upstream_key: None,
         })
         .unwrap();
         // Seed the request-log rows the headline counts: the forwarded request
@@ -311,6 +312,7 @@ mod tests {
             cost_currency: None,
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         };
         s.insert_request_log(&log(200, (1000, 500))).unwrap();
         s.insert_request_log(&log(503, (0, 0))).unwrap();
@@ -464,6 +466,7 @@ mod tests {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
         }

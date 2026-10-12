@@ -235,6 +235,8 @@ fn price_row(
         // this table says so (migration v31).
         provider_id: None,
         client_key_id: None,
+        // A file states no gateway key: the request never went through one.
+        upstream_key: None,
         model: row.model.clone(),
         input_tokens: row.input_tokens,
         output_tokens: row.output_tokens,
@@ -404,6 +406,7 @@ mod tests {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
 
@@ -593,6 +596,7 @@ mod tests {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
         let again = apply_history(&store, &hub, &none, &second).unwrap();

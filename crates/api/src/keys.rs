@@ -15,6 +15,26 @@ pub struct ApiKeyVm {
     pub created_at: String,
 }
 
+/// What one entry of a provider's key pool has spent, in one currency
+/// (`kiwanod::store::Store::upstream_key_spend`).
+///
+/// A pool entry can be a different **account** from its neighbours, so this is
+/// the report that answers "how much of this provider's bill is mine". The name
+/// is the frozen string the `usage` rows carry — a label, `#<id>`, or `primary`
+/// — and never the key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamKeySpendVm {
+    pub upstream_key: String,
+    /// `None` for rows that were never priced; their tokens are in `tokens`
+    /// and their money is missing, which `unpriced_rows` states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    pub requests: i64,
+    pub tokens: i64,
+    pub unpriced_rows: i64,
+    pub cost: f64,
+}
+
 /// Display form of a key: a recognisable head and tail, never a usable secret.
 ///
 /// The previous frontend-side masker printed the key verbatim when it was 12

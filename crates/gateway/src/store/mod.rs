@@ -62,7 +62,7 @@ pub use types::{
     AgentLimit, ApiKeyRow, Billing, Binding, ClientKey, ClientKeyLimit, ClientKeySpend, CostBucket,
     CustomAgent, DailyUsage, ImportedSession, OpenAiWire, Protocol, Provider, ProviderCostBucket,
     ProviderEndpoint, ProviderHealth, ProviderUsage, Strategy, StrategyType, TrafficStats,
-    UsageRecord, UsageTotals,
+    UpstreamKeySpend, UsageRecord, UsageTotals,
 };
 
 /// Thin handle around a SQLite connection (WAL, shared with the Tauri app).
@@ -147,6 +147,7 @@ pub(crate) mod test_support {
             cost_currency: None,
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         }
     }
 }

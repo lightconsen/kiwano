@@ -105,6 +105,10 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
             "/providers/{provider_id}/keys",
             get(list_provider_keys).post(add_provider_key),
         )
+        .route(
+            "/providers/{provider_id}/key-spend",
+            get(provider_key_spend_route),
+        )
         .route("/keys/{id}", delete(delete_provider_key))
         .route("/agent-routes", get(list_agent_routes))
         .route("/agents/{agent}/strategy", post(set_agent_strategy_route))
@@ -265,6 +269,26 @@ async fn list_provider_keys(
 ) -> Response {
     match crate::api::keys::list_api_keys(&state.store, &provider_id) {
         Ok(keys) => Json(keys).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
+
+/// `GET /api/providers/{provider_id}/key-spend?days=N` — what each entry of the
+/// provider's key pool spent.
+///
+/// Separate from the pool listing rather than a field on it: the provider form
+/// reads the pool on every open and has no use for an aggregate, and a screen
+/// that asks "what did this cost" is a different question from "what is in the
+/// pool". The window is shared with every other spend reader in the daemon
+/// (`days_ago`), so two screens cannot disagree about the period.
+async fn provider_key_spend_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(provider_id): Path<String>,
+    Query(q): Query<DaysQuery>,
+) -> Response {
+    let since = q.days.map(days_ago);
+    match crate::api::keys::list_upstream_key_spend(&state.store, &provider_id, since.as_deref()) {
+        Ok(spend) => Json(spend).into_response(),
         Err(e) => resource_error(e),
     }
 }

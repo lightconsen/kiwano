@@ -101,6 +101,7 @@ pub(crate) fn sse_response(
         &mut response_headers,
         &sample.provider_id,
         sample.model.as_deref(),
+        sample.upstream_key.as_deref(),
     );
     let (tx, rx) = mpsc::channel::<UsageSample>(1);
     tokio::spawn(record_pending_usage(state.clone(), rx));
@@ -129,6 +130,7 @@ pub(crate) fn buffered_response(
         &mut response_headers,
         &sample.provider_id,
         sample.model.as_deref(),
+        sample.upstream_key.as_deref(),
     );
     record_sample(state, sample);
     response_with(Body::from(body), status, response_headers)

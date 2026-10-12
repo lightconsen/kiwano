@@ -11,7 +11,7 @@
 use crate::error::Result;
 use crate::store::types::{
     ClientKeySpend, CostBucket, DailyUsage, ProviderCostBucket, ProviderUsage, TrafficStats,
-    UsageRecord, UsageTotals,
+    UpstreamKeySpend, UsageRecord, UsageTotals,
 };
 use crate::store::Store;
 use rusqlite::params;
@@ -29,8 +29,8 @@ impl Store {
             "INSERT INTO usage (ts, agent, provider_id, client_key_id, model, input_tokens,
                                 output_tokens, cache_read_tokens, cache_creation_tokens,
                                 latency_ms, status, cost, cost_currency, cost_off_peak,
-                                project, session_id, import_key, imported_from)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                                project, session_id, import_key, imported_from, upstream_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 u.ts,
                 u.agent,
@@ -50,6 +50,7 @@ impl Store {
                 u.session_id,
                 u.import_key,
                 u.imported_from,
+                u.upstream_key,
             ],
         )?;
         Ok(())
@@ -446,6 +447,47 @@ impl Store {
         Ok(rows)
     }
 
+    /// What each entry of a provider's key pool spent, per currency, over a
+    /// window (migration v33).
+    ///
+    /// The upstream half of [`Self::client_key_spend`]: a pool whose keys belong
+    /// to different accounts is several accounts' spend under one provider row,
+    /// and this is what tells them apart. Rows with no `upstream_key` — an
+    /// imported row, or one written before the column — are left out rather than
+    /// folded into an "unnamed" bucket, because they never had a pool entry to
+    /// name.
+    pub fn upstream_key_spend(
+        &self,
+        provider_id: &str,
+        since: Option<&str>,
+    ) -> Result<Vec<UpstreamKeySpend>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT upstream_key, cost_currency, COUNT(*),
+                    COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens
+                                 + cache_creation_tokens), 0),
+                    COALESCE(SUM(CASE WHEN cost IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(cost), 0)
+             FROM usage
+             WHERE provider_id = ?1 AND upstream_key IS NOT NULL
+               AND (?2 IS NULL OR ts >= ?2)
+             GROUP BY upstream_key, cost_currency",
+        )?;
+        let rows = stmt
+            .query_map(params![provider_id, since], |row| {
+                Ok(UpstreamKeySpend {
+                    upstream_key: row.get(0)?,
+                    currency: row.get(1)?,
+                    requests: row.get(2)?,
+                    tokens: row.get(3)?,
+                    unpriced_rows: row.get(4)?,
+                    cost: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Totals grouped by provider, optionally filtered by agent, provider
     /// and/or since.
     pub fn usage_by_provider(
@@ -661,6 +703,7 @@ fn last_used_is_the_latest_request_per_key_and_absent_for_an_idle_one() {
         session_id: None,
         import_key: None,
         imported_from: None,
+        upstream_key: None,
     };
     store
         .record_usage(&row("2026-01-01T00:00:00+00:00", Some(&id)))
@@ -714,6 +757,7 @@ mod tests {
             session_id: None,
             import_key: None,
             imported_from: None,
+            upstream_key: None,
         };
 
         store
@@ -745,6 +789,7 @@ mod tests {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
 
@@ -824,6 +869,7 @@ mod tests {
             session_id: None,
             import_key: Some(key.into()),
             imported_from: machine.map(str::to_string),
+            upstream_key: None,
         };
         let machine_of = |key: &str| -> Option<String> {
             let conn = store.conn.lock().unwrap();
@@ -870,5 +916,94 @@ mod tests {
             )
             .unwrap();
         assert_eq!(own, None, "a metered request names no importing machine");
+    }
+
+    /// v33: which pool entry served a request is a column on both ledgers, and
+    /// the spend aggregate groups by it **within one provider** — the question a
+    /// pool whose keys are different accounts exists to answer.
+    #[test]
+    fn upstream_key_is_recorded_and_its_spend_is_grouped_per_currency() {
+        let (_dir, store) = temp_store();
+        let row =
+            |key: Option<&str>, currency: Option<&str>, cost: Option<f64>, ts: &str| UsageRecord {
+                ts: ts.into(),
+                agent: "claude".into(),
+                provider_id: Some("p-work".into()),
+                client_key_id: None,
+                model: None,
+                input_tokens: 10,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: None,
+                status: "ok".into(),
+                cost,
+                cost_currency: currency.map(str::to_string),
+                cost_off_peak: cost,
+                project: None,
+                session_id: None,
+                import_key: None,
+                imported_from: None,
+                upstream_key: key.map(str::to_string),
+            };
+        store
+            .record_usage(&row(
+                Some("primary"),
+                Some("USD"),
+                Some(1.5),
+                "2026-09-01T00:00:00+00:00",
+            ))
+            .unwrap();
+        store
+            .record_usage(&row(
+                Some("personal"),
+                Some("CNY"),
+                Some(7.0),
+                "2026-09-02T00:00:00+00:00",
+            ))
+            .unwrap();
+        // Another provider's rows are a different provider's pool, and a row
+        // with no pool entry at all (an import, or one written before v33) is
+        // left out rather than gathered into an "unnamed" bucket.
+        let mut other = row(
+            Some("personal"),
+            Some("USD"),
+            Some(9.0),
+            "2026-09-02T00:00:00+00:00",
+        );
+        other.provider_id = Some("p-other".into());
+        store.record_usage(&other).unwrap();
+        store
+            .record_usage(&row(None, None, None, "2026-09-02T00:00:00+00:00"))
+            .unwrap();
+
+        let spend = store.upstream_key_spend("p-work", None).unwrap();
+        assert_eq!(spend.len(), 2, "{spend:?}");
+        let primary = spend
+            .iter()
+            .find(|s| s.upstream_key == "primary")
+            .expect("the primary's own entry");
+        assert_eq!(primary.currency.as_deref(), Some("USD"));
+        assert_eq!(primary.cost, 1.5);
+        assert_eq!(primary.tokens, 10);
+
+        // The window is the caller's, and it is a real filter.
+        let recent = store
+            .upstream_key_spend("p-work", Some("2026-09-02T00:00:00+00:00"))
+            .unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].upstream_key, "personal");
+
+        // The column round-trips on the row, so a report reads what was written
+        // rather than re-deriving it from a pool that has since changed.
+        let conn = store.conn.lock().unwrap();
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT upstream_key FROM usage WHERE cost_currency = 'CNY'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some("personal"));
     }
 }

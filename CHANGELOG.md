@@ -21,6 +21,25 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **Which account paid: a key pool can be several accounts, and now says so.**
+  A provider's rotating keys can belong to different accounts — a work key and
+  a personal one, say — and the ledger stopped at the provider, so "how much of
+  this bill is mine" had no answer. Each metered request and each request log
+  now records **which entry of the pool carried it** (migration v33), and that
+  entry is named the way a human named it: its `label`, else `#<id>`, else
+  `primary`. `kiwano keys list <ID>` reports what each entry spent — per
+  currency, never summed across them — and `kiwano logs show` names the entry
+  on the row.
+
+  It is a **frozen display name, not a foreign key**: remove a key next month
+  and this month's rows still say who paid, in the words of the day. And it is
+  never the key — a label is safe to print, export and log, and a credential is
+  not, which is the whole reason the two are different columns.
+
+  The response receipt gains the third header, `X-Kiwano-Account`, beside the
+  provider and model: under failover the client can now see not just which
+  provider answered but on whose account.
+
 - **Every forwarded response says who served it: `X-Kiwano-Provider` and
   `X-Kiwano-Model`.** Under `failover` or any strategy with a standby queue,
   "this answer — which provider actually served it?" used to be a question

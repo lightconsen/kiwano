@@ -41,6 +41,11 @@ pub(crate) struct UsageSample {
     /// under; None is priced at the general rate, which is what a hand-added
     /// provider should get.
     pub(crate) catalog_id: Option<String>,
+    /// Which entry of the provider's key pool carried the request — a label,
+    /// `#<id>`, or `primary` (migration v33). The provider answers "where did
+    /// this go"; this answers "on whose account", which a pool of keys from
+    /// different accounts makes a different question.
+    pub(crate) upstream_key: Option<String>,
     /// Unix seconds when the request began, which is what decides the price
     /// tier: a row may charge its peak rates only inside its own windows, and a
     /// request belongs to the window it *started* in. Not `ts`, which is the
@@ -98,6 +103,10 @@ impl UsageSample {
             // And no importing machine (v32): this row came through the gateway,
             // not out of a file, so there is no machine to name.
             imported_from: None,
+            // Which pool entry carried it (v33) — the half of attribution a
+            // provider row cannot give when its keys belong to different
+            // accounts.
+            upstream_key: self.upstream_key,
         }
     }
 }

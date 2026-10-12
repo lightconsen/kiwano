@@ -42,7 +42,7 @@ pub(crate) fn select_upstream_key(
     state: &crate::server::GatewayState,
     provider: &UpstreamProvider,
     session: Option<&str>,
-) -> Result<String, GatewayError> {
+) -> Result<SelectedKey, GatewayError> {
     let pool = provider.key_pool();
     if pool.is_empty() {
         return Err(GatewayError::Upstream(format!(
@@ -54,16 +54,56 @@ pub(crate) fn select_upstream_key(
         // A pin that survives: the entry is still in the pool (a removed or
         // disabled key falls through and the session is re-pinned).
         if let Some(handle) = state.pinned_key(&provider.id, session) {
-            if let Some((_, key)) = pool.iter().find(|(h, _)| *h == handle) {
-                return Ok((*key).to_string());
+            if let Some(found) = pool.iter().find(|(h, _)| *h == handle) {
+                return Ok(SelectedKey::of(found.0, found.1, provider));
             }
         }
         let (handle, key) = pool[state.next_key_index(&provider.id, pool.len())];
         state.pin_key(&provider.id, session, handle);
-        return Ok(key.to_string());
+        return Ok(SelectedKey::of(handle, key, provider));
     }
-    let idx = state.next_key_index(&provider.id, pool.len());
-    Ok(pool[idx].1.to_string())
+    let (handle, key) = pool[state.next_key_index(&provider.id, pool.len())];
+    Ok(SelectedKey::of(handle, key, provider))
+}
+
+/// One chosen pool entry: the credential to send, and the name to remember it
+/// by.
+///
+/// The two are separate on purpose. The credential is a secret that only ever
+/// goes upstream; the name is what the ledger and the receipt record, which is
+/// why it can never be the key. Built here, at the one place that knows which
+/// entry was chosen, so no caller can pair the wrong name with the wrong key.
+pub(crate) struct SelectedKey {
+    pub(crate) key: String,
+    pub(crate) account: String,
+}
+
+/// Hand-written so a stray `{:?}` — in a test failure, an assertion message, a
+/// log line — cannot print a live credential into a terminal or a file.
+impl std::fmt::Debug for SelectedKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SelectedKey")
+            .field("key", &"<redacted>")
+            .field("account", &self.account)
+            .finish()
+    }
+}
+
+impl SelectedKey {
+    fn of(handle: crate::router::PoolHandle, key: &str, provider: &UpstreamProvider) -> Self {
+        let account = match handle {
+            crate::router::PoolHandle::Primary => "primary".to_string(),
+            crate::router::PoolHandle::Extra(id) => provider
+                .extra_keys
+                .iter()
+                .find(|k| k.id == id)
+                .map_or_else(|| format!("#{id}"), crate::router::PoolKey::account_name),
+        };
+        SelectedKey {
+            key: key.to_string(),
+            account,
+        }
+    }
 }
 
 /// Build upstream request headers: copy the inbound set (minus hop-by-hop and
@@ -141,8 +181,12 @@ pub(crate) fn build_upstream_headers(
     Ok(out)
 }
 
-/// The credential and the headers one upstream request goes out with — or the
-/// client-facing failure to answer with, whose log row is written here.
+/// The headers one upstream request goes out with, and the name of the pool
+/// entry that carries it — or the client-facing failure to answer with, whose
+/// log row is written here.
+///
+/// The entry's name rides back with the headers rather than being read again
+/// later: the choice is made once, and a second read could disagree with it.
 #[allow(clippy::result_large_err)] // Err is the client-facing response, not a diagnostic
 pub(crate) fn upstream_key_and_headers(
     state: &GatewayState,
@@ -151,8 +195,8 @@ pub(crate) fn upstream_key_and_headers(
     inbound: Option<Protocol>,
     log: Option<&CompletedLog>,
     routed: &RoutedRequest,
-) -> Result<HeaderMap, Response> {
-    let api_key = match select_upstream_key(state, provider, routed.session_id.as_deref()) {
+) -> Result<(HeaderMap, String), Response> {
+    let selected = match select_upstream_key(state, provider, routed.session_id.as_deref()) {
         Ok(k) => k,
         Err(e) => {
             let resp = error_into_response(e, inbound);
@@ -168,8 +212,8 @@ pub(crate) fn upstream_key_and_headers(
             return Err(resp);
         }
     };
-    match build_upstream_headers(inbound_headers, provider, &api_key) {
-        Ok(h) => Ok(h),
+    match build_upstream_headers(inbound_headers, provider, &selected.key) {
+        Ok(h) => Ok((h, selected.account)),
         Err(e) => {
             let resp = error_into_response(e, inbound);
             log_failure(
@@ -193,18 +237,33 @@ pub(crate) fn upstream_key_and_headers(
 /// Logs screen afterwards.
 pub(crate) const RECEIPT_PROVIDER_HEADER: &str = "x-kiwano-provider";
 pub(crate) const RECEIPT_MODEL_HEADER: &str = "x-kiwano-model";
+pub(crate) const RECEIPT_ACCOUNT_HEADER: &str = "x-kiwano-account";
 
 /// Stamp the attribution receipt onto a client-facing response. The gateway's
 /// own statement wins over an upstream header of the same name — a provider
 /// could echo one, and only the gateway knows which provider it chose. A value
 /// that cannot be a header value is skipped rather than failing the response.
-pub(crate) fn stamp_receipt(headers: &mut HeaderMap, provider_id: &str, model: Option<&str>) {
+///
+/// The account is the pool entry's name (`primary`, a label, or `#3`) and never
+/// the key: a receipt is read by clients and written to logs, and neither is a
+/// place for a credential.
+pub(crate) fn stamp_receipt(
+    headers: &mut HeaderMap,
+    provider_id: &str,
+    model: Option<&str>,
+    account: Option<&str>,
+) {
     if let Ok(v) = HeaderValue::from_str(provider_id) {
         headers.insert(RECEIPT_PROVIDER_HEADER, v);
     }
     if let Some(model) = model {
         if let Ok(v) = HeaderValue::from_str(model) {
             headers.insert(RECEIPT_MODEL_HEADER, v);
+        }
+    }
+    if let Some(account) = account {
+        if let Ok(v) = HeaderValue::from_str(account) {
+            headers.insert(RECEIPT_ACCOUNT_HEADER, v);
         }
     }
 }
@@ -339,6 +398,7 @@ mod tests {
         crate::router::PoolKey {
             id,
             key: key.into(),
+            label: None,
         }
     }
 
@@ -354,22 +414,22 @@ mod tests {
         let mut single = provider(Protocol::OpenAI, None);
         single.extra_keys.clear();
         for _ in 0..3 {
-            assert_eq!(
-                select_upstream_key(&state, &single, None).unwrap(),
-                "sk-real-key"
-            );
+            let picked = select_upstream_key(&state, &single, None).unwrap();
+            assert_eq!(picked.key, "sk-real-key");
+            assert_eq!(picked.account, "primary");
         }
 
         // Multi-key pool: primary key → extra keys rotate in turn, then back to the primary key
         let mut seen = Vec::new();
         for _ in 0..3 {
-            seen.push(select_upstream_key(&state, &p, None).unwrap());
+            seen.push(select_upstream_key(&state, &p, None).unwrap().key);
         }
         assert_eq!(seen, vec!["sk-real-key", "sk-two", "sk-three"]);
-        assert_eq!(
-            select_upstream_key(&state, &p, None).unwrap(),
-            "sk-real-key"
-        );
+        let wrapped = select_upstream_key(&state, &p, None).unwrap();
+        assert_eq!(wrapped.key, "sk-real-key");
+        // An entry the operator did not name is reported by its row id, and
+        // never by the key itself.
+        assert_eq!(wrapped.account, "primary");
     }
 
     /// A conversation stays on the pool entry it started on: the upstream
@@ -387,17 +447,18 @@ mod tests {
         // New sessions take the rotating cursor, one entry each.
         let first = select_upstream_key(&state, &p, Some("s-1")).unwrap();
         let second = select_upstream_key(&state, &p, Some("s-2")).unwrap();
-        assert_eq!(first, "sk-real-key");
-        assert_eq!(second, "sk-two");
+        assert_eq!(first.key, "sk-real-key");
+        assert_eq!(second.key, "sk-two");
+        assert_eq!(second.account, "#2");
 
         // And then hold it, however many requests the conversation makes.
         for _ in 0..5 {
             assert_eq!(
-                select_upstream_key(&state, &p, Some("s-1")).unwrap(),
+                select_upstream_key(&state, &p, Some("s-1")).unwrap().key,
                 "sk-real-key"
             );
             assert_eq!(
-                select_upstream_key(&state, &p, Some("s-2")).unwrap(),
+                select_upstream_key(&state, &p, Some("s-2")).unwrap().key,
                 "sk-two"
             );
         }
@@ -416,24 +477,24 @@ mod tests {
 
         // Pin the session to the first extra.
         assert_eq!(
-            select_upstream_key(&state, &p, Some("s-1")).unwrap(),
+            select_upstream_key(&state, &p, Some("s-1")).unwrap().key,
             "sk-real-key"
         );
         assert_eq!(
-            select_upstream_key(&state, &p, Some("s-2")).unwrap(),
+            select_upstream_key(&state, &p, Some("s-2")).unwrap().key,
             "sk-two"
         );
 
         // The pinned key leaves the pool: the session re-pins instead of
         // erroring on a credential that is no longer offered.
         p.extra_keys.retain(|k| k.id != 2);
-        let repinned = select_upstream_key(&state, &p, Some("s-2")).unwrap();
+        let repinned = select_upstream_key(&state, &p, Some("s-2")).unwrap().key;
         assert!(
             repinned == "sk-real-key" || repinned == "sk-three",
             "re-pinned to a live entry, got {repinned}"
         );
         assert_eq!(
-            select_upstream_key(&state, &p, Some("s-2")).unwrap(),
+            select_upstream_key(&state, &p, Some("s-2")).unwrap().key,
             repinned,
             "and the re-pin holds"
         );
@@ -470,18 +531,25 @@ mod tests {
             RECEIPT_PROVIDER_HEADER,
             HeaderValue::from_static("upstream-lie"),
         );
-        stamp_receipt(&mut headers, "p-work", Some("claude-haiku-4-5"));
+        stamp_receipt(
+            &mut headers,
+            "p-work",
+            Some("claude-haiku-4-5"),
+            Some("personal"),
+        );
         assert_eq!(headers.get(RECEIPT_PROVIDER_HEADER).unwrap(), "p-work");
         assert_eq!(
             headers.get(RECEIPT_MODEL_HEADER).unwrap(),
             "claude-haiku-4-5"
         );
+        assert_eq!(headers.get(RECEIPT_ACCOUNT_HEADER).unwrap(), "personal");
 
         // A request whose model could not be read still says who served it.
         let mut headers = HeaderMap::new();
-        stamp_receipt(&mut headers, "p-work", None);
+        stamp_receipt(&mut headers, "p-work", None, None);
         assert_eq!(headers.get(RECEIPT_PROVIDER_HEADER).unwrap(), "p-work");
         assert!(headers.get(RECEIPT_MODEL_HEADER).is_none());
+        assert!(headers.get(RECEIPT_ACCOUNT_HEADER).is_none());
     }
 
     /// An upstream response carries credentials of its own — a session cookie

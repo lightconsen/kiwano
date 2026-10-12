@@ -76,6 +76,7 @@ mod tests {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
 

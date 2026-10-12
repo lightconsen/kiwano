@@ -158,7 +158,7 @@ kiwano providers probe latency|endpoint|models
 ### 輪換金鑰
 
 ```
-kiwano keys list <PROVIDER_ID>            masked; the key is never printed in full
+kiwano keys list <PROVIDER_ID> [--days N]   masked; also what each entry spent
 kiwano keys add <PROVIDER_ID> --key K [--label L]
 kiwano keys remove <KEY_ID>
 ```
@@ -166,6 +166,11 @@ kiwano keys remove <KEY_ID>
 輪換金鑰跟在供應商的主金鑰之後。輪換**按工作階段**進行:一次工作階段保持它開始時
 用的那把金鑰(上游的 prompt cache 按金鑰所屬的帳號隔離),新工作階段在整個池上
 攤開。不帶工作階段識別的請求仍按每個請求輪換。
+
+池子裡可以放**不同帳號**的金鑰——給每把加個 `--label`,花費表就會說明哪個
+帳號花了多少,並按它實際花掉的幣種列出(這裡**絕不跨幣種相加**;唯一做換算
+的地方是 Dashboard)。報表裡顯示的名字是標籤,沒有標籤就是 `#<id>`,供應商
+自己的主金鑰則是 `primary`。金鑰本身永遠不會被列印、匯出,也不會進帳本。
 
 ### 規則
 

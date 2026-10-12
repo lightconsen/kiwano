@@ -9,10 +9,36 @@ use crate::{CliError, Ctx};
 
 pub fn keys(cmd: &KeysCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     match cmd {
-        KeysCmd::List { provider_id } => {
+        KeysCmd::List { provider_id, days } => {
             let keys = ctx.api.list_api_keys(provider_id)?;
-            let text = render_keys(&keys, provider_id);
-            ctx.out.emit(&keys, || text);
+            // The spend window defaults to 30 days, the same default the client
+            // keys' own column uses: a bare figure in a table gets read as
+            // all-time, so the window is a parameter and its name is in the
+            // header.
+            let days = days.unwrap_or(30).max(0);
+            let spend = ctx.api.list_upstream_key_spend(provider_id, Some(days))?;
+            let text = render_keys(&keys, &spend, provider_id, days);
+            // An object rather than the bare array this used to print: the
+            // command answers two questions now (what is in the pool, what each
+            // entry spent), and the second needs its window named. A JSON
+            // consumer that kept the old reading of `keys` finds it under
+            // `keys`, and `days` says what the spend is over.
+            #[derive(serde::Serialize)]
+            struct Pool<'a> {
+                provider_id: &'a str,
+                days: i64,
+                keys: &'a [kiwano_core::vm::ApiKeyVm],
+                spend: &'a [kiwano_core::vm::UpstreamKeySpendVm],
+            }
+            ctx.out.emit(
+                &Pool {
+                    provider_id,
+                    days,
+                    keys: &keys,
+                    spend: &spend,
+                },
+                || text,
+            );
             Ok(())
         }
         KeysCmd::Add {

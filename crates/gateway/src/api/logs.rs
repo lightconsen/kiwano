@@ -196,6 +196,7 @@ mod tests {
                 cost_currency: None,
                 cost_off_peak: None,
                 request_notes: notes.map(str::to_string),
+                upstream_key: Some("primary".into()),
             })
             .unwrap()
     }

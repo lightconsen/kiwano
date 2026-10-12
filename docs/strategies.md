@@ -40,14 +40,26 @@ price. New sessions still spread across the pool — that spreading is what the
 pool is for — and a pin never outlives its key: remove or disable the entry
 and the session is re-pinned, not failed.
 
+A pool can be **several accounts under one provider** (that is what the label
+on each entry is for), so the ledger records which entry carried each request
+rather than stopping at the provider: `kiwano keys list <ID>` reports what
+each entry spent, in the currencies it spent them in, and `kiwano logs show`
+names the entry on the row.
+
 ## Which provider answered: the receipt headers
 
-Every response the gateway forwards carries two headers of its own:
+Every response the gateway forwards carries three headers of its own:
 
 | Header | What it names |
 | --- | --- |
 | `X-Kiwano-Provider` | the id of the provider that served the request |
 | `X-Kiwano-Model` | the model the request was metered under |
+| `X-Kiwano-Account` | which entry of that provider's key pool carried it — `primary`, a label, or `#<id>`; never the key |
+
+The account names an entry, not a credential: it is safe to read in a client
+and to keep in a log, which is exactly why it can be the key's label and never
+the key. A provider whose pool holds one key still reports `primary` — the
+header says which entry, and "the only one" is an answer.
 
 Under `single` they tell you nothing new. Under `failover` or any strategy
 with a standby queue they answer, on the response itself, the question you

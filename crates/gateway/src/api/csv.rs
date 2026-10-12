@@ -189,6 +189,7 @@ mod tests {
             cost_currency: Some("USD".into()),
             cost_off_peak: None,
             request_notes: None,
+            upstream_key: None,
         }
     }
 

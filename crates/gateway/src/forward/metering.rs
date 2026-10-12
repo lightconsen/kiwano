@@ -91,6 +91,9 @@ pub(crate) fn record_sample(state: &GatewayState, sample: UsageSample) {
             cost_currency: record.cost_currency,
             cost_off_peak: record.cost_off_peak,
             request_notes: log.request_notes,
+            // The other half of attribution, from the same frozen record as
+            // `usage` above — the two rows must agree about who paid.
+            upstream_key: record.upstream_key.clone(),
         };
         let log_id = match state.store.insert_request_log(&entry) {
             Ok(id) => id,
@@ -181,6 +184,7 @@ mod tests {
             provider_id: "p1".into(),
             client_key_id: "ck-test".to_string(),
             catalog_id: None,
+            upstream_key: Some("primary".into()),
             started_unix: TEST_AT,
             model: model.map(str::to_string),
             usage: Usage {
@@ -281,6 +285,7 @@ mod tests {
         let state = crate::server::GatewayState::new(store).expect("state");
 
         let sample = |provider_id: &str, catalog_id: Option<&str>| UsageSample {
+            upstream_key: Some("primary".into()),
             agent: "claude".into(),
             provider_id: provider_id.into(),
             client_key_id: "ck-test".to_string(),
@@ -415,6 +420,7 @@ mod tests {
         };
         // 1M input tokens of m1 at each rate.
         let sample = |provider_id: &str, catalog_id: Option<&str>, model: &str| UsageSample {
+            upstream_key: Some("primary".into()),
             agent: "claude".into(),
             provider_id: provider_id.into(),
             client_key_id: "ck-test".to_string(),
@@ -520,6 +526,7 @@ mod tests {
             provider_id: "p-own".into(),
             client_key_id: "ck-test".to_string(),
             catalog_id: None,
+            upstream_key: Some("primary".into()),
             started_unix: TEST_AT,
             model: Some("m1".into()),
             usage: Usage {
@@ -660,6 +667,7 @@ mod tests {
             provider_id: provider_id.into(),
             client_key_id: "ck-test".to_string(),
             catalog_id: None,
+            upstream_key: Some("primary".into()),
             started_unix,
             model: Some("m1".into()),
             usage: Usage {
@@ -768,6 +776,7 @@ mod tests {
             provider_id: provider_id.into(),
             client_key_id: "ck-test".to_string(),
             catalog_id: None,
+            upstream_key: Some("primary".into()),
             started_unix: 1_788_919_200,
             model: Some("m1".into()),
             usage: Usage {

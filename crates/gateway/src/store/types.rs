@@ -485,6 +485,19 @@ pub struct UsageRecord {
     /// machines can share a name and a name can change, so this is a hint for a
     /// human reading the list, not a key anything joins on.
     pub imported_from: Option<String>,
+    /// Which entry of the provider's key pool served this request (migration
+    /// v33) — the half of attribution `provider_id` cannot answer, because a
+    /// pool's keys can belong to **different accounts** and the ledger is where
+    /// the difference has to show up.
+    ///
+    /// A **frozen display string**, not a foreign key: the entry's `label` when
+    /// it has one, else `#<api_keys.id>`, else `primary` for the provider's own
+    /// key. Frozen at write time for the reason `cost` is — a key removed next
+    /// month must not rewrite what this month was spent on, and a row that named
+    /// its account in the words of the day is more useful than one that cannot
+    /// name it at all. `None` on an imported row (a file states no gateway key)
+    /// and on rows written before the column.
+    pub upstream_key: Option<String>,
 }
 
 /// One session an agent's own files reported (migration v31).
@@ -530,6 +543,29 @@ pub struct ClientKeySpend {
     pub tokens: i64,
     /// How many of `requests` carry no cost at all. A spend figure missing rows
     /// must say so (see the import report's own rule).
+    pub unpriced_rows: i64,
+    pub cost: f64,
+}
+
+/// One upstream key pool entry's spend in one currency
+/// (`Store::upstream_key_spend`).
+///
+/// The upstream half of [`ClientKeySpend`], and it follows the same rule for the
+/// same reason: one row per entry **and currency**, because a pool entry whose
+/// traffic spanned two billing currencies has two facts and folding them would
+/// be adding different monies.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpstreamKeySpend {
+    /// The frozen display string from `usage.upstream_key`: a `label`, `#<id>`,
+    /// or `primary`. Not a key, so it is safe to print.
+    pub upstream_key: String,
+    /// `None` for the rows that were never priced — the tokens they used are in
+    /// `tokens`, and `cost` misses them.
+    pub currency: Option<String>,
+    pub requests: i64,
+    pub tokens: i64,
+    /// How many of `requests` carry no cost at all; a spend figure missing rows
+    /// must say so.
     pub unpriced_rows: i64,
     pub cost: f64,
 }

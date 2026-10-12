@@ -129,7 +129,7 @@ pub(crate) async fn forward_anthropic_via_openai(
 
     let url = upstream_url(provider, "/v1/chat/completions");
     // Query strings are meaningless across protocol conversion; drop them.
-    let headers = match upstream_key_and_headers(
+    let (headers, upstream_key) = match upstream_key_and_headers(
         &state,
         provider,
         &inbound_headers,
@@ -191,6 +191,7 @@ pub(crate) async fn forward_anthropic_via_openai(
                 provider_id: provider.id.clone(),
                 client_key_id: routed.client_key_id.clone(),
                 catalog_id: provider.catalog_id.clone(),
+                upstream_key: Some(upstream_key.clone()),
                 started_unix,
                 model,
                 usage: Usage::default(),
@@ -252,6 +253,7 @@ pub(crate) async fn forward_anthropic_via_openai(
                 provider_id: provider.id.clone(),
                 client_key_id: routed.client_key_id.clone(),
                 catalog_id: provider.catalog_id.clone(),
+                upstream_key: Some(upstream_key.clone()),
                 started_unix,
                 model: model.or(upstream_model),
                 usage_missing: usage.is_none(),
@@ -313,6 +315,7 @@ pub(crate) async fn forward_anthropic_via_openai(
             provider_id: provider.id.clone(),
             client_key_id: routed.client_key_id.clone(),
             catalog_id: provider.catalog_id.clone(),
+            upstream_key: Some(upstream_key.clone()),
             started_unix,
             model: model.or(upstream_model),
             usage_missing: usage.is_none(),

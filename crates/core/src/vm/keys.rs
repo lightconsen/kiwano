@@ -22,12 +22,24 @@ use kiwanod::store::Store;
 // on purpose — and so is `mask_key`'s: the daemon has to produce the same
 // masked string the app does, and two copies of a rule like this is how the two
 // would come to disagree (`migrate.local.md` §10.6).
-pub use kiwano_api::keys::{mask_key, ApiKeyVm};
+pub use kiwano_api::keys::{mask_key, ApiKeyVm, UpstreamKeySpendVm};
 
 // ── Multi-key rotation (spec §4.1 P1: auto-rotate multiple API keys per provider) ──
 
 pub fn list_api_keys(store: &Store, provider_id: &str) -> Result<Vec<ApiKeyVm>, String> {
     daemon::list_api_keys(store, provider_id).map_err(|e| e.to_string())
+}
+
+/// What each entry of a provider's key pool spent over a window, per currency —
+/// `kiwanod::store::Store::upstream_key_spend`. The upstream half of "who spent
+/// this": a pool whose keys are different accounts is several accounts' spend
+/// under one provider row.
+pub fn list_upstream_key_spend(
+    store: &Store,
+    provider_id: &str,
+    since: Option<&str>,
+) -> Result<Vec<UpstreamKeySpendVm>, String> {
+    daemon::list_upstream_key_spend(store, provider_id, since).map_err(|e| e.to_string())
 }
 
 /// Append a rotation key (providers.api_key is the primary key, always first in the pool).

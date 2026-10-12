@@ -66,7 +66,10 @@ pub use dashboard::{
     FilterOptionVm, FooterStatsVm, GatewayStatusVm, ProviderDistVm, TrendVm,
 };
 pub use fmt::fmt_tokens;
-pub use keys::{add_api_key, delete_api_key, list_api_keys, ApiKeyVm};
+pub use keys::{
+    add_api_key, delete_api_key, list_api_keys, list_upstream_key_spend, ApiKeyVm,
+    UpstreamKeySpendVm,
+};
 pub use kiwano_api::client_keys::{
     ClientKeyCreatedVm, ClientKeyLimitVm, ClientKeyPolicyInput, ClientKeyVm, NewClientKeyInput,
 };
@@ -358,6 +361,7 @@ pub(crate) mod test_support {
                 session_id: None,
                 import_key: None,
                 imported_from: None,
+                upstream_key: None,
             })
             .unwrap();
             // The headline count reads request_logs, not usage: seed both, as
@@ -395,6 +399,7 @@ pub(crate) mod test_support {
                 cost_currency: Some("USD".into()),
                 cost_off_peak: None,
                 request_notes: None,
+                upstream_key: None,
             })
             .unwrap();
         }
@@ -420,6 +425,7 @@ pub(crate) mod test_support {
             session_id: None,
             import_key: None,
             imported_from: None,
+            upstream_key: None,
         }
     }
 

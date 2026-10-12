@@ -199,7 +199,7 @@ publishes rates against.
 ### Rotating keys
 
 ```
-kiwano keys list <PROVIDER_ID>            masked; the key is never printed in full
+kiwano keys list <PROVIDER_ID> [--days N]   masked; also what each entry spent
 kiwano keys add <PROVIDER_ID> --key K [--label L]
 kiwano keys remove <KEY_ID>
 ```
@@ -208,6 +208,13 @@ Rotating keys follow the provider's primary key. Rotation is **per session**:
 a conversation keeps the key it started on (the upstream prompt cache is
 scoped to the account a key belongs to), and new sessions spread across the
 pool. Requests that name no session rotate per request.
+
+A pool can hold keys from **different accounts** — give each a `--label` and
+the spend table says which account spent what, in the currencies it spent them
+in (never summed across currencies here; the Dashboard is the one place that
+converts). The name a report shows is the label, or `#<id>` when there is
+none, or `primary` for the provider's own key. The key itself is never
+printed, exported, or recorded in a ledger.
 
 ### Rules
 

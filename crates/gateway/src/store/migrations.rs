@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 32;
+pub const SCHEMA_VERSION: i32 = 33;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -928,6 +928,19 @@ ALTER TABLE usage ADD COLUMN imported_from TEXT;
 ALTER TABLE sessions ADD COLUMN imported_from TEXT;
 "#;
 
+/// v33: which entry of a provider's key pool served the request, on both the
+/// metered row and its log row.
+///
+/// A frozen display string, not a foreign key: it is the entry's `label` when it
+/// has one, else `#<api_keys.id>`, else `primary` for the provider's own key.
+/// Frozen at write time for the reason cost is — a key removed later must not
+/// rewrite history, and a row whose account can no longer be named is worse than
+/// one that names it in the words of the day.
+const MIGRATION_V33: &str = r#"
+ALTER TABLE usage ADD COLUMN upstream_key TEXT;
+ALTER TABLE request_logs ADD COLUMN upstream_key TEXT;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1083,6 +1096,9 @@ impl Store {
         }
         if version < 32 {
             conn.execute_batch(MIGRATION_V32)?;
+        }
+        if version < 33 {
+            conn.execute_batch(MIGRATION_V33)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

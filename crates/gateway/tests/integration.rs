@@ -494,6 +494,100 @@ async fn a_session_keeps_its_pool_key_and_a_new_session_takes_the_next() {
     );
 }
 
+/// The account is on the receipt and in the ledger, and the two agree: the
+/// header a client reads and the rows a report sums come from one choice.
+#[tokio::test]
+async fn the_same_pool_choice_reaches_the_receipt_and_both_ledger_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, _captured) = mock_openai(MockReply::Json(json!({
+        "id": "chatcmpl-1",
+        "model": "gpt-4o",
+        "choices": [],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    // The second entry is named, because a label is what a human reading the
+    // report recognizes. The primary is not: it is reported as `primary`.
+    store
+        .insert_api_key("p-oai", "sk-pool-two", Some("personal"))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let send = |session: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/chat/completions")
+                        .header("content-type", "application/json")
+                        .header("x-api-key", "kw-ag-codex-test")
+                        .header("x-kw-session", session)
+                        .body(Body::from(
+                            r#"{"model":"gpt-4o","messages":[]}"#.to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            response
+        }
+    };
+
+    // The primary serves one conversation, the named key the next.
+    let response = send("s-primary").await;
+    let receipt = response
+        .headers()
+        .get("x-kiwano-account")
+        .expect("a served response says which pool entry served it")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(receipt, "primary");
+    response_body(response).await;
+
+    let response = send("s-personal").await;
+    assert_eq!(
+        response.headers().get("x-kiwano-account").unwrap(),
+        "personal"
+    );
+    response_body(response).await;
+
+    // The metered rows carry the same names.
+    let spend = state.store.upstream_key_spend("p-oai", None).unwrap();
+    let named: Vec<&str> = spend.iter().map(|s| s.upstream_key.as_str()).collect();
+    assert!(named.contains(&"primary"), "{named:?}");
+    assert!(named.contains(&"personal"), "{named:?}");
+
+    // And the log rows agree with them — the report is only trustworthy if the
+    // two tables were written from one decision.
+    let (logs, _total) = state
+        .store
+        .list_request_logs(1, 50, RequestLogFilter::default())
+        .unwrap();
+    let accounts: std::collections::BTreeSet<&str> = logs
+        .iter()
+        .filter_map(|l| l.upstream_key.as_deref())
+        .collect();
+    assert!(
+        accounts.contains("primary") && accounts.contains("personal"),
+        "{accounts:?}"
+    );
+}
+
 #[tokio::test]
 async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     let dir = tempfile::tempdir().unwrap();
@@ -1831,6 +1925,7 @@ async fn an_agent_over_its_own_limit_never_reaches_a_provider() {
             session_id: None,
             import_key: None,
             imported_from: None,
+            upstream_key: None,
         })
         .unwrap();
 
@@ -3091,6 +3186,7 @@ async fn a_client_key_over_its_own_ceiling_is_429_with_retry_after() {
             session_id: None,
             import_key: None,
             imported_from: None,
+            upstream_key: None,
         })
         .unwrap();
 

@@ -58,6 +58,8 @@ export const logs = {
   // ── 工作階段檢視(這張卡的第二個 tab) ──
   tabSessions: "工作階段",
   sessionsCount: "{n} 個工作階段",
+  unpricedRows: "{n} 個未定價",
+  costPlusUnpriced: "{amounts}(另有 {n} 個未定價)",
   sessionsWindowTitle: "視窗取自 Dashboard 頂部的選擇器",
   sessionsProviderNotApplied: "供應商篩選不適用於工作階段",
   sessionsEmpty:

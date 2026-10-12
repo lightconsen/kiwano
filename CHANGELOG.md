@@ -49,6 +49,27 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **A session has its own page.** The sessions list can only show a row's worth
+  of one, and the parts that did not fit — the tools it reached for, its skills,
+  all four token buckets, the machine — are the parts worth reading. Opening a
+  row now replaces the Dashboard with that session's page, reached by
+  `#dashboard/session/<id>` (so it survives a refresh and can be linked), with a
+  breadcrumb back to the Dashboard — which returns to the Sessions tab it was
+  opened from, not to the top.
+
+  The page exists mostly to say **which ledger each number came from**, which a
+  single merged row cannot: "what the gateway saw" (requests, tokens, cost) sits
+  beside "what the agent's files recorded" (project, machine, span, turns).
+  Nothing is added across the two, a side that never saw the session reads `—`
+  rather than `0` — including its cost, because the files carry tokens and not
+  money — and money stays in the currency it was spent in, unconverted. Tools and
+  skills are ordered by use, capped at ten, and the page says how many it left
+  out rather than quietly ending.
+
+  Sessions are read by id (`GET /api/sessions/{id}`, `null` for an id neither
+  ledger has), so the page works from a cold start rather than depending on a row
+  a previous screen happened to hold.
+
 - **The session table fits the window it actually has.** The window's minimum is
   900×600, which leaves the card about 860px for nine columns — and the table
   sized itself to its content, so the right-hand columns went past the card's

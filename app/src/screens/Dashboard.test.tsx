@@ -23,6 +23,7 @@ const { apiMock } = vi.hoisted(() => ({
     getDashboard: vi.fn(),
     listRequestLogs: vi.fn(),
     listSessions: vi.fn(),
+    getSession: vi.fn(),
     getRequestLog: vi.fn(),
     exportRequestLogs: vi.fn(),
   },
@@ -68,6 +69,49 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.getCurrencyMeta.mockResolvedValue({ preferred: "CNY", currencies: ["CNY"], exchange_rates: {} });
   apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
+});
+
+/** One session both ledgers know — enough for the page to render. */
+const SESSION = {
+  session_id: "s-1",
+  source: "both" as const,
+  agent: "claude",
+  project: "acme-api",
+  machine: "buildbox",
+  title: "port the parser to Rust",
+  started_at: "2026-09-09T20:41:00Z",
+  ended_at: "2026-09-09T21:30:00Z",
+  requests: 3,
+  turns: 7,
+  input_tokens: 10,
+  output_tokens: 2,
+  cache_read_tokens: 0,
+  cache_creation_tokens: 0,
+  cost: [],
+  unpriced_rows: 0,
+  tool_calls: [{ name: "Bash", count: 9 }],
+  skills: [],
+};
+
+describe("a session's own page inside the Dashboard", () => {
+  it("replaces the Dashboard rather than floating over it, and comes back where it left", async () => {
+    // The Dashboard's own read still runs while the session page is open — its
+    // hooks are above the early return — so it has to answer.
+    apiMock.getDashboard.mockResolvedValue(dashboard());
+    apiMock.listSessions.mockResolvedValue({ rows: [], total: 0 });
+    apiMock.getSession.mockResolvedValue(SESSION);
+    window.location.hash = "";
+    const { rerender } = render(<Dashboard openSessionId="s-1" />);
+
+    // What it shows is a different subject: the panels above it must not render
+    // underneath, or the page reads as a detail *of* them.
+    expect(await screen.findByRole("heading", { name: "port the parser to Rust" })).toBeInTheDocument();
+    expect(screen.queryByText(en.dashboard.usageTrend)).toBeNull();
+
+    // And when the route drops the tail, the Dashboard is back.
+    rerender(<Dashboard openSessionId={undefined} />);
+    expect(await screen.findByText(en.dashboard.usageTrend)).toBeInTheDocument();
+  });
 });
 
 describe("the dashboard's filters", () => {

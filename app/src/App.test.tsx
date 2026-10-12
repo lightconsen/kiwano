@@ -56,6 +56,7 @@ const { apiMock } = vi.hoisted(() => ({
     getDashboard: vi.fn(),
     listRequestLogs: vi.fn(),
     listSessions: vi.fn(),
+    getSession: vi.fn(),
     getRequestLog: vi.fn(),
   },
 }));
@@ -66,6 +67,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   listeners.clear();
   apiMock.getGatewayStatus.mockResolvedValue({ running: true, port: 8317, blocked: [] });
+  apiMock.getSession.mockResolvedValue(null);
+  apiMock.listSessions.mockResolvedValue({ rows: [], total: 0 });
   apiMock.getFooterStats.mockResolvedValue({
     today_requests: 1,
     today_tokens: 10,
@@ -112,6 +115,7 @@ beforeEach(() => {
     filter_providers: [],
     filter_agents: [],
   });
+  apiMock.listSessions.mockResolvedValue({ rows: [], total: 0 });
   apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
   apiMock.getRequestLog.mockResolvedValue(null);
 });
@@ -196,6 +200,68 @@ describe("the gateway's live numbers", () => {
     // status bar, because Settings' About row shows the same string.
     const bar = await screen.findByRole("contentinfo");
     expect(await within(bar).findByText("v9.9.9")).toBeInTheDocument();
+  });
+});
+
+describe("a session's own page, as a route", () => {
+  it("renders it from the hash, decoding the id, and leaves the log dialog closed", async () => {
+    // An id with an escape in it: the id is opaque, so the route encodes it and
+    // the parser has to give back exactly what went in.
+    window.location.hash = "#dashboard/session/user_acct%2Fsession%209f3a";
+    const row = {
+      session_id: "user_acct/session 9f3a",
+      source: "imported" as const,
+      agent: "claude",
+      project: "acme-api",
+      machine: "buildbox",
+      title: "port the parser to Rust",
+      started_at: "2026-09-09T20:41:00Z",
+      ended_at: "2026-09-09T21:30:00Z",
+      requests: 0,
+      turns: 7,
+      input_tokens: 10,
+      output_tokens: 2,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      cost: [],
+      unpriced_rows: 0,
+      tool_calls: [{ name: "Bash", count: 9 }],
+      skills: [],
+    };
+    apiMock.getSession.mockResolvedValue(row);
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(apiMock.getSession).toHaveBeenCalledWith("user_acct/session 9f3a"),
+    );
+    expect(await screen.findByRole("heading", { name: "port the parser to Rust" })).toBeInTheDocument();
+
+    // The two Dashboard tails are matched on the same segment, so a session
+    // route is not also a log deep-link — no dialog opens behind it.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(apiMock.getRequestLog).not.toHaveBeenCalled();
+    // And it did not become an agent id on the way (the fallback that used to
+    // swallow any unknown tail).
+    expect(screen.queryByText(en.logs.sessionNoTraffic)).toBeNull();
+  });
+
+  it("goes back to the Dashboard, not out of the app", async () => {
+    window.location.hash = "#dashboard/session/s-1";
+    apiMock.getSession.mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+
+    // Back is a hash, not `history.back()`: a pasted link has no entry behind it.
+    // Scoped to the breadcrumb: the top nav has a "Dashboard" button too, and
+    // that one is a different journey.
+    const crumbs = await screen.findByRole("navigation", {
+      name: en.dashboard.sessionBreadcrumb,
+    });
+    await user.click(within(crumbs).getByRole("button", { name: en.app.nav.dashboard }));
+    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
+    // The Dashboard's own content is back — not an empty history.
+    expect(await screen.findByText(en.dashboard.usageTrend)).toBeInTheDocument();
   });
 });
 

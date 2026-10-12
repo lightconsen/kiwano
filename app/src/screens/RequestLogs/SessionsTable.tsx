@@ -11,55 +11,9 @@
 // never converted outside the Dashboard.
 
 import { useT } from "../../i18n";
-import { fmtMoney, fmtTokens } from "../../lib/format";
+import { fmtTokens } from "../../lib/format";
 import type { Session } from "../../api/types";
-
-/** `2026-09-09T20:41:00Z` → `09-09 20:41` in the reader's own clock. */
-function fmtStamp(ts: string): string {
-  const at = new Date(ts);
-  if (Number.isNaN(at.getTime())) return ts;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
-}
-
-/** What one session's traffic cost, in the monies it cost them in.
- *
- * **Never summed across currencies and never converted.** A session whose
- * traffic spanned two providers has two facts, and adding them would be adding
- * dollars to yuan; the Dashboard is the one place a single figure exists. An
- * imported-only session has no cost at all rather than a zero — the files carry
- * tokens, not money, and a zero would read as "this was free". */
-function fmtSessionCost(row: Session): string {
-  if (row.cost.length === 0) {
-    return row.unpriced_rows === 0 ? "—" : `${row.unpriced_rows} unpriced`;
-  }
-  const amounts = row.cost.map((c) => fmtMoney(c.amount, c.currency)).join(" + ");
-  return row.unpriced_rows === 0 ? amounts : `${amounts} (+${row.unpriced_rows} unpriced)`;
-}
-
-/** Which ledger(s) this session was found in, and what that means for the row's
-    numbers. The badge is load-bearing, not decoration: it is what tells a reader
-    why `REQ` is `—` on some rows and `TURNS` is `—` on others. */
-function SourceBadge({ source }: { source: Session["source"] }) {
-  const t = useT();
-  // The daemon writes one of three strings; an unknown one still has to render
-  // as something (the wire type is a plain string), so it falls back to itself.
-  const label =
-    source === "both"
-      ? t("logs.sourceBoth")
-      : source === "imported"
-        ? t("logs.sourceImported")
-        : source === "gateway"
-          ? t("logs.sourceGateway")
-          : source;
-  const tone =
-    source === "both" ? "var(--kiwi)" : source === "imported" ? "var(--violet)" : "var(--mut)";
-  return (
-    <span className="text-[10px]" style={{ color: tone }} title={t("logs.sourceTitle")}>
-      {label}
-    </span>
-  );
-}
+import { fmtSessionCost, fmtStamp, SourceBadge } from "./sessionBits";
 
 export function SessionsTable({
   rows,
@@ -189,7 +143,7 @@ export function SessionsTable({
                 {fmtTokens(r.input_tokens)} / {fmtTokens(r.output_tokens)}
               </td>
               <td className="px-1.5 py-1.5 text-right align-top">
-                <span className="block break-words">{fmtSessionCost(r)}</span>
+                <span className="block break-words">{fmtSessionCost(r, t)}</span>
               </td>
             </tr>
           ))}

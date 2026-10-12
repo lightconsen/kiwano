@@ -58,6 +58,8 @@ export const logs = {
   // ── 会话视图(这张卡的第二个 tab) ──
   tabSessions: "会话",
   sessionsCount: "{n} 个会话",
+  unpricedRows: "{n} 个未定价",
+  costPlusUnpriced: "{amounts}(另有 {n} 个未定价)",
   sessionsWindowTitle: "窗口取自 Dashboard 顶部的选择器",
   sessionsProviderNotApplied: "供应商筛选不适用于会话",
   sessionsEmpty:

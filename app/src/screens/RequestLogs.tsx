@@ -54,7 +54,7 @@ const FILTERS: { id: StatusFilter; labelKey: KeyPath<Messages> }[] = [
   { id: "error", labelKey: "logs.filterError" },
 ];
 
-type Tab = "logs" | "sessions";
+export type Tab = "logs" | "sessions";
 
 /** The card's two views. The first is the audit trail this card has always
     been; the second is the same machine's sessions, which the gateway's traffic
@@ -433,6 +433,11 @@ export default function RequestLogs({
   providerId,
   initialOpenId,
   window: win = "7d",
+  tab,
+  onTab,
+  sessionFilter,
+  onSessionFilter,
+  onOpenSession,
 }: {
   /** The page's provider/agent filters. They narrow this table the same way
    *  they narrow the cards above it — the reader set one slice and expects
@@ -449,16 +454,21 @@ export default function RequestLogs({
    *  its own range, in the export dialog). It is passed down rather than
    *  re-derived so the two panels cannot end up measuring different spans. */
   window?: DashboardWindow;
-} = {}) {
+  /** Which view is showing, and the session the log table is narrowed to.
+   *
+   *  Both are **controlled by the Dashboard**, which is the component that
+   *  survives a trip into a session's own page: coming back has to land where
+   *  the reader left, and the session page is what now sets the filter (it is
+   *  the thing that knows a row was opened). */
+  tab: Tab;
+  onTab: (tab: Tab) => void;
+  sessionFilter: string | null;
+  onSessionFilter: (id: string | null) => void;
+  /** A session row was opened: show that session's own page. The Dashboard owns
+   *  the navigation, because it owns the route. */
+  onOpenSession: (id: string) => void;
+} = { tab: "logs" } as never) {
   const t = useT();
-  // Which of the two views this card is showing. The card owns it rather than
-  // the Dashboard: it is the card's own state, and the header row that carries
-  // the switch also carries each view's count and controls.
-  const [tab, setTab] = useState<"logs" | "sessions">("logs");
-  // One conversation's requests, set by the session view's drill-down and
-  // cleared by the chip beside the status filter. It lives here because it is
-  // part of the log filter — the same query, one more bound.
-  const [sessionFilter, setSessionFilter] = useState<string | null>(null);
   // The sessions view's own read: the rows, whether one has landed, its error,
   // and a sequence guard for the same reason the log table has one.
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -751,7 +761,7 @@ export default function RequestLogs({
               aria-selected={tab === x.id}
               className={`seg h-7 border-line px-3 text-mut${i > 0 ? " border-l" : ""}${tab === x.id ? " active font-semibold" : ""}`}
               onClick={() => {
-                setTab(x.id);
+                onTab(x.id);
                 // A tab switch is a change of view, not of result set: the
                 // pager and the open dialog belong to the view being left.
                 setOpenId(null);
@@ -793,7 +803,7 @@ export default function RequestLogs({
             <button
               className="text-mut hover:text-fg"
               aria-label={t("logs.clearSessionFilter")}
-              onClick={() => setSessionFilter(null)}
+              onClick={() => onSessionFilter(null)}
             >
               <XIcon className="h-3 w-3" />
             </button>
@@ -859,13 +869,11 @@ export default function RequestLogs({
           rows={sessions}
           loaded={sessionsLoaded}
           onOpenSession={(id) => {
-            // A row click is the one place the session id a reader can see
-            // becomes a filter they can use: the log table has had a
-            // `session_id` bound all along and no way to set it.
-            setSessionFilter(id);
-            setTab("logs");
-            setPage(1);
+            // Opening a row leaves this card for that session's own page. The
+            // filter this used to set still exists — the page sets it, from a
+            // button that says what it does, which is where a reader can see it.
             setOpenId(null);
+            onOpenSession(id);
           }}
         />
         {sessionsLoaded && sessionsTotal > 0 && (

@@ -6,6 +6,7 @@
 // when the table is used for itself. The export is the one that leaves the
 // machine, which is why all three outcomes are pinned — including the two that
 // write nothing.
+import { useState } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,14 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { en } from "@/i18n/en";
 import type { RequestLogEntry, Session } from "@/api/types";
 
-import RequestLogs from "./RequestLogs";
+import RequestLogs, { type Tab } from "./RequestLogs";
 
-const { apiMock, saveMock } = vi.hoisted(() => ({
+const { apiMock, saveMock, openSession } = vi.hoisted(() => ({
+  openSession: vi.fn(),
   apiMock: {
     listRequestLogs: vi.fn(),
     getRequestLog: vi.fn(),
     exportRequestLogs: vi.fn(),
     listSessions: vi.fn(),
+    getSession: vi.fn(),
   },
   saveMock: vi.fn(),
 }));
@@ -69,9 +72,33 @@ function page(ids: number[], total: number) {
   return { rows: ids.map(entry), total };
 }
 
+/** The card with its two view-state values supplied the way the Dashboard
+ *  supplies them.
+ *
+ *  They are controlled props now (the Dashboard owns them so a trip into a
+ *  session's page can come back to the tab it left), and a test that clicked the
+ *  Sessions tab has to keep working — so the harness is that owner, in ten
+ *  lines, rather than a stub that does nothing. `onOpenSession` is a spy: the
+ *  row click leaves this card now, and what it leaves to is the Dashboard's
+ *  business (see `Dashboard.test.tsx`). */
+function Harness(props: Partial<Parameters<typeof RequestLogs>[0]> = {}) {
+  const [tab, setTab] = useState<Tab>("logs");
+  const [sessionFilter, setSessionFilter] = useState<string | null>(null);
+  return (
+    <RequestLogs
+      tab={tab}
+      onTab={setTab}
+      sessionFilter={sessionFilter}
+      onSessionFilter={setSessionFilter}
+      onOpenSession={openSession}
+      {...props}
+    />
+  );
+}
+
 async function openExportDialog() {
   const user = userEvent.setup();
-  render(<RequestLogs />);
+  render(<Harness />);
   // The toolbar's button is disabled until the first page has answered, and a
   // click on a disabled button is swallowed — so wait for it to be enabled.
   await waitFor(() =>
@@ -128,7 +155,7 @@ beforeEach(() => {
 describe("the request log table", () => {
   it("pages through the query and returns to the first page when the slice changes", async () => {
     const user = userEvent.setup();
-    render(<RequestLogs />);
+    render(<Harness />);
     await waitFor(() => expect(apiMock.listRequestLogs).toHaveBeenCalledWith(1, 10, {}));
 
     // 25 rows at 10 a page: three pages, and Next is the way through them.
@@ -204,7 +231,7 @@ describe("the request log table", () => {
       total: 2,
     });
     apiMock.getRequestLog.mockResolvedValue({ ...finding, request_body: null, response_body: null });
-    render(<RequestLogs />);
+    render(<Harness />);
 
     // The badge rides the status cell of the finding's row only.
     expect(await screen.findByText(en.logs.dlpBadge)).toBeInTheDocument();
@@ -224,7 +251,7 @@ describe("the request log table", () => {
     const detail = { ...entry(99), request_body: null, response_body: null };
     apiMock.getRequestLog.mockResolvedValue(detail);
     window.location.hash = "#dashboard/log/99";
-    render(<RequestLogs initialOpenId={99} />);
+    render(<Harness initialOpenId={99} />);
 
     // Straight to the row by id — the paged list is never asked to find it.
     await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(99));
@@ -242,7 +269,7 @@ describe("the request log table", () => {
     // the title still names it.
     apiMock.getRequestLog.mockRejectedValue(new Error("pruned"));
     window.location.hash = "#dashboard/log/99";
-    render(<RequestLogs initialOpenId={99} />);
+    render(<Harness initialOpenId={99} />);
 
     await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(99));
     const dialog = await screen.findByRole("dialog");
@@ -260,7 +287,7 @@ describe("the request log table", () => {
     apiMock.getRequestLog.mockReturnValue(new Promise(() => {}));
     window.location.hash = "#dashboard/log/99";
     const user = userEvent.setup();
-    render(<RequestLogs initialOpenId={99} />);
+    render(<Harness initialOpenId={99} />);
 
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: en.common.close }));
@@ -280,7 +307,7 @@ describe("the request log table", () => {
 describe("the sessions view", () => {
   it("reads nothing until it is opened, then reads over the Dashboard's window", async () => {
     const user = userEvent.setup();
-    render(<RequestLogs agent="claude" window="7d" />);
+    render(<Harness agent="claude" window="7d" />);
 
     // The card opens on the audit trail, and a view nobody has asked for must
     // not cost a query.
@@ -311,22 +338,46 @@ describe("the sessions view", () => {
 
   it("all time sends no bound at all", async () => {
     const user = userEvent.setup();
-    render(<RequestLogs window="all" />);
+    render(<Harness window="all" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
     await waitFor(() => expect(apiMock.listSessions).toHaveBeenCalled());
     expect(apiMock.listSessions.mock.calls[0][3]).toBeUndefined();
   });
 
-  it("narrows the log table to a session, and the chip is the way back", async () => {
+  it("hands a row's session to the Dashboard, which owns where it goes", async () => {
     apiMock.listSessions.mockResolvedValue({ rows: [session("s-1"), session("s-2")], total: 2 });
     const user = userEvent.setup();
-    render(<RequestLogs window="7d" />);
+    render(<Harness window="7d" />);
 
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
     await user.click(await screen.findByTitle(rowTitle("s-2")));
 
-    // Back on the audit trail, filtered — and starting at page one, because the
-    // result set changed under the pager.
+    // Opening a row is no longer "filter this table": it is "show me that
+    // session", which is the Dashboard's navigation to make. The card reports
+    // the id and keeps its own hands off the filter.
+    await waitFor(() => expect(openSession).toHaveBeenCalledWith("s-2"));
+    expect(apiMock.listRequestLogs).toHaveBeenLastCalledWith(1, 10, expect.not.objectContaining({
+      session_id: expect.anything(),
+    }));
+  });
+
+  it("narrows the table when the filter is set from outside, and the chip is the way back", async () => {
+    // The other half of the same contract: the session page's button sets this
+    // filter through the Dashboard, and the card has to honour it like any other
+    // bound on the query.
+    const user = userEvent.setup();
+    const outside = vi.fn();
+    render(
+      <RequestLogs
+        window="7d"
+        tab="logs"
+        onTab={() => {}}
+        sessionFilter="s-2"
+        onSessionFilter={outside}
+        onOpenSession={openSession}
+      />,
+    );
+
     await waitFor(() =>
       expect(apiMock.listRequestLogs).toHaveBeenLastCalledWith(
         1,
@@ -334,35 +385,20 @@ describe("the sessions view", () => {
         expect.objectContaining({ session_id: "s-2" }),
       ),
     );
-    expect(screen.getByRole("tab", { name: en.logs.title })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByTitle("s-2")).toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: en.logs.clearSessionFilter }));
-    await waitFor(() =>
-      expect(apiMock.listRequestLogs).toHaveBeenLastCalledWith(
-        1,
-        10,
-        expect.not.objectContaining({ session_id: expect.anything() }),
-      ),
-    );
-    expect(screen.queryByTitle("s-2")).toBeNull();
+    expect(outside).toHaveBeenCalledWith(null);
   });
 
   it("says so when a session has no gateway traffic, rather than looking broken", async () => {
-    apiMock.listSessions.mockResolvedValue({
-      rows: [session("imported-1", { source: "imported", requests: 0, cost: [] })],
-      total: 1,
-    });
     apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
-    const user = userEvent.setup();
-    render(<RequestLogs window="7d" />);
-
-    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
-    await user.click(
-      await screen.findByTitle(rowTitle("imported-1")),
+    render(
+      <RequestLogs
+        tab="logs"
+        onTab={() => {}}
+        sessionFilter="imported-1"
+        onSessionFilter={() => {}}
+        onOpenSession={openSession}
+      />,
     );
 
     // An empty result that is *correct* must not read as a broken filter: the
@@ -388,7 +424,7 @@ describe("the sessions view", () => {
       total: 3,
     });
     const user = userEvent.setup();
-    render(<RequestLogs window="7d" />);
+    render(<Harness window="7d" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
     await screen.findByTitle(rowTitle("both-1"));
 
@@ -427,7 +463,7 @@ describe("the sessions view", () => {
       total: 1,
     });
     const user = userEvent.setup();
-    render(<RequestLogs window="7d" />);
+    render(<Harness window="7d" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
     const row = await screen.findByTitle(rowTitle("s-1"));
 
@@ -474,7 +510,7 @@ describe("the sessions view", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<RequestLogs window="7d" />);
+    render(<Harness window="7d" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
 
     // The count is the whole list, not this page of it — a header that said "10
@@ -494,7 +530,7 @@ describe("the sessions view", () => {
 
   it("says the provider filter does not apply here instead of pretending it does", async () => {
     const user = userEvent.setup();
-    render(<RequestLogs providerId="deepseek" window="7d" />);
+    render(<Harness providerId="deepseek" window="7d" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
     expect(
       await screen.findByText(en.logs.sessionsProviderNotApplied),

@@ -20,7 +20,8 @@ import { useReload } from "../lib/reload";
 import type { DashboardData, DashboardWindow, GatewayStatus } from "../api/types";
 import { fmtMoney, fmtTokens } from "../lib/format";
 import { useT, type KeyPath, type Messages } from "../i18n";
-import RequestLogs from "./RequestLogs";
+import RequestLogs, { type Tab } from "./RequestLogs";
+import SessionDetail from "./SessionDetail";
 
 // Labels only: `id` is what the backend filters on and stays untranslated.
 const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
@@ -414,11 +415,15 @@ function Delta({ pct, invert }: { pct: number | null; invert?: boolean }) {
 export default function Dashboard({
   gateway,
   openLogId,
+  openSessionId,
 }: {
   gateway?: GatewayStatus | null;
   /** Deep-linked request-log detail (`#dashboard/log/<id>`), passed through to
    *  the Logs card, which consumes it. */
   openLogId?: number;
+  /** A session's own page (`#dashboard/session/<id>`). While it is set this
+   *  screen renders *that* instead of its panels — see the early return below. */
+  openSessionId?: string;
 } = {}) {
   const t = useT();
   const [win, setWin] = useState<DashboardWindow>("7d");
@@ -431,6 +436,20 @@ export default function Dashboard({
   // "all" = no filter; otherwise the provider id / agent id
   const [providerFilter, setProviderFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
+  // The request card's two view-state values, owned here rather than by the card
+  // because this screen outlives a trip into a session's page: coming back has to
+  // land on the tab the reader left, and the session page is what sets the
+  // filter — it is the thing that knows a row was opened.
+  const [cardTab, setCardTab] = useState<Tab>("logs");
+  const [logSessionFilter, setLogSessionFilter] = useState<string | null>(null);
+
+  // A session page reached cold (a pasted link, a refresh) leaves no memory of
+  // which tab the reader came from, so returning to it would land on Logs. Every
+  // entry into the page says "sessions", which is the only tab it can be reached
+  // from.
+  useEffect(() => {
+    if (openSessionId) setCardTab("sessions");
+  }, [openSessionId]);
   // The trend chart shows one metric at a time (see TrendBars).
   const [metric, setMetric] = useState<TrendMetric>("requests");
   const [data, setData] = useState<DashboardData | null>(null);
@@ -470,6 +489,23 @@ export default function Dashboard({
     void reload();
   }, [reload]);
   useReload(reload);
+
+  // A session's page **replaces** this screen: what it shows is a different
+  // subject, not a detail of this one, and the panels must not render underneath
+  // it. Everything above this line is a hook and stays registered while the page
+  // is open, so the ⟳ reaches both it and the numbers behind it.
+  if (openSessionId) {
+    return (
+      <SessionDetail
+        sessionId={openSessionId}
+        onShowRequests={(id) => {
+          setLogSessionFilter(id);
+          setCardTab("logs");
+          window.location.hash = "#dashboard";
+        }}
+      />
+    );
+  }
 
   if (!data)
     return <div className="p-8 text-center text-[12px] text-mut">{t("common.loading")}</div>;
@@ -672,6 +708,15 @@ export default function Dashboard({
           providerId={providerFilter === "all" ? undefined : providerFilter}
           initialOpenId={openLogId}
           window={win}
+          tab={cardTab}
+          onTab={setCardTab}
+          sessionFilter={logSessionFilter}
+          onSessionFilter={setLogSessionFilter}
+          onOpenSession={(id) => {
+            // `encodeURIComponent`: a session id is opaque, and the hash splits
+            // on `/`.
+            window.location.hash = `#dashboard/session/${encodeURIComponent(id)}`;
+          }}
         />
       </div>
     </section>

@@ -1085,6 +1085,10 @@ export interface KiwanoApi {
   /** Sessions this machine knows, newest first, from the gateway's traffic and
       the agents' own files. `since` is an instant (the app's local-day window);
       `days` is the rolling span the CLI uses. The daemon prefers `since`. */
+  /** One session by id, or `null` when neither ledger has it — the detail page's
+      read, which has to survive a refresh and a pasted link. */
+  getSession(id: string): Promise<Session | null>;
+
   listSessions(
     agent: string | undefined,
     project: string | undefined,

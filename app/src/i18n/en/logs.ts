@@ -68,6 +68,8 @@ export const logs = {
   // ── The sessions view (the card's second tab) ──
   tabSessions: "Sessions",
   sessionsCount: "{n} sessions",
+  unpricedRows: "{n} unpriced",
+  costPlusUnpriced: "{amounts} (+{n} unpriced)",
   sessionsWindowTitle: "The window the Dashboard's selector is set to",
   sessionsProviderNotApplied: "The provider filter does not apply to sessions",
   sessionsEmpty:

@@ -23,7 +23,14 @@ export function matchingSessions(
     .sort((a, b) => (a.ended_at < b.ended_at ? 1 : -1));
 }
 
-export const sessionsApi: Pick<KiwanoApi, "listSessions"> = {
+export const sessionsApi: Pick<KiwanoApi, "listSessions" | "getSession"> = {
+  async getSession(id: string): Promise<Session | null> {
+    await delay();
+    // The same fixture list the index reads, so a session the list shows is a
+    // session the detail page can open — in dev and in the demo alike.
+    return sessions.find((s) => s.session_id === id) ?? null;
+  },
+
   async listSessions(
     agent: string | undefined,
     _project: string | undefined,

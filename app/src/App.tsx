@@ -51,20 +51,50 @@ const NAV: { id: Route; labelKey: KeyPath<Messages> }[] = [
     deep-linked the same way, and the Apps screen already falls back to "all"
     for an id nothing knows. One more shape: #dashboard/log/<id> opens that
     request log's detail (the credential banner's click-through). */
-function routeFromHash(): { route: Route; agent: AgentRef | null; logId: number | null } {
+function routeFromHash(): {
+  route: Route;
+  agent: AgentRef | null;
+  logId: number | null;
+  sessionId: string | null;
+} {
   const [head, tail, extra] = window.location.hash.slice(1).split("/");
   const route: Route = NAV.some((n) => n.id === head) ? (head as Route) : "providers";
+  // Two drill-ins under the Dashboard, matched on the same segment and so
+  // mutually exclusive by construction: a request log's detail, and a session's
+  // own page. A third one would need the same care.
   const logId =
     route === "dashboard" && tail === "log" && extra && /^\d+$/.test(extra)
       ? Number(extra)
       : null;
-  return { route, agent: logId ? null : tail ? decodeURIComponent(tail) : null, logId };
+  const sessionId =
+    route === "dashboard" && tail === "session" && extra ? safeDecode(extra) : null;
+  // A drill-in is not an agent id: without this, a session's page would also
+  // arrive as `agent: "session"`, which the Dashboard ignores today and some
+  // later screen would not.
+  const agent = logId || sessionId ? null : tail ? safeDecode(tail) : null;
+  return { route, agent, logId, sessionId };
+}
+
+/** `decodeURIComponent` throws on a malformed escape — `#dashboard/session/%E0%A4%A`
+ *  is a hash a user can type — and a route that cannot be parsed should read as
+ *  "no id" rather than take the app down. */
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 export default function App() {
   const t = useT();
   const locale = useLocale();
-  const [route, setRoute] = useState<{ route: Route; agent: AgentRef | null; logId: number | null }>(routeFromHash);
+  const [route, setRoute] = useState<{
+    route: Route;
+    agent: AgentRef | null;
+    logId: number | null;
+    sessionId: string | null;
+  }>(routeFromHash);
   // The app's own reload: what the current screen re-reads, and whether one is
   // in flight (the button spins and disables for exactly as long as that is
   // true). It replaces a remount — see lib/reload.ts for why that was wrong.
@@ -340,7 +370,7 @@ export default function App() {
   }, []);
 
   const nav = (id: Route) => {
-    setRoute({ route: id, agent: null, logId: null });
+    setRoute({ route: id, agent: null, logId: null, sessionId: null });
     window.location.hash = id;
   };
 
@@ -414,7 +444,13 @@ export default function App() {
         {route.route === "shelf" && (
           <Shelf onAdd={(preset) => setModal({ open: true, preset, edit: null })} />
         )}
-        {route.route === "dashboard" && <Dashboard gateway={gw} openLogId={route.logId ?? undefined} />}
+        {route.route === "dashboard" && (
+          <Dashboard
+            gateway={gw}
+            openLogId={route.logId ?? undefined}
+            openSessionId={route.sessionId ?? undefined}
+          />
+        )}
         {route.route === "settings" && <Settings />}
         </ReloadRegistryProvider>
       </main>

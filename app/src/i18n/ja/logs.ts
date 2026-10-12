@@ -58,6 +58,8 @@ export const logs = {
   // ── セッション表示（このカードの 2 つ目のタブ） ──
   tabSessions: "セッション",
   sessionsCount: "{n} セッション",
+  unpricedRows: "{n} 件は価格なし",
+  costPlusUnpriced: "{amounts}（ほか {n} 件は価格なし）",
   sessionsWindowTitle: "ウィンドウは Dashboard 上部のセレクターに従います",
   sessionsProviderNotApplied: "プロバイダーのフィルタはセッションには適用されません",
   sessionsEmpty:

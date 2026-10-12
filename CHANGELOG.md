@@ -19,6 +19,20 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-12
+
+**The version where a session became the unit.** 0.3.1 answered "who paid" for a
+request. This one answers it for the thing a person actually thinks in: a
+conversation. A session now has a name (the agent's own, where its file carries
+one), a last-active time, a page of its own — reachable by link, with a
+breadcrumb back — and the list of what it did, call by call.
+
+Getting there meant reading the files properly, and two real runs over a live
+`~/.claude` showed why that matters: the reader was missing every **subagent**
+transcript (21% of the usage on this machine) and keying a session by an id its
+own file can change underneath it. Both are fixed, and the second is why the
+list no longer shows a conversation as several fragments.
+
 ### Fixed
 
 - **A Claude Code session is imported whole.** Two things were being dropped, and

@@ -61,6 +61,12 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   arguments themselves are never stored, only the one-line summary, the same
   choice the transcripts' message bodies get.
 
+  The calls are a **table, ten to a page**, with the call's position in the
+  session as its first column — where in the work something happened is what a
+  chronology has that a count cannot say. The page control is the request-log
+  card's, extracted so the two cannot drift apart (its labels moved into
+  `common`, where a control belonging to no screen in particular keeps its words).
+
   Capped at 100 calls per session, because one session on this machine made
   **1,817** of them: the counts above the list are the ledger, and the list is a
   chronology of it. Skills stay out of it — they are counted separately, and

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "../api/client";
 import { errText } from "../components/LoadFailed";
+import { Pager } from "../components/Pager";
 import { useReload } from "../lib/reload";
 import type {
   DashboardWindow,
@@ -194,47 +195,6 @@ function StatusPill({ code }: { code: number }) {
     >
       {code}
     </span>
-  );
-}
-
-/** The card's pager, shared by both views.
- *
- * One component rather than two copies: the views are siblings in one card, and
- * two page controls that drifted apart in spacing or wording would read as two
- * different mechanisms. What each view pages through is its own business — only
- * the control is shared. */
-function Pager({
-  page,
-  pages,
-  onGo,
-}: {
-  page: number;
-  pages: number;
-  onGo: (page: number) => void;
-}) {
-  const t = useT();
-  return (
-    <div className="flex items-center justify-center gap-3 pb-3 text-[11.5px] text-mut">
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 px-2.5 text-[11px]"
-        disabled={page <= 1}
-        onClick={() => onGo(page - 1)}
-      >
-        {t("logs.prev")}
-      </Button>
-      <span className="font-mono">{t("logs.pageIndicator", { page, pages })}</span>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 px-2.5 text-[11px]"
-        disabled={page >= pages}
-        onClick={() => onGo(page + 1)}
-      >
-        {t("logs.next")}
-      </Button>
-    </div>
   );
 }
 

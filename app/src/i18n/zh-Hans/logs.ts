@@ -28,9 +28,6 @@ export const logs = {
 
   empty: "暂无请求记录 — 经网关转发的流量会显示在这里",
 
-  prev: "上一页",
-  next: "下一页",
-  pageIndicator: "{page} / {pages}",
 
   logTitle: "日志 #{id}",
 

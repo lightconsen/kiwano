@@ -118,38 +118,57 @@ describe("a session's own page", () => {
     expect(screen.getByText(en.dashboard.sessionNoSkills)).toBeInTheDocument();
   });
 
-  it("lists the calls themselves, in the order they happened, one line each", async () => {
-    apiMock.getSession.mockResolvedValue(
-      session({
-        tool_uses: [
-          { name: "Read", detail: "/work/acme/src/parser.rs" },
-          { name: "Bash", detail: "cargo test --lib parser" },
-          { name: "ExitPlanMode", detail: "" },
-        ],
-      }),
-    );
+  it("lists the calls as a table, in order, one page at a time", async () => {
+    // Twelve calls, so the second page is a page rather than the end.
+    const calls = Array.from({ length: 12 }, (_, i) => ({
+      name: `Tool${String(i + 1).padStart(2, "0")}`,
+      detail: `did the ${i + 1}th thing`,
+    }));
+    apiMock.getSession.mockResolvedValue(session({ tool_uses: calls }));
+    const user = userEvent.setup();
     renderDetail();
 
-    // The counts say how many times a tool ran; this says what it ran on — and
-    // in order, which is the only ordering a chronology can have.
-    const calls = await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "3"));
-    expect(calls).toBeInTheDocument();
-    // Scoped to the Tools card: the breadcrumb is a list too, and a query that
-    // swept the page would compare its crumbs against the calls.
-    // `.closest(".rounded-lg")`, not `.closest("div")`: the heading is itself a
-    // div, so the looser query stops at the heading and finds no list at all.
+    // Await the body before scoping: the card exists only once the read lands,
+    // and the first paint of this page is the breadcrumb alone.
+    await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "12"));
+    // Scoped to the Tools card: the breadcrumb is a list too.
     const toolsCard = screen
       .getByText(en.dashboard.sessionTools)
       .closest(".rounded-lg") as HTMLElement;
-    const items = within(toolsCard)
-      .getAllByRole("listitem")
-      .map((li) => li.textContent);
-    expect(items).toEqual([
-      "Read/work/acme/src/parser.rs",
-      "Bashcargo test --lib parser",
-      // A call with nothing to summarise still appears: it happened.
-      `ExitPlanMode${en.common.none}`,
-    ]);
+    const rows = () =>
+      within(toolsCard)
+        .getAllByRole("row")
+        .slice(1) // the header
+        .map((r) => r.textContent);
+
+    // The number is the call's place in the session — what a chronology has that
+    // a count cannot say.
+    expect(rows()).toHaveLength(10);
+    expect(rows()[0]).toBe("1Tool01did the 1th thing");
+    expect(rows()[9]).toBe("10Tool10did the 10th thing");
+    expect(within(toolsCard).getByText(en.common.pageIndicator.replace("{page}", "1").replace("{pages}", "2"))).toBeInTheDocument();
+
+    await user.click(within(toolsCard).getByRole("button", { name: en.common.next }));
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0]).toBe("11Tool11did the 11th thing");
+    expect(rows()[1]).toBe("12Tool12did the 12th thing");
+  });
+
+  it("shows a call with nothing to summarise, because it happened", async () => {
+    apiMock.getSession.mockResolvedValue(
+      session({ tool_uses: [{ name: "ExitPlanMode", detail: "" }] }),
+    );
+    renderDetail();
+    await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "1"));
+    const toolsCard = screen
+      .getByText(en.dashboard.sessionTools)
+      .closest(".rounded-lg") as HTMLElement;
+    expect(
+      within(toolsCard)
+        .getAllByRole("row")
+        .slice(1)
+        .map((r) => r.textContent),
+    ).toEqual([`1ExitPlanMode${en.common.none}`]);
   });
 
   it("orders tools by use, caps the list, and says what it left out", async () => {

@@ -160,8 +160,8 @@ describe("the request log table", () => {
     await waitFor(() => expect(apiMock.listRequestLogs).toHaveBeenCalledWith(1, 10, {}));
 
     // 25 rows at 10 a page: three pages, and Next is the way through them.
-    expect(screen.getByText(en.logs.pageIndicator.replace("{page}", "1").replace("{pages}", "3"))).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: en.logs.next }));
+    expect(screen.getByText(en.common.pageIndicator.replace("{page}", "1").replace("{pages}", "3"))).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: en.common.next }));
     await waitFor(() => expect(apiMock.listRequestLogs).toHaveBeenLastCalledWith(2, 10, {}));
 
     // A status tab changes *which rows there are*, not which page of them is on
@@ -518,9 +518,9 @@ describe("the sessions view", () => {
     // sessions" over sixty would be a lie the pager immediately contradicts.
     await screen.findByTitle(rowTitle("s-01"));
     expect(screen.getByText(en.logs.sessionsCount.replace("{n}", "60"))).toBeInTheDocument();
-    expect(screen.getByText(en.logs.pageIndicator.replace("{page}", "1").replace("{pages}", "6"))).toBeInTheDocument();
+    expect(screen.getByText(en.common.pageIndicator.replace("{page}", "1").replace("{pages}", "6"))).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: en.logs.next }));
+    await user.click(screen.getByRole("button", { name: en.common.next }));
     await waitFor(() => expect(apiMock.listSessions).toHaveBeenLastCalledWith(
       undefined, undefined, undefined, expect.any(String), 2, 10,
     ));

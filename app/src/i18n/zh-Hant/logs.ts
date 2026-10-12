@@ -28,9 +28,6 @@ export const logs = {
 
   empty: "尚無請求記錄 — 經閘道轉送的流量會顯示在這裡",
 
-  prev: "上一頁",
-  next: "下一頁",
-  pageIndicator: "{page} / {pages}",
 
   logTitle: "日誌 #{id}",
 

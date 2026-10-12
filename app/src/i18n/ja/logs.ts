@@ -28,9 +28,6 @@ export const logs = {
 
   empty: "まだリクエストが記録されていません — ゲートウェイ経由で転送されたトラフィックがここに表示されます",
 
-  prev: "前へ",
-  next: "次へ",
-  pageIndicator: "{page} / {pages}",
 
   logTitle: "ログ #{id}",
 

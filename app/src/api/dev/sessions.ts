@@ -63,13 +63,24 @@ export const sessions: Session[] = [
       { name: "Bash", count: 9 },
       { name: "Read", count: 4 },
     ],
-    // In the order they happened, with what each one did.
+    // In the order they happened, with what each one did — enough of them that
+    // the table has a second page, which is the shape a real session of this
+    // size has (the one this was built against made 1,817 calls).
     tool_uses: [
       { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs" },
+      { name: "Grep", detail: "fn parse_token" },
       { name: "Bash", detail: "cargo test --lib parser" },
       { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs" },
       { name: "Bash", detail: "cargo test --lib parser" },
+      { name: "Read", detail: "/Users/me/work/acme-api/src/lexer.rs" },
+      { name: "Edit", detail: "/Users/me/work/acme-api/src/lexer.rs" },
+      { name: "Bash", detail: "cargo clippy -- -D warnings" },
       { name: "Agent", detail: "Explore the tokenizer's error paths" },
+      { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs" },
+      { name: "Bash", detail: "cargo test --lib parser" },
+      { name: "Write", detail: "/Users/me/work/acme-api/tests/parser_cases.rs" },
+      { name: "Bash", detail: "cargo test --test parser_cases" },
+      { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs" },
     ],
     skills: [{ name: "Skill", count: 1 }],
   },

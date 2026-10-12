@@ -11,13 +11,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
+import { Pager } from "../components/Pager";
 import { Button } from "@/components/ui/button";
 import { api } from "../api/client";
 import { errText, LoadFailed } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
 import { fmtTokens } from "../lib/format";
 import { useLocale, useT, type Translate } from "../i18n";
-import type { HistoryCount, Session } from "../api/types";
+import type { HistoryCount, HistoryToolUse, Session } from "../api/types";
 import {
   fmtFullStamp,
   fmtSessionCost,
@@ -249,29 +250,7 @@ function Body({
             }
             t={t}
           />
-          {row.tool_uses.length > 0 && (
-            <div className="mt-2 border-t border-line pt-2">
-              {/* What those calls *were*, in order — the counts above say how many
-                  times a tool ran, and this says what it ran on. The reader caps
-                  the list, so the heading names how many are shown rather than
-                  letting a truncated chronology look like the whole session. */}
-              <div className="mb-1 text-[10px] tracking-wide text-mut uppercase">
-                {t("dashboard.sessionCalls", { n: row.tool_uses.length })}
-              </div>
-              <ol className="space-y-0.5">
-                {row.tool_uses.map((c, i) => (
-                  <li key={`${c.name}-${i}`} className="flex items-baseline gap-2 text-[11px]">
-                    <span className="w-[104px] shrink-0 truncate font-sans" title={c.name}>
-                      {c.name}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-mut" title={c.detail}>
-                      {c.detail || t("common.none")}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
+          {row.tool_uses.length > 0 && <ToolCalls calls={row.tool_uses} />}
         </Card>
         <Card title={t("dashboard.sessionSkills")}>
           <CountList
@@ -297,6 +276,69 @@ function Body({
         </Button>
       </div>
     </>
+  );
+}
+
+/** How many calls one page of the table shows. Ten, like every other list in the
+ *  app — the reader keeps up to 100 calls per session, so this is a pager over a
+ *  chronology rather than over a ledger. */
+const CALLS_PER_PAGE = 10;
+
+/** The calls themselves: a table, paged.
+ *
+ * A table rather than a list because the two halves of a row are a *tool* and
+ * what it did, and columns are what make those comparable down the page; paged
+ * rather than scrolled because the list is bounded anyway (the reader caps it)
+ * and a nested scroll region inside a card is a thing readers fall into and
+ * cannot get out of.
+ */
+function ToolCalls({ calls }: { calls: HistoryToolUse[] }) {
+  const t = useT();
+  const [page, setPage] = useState(1);
+  const pages = Math.max(1, Math.ceil(calls.length / CALLS_PER_PAGE));
+  // The calls arrive with the session, so a different session is a different
+  // list — and page 7 of the old one is rarely a page of the new one.
+  const first = (Math.min(page, pages) - 1) * CALLS_PER_PAGE;
+  const shown = calls.slice(first, first + CALLS_PER_PAGE);
+  useEffect(() => {
+    setPage(1);
+  }, [calls]);
+
+  return (
+    <div className="mt-2 border-t border-line pt-2">
+      <div className="mb-1 text-[10px] tracking-wide text-mut uppercase">
+        {t("dashboard.sessionCalls", { n: calls.length })}
+      </div>
+      <table className="w-full table-fixed text-[11px]">
+        <colgroup>
+          <col className="w-[28px]" />
+          <col className="w-[112px]" />
+        </colgroup>
+        <thead>
+          <tr className="text-left text-[9.5px] text-mut">
+            <th className="py-0.5 pr-1 font-medium">{t("dashboard.sessionCallNo")}</th>
+            <th className="py-0.5 pr-1 font-medium">{t("dashboard.sessionCallTool")}</th>
+            <th className="py-0.5 font-medium">{t("dashboard.sessionCallWhat")}</th>
+          </tr>
+        </thead>
+        <tbody className="font-mono">
+          {shown.map((c, i) => (
+            <tr key={`${first + i}-${c.name}`} className="border-t border-line">
+              {/* The position in the session — the one thing a chronology has
+                  that a count cannot: where in the work this happened. */}
+              <td className="py-0.5 pr-1 text-mut">{first + i + 1}</td>
+              <td className="truncate py-0.5 pr-1 font-sans" title={c.name}>
+                {c.name}
+              </td>
+              <td className="truncate py-0.5 text-mut" title={c.detail}>
+                {c.detail || t("common.none")}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {pages > 1 && <Pager page={Math.min(page, pages)} pages={pages} onGo={setPage} />}
+    </div>
   );
 }
 

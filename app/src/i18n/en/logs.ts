@@ -37,9 +37,6 @@ export const logs = {
 
   empty: "No requests recorded yet — traffic forwarded through the gateway shows up here",
 
-  prev: "Prev",
-  next: "Next",
-  pageIndicator: "{page} / {pages}",
 
   logTitle: "Log #{id}",
 

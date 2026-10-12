@@ -521,10 +521,19 @@ mod all_window_tests {
         store.insert_provider(&test_provider("ds-1")).unwrap();
         let day = agent_limit("claude", 10.0, Some("requests"), "day");
 
-        // Five requests earlier today, before the ceiling existed.
-        let earlier = chrono::Utc::now() - chrono::Duration::hours(1);
+        // Five requests earlier today, before the ceiling existed — written at
+        // the window's own start, because "one hour ago" is *yesterday* for the
+        // first hour after local midnight (which is when CI runs), and because
+        // the start is the boundary under test: a row exactly on it belongs to
+        // the window.
+        let (since, _) = period_start(
+            Utc::now().timestamp(),
+            Some("day"),
+            store.ui_tz_offset_minutes(),
+        );
+        let earlier = since.expect("a day window has a start");
         for _ in 0..5 {
-            row_at(&store, &earlier.to_rfc3339(), "claude", "ds-1", None);
+            row_at(&store, &earlier, "claude", "ds-1", None);
         }
         store
             .replace_agent_limits("claude", std::slice::from_ref(&day))

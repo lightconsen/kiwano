@@ -177,6 +177,7 @@ pub fn admin_plane_router(state: Arc<GatewayState>) -> Router {
         // (`api::sessions`). It replaced `/history/sessions`, which showed only
         // the imported half: the two are one list now, and the row says which.
         .route("/sessions", get(list_sessions_route))
+        .route("/sessions/{id}", get(get_session_route))
         .route("/history/scan", get(history_scan_route))
         .route(
             "/takeover/{agent}/state",
@@ -1724,6 +1725,23 @@ async fn list_sessions_route(
 /// and a half: enough that a reader scrolling a card is not paging constantly,
 /// small enough that the answer stays a page rather than a download.
 const DEFAULT_SESSION_PAGE: i64 = 50;
+
+/// `GET /api/sessions/{id}` — one session, or `null`.
+///
+/// **`null`, not 404**, for an id neither ledger has: the client's one read path
+/// turns a non-2xx into an error string, so a 404 would leave the UI matching
+/// messages to tell "this session is gone" from "the gateway is unreachable" —
+/// the distinction `kiwano_api::error::ApiErrorKind` exists to keep out of
+/// string comparison. `GET /api/logs/{id}` answers the same way.
+async fn get_session_route(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match crate::api::sessions::get_session(&state.store, &id) {
+        Ok(row) => Json(row).into_response(),
+        Err(e) => resource_error(e),
+    }
+}
 
 /// The session list's query string. Every field is optional, and an absent one
 /// means "no filter" — the same contract as [`LogQuery`].

@@ -22,7 +22,7 @@ use kiwano_api::providers::{
     NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, SyncReportVm,
 };
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
-use kiwano_api::sessions::SessionListVm;
+use kiwano_api::sessions::{SessionListVm, SessionVm};
 use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::import_history::HistoryImportReport;
@@ -94,6 +94,20 @@ impl DaemonApi {
             &self.endpoint,
             self.token.as_deref(),
             &format!("/api/providers/{provider_id}/key-spend{query}"),
+        )
+    }
+
+    /// One session by id, or `None` when neither ledger has it — `vm::get_session`.
+    ///
+    /// `None` and "the read failed" are different answers, which is why the daemon
+    /// answers `null` rather than 404 for an id it does not know: a missing
+    /// session is not an error, and a client that had to read error text to tell
+    /// the two apart would get it wrong the first time the wording changed.
+    pub fn session(&self, id: &str) -> Result<Option<SessionVm>, String> {
+        sidecar::admin_get_json(
+            &self.endpoint,
+            self.token.as_deref(),
+            &format!("/api/sessions/{}", encode_query(id)),
         )
     }
 

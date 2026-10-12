@@ -94,7 +94,7 @@ pub use providers::{
     add_provider, delete_provider, list_providers, set_provider_enabled, update_provider,
 };
 pub use quota::get_plan_quota;
-pub use sessions::list_sessions;
+pub use sessions::{get_session, list_sessions};
 pub use settings::{get_settings, update_settings};
 pub use sharing::{export_config, import_cc_switch, import_config};
 pub use strategies::{
@@ -296,6 +296,7 @@ pub fn run() {
             list_request_logs,
             export_request_logs,
             list_sessions,
+            get_session,
             get_request_log,
             clear_request_logs,
             check_credential_finding,

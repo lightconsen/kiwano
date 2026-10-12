@@ -182,16 +182,45 @@ impl Store {
         project: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<SessionRow>> {
+        self.sessions_where(agent, project, since, None)
+    }
+
+    /// One session id's imported rows — a **list**, not one row.
+    ///
+    /// `sessions.import_key` is `"{agent}:{session}"`, so a single id can be two
+    /// agents' rows and this table keeps both. The list view shows them as two
+    /// rows; anything wanting "the session with this id" has to pick, and the
+    /// sort here (`agent ASC`) is what that pick is made on.
+    pub fn session_rows_by_id(&self, session_id: &str) -> Result<Vec<SessionRow>> {
+        self.sessions_where(None, None, None, Some(session_id))
+    }
+
+    /// The one query behind both readers above: same columns, same predicates,
+    /// one more optional bound. Two copies of this WHERE is how a filter comes
+    /// to mean one thing in the list and another in the lookup.
+    fn sessions_where(
+        &self,
+        agent: Option<&str>,
+        project: Option<&str>,
+        since: Option<&str>,
+        session_id: Option<&str>,
+    ) -> Result<Vec<SessionRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT {SESSION_COLUMNS} FROM sessions
              WHERE (?1 IS NULL OR agent = ?1)
                AND (?2 IS NULL OR project = ?2)
                AND (?3 IS NULL OR ended_at >= ?3)
-             ORDER BY started_at DESC, session_id ASC"
+               AND (?4 IS NULL OR session_id = ?4)
+             -- A total order, and the last term is why: two rows can share a
+             -- session id (one per agent) and a start, and without a final
+             -- tiebreak the order between them is whatever the planner returns —
+             -- which is how the by-id lookup would settle on a different row on
+             -- different runs.
+             ORDER BY started_at DESC, session_id ASC, agent ASC"
         ))?;
         let rows = stmt
-            .query_map(params![agent, project, since], session_from_row)?
+            .query_map(params![agent, project, since, session_id], session_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -212,6 +241,27 @@ impl Store {
         agent: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<TrafficSession>> {
+        self.traffic_sessions_where(agent, since, None)
+    }
+
+    /// The gateway's own reading of one session, when it routed any of it.
+    ///
+    /// No index carries `request_logs(session_id)`, so this is two full scans —
+    /// and still cheaper than the list read the app already makes on every open,
+    /// because the `GROUP BY` collapses to one row.
+    pub fn traffic_session_by_id(&self, session_id: &str) -> Result<Option<TrafficSession>> {
+        Ok(self
+            .traffic_sessions_where(None, None, Some(session_id))?
+            .into_iter()
+            .next())
+    }
+
+    fn traffic_sessions_where(
+        &self,
+        agent: Option<&str>,
+        since: Option<&str>,
+        session_id: Option<&str>,
+    ) -> Result<Vec<TrafficSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut sessions: Vec<TrafficSession> = {
             let mut stmt = conn.prepare(
@@ -225,10 +275,11 @@ impl Store {
                  WHERE session_id IS NOT NULL
                    AND (?1 IS NULL OR agent = ?1)
                    AND (?2 IS NULL OR ts >= ?2)
+                   AND (?3 IS NULL OR session_id = ?3)
                  GROUP BY session_id
                  ORDER BY MAX(ts) DESC, session_id ASC",
             )?;
-            let rows = stmt.query_map(params![agent, since], |row| {
+            let rows = stmt.query_map(params![agent, since, session_id], |row| {
                 Ok(TrafficSession {
                     session_id: row.get(0)?,
                     first_ts: row.get(1)?,
@@ -253,11 +304,12 @@ impl Store {
              WHERE session_id IS NOT NULL AND cost IS NOT NULL
                AND (?1 IS NULL OR agent = ?1)
                AND (?2 IS NULL OR ts >= ?2)
+               AND (?3 IS NULL OR session_id = ?3)
              GROUP BY session_id, cost_currency",
         )?;
         let mut by_session: std::collections::HashMap<String, Vec<SessionCurrencyCost>> =
             std::collections::HashMap::new();
-        let rows = money.query_map(params![agent, since], |row| {
+        let rows = money.query_map(params![agent, since, session_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 SessionCurrencyCost {
@@ -439,6 +491,44 @@ mod tests {
             .list_sessions(None, None, Some("2027-01-01T00:00:00+00:00"))
             .unwrap()
             .is_empty());
+    }
+
+    /// The by-id reads: the imported rows come back as a **list** (one id can be
+    /// two agents' rows), and the traffic side answers `None` rather than an
+    /// empty aggregate when the gateway never routed the session.
+    /// The by-id reads: the imported side answers a **list** (one id can be two
+    /// agents' rows) and the traffic side answers `None` rather than a zeroed
+    /// aggregate when the gateway never routed the session.
+    #[test]
+    fn the_by_id_reads_answer_what_they_have_and_nothing_for_the_rest() {
+        let (_dir, store) = crate::store::test_support::temp_store();
+        // Two agents, one session id: what `import_key = "{agent}:{session}"`
+        // makes possible, and why the imported lookup cannot be an Option.
+        let mut second = session("codex:x", "kiwano", "2026-01-01T00:00:00+00:00");
+        second.session_id = "s-claude-code:a".into();
+        second.agent = "codex".into();
+        store
+            .upsert_imported_sessions(&[
+                session("claude-code:a", "kiwano", "2026-01-01T00:00:00+00:00"),
+                second,
+            ])
+            .unwrap();
+
+        let rows = store.session_rows_by_id("s-claude-code:a").unwrap();
+        assert_eq!(rows.len(), 2, "both agents' rows, sorted by agent");
+        assert_eq!(rows[0].agent, "claude", "the pick the detail page makes");
+        assert!(store
+            .session_rows_by_id("nothing-knows-this")
+            .unwrap()
+            .is_empty());
+
+        assert!(
+            store
+                .traffic_session_by_id("s-claude-code:a")
+                .unwrap()
+                .is_none(),
+            "no request log names it: None, not an empty aggregate"
+        );
     }
 
     /// v32: the machine a session was imported from round-trips through the

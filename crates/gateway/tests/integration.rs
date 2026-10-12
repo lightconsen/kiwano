@@ -3850,6 +3850,59 @@ async fn a_model_family_allowlist_serves_the_family_and_refuses_the_rest() {
     );
 }
 
+/// One session by id, and `null` — not 404 — for an id neither ledger has.
+///
+/// The `null` is load-bearing: the client has one read path, and it turns a
+/// non-2xx into an error string. A 404 would leave the UI comparing messages to
+/// tell "this session is gone" from "the gateway is unreachable".
+#[tokio::test]
+async fn a_session_reads_by_id_and_an_unknown_one_is_null() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    store
+        .insert_provider(&provider(
+            "p-ant",
+            Protocol::Anthropic,
+            "http://127.0.0.1:1".into(),
+        ))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_imported_sessions(&[kiwanod::store::ImportedSession {
+            import_key: "claude:s-1".into(),
+            agent: "claude".into(),
+            project: Some("acme".into()),
+            title: Some("port the parser".into()),
+            session_id: "s-1".into(),
+            started_at: "2026-09-09T10:00:00+00:00".into(),
+            ended_at: "2026-09-09T12:00:00+00:00".into(),
+            turns: 4,
+            input_tokens: 10,
+            output_tokens: 2,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            tool_calls: Some(r#"[{"name":"Bash","count":9}]"#.into()),
+            skills: None,
+            imported_from: Some("buildbox".into()),
+        }])
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let admin = admin_plane_router(state.clone());
+
+    let one = admin_get(&admin, &state, "/api/sessions/s-1").await;
+    assert_eq!(one["session_id"], "s-1");
+    assert_eq!(one["title"], "port the parser");
+    assert_eq!(one["machine"], "buildbox");
+    assert_eq!(one["tool_calls"][0]["name"], "Bash");
+    assert_eq!(one["source"], "imported");
+    assert_eq!(one["requests"], 0, "no traffic for it");
+
+    // An id nobody knows answers with a null body and 200 — see the doc comment.
+    let missing = admin_get(&admin, &state, "/api/sessions/nobody-knows-this").await;
+    assert!(missing.is_null(), "{missing}");
+}
+
 /// `GET /api/sessions?since=…` bounds from the instant the caller computed, and
 /// `since` wins over `days` when both arrive.
 ///

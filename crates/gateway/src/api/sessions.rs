@@ -25,6 +25,30 @@ use std::collections::{HashMap, HashSet};
 /// half — and, therefore, the whole view: a traffic-only session has no project,
 /// so under a project filter it cannot be said to match and is dropped rather
 /// than shown as if it did.
+/// One session, by id. `None` when neither ledger has it.
+///
+/// Lives here rather than in a module of its own because [`merge`] is private to
+/// this file — and `merge` is private because this is the only thing that should
+/// ever combine the two ledgers.
+///
+/// **When two imported rows share the id** (two agents can be recorded against
+/// one session id) this takes the first, which `Store::session_rows_by_id` sorts
+/// by agent. The list shows both as separate rows; a page about "this session"
+/// can only be about one, and the tie-break is stated at the pick rather than
+/// left to a hash map's order.
+pub fn get_session(store: &Store, session_id: &str) -> Result<Option<SessionVm>, ApiError> {
+    let imported = store
+        .session_rows_by_id(session_id)
+        .map_err(ApiError::failed)?;
+    let traffic = store
+        .traffic_session_by_id(session_id)
+        .map_err(ApiError::failed)?;
+    match (imported.first(), traffic.as_ref()) {
+        (None, None) => Ok(None),
+        (first, traffic) => Ok(Some(merge(first, traffic))),
+    }
+}
+
 /// One page of the merged list, with the total beside it.
 ///
 /// The slice happens **after** the merge, because the merge is what decides the
@@ -322,6 +346,38 @@ mod tests {
 
     /// An imported-only session shows the files' numbers and no money: the files
     /// carry tokens, not cost.
+    /// One session by id, from both ledgers or from one — and `None` for an id
+    /// neither has, which is the answer the route turns into a `null` body.
+    #[test]
+    fn a_session_can_be_read_by_id_from_either_ledger() {
+        let (_dir, store) = store_with_traffic();
+        store
+            .upsert_imported_sessions(&[
+                imported("claude", "s-both", Some("acme")),
+                imported("claude", "s-imported", Some("blog")),
+            ])
+            .unwrap();
+
+        let both = get_session(&store, "s-both").unwrap().expect("in both");
+        assert_eq!(both.source, "both");
+        assert_eq!(both.project.as_deref(), Some("acme"));
+        assert_eq!(both.requests, 2, "the traffic side's count");
+
+        let imported_only = get_session(&store, "s-imported").unwrap().expect("files");
+        assert_eq!(imported_only.source, "imported");
+        assert_eq!(imported_only.requests, 0);
+        assert!(imported_only.cost.is_empty(), "the files carry no money");
+
+        let gateway_only = get_session(&store, "s-gateway").unwrap().expect("traffic");
+        assert_eq!(gateway_only.source, "gateway");
+        assert_eq!(gateway_only.project, None);
+
+        assert!(
+            get_session(&store, "nothing-knows-this").unwrap().is_none(),
+            "neither ledger has it, and that is None rather than an error"
+        );
+    }
+
     #[test]
     fn an_imported_only_session_has_no_requests_and_no_money() {
         let (_dir, store) = store_with_traffic();

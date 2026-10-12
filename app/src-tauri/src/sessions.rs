@@ -33,3 +33,12 @@ pub fn list_sessions(
         page_size,
     )
 }
+
+/// One session by id, or `null` when neither ledger has it.
+///
+/// The detail page's read: it replaces the component that held the row, so it
+/// cannot be handed one — and a refresh or a pasted link has to render it too.
+#[tauri::command(async)]
+pub fn get_session(id: String) -> Result<Option<vm::SessionVm>, String> {
+    DaemonApi::connect().session(&id)
+}

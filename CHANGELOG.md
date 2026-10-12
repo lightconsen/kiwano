@@ -19,6 +19,24 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-12
+
+**The version that answers "who paid".** Every change here is one question asked
+from a different side: which client key, which account, which conversation,
+which machine. The gateway had been metering requests all along, and the answers
+stopped one level short of being usable — the ledger knew the provider but not
+the key, the report knew the agent but not the machine, and a fresh install knew
+nothing at all because it had not routed anything yet.
+
+So: the app reads the agents' own history (`kiwano history import`), each row
+says which machine it came from, a provider's key pool reports what each entry
+spent and keeps a conversation on one of them, every forwarded response carries
+the attribution as headers, and the Dashboard's request card grew a second view
+that puts the gateway's traffic and the files' history side by side. Beside
+them, the guardrails a cross-machine install needs: client keys that carry their
+own ceilings and allowlists, and a model allowlist that can name a family rather
+than expiring.
+
 ### Added
 
 - **Sessions in the desktop app: the Dashboard's request card has two views.**

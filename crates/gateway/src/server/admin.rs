@@ -1701,11 +1701,18 @@ async fn list_sessions_route(
     // A caller-computed instant beats the rolling span it would otherwise get:
     // see `SessionQuery`, where the reason is the dashboard's local-day window.
     let since = query.since.clone().or_else(|| query.days.map(days_ago));
+    let agents: Option<Vec<String>> = query.agents.as_deref().map(|raw| {
+        raw.split(',')
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_string)
+            .collect()
+    });
     match crate::api::sessions::list_sessions_page(
         &state.store,
-        query.agent.as_deref(),
         query.project.as_deref(),
         since.as_deref(),
+        agents.as_deref(),
         query.page.unwrap_or(1),
         query.page_size.unwrap_or(DEFAULT_SESSION_PAGE),
     ) {
@@ -1748,8 +1755,6 @@ async fn get_session_route(
 #[derive(serde::Deserialize)]
 struct SessionQuery {
     #[serde(default)]
-    agent: Option<String>,
-    #[serde(default)]
     project: Option<String>,
     days: Option<i64>,
     #[serde(default)]
@@ -1761,6 +1766,11 @@ struct SessionQuery {
     page: Option<i64>,
     #[serde(default)]
     page_size: Option<i64>,
+    /// The agents the caller manages, comma-separated, when it manages a
+    /// particular set — the app sends the agents it has taken over, and the CLI
+    /// sends nothing because a ledger is not a management view.
+    #[serde(default)]
+    agents: Option<String>,
 }
 
 /// `?days=N` — the window a read's figures cover. Shared by the reads that report

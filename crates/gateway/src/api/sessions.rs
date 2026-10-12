@@ -59,13 +59,13 @@ pub fn get_session(store: &Store, session_id: &str) -> Result<Option<SessionVm>,
 /// rows.
 pub fn list_sessions_page(
     store: &Store,
-    agent: Option<&str>,
     project: Option<&str>,
     since: Option<&str>,
+    agents: Option<&[String]>,
     page: i64,
     page_size: i64,
 ) -> Result<SessionListVm, ApiError> {
-    let rows = list_sessions(store, agent, project, since)?;
+    let rows = list_sessions(store, project, since, agents)?;
     let total = rows.len() as i64;
     let page = page.max(1);
     let page_size = page_size.clamp(1, MAX_PAGE_SIZE);
@@ -85,15 +85,15 @@ pub const MAX_PAGE_SIZE: i64 = 500;
 
 pub fn list_sessions(
     store: &Store,
-    agent: Option<&str>,
     project: Option<&str>,
     since: Option<&str>,
+    agents: Option<&[String]>,
 ) -> Result<Vec<SessionVm>, ApiError> {
     let imported = store
-        .list_sessions(agent, project, since)
+        .list_sessions(None, project, since)
         .map_err(ApiError::failed)?;
     let traffic = store
-        .traffic_sessions(agent, since)
+        .traffic_sessions(None, since)
         .map_err(ApiError::failed)?;
 
     // The ids the imported half matched. Under a project filter this is also the
@@ -119,6 +119,14 @@ pub fn list_sessions(
         if !known.contains(traffic.session_id.as_str()) {
             rows.push(merge(None, Some(traffic)));
         }
+    }
+
+    // The agents the caller manages, when it named them. **Here, and server-side,
+    // on purpose**: the list is paged, so a client that filtered its own page would
+    // show ten rows under a pager counting fifty. An empty list is not "no filter" —
+    // it is the honest answer to "which of the agents I manage", and it means none.
+    if let Some(agents) = agents {
+        rows.retain(|r| agents.iter().any(|a| a == &r.agent));
     }
 
     // Newest first, by the session's end. Ties break on the id so the order does
@@ -383,6 +391,38 @@ mod tests {
     /// carry tokens, not cost.
     /// One session by id, from both ledgers or from one — and `None` for an id
     /// neither has, which is the answer the route turns into a `null` body.
+    /// A caller that names the agents it manages gets those, and **only** those —
+    /// including when it manages none, which is a real answer and not a missing
+    /// filter.
+    #[test]
+    fn a_page_can_be_narrowed_to_the_agents_the_caller_manages() {
+        let (_dir, store) = store_with_traffic();
+        store
+            .upsert_imported_sessions(&[
+                imported("claude", "s-claude", Some("acme")),
+                imported("codex", "s-codex", Some("acme")),
+            ])
+            .unwrap();
+
+        let page = |agents: Option<&[String]>| {
+            list_sessions_page(&store, None, None, agents, 1, 50).unwrap()
+        };
+
+        // No set: the ledger, everything in it — the fixture's two traffic-only
+        // sessions and these two.
+        assert_eq!(page(None).total, 4);
+
+        let one = vec!["codex".to_string()];
+        let narrowed = page(Some(&one));
+        assert_eq!(narrowed.total, 1, "and the total counts the narrowed list");
+        assert!(narrowed.rows.iter().all(|r| r.agent == "codex"));
+
+        // Nobody manages nothing: the app sends this on a machine where no agent
+        // has been taken over, and the answer is an empty page — not every row.
+        let none: Vec<String> = Vec::new();
+        assert_eq!(page(Some(&none)).total, 0);
+    }
+
     #[test]
     fn a_session_can_be_read_by_id_from_either_ledger() {
         let (_dir, store) = store_with_traffic();
@@ -483,11 +523,11 @@ mod tests {
             .upsert_imported_sessions(&[imported("claude", "s-both", Some("kiwano"))])
             .unwrap();
 
-        let rows = list_sessions(&store, None, Some("kiwano"), None).unwrap();
+        let rows = list_sessions(&store, Some("kiwano"), None, None).unwrap();
         assert_eq!(rows.len(), 1, "only the placed session");
         assert_eq!(rows[0].session_id, "s-both");
 
-        assert!(list_sessions(&store, None, Some("nothing"), None)
+        assert!(list_sessions(&store, Some("nothing"), None, None)
             .unwrap()
             .is_empty());
     }

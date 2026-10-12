@@ -398,6 +398,7 @@ export default function RequestLogs({
   sessionFilter,
   onSessionFilter,
   onOpenSession,
+  managedAgents = [],
 }: {
   /** The page's provider/agent filters. They narrow this table the same way
    *  they narrow the cards above it — the reader set one slice and expects
@@ -427,6 +428,16 @@ export default function RequestLogs({
   /** A session row was opened: show that session's own page. The Dashboard owns
    *  the navigation, because it owns the route. */
   onOpenSession: (id: string) => void;
+  /** The agents this install has taken over. The sessions view shows theirs, and
+   *  only theirs — a release build is a management surface, and an agent nobody
+   *  has taken over is not being managed by anything here.
+   *
+   *  **Developing is the exception**, and deliberately: `import.meta.env.DEV` is
+   *  true under `vite dev` and `tauri dev`, where the whole point is to see what
+   *  the machine's files hold. The app's first-run promise — a fresh install's
+   *  dashboard is not empty — is unaffected, because a fresh install has nothing
+   *  taken over and so sends no set at all. */
+  managedAgents: string[];
 } = { tab: "logs" } as never) {
   const t = useT();
   // The sessions view's own read: the rows, whether one has landed, its error,
@@ -601,7 +612,16 @@ export default function RequestLogs({
     const seq = ++seqSessions.current;
     setSessionsErr(null);
     api
-      .listSessions(agent, undefined, undefined, windowSince(win), page, PAGE_SIZE)
+      .listSessions(
+        agent,
+        undefined,
+        undefined,
+        windowSince(win),
+        // Dev shows the whole ledger; a release build shows what it manages.
+        import.meta.env.DEV ? undefined : managedAgents,
+        page,
+        PAGE_SIZE,
+      )
       .then((listed) => {
         if (seq !== seqSessions.current) return;
         setSessions(listed.rows);
@@ -644,11 +664,11 @@ export default function RequestLogs({
     if (tab !== "sessions") return;
     void fetchSessions(sessionsPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, agent, win, sessionsPage]);
+  }, [tab, agent, win, sessionsPage, managedAgents]);
 
   useEffect(() => {
     setSessionsPage(1);
-  }, [agent, win]);
+  }, [agent, win, managedAgents]);
 
   // Presets move both ends at once, so React batches them into one refetch.
   const applyRange = (id: RangeId) => {
@@ -828,6 +848,7 @@ export default function RequestLogs({
         <SessionsTable
           rows={sessions}
           loaded={sessionsLoaded}
+          managedAgents={managedAgents}
           onOpenSession={(id) => {
             // Opening a row leaves this card for that session's own page. The
             // filter this used to set still exists — the page sets it, from a

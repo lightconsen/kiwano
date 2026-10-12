@@ -91,6 +91,7 @@ function Harness(props: Partial<Parameters<typeof RequestLogs>[0]> = {}) {
       sessionFilter={sessionFilter}
       onSessionFilter={setSessionFilter}
       onOpenSession={openSession}
+      managedAgents={[]}
       {...props}
     />
   );
@@ -376,6 +377,7 @@ describe("the sessions view", () => {
         sessionFilter="s-2"
         onSessionFilter={outside}
         onOpenSession={openSession}
+        managedAgents={[]}
       />,
     );
 
@@ -399,6 +401,7 @@ describe("the sessions view", () => {
         sessionFilter="imported-1"
         onSessionFilter={() => {}}
         onOpenSession={openSession}
+        managedAgents={[]}
       />,
     );
 
@@ -505,7 +508,7 @@ describe("the sessions view", () => {
     // table above it.
     const all = Array.from({ length: 60 }, (_, i) => session(`s-${String(i + 1).padStart(2, "0")}`));
     apiMock.listSessions.mockImplementation(
-      async (_a, _p, _d, _since, page: number, pageSize: number) => ({
+      async (_a, _p, _d, _since, _agents, page: number, pageSize: number) => ({
         rows: all.slice((page - 1) * pageSize, page * pageSize),
         total: all.length,
       }),
@@ -522,11 +525,50 @@ describe("the sessions view", () => {
 
     await user.click(screen.getByRole("button", { name: en.common.next }));
     await waitFor(() => expect(apiMock.listSessions).toHaveBeenLastCalledWith(
-      undefined, undefined, undefined, expect.any(String), 2, 10,
+      // The fifth argument is `undefined` here because vitest runs with
+      // `import.meta.env.DEV` true — the developing case, which asks for the whole
+      // ledger. The release case is pinned by the test below.
+      undefined, undefined, undefined, expect.any(String), undefined, 2, 10,
     ));
     await screen.findByTitle(rowTitle("s-11"));
     // Page two does not carry page one's rows.
     expect(screen.queryByTitle(rowTitle("s-01"))).toBeNull();
+  });
+
+  it("asks for the agents it manages, and says which empty it is showing", async () => {
+    // `vi.stubEnv`, because the rule is a build-time constant: the release build
+    // is the one that narrows the list to what it manages.
+    vi.stubEnv("DEV", false);
+    try {
+      apiMock.listSessions.mockResolvedValue({ rows: [], total: 0 });
+      const user = userEvent.setup();
+      // A machine that has taken nothing over: the app sends an empty set (which
+      // the daemon reads as "none of them", not "no filter").
+      render(<Harness window="7d" managedAgents={[]} />);
+      await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+
+      // The set travels with the query, so the daemon pages *within* it — a client
+      // that filtered its own page would show ten rows under a pager counting
+      // fifty.
+      await waitFor(() =>
+        expect(apiMock.listSessions).toHaveBeenLastCalledWith(
+          undefined,
+          undefined,
+          undefined,
+          expect.any(String),
+          [],
+          1,
+          10,
+        ),
+      );
+
+      // Nothing managed is a *different* empty from nothing in this window, and it
+      // is the one a reader can act on: it says a takeover is what fills the list.
+      expect(screen.queryByText(en.logs.sessionsEmpty)).toBeNull();
+      expect(screen.getByText(en.logs.sessionsEmptyUnmanaged)).toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("says the provider filter does not apply here instead of pretending it does", async () => {
@@ -537,8 +579,8 @@ describe("the sessions view", () => {
       await screen.findByText(en.logs.sessionsProviderNotApplied),
     ).toBeInTheDocument();
     // Structurally too: the call has no provider to filter by.
-    // Six arguments, and a provider is not one of them: the structural guarantee
-    // behind the note the reader is shown.
-    expect(apiMock.listSessions.mock.calls[0]).toHaveLength(6);
+    // Seven arguments, and a provider is not one of them: the structural
+    // guarantee behind the note the reader is shown.
+    expect(apiMock.listSessions.mock.calls[0]).toHaveLength(7);
   });
 });

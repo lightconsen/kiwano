@@ -1133,6 +1133,9 @@ export interface KiwanoApi {
     project: string | undefined,
     days: number | undefined,
     since: string | undefined,
+    /** The agents the caller manages. `undefined` is every agent in the ledger —
+     *  what a command line means, and what the app means while developing. */
+    agents: string[] | undefined,
     page: number,
     pageSize: number,
   ): Promise<SessionList>;

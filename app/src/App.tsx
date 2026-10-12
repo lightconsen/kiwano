@@ -119,6 +119,12 @@ export default function App() {
   // with it — another local read would be a round trip, and the seed has to be
   // there before the first paint of that field.
   const [preferredCurrency, setPreferredCurrency] = useState("USD");
+  // The agents this install has taken over, plus the user's own: what the app is
+  // managing, which is what the sessions view shows outside development. Read
+  // here because `takeovers` is a *machine* fact the settings view assembles
+  // (from the agents' own config files), and this is the one startup read that
+  // already asks for it.
+  const [managedAgents, setManagedAgents] = useState<string[]>([]);
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -152,6 +158,10 @@ export default function App() {
         // paint that shows text.
         setLocale(resolveLocale(s.language));
         const tz = -new Date().getTimezoneOffset();
+        setManagedAgents([
+          ...s.takeovers.filter((k) => k.enabled).map((k) => k.agent),
+          ...s.custom_agents.map((a) => a.id),
+        ]);
         if (s.tz_offset_minutes !== tz) {
           api.updateSettings({ tz_offset_minutes: tz }).catch(() => {});
         }
@@ -449,6 +459,7 @@ export default function App() {
             gateway={gw}
             openLogId={route.logId ?? undefined}
             openSessionId={route.sessionId ?? undefined}
+            managedAgents={managedAgents}
           />
         )}
         {route.route === "settings" && <Settings />}

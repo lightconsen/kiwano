@@ -55,6 +55,7 @@ export const logs = {
   // ── 会话视图(这张卡的第二个 tab) ──
   tabSessions: "会话",
   sessionsCount: "{n} 个会话",
+  sessionsEmptyUnmanaged: "你接管的 agent 还没有会话 —— 接管一个,它的历史就会出现在这里",
   unpricedRows: "{n} 个未定价",
   costPlusUnpriced: "{amounts}(另有 {n} 个未定价)",
   sessionsWindowTitle: "窗口取自 Dashboard 顶部的选择器",

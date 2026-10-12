@@ -61,6 +61,28 @@ list no longer shows a conversation as several fragments.
   earlier version, delete that machine's imported rows and re-import, or its
   spend appears in two places.
 
+### Changed
+
+- **In a release build the session list shows the agents you have taken over.**
+  A session belongs to an agent, and an agent nobody has taken over is not being
+  managed by anything here — so the list is a management view, and it shows what
+  is managed. **Developing is the exception**: `vite dev` and `tauri dev` show
+  everything the machine's files hold, which is the whole point of the fixtures,
+  and a fresh install is unaffected because a machine with no takeovers sends no
+  set at all.
+
+  The narrowing happens **in the gateway**, not in the app: the list is paged, so
+  a client that filtered its own page would show ten rows under a pager counting
+  fifty. `GET /api/sessions` takes `agents=a,b` for that, and an **empty set means
+  none** rather than "no filter" — the two are different answers and the app sends
+  the first one. `kiwano sessions --agent X` is that same parameter with one value
+  in it: one spelling for "which agents", where there used to be a single-agent one
+  beside it.
+
+  The empty state says which empty it is. "Nothing in this window" and "nothing for
+  the agents you manage" look identical and mean opposite things, and the second is
+  what a reader sees after taking an agent over if it did not work.
+
 ### Added
 
 - **A long session's calls are kept at both ends, with the gap counted.** The list

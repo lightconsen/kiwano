@@ -37,10 +37,15 @@ pub fn sessions(args: &SessionsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
             // instant) is what a client showing a local-day window sends, and the
             // CLI has no such window.
             .sessions(
-                args.agent.as_deref(),
                 args.project.as_deref(),
                 args.days,
                 None,
+                // `--agent` is a set of one; without it, the whole ledger, because
+                // `kiwano sessions` is the ledger and not a management view.
+                args.agent
+                    .as_deref()
+                    .map(|a| vec![a.to_string()])
+                    .as_deref(),
                 page,
                 PAGE_SIZE,
             )?;

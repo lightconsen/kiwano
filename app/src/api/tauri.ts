@@ -151,12 +151,13 @@ export const tauriApi: KiwanoApi = {
 
   getSession: (id: string) => invoke<Session | null>("get_session", { id }),
 
-  listSessions: (agent, project, days, since, page, pageSize) =>
+  listSessions: (agent, project, days, since, agents, page, pageSize) =>
     invoke<SessionList>("list_sessions", {
       agent: agent ?? null,
       project: project ?? null,
       days: days ?? null,
       since: since ?? null,
+      agents: agents ?? null,
       page,
       pageSize,
     }),

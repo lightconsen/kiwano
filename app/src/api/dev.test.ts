@@ -80,7 +80,7 @@ describe("the browser-dev session fixtures", () => {
     // The detail page's read, against the same fixtures the list reads: a
     // session the list shows has to be one the page can open, or the demo lies
     // about the feature it is demonstrating.
-    const page = await api.listSessions(undefined, undefined, undefined, undefined, 1, 50);
+    const page = await api.listSessions(undefined, undefined, undefined, undefined, undefined, 1, 50);
     expect(page.rows.length).toBeGreaterThan(0);
     for (const row of page.rows) {
       const opened = await api.getSession(row.session_id);

@@ -19,9 +19,13 @@ export function SessionsTable({
   rows,
   loaded,
   onOpenSession,
+  managedAgents,
 }: {
   rows: Session[];
   loaded: boolean;
+  /** The agents this install manages — empty on a machine that has taken none
+   *  over, which is why the empty state below has two things to say. */
+  managedAgents: string[];
   /** A row click: narrow the request-log view to this conversation. */
   onOpenSession: (sessionId: string) => void;
 }) {
@@ -151,7 +155,13 @@ export function SessionsTable({
       </table>
       {loaded && rows.length === 0 && (
         <div className="px-3.5 py-6 text-center text-[11.5px] text-mut">
-          {t("logs.sessionsEmpty")}
+          {/* Two empties, two sentences. "Nothing in this window" and "nothing for
+              the agents you manage" look identical and mean opposite things: the
+              second is a list waiting for a takeover, and a reader who takes one
+              agent over should not have to guess whether it worked. */}
+          {managedAgents.length === 0 && !import.meta.env.DEV
+            ? t("logs.sessionsEmptyUnmanaged")
+            : t("logs.sessionsEmpty")}
         </div>
       )}
     </div>

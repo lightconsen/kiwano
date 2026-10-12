@@ -292,10 +292,13 @@ impl DaemonApi {
     /// boundary. The far end prefers `since` when both arrive.
     pub fn sessions(
         &self,
-        agent: Option<&str>,
         project: Option<&str>,
         days: Option<i64>,
         since: Option<&str>,
+        // The agents the caller manages, when it manages a set — see the route's
+        // own `agents`. `None` is every agent in the ledger, which is what a
+        // command line wants and what the app sends only where it is developing.
+        agents: Option<&[String]>,
         page: i64,
         page_size: i64,
     ) -> Result<SessionListVm, String> {
@@ -304,13 +307,16 @@ impl DaemonApi {
         // it is not a filter but the shape of the answer, and the daemon has its
         // own default the caller should not have to know.
         let mut query: Vec<String> = vec![format!("page={page}&page_size={page_size}")];
-        for (key, value) in [("agent", agent), ("project", project), ("since", since)] {
+        for (key, value) in [("project", project), ("since", since)] {
             if let Some(value) = value {
                 query.push(format!("{key}={}", encode_query(value)));
             }
         }
         if let Some(days) = days {
             query.push(format!("days={days}"));
+        }
+        if let Some(agents) = agents {
+            query.push(format!("agents={}", encode_query(&agents.join(","))));
         }
         let path = if query.is_empty() {
             "/api/sessions".to_string()
@@ -1206,10 +1212,10 @@ mod tests {
 
         DaemonApi::with_token(endpoint, Some("tok-123".into()))
             .sessions(
-                Some("claude"),
                 None,
                 None,
                 Some("2026-09-09T00:00:00+00:00"),
+                Some(&["claude".to_string()]),
                 1,
                 50,
             )
@@ -1218,7 +1224,7 @@ mod tests {
         let request = handle.join().unwrap();
         assert!(
             request.starts_with(
-                "GET /api/sessions?page=1&page_size=50&agent=claude&since=2026-09-09T00%3A00%3A00%2B00%3A00 HTTP/1.1"
+                "GET /api/sessions?page=1&page_size=50&since=2026-09-09T00%3A00%3A00%2B00%3A00&agents=claude HTTP/1.1"
             ),
             "{request}"
         );

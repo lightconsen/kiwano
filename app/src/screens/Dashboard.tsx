@@ -416,6 +416,7 @@ export default function Dashboard({
   gateway,
   openLogId,
   openSessionId,
+  managedAgents = [],
 }: {
   gateway?: GatewayStatus | null;
   /** Deep-linked request-log detail (`#dashboard/log/<id>`), passed through to
@@ -424,6 +425,8 @@ export default function Dashboard({
   /** A session's own page (`#dashboard/session/<id>`). While it is set this
    *  screen renders *that* instead of its panels — see the early return below. */
   openSessionId?: string;
+  /** The agents the app manages, for the sessions card — see its own prop. */
+  managedAgents?: string[];
 } = {}) {
   const t = useT();
   const [win, setWin] = useState<DashboardWindow>("7d");
@@ -712,6 +715,7 @@ export default function Dashboard({
           onTab={setCardTab}
           sessionFilter={logSessionFilter}
           onSessionFilter={setLogSessionFilter}
+          managedAgents={managedAgents}
           onOpenSession={(id) => {
             // `encodeURIComponent`: a session id is opaque, and the hash splits
             // on `/`.

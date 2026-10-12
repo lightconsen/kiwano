@@ -17,18 +17,22 @@ use kiwano_core::vm;
 /// panels below it must not be measured in something else; the CLI sends `days`.
 #[tauri::command(async)]
 pub fn list_sessions(
-    agent: Option<String>,
     project: Option<String>,
     days: Option<i64>,
     since: Option<String>,
+    // The agents the app manages, when it is not developing: the release build
+    // shows the sessions of the agents it has taken over, and `None` (dev) shows
+    // everything the machine's files hold. The only spelling of "which agents" —
+    // the CLI's `--agent` sends a one-element set.
+    agents: Option<Vec<String>>,
     page: i64,
     page_size: i64,
 ) -> Result<vm::SessionListVm, String> {
     DaemonApi::connect().sessions(
-        agent.as_deref(),
         project.as_deref(),
         days,
         since.as_deref(),
+        agents.as_deref(),
         page,
         page_size,
     )

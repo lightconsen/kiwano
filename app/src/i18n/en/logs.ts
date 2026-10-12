@@ -65,6 +65,7 @@ export const logs = {
   // ── The sessions view (the card's second tab) ──
   tabSessions: "Sessions",
   sessionsCount: "{n} sessions",
+  sessionsEmptyUnmanaged: "No sessions for the agents you have taken over — take one over and its history appears here",
   unpricedRows: "{n} unpriced",
   costPlusUnpriced: "{amounts} (+{n} unpriced)",
   sessionsWindowTitle: "The window the Dashboard's selector is set to",

@@ -55,6 +55,7 @@ export const logs = {
   // ── 工作階段檢視(這張卡的第二個 tab) ──
   tabSessions: "工作階段",
   sessionsCount: "{n} 個工作階段",
+  sessionsEmptyUnmanaged: "你接管的 agent 還沒有工作階段 —— 接管一個,它的歷史就會出現在這裡",
   unpricedRows: "{n} 個未定價",
   costPlusUnpriced: "{amounts}(另有 {n} 個未定價)",
   sessionsWindowTitle: "視窗取自 Dashboard 頂部的選擇器",

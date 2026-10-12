@@ -36,6 +36,7 @@ export const sessionsApi: Pick<KiwanoApi, "listSessions" | "getSession"> = {
     _project: string | undefined,
     _days: number | undefined,
     since: string | undefined,
+    agents: string[] | undefined,
     page: number,
     pageSize: number,
   ): Promise<SessionList> {
@@ -43,7 +44,13 @@ export const sessionsApi: Pick<KiwanoApi, "listSessions" | "getSession"> = {
     // `_project` is accepted and ignored: the fixtures carry project labels, but
     // nothing in the app sets a project filter yet — the parameter is here
     // because the daemon's route takes it.
-    const all = matchingSessions(agent, since);
+    // The mock is the dev fixture, so it is always the "developing" case: the
+    // real filtering happens in the daemon, and a mock that reproduced it would
+    // be a second copy of a rule with nothing keeping the two in step — except
+    // when a test asks it to, which is what `agents` here is for.
+    const all = matchingSessions(agent, since).filter(
+      (s) => !agents || agents.includes(s.agent),
+    );
     const from = Math.max(0, (Math.max(1, page) - 1) * pageSize);
     return { rows: all.slice(from, from + pageSize), total: all.length };
   },

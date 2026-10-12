@@ -55,6 +55,7 @@ export const logs = {
   // ── セッション表示（このカードの 2 つ目のタブ） ──
   tabSessions: "セッション",
   sessionsCount: "{n} セッション",
+  sessionsEmptyUnmanaged: "テイクオーバーしたエージェントのセッションはまだありません —— 1 つ引き継ぐと、その履歴がここに現れます",
   unpricedRows: "{n} 件は価格なし",
   costPlusUnpriced: "{amounts}（ほか {n} 件は価格なし）",
   sessionsWindowTitle: "ウィンドウは Dashboard 上部のセレクターに従います",

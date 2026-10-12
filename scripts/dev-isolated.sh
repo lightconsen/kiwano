@@ -28,6 +28,42 @@ KIWANO_DEV_PORT="${KIWANO_DEV_PORT:-8318}"
 
 mkdir -p "$(dirname "$KIWANO_DEV_DB")"
 
+# Restart means restart, daemon included.
+#
+# The gateway is a separate process that **outlives the app**: relaunching the
+# app connects to whatever daemon is already listening, so a change to the
+# daemon's own code lands only if that process is replaced. That is not a
+# theoretical trap — it produced three separate "I clicked and nothing happened"
+# reports, each time with a new frontend talking to an old gateway.
+#
+# The daemon is identified by the **socket beside this database**, not by name or
+# command line: its database path is in its environment, so `pgrep -f` cannot see
+# it (`migrate.local.md` §14). Killing by socket means this only ever stops the
+# daemon serving *this* stack — a second dev instance on the same port is still
+# refused below, by the port check that follows.
+DEV_SOCKET="$(dirname "$KIWANO_DEV_DB")/admin.sock"
+stale_daemon="$(lsof -U 2>/dev/null | awk -v s="$DEV_SOCKET" '$NF == s { print $2; exit }')"
+if [ -n "$stale_daemon" ]; then
+    echo "dev-isolated: stopping the daemon already serving $DEV_SOCKET (pid $stale_daemon)"
+    kill "$stale_daemon" 2>/dev/null || true
+    for _ in $(seq 1 40); do
+        kill -0 "$stale_daemon" 2>/dev/null || break
+        sleep 0.25
+    done
+    rm -f "$DEV_SOCKET"
+fi
+
+# The app window is replaced too, for the same reason one level up: a stale one
+# would be a window onto the old build, and the two would share a tray icon and a
+# database. Matched on **this checkout's** binary path, so the installed app
+# (`/Applications/Kiwano.app`) is never touched.
+stale_app="$(pgrep -f "^$(pwd)/target/debug/kiwano-app$" || true)"
+if [ -n "$stale_app" ]; then
+    echo "dev-isolated: closing the dev app already running (pid $stale_app)"
+    kill $stale_app 2>/dev/null || true
+    sleep 1
+fi
+
 # A second dev stack on the same port would race the first one's daemon for
 # the bind; refuse instead of letting the GUI show a red gateway it cannot fix.
 if lsof -nP -iTCP:"$KIWANO_DEV_PORT" -sTCP:LISTEN >/dev/null 2>&1; then

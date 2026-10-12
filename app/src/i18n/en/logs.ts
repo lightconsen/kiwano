@@ -81,8 +81,8 @@ export const logs = {
   colSource: "SOURCE",
   colTurns: "TURNS",
   colCost: "COST",
-  colSession: "SESSION",
-  colTokensTitle: "in / out / cache read / cache write — one side's numbers, never added",
+  colTokensTitle: "in / out — the cache read and write buckets are on each row",
+  tokensCellTitle: "in {input} · out {output} · cache read {read} · cache write {write}",
   sourceGateway: "gateway",
   sourceImported: "imported",
   sourceBoth: "both",
@@ -92,5 +92,5 @@ export const logs = {
   clearSessionFilter: "Clear the session filter",
   sessionNoTraffic:
     "No gateway traffic for this session — it came from the agent's own files",
-  sessionRowTitle: "Show this session's requests",
+  sessionRowTitle: "Show this session's requests · {id}",
 };

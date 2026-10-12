@@ -71,8 +71,8 @@ export const logs = {
   colSource: "来源",
   colTurns: "轮次",
   colCost: "花费",
-  colSession: "会话",
-  colTokensTitle: "输入 / 输出 / 缓存读 / 缓存写 —— 只取一侧的数字,绝不相加",
+  colTokensTitle: "输入 / 输出 —— 缓存读与缓存写两桶在每一行上",
+  tokensCellTitle: "输入 {input} · 输出 {output} · 缓存读 {read} · 缓存写 {write}",
   sourceGateway: "流量",
   sourceImported: "文件",
   sourceBoth: "两者",
@@ -81,5 +81,5 @@ export const logs = {
   sessionFilter: "会话",
   clearSessionFilter: "清除会话筛选",
   sessionNoTraffic: "这个会话没有网关流量 —— 它来自 agent 自己的文件",
-  sessionRowTitle: "只看这个会话的请求",
+  sessionRowTitle: "只看这个会话的请求 · {id}",
 };

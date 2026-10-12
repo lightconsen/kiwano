@@ -71,8 +71,8 @@ export const logs = {
   colSource: "ソース",
   colTurns: "ターン",
   colCost: "コスト",
-  colSession: "セッション",
-  colTokensTitle: "入力 / 出力 / キャッシュ読 / キャッシュ書 — 片側の数字のみで、決して合算しません",
+  colTokensTitle: "入力 / 出力 —— キャッシュ読み書きは各行にあります",
+  tokensCellTitle: "入力 {input} · 出力 {output} · キャッシュ読 {read} · キャッシュ書 {write}",
   sourceGateway: "ゲートウェイ",
   sourceImported: "ファイル",
   sourceBoth: "両方",
@@ -81,5 +81,5 @@ export const logs = {
   sessionFilter: "セッション",
   clearSessionFilter: "セッションのフィルタを解除",
   sessionNoTraffic: "このセッションにゲートウェイのトラフィックはありません — エージェント自身のファイル由来です",
-  sessionRowTitle: "このセッションのリクエストだけを表示",
+  sessionRowTitle: "このセッションのリクエストだけを表示 · {id}",
 };

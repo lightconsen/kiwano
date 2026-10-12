@@ -74,23 +74,40 @@ export function SessionsTable({
   const t = useT();
   return (
     <div className="overflow-hidden">
-      <table className="w-full text-[11.5px]">
+      {/* `table-fixed`, and every column but two carries a width: the window's
+          minimum is 900px, which leaves the card about 840px for nine columns,
+          and a table that sized itself to its content would push the right-hand
+          ones past the card's edge, where `overflow-hidden` **cuts** them rather
+          than scrolling them. Fixed widths make the elastic columns truncate
+          instead — which is what the titles are for — and the tooltips keep every
+          value that a narrow window cannot show. */}
+      <table className="w-full table-fixed text-[11.5px]">
+        <colgroup>
+          <col className="w-[28%]" />
+          <col className="w-[76px]" />
+          <col className="w-[46px]" />
+          <col className="w-[16%]" />
+          <col className="w-[54px]" />
+          <col className="w-[38px]" />
+          <col className="w-[42px]" />
+          <col className="w-[84px]" />
+          <col className="w-[86px]" />
+        </colgroup>
         <thead>
           <tr className="border-b border-line text-left text-[10px] text-mut">
             <th className="px-3 py-2 font-medium">{t("logs.colTitle")}</th>
-            <th className="px-2 py-2 font-medium" title={t("logs.colLastTitle")}>
+            <th className="px-1.5 py-2 font-medium" title={t("logs.colLastTitle")}>
               {t("logs.colLast")}
             </th>
-            <th className="px-2 py-2 font-medium">{t("logs.colAgent")}</th>
-            <th className="px-2 py-2 font-medium">{t("logs.colProject")}</th>
-            <th className="px-2 py-2 font-medium">{t("logs.colSource")}</th>
-            <th className="px-2 py-2 text-right font-medium">{t("logs.colRequests")}</th>
-            <th className="px-2 py-2 text-right font-medium">{t("logs.colTurns")}</th>
-            <th className="px-2 py-2 text-right font-medium" title={t("logs.colTokensTitle")}>
+            <th className="px-1.5 py-2 font-medium">{t("logs.colAgent")}</th>
+            <th className="px-1.5 py-2 font-medium">{t("logs.colProject")}</th>
+            <th className="px-1.5 py-2 font-medium">{t("logs.colSource")}</th>
+            <th className="px-1.5 py-2 text-right font-medium">{t("logs.colRequests")}</th>
+            <th className="px-1.5 py-2 text-right font-medium">{t("logs.colTurns")}</th>
+            <th className="px-1.5 py-2 text-right font-medium" title={t("logs.colTokensTitle")}>
               {t("logs.colTokens")}
             </th>
-            <th className="px-2 py-2 text-right font-medium">{t("logs.colCost")}</th>
-            <th className="px-3 py-2 font-medium">{t("logs.colSession")}</th>
+            <th className="px-1.5 py-2 text-right font-medium">{t("logs.colCost")}</th>
           </tr>
         </thead>
         <tbody className="font-mono">
@@ -98,7 +115,11 @@ export function SessionsTable({
             <tr
               key={r.session_id}
               className="cursor-pointer border-b border-line hover:bg-surface2"
-              title={t("logs.sessionRowTitle")}
+              // The session id lives here rather than in a column: at a 900px
+              // window the card has room for nine columns and the id is the one a
+              // reader never scans for — the click already takes them to that
+              // session's requests, where the full id is on the dialog.
+              title={t("logs.sessionRowTitle", { id: r.session_id })}
               onClick={() => onOpenSession(r.session_id)}
             >
               {/* What this conversation was about. The agent's own title where
@@ -106,7 +127,7 @@ export function SessionsTable({
                   session only the gateway saw, which has no file to ask. */}
               <td className="px-3 py-1.5 font-sans">
                 <span
-                  className={`block max-w-[260px] truncate${r.title ? "" : " text-mut"}`}
+                  className={`block truncate${r.title ? "" : " text-mut"}`}
                   title={r.title ?? undefined}
                 >
                   {r.title ?? "—"}
@@ -115,40 +136,57 @@ export function SessionsTable({
               {/* When it was last active — the figure the list is ordered by,
                   and the one a reader scanning it is after. The start is a
                   separate question, and `--json` still carries it. */}
-              <td className="whitespace-nowrap px-2 py-1.5 font-sans text-mut">
+              <td className="whitespace-nowrap px-1.5 py-1.5 font-sans text-mut">
                 {fmtStamp(r.ended_at)}
               </td>
-              <td className="px-2 py-1.5 font-sans">{r.agent}</td>
+              <td className="truncate px-1.5 py-1.5 font-sans" title={r.agent}>
+                {r.agent}
+              </td>
               {/* The project is the files' dimension — the gateway sees requests,
                   not the checkout they came from — so a traffic-only row has
                   none, and `—` says "no side knew", not "none". */}
               <td
-                className="max-w-[160px] truncate px-2 py-1.5 font-sans"
-                title={r.machine ? `${t("logs.colMachine")}: ${r.machine}` : undefined}
+                className="truncate px-1.5 py-1.5 font-sans"
+                title={[
+                  r.project,
+                  r.machine ? `${t("logs.colMachine")}: ${r.machine}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined}
               >
                 {r.project ?? "—"}
               </td>
-              <td className="px-2 py-1.5 font-sans">
+              <td className="px-1.5 py-1.5 font-sans">
                 <SourceBadge source={r.source} />
               </td>
               {/* A turn in a file is not a request, and a request the files never
                   saw is not a turn. Whichever side is absent shows `—`. */}
-              <td className="px-2 py-1.5 text-right">
+              <td className="px-1.5 py-1.5 text-right">
                 {r.source === "imported" ? "—" : r.requests}
               </td>
-              <td className="px-2 py-1.5 text-right">{r.source === "gateway" ? "—" : r.turns}</td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-right">
-                {fmtTokens(r.input_tokens)} / {fmtTokens(r.output_tokens)} /{" "}
-                {fmtTokens(r.cache_read_tokens)} / {fmtTokens(r.cache_creation_tokens)}
+              <td className="px-1.5 py-1.5 text-right">
+                {r.source === "gateway" ? "—" : r.turns}
               </td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-right">
-                {fmtSessionCost(r)}
+              {/* Two of the four buckets, and the other two on hover: cache reads
+                  dwarf everything else on a long conversation, and a list is for
+                  comparing spend, not for reading four numbers per row. Nothing is
+                  lost — the cell's title names all four, labelled. */}
+              <td
+                className="truncate px-1.5 py-1.5 text-right"
+                title={t("logs.tokensCellTitle", {
+                  input: fmtTokens(r.input_tokens),
+                  output: fmtTokens(r.output_tokens),
+                  read: fmtTokens(r.cache_read_tokens),
+                  write: fmtTokens(r.cache_creation_tokens),
+                })}
+              >
+                {fmtTokens(r.input_tokens)} / {fmtTokens(r.output_tokens)}
               </td>
               <td
-                className="max-w-[140px] truncate px-3 py-1.5 text-mut"
-                title={r.session_id}
+                className="truncate px-1.5 py-1.5 text-right"
+                title={fmtSessionCost(r)}
               >
-                {r.session_id}
+                {fmtSessionCost(r)}
               </td>
             </tr>
           ))}

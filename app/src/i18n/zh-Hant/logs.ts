@@ -71,8 +71,8 @@ export const logs = {
   colSource: "來源",
   colTurns: "輪次",
   colCost: "花費",
-  colSession: "工作階段",
-  colTokensTitle: "輸入 / 輸出 / 快取讀 / 快取寫 —— 只取一側的數字,絕不相加",
+  colTokensTitle: "輸入 / 輸出 —— 快取讀與快取寫兩桶在每一列上",
+  tokensCellTitle: "輸入 {input} · 輸出 {output} · 快取讀 {read} · 快取寫 {write}",
   sourceGateway: "流量",
   sourceImported: "檔案",
   sourceBoth: "兩者",
@@ -81,5 +81,5 @@ export const logs = {
   sessionFilter: "工作階段",
   clearSessionFilter: "清除工作階段篩選",
   sessionNoTraffic: "這個工作階段沒有閘道流量 —— 它來自 agent 自己的檔案",
-  sessionRowTitle: "只看這個工作階段的請求",
+  sessionRowTitle: "只看這個工作階段的請求 · {id}",
 };

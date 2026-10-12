@@ -81,6 +81,15 @@ async function openExportDialog() {
   return { user, dialog: await screen.findByRole("dialog") };
 }
 
+/** The tooltip a session row carries, by id.
+ *
+ * The id is no longer a column — at the window's 900px minimum this card cannot
+ * hold ten of them without cutting the right-hand ones off — so it travels on the
+ * row, which is also how a test finds a particular row now. */
+function rowTitle(id: string): string {
+  return en.logs.sessionRowTitle.replace("{id}", id);
+}
+
 /** ONE_SHAPE: a session the gateway routed *and* the files recorded — the
     ordinary state after a takeover, and the one whose numbers come from both
     sides. */
@@ -314,7 +323,7 @@ describe("the sessions view", () => {
     render(<RequestLogs window="7d" />);
 
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
-    await user.click(await screen.findByText("s-2"));
+    await user.click(await screen.findByTitle(rowTitle("s-2")));
 
     // Back on the audit trail, filtered — and starting at page one, because the
     // result set changed under the pager.
@@ -352,7 +361,9 @@ describe("the sessions view", () => {
     render(<RequestLogs window="7d" />);
 
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
-    await user.click(await screen.findByText("imported-1"));
+    await user.click(
+      await screen.findByTitle(rowTitle("imported-1")),
+    );
 
     // An empty result that is *correct* must not read as a broken filter: the
     // session came out of a file, so the gateway has nothing to show for it.
@@ -379,7 +390,7 @@ describe("the sessions view", () => {
     const user = userEvent.setup();
     render(<RequestLogs window="7d" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
-    await screen.findByText("both-1");
+    await screen.findByTitle(rowTitle("both-1"));
 
     // The title is the row's leading column — what a reader scans for, and the
     // id never was.
@@ -391,6 +402,54 @@ describe("the sessions view", () => {
     // files carry no money, so `0` there would read as "this was free".
     expect(screen.getByText(en.logs.sourceImported)).toBeInTheDocument();
     expect(screen.getByText(en.logs.sourceGateway)).toBeInTheDocument();
+  });
+
+  it("fits a narrow window by truncating and by moving detail to tooltips", async () => {
+    // The window's minimum is 900px, which leaves this card about 840 for nine
+    // columns — so the table is `table-fixed` and the columns that can be are
+    // pinned. What a narrow window cannot show is not lost: it is on the row.
+    apiMock.listSessions.mockResolvedValue({
+      rows: [
+        session("s-1", {
+          machine: "buildbox",
+          input_tokens: 4_210,
+          output_tokens: 1_180,
+          cache_read_tokens: 12_400,
+          cache_creation_tokens: 640,
+          cost: [{ currency: "USD", amount: 2.5 }],
+          unpriced_rows: 3,
+        }),
+      ],
+      total: 1,
+    });
+    const user = userEvent.setup();
+    render(<RequestLogs window="7d" />);
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+    const row = await screen.findByTitle(rowTitle("s-1"));
+
+    const table = screen.getByRole("table");
+    expect(table.className).toContain("table-fixed");
+
+    // The cell shows the two buckets a reader compares; the other two are named
+    // on hover, with their labels — a number without its bucket is not evidence.
+    const tokens = row.querySelectorAll("td")[7];
+    expect(tokens.textContent).toBe("4k / 1k");
+    expect(tokens.getAttribute("title")).toBe(
+      en.logs.tokensCellTitle
+        .replace("{input}", "4k")
+        .replace("{output}", "1k")
+        .replace("{read}", "12k")
+        .replace("{write}", "640"),
+    );
+
+    // The project cell carries the machine, which has no column of its own.
+    const project = row.querySelectorAll("td")[3];
+    expect(project.getAttribute("title")).toContain("buildbox");
+
+    // And money that a narrow cell truncates is still readable in full.
+    const cost = row.querySelectorAll("td")[8];
+    expect(cost.textContent).toBe("$2.5 (+3 unpriced)");
+    expect(cost.getAttribute("title")).toBe("$2.5 (+3 unpriced)");
   });
 
   it("pages the list, and counts what is there rather than what is on screen", async () => {
@@ -409,7 +468,7 @@ describe("the sessions view", () => {
 
     // The count is the whole list, not this page of it — a header that said "10
     // sessions" over sixty would be a lie the pager immediately contradicts.
-    await screen.findByText("s-01");
+    await screen.findByTitle(rowTitle("s-01"));
     expect(screen.getByText(en.logs.sessionsCount.replace("{n}", "60"))).toBeInTheDocument();
     expect(screen.getByText(en.logs.pageIndicator.replace("{page}", "1").replace("{pages}", "6"))).toBeInTheDocument();
 
@@ -417,8 +476,9 @@ describe("the sessions view", () => {
     await waitFor(() => expect(apiMock.listSessions).toHaveBeenLastCalledWith(
       undefined, undefined, undefined, expect.any(String), 2, 10,
     ));
-    await screen.findByText("s-11");
-    expect(screen.queryByText("s-01")).toBeNull();
+    await screen.findByTitle(rowTitle("s-11"));
+    // Page two does not carry page one's rows.
+    expect(screen.queryByTitle(rowTitle("s-01"))).toBeNull();
   });
 
   it("says the provider filter does not apply here instead of pretending it does", async () => {

@@ -780,11 +780,34 @@ export interface HistoryCount {
  *
  * `detail` is the reader's one-line summary of what the call did — the command
  * for a shell call, the path for a read, the description for a spawned agent —
- * never the arguments themselves. The list is capped by the reader, so a long
- * session shows its first calls rather than all of them. */
+ * never the arguments themselves. */
 export interface HistoryToolUse {
   name: string;
   detail: string;
+  /** The file's own timestamp for the call. */
+  at: string;
+}
+
+/** A session's calls: the head and the tail, with the gap between them counted.
+ *
+ * The reader keeps both ends because a long session cannot be kept whole — one
+ * here made 1,817 calls — and because "what it set out to do" and "what it ended
+ * up doing" are the two questions a reader asks of a long one. */
+export interface HistoryToolUses {
+  head: HistoryToolUse[];
+  /** Empty when the session fitted in the head, which is the common case. */
+  tail: HistoryToolUse[];
+  /** Calls between the two runs that nothing holds. */
+  skipped: number;
+}
+
+/** One side's four token buckets — what the files recorded, when both ledgers
+ *  know a session and the merged fields above are the gateway's. */
+export interface SessionTokens {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
 }
 
 /** One session, from the gateway's traffic, the agent's files, or both.
@@ -826,8 +849,11 @@ export interface Session {
   /** Of `requests`, the ones with no cost: the figure above is short by them. */
   unpriced_rows: number;
   tool_calls: HistoryCount[];
-  /** The calls themselves, in order and capped — see `HistoryToolUse`. */
-  tool_uses: HistoryToolUse[];
+  /** The calls themselves — head and tail. See `HistoryToolUses`. */
+  tool_uses: HistoryToolUses;
+  /** What the files recorded, when they are one of the session's two sides.
+   *  Absent for a session only the gateway saw. */
+  file_tokens?: SessionTokens | null;
   skills: HistoryCount[];
 }
 

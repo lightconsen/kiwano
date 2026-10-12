@@ -295,8 +295,10 @@ fn session_row(row: &HistorySessionRow, machine: Option<&str>) -> crate::store::
         cache_read_tokens: row.cache_read_tokens,
         cache_creation_tokens: row.cache_creation_tokens,
         tool_calls: encode(&row.tool_calls),
-        // The calls themselves, same encoding — a list of `{name, detail}`.
-        tool_uses: encode(&row.tool_uses),
+        // The calls themselves — the head and tail of them, with the gap counted.
+        // One blob rather than three columns: it is one fact about the session.
+        tool_uses: (!row.tool_uses.is_empty())
+            .then(|| serde_json::to_string(&row.tool_uses).unwrap_or_else(|_| "{}".to_string())),
         skills: encode(&row.skills),
         // The same batch-level machine as the usage rows, for the same reason.
         imported_from: machine.map(str::to_string),
@@ -342,10 +344,15 @@ mod tests {
                 name: "Bash".into(),
                 count: 3,
             }],
-            tool_uses: vec![kiwano_api::history::HistoryToolUse {
-                name: "Bash".into(),
-                detail: "cargo test".into(),
-            }],
+            tool_uses: kiwano_api::history::HistoryToolUses {
+                head: vec![kiwano_api::history::HistoryToolUse {
+                    name: "Bash".into(),
+                    detail: "cargo test".into(),
+                    at: "2026-01-01T00:10:00+00:00".into(),
+                }],
+                tail: Vec::new(),
+                skipped: 0,
+            },
             skills: vec![HistoryCount {
                 name: "tweet".into(),
                 count: 1,

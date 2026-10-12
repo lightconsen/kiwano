@@ -22,8 +22,8 @@ use serde_json::Value;
 
 use super::{
     config_root, counts, i64_at, jsonl_files, project_label, session_title, str_at,
-    tool_use_detail, HistoryRead, HistorySessionRow, HistoryToolUse, HistoryUsageRow, ParsedFile,
-    MAX_TOOL_USES,
+    tool_use_detail, tool_uses, HistoryRead, HistorySessionRow, HistoryToolUse, HistoryUsageRow,
+    ParsedFile, TOOL_USES_PER_END,
 };
 use crate::detect::ShellVars;
 
@@ -134,9 +134,13 @@ fn read_file(
     // it in any "tools used" total the dashboard draws.
     let mut tool_calls: BTreeMap<String, i64> = BTreeMap::new();
     let mut skills: BTreeMap<String, i64> = BTreeMap::new();
-    // The calls themselves, in order, capped: the counts say how many there were,
-    // and this says what they were.
-    let mut tool_uses: Vec<HistoryToolUse> = Vec::new();
+    // The calls themselves: the opening run, a rolling window of the most recent,
+    // and how many there were in total. `tool_uses` trims the three into the head
+    // and tail a session's row keeps.
+    let mut first_calls: Vec<HistoryToolUse> = Vec::new();
+    let mut last_calls: std::collections::VecDeque<HistoryToolUse> =
+        std::collections::VecDeque::new();
+    let mut call_count = 0usize;
     // **The file's name is the session's identity, and the ids inside it are
     // not.** Claude Code mints a new `sessionId` when a conversation is compacted
     // or resumed, and keeps appending to the file it started — so a transcript
@@ -274,11 +278,18 @@ fn read_file(
                         continue;
                     }
                     *tool_calls.entry(name.clone()).or_default() += 1;
-                    if tool_uses.len() < MAX_TOOL_USES {
-                        tool_uses.push(HistoryToolUse {
-                            detail: tool_use_detail(&name, block.get("input")),
-                            name,
-                        });
+                    call_count += 1;
+                    let call = HistoryToolUse {
+                        detail: tool_use_detail(&name, block.get("input")),
+                        at: str_at(&record, "timestamp").unwrap_or_default(),
+                        name,
+                    };
+                    if first_calls.len() < TOOL_USES_PER_END {
+                        first_calls.push(call.clone());
+                    }
+                    last_calls.push_back(call);
+                    if last_calls.len() > TOOL_USES_PER_END {
+                        last_calls.pop_front();
                     }
                 }
             }
@@ -303,7 +314,7 @@ fn read_file(
             cache_read_tokens: usage.iter().map(|r| r.cache_read_tokens).sum(),
             cache_creation_tokens: usage.iter().map(|r| r.cache_creation_tokens).sum(),
             tool_calls: counts(tool_calls),
-            tool_uses,
+            tool_uses: tool_uses(first_calls, last_calls.into(), call_count),
             skills: counts(skills),
         })
     };
@@ -519,6 +530,7 @@ mod tests {
         let session = &read.batch.sessions[0];
         let calls: Vec<(&str, &str)> = session
             .tool_uses
+            .head
             .iter()
             .map(|c| (c.name.as_str(), c.detail.as_str()))
             .collect();
@@ -543,17 +555,71 @@ mod tests {
         assert_eq!(session.skills[0].name, "Skill");
     }
 
-    /// The list is capped, and the cap is the *list's*: the call that pushed it
-    /// over is still counted, because the counts are the session's ledger and the
-    /// list is a chronology of it. One session on this machine made 1,817 calls.
+    /// A long session keeps both ends of its calls and counts the gap; a short
+    /// one keeps every call exactly once.
+    ///
+    /// The middle case is the one worth a test: a session with more calls than the
+    /// head holds but fewer than both ends together has its last calls in **both**
+    /// runs, and a reader that appended them would repeat the 51st call in a
+    /// 150-call session.
     #[test]
-    fn the_call_list_is_capped_while_the_counts_keep_counting() {
+    fn a_sessions_calls_are_kept_at_both_ends_with_the_gap_counted() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
         let sid = "11111111-2222-3333-4444-555555555555";
-        let over = MAX_TOOL_USES + 25;
+        let transcript = |calls: usize| {
+            let blocks: Vec<Value> = (0..calls)
+                .map(|i| {
+                    serde_json::json!({
+                        "type": "tool_use",
+                        "name": "Bash",
+                        "input": {"command": format!("echo {i}")}
+                    })
+                })
+                .collect();
+            vec![assistant(
+                "r1",
+                "2026-01-02T10:00:00Z",
+                sid,
+                "/home/me/work/acme",
+                serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                Value::Array(blocks),
+            )]
+        };
+
+        // Short: everything, once, no gap.
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            &format!("{sid}.jsonl"),
+            &transcript(150),
+        );
+        let read = claude_read(home);
+        let calls = &read.batch.sessions[0].tool_uses;
+        assert_eq!(calls.skipped, 0, "a 150-call session loses nothing");
+        assert_eq!(calls.len(), 150);
+        assert_eq!(calls.head.len(), TOOL_USES_PER_END);
+        assert_eq!(calls.tail.len(), 50, "the rest come from the tail's end");
+        assert_eq!(calls.tail[0].detail, "echo 100", "no call appears twice");
+        assert_eq!(calls.tail[49].detail, "echo 149");
+    }
+
+    /// …and a genuinely long one: both ends kept, the middle counted rather than
+    /// hidden. One session on this machine made 1,817 calls.
+    #[test]
+    fn a_long_sessions_middle_is_counted_not_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sid = "11111111-2222-3333-4444-555555555555";
+        let over = TOOL_USES_PER_END * 5;
         let blocks: Vec<Value> = (0..over)
-            .map(|i| serde_json::json!({"type": "tool_use", "name": "Bash", "input": {"command": format!("echo {i}")}}))
+            .map(|i| {
+                serde_json::json!({
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": {"command": format!("echo {i}")}
+                })
+            })
             .collect();
         write_transcript(
             home,
@@ -571,12 +637,21 @@ mod tests {
 
         let read = claude_read(home);
         let session = &read.batch.sessions[0];
-        assert_eq!(session.tool_uses.len(), MAX_TOOL_USES);
-        assert_eq!(session.tool_calls[0].count, over as i64);
+        let calls = &session.tool_uses;
+        assert_eq!(calls.head.len(), TOOL_USES_PER_END);
+        assert_eq!(calls.tail.len(), TOOL_USES_PER_END);
+        assert_eq!(calls.skipped, (over - 2 * TOOL_USES_PER_END) as i64);
+        assert_eq!(calls.head[0].detail, "echo 0", "the opening is kept");
         assert_eq!(
-            session.tool_uses[0].detail, "echo 0",
-            "the first ones are kept"
+            calls.tail[TOOL_USES_PER_END - 1].detail,
+            format!("echo {}", over - 1),
+            "and so is the end"
         );
+        // Every call carries when it happened, not just that it happened.
+        assert_eq!(calls.head[0].at, "2026-01-02T10:00:00Z");
+        // The counts still see everything: they are the ledger, this is a
+        // chronology of it.
+        assert_eq!(session.tool_calls[0].count, over as i64);
     }
 
     /// A session's subagent transcripts are **the same session**: their usage

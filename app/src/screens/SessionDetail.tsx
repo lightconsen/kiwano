@@ -18,10 +18,11 @@ import { errText, LoadFailed } from "../components/LoadFailed";
 import { useReload } from "../lib/reload";
 import { fmtTokens } from "../lib/format";
 import { useLocale, useT, type Translate } from "../i18n";
-import type { HistoryCount, HistoryToolUse, Session } from "../api/types";
+import type { HistoryCount, HistoryToolUse, HistoryToolUses, Session } from "../api/types";
 import {
   fmtFullStamp,
   fmtSessionCost,
+  fmtStamp,
   SourceBadge,
 } from "./RequestLogs/sessionBits";
 
@@ -222,6 +223,19 @@ function Body({
           title={t("dashboard.sessionFromFiles")}
           hint={t("dashboard.sessionFromFilesHint")}
         >
+          {/* The files' own token total, shown only when both ledgers have the
+              session: for one the files alone recorded, the gateway column above
+              already shows these numbers, and printing them twice would read as
+              two measurements of one thing. */}
+          {row.source === "both" && row.file_tokens && (
+            <Row
+              label={t("dashboard.sessionTokens")}
+              title={t("dashboard.sessionFileTokensHint")}
+              value={`${fmtTokens(row.file_tokens.input)} / ${fmtTokens(row.file_tokens.output)} / ${fmtTokens(
+                row.file_tokens.cache_read,
+              )} / ${fmtTokens(row.file_tokens.cache_creation)}`}
+            />
+          )}
           <Row
             label={t("dashboard.sessionStarted")}
             value={fmtFullStamp(row.started_at, locale)}
@@ -279,9 +293,9 @@ function Body({
           longest thing on this page and the only part read as a list rather than
           as a figure, so half a card was cramped — a path is wide — and wrong
           about what the reader is doing. */}
-      {row.tool_uses.length > 0 && (
-        <Card title={t("dashboard.sessionCalls", { n: row.tool_uses.length })}>
-          <ToolCalls calls={row.tool_uses} />
+      {!row.tool_uses.head.length && !row.tool_uses.tail.length ? null : (
+        <Card title={t("dashboard.sessionCalls", { n: row.tool_uses.head.length + row.tool_uses.tail.length })}>
+          <ToolCalls uses={row.tool_uses} />
         </Card>
       )}
     </>
@@ -301,46 +315,80 @@ const CALLS_PER_PAGE = 10;
  * and a nested scroll region inside a card is a thing readers fall into and
  * cannot get out of.
  */
-function ToolCalls({ calls }: { calls: HistoryToolUse[] }) {
+function ToolCalls({ uses }: { uses: HistoryToolUses }) {
   const t = useT();
   const [page, setPage] = useState(1);
-  const pages = Math.max(1, Math.ceil(calls.length / CALLS_PER_PAGE));
-  // The calls arrive with the session, so a different session is a different
-  // list — and page 7 of the old one is rarely a page of the new one.
+
+  // One list of rows, because the table pages over *the list*, not over the head:
+  // the gap is a row like any other and belongs where it falls. Each row carries
+  // its own position in the session, which is what the numbering shows — a
+  // chronology's numbers are not its indices.
+  type Row =
+    | { kind: "call"; n: number; call: HistoryToolUse }
+    | { kind: "gap"; n: number; skipped: number };
+  const rows: Row[] = [
+    ...uses.head.map((call, i) => ({ kind: "call" as const, n: i + 1, call })),
+    ...(uses.skipped > 0
+      ? [{ kind: "gap" as const, n: uses.head.length + 1, skipped: uses.skipped }]
+      : []),
+    ...uses.tail.map((call, i) => ({
+      kind: "call" as const,
+      // Where this call actually sits in the session: the head, the gap, then it.
+      n: uses.head.length + uses.skipped + i + 1,
+      call,
+    })),
+  ];
+
+  const pages = Math.max(1, Math.ceil(rows.length / CALLS_PER_PAGE));
   const first = (Math.min(page, pages) - 1) * CALLS_PER_PAGE;
-  const shown = calls.slice(first, first + CALLS_PER_PAGE);
+  const shown = rows.slice(first, first + CALLS_PER_PAGE);
   useEffect(() => {
     setPage(1);
-  }, [calls]);
+  }, [uses]);
 
   return (
     <div>
       <table className="w-full table-fixed text-[11px]">
         <colgroup>
-          <col className="w-[34px]" />
+          <col className="w-[38px]" />
+          <col className="w-[96px]" />
           <col className="w-[150px]" />
         </colgroup>
         <thead>
           <tr className="text-left text-[9.5px] text-mut">
             <th className="py-0.5 pr-1 font-medium">{t("dashboard.sessionCallNo")}</th>
+            <th className="py-0.5 pr-1 font-medium">{t("dashboard.sessionCallWhen")}</th>
             <th className="py-0.5 pr-1 font-medium">{t("dashboard.sessionCallTool")}</th>
             <th className="py-0.5 font-medium">{t("dashboard.sessionCallWhat")}</th>
           </tr>
         </thead>
         <tbody className="font-mono">
-          {shown.map((c, i) => (
-            <tr key={`${first + i}-${c.name}`} className="border-t border-line">
-              {/* The position in the session — the one thing a chronology has
-                  that a count cannot: where in the work this happened. */}
-              <td className="py-0.5 pr-1 text-mut">{first + i + 1}</td>
-              <td className="truncate py-0.5 pr-1 font-sans" title={c.name}>
-                {c.name}
-              </td>
-              <td className="truncate py-0.5 text-mut" title={c.detail}>
-                {c.detail || t("common.none")}
-              </td>
-            </tr>
-          ))}
+          {shown.map((row) =>
+            row.kind === "gap" ? (
+              // Not a call: the calls this row stands for are the ones nothing
+              // holds, and saying so is the difference between a chronology and a
+              // fragment that looks whole.
+              <tr key="gap" className="border-t border-line text-mut">
+                <td className="py-1" colSpan={2} />
+                <td className="py-1 font-sans italic" colSpan={2}>
+                  {t("dashboard.sessionCallsSkipped", { n: row.skipped.toLocaleString() })}
+                </td>
+              </tr>
+            ) : (
+              <tr key={`${row.n}-${row.call.name}`} className="border-t border-line">
+                <td className="py-0.5 pr-1 text-mut">{row.n}</td>
+                <td className="whitespace-nowrap py-0.5 pr-1 text-mut">
+                  {fmtStamp(row.call.at)}
+                </td>
+                <td className="truncate py-0.5 pr-1 font-sans" title={row.call.name}>
+                  {row.call.name}
+                </td>
+                <td className="truncate py-0.5 text-mut" title={row.call.detail}>
+                  {row.call.detail || t("common.none")}
+                </td>
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
       {pages > 1 && <Pager page={Math.min(page, pages)} pages={pages} onGo={setPage} />}

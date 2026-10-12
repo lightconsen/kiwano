@@ -26,8 +26,8 @@ use serde_json::Value;
 
 use super::{
     config_root, counts, i64_at, jsonl_files, project_label, session_title, str_at,
-    tool_use_detail, HistoryRead, HistorySessionRow, HistoryToolUse, HistoryUsageRow, ParsedFile,
-    MAX_TOOL_USES,
+    tool_use_detail, tool_uses, HistoryRead, HistorySessionRow, HistoryToolUse, HistoryUsageRow,
+    ParsedFile, TOOL_USES_PER_END,
 };
 use crate::detect::ShellVars;
 
@@ -166,7 +166,10 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
 
     let mut usage: Vec<HistoryUsageRow> = Vec::new();
     let mut tool_calls: BTreeMap<String, i64> = BTreeMap::new();
-    let mut tool_uses: Vec<HistoryToolUse> = Vec::new();
+    let mut first_calls: Vec<HistoryToolUse> = Vec::new();
+    let mut last_calls: std::collections::VecDeque<HistoryToolUse> =
+        std::collections::VecDeque::new();
+    let mut call_count = 0usize;
     let mut session_id = stem.map(str::to_string);
     // The opening user message — see the `event_msg` arm below for why a rollout
     // has no better candidate than this.
@@ -248,14 +251,21 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
                     if matches!(item, "function_call" | "custom_tool_call") {
                         if let Some(name) = str_at(p, "name") {
                             *tool_calls.entry(name.clone()).or_default() += 1;
-                            if tool_uses.len() < MAX_TOOL_USES {
-                                tool_uses.push(HistoryToolUse {
-                                    // `arguments` is a JSON *string* here, which
-                                    // `tool_use_detail` parses — one rule serves
-                                    // both agents' shapes.
-                                    detail: tool_use_detail(&name, p.get("arguments")),
-                                    name,
-                                });
+                            call_count += 1;
+                            let call = HistoryToolUse {
+                                // `arguments` is a JSON *string* here, which
+                                // `tool_use_detail` parses — one rule serves both
+                                // agents' shapes.
+                                detail: tool_use_detail(&name, p.get("arguments")),
+                                at: ts.clone().unwrap_or_default(),
+                                name,
+                            };
+                            if first_calls.len() < TOOL_USES_PER_END {
+                                first_calls.push(call.clone());
+                            }
+                            last_calls.push_back(call);
+                            if last_calls.len() > TOOL_USES_PER_END {
+                                last_calls.pop_front();
                             }
                         }
                     }
@@ -323,7 +333,7 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
             cache_read_tokens: usage.iter().map(|r| r.cache_read_tokens).sum(),
             cache_creation_tokens: usage.iter().map(|r| r.cache_creation_tokens).sum(),
             tool_calls: counts(tool_calls),
-            tool_uses,
+            tool_uses: tool_uses(first_calls, last_calls.into(), call_count),
             // Codex has no `Skill` tool; the field is empty, not omitted.
             skills: Vec::new(),
         })
@@ -396,8 +406,8 @@ mod tests {
         let read = read_history(home, &ShellVars::new(), &["codex".into()]);
         let session = &read.batch.sessions[0];
         assert_eq!(session.tool_uses.len(), 1);
-        assert_eq!(session.tool_uses[0].name, "exec_command");
-        assert_eq!(session.tool_uses[0].detail, "ls -la /tmp");
+        assert_eq!(session.tool_uses.head[0].name, "exec_command");
+        assert_eq!(session.tool_uses.head[0].detail, "ls -la /tmp");
     }
 
     /// A rollout's title is its opening user message — Codex writes no title

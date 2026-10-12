@@ -48,6 +48,9 @@ export const sessions: Session[] = [
     ended_at: daysAgo(1, 21, 30),
     requests: 3,
     turns: 7,
+    // The files' own count of the same conversation: close to the gateway's and
+    // deliberately not equal, which is what two ledgers of one session look like.
+    file_tokens: { input: 4_500, output: 1_240, cache_read: 11_900, cache_creation: 700 },
     input_tokens: 4_210,
     output_tokens: 1_180,
     cache_read_tokens: 12_400,
@@ -66,22 +69,26 @@ export const sessions: Session[] = [
     // In the order they happened, with what each one did — enough of them that
     // the table has a second page, which is the shape a real session of this
     // size has (the one this was built against made 1,817 calls).
-    tool_uses: [
-      { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs" },
-      { name: "Grep", detail: "fn parse_token" },
-      { name: "Bash", detail: "cargo test --lib parser" },
-      { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs" },
-      { name: "Bash", detail: "cargo test --lib parser" },
-      { name: "Read", detail: "/Users/me/work/acme-api/src/lexer.rs" },
-      { name: "Edit", detail: "/Users/me/work/acme-api/src/lexer.rs" },
-      { name: "Bash", detail: "cargo clippy -- -D warnings" },
-      { name: "Agent", detail: "Explore the tokenizer's error paths" },
-      { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs" },
-      { name: "Bash", detail: "cargo test --lib parser" },
-      { name: "Write", detail: "/Users/me/work/acme-api/tests/parser_cases.rs" },
-      { name: "Bash", detail: "cargo test --test parser_cases" },
-      { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs" },
-    ],
+    tool_uses: {
+      head: [
+      { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs", at: daysAgo(1, 20, 41) },
+      { name: "Grep", detail: "fn parse_token", at: daysAgo(1, 20, 42) },
+      { name: "Bash", detail: "cargo test --lib parser", at: daysAgo(1, 20, 43) },
+      { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs", at: daysAgo(1, 20, 44) },
+      { name: "Bash", detail: "cargo test --lib parser", at: daysAgo(1, 20, 45) },
+      { name: "Read", detail: "/Users/me/work/acme-api/src/lexer.rs", at: daysAgo(1, 20, 46) },
+      { name: "Edit", detail: "/Users/me/work/acme-api/src/lexer.rs", at: daysAgo(1, 20, 47) },
+      { name: "Bash", detail: "cargo clippy -- -D warnings", at: daysAgo(1, 20, 48) },
+      { name: "Agent", detail: "Explore the tokenizer's error paths", at: daysAgo(1, 20, 49) },
+      { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs", at: daysAgo(1, 20, 50) },
+      { name: "Bash", detail: "cargo test --lib parser", at: daysAgo(1, 20, 51) },
+      { name: "Write", detail: "/Users/me/work/acme-api/tests/parser_cases.rs", at: daysAgo(1, 20, 52) },
+      { name: "Bash", detail: "cargo test --test parser_cases", at: daysAgo(1, 20, 53) },
+      { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs", at: daysAgo(1, 21, 29) },
+      ],
+      tail: [],
+      skipped: 0,
+    },
     skills: [{ name: "Skill", count: 1 }],
   },
   {
@@ -104,10 +111,14 @@ export const sessions: Session[] = [
     cost: [],
     unpriced_rows: 0,
     tool_calls: [{ name: "Edit", count: 6 }],
-    tool_uses: [
-      { name: "Edit", detail: "/Users/me/blog-astro/src/content/config.ts" },
-      { name: "Write", detail: "/Users/me/blog-astro/src/pages/sitemap.xml.ts" },
-    ],
+    tool_uses: {
+      head: [
+        { name: "Edit", detail: "/Users/me/blog-astro/src/content/config.ts", at: "2026-10-08T09:20:00Z" },
+        { name: "Write", detail: "/Users/me/blog-astro/src/pages/sitemap.xml.ts", at: "2026-10-08T09:48:00Z" },
+      ],
+      tail: [],
+      skipped: 0,
+    },
     skills: [],
   },
   {
@@ -125,7 +136,7 @@ export const sessions: Session[] = [
     cost: [{ currency: "USD", amount: 0.42 }],
     unpriced_rows: 0,
     tool_calls: [],
-    tool_uses: [],
+    tool_uses: { head: [], tail: [], skipped: 0 },
     skills: [],
   },
 ];

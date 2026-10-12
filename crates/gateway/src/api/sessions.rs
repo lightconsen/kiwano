@@ -15,8 +15,8 @@ use crate::store::sessions::{SessionRow, TrafficSession};
 use crate::store::Store;
 use kiwano_api::client_keys::CurrencyAmountVm;
 use kiwano_api::error::ApiError;
-use kiwano_api::history::{HistoryCount, HistoryToolUse};
-use kiwano_api::sessions::{SessionListVm, SessionVm};
+use kiwano_api::history::{HistoryCount, HistoryToolUse, HistoryToolUses};
+use kiwano_api::sessions::{SessionListVm, SessionTokens, SessionVm};
 use std::collections::{HashMap, HashSet};
 
 /// Every session this store can see, newest first.
@@ -221,28 +221,49 @@ fn merge(imported: Option<&SessionRow>, traffic: Option<&TrafficSession>) -> Ses
         output_tokens,
         cache_read_tokens,
         cache_creation_tokens,
+        file_tokens: imported.map(|i| SessionTokens {
+            input: i.input_tokens,
+            output: i.output_tokens,
+            cache_read: i.cache_read_tokens,
+            cache_creation: i.cache_creation_tokens,
+        }),
         cost,
         unpriced_rows: traffic.map(|t| t.unpriced_rows).unwrap_or(0),
         tool_calls: imported
             .map(|i| decode_counts(i.tool_calls.as_deref()))
             .unwrap_or_default(),
-        tool_uses: imported
-            .map(|i| decode_tool_uses(i.tool_uses.as_deref()))
-            .unwrap_or_default(),
+        tool_uses: decode_tool_uses(imported.and_then(|i| i.tool_uses.as_deref())),
         skills: imported
             .map(|i| decode_counts(i.skills.as_deref()))
             .unwrap_or_default(),
     }
 }
 
-/// A stored `[{"name","detail"}]` cell back into the typed list.
+/// A stored cell back into the typed list.
+///
+/// Two shapes are accepted, because a row imported before the list grew a tail
+/// holds the older one — a bare array of calls, with no timestamps and no gap. It
+/// is read as the head of the new shape rather than dropped: the page shows what
+/// the machine has, and a re-import upgrades it in place.
 ///
 /// A cell that will not parse decodes to nothing rather than failing the read:
 /// the list is the least important thing on the page, and losing it must not cost
 /// the session its numbers.
-fn decode_tool_uses(raw: Option<&str>) -> Vec<HistoryToolUse> {
-    raw.and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default()
+fn decode_tool_uses(raw: Option<&str>) -> HistoryToolUses {
+    let Some(raw) = raw else {
+        return HistoryToolUses::default();
+    };
+    if let Ok(uses) = serde_json::from_str::<HistoryToolUses>(raw) {
+        return uses;
+    }
+    match serde_json::from_str::<Vec<HistoryToolUse>>(raw) {
+        Ok(head) => HistoryToolUses {
+            head,
+            tail: Vec::new(),
+            skipped: 0,
+        },
+        Err(_) => HistoryToolUses::default(),
+    }
 }
 
 /// A stored `[{"name","count"}]` cell back into the typed list.

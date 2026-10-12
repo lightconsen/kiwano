@@ -44,7 +44,7 @@ pub mod codex;
 // The row types are the daemon's wire types and live in `kiwano-api`; re-exported
 // so a caller reaches them through this module (the [`crate::import`] shape).
 pub use kiwano_api::history::{
-    HistoryBatch, HistoryCount, HistorySessionRow, HistoryToolUse, HistoryUsageRow,
+    HistoryBatch, HistoryCount, HistorySessionRow, HistoryToolUse, HistoryToolUses, HistoryUsageRow,
 };
 
 /// How far up from a record's `cwd` [`project_label`] will look for a `.git`.
@@ -349,13 +349,15 @@ pub(super) fn session_title(text: Option<&str>) -> Option<String> {
     Some(line)
 }
 
-/// The most tool calls one session's row keeps.
+/// How many tool calls one session's row keeps **at each end**.
 ///
-/// A session can make thousands — the one this was built against made **1,817 in
-/// a single conversation** — and the list is a chronology, not a ledger: the
-/// counts above it say how many there were. The reader stops recording here and
-/// the page says what it is showing.
-pub(super) const MAX_TOOL_USES: usize = 100;
+/// A session can make thousands — one here made **1,817 in a single
+/// conversation** — and the list is a chronology, not a ledger: the counts above
+/// it say how many there were. Keeping both ends and counting the gap is what
+/// makes it a chronology rather than a fragment: what a session set out to do and
+/// what it ended up doing are the two things a reader asks of a long one, and a
+/// list that kept only the opening answered neither.
+pub(super) const TOOL_USES_PER_END: usize = 100;
 
 /// How long one call's summary may be. One line, bounded, because it lands in a
 /// list — the same rule the session title follows and for the same reason.
@@ -420,6 +422,34 @@ pub(super) fn tool_use_detail(name: &str, input: Option<&Value>) -> String {
         }
     }
     String::new()
+}
+
+/// The head and tail of a session's calls, with the gap counted.
+///
+/// Written once here rather than in each reader: the two agents differ in how
+/// they record a call, not in how much of a chronology is worth keeping.
+///
+/// Each reader streams, so it keeps the first [`TOOL_USES_PER_END`] calls and a
+/// rolling window of the last [`TOOL_USES_PER_END`], and hands both here. The
+/// trimming lives in this one place because the interesting case is the middle
+/// one: a session with more calls than the head holds but fewer than both ends
+/// together has its last calls **in both runs**, and taking them from the tail's
+/// end is what keeps a 150-call session whole instead of repeating its 51st call.
+pub(super) fn tool_uses(
+    head: Vec<HistoryToolUse>,
+    last: Vec<HistoryToolUse>,
+    total: usize,
+) -> HistoryToolUses {
+    let head: Vec<HistoryToolUse> = head.into_iter().take(TOOL_USES_PER_END).collect();
+    // How many of the calls came after the head — the ones the tail must supply.
+    let after_head = total.saturating_sub(head.len());
+    let take = after_head.min(last.len());
+    let tail = last[last.len() - take..].to_vec();
+    HistoryToolUses {
+        skipped: (total as i64 - head.len() as i64 - tail.len() as i64).max(0),
+        head,
+        tail,
+    }
 }
 
 /// Whitespace runs collapse to single spaces and the result is bounded, with an

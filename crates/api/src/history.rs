@@ -58,7 +58,7 @@ pub struct HistoryCount {
     pub count: i64,
 }
 
-/// One tool call, as the file recorded it: which tool, and what it did.
+/// One tool call, as the file recorded it: which tool, what it did, and when.
 ///
 /// `detail` is a **summary**, derived by the reader from the call's own
 /// arguments — the command for a shell call, the path for a read or an edit, the
@@ -71,6 +71,40 @@ pub struct HistoryToolUse {
     /// Empty when the call carried nothing summarisable.
     #[serde(default)]
     pub detail: String,
+    /// The record's own timestamp. A chronology without "when" is half of one,
+    /// and the files carry this — dropping it was the reader's omission, not the
+    /// format's.
+    #[serde(default)]
+    pub at: String,
+}
+
+/// A session's calls, as much of them as is worth keeping.
+///
+/// A session can make thousands — one here made **1,817** in a conversation, and
+/// 6,000+ across a long one — so the list is a **head and a tail** with the gap
+/// counted rather than hidden: what a session set out to do and what it ended up
+/// doing are the two ends a reader asks about, and a list that silently kept only
+/// the opening answered neither.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct HistoryToolUses {
+    pub head: Vec<HistoryToolUse>,
+    /// Empty when the session fit in `head`, which is the common case.
+    #[serde(default)]
+    pub tail: Vec<HistoryToolUse>,
+    /// Calls between the two runs that no list holds. 0 when there are none.
+    #[serde(default)]
+    pub skipped: i64,
+}
+
+impl HistoryToolUses {
+    /// Everything kept, in order — head first, then tail.
+    pub fn len(&self) -> usize {
+        self.head.len() + self.tail.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.head.is_empty() && self.tail.is_empty()
+    }
 }
 
 /// One session: what a single Claude Code transcript or Codex rollout spent, and
@@ -108,14 +142,13 @@ pub struct HistorySessionRow {
     pub cache_creation_tokens: i64,
     #[serde(default)]
     pub tool_calls: Vec<HistoryCount>,
-    /// The calls themselves, in the order the session made them, each with a
-    /// one-line summary of what it did — capped (see the readers), because one
-    /// session here made 1,817 of them.
+    /// The calls themselves, each with what it did and when — the head and the
+    /// tail of them (see [`HistoryToolUses`]).
     ///
     /// Real tools only: a `Skill` invocation is counted in `skills`, and listing
     /// it here too would be the double-count the split exists to prevent.
     #[serde(default)]
-    pub tool_uses: Vec<HistoryToolUse>,
+    pub tool_uses: HistoryToolUses,
     #[serde(default)]
     pub skills: Vec<HistoryCount>,
 }
@@ -193,10 +226,15 @@ mod tests {
                 name: "Bash".into(),
                 count: 1,
             }],
-            tool_uses: vec![HistoryToolUse {
-                name: "Bash".into(),
-                detail: "ls".into(),
-            }],
+            tool_uses: HistoryToolUses {
+                head: vec![HistoryToolUse {
+                    name: "Bash".into(),
+                    detail: "ls".into(),
+                    at: "2024-01-01T00:00:00Z".into(),
+                }],
+                tail: Vec::new(),
+                skipped: 0,
+            },
             skills: Vec::new(),
         };
         let batch = HistoryBatch {

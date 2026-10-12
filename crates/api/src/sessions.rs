@@ -20,8 +20,17 @@
 //! field's own comment.
 
 use crate::client_keys::CurrencyAmountVm;
-use crate::history::{HistoryCount, HistoryToolUse};
+use crate::history::{HistoryCount, HistoryToolUses};
 use serde::{Deserialize, Serialize};
+
+/// One side's four token buckets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionTokens {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_creation: i64,
+}
 
 /// One page of the session list, with the size of the whole list beside it.
 ///
@@ -85,6 +94,16 @@ pub struct SessionVm {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// What the **files** recorded, when they are one of the two sides.
+    ///
+    /// The four fields above are the merged answer — the traffic's, for a session
+    /// both ledgers know — so without this the page could not keep the promise its
+    /// layout makes ("what the gateway saw" beside "what the files recorded"):
+    /// one column would simply be missing the tokens. `None` for a session no file
+    /// has, and redundant for one only a file has (there the merged values *are*
+    /// these).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_tokens: Option<SessionTokens>,
     /// What the traffic cost, per currency — **the traffic side only**, and
     /// never converted. Empty for an imported-only session: the files carry
     /// tokens, not money, and an amount invented from them would be a guess.
@@ -97,10 +116,11 @@ pub struct SessionVm {
     /// Tools the files recorded, as `{name, count}`. Imported only.
     #[serde(default)]
     pub tool_calls: Vec<HistoryCount>,
-    /// The calls themselves, in order, one line each and capped by the reader.
-    /// Imported only, for the same reason `tool_calls` is.
+    /// The calls themselves — the head and the tail of them, each with what it
+    /// did and when (see [`HistoryToolUses`]). Imported only, for the same reason
+    /// `tool_calls` is.
     #[serde(default)]
-    pub tool_uses: Vec<HistoryToolUse>,
+    pub tool_uses: HistoryToolUses,
     /// Skills the files recorded. Imported only.
     #[serde(default)]
     pub skills: Vec<HistoryCount>,

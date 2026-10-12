@@ -41,9 +41,23 @@ function session(over: Partial<Session> = {}): Session {
     cost: [{ currency: "USD", amount: 2.5 }],
     unpriced_rows: 0,
     tool_calls: [],
-    tool_uses: [],
+    tool_uses: { head: [], tail: [], skipped: 0 },
     skills: [],
     ...over,
+  };
+}
+
+/** Calls in the shape the reader keeps: a head, an optional tail, a gap. */
+function calls(
+  head: { name: string; detail: string; at?: string }[],
+  tail: typeof head = [],
+  skipped = 0,
+) {
+  const stamp = (i: number) => `2026-09-09T20:${String(41 + i).padStart(2, "0")}:00Z`;
+  return {
+    head: head.map((c, i) => ({ ...c, at: c.at ?? stamp(i) })),
+    tail: tail.map((c, i) => ({ ...c, at: c.at ?? stamp(head.length + skipped + i) })),
+    skipped,
   };
 }
 
@@ -120,11 +134,11 @@ describe("a session's own page", () => {
 
   it("lists the calls as a table, in order, one page at a time", async () => {
     // Twelve calls, so the second page is a page rather than the end.
-    const calls = Array.from({ length: 12 }, (_, i) => ({
+    const made = Array.from({ length: 12 }, (_, i) => ({
       name: `Tool${String(i + 1).padStart(2, "0")}`,
       detail: `did the ${i + 1}th thing`,
     }));
-    apiMock.getSession.mockResolvedValue(session({ tool_uses: calls }));
+    apiMock.getSession.mockResolvedValue(session({ tool_uses: calls(made) }));
     const user = userEvent.setup();
     renderDetail();
 
@@ -144,18 +158,94 @@ describe("a session's own page", () => {
     // The number is the call's place in the session — what a chronology has that
     // a count cannot say.
     expect(rows()).toHaveLength(10);
-    expect(rows()[0]).toBe("1Tool01did the 1th thing");
-    expect(rows()[9]).toBe("10Tool10did the 10th thing");
+    // The row is number, when, tool, what — and the number is the call's place
+    // in the session, not its index in this list.
+    expect(rows()[0]).toBe("109-10 04:41Tool01did the 1th thing");
+    expect(rows()[9]).toBe("1009-10 04:50Tool10did the 10th thing");
     expect(within(toolsCard).getByText(en.common.pageIndicator.replace("{page}", "1").replace("{pages}", "2"))).toBeInTheDocument();
 
     await user.click(within(toolsCard).getByRole("button", { name: en.common.next }));
     expect(rows()).toHaveLength(2);
-    expect(rows()[0]).toBe("11Tool11did the 11th thing");
-    expect(rows()[1]).toBe("12Tool12did the 12th thing");
+    expect(rows()[0]).toContain("Tool11");
+    expect(rows()[1]).toContain("Tool12");
+  });
+
+  it("shows both ends of a long session, and counts what it did not keep", async () => {
+    // The shape a 6,000-call session arrives in: the opening, the end, and the
+    // number in between that nothing holds.
+    apiMock.getSession.mockResolvedValue(
+      session({
+        tool_uses: calls(
+          [
+            { name: "Read", detail: "the first thing it read" },
+            { name: "Bash", detail: "the second thing it ran" },
+          ],
+          [{ name: "Write", detail: "the last thing it wrote" }],
+          5_733,
+        ),
+      }),
+    );
+    renderDetail();
+
+    const panel = (await screen.findByText(
+      en.dashboard.sessionCalls.replace("{n}", "3"),
+    )).closest(".rounded-lg") as HTMLElement;
+    const rows = within(panel)
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => r.textContent);
+
+    // Head first…
+    expect(rows[0]).toContain("the first thing it read");
+    // …then the gap, said out loud rather than left to look like a jump…
+    expect(rows[2]).toContain(
+      en.dashboard.sessionCallsSkipped.replace("{n}", "5,733"),
+    );
+    // …then the tail, numbered where it actually sits in the session.
+    expect(rows[3]).toContain("the last thing it wrote");
+    expect(rows[3]).toContain(String(2 + 5_733 + 1));
+  });
+
+  it("shows the files' own tokens when both ledgers have the session", async () => {
+    // `both`: the merged token fields are the gateway's, so the files' total has
+    // to come from its own field or the "two ledgers" columns show one of them
+    // missing a number.
+    apiMock.getSession.mockResolvedValue(
+      session({
+        source: "both",
+        input_tokens: 10,
+        output_tokens: 2,
+        file_tokens: { input: 900, output: 100, cache_read: 4_000, cache_creation: 0 },
+      }),
+    );
+    const { unmount } = renderDetail();
+    const files = (await screen.findByText(en.dashboard.sessionFromFiles)).closest(
+      ".rounded-lg",
+    ) as HTMLElement;
+    expect(files.textContent).toContain("900 / 100 / 4k / 0");
+    unmount();
+
+    // An imported-only session's merged numbers *are* the files': printing them
+    // twice would read as two measurements of one thing.
+    apiMock.getSession.mockResolvedValue(
+      session({
+        source: "imported",
+        input_tokens: 900,
+        output_tokens: 100,
+        file_tokens: { input: 900, output: 100, cache_read: 4_000, cache_creation: 0 },
+      }),
+    );
+    renderDetail();
+    const files2 = (await screen.findByText(en.dashboard.sessionFromFiles)).closest(
+      ".rounded-lg",
+    ) as HTMLElement;
+    expect(files2.textContent).not.toContain("900 / 100 / 4k / 0");
   });
 
   it("puts the calls in their own panel, last on the page", async () => {
-    apiMock.getSession.mockResolvedValue(session({ tool_uses: [{ name: "Bash", detail: "ls" }] }));
+    apiMock.getSession.mockResolvedValue(
+      session({ tool_uses: calls([{ name: "Bash", detail: "ls" }]) }),
+    );
     renderDetail();
 
     // Await the body first: the first paint of this page is the breadcrumb alone.
@@ -175,18 +265,16 @@ describe("a session's own page", () => {
 
   it("shows a call with nothing to summarise, because it happened", async () => {
     apiMock.getSession.mockResolvedValue(
-      session({ tool_uses: [{ name: "ExitPlanMode", detail: "" }] }),
+      session({ tool_uses: calls([{ name: "ExitPlanMode", detail: "" }]) }),
     );
     renderDetail();
     const toolsCard = (await screen.findByText(
       en.dashboard.sessionCalls.replace("{n}", "1"),
     )).closest(".rounded-lg") as HTMLElement;
-    expect(
-      within(toolsCard)
-        .getAllByRole("row")
-        .slice(1)
-        .map((r) => r.textContent),
-    ).toEqual([`1ExitPlanMode${en.common.none}`]);
+    const row = within(toolsCard).getAllByRole("row")[1];
+    expect(row.textContent).toContain("ExitPlanMode");
+    // A call with nothing to summarise still appears: it happened.
+    expect(row.textContent).toContain(en.common.none);
   });
 
   it("orders tools by use, caps the list, and says what it left out", async () => {

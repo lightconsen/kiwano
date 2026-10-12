@@ -63,6 +63,22 @@ list no longer shows a conversation as several fragments.
 
 ### Added
 
+- **A long session's calls are kept at both ends, with the gap counted.** The list
+  kept the first hundred, which answered "how did this start" for a session that
+  made six thousand calls and nothing else — the two things a reader asks of a
+  long one are how it started and what it ended up doing. The row now holds a head
+  and a tail, and where nothing is held it **says so** (`5,733 calls not kept`)
+  rather than leaving a jump in the numbering. A session that fits keeps every
+  call exactly once.
+
+  Each call also carries **when** it happened, from the record's own timestamp —
+  a chronology without a clock is half of one — and the app's table shows it. The
+  files' side of the token count is on the wire too: the merged fields are the
+  gateway's for a session both ledgers know, so "what the files recorded" showed
+  no tokens at all until now.
+
+### Added
+
 - **A session's page lists the calls it made, not just the tools it used.** The
   counts (`Bash ×976`) say how often a tool ran; the list says what it ran *on* —
   one line each, in order: the command for a shell call, the path for a read or

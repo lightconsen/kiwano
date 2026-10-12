@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -46,7 +46,7 @@ pub(super) fn read(home: &Path, vars: &ShellVars, read: &mut HistoryRead) {
 
     // `projects/<slug>/*.jsonl`: one file per session, named by its uuid.
     let files = jsonl_files(&projects, 1);
-    let (mut sessions, mut rows) = (0usize, 0usize);
+    let (mut sessions, mut rows, mut spawned) = (0usize, 0usize, 0usize);
     for file in &files {
         let slug = file
             .parent()
@@ -56,7 +56,19 @@ pub(super) fn read(home: &Path, vars: &ShellVars, read: &mut HistoryRead) {
             .file_stem()
             .map(|n| n.to_string_lossy().into_owned())
             .filter(|s| !s.is_empty());
-        match read_file(file, slug.as_deref(), stem.as_deref()) {
+        // The session's **subagents** live beside it: Claude Code gives the
+        // session a directory named after itself and writes one transcript per
+        // spawned agent under `subagents/`. Those are not sessions of their own —
+        // they are turns of this one, and on a machine that uses agents they are
+        // a fifth of the usage rows (measured: 30,988 of 146,566 here). Read them
+        // into the same session, or the ledger is short by everything the
+        // subagents spent.
+        let subagents = match (file.parent(), stem.as_deref()) {
+            (Some(dir), Some(stem)) => jsonl_files(&dir.join(stem).join("subagents"), 0),
+            _ => Vec::new(),
+        };
+        spawned += subagents.len();
+        match read_file(file, slug.as_deref(), stem.as_deref(), &subagents) {
             Ok(parsed) => {
                 if let Some(session) = parsed.session {
                     sessions += 1;
@@ -76,19 +88,42 @@ pub(super) fn read(home: &Path, vars: &ShellVars, read: &mut HistoryRead) {
         }
     }
     read.detail.push(format!(
-        "claude: {} files under {} · {} sessions, {} usage rows",
+        "claude: {} transcripts + {} subagent files under {} · {} sessions, {} usage rows",
         files.len(),
+        spawned,
         projects.display(),
         sessions,
         rows
     ));
 }
 
-/// Parse one transcript. `slug` is the project directory's name, the label
-/// fallback for a record with no `cwd`; `stem` is the file name, the session id
-/// fallback for a record with no `sessionId` (the file is named by the session).
-fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<ParsedFile, String> {
+/// Parse one session: the transcript itself, and the subagent transcripts that
+/// belong to it.
+///
+/// `slug` is the project directory's name, the label fallback for a record with
+/// no `cwd`; `stem` is the file name, the session id fallback for a record with
+/// no `sessionId` (the file is named by the session). `subagents` are that
+/// session's spawned-agent transcripts — folded into the same accumulators, so
+/// one `ParsedFile` is one session whatever number of files it took to record.
+fn read_file(
+    file: &Path,
+    slug: Option<&str>,
+    stem: Option<&str>,
+    subagents: &[PathBuf],
+) -> Result<ParsedFile, String> {
+    // Opened here rather than inside the loop: a transcript that cannot be read
+    // is a skip for the whole session, which is what this `?` reports.
     let handle = File::open(file).map_err(|e| e.to_string())?;
+    // The session's own file first, then its subagents: everything below
+    // accumulates across all of them, so one `ParsedFile` is one session.
+    let sources = std::iter::once((file, BufReader::new(handle)))
+        .chain(subagents.iter().filter_map(|f| {
+            // A subagent file that cannot be read is not a reason to lose the
+            // session: its transcript is still there, and the loss is bounded to
+            // what that one spawned agent spent.
+            File::open(f).ok().map(|h| (f.as_path(), BufReader::new(h)))
+        }))
+        .collect::<Vec<_>>();
 
     let mut usage: Vec<HistoryUsageRow> = Vec::new();
     // The tool-call vs skill rule: a `tool_use` block named `Skill` is a skill
@@ -98,6 +133,17 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
     // it in any "tools used" total the dashboard draws.
     let mut tool_calls: BTreeMap<String, i64> = BTreeMap::new();
     let mut skills: BTreeMap<String, i64> = BTreeMap::new();
+    // **The file's name is the session's identity, and the ids inside it are
+    // not.** Claude Code mints a new `sessionId` when a conversation is compacted
+    // or resumed, and keeps appending to the file it started — so a transcript
+    // can hold records from several ids while its name never changes. Keying rows
+    // by what the records say makes a session's identity depend on where the file
+    // happened to end, which moves under the ledger between imports: this machine
+    // had seven session rows left behind by exactly that, each a fragment of a
+    // conversation that was already listed under another id.
+    //
+    // The record's own id is a fallback for a file with no usable name, which is
+    // the only case where there is nothing better to use.
     let mut session_id = stem.map(str::to_string);
     // The two title candidates, and the agent's own name wins: Claude Code
     // rewrites `aiTitle` as the conversation develops (a long session carries
@@ -112,99 +158,117 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
     let (mut first_ts, mut last_ts): (Option<String>, Option<String>) = (None, None);
     let mut malformed = 0usize;
 
-    for (line_no, line) in BufReader::new(handle).lines().enumerate() {
-        let Ok(line) = line else {
-            malformed += 1;
-            continue;
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let Ok(record) = serde_json::from_str::<Value>(&line) else {
-            malformed += 1;
-            continue;
-        };
-        if !record.is_object() {
-            malformed += 1;
-            continue;
-        }
-
-        if let Some(ts) = str_at(&record, "timestamp") {
-            if first_ts.is_none() {
-                first_ts = Some(ts.clone());
+    // `file_idx` is not decoration: a record without a `uuid` falls back to its
+    // line number as an idempotency key, and the same line number in two files
+    // would import as the same row — the second silently overwriting the first.
+    for (file_idx, (_, reader)) in sources.into_iter().enumerate() {
+        for (line_no, line) in reader.lines().enumerate() {
+            let Ok(line) = line else {
+                malformed += 1;
+                continue;
+            };
+            if line.trim().is_empty() {
+                continue;
             }
-            last_ts = Some(ts);
-        }
-        if let Some(id) = str_at(&record, "sessionId") {
-            session_id = Some(id);
-        }
-        let cwd = str_at(&record, "cwd");
-        if cwd_label.is_none() {
-            cwd_label = project_label(cwd.as_deref(), None);
-        }
+            let Ok(record) = serde_json::from_str::<Value>(&line) else {
+                malformed += 1;
+                continue;
+            };
+            if !record.is_object() {
+                malformed += 1;
+                continue;
+            }
 
-        if let Some(t) = str_at(&record, "aiTitle").filter(|t| !t.trim().is_empty()) {
-            ai_title = Some(t);
-        }
-
-        let message = record.get("message");
-        // The opening message: the first `user` record that carries text. Its
-        // content is either a string or the block array the API uses, and a
-        // record whose content is an image or a tool result contributes nothing.
-        if opening_message.is_none()
-            && record.get("type").and_then(Value::as_str) == Some("user")
-            && !is_scaffolding(&record)
-        {
-            opening_message = message
-                .and_then(|m| m.get("content"))
-                .and_then(first_text)
-                .map(str::to_string);
-        }
-
-        // A record with no `usage` is not a spend: it contributes no row. The
-        // `user` records and every bookkeeping record land here.
-        if let Some(usage_v) = message
-            .and_then(|m| m.get("usage"))
-            .filter(|u| u.is_object())
-        {
-            let uuid = str_at(&record, "uuid").unwrap_or_else(|| format!("line-{}", line_no + 1));
-            let sid = session_id.clone().unwrap_or_default();
-            usage.push(HistoryUsageRow {
-                agent: "claude".into(),
-                ts: str_at(&record, "timestamp").unwrap_or_default(),
-                model: message
-                    .and_then(|m| m.get("model"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                // Rule 1: a label, never the `cwd` path the record carries.
-                project: project_label(cwd.as_deref(), slug),
-                session_id: (!sid.is_empty()).then(|| sid.clone()),
-                import_key: format!("claude-code:{sid}:{uuid}"),
-                input_tokens: i64_at(usage_v, "input_tokens"),
-                output_tokens: i64_at(usage_v, "output_tokens"),
-                cache_read_tokens: i64_at(usage_v, "cache_read_input_tokens"),
-                cache_creation_tokens: i64_at(usage_v, "cache_creation_input_tokens"),
-                cache_inclusive: false,
-            });
-        }
-
-        if let Some(blocks) = message
-            .and_then(|m| m.get("content"))
-            .and_then(Value::as_array)
-        {
-            for block in blocks {
-                if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-                    continue;
+            // Across every file of the session, and by value rather than by
+            // position: the subagent transcripts are read after the session's
+            // own, so "the last record seen" is not "the latest moment". RFC3339
+            // UTC strings order lexicographically — the same comparison every
+            // `ts` filter in the store makes.
+            if let Some(ts) = str_at(&record, "timestamp") {
+                if first_ts.as_deref().is_none_or(|f| ts.as_str() < f) {
+                    first_ts = Some(ts.clone());
                 }
-                let Some(name) = str_at(block, "name") else {
-                    continue;
-                };
-                let bucket = if name == "Skill" {
-                    &mut skills
-                } else {
-                    &mut tool_calls
-                };
-                *bucket.entry(name).or_default() += 1;
+                if last_ts.as_deref().is_none_or(|l| ts.as_str() > l) {
+                    last_ts = Some(ts);
+                }
+            }
+            if session_id.is_none() {
+                session_id = str_at(&record, "sessionId");
+            }
+            let cwd = str_at(&record, "cwd");
+            if cwd_label.is_none() {
+                cwd_label = project_label(cwd.as_deref(), None);
+            }
+
+            if let Some(t) = str_at(&record, "aiTitle").filter(|t| !t.trim().is_empty()) {
+                ai_title = Some(t);
+            }
+
+            let message = record.get("message");
+            // The opening message: the first `user` record that carries text. Its
+            // content is either a string or the block array the API uses, and a
+            // record whose content is an image or a tool result contributes nothing.
+            if opening_message.is_none()
+                && record.get("type").and_then(Value::as_str) == Some("user")
+                && !is_scaffolding(&record)
+            {
+                opening_message = message
+                    .and_then(|m| m.get("content"))
+                    .and_then(first_text)
+                    .map(str::to_string);
+            }
+
+            // A record with no `usage` is not a spend: it contributes no row. The
+            // `user` records and every bookkeeping record land here.
+            if let Some(usage_v) = message
+                .and_then(|m| m.get("usage"))
+                .filter(|u| u.is_object())
+            {
+                // The session's own file keeps the bare `line-N` spelling its
+                // rows already carry; a subagent's fallback is scoped to its file,
+                // because two files' line 5 are two different rows.
+                let uuid = str_at(&record, "uuid").unwrap_or_else(|| match file_idx {
+                    0 => format!("line-{}", line_no + 1),
+                    i => format!("sub{i}-line-{}", line_no + 1),
+                });
+                let sid = session_id.clone().unwrap_or_default();
+                usage.push(HistoryUsageRow {
+                    agent: "claude".into(),
+                    ts: str_at(&record, "timestamp").unwrap_or_default(),
+                    model: message
+                        .and_then(|m| m.get("model"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    // Rule 1: a label, never the `cwd` path the record carries.
+                    project: project_label(cwd.as_deref(), slug),
+                    session_id: (!sid.is_empty()).then(|| sid.clone()),
+                    import_key: format!("claude-code:{sid}:{uuid}"),
+                    input_tokens: i64_at(usage_v, "input_tokens"),
+                    output_tokens: i64_at(usage_v, "output_tokens"),
+                    cache_read_tokens: i64_at(usage_v, "cache_read_input_tokens"),
+                    cache_creation_tokens: i64_at(usage_v, "cache_creation_input_tokens"),
+                    cache_inclusive: false,
+                });
+            }
+
+            if let Some(blocks) = message
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_array)
+            {
+                for block in blocks {
+                    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                        continue;
+                    }
+                    let Some(name) = str_at(block, "name") else {
+                        continue;
+                    };
+                    let bucket = if name == "Skill" {
+                        &mut skills
+                    } else {
+                        &mut tool_calls
+                    };
+                    *bucket.entry(name).or_default() += 1;
+                }
             }
         }
     }
@@ -326,6 +390,162 @@ mod tests {
 
     fn claude_read(home: &Path) -> crate::history::HistoryRead {
         read_history(home, &ShellVars::new(), &["claude".into()])
+    }
+
+    /// The session is the **file**, not the ids inside it.
+    ///
+    /// A transcript carries records from several `sessionId`s once its
+    /// conversation has been compacted or resumed — the file keeps the name it
+    /// was created with — and this reader used to take its identity from
+    /// whatever id the last record happened to carry. On a real machine that left
+    /// seven session rows behind, each a fragment of a conversation already
+    /// listed under another id, and each looking like a session that had lost its
+    /// numbers.
+    #[test]
+    fn a_session_is_its_file_not_the_last_id_inside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let started_as = "11111111-2222-3333-4444-555555555555";
+        let after_compaction = "99999999-8888-7777-6666-555555555555";
+
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            &format!("{started_as}.jsonl"),
+            &[
+                assistant(
+                    "r1",
+                    "2026-01-02T10:00:00Z",
+                    started_as,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 10, "output_tokens": 1}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+                // The compaction happens and the ids after it are new…
+                assistant(
+                    "r2",
+                    "2026-01-02T11:00:00Z",
+                    after_compaction,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 20, "output_tokens": 2}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+            ],
+        );
+
+        let read = claude_read(home);
+        assert_eq!(read.batch.sessions.len(), 1, "one file is one session");
+        assert_eq!(
+            read.batch.sessions[0].session_id, started_as,
+            "the file's name is the identity, not the id the file ends on"
+        );
+        // And every row belongs to it — including the ones recorded after the id
+        // changed, which is what used to split a session's numbers in two.
+        assert_eq!(read.batch.usage.len(), 2);
+        assert!(
+            read.batch
+                .usage
+                .iter()
+                .all(|r| r.session_id.as_deref() == Some(started_as)),
+            "{:?}",
+            read.batch
+                .usage
+                .iter()
+                .map(|r| r.session_id.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(read.batch.sessions[0].turns, 2);
+        assert_eq!(read.batch.sessions[0].input_tokens, 30);
+    }
+
+    /// A session's subagent transcripts are **the same session**: their usage
+    /// belongs to it, they do not become sessions of their own, and they do not
+    /// each contribute a row for the same turns.
+    ///
+    /// This is the shape Claude Code writes — `projects/<slug>/<session>.jsonl`
+    /// beside `projects/<slug>/<session>/subagents/agent-*.jsonl` — and on this
+    /// machine those files hold a fifth of all usage rows. Reading only the first
+    /// left the ledger short by everything the spawned agents spent.
+    #[test]
+    fn subagent_transcripts_fold_into_their_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sid = "11111111-2222-3333-4444-555555555555";
+
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            &format!("{sid}.jsonl"),
+            &[assistant(
+                "r1",
+                "2026-01-02T10:00:00Z",
+                sid,
+                "/home/me/work/acme",
+                serde_json::json!({"input_tokens": 10, "output_tokens": 1}),
+                serde_json::json!([{"type": "tool_use", "name": "Task"}]),
+            )],
+        );
+        // Two agents it spawned, each with its own usage — one of them later in
+        // time than anything in the session's own file.
+        write_transcript(
+            home,
+            &format!("-home-me-work-acme/{sid}/subagents"),
+            "agent-aaa.jsonl",
+            &[assistant(
+                "a1",
+                "2026-01-02T10:05:00Z",
+                sid,
+                "/home/me/work/acme",
+                serde_json::json!({"input_tokens": 100, "output_tokens": 20}),
+                serde_json::json!([{"type": "tool_use", "name": "Bash"}]),
+            )],
+        );
+        write_transcript(
+            home,
+            &format!("-home-me-work-acme/{sid}/subagents"),
+            "agent-bbb.jsonl",
+            &[assistant(
+                "b1",
+                "2026-01-02T09:59:00Z",
+                sid,
+                "/home/me/work/acme",
+                serde_json::json!({"input_tokens": 300, "output_tokens": 40}),
+                serde_json::json!([{"type": "tool_use", "name": "Bash"}]),
+            )],
+        );
+
+        let read = claude_read(home);
+        assert_eq!(
+            read.batch.sessions.len(),
+            1,
+            "one session, not one per spawned agent"
+        );
+        let session = &read.batch.sessions[0];
+        assert_eq!(session.turns, 3, "every turn of the session counts");
+        assert_eq!(
+            session.input_tokens, 410,
+            "the agents' tokens are the session's"
+        );
+        assert_eq!(session.output_tokens, 61);
+        // Tool calls come from both, and the session's own `Task` is a tool too.
+        let tools: std::collections::BTreeMap<&str, i64> = session
+            .tool_calls
+            .iter()
+            .map(|c| (c.name.as_str(), c.count))
+            .collect();
+        assert_eq!(tools.get("Bash"), Some(&2));
+        assert_eq!(tools.get("Task"), Some(&1));
+        // And the span takes the earliest and the latest across the files: the
+        // subagent that ran "before" the first record still belongs inside it.
+        assert_eq!(session.started_at, "2026-01-02T09:59:00Z");
+        assert_eq!(session.ended_at, "2026-01-02T10:05:00Z");
+        // Every row is priced and attributable, so the ledger sums them.
+        assert_eq!(read.batch.usage.len(), 3);
+        assert!(read
+            .batch
+            .usage
+            .iter()
+            .all(|r| r.session_id.as_deref() == Some(sid)));
     }
 
     /// The title: the agent's own name for the session when it wrote one, the

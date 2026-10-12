@@ -251,7 +251,12 @@ kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
 
 The agents' own history, read from their session files and imported, so the
 dashboard of a machine that installed Kiwano this morning has yesterday's spend on
-it. `import` reads Claude Code's and Codex's transcripts and sends what they say;
+it. A Claude Code session is read **whole**: the transcript, plus the subagent
+transcripts it spawned (`<session>/subagents/agent-*.jsonl`), whose tokens are the
+session's own — on a machine that uses agents they were a fifth of the usage and
+were being missed. One transcript is one session, named by its **file**: the ids
+inside it change when a conversation is compacted or resumed, and a ledger keyed
+by those would list one conversation as several. `import` reads Claude Code's and Codex's transcripts and sends what they say;
 the app runs the same scan once, on first launch. `--dry-run` reads and reports
 without writing anything — the honest answer to "why is my dashboard still
 empty?", since the files may simply not be where this machine expects them

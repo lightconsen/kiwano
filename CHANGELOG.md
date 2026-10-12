@@ -19,6 +19,34 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Claude Code session is imported whole.** Two things were being dropped, and
+  both were found by running the import over a real `~/.claude` rather than over
+  fixtures.
+
+  **Subagent transcripts.** Claude Code writes one transcript per spawned agent
+  under `<session>/subagents/agent-*.jsonl`, and their tokens are the session's
+  own — on the machine this was found on, **30,988 usage rows, 21% of the total**,
+  and 7 sessions that had spend but no session row at all. They are now read into
+  the session they belong to: not as sessions of their own (a spawned agent is a
+  turn of a conversation, not a conversation), and counted in the session's
+  tokens, turns and tools.
+
+  **The session's identity.** A transcript holds records from several
+  `sessionId`s once its conversation has been compacted or resumed — the file
+  keeps the name it was created with — and the import took its identity from
+  whatever id the records happened to carry. A session's rows could therefore land
+  under different ids between imports, which left seven phantom sessions behind on
+  that same machine, each a fragment of a conversation already listed elsewhere.
+  One file is now one session, named by its file.
+
+  Nothing changes for a transcript whose ids already agree with its name (91 of
+  92 here, and the import key is byte-identical for them). A file that disagrees
+  re-imports under its corrected id; if a machine imported such a file with an
+  earlier version, delete that machine's imported rows and re-import, or its
+  spend appears in two places.
+
 ### Changed
 
 - **`kiwano sessions` shows when a session was last active, not its span.** The

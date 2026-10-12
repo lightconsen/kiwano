@@ -204,7 +204,11 @@ kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
 
 Agent 自己的历史：从它们的会话文件里读出来并导入，于是一台今天早上才装 Kiwano 的机器，
 dashboard 上已经有昨天的花费。`import` 读 Claude Code 与 Codex 的记录文件并把它们说的
-东西送过去；App 会在首次启动时跑同一趟扫描。`--dry-run` 只读只报告、什么都不写 ——
+东西送过去；App 会在首次启动时跑同一趟扫描。一个 Claude Code 会话是**整份**读的:
+transcript 本身,加上它派生的子代理 transcript(`<session>/subagents/agent-*.jsonl`)——
+那些 token 属于这个会话,在用代理的机器上它们占了约两成的用量,之前一直被漏掉。
+一份 transcript 就是一个会话,身份取自**文件名**:对话被压缩或续接时,文件内部的
+id 会变,而按那些 id 记账会把一场对话列成好几个。`--dry-run` 只读只报告、什么都不写 ——
 这是"我的 dashboard 怎么还是空的"唯一诚实的回答，因为文件可能根本不在这个机器期望的
 位置（那些行走 stderr：扫描正是你 `| jq` 的那种命令）。
 

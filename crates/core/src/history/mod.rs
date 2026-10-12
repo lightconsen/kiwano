@@ -407,7 +407,7 @@ mod tests {
         assert!(
             read.detail
                 .iter()
-                .any(|d| d.contains("1 files under") && d.contains("elsewhere")),
+                .any(|d| d.contains("1 transcripts") && d.contains("elsewhere")),
             "detail={:?}",
             read.detail
         );

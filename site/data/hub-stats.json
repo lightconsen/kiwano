@@ -1,13 +1,43 @@
 {
-  "generated_at": "2026-10-05T17:06:53+00:00",
+  "generated_at": "2026-10-12T17:50:31+00:00",
   "source": "github-release-assets",
-  "note": "installer downloads summed over 25 releases. Every release's mirror-verification step fetches each asset once (~5 per release), so the honest count is the sum minus that floor. Downloads are not installs: retries, abandoned downloads and install.sh users are all invisible here.",
+  "note": "installer downloads summed over 30 releases. Every release's mirror-verification step fetches each asset once (~5 per release), so the honest count is the sum minus that floor. Downloads are not installs: retries, abandoned downloads and install.sh users are all invisible here.",
   "releases": [
+    {
+      "tag": "v0.3.2",
+      "published": "2026-10-12T13:02:20Z",
+      "installer_downloads": 9,
+      "estimate_minus_ci_floor": 4
+    },
+    {
+      "tag": "v0.3.1",
+      "published": "2026-10-12T07:09:27Z",
+      "installer_downloads": 10,
+      "estimate_minus_ci_floor": 5
+    },
+    {
+      "tag": "v0.3.0",
+      "published": "2026-10-10T04:31:34Z",
+      "installer_downloads": 10,
+      "estimate_minus_ci_floor": 5
+    },
+    {
+      "tag": "v0.2.13",
+      "published": "2026-10-10T03:25:57Z",
+      "installer_downloads": 9,
+      "estimate_minus_ci_floor": 4
+    },
+    {
+      "tag": "v0.2.12",
+      "published": "2026-10-07T05:26:30Z",
+      "installer_downloads": 14,
+      "estimate_minus_ci_floor": 9
+    },
     {
       "tag": "v0.2.11",
       "published": "2026-10-05T12:38:14Z",
-      "installer_downloads": 9,
-      "estimate_minus_ci_floor": 4
+      "installer_downloads": 10,
+      "estimate_minus_ci_floor": 5
     },
     {
       "tag": "v0.2.10",
@@ -155,8 +185,8 @@
     }
   ],
   "totals": {
-    "installer_downloads": 206,
-    "ci_noise_floor": 125,
-    "estimate_minus_ci_floor": 81
+    "installer_downloads": 259,
+    "ci_noise_floor": 150,
+    "estimate_minus_ci_floor": 109
   }
 }

@@ -320,15 +320,17 @@ pasted into it still imports; it just has no title.
 The columns are:
 
 ```
-PROJECT  MACHINE  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
 ```
 
 `REQ` is 0 for an `imported` row and `TURNS` is 0 for a `gateway` row: neither
 side invents the other's count. `COST` is the traffic's spend, per currency and
 never converted; `-` means the files knew of no traffic (not "free"), and a
 session whose rows could not all be priced says so (`2.50 USD (+3 unpriced)`).
-`SPAN` is the session's whole life from the file when there is one, and the span
-of the requests the gateway saw otherwise.
+`LAST` is when the session was last active — the figure the list is ordered by,
+and the one a reader scanning it is asking about. (The start of the span is in
+`--json`, for anything that needs it; the column does not carry both, because a
+recency list is not a timeline.)
 
 `MACHINE` is the machine an imported row came from (see **History** above): the
 label the importing client recorded for itself, `unnamed` when it could not name

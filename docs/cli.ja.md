@@ -287,15 +287,16 @@ kiwano sessions [--project P] [--agent A] [--days N]
 列は次のとおりです：
 
 ```
-PROJECT  MACHINE  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
 ```
 
 `imported` 行の `REQ` は 0、`gateway` 行の `TURNS` は 0 です。どちらの側も、もう一方の
 数をでっち上げません。`COST` はトラフィックが使った金額で、通貨ごとに分けて表示し、換算は
 しません。`-` はファイル側にトラフィックが無いことを意味し（「無料」ではありません）、
 一部のリクエストに価格が付かなかったセッションはその旨を書きます
-（`2.50 USD (+3 unpriced)`）。`SPAN` はファイルがあればセッションの全期間、無ければ
-ゲートウェイが見たリクエストの範囲です。
+（`2.50 USD (+3 unpriced)`）。`LAST` はそのセッションが最後に動いた時刻です —— 一覧は
+この値で並んでおり、一覧を眺める人が知りたいのもこれです（期間の開始点は `--json` に
+あります。1 つの列に 2 つの時刻は入れません。「最近」の一覧はタイムラインではないからです）。
 
 `MACHINE` は取り込んだ行がどのマシンから来たかです（上の**ローカル履歴**を参照）。
 取り込み側のクライアントが自分のために記録したラベルで、自分の名前を調べられなければ

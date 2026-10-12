@@ -78,7 +78,9 @@ export function SessionsTable({
         <thead>
           <tr className="border-b border-line text-left text-[10px] text-mut">
             <th className="px-3 py-2 font-medium">{t("logs.colTitle")}</th>
-            <th className="px-2 py-2 font-medium">{t("logs.colSpan")}</th>
+            <th className="px-2 py-2 font-medium" title={t("logs.colLastTitle")}>
+              {t("logs.colLast")}
+            </th>
             <th className="px-2 py-2 font-medium">{t("logs.colAgent")}</th>
             <th className="px-2 py-2 font-medium">{t("logs.colProject")}</th>
             <th className="px-2 py-2 font-medium">{t("logs.colSource")}</th>
@@ -110,8 +112,11 @@ export function SessionsTable({
                   {r.title ?? "—"}
                 </span>
               </td>
+              {/* When it was last active — the figure the list is ordered by,
+                  and the one a reader scanning it is after. The start is a
+                  separate question, and `--json` still carries it. */}
               <td className="whitespace-nowrap px-2 py-1.5 font-sans text-mut">
-                {fmtStamp(r.started_at)} → {fmtStamp(r.ended_at)}
+                {fmtStamp(r.ended_at)}
               </td>
               <td className="px-2 py-1.5 font-sans">{r.agent}</td>
               {/* The project is the files' dimension — the gateway sees requests,

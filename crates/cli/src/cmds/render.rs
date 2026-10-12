@@ -810,7 +810,7 @@ pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
         "MACHINE",
         "AGENT",
         "SOURCE",
-        "SPAN",
+        "LAST",
         "REQ",
         "TURNS",
         "TOKENS (in/out/read/write)",
@@ -836,11 +836,11 @@ pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
                 s.machine.clone().unwrap_or_else(|| "unnamed".to_string()),
                 s.agent.clone(),
                 s.source.clone(),
-                format!(
-                    "{} → {}",
-                    minute_stamp(&s.started_at),
-                    minute_stamp(&s.ended_at)
-                ),
+                // When the conversation was last active, not the span it
+                // covered: the list is ordered by this figure, and a reader
+                // scanning it is asking "how recent", not "how long". The start
+                // is still there for anything that needs it (`--json`).
+                minute_stamp(&s.ended_at),
                 s.requests.to_string(),
                 s.turns.to_string(),
                 format!(

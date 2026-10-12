@@ -19,6 +19,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **`kiwano sessions` shows when a session was last active, not its span.** The
+  `SPAN` column carried two timestamps (`20:41 → 21:30`) for a list that is
+  ordered by recency and read for recency — the figure a reader is after was one
+  of the two, and the other cost the width a title now needs. The column is
+  `LAST` and holds that one. The start of the span is still in `--json`; the
+  column does not carry both, because a recency list is not a timeline.
+
 ### Added
 
 - **A session says what it was about: `TITLE`.** A list of spans, counters and

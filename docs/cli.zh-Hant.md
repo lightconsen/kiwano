@@ -256,13 +256,15 @@ agent 自己替這場對話起的名字時(Claude Code 寫 `ai-title` 記錄,並
 各欄如下：
 
 ```
-PROJECT  MACHINE  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
 ```
 
 `imported` 列的 `REQ` 是 0，`gateway` 列的 `TURNS` 是 0：哪一邊都不會替另一邊編一個數。
 `COST` 是流量花的錢，依幣別分別給出、從不換算；`-` 表示檔案裡沒有流量（不是「免費」），
-如果某個工作階段的請求沒能全部定價，會寫明（`2.50 USD (+3 unpriced)`）。有檔案時 `SPAN`
-是工作階段的完整生命期，否則就是閘道看到的請求跨度。
+如果某個工作階段的請求沒能全部定價，會寫明（`2.50 USD (+3 unpriced)`）。`LAST` 是
+這個工作階段最後一次活動的時間 —— 列表就是按它排序的，也是讀列表的人真正在問的那個數。
+（起止的起點在 `--json` 裡，需要的人自取；這一欄不同時放兩個時間戳，因為一張「最近」
+列表不是時間線。）
 
 `MACHINE` 是某個匯入列來自哪台機器（見上面的**本機歷史**）：匯入方客戶端替自己記下的
 標籤，查不到自己的名字時是 `unnamed`，只有閘道看到的列同樣是 `unnamed` —— 它是閘道路由

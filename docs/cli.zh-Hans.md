@@ -258,13 +258,15 @@ agent 自己给这场对话起的名字时(Claude Code 写 `ai-title` 记录,并
 各列如下：
 
 ```
-PROJECT  MACHINE  AGENT  SOURCE  SPAN  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
 ```
 
 `imported` 行的 `REQ` 是 0，`gateway` 行的 `TURNS` 是 0：哪一边都不会替另一边编一个数。
 `COST` 是流量花的钱，按币种分别给出、从不换算；`-` 表示文件里没有流量（不是"免费"），
-如果某个会话的请求没能全部定价，会写明（`2.50 USD (+3 unpriced)`）。有文件时 `SPAN`
-是会话的完整生命期，否则是网关看到的请求跨度。
+如果某个会话的请求没能全部定价，会写明（`2.50 USD (+3 unpriced)`）。`LAST` 是
+这个会话最后一次活动的时间 —— 列表就是按它排序的，也是读列表的人真正在问的那个数。
+（起止的起点在 `--json` 里，需要的人自取；这一列不同时放两个时间戳，因为一张"最近"
+列表不是时间线。）
 
 `MACHINE` 是某条导入行来自哪台机器（见上面的**本机历史**）：导入方客户端给自己记下的
 标签，查不到自己的名字时是 `unnamed`，只有网关看到的行同样是 `unnamed` —— 它是网关路由

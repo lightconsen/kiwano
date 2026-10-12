@@ -138,6 +138,18 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **A conversation keeps its key, not just its provider.** A provider's key
+  pool rotated per request — fine for spreading rate limits, but the upstream
+  prompt cache is scoped to the account a key belongs to, so a pool whose keys
+  are different accounts rebuilt the conversation's prefix on every turn, at
+  full input price. Rotation is now **per new session**: a conversation stays
+  on the pool entry it started on (the same stickiness the strategy layer
+  gives a provider, one level down), and the spreading the pool exists for
+  happens across sessions. A pin does not outlive its key — remove or disable
+  the entry and the session is re-pinned, not failed. Requests that name no
+  session rotate per request, as before. The pin is in-memory; a restart costs
+  one cold prefix per live conversation, nothing more.
+
 - **The placeholder key is the client key.** The table (`placeholder_keys` →
   `client_keys`), the store methods and the type are renamed after what the thing
   became; the value an agent carries is unchanged, so every existing takeover keeps

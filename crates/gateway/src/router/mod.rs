@@ -18,6 +18,44 @@ pub const AGENT_CODEX: &str = "codex";
 /// Prefix of per-agent placeholder keys: `kw-ag-<agent>-<rand>`.
 pub const PLACEHOLDER_KEY_PREFIX: &str = "kw-ag-";
 
+/// A rotating key of a provider's pool, with the identity a session pin
+/// remembers it by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoolKey {
+    /// The `api_keys` row id. A pin names this rather than the key's position,
+    /// which a disable shifts — a pin that followed the shift would move a
+    /// conversation onto another account, and with it onto a cold prompt cache.
+    pub id: i64,
+    pub key: String,
+}
+
+/// Which entry of a provider's pool a session is pinned to: the `api_keys`
+/// row id for a rotating key, a fixed marker for the primary (it has no row).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolHandle {
+    Primary,
+    Extra(i64),
+}
+
+impl PoolHandle {
+    /// The stored spelling inside the pin table.
+    pub fn pin_id(self) -> String {
+        match self {
+            PoolHandle::Primary => "primary".to_string(),
+            PoolHandle::Extra(id) => id.to_string(),
+        }
+    }
+
+    /// Back from the stored spelling; anything else is no pin at all.
+    pub fn from_pin_id(s: &str) -> Option<Self> {
+        if s == "primary" {
+            Some(PoolHandle::Primary)
+        } else {
+            s.parse::<i64>().ok().map(PoolHandle::Extra)
+        }
+    }
+}
+
 /// An upstream provider as seen by the routing/proxy layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpstreamProvider {
@@ -40,7 +78,7 @@ pub struct UpstreamProvider {
     pub endpoints: Vec<ProviderEndpoint>,
     pub api_key: Option<String>,
     /// Extra API keys rotating after the primary (spec §4.1 P1 multi-key rotation).
-    pub extra_keys: Vec<String>,
+    pub extra_keys: Vec<PoolKey>,
     /// roundrobin weight (tech.md §4.7: default 1).
     pub weight: i64,
     /// timewindow local window `HH:MM` (passed through from agent_bindings).
@@ -124,6 +162,10 @@ pub struct RoutedRequest {
     /// rides the attempt so the metered row can name the credential that spent
     /// it — without which a key's ceiling would have nothing to count.
     pub client_key_id: String,
+    /// The session the request belongs to, when it named (or implied) one. The
+    /// key pool pins on it: a conversation keeps the upstream key it started
+    /// on, because the prompt cache is scoped to the account behind the key.
+    pub session_id: Option<String>,
     pub provider: UpstreamProvider,
 }
 
@@ -143,6 +185,9 @@ pub struct RoutedPlan {
     /// rather than re-read per attempt: every attempt of one request is the same
     /// credential, and a re-read could disagree with what was authorised.
     pub client_key_id: String,
+    /// The session of the request, for the same reason: one request is one
+    /// conversation whichever candidate serves it, and the key pool pins on it.
+    pub session_id: Option<String>,
     /// Ordered, best first; never empty on `Ok`.
     pub candidates: Vec<UpstreamProvider>,
 }
@@ -154,22 +199,23 @@ impl RoutedPlan {
             agent: self.agent.clone(),
             attribution: self.attribution,
             client_key_id: self.client_key_id.clone(),
+            session_id: self.session_id.clone(),
             provider: c.clone(),
         })
     }
 }
 
 impl UpstreamProvider {
-    /// Credential pool for per-request rotation: primary first, then extras
-    /// (order preserved, duplicates of the primary dropped).
-    pub fn key_pool(&self) -> Vec<&str> {
-        let mut pool = Vec::with_capacity(1 + self.extra_keys.len());
+    /// Credential pool with each entry's pin identity: primary first, then
+    /// extras (order preserved, duplicates of the primary dropped).
+    pub fn key_pool(&self) -> Vec<(PoolHandle, &str)> {
+        let mut pool: Vec<(PoolHandle, &str)> = Vec::with_capacity(1 + self.extra_keys.len());
         if let Some(k) = self.api_key.as_deref() {
-            pool.push(k);
+            pool.push((PoolHandle::Primary, k));
         }
         for k in &self.extra_keys {
-            if !pool.contains(&k.as_str()) {
-                pool.push(k.as_str());
+            if !pool.iter().any(|(_, s)| *s == k.key) {
+                pool.push((PoolHandle::Extra(k.id), &k.key));
             }
         }
         pool
@@ -230,7 +276,10 @@ impl RouteTable {
                             .list_api_keys(&p.id)?
                             .into_iter()
                             .filter(|k| k.enabled)
-                            .map(|k| k.api_key)
+                            .map(|k| PoolKey {
+                                id: k.id,
+                                key: k.api_key,
+                            })
                             .collect(),
                         weight: b.weight,
                         win_start: b.win_start,
@@ -386,6 +435,7 @@ pub async fn resolve_via_engine(
         // remains for historical `request_logs` rows.
         attribution: Attribution::ClientKey,
         client_key_id: client.id.clone(),
+        session_id: session.map(str::to_string),
         candidates,
     })
 }
@@ -399,6 +449,7 @@ pub fn resolve(table: &RouteTable, placeholder_key: Option<&str>) -> Result<Rout
         agent: route.agent.clone(),
         attribution: Attribution::ClientKey,
         client_key_id: client.id.clone(),
+        session_id: None,
         provider,
     })
 }

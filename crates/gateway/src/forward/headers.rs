@@ -29,9 +29,19 @@ fn is_hop_by_hop(name: &axum::http::HeaderName) -> bool {
 /// Pick the credential for one upstream request: the provider's key pool is
 /// `[primary, extras…]`; pools with more than one entry rotate per request
 /// (spec §4.1 P1 multi-key rotation, so a single key never trips upstream rate limits).
+///
+/// A request that names a session is the exception: it stays on the pool entry
+/// the conversation started on. The upstream prompt cache is scoped to the
+/// account a key belongs to, so a conversation rotated mid-flight would
+/// rebuild its prefix on another account at full input price — the same loss
+/// the strategy layer pins a provider to avoid, one level down. New sessions
+/// still take the rotating cursor, so the spreading the pool exists for
+/// happens across sessions instead of across requests. A request that names
+/// no session rotates per request, as before.
 pub(crate) fn select_upstream_key(
     state: &crate::server::GatewayState,
     provider: &UpstreamProvider,
+    session: Option<&str>,
 ) -> Result<String, GatewayError> {
     let pool = provider.key_pool();
     if pool.is_empty() {
@@ -40,8 +50,20 @@ pub(crate) fn select_upstream_key(
             provider.id
         )));
     }
+    if let Some(session) = session {
+        // A pin that survives: the entry is still in the pool (a removed or
+        // disabled key falls through and the session is re-pinned).
+        if let Some(handle) = state.pinned_key(&provider.id, session) {
+            if let Some((_, key)) = pool.iter().find(|(h, _)| *h == handle) {
+                return Ok((*key).to_string());
+            }
+        }
+        let (handle, key) = pool[state.next_key_index(&provider.id, pool.len())];
+        state.pin_key(&provider.id, session, handle);
+        return Ok(key.to_string());
+    }
     let idx = state.next_key_index(&provider.id, pool.len());
-    Ok(pool[idx].to_string())
+    Ok(pool[idx].1.to_string())
 }
 
 /// Build upstream request headers: copy the inbound set (minus hop-by-hop and
@@ -130,7 +152,7 @@ pub(crate) fn upstream_key_and_headers(
     log: Option<&CompletedLog>,
     routed: &RoutedRequest,
 ) -> Result<HeaderMap, Response> {
-    let api_key = match select_upstream_key(state, provider) {
+    let api_key = match select_upstream_key(state, provider, routed.session_id.as_deref()) {
         Ok(k) => k,
         Err(e) => {
             let resp = error_into_response(e, inbound);
@@ -309,8 +331,15 @@ mod tests {
         let state =
             crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
                 .expect("state");
-        let err = select_upstream_key(&state, &p).unwrap_err();
+        let err = select_upstream_key(&state, &p, None).unwrap_err();
         assert!(matches!(err, GatewayError::Upstream(_)));
+    }
+
+    fn pool_key(id: i64, key: &str) -> crate::router::PoolKey {
+        crate::router::PoolKey {
+            id,
+            key: key.into(),
+        }
     }
 
     #[test]
@@ -319,22 +348,95 @@ mod tests {
             crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
                 .expect("state");
         let mut p = provider(Protocol::OpenAI, None);
-        p.extra_keys = vec!["sk-two".into(), "sk-three".into()];
+        p.extra_keys = vec![pool_key(2, "sk-two"), pool_key(3, "sk-three")];
 
         // Single-key pool always returns the primary key
         let mut single = provider(Protocol::OpenAI, None);
         single.extra_keys.clear();
         for _ in 0..3 {
-            assert_eq!(select_upstream_key(&state, &single).unwrap(), "sk-real-key");
+            assert_eq!(
+                select_upstream_key(&state, &single, None).unwrap(),
+                "sk-real-key"
+            );
         }
 
         // Multi-key pool: primary key → extra keys rotate in turn, then back to the primary key
         let mut seen = Vec::new();
         for _ in 0..3 {
-            seen.push(select_upstream_key(&state, &p).unwrap());
+            seen.push(select_upstream_key(&state, &p, None).unwrap());
         }
         assert_eq!(seen, vec!["sk-real-key", "sk-two", "sk-three"]);
-        assert_eq!(select_upstream_key(&state, &p).unwrap(), "sk-real-key");
+        assert_eq!(
+            select_upstream_key(&state, &p, None).unwrap(),
+            "sk-real-key"
+        );
+    }
+
+    /// A conversation stays on the pool entry it started on: the upstream
+    /// prompt cache is scoped to the account behind the key, and rotating
+    /// mid-conversation would rebuild the prefix at full price. New sessions
+    /// still spread across the pool.
+    #[test]
+    fn a_session_keeps_its_key_while_new_sessions_spread() {
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.extra_keys = vec![pool_key(2, "sk-two"), pool_key(3, "sk-three")];
+
+        // New sessions take the rotating cursor, one entry each.
+        let first = select_upstream_key(&state, &p, Some("s-1")).unwrap();
+        let second = select_upstream_key(&state, &p, Some("s-2")).unwrap();
+        assert_eq!(first, "sk-real-key");
+        assert_eq!(second, "sk-two");
+
+        // And then hold it, however many requests the conversation makes.
+        for _ in 0..5 {
+            assert_eq!(
+                select_upstream_key(&state, &p, Some("s-1")).unwrap(),
+                "sk-real-key"
+            );
+            assert_eq!(
+                select_upstream_key(&state, &p, Some("s-2")).unwrap(),
+                "sk-two"
+            );
+        }
+    }
+
+    /// A pin does not outlive its key: when the pinned entry leaves the pool
+    /// (removed or disabled), the session is re-pinned to one that is still
+    /// usable rather than failing on a key that is gone.
+    #[test]
+    fn a_pin_does_not_outlive_its_key() {
+        let state =
+            crate::server::GatewayState::new(crate::store::Store::open_in_memory().expect("store"))
+                .expect("state");
+        let mut p = provider(Protocol::OpenAI, None);
+        p.extra_keys = vec![pool_key(2, "sk-two"), pool_key(3, "sk-three")];
+
+        // Pin the session to the first extra.
+        assert_eq!(
+            select_upstream_key(&state, &p, Some("s-1")).unwrap(),
+            "sk-real-key"
+        );
+        assert_eq!(
+            select_upstream_key(&state, &p, Some("s-2")).unwrap(),
+            "sk-two"
+        );
+
+        // The pinned key leaves the pool: the session re-pins instead of
+        // erroring on a credential that is no longer offered.
+        p.extra_keys.retain(|k| k.id != 2);
+        let repinned = select_upstream_key(&state, &p, Some("s-2")).unwrap();
+        assert!(
+            repinned == "sk-real-key" || repinned == "sk-three",
+            "re-pinned to a live entry, got {repinned}"
+        );
+        assert_eq!(
+            select_upstream_key(&state, &p, Some("s-2")).unwrap(),
+            repinned,
+            "and the re-pin holds"
+        );
     }
 
     #[test]

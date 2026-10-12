@@ -51,6 +51,13 @@ pub struct GatewayState {
     /// (spec §4.1 P1 multi-key rotation). In-memory only; a gateway restart
     /// simply restarts each pool at its primary.
     key_cursors: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// Session pins for the key pool: `provider \0 session` → which pool entry
+    /// the conversation is on. Same reason the strategy pins a provider — the
+    /// upstream prompt cache is scoped to the account a key belongs to, so a
+    /// conversation that rotated mid-flight would rebuild its prefix on another
+    /// account, at full price. In-memory like the cursors: a restart costs one
+    /// cold prefix per live conversation, nothing more.
+    key_pins: std::sync::Mutex<crate::strategy::sticky::StickyTable>,
     /// Request-log capture config, refreshed alongside the route table.
     log_cfg: RwLock<LogConfig>,
     /// Compat shim on/off, same lifecycle as `log_cfg`: read at startup,
@@ -251,6 +258,7 @@ impl GatewayState {
             engine: crate::strategy::StrategyEngine::new(),
             route_table: RwLock::new(route_table),
             key_cursors: std::sync::Mutex::new(std::collections::HashMap::new()),
+            key_pins: std::sync::Mutex::new(crate::strategy::sticky::StickyTable::new()),
             log_cfg: RwLock::new(log_config),
             shim_cfg: RwLock::new(shim_cfg),
             redactor: RwLock::new(Arc::new(redactor)),
@@ -385,6 +393,29 @@ impl GatewayState {
         let idx = *cursor % pool_len;
         *cursor = cursor.wrapping_add(1);
         idx
+    }
+
+    /// The pool entry this session is pinned to, if the pin is still readable.
+    pub fn pinned_key(
+        &self,
+        provider_id: &str,
+        session: &str,
+    ) -> Option<crate::router::PoolHandle> {
+        let id = self
+            .key_pins
+            .lock()
+            .expect("key pins poisoned")
+            .get(&format!("{provider_id}\u{0}{session}"))?;
+        crate::router::PoolHandle::from_pin_id(&id)
+    }
+
+    /// Pin a session to a pool entry, so its next request stays on the same
+    /// upstream account.
+    pub fn pin_key(&self, provider_id: &str, session: &str, handle: crate::router::PoolHandle) {
+        self.key_pins
+            .lock()
+            .expect("key pins poisoned")
+            .insert(format!("{provider_id}\u{0}{session}"), handle.pin_id());
     }
 
     /// Rebuild the route table from SQLite; returns the number of agents

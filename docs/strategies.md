@@ -32,6 +32,14 @@ Two properties hold across all of them:
   a request that fails is replayed against the next candidate in the queue
   instead of being handed back to your agent as an error.
 
+The stickiness holds one level down, too: within a provider's rotating key
+pool (`kiwano keys`), a conversation keeps the **key** it started on. An
+upstream prompt cache is scoped to the account a key belongs to, so rotating
+mid-conversation would rebuild the prefix on another account at full input
+price. New sessions still spread across the pool — that spreading is what the
+pool is for — and a pin never outlives its key: remove or disable the entry
+and the session is re-pinned, not failed.
+
 ## Which provider answered: the receipt headers
 
 Every response the gateway forwards carries two headers of its own:

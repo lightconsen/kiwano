@@ -412,6 +412,88 @@ async fn a_forwarded_response_says_who_served_it_and_a_refusal_says_nothing() {
     assert!(response.headers().get("x-kiwano-model").is_none());
 }
 
+/// A provider's key pool rotates across requests — but not inside a
+/// conversation: the prompt cache lives behind the account the key belongs
+/// to, so a session keeps its key and only new sessions spread.
+#[tokio::test]
+async fn a_session_keeps_its_pool_key_and_a_new_session_takes_the_next() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, captured) = mock_openai(MockReply::Json(json!({
+        "id": "chatcmpl-1",
+        "model": "gpt-4o",
+        "choices": [],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-oai", Protocol::OpenAI, upstream_url))
+        .unwrap();
+    // A second key in the pool, so rotation has somewhere to go.
+    store
+        .insert_api_key("p-oai", "sk-pool-two", Some("second"))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-oai", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let send = |session: &str| {
+        let app = app.clone();
+        let session = session.to_string();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/chat/completions")
+                        .header("content-type", "application/json")
+                        .header("x-api-key", "kw-ag-codex-test")
+                        .header("x-kw-session", session)
+                        .body(Body::from(
+                            r#"{"model":"gpt-4o","messages":[]}"#.to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            response_body(response).await;
+        }
+    };
+
+    // First request of a session takes the cursor; the rest stay where it landed.
+    send("s-1").await;
+    send("s-1").await;
+    // A new session takes the next entry of the pool.
+    send("s-2").await;
+    // And both pins hold, however the cursor has moved since.
+    send("s-1").await;
+    send("s-2").await;
+
+    let seen: Vec<String> = captured
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, v)| v.clone())
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            format!("Bearer {REAL_KEY}"),
+            format!("Bearer {REAL_KEY}"),
+            "Bearer sk-pool-two".to_string(),
+            format!("Bearer {REAL_KEY}"),
+            "Bearer sk-pool-two".to_string(),
+        ],
+        "s-1 keeps the primary, s-2 keeps the second key, across requests"
+    );
+}
+
 #[tokio::test]
 async fn sse_stream_passthrough_is_byte_exact_and_metered() {
     let dir = tempfile::tempdir().unwrap();

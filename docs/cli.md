@@ -204,7 +204,10 @@ kiwano keys add <PROVIDER_ID> --key K [--label L]
 kiwano keys remove <KEY_ID>
 ```
 
-Rotating keys are tried after the provider's primary key, per request.
+Rotating keys follow the provider's primary key. Rotation is **per session**:
+a conversation keeps the key it started on (the upstream prompt cache is
+scoped to the account a key belongs to), and new sessions spread across the
+pool. Requests that name no session rotate per request.
 
 ### Rules
 

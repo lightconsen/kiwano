@@ -65,7 +65,7 @@ impl StickyTable {
     /// The id comes back owned rather than borrowed: the caller has to await
     /// before it can use it, and a guard held across an await makes the future
     /// non-Send. An id is a few dozen bytes.
-    fn get(&mut self, key: &str) -> Option<String> {
+    pub(crate) fn get(&mut self, key: &str) -> Option<String> {
         self.tick += 1;
         let tick = self.tick;
         let entry = self.map.get_mut(key)?;
@@ -73,7 +73,7 @@ impl StickyTable {
         Some(entry.id.clone())
     }
 
-    fn insert(&mut self, key: String, id: String) {
+    pub(crate) fn insert(&mut self, key: String, id: String) {
         self.tick += 1;
         self.map.insert(
             key,

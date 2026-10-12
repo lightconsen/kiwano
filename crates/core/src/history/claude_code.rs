@@ -151,7 +151,10 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
         // The opening message: the first `user` record that carries text. Its
         // content is either a string or the block array the API uses, and a
         // record whose content is an image or a tool result contributes nothing.
-        if opening_message.is_none() && record.get("type").and_then(Value::as_str) == Some("user") {
+        if opening_message.is_none()
+            && record.get("type").and_then(Value::as_str) == Some("user")
+            && !is_scaffolding(&record)
+        {
             opening_message = message
                 .and_then(|m| m.get("content"))
                 .and_then(first_text)
@@ -233,6 +236,41 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
         usage,
         malformed,
     })
+}
+
+/// Whether a `user` record is Claude Code talking to itself rather than the human
+/// talking to the model.
+///
+/// Real transcripts are full of these — a `/clear` echo, a compaction caveat, a
+/// local command's output — and they are written as `user` records whose content
+/// reads like a message. Taking one as a session's opening message produces
+/// titles like `<local-command-caveat>Caveat: The messages below were…`, which is
+/// how a real run found this: no synthetic fixture had them.
+///
+/// Two signals, and either is enough. `isMeta` is Claude Code's own marker for
+/// "not a real user turn". The tags are the wrappers it writes around the ones it
+/// marks nothing on — a closed set of its own vocabulary, matched on the prefix,
+/// so that a genuine message which merely *starts* with `<` (pasted markup) is
+/// still kept.
+fn is_scaffolding(record: &Value) -> bool {
+    if record.get("isMeta").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
+    let text = record
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(first_text)
+        .unwrap_or_default()
+        .trim_start();
+    [
+        "<command-name>",
+        "<command-message>",
+        "<local-command-caveat>",
+        "<local-command-stdout>",
+        "<local-command-stderr>",
+    ]
+    .iter()
+    .any(|tag| text.starts_with(tag))
 }
 
 /// The text of a `user` message's content: a plain string, or the first text
@@ -326,12 +364,26 @@ mod tests {
                 serde_json::json!({"type": "ai-title", "aiTitle": "fixing the flaky test", "sessionId": sid}),
             ],
         );
-        // A second transcript with no title record at all.
+        // A second transcript with no title record at all — and with the
+        // scaffolding records a real one opens with, which must not become the
+        // title. Both shapes here were taken from a live transcript after a real
+        // run produced `<local-command-caveat>Caveat: …` as a session's name.
         write_transcript(
             home,
             "-home-me-work-acme",
             "b.jsonl",
             &[
+                serde_json::json!({
+                    "type": "user",
+                    "isMeta": true,
+                    "sessionId": sid,
+                    "message": {"role": "user", "content": "<local-command-caveat>Caveat: The messages below were generated"}
+                }),
+                serde_json::json!({
+                    "type": "user",
+                    "sessionId": sid,
+                    "message": {"role": "user", "content": "<command-name>/clear</command-name>"}
+                }),
                 serde_json::json!({
                     "type": "user",
                     "sessionId": sid,
@@ -340,6 +392,7 @@ mod tests {
                 serde_json::json!({
                     "type": "user",
                     "sessionId": sid,
+                    "promptSource": "typed",
                     "message": {"role": "user", "content": [{"type": "text", "text": "the second thing said"}]}
                 }),
                 assistant(
@@ -361,7 +414,8 @@ mod tests {
             .map(|s| s.title.clone())
             .collect();
         // The first file's own title wins over its opening message; the second has
-        // no title record, so it uses the first message that carried text.
+        // no title record, so it uses the first message that is actually the
+        // user's — past the meta record and the command echo.
         assert!(
             titles.contains(&Some("fixing the flaky test".to_string())),
             "{titles:?}"

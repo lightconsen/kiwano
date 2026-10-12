@@ -294,6 +294,9 @@ gateway itself routed.
 kiwano sessions [--project P] [--agent A] [--days N]
 ```
 
+`--days` keeps the sessions **active** in that window — a conversation begun ten
+days ago and worked on yesterday belongs in a seven-day list.
+
 One row per session, from **two sources**, and the `SOURCE` column says which:
 
 - `gateway` — the gateway routed its requests. It knows the requests, the tokens

@@ -49,6 +49,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Changed
 
+- **A session is in the window if it was *active* in it, not if it started
+  there.** The list is ordered by last activity and now shows that figure in its
+  own column — but the `--days` filter (and the app's window) bounded the session
+  by where it *began*, so a conversation started ten days ago and worked on
+  yesterday was missing from a seven-day list. The traffic half of the same view
+  already answered the activity question (any request inside the window counts),
+  which made one list measure two different things. Strictly a widening:
+  `ended_at >= started_at` always, so nothing that used to appear disappears.
+
 - **`kiwano sessions` shows when a session was last active, not its span.** The
   `SPAN` column carried two timestamps (`20:41 → 21:30`) for a list that is
   ordered by recency and read for recency — the figure a reader is after was one

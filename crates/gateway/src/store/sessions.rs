@@ -164,8 +164,18 @@ impl Store {
     /// The imported sessions, most recent first.
     ///
     /// `project` and `agent` are exact matches (a label the user reads, not a
-    /// pattern), and `since` bounds `started_at` the way every other `ts` filter
-    /// in the store does.
+    /// pattern), and `since` bounds **`ended_at`** — the session's last activity.
+    ///
+    /// Not `started_at`, which is what this used to do, and the difference is a
+    /// session that ran across the window's edge: a conversation begun ten days
+    /// ago and worked on yesterday belongs in a seven-day list, and the traffic
+    /// half of the same view already answers that way (it includes a session with
+    /// *any* request in the window). Two halves of one list measuring two
+    /// different questions is the kind of disagreement this store does not
+    /// tolerate anywhere else.
+    ///
+    /// It is strictly a widening: `ended_at >= started_at` always, so every
+    /// session the old bound included is still included.
     pub fn list_sessions(
         &self,
         agent: Option<&str>,
@@ -177,7 +187,7 @@ impl Store {
             "SELECT {SESSION_COLUMNS} FROM sessions
              WHERE (?1 IS NULL OR agent = ?1)
                AND (?2 IS NULL OR project = ?2)
-               AND (?3 IS NULL OR started_at >= ?3)
+               AND (?3 IS NULL OR ended_at >= ?3)
              ORDER BY started_at DESC, session_id ASC"
         ))?;
         let rows = stmt
@@ -363,7 +373,11 @@ fn history_scan_key(agent: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A session with its own span: `started` and `ended` are separate because
+    /// the window filter reads the **end**, and a fixture that made them equal
+    /// could not tell the two apart.
     fn session(key: &str, project: &str, started: &str) -> ImportedSession {
+        let ended = started.replace("T00:00:00", "T06:00:00");
         ImportedSession {
             import_key: key.into(),
             agent: "claude".into(),
@@ -371,7 +385,7 @@ mod tests {
             title: None,
             session_id: format!("s-{key}"),
             started_at: started.into(),
-            ended_at: started.into(),
+            ended_at: ended,
             turns: 3,
             input_tokens: 100,
             output_tokens: 10,
@@ -409,13 +423,22 @@ mod tests {
             .list_sessions(None, Some("nothing"), None)
             .unwrap()
             .is_empty());
-        assert_eq!(
-            store
-                .list_sessions(None, None, Some("2026-01-15T00:00:00+00:00"))
-                .unwrap()
-                .len(),
-            1
-        );
+        // `since` bounds the session's **last activity**, not its start. The
+        // bound sits inside `b`'s own span (00:00–06:00): a start-based filter
+        // would drop a conversation that was still being worked on inside the
+        // window, which is the bug this bound exists to not have.
+        let recent = store
+            .list_sessions(None, None, Some("2026-02-01T03:00:00+00:00"))
+            .unwrap();
+        assert_eq!(recent.len(), 1, "{:?}", recent.len());
+        assert_eq!(recent[0].session_id, "s-claude-code:b");
+
+        // And a bound past everything still returns nothing rather than falling
+        // back to "unbounded".
+        assert!(store
+            .list_sessions(None, None, Some("2027-01-01T00:00:00+00:00"))
+            .unwrap()
+            .is_empty());
     }
 
     /// v32: the machine a session was imported from round-trips through the

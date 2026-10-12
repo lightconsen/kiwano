@@ -246,7 +246,7 @@ derived, not about what you wrote.
 ### History
 
 ```
-kiwano history import [--agent claude|codex]… [--dry-run]
+kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
 ```
 
 The agents' own history, read from their session files and imported, so the
@@ -275,6 +275,10 @@ Two things to know before reading the numbers:
   label, not an identity: two machines can share a name, a name can change, and a
   machine that cannot name itself records nothing (shown as `unnamed`). Traffic
   the gateway routed has no importing machine at all.
+
+  `--machine LABEL` states the label instead of asking the system, for the
+  machines whose own answer is useless: a container's hostname is a hex string,
+  and a laptop's can change under it. What you pass is recorded as given.
 
 What came in is listed by `kiwano sessions` (below), beside the traffic the
 gateway itself routed.

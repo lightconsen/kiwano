@@ -26,11 +26,36 @@ pub fn history(cmd: &HistoryCmd, ctx: &mut Ctx) -> Result<(), CliError> {
     // now, where it shows the gateway's traffic beside the files' rows rather
     // than the files' rows alone. See `cmds::sessions`.
     match cmd {
-        HistoryCmd::Import { agent, dry_run } => import(agent, *dry_run, ctx),
+        HistoryCmd::Import {
+            agent,
+            machine,
+            dry_run,
+        } => import(agent, machine.as_deref(), *dry_run, ctx),
     }
 }
 
-fn import(agents: &[String], dry_run: bool, ctx: &mut Ctx) -> Result<(), CliError> {
+/// What to record as the machine this import came from: the name the caller
+/// gave, or what this machine can say about itself.
+///
+/// A given name is held to the same rule the system's answer is (`paths::
+/// machine_name`): whitespace is not a name, so `--machine "  "` falls through
+/// to the hostname rather than recording a blank. Split out from [`import`] so
+/// that rule has somewhere to be asserted — the alternative is a test that
+/// depends on whatever the build machine happens to be called.
+fn machine_label(given: Option<&str>) -> Option<String> {
+    given
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .or_else(kiwano_core::paths::machine_name)
+}
+
+fn import(
+    agents: &[String],
+    machine: Option<&str>,
+    dry_run: bool,
+    ctx: &mut Ctx,
+) -> Result<(), CliError> {
     let wanted: Vec<String> = if agents.is_empty() {
         READABLE.iter().map(|a| (*a).to_string()).collect()
     } else {
@@ -55,7 +80,7 @@ fn import(agents: &[String], dry_run: bool, ctx: &mut Ctx) -> Result<(), CliErro
     // ran on, and `chunks` copies it into every piece, so naming it once here is
     // what stamps the whole import. Best effort — `None` when this machine cannot
     // name itself, which the report shows as "unnamed" rather than a blank.
-    batch.source_machine = kiwano_core::paths::machine_name();
+    batch.source_machine = machine_label(machine);
     // Detail and skips are the client's own account of *this machine* — which
     // roots were looked at, which files answered, which could not be opened —
     // and they are diagnostics, so they go to stderr. Under `--json` stdout has
@@ -96,4 +121,27 @@ fn import(agents: &[String], dry_run: bool, ctx: &mut Ctx) -> Result<(), CliErro
     let text = render_history_import(&total, batch.usage.len(), batch.source_machine.as_deref());
     ctx.out.emit(&total, || text);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::machine_label;
+
+    /// A name the caller states is used **as given** — that is the point of the
+    /// flag — while one that is only whitespace is not a name at all and falls
+    /// through to what the machine says about itself. `None` there is a real
+    /// answer too (`unnamed`), so the fallback cannot be asserted to be `Some`.
+    #[test]
+    fn a_stated_machine_name_wins_and_a_blank_one_is_not_a_name() {
+        assert_eq!(machine_label(Some("buildbox")).as_deref(), Some("buildbox"));
+        assert_eq!(
+            machine_label(Some("  buildbox ")).as_deref(),
+            Some("buildbox")
+        );
+        assert_eq!(
+            machine_label(Some("   ")),
+            kiwano_core::paths::machine_name()
+        );
+        assert_eq!(machine_label(None), kiwano_core::paths::machine_name());
+    }
 }

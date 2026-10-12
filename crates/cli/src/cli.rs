@@ -801,6 +801,12 @@ pub enum HistoryCmd {
         #[arg(long = "agent", value_name = "AGENT")]
         agent: Vec<String>,
 
+        /// Name this machine in the imported rows, instead of asking the
+        /// system. Use it where the hostname is useless — a container's, or one
+        /// that keeps changing — so the rows say which machine they came from.
+        #[arg(long, value_name = "LABEL")]
+        machine: Option<String>,
+
         /// Read and report, send nothing
         #[arg(long)]
         dry_run: bool,

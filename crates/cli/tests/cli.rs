@@ -2808,10 +2808,13 @@ fn a_sessions_machine_is_the_label_the_import_sent() {
 }
 
 /// The import names the machine its rows are recorded as coming from (v32), so
-/// two laptops importing into one gateway can be told apart. `HOSTNAME` is
-/// pinned for the run — the first place `paths::machine_name` looks — and the
-/// real value put back immediately, because the tests here share the process
-/// environment.
+/// two laptops importing into one gateway can be told apart.
+///
+/// The name is stated on the command line rather than pinned through `HOSTNAME`.
+/// The tests here run in parallel in one process and the CLI runs in-process, so
+/// mutating that variable would be visible to every other test for as long as it
+/// was set — and the next test to assert `unnamed` would fail depending on when
+/// it happened to run.
 #[test]
 fn history_import_names_the_machine_it_imported_from() {
     let (_dir, db) = temp_db();
@@ -2841,13 +2844,18 @@ fn history_import_names_the_machine_it_imported_from() {
     std::fs::write(dir.join("session.jsonl"), format!("{line}\n")).unwrap();
 
     let home_arg = home.path().display().to_string();
-    let prior = std::env::var_os("HOSTNAME");
-    std::env::set_var("HOSTNAME", "buildbox");
-    let (code, out, err) = run_served(&db, &daemon, &["--home", &home_arg, "history", "import"]);
-    match prior {
-        Some(value) => std::env::set_var("HOSTNAME", value),
-        None => std::env::remove_var("HOSTNAME"),
-    }
+    let (code, out, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "--home",
+            &home_arg,
+            "history",
+            "import",
+            "--machine",
+            "buildbox",
+        ],
+    );
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("from machine buildbox"), "{out}");
 

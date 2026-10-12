@@ -197,7 +197,7 @@ Kiwano 推導出來的建議，不是你寫的東西。
 ### 本機歷史
 
 ```
-kiwano history import [--agent claude|codex]… [--dry-run]
+kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
 ```
 
 Agent 自己的歷史：從它們的會話檔讀出來並匯入，於是一台今天早上才裝 Kiwano 的機器，
@@ -219,6 +219,9 @@ dashboard 上已經有昨天的花費。`import` 讀 Claude Code 與 Codex 的�
   自己的名字（盡力而為，通常是主機名），報告裡也會寫出它。它是標籤，不是身分：兩台機器
   可以同名、名字也可以變，查不到名字的機器就什麼都不記（顯示為 `unnamed`）。閘道路由的
   流量根本沒有匯入機器可言。
+
+  `--machine LABEL` 直接宣告這個標籤，而不是問系統。給那些自己答不出有用名字的機器用:
+  容器的主機名是一串十六進位,筆電的名字也可能中途變掉。你傳什麼就記什麼。
 
 匯入進來的是什麼，由 `kiwano sessions`（見下）列出，和閘道自己路由的流量並排在一起。
 

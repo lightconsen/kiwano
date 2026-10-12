@@ -277,7 +277,6 @@ pub(crate) mod test_support {
         // Through the store's own accessor: the cache is the daemon's table
         // (migration v28), so a fixture that built it by hand was keeping a
         // second copy of the schema — the thing this migration removes
-        // (`migrate.local.md` §10.14).
         store
             .save_hub_models_cache(
                 1,

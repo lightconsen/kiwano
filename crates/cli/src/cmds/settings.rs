@@ -26,7 +26,7 @@ pub fn settings(cmd: &SettingsCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             let patch = settings_patch(keys, patch.as_deref())?;
             // The blob and the gateway-facing mirrors are the daemon's, and it
             // re-reads its own config after the patch — which is what the reload
-            // ping this used to send was for (`migrate.local.md` §10.16).
+            // ping this used to send was for.
             let mut settings = ctx.api.update_settings(&patch)?;
             vm::layer_settings(&ctx.api, &mut settings, &ctx.home, ctx.config_vars())?;
             let text = render_settings(&settings);
@@ -77,7 +77,6 @@ pub fn config(cmd: &ConfigCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             let count = {
                 // The document is the daemon's; the **file** is this side's,
                 // because the path came from this machine's `--out`
-                // (`migrate.local.md` §10.17).
                 let json = ctx.api.export_config(*include_keys)?;
                 share::write_config_file(&path, &json)?;
                 share::provider_count(&json)
@@ -171,7 +170,7 @@ pub fn import(cmd: &ImportCmd, ctx: &mut Ctx) -> Result<(), CliError> {
         ImportCmd::CcSwitch => {
             // The rows, not the paths: those files are in this machine's home
             // and one is a SQLite database, so reading them is the client's
-            // (`migrate.local.md` §10.19). The daemon applies what they say.
+            // The daemon applies what they say.
             let root = ctx.home.join(".cc-switch");
             let (raws, skips, mut detail) = import::read_cc_switch(
                 Some(&root.join("cc-switch.db")),

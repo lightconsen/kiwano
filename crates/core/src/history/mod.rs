@@ -4,10 +4,10 @@
 //! The gateway only knows the traffic that goes *through* it, so a fresh
 //! install's dashboard is empty. The agents' own session files hold what they
 //! spent before Kiwano existed, and a project dimension the gateway can never
-//! observe. The daemon must never touch a user path (`migrate.local.md` §5
-//! #1/#2), so this side — which is already allowed to read this machine's files,
-//! the same way [`crate::import`] reads cc-switch's — parses them and hands the
-//! daemon rows. There is no store, no HTTP and no watermarking here: the daemon
+//! observe. The daemon must never touch a user path (see CONTRIBUTING.md's
+//! architecture rules), so this side — already allowed to read this machine's
+//! files, the same way [`crate::import`] reads cc-switch's — parses them and
+//! hands the daemon rows. There is no store, no HTTP and no watermarking here: the daemon
 //! owns all three.
 //!
 //! The shape mirrors [`crate::import::read_cc_switch`]: rows out, a `detail` line

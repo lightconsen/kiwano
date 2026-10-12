@@ -10,7 +10,7 @@
 //! straight out of it. The daemon cannot depend on `kiwano-core`, so the choice
 //! was to duplicate the parse-and-normalize rules, to introduce a shared crate
 //! for the database layer, or to **assign ownership** — and ownership is what
-//! `migrate.local.md` §9-B decided for the database as a whole.
+//! the database decided once, for the database as a whole.
 //!
 //! So the caches are the daemon's: the tables are created by the daemon's
 //! migrations (v28), and the reads live here. The *writer* is still the client —

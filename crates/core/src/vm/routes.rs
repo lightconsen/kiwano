@@ -3,7 +3,7 @@
 //!
 //! The bodies live in `kiwanod::api::routes` now: the daemon serves this
 //! resource and owns the store it is read from, so a copy here would be the
-//! second one (`migrate.local.md` §10.8). What stays is the *client-facing*
+//! second one. What stays is the *client-facing*
 //! signature — `Result<_, String>`, which is what the app's IPC and the CLI
 //! take — and the wire types, re-exported so `crate::vm::AgentRouteVm` and
 //! friends still resolve.

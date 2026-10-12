@@ -724,8 +724,8 @@ mod tests {
 /// Unset — the default, and every install today — is loopback: the agents on
 /// this machine, and nobody else's. Set it to a private address so agents on
 /// *another* machine can reach the gateway they were taken over by
-/// (`migrate.local.md` §10.30 wanted exactly this and could not have it: the
-/// client composed `http://<the far host>:<port>` while this listener was
+/// (the client used to compose `http://<the far host>:<port>` while this listener
+/// was
 /// bound to `127.0.0.1`, so the address it wrote answered nothing).
 ///
 /// The value is an **IP address, not `host:port`** — unlike its admin-plane
@@ -739,7 +739,7 @@ pub const DATA_ADDR_ENV: &str = "KIWANO_DATA_ADDR";
 /// **Deliberately separate from the admin plane's.** That one is about
 /// credentials; this listener carries the requests and responses themselves —
 /// prompts and completions, in the clear, because there is no TLS
-/// (`migrate.local.md` §13.4). Someone who has decided their admin plane may
+/// Someone who has decided their admin plane may
 /// face the network has not thereby decided that this one may.
 pub const DATA_ALLOW_ANY_ENV: &str = "KIWANO_DATA_ALLOW_ANY";
 

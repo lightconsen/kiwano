@@ -1,8 +1,8 @@
 //! Importing an agent's own history: the rows the client parsed, applied.
 //!
-//! The client reads the files (they are in the user's home, and `migrate.local.md`
-//! §5 #1/#2 puts both halves of that boundary on it: no paths in an API payload,
-//! and the daemon never touches user files). What arrives here is a batch of
+//! The client reads the files (they are in the user's home, and the two
+//! architecture rules that draw this boundary both land on it: no paths in an API
+//! payload, and the daemon never touches user files). What arrives here is a batch of
 //! parsed rows, and this module answers three questions about them.
 //!
 //! **What does it cost?** The files carry tokens, not money. Each row is priced

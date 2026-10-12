@@ -28,7 +28,7 @@ pub fn status(ctx: &mut Ctx) -> Result<i32, CliError> {
         // the two apart, and that much is unchanged.
         //
         // What it no longer does is read the shared database for a fallback
-        // report (`migrate.local.md` §14.1, decision D3). A client that answers
+        // report. A client that answers
         // from a database of its own is answering about a *different* daemon the
         // moment it is pointed at another machine — and a remote one could not
         // open that file at all. It is the same failure class as §10.29's

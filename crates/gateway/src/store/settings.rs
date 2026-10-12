@@ -14,7 +14,7 @@ use std::collections::HashMap;
 /// The daemon's own copy of the user's UTC offset, in minutes east of UTC.
 ///
 /// Split out of the app's `ui` blob because the daemon is what needs it
-/// (`migrate.local.md` §9.2.1): quota period boundaries are the user's days.
+/// Quota period boundaries are the user's days.
 const TZ_OFFSET_KEY: &str = "tz_offset_minutes";
 
 impl Store {
@@ -116,8 +116,8 @@ impl Store {
     /// over at their midnight, not UTC's — so the enforcement side needs it.
     /// Absent means UTC, which is what an older settings blob yields.
     pub fn ui_tz_offset_minutes(&self) -> i64 {
-        // **Its own key first, the `ui` blob second** (`migrate.local.md`
-        // §9.2.1): the offset is moving out of the app's blob because the daemon
+        // **Its own key first, the `ui` blob second**: the offset is moving out
+        // of the app's blob because the daemon
         // is the side that needs it — every quota period boundary is measured in
         // the user's day, not UTC's — and a daemon reading a blob the app owns
         // is the arrangement being retired.
@@ -140,8 +140,8 @@ impl Store {
     }
 
     /// Keep the daemon's own copy of the UTC offset in step with the blob the
-    /// app writes. Called wherever the offset can change (`migrate.local.md`
-    /// §9.2.2's hazard, and the only reason this key exists at all).
+    /// app writes. Called wherever the offset can change — the hazard this key
+    /// exists for.
     pub fn set_ui_tz_offset_minutes(&self, minutes: i64) -> Result<()> {
         self.set_gateway_setting(TZ_OFFSET_KEY, &minutes.to_string())
     }

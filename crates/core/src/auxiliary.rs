@@ -10,7 +10,7 @@
 //! **The Hub caches are no longer here.** They moved to the daemon's schema
 //! (`store::hub`, migration v28) when the sync became the daemon's: the client
 //! was the only writer, so a second set of accessors on this side was a second
-//! path to a table with one owner (`migrate.local.md` §10.14).
+//! path to a table with one owner.
 //!
 //! Extracted from `vm.rs` when the crate was split. `vm` re-exports it as
 //! `vm::Aux`, so `crate::vm::Aux` paths keep resolving.
@@ -89,7 +89,7 @@ impl Aux {
     ///
     /// Named by prefix rather than as "everything the daemon does not use", so a
     /// key it adopts later cannot be swept in by accident: this list is what the
-    /// client owns, and growing it is a decision (`migrate.local.md` §9.4).
+    /// client owns, and growing it is a decision.
     ///
     /// The daemon's keys are deliberately absent — `dlp_finding_acked`,
     /// `pricing_seeded_*`, `hub_catalog_sha`, `alert_sent:*`,
@@ -117,7 +117,7 @@ impl Aux {
     }
 
     /// Bring this client's own rows across from the database it used to share
-    /// with the daemon (`migrate.local.md` §9.5 step 2).
+    /// with the daemon.
     ///
     /// Runs once. The copy is `INSERT OR IGNORE`, so a second pass would be
     /// harmless anyway — but the marker is what makes "has this install been
@@ -433,7 +433,7 @@ impl Aux {
     /// The install directory a user declared for a built-in agent the detector
     /// could not find on its own, keyed by agent id.
     ///
-    /// Moved here from `kiwanod::store::Store` (`migrate.local.md` §9.5 step 2).
+    /// Moved here from `kiwanod::store::Store`.
     /// It lived there by **layering** — the accessor's code sits in the daemon's
     /// crate — while every runtime caller was a client, which is the distinction
     /// §9.3 had to be written to record. A declaration is a fact about this
@@ -515,7 +515,7 @@ mod tests {
     use std::path::Path;
 
     /// The declared directories round-trip, and only their own bad rows drop
-    /// out. Moved here with the accessors (`migrate.local.md` §9.5 step 2): a
+    /// out. Moved here with the accessors: a
     /// declaration is a fact about *this machine*, so it lives in this machine's
     /// file.
     #[test]
@@ -619,8 +619,8 @@ mod tests {
     /// An upgraded install ends up with the rows a fresh one would have had —
     /// and with none of the daemon's.
     ///
-    /// The rehearsal `migrate.local.md` §3.3b asks for, in the shape §10's
-    /// fourth test class describes: the two arrival paths have to converge. The
+    /// The rehearsal the fourth test class asks for: the two arrival paths have
+    /// to converge. The
     /// second half is the one that matters more — a copy that swept in
     /// `dlp_finding_acked` would look like success and be a second source for a
     /// row the daemon is the authority on.

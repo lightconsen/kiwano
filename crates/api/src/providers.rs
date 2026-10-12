@@ -161,8 +161,8 @@ pub struct ProviderEndpointVm {
 
 // ── The add/edit form's request body ──
 //
-// Moved here when the daemon took over `add_provider` (`migrate.local.md`
-// §10.13). They derive **both** directions, which they did not before: as
+// Moved here when the daemon took over `add_provider`. They derive **both**
+// directions, which they did not before: as
 // request types the app reads them from the webview and then *sends* them, and
 // a type that can only be deserialized cannot be written by the side that has
 // one. That was a recorded finding of the contract skeleton; this closes it.
@@ -292,7 +292,7 @@ pub struct NewProviderInput {
 // That is what lets a client without a form edit a provider at all. The CLI has
 // none: it read the row back, rebuilt a whole input from it, and sent that, so
 // editing needed a database read it was not otherwise entitled to
-// (`migrate.local.md` §14.1). A client with a form has the values in hand; one
+// A client with a form has the values in hand; one
 // without should be able to say only what changed.
 
 /// The limit fields an edit may change — each absent one keeps what is stored.
@@ -411,7 +411,6 @@ pub struct ProviderPatch {
 /// (plan ceilings or a spend ceiling) and whether the two plan-window flags are
 /// legal at all. `billing` is the whole of what those need. The rest of the row
 /// stays on the daemon, which is where the patch leaves it
-/// (`migrate.local.md` §10.38).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderRefVm {
     pub id: String,
@@ -470,7 +469,7 @@ pub struct ProviderPriceInput {
 /// Result of a Hub sync, as the Settings screen shows it.
 ///
 /// Moved here from `kiwano-core` when the daemon took over the sync
-/// (`migrate.local.md` §10.14): the daemon produces it, so it is a wire type
+/// The daemon produces it, so it is a wire type
 /// rather than a view model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncReportVm {

@@ -1,11 +1,11 @@
 //! Usage alerts: the Dashboard's warnings about spend, plan windows, anomalies
 //! and agent ceilings.
 //!
-//! Moved from `kiwano_core::vm::alerts` (`migrate.local.md` §10.21). It reads
+//! Moved from `kiwano_core::vm::alerts`. It reads
 //! nothing but the daemon's tables, so it moved whole — with one classification
 //! changed: the **dedup markers** (`alert_sent:*`) were the app's because the app
-//! was what produced the alerts. The daemon produces them now, so it remembers
-//! them, and `migrate.local.md` §9.1 is corrected to match.
+//! was what produced the alerts. The daemon produces them now, so it is what
+//! remembers them.
 
 use crate::store::time::{rfc3339_from_unix, unix_now};
 use crate::store::{Billing, Provider, Store};
@@ -358,8 +358,8 @@ pub fn check_usage_alerts_at(
 /// dedup, so a read-only caller cannot eat the alert the app is about to raise.
 fn first_notice(store: &Store, key: &str, identity: &str, mark: bool) -> Result<bool, ApiError> {
     // **The daemon's KV, not the app's.** These markers were the app's because
-    // the app was what produced the alerts (`migrate.local.md` §9.1 listed them
-    // as local). It is not any more: the daemon decides what is worth saying, so
+    // the app was what produced the alerts, so the markers were the app's. It is
+    // not any more: the daemon decides what is worth saying, so
     // it is also what remembers having said it — a marker on the client would
     // re-raise every alert the moment the user opened the app on their other
     // machine.

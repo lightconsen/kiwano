@@ -5,7 +5,7 @@
 //! fresh install's dashboard is empty and a request row can name no project.
 //! The agents themselves kept those sessions — months of them, before Kiwano
 //! existed — under the user's own home, and the daemon must never touch a user
-//! path (`migrate.local.md` §5 #1/#2). The *client* reads those files and sends
+//! path. The *client* reads those files and sends
 //! parsed rows; these are the rows.
 //!
 //! The alternative considered and rejected — paths in, the daemon reads the

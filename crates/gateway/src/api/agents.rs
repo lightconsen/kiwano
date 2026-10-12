@@ -8,9 +8,8 @@
 //! # The id is the operation's identity
 //!
 //! An agent id is minted with six random hex characters, so nothing in the
-//! request body identifies a create on its own — which is what
-//! `migrate.local.md` §6.1 flagged as the one case needing more than a
-//! value-based rule. The resolution is the one that section already chose for
+//! request body identifies a create on its own — the one case a value-based rule
+//! cannot settle. The resolution is the one already chosen for
 //! providers: **the id comes from the client**, so a replayed request carries
 //! the id it minted the first time and lands on the row that is already there.
 //! `create_custom_agent` is the upsert that makes that true, and the key is
@@ -166,8 +165,8 @@ pub fn update_custom_agent(
 /// history and stay — the same line the provider deletion draws.
 ///
 /// A second delete is refused rather than treated as success: the caller has to
-/// be able to tell "it is gone" from "it never was" (`migrate.local.md` §6.1
-/// accepts that a retried delete answers differently, as long as the state
+/// be able to tell "it is gone" from "it never was". A retried delete answering
+/// differently is acceptable as long as the state
 /// converges — and it does, because the first one did the work).
 pub fn remove_custom_agent(store: &Store, id: &str) -> Result<(), ApiError> {
     if store
@@ -212,7 +211,7 @@ pub fn list_agents(store: &Store) -> Result<Vec<(String, String)>, ApiError> {
 /// agent, and it is deleted with it, so it cannot outlive anything.
 ///
 /// Moved from `kiwano_core::vm::settings` with the rest of the read
-/// (`migrate.local.md` §10.44): it is the daemon's rows, and a client that
+/// It is the daemon's rows, and a client that
 /// assembles the settings screen needs them to be told.
 pub fn custom_agents_with_keys(store: &Store) -> Result<Vec<CustomAgentVm>, ApiError> {
     let keys = store.list_client_keys().map_err(ApiError::failed)?;

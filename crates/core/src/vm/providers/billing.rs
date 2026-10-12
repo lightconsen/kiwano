@@ -10,7 +10,7 @@
 // which is the whole point of keeping it: the vocabulary is pinned, not copied.
 // The implementation is the daemon's (`kiwanod::api::views`), which produces
 // this field now — a second copy is how two vocabularies come to disagree
-// (`migrate.local.md` §10.7). Re-exported so the paths here are unchanged, and
+// Re-exported so the paths here are unchanged, and
 // the round-trip test below still pins the vocabulary by calling it.
 pub use kiwanod::api::views::billing_to_ui;
 

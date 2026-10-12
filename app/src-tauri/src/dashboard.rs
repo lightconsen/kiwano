@@ -12,6 +12,6 @@ pub fn get_dashboard(
 ) -> Result<vm::DashboardVm, String> {
     // Served by the daemon: every read this screen makes is its — the usage
     // table, the price cache, the settings blob — and none of them is a fact
-    // about this machine (`migrate.local.md` §10.21).
+    // about this machine.
     DaemonApi::connect().dashboard(&window, provider_id.as_deref(), agent.as_deref())
 }

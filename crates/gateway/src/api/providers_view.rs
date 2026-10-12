@@ -1,6 +1,6 @@
 //! The provider screen: the rows the Apps list is built from.
 //!
-//! Moved here from `kiwano_core::vm::providers` (`migrate.local.md` §10.21). The
+//! Moved here from `kiwano_core::vm::providers`. The
 //! split is by **kind**, and it is §5's two constraints deciding it:
 //!
 //! - the daemon assembles the view, because the client cannot open its database
@@ -309,7 +309,6 @@ pub fn build_provider_vms(store: &Store, carrying: &[String]) -> Result<Vec<Prov
 /// which meant it needed the custom agents and the bindings — two shared reads —
 /// to answer a question whose only *machine* half was the config files. Doing it
 /// this way round leaves the client with the half it can actually see
-/// (`migrate.local.md` §10.44).
 fn live_agents(store: &Store, carrying: &[String]) -> Result<Vec<String>, ApiError> {
     let custom: Vec<String> = store
         .list_custom_agents()

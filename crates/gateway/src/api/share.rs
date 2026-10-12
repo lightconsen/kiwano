@@ -1,7 +1,7 @@
 //! Config share: export the whole configuration as JSON, and import one back.
 //!
 //! Moved here from `kiwano_core::share` when the daemon took over the two
-//! library halves (`migrate.local.md` §10.17). The split is the one §7 batch 3
+//! library halves. The split is the one §7 batch 3
 //! describes for this family: **the file is the client's, the rows are the
 //! daemon's** — the app reads the path the user picked and writes the bytes it
 //! gets back, and everything that touches the store happens here.

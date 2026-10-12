@@ -38,7 +38,7 @@ mkdir -p "$(dirname "$KIWANO_DEV_DB")"
 #
 # The daemon is identified by the **socket beside this database**, not by name or
 # command line: its database path is in its environment, so `pgrep -f` cannot see
-# it (`migrate.local.md` §14). Killing by socket means this only ever stops the
+# it. Killing by socket means this only ever stops the
 # daemon serving *this* stack — a second dev instance on the same port is still
 # refused below, by the port check that follows.
 DEV_SOCKET="$(dirname "$KIWANO_DEV_DB")/admin.sock"

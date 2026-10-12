@@ -2,7 +2,7 @@
 //! stored.
 //!
 //! Moved here from `kiwano_core::vm::limits` so the daemon's `add_provider` can
-//! hold a form to the same rules the client does (`migrate.local.md` §10.13).
+//! hold a form to the same rules the client does.
 //! These return `String` on purpose: they are shared with paths that are still
 //! the client's, and the daemon's `api::providers_add` maps them into
 //! [`ApiError`] at its own boundary.

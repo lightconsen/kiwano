@@ -52,6 +52,6 @@ pub fn rfc3339(epoch_secs: i64) -> String {
 //    runtime state (circuit breakers, roundrobin sticky sessions) ──
 
 // The local-day arithmetic and the window helpers moved to `kiwanod::store::time`
-// with the provider view (`migrate.local.md` §10.21): the aggregation is their
+// with the provider view: the aggregation is their
 // only caller and the aggregation is the daemon's now. Re-exported so the paths
 // here are unchanged.

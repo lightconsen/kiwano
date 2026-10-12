@@ -2,7 +2,7 @@
 //! daemon.
 //!
 //! Moved from `kiwano_core::vm::dashboard` and `kiwano_core::pricing`
-//! (`migrate.local.md` §10.21). None of these needs a machine fact: they are
+//! None of these needs a machine fact: they are
 //! reads of the usage table, the price cache and the settings blob, all of which
 //! the daemon owns — which is why they move whole, with no input from the client
 //! beyond the window the screen is showing.
@@ -721,7 +721,7 @@ pub struct ProviderUsageVm {
 /// Everything a client needs in **one** answer, because every part of it is the
 /// same aggregate over the same rows: `kiwano usage` renders all four, `kiwano
 /// mcp` reads two of them, and a report requested in pieces is the same query
-/// run three times (`migrate.local.md` §10.45).
+/// run three times.
 ///
 /// `since` comes back as the daemon resolved it: the window is the daemon's
 /// clock's to draw, the same way the dashboard's is.

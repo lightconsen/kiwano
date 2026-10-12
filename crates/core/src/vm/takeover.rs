@@ -16,7 +16,6 @@ pub fn set_agent_takeover(
     // `gateway` is where an agent on this machine reaches the data plane —
     // `http://127.0.0.1:8317` locally, or another machine's address. Composed
     // by the caller, which is the side that knows where its daemon is
-    // (`migrate.local.md` §10.30).
     gateway: &str,
     home: &std::path::Path,
     vars: &ShellVars,
@@ -97,7 +96,7 @@ pub fn set_agent_takeover(
 /// It used to be a marker beside a `store` parameter the function took anyway,
 /// so the caller always held a database handle whether or not the branch it took
 /// used one. That is what it took for the CLI to stop opening the shared
-/// database here (`migrate.local.md` §10.43): the handle is now *inside* the
+/// database here: the handle is now *inside* the
 /// variant, and a caller that goes over the wire cannot name one.
 #[derive(Clone, Copy)]
 pub enum StateHalf<'a> {
@@ -266,7 +265,7 @@ fn undo_state(aux: &Aux, agent: &str, key: &str, state_half: StateHalf<'_>) {
     // failed, and a full teardown would delete a route the user had before
     // Kiwano was involved. `key` names what phase one registered — kept in the
     // signature so the intent survives the move to the wire, where the daemon
-    // resolves it by agent (`migrate.local.md` §10.43).
+    // resolves it by agent.
     let _ = key;
     let _ = state_half.unregister_key(agent);
     let _ = aux.clear_takeover_op(agent);

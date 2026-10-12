@@ -172,7 +172,6 @@ pub fn db_path(explicit: Option<&Path>) -> DbPath {
 }
 
 /// Environment variable naming a daemon on **another machine**
-/// (`migrate.local.md` §13.5).
 ///
 /// Unset — the default, and every install today — means the client resolves the
 /// local plane beside its own database, exactly as before. Set, the client dials
@@ -188,7 +187,7 @@ pub const DAEMON_ADDR_ENV: &str = "KIWANO_DAEMON_ADDR";
 ///
 /// Needed because the usual source is gone: the token lives in the row the
 /// daemon minted it into, and on a remote daemon that row is on the other
-/// machine (`migrate.local.md` §9.2.1). Where a *local* client reads it, a
+/// machine. Where a *local* client reads it, a
 /// remote one has to be told — and this is the smallest honest way to be told.
 pub const DAEMON_TOKEN_ENV: &str = "KIWANO_DAEMON_TOKEN";
 
@@ -275,7 +274,7 @@ pub fn admin_token_for(db: &Path) -> Option<String> {
         return None;
     }
     let store = Store::open(db).ok()?;
-    // **New place first, old place second** (`migrate.local.md` §9.2.1): the
+    // **New place first, old place second**: the
     // token is moving from the app's KV to the daemon's, and the two sides are
     // upgraded independently, so a client has to read whichever row its daemon
     // wrote. The fallback is what makes an old daemon still work; it goes when
@@ -307,7 +306,7 @@ pub fn admin_token() -> Option<String> {
         return Some(token.clone());
     }
     // A named remote daemon is the one case where the database row is not the
-    // answer — it is on the other machine (`migrate.local.md` §13.5). Read the
+    // answer — it is on the other machine. Read the
     // environment first, and only then the local row.
     let token = admin_token_resolved(&db_path(None).path)?;
     let _ = CACHED.set(token.clone());
@@ -372,7 +371,7 @@ fn token_header(token: Option<&str>) -> String {
     }
 }
 
-/// The API generation this client speaks (`migrate.local.md` §11.2).
+/// The API generation this client speaks.
 ///
 /// Sent on every request, including the ones with no token: a daemon that
 /// cannot answer this generation should say so **before** anything else, and a
@@ -502,7 +501,7 @@ fn endpoint_body(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
 
 /// One authorized request from the daemon's resource API, parsed.
 ///
-/// The client half of `migrate.local.md` §7's batch 1: the app and the CLI ask
+/// The client half of the API: the app and the CLI ask
 /// the daemon instead of reading the store, so one process owns the state.
 /// Everything the commands need is here — the transport, the token, the error
 /// convention — and a resource function is a verb, a path and a type.
@@ -569,7 +568,6 @@ pub fn admin_get_json<T: serde::de::DeserializeOwned>(
 /// Separate from the read rather than a mode on it, because the two differ in
 /// what a caller has to think about: a GET can be retried by anyone, a POST has
 /// to be idempotent at the far end or the retry is a second row
-/// (`migrate.local.md` §6.1).
 pub fn admin_post_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
     endpoint: &AdminEndpoint,
     token: Option<&str>,
@@ -647,7 +645,7 @@ fn endpoint_http(endpoint: &AdminEndpoint, request: &str) -> Option<String> {
 /// There is no error for the case this catches: a daemon started by a service
 /// manager resolves `$HOME/.kiwano/kiwano.db` against *its* `$HOME`, so it can
 /// come up healthy, answer `/status`, route requests, and be writing to a
-/// database nobody is looking at (`migrate.local.md` §13.1). The identity in
+/// database nobody is looking at. The identity in
 /// `/status` is the one thing a client can compare from the outside.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatabaseAgreement {
@@ -848,7 +846,7 @@ mod tests {
     /// when the app has none (a fresh install, before the gateway has written
     /// its row), rather than dropping the header line and the blank line with it.
     /// Pointing a client at another machine's daemon, which is what makes the
-    /// TCP plane reachable from the app at all (`migrate.local.md` §13.5).
+    /// TCP plane reachable from the app at all.
     ///
     /// One test rather than four because the process environment is shared by
     /// every test in this binary: the guards would otherwise race each other,

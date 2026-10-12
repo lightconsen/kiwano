@@ -5,7 +5,7 @@
 //! Every write route re-reads the route table itself (`after_write`), so a
 //! mutation does not end with a ping: the process that wrote a binding is the
 //! process that routes by it. That is why there is no `/reload` any more —
-//! nothing was left to call it (`migrate.local.md` §10.20, §10.46). `GET
+//! nothing was left to call it. `GET
 //! /status` powers the first-screen gateway state chip and sidecar re-connect,
 //! and `GET /events` streams a tick per recorded request, which is what lets a
 //! screen re-read its numbers instead of polling for them.
@@ -231,7 +231,6 @@ async fn require_admin_token(
     // The generation check sits in the same layer as the token, and before the
     // route is reached: a request this daemon cannot understand should be told
     // so rather than answered by a handler that has already parsed it
-    // (`migrate.local.md` §11.2).
     let wanted = kiwano_api::version::requested(
         headers
             .get(kiwano_api::version::HEADER)
@@ -368,8 +367,8 @@ pub fn ensure_admin_token(store: &Store) -> crate::error::Result<String> {
         return Ok(existing);
     }
     let token = uuid::Uuid::new_v4().simple().to_string();
-    // **Written to both places, and that is not redundancy** (`migrate.local.md`
-    // §9.2.1): the token is the one credential the app and the daemon share, and
+    // **Written to both places, and that is not redundancy**: the token is the
+    // one credential the app and the daemon share, and
     // the two are upgraded independently. An app from before this change reads
     // only the old row, a later one reads the new row first, and both have to
     // work against whichever daemon is running. The double write lasts until no
@@ -497,13 +496,12 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         // part on purpose: it is where agents connect, not a secret the way the
         // provider list is. A client on another machine needs it to point an
         // agent here — it knows the host, having dialled it, and only the daemon
-        // knows the port (`migrate.local.md` §10.30).
+        // knows the port.
         "data_port": state.data_addr().port(),
         // Both halves of the URL an agent should be pointed at. The host is
         // reported rather than assumed: a client composes it from its own idea
         // of where the daemon is, and if the data plane is bound to another
-        // interface that guess writes an address nothing answers on — which is
-        // what `migrate.local.md` §10.30's fix shipped with.
+        // interface that guess writes an address nothing answers on.
         "data_host": state.data_addr().ip().to_string(),
         "api": {
             "min": kiwano_api::version::MIN_SUPPORTED,
@@ -576,21 +574,18 @@ async fn status(State(state): State<Arc<GatewayState>>, headers: HeaderMap) -> R
         "version": state.version,
         "uptime_secs": state.started_at.elapsed().as_secs(),
         // Which database this process opened. A client that has its own open
-        // compares the two — the only way to notice the split described in
-        // `migrate.local.md` §13.1 from the outside.
+        // compares the two — the only way to notice the split from the outside.
         "install_id": state.install_id,
         // Here as well as in the liveness payload, because **this** is the one
         // a client that has a token receives — and a client composing a
         // data-plane URL always has one. Putting it only in the liveness answer
-        // was a mistake worth naming: the endpoint looked right to a bare
-        // `curl` and was invisible to every real caller (`migrate.local.md`
-        // §10.30).
+        // was a mistake worth naming: the endpoint looked right to a bare `curl`
+        // and was invisible to every real caller.
         "data_port": state.data_addr().port(),
         // Both halves of the URL an agent should be pointed at. The host is
         // reported rather than assumed: a client composes it from its own idea
         // of where the daemon is, and if the data plane is bound to another
-        // interface that guess writes an address nothing answers on — which is
-        // what `migrate.local.md` §10.30's fix shipped with.
+        // interface that guess writes an address nothing answers on.
         "data_host": state.data_addr().ip().to_string(),
         "providers": metrics.providers,
         "bindings": metrics.bindings,
@@ -645,7 +640,7 @@ fn resource_error(err: kiwano_api::error::ApiError) -> Response {
 /// Idempotent on the key's value, and that is the store's decision rather than
 /// this handler's, so the `vm::` path agrees with it. A retry therefore answers
 /// with the row that is already there rather than a second one, which is what
-/// lets a client retry a write at all (`migrate.local.md` §6.1).
+/// lets a client retry a write at all.
 #[derive(serde::Deserialize)]
 struct AddKeyBody {
     api_key: String,
@@ -690,7 +685,7 @@ async fn delete_provider_key(
     }
 }
 
-// ── Agent routes and bindings (`migrate.local.md` §7 batch 1) ──
+// ── Agent routes and bindings ──
 
 /// Re-read the route table after a write, then answer.
 ///
@@ -953,7 +948,7 @@ async fn apply_agent_route_route(
     after_write(&state, result)
 }
 
-// ── User-defined agents (`migrate.local.md` §7 batch 1) ──
+// ── User-defined agents ──
 
 /// The body of a create. **The id is the caller's**: it is minted client-side
 /// (`kiwano_api::ids::mint_agent_id`) and is the identity of the operation, so a
@@ -1024,7 +1019,7 @@ async fn remove_custom_agent_route(
     after_write(&state, result)
 }
 
-// ── Provider writes (`migrate.local.md` §7 batch 1) ──
+// ── Provider writes ──
 
 #[derive(serde::Deserialize)]
 struct EnabledBody {
@@ -1063,7 +1058,7 @@ async fn delete_provider_route(
     }
 }
 
-// ── Request logs (`migrate.local.md` §7 batch 1) ──
+// ── Request logs ──
 
 /// The list's query string. Every filter is optional, and an absent one means
 /// "no filter" — which is why the client omits it rather than sending an empty
@@ -1167,7 +1162,7 @@ async fn list_model_prices_route(State(state): State<Arc<GatewayState>>) -> Resp
 ///
 /// Read out of the daemon's own `hub_cache` (`store::hub`) — the table became
 /// the daemon's when this endpoint was written, because the alternative was a
-/// second copy of the parse-and-normalize rules (`migrate.local.md` §10.12).
+/// second copy of the parse-and-normalize rules.
 async fn list_catalog_route(State(state): State<Arc<GatewayState>>) -> Response {
     Json(crate::api::catalog::load_catalog(&state.store)).into_response()
 }
@@ -1176,7 +1171,7 @@ async fn list_catalog_route(State(state): State<Arc<GatewayState>>) -> Response 
 /// (`kiwano_api::ids::mint_provider_id`): nothing else in the request identifies
 /// the operation — the name is a label, not an id — and an id the daemon has
 /// already seen *is* this operation's result, so a retried add answers with the
-/// provider that exists rather than a second one (`migrate.local.md` §6.1).
+/// provider that exists rather than a second one.
 #[derive(serde::Deserialize)]
 struct AddProviderBody {
     id: String,
@@ -1387,7 +1382,7 @@ async fn update_settings_route(
     }
 }
 
-// ── Config share and the log export (`migrate.local.md` §10.17) ──
+// ── Config share and the log export ──
 //
 // The file half of each stays on the client: it writes the path the user picked
 // in a save dialog, and reads one back for an import. What is here is the half
@@ -1413,7 +1408,7 @@ async fn export_config_route(
         // The document as a **string field**, not as the body: a client that
         // parses JSON responses reads an object here, and a bare document is
         // whatever shape the document happens to have. Same reason
-        // `/api/logs/export` wraps its CSV (`migrate.local.md` §10.39).
+        // `/api/logs/export` wraps its CSV.
         Ok(json) => Json(json!({ "config": json })).into_response(),
         Err(e) => resource_error(e),
     }
@@ -1424,7 +1419,7 @@ async fn export_config_route(
 /// the backup turns out to be unusable.
 ///
 /// The rebuild half is why this cannot be the client's own read
-/// (`migrate.local.md` §10.43): it needs the provider's **credential**, which is
+/// It needs the provider's **credential**, which is
 /// in the daemon's row and which no other endpoint hands out.
 async fn takeover_state_read_route(
     State(state): State<Arc<GatewayState>>,
@@ -1557,7 +1552,6 @@ struct ExportRowsQuery {
 /// sends neither, so every export was answered with a 400 (the rejection is
 /// axum's, and says nothing about which field). It went unnoticed until the CLI
 /// moved onto the same endpoint and its own export test went red
-/// (`migrate.local.md` §10.34).
 #[derive(serde::Deserialize)]
 struct ExportQuery {
     #[serde(default)]
@@ -1607,7 +1601,6 @@ async fn export_logs_route(
 /// Not the add's shape. `PATCH`, because that is what it now means — the fields
 /// present are the change, and an absent one is left alone, which is the whole
 /// difference from a `PUT` whose body is the resulting state
-/// (`migrate.local.md` §10.38).
 #[derive(serde::Deserialize)]
 struct UpdateProviderBody {
     #[serde(flatten)]
@@ -1616,8 +1609,8 @@ struct UpdateProviderBody {
 
 /// `PATCH /api/providers/{id}` — apply an edit's changed fields.
 ///
-/// The **write** is here and the **view** is the client's (`migrate.local.md`
-/// §5's fifth constraint): the daemon updates the row and the bindings, and the
+/// The **write** is here and the **view** is the client's (the fifth architecture
+/// rule): the daemon updates the row and the bindings, and the
 /// caller assembles the row it shows, because that assembly reads *this
 /// machine* — which agents actually route through the gateway.
 async fn update_provider_route(
@@ -1677,7 +1670,7 @@ async fn limit_currencies_route(State(state): State<Arc<GatewayState>>) -> Respo
 /// it is billed.
 ///
 /// The narrow read a flag-driven client needs and cannot derive
-/// (`migrate.local.md` §10.38). It is not the row: the edit that follows says
+/// It is not the row: the edit that follows says
 /// only what it changes, and the daemon applies it to a row it never hands out.
 async fn provider_ref_route(
     State(state): State<Arc<GatewayState>>,
@@ -1693,8 +1686,8 @@ async fn provider_ref_route(
 /// cc-switch's files.
 ///
 /// The rows, not the paths: those files are in the user's home and one of them
-/// is a SQLite database, so reading them is the client's (`migrate.local.md`
-/// §10.19). The split falls where the reading stops.
+/// is a SQLite database, so reading them is the client's. The split falls where
+/// the reading stops.
 /// `GET /api/sessions` — every session this machine knows, newest first, from
 /// both the gateway's traffic and the agent files the import wrote.
 ///
@@ -1901,7 +1894,7 @@ async fn provider_view_route(
     }
 }
 
-// ── The Dashboard, the footer and the currency picker (`migrate.local.md` §10.21) ──
+// ── The Dashboard, the footer and the currency picker ──
 //
 // Three screens, three reads, and none of them a machine fact: the usage table,
 // the price cache and the settings blob are all the daemon's. They moved whole,
@@ -2201,8 +2194,8 @@ mod tests {
     /// out from under a GUI that is holding the old one.
     /// The token's move, in the four combinations that can actually happen.
     ///
-    /// `migrate.local.md` §9.2.1 moves it from the app's KV to the daemon's, and
-    /// the two sides are upgraded independently — so "which row does this build
+    /// It lives in the daemon's table now rather than the app's KV, and the two
+    /// sides are upgraded independently — so "which row does this build
     /// read" is not a detail, it is the difference between working and being
     /// locked out of one's own gateway. The fallback is what makes the middle
     /// two cases work, and it is why `ensure_admin_token` copies a token it
@@ -2249,7 +2242,7 @@ mod tests {
     ///
     /// A client on another machine needs it to point an agent here: it knows the
     /// host — it dialled it — and only the daemon knows the port
-    /// (`migrate.local.md` §10.30). Unauthenticated on purpose, and that is not
+    /// Unauthenticated on purpose, and that is not
     /// a lapse: agents connect to this address, so it is not a secret the way
     /// the provider list is. What the token protects is who may *read and
     /// change* the configuration, not where traffic goes.
@@ -2310,7 +2303,7 @@ mod tests {
         assert!(!token_matches("", "abcdef"));
     }
 
-    // ── the resource API (migrate.local.md §7 batch 1) ──────────────────
+    // ── the resource API ────────────────────────────────────────────────
 
     /// The daemon serves the key pool the way the app used to build it, and
     /// **the plaintext never crosses the socket** — the assertion that matters,
@@ -2392,7 +2385,7 @@ mod tests {
     }
 
     /// Adding the same key twice is one row, and the second answer is the same
-    /// row — the daemon's half of `migrate.local.md` §6.1. Asserted through the
+    /// row — the daemon's half of the idempotency rule. Asserted through the
     /// endpoint rather than the store, because it is the *endpoint* a client
     /// retries.
     #[tokio::test]
@@ -2445,7 +2438,7 @@ mod tests {
     /// This is the test the first version of these endpoints could not have
     /// passed honestly: it had no kind, so it re-queried the store to decide
     /// between 400 and 404, which is a second place for the answer to live
-    /// (`migrate.local.md` §10.8). The `error` strings are asserted at their
+    /// The `error` strings are asserted at their
     /// endpoint because they are asserted at the `vm::` end too — the contract
     /// fixtures freeze them, and two assertions that have to agree is what a
     /// move of this kind is checked by.
@@ -3040,7 +3033,7 @@ mod tests {
     /// `page_size` are required, so *every* export came back as the extractor's
     /// 400 rather than as CSV — with filters or without. Nothing failed, because
     /// no test called the route; the CLI's own export test caught it the moment
-    /// the CLI moved onto the same endpoint (`migrate.local.md` §10.34).
+    /// the CLI moved onto the same endpoint.
     #[tokio::test]
     async fn the_export_takes_filters_without_paging() {
         let dir = tempfile::tempdir().unwrap();

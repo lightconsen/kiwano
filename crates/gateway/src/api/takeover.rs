@@ -1,7 +1,7 @@
 //! The store half of a takeover: the provider imported from the agent's own
 //! credentials, and the placeholder key the agent will carry.
 //!
-//! Moved here from `kiwano_core::vm::takeover` (`migrate.local.md` §10.20). The
+//! Moved here from `kiwano_core::vm::takeover`. The
 //! **file** half — rewriting the agent's config — stays on the client, and it
 //! has to: §5's first constraint forbids paths in this interface, and those
 //! files are the user's own. What travels is the credential the client read out
@@ -277,7 +277,7 @@ mod tests {
 
     /// The read answers both questions a client has, and the rebuild half is the
     /// one it could not answer for itself: it carries the provider's
-    /// **credential**, which lives in this row (`migrate.local.md` §10.43).
+    /// **credential**, which lives in this row.
     #[test]
     fn the_state_read_carries_the_key_and_the_route_to_fall_back_to() {
         let store = taken_over();
@@ -356,7 +356,7 @@ mod tests {
 ///
 /// Moved here from `kiwano_core::vm::takeover` with the rest of the store half:
 /// the key it needs is in the daemon's `providers` row, and a client on another
-/// machine has no way to read it (`migrate.local.md` §10.43).
+/// machine has no way to read it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TakeoverRebuildVm {
     pub base_url: String,

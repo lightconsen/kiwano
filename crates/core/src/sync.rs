@@ -1,7 +1,7 @@
 //! Hub catalog sync — served by the daemon now.
 //!
 //! The protocol, the gate and the caches moved to `kiwanod::api::sync` when the
-//! daemon took over the sync (`migrate.local.md` §10.14): it is the writer of
+//! daemon took over the sync: it is the writer of
 //! the `hub_cache` and `hub_models_cache` tables, which are the daemon's.
 //!
 //! What stays here is the **client's half of the same behaviour**, and the tests

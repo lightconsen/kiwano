@@ -29,7 +29,7 @@ pub fn rfc3339_from_unix(secs: i64) -> String {
 // ── Local-day arithmetic and the "in use" window helpers ──
 //
 // Moved here from `kiwano_core::vm::time` with the provider view
-// (`migrate.local.md` §10.21): every caller of these is the aggregation, and the
+// Every caller of these is the aggregation, and the
 // aggregation is the daemon's now. They read no store and no setting — the
 // offset is passed in — which is what let them move without dragging anything
 // along.

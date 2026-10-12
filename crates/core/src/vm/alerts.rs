@@ -1,6 +1,6 @@
 //! Usage alerts — produced by the daemon.
 //!
-//! Moved to `kiwanod::api::alerts` (`migrate.local.md` §10.21): it reads nothing
+//! Moved to `kiwanod::api::alerts`: it reads nothing
 //! but the daemon's tables. One classification changed with it — the dedup
 //! markers (`alert_sent:*`) were the app's, because the app was what produced the
 //! alerts; the daemon produces them now, so it remembers them (§9.1 corrected).

@@ -1,6 +1,6 @@
 //! The Dashboard — assembled by the daemon.
 //!
-//! Moved to `kiwanod::api::dashboard` (`migrate.local.md` §10.21): every read it
+//! Moved to `kiwanod::api::dashboard`: every read it
 //! makes is the daemon's — the usage table, the price cache, the settings blob —
 //! and none of them is a fact about *this* machine, so the whole thing moved
 //! with no input from the client beyond the window the screen is showing.
@@ -74,8 +74,7 @@ mod tests {
         })
         .to_string();
         // Seeded through the store: the cache is the daemon's table, and its
-        // accessor there is the only one that survives (`migrate.local.md`
-        // §10.14).
+        // accessor there is the only one that survives.
         s.save_hub_models_cache(1, &hub, &"a".repeat(64), "2026-01-01T00:00:00Z")
             .unwrap();
         // Distinct magnitudes per age so a window that is too wide or too

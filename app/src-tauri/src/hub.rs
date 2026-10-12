@@ -1,7 +1,7 @@
 //! The Hub catalog: the sync the user triggers from Settings, and the retried
 //! one startup runs.
 //!
-//! Both are the daemon's now (`migrate.local.md` §10.14): it fetches, caches,
+//! Both are the daemon's now: it fetches, caches,
 //! applies what changed, and re-reads its own route table — which is why this
 //! module no longer reads the cache or sends a reload ping. The startup loop
 //! keeps only what is the app's business: *when* to retry.
@@ -65,7 +65,7 @@ pub(crate) fn spawn_hub_sync(handle: tauri::AppHandle) {
 /// panics if it is dropped inside a runtime.
 #[tauri::command(async)]
 pub fn sync_hub() -> Result<vm::SyncReportVm, String> {
-    // Served by the daemon (`migrate.local.md` §10.14): it fetches, caches,
+    // Served by the daemon: it fetches, caches,
     // applies what changed, and re-reads its own route table — the whole of
     // what this command used to orchestrate by hand.
     kiwano_core::daemon_api::DaemonApi::connect().sync_hub()

@@ -1,7 +1,7 @@
 //! Hub catalog sync (tech.md §3 Hub info sync protocol).
 //!
 //! Moved here from `kiwano_core::sync` when the daemon took over the sync
-//! (`migrate.local.md` §10.14): it is the **writer** of the `hub_cache` and
+//! It is the **writer** of the `hub_cache` and
 //! `hub_models_cache` tables, and those are the daemon's tables now. The caches
 //! therefore have one writer and one set of accessors — which is the whole of
 //! the "aux connection to the sync" that used to be.

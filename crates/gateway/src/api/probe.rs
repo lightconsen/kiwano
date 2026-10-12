@@ -2,7 +2,7 @@
 //! trip, and the live model list.
 //!
 //! Moved here from `kiwano_core::sidecar` when the daemon took over the probes
-//! (`migrate.local.md` §10.15): they are network I/O — the same kind of work
+//! They are network I/O — the same kind of work
 //! the data plane is for — and they write to the health table, which the daemon
 //! owns. Nothing else changed: the verdicts, the timeouts and the model parsing
 //! are the same.

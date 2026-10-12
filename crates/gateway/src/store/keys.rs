@@ -46,8 +46,8 @@ impl Store {
     /// has — its handle, its label, its limits and its spend history — and only
     /// has its agent rebound. Both callers (a takeover and a user-defined agent)
     /// mint a fresh value each time, so a repeat here means the same client is
-    /// registering again, not a new one. `migrate.local.md` §6.1 counts this, with
-    /// `insert_api_key` and `add_custom_agent`, among the writes that must be safe
+    /// registering again, not a new one. This, `insert_api_key` and
+    /// `add_custom_agent` are the writes that must be safe
     /// to retry.
     pub fn upsert_client_key(&self, key: &str, agent: &str) -> Result<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -307,8 +307,8 @@ impl Store {
     ///
     /// The identity of "this rotation key" is its value, so a request delivered
     /// twice is one key — which is what makes the API's `add_api_key` safe to
-    /// retry (`migrate.local.md` §6.1: of batch 1's writes, this one and
-    /// `add_custom_agent` and `add_provider` are the three that mint something).
+    /// retry (this one, `add_custom_agent` and `add_provider` are the three that
+    /// mint something).
     /// The check lives here rather than in one caller because both callers —
     /// the daemon's endpoint and the `vm::` path the app used to take — must
     /// agree about it.

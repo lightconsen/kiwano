@@ -105,7 +105,7 @@ fn agents_add(
 ) -> Result<(), CliError> {
     // The id is minted here, not by the daemon: it carries a random suffix, and
     // an id the daemon has already seen is answered with the agent that exists,
-    // so it is also the identity of the operation (`migrate.local.md` §6.1).
+    // so it is also the identity of the operation.
     let id = vm::mint_agent_id(name);
     let created = ctx.api.add_custom_agent(&id, name, note, protocol)?;
     // The key is the whole integration surface, so it is printed rather than
@@ -161,7 +161,7 @@ fn set_takeover(ctx: &mut Ctx, agent: &str, enabled: bool) -> Result<(), CliErro
         let aux = ctx.aux()?;
         // The store half goes to the daemon, as it does for the app: the CLI is
         // a client like any other now, and this was the last command that wrote
-        // the shared database (`migrate.local.md` §10.43). The **file** half is
+        // the shared database. The **file** half is
         // still this side's — the agent's config is this machine's.
         let api = &ctx.api;
         vm::set_agent_takeover(

@@ -1,7 +1,7 @@
 //! The Status column's contract, tested through the view the daemon assembles.
 //!
-//! The rule itself (`health_vm`) is the daemon's (`migrate.local.md` §10.7,
-//! §10.21) and nothing in this crate calls it. What is here is the *behaviour*
+//! The rule itself (`health_vm`) is the daemon's and nothing here calls it. What
+//! is here is the *behaviour*
 //! the column promises — a provider's own round trips before the prober's
 //! verdict, and neither for a parked one — asserted through
 //! [`build_provider_vms`], which is the call the app and the CLI make.

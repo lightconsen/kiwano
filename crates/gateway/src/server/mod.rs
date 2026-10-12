@@ -99,7 +99,7 @@ pub struct GatewayState {
     /// Where the data plane listens, as a port.
     ///
     /// Reported by `/status` so a client on another machine can point an agent
-    /// at it (`migrate.local.md` §10.30): the client knows the *host* — it
+    /// at it: the client knows the *host* — it
     /// dialled it — and only the daemon knows the port. The default is the
     /// conventional one, so a state built by a test that never serves a data
     /// plane still answers sensibly.
@@ -159,8 +159,7 @@ pub enum GatewayEvent {
     /// Only a fresh fetch sends this: a cache hit changed nothing, and a failed
     /// query changed nothing either. Before this existed the percentage moved
     /// only when traffic happened to re-read the screen, which left an idle
-    /// machine showing a stale number with no way to know (`migrate.local.md`
-    /// §10.27).
+    /// machine showing a stale number with no way to know.
     QuotaRefreshed { provider_id: String },
 }
 
@@ -247,8 +246,8 @@ impl GatewayState {
         admin::ensure_admin_token(&store)?;
         // This install's identity, minted beside the token and for a related
         // reason: an app that opens one database while the gateway writes to
-        // another has no error and no symptom it can name (`migrate.local.md`
-        // §13.1). Comparing identities over `/status` is how it finds out.
+        // another has no error and no symptom it can name. Comparing identities
+        // over `/status` is how it finds out.
         let install_id = store.ensure_install_id()?;
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let (usage_ticks, _) = tokio::sync::broadcast::channel(USAGE_TICK_BACKLOG);

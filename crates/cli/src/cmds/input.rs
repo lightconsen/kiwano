@@ -157,8 +157,8 @@ pub(crate) fn advanced_input(
 ///
 /// The two shapes differ in what "absent" means and that is the whole reason
 /// both exist — [`vm::AdvancedInput`] is the resulting state (a null field
-/// clears it), [`vm::AdvancedPatch`] is a list of changes (`migrate.local.md`
-/// §10.38). On add there is nothing to preserve, so the first is built from the
+/// clears it), [`vm::AdvancedPatch`] is a list of changes. On add there is
+/// nothing to preserve, so the first is built from the
 /// same reading of the flags.
 pub(crate) fn advanced_patch(
     forward: &ForwardArgs,
@@ -189,7 +189,7 @@ pub(crate) fn advanced_patch(
 ///
 /// An edit no longer fills the windows it did not mention from a row it read
 /// back: the daemon merges them window by window against the row it holds
-/// (`migrate.local.md` §10.38). On add there is no row to fill from either, so
+/// On add there is no row to fill from either, so
 /// this is the same reading in both cases.
 pub(crate) fn plan_limits_input(forward: &ForwardArgs) -> Option<vm::PlanLimitsInput> {
     if forward.plan_limit_5h.is_none() && forward.plan_limit_weekly.is_none() {

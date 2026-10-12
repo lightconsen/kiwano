@@ -124,13 +124,13 @@ pub fn displayable_currencies(rates: &HashMap<String, f64>, preferred: &str) -> 
 }
 
 /// The currency picker — served by the daemon (`kiwanod::api::dashboard`), like
-/// the rest of the Dashboard's reads (`migrate.local.md` §10.21).
+/// the rest of the Dashboard's reads.
 pub fn currency_meta(store: &kiwanod::store::Store) -> Result<CurrencyMetaVm, String> {
     kiwanod::api::dashboard::currency_meta(store).map_err(|e| e.to_string())
 }
 
 // The currency picker's shape moved to `kiwano-api` with the daemon's
-// dashboard (`migrate.local.md` §10.21).
+// dashboard.
 pub use kiwano_api::dashboard::CurrencyMetaVm;
 
 #[cfg(test)]

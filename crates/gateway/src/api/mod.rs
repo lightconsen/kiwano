@@ -11,9 +11,8 @@
 //! endpoints therefore meant writing a *second copy* of `vm::add_api_key`'s
 //! body, down to the strings the UI shows (`crates/core/src/vm/keys.rs` and
 //! `crates/gateway/src/server/admin.rs` each had their own "API key must not be
-//! empty"). That is the shape `migrate.local.md` §10.5 considered and rejected
-//! *for the types* — and `migrate.local.md` §10.8 records the same reasoning
-//! being applied to the logic.
+//! empty"). That is the shape considered and rejected *for the types*, and the
+//! same reasoning applied to the logic.
 //!
 //! The rule that decides it is already written down twice, once in each
 //! neighbouring decision: §10.6 says a type goes to the side that *serves* it,
@@ -30,7 +29,7 @@
 //! [`ApiError`]; the HTTP status, the JSON envelope and the token are
 //! `server::admin`'s business. That split is what lets the same function answer
 //! a unix-socket request today and a TCP one after the cross-machine work
-//! (`migrate.local.md` §6) without a line changing.
+//! without a line changing.
 //!
 //! [`ApiError`]: kiwano_api::error::ApiError
 

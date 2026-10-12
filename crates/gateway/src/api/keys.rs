@@ -63,7 +63,7 @@ pub fn list_api_keys(store: &Store, provider_id: &str) -> Result<Vec<ApiKeyVm>, 
 ///
 /// Idempotent on the key's value — the store decides that, so every caller
 /// agrees — which is what makes a retry answer with the row that is already
-/// there instead of a second one (`migrate.local.md` §6.1).
+/// there instead of a second one.
 pub fn add_api_key(
     store: &Store,
     provider_id: &str,

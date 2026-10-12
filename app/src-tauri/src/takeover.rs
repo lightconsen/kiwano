@@ -28,7 +28,6 @@ pub fn set_agent_takeover(
     // Where an agent on **this** machine reaches the gateway. Composed from the
     // daemon's own report, so a gateway on another machine — or on a
     // non-standard port — has its agents pointed at the right place
-    // (`migrate.local.md` §10.30).
     let gateway = api
         .gateway_base()
         .unwrap_or_else(|_| format!("http://127.0.0.1:{}", state.data_port));

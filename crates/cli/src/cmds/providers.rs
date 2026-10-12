@@ -114,7 +114,6 @@ fn providers_add(args: &AddArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     let input = new_provider_input(args, &known)?;
     // Minted here, like the app's: an id the daemon has already seen is
     // answered with the provider that exists, so a retried add writes nothing
-    // (`migrate.local.md` §6.1).
     let id = vm::mint_provider_id(&input.name);
     let created = ctx.api.add_provider(&id, &input)?;
     let text = format!("added {} ({})", created.id, created.name);
@@ -169,7 +168,7 @@ fn providers_price(
     declared: PriceDeclaration<'_>,
 ) -> Result<(), CliError> {
     // Through the daemon, with this machine's evidence: nothing here reads a
-    // database (`migrate.local.md` §10.44).
+    // database.
     let providers = vm::providers::provider_view(&ctx.api, &ctx.home, ctx.config_vars())?;
     let provider = providers
         .iter()
@@ -260,13 +259,13 @@ fn providers_price(
 /// is not the same operation.
 fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     // The one read a flag-driven client cannot avoid: two of its rules are
-    // stated in terms of the **stored** billing mode (`migrate.local.md`
-    // §10.38), and the daemon hands back just that much rather than the row.
+    // stated in terms of the **stored** billing mode, and the daemon hands back
+    // just that much rather than the row.
     let current = ctx.api.provider_ref(&args.provider_id)?;
     let patch = edit_patch(args, &current, &ctx.api)?;
     ctx.api.update_provider(&args.provider_id, &patch)?;
     // Back through the daemon for the refreshed row, with this machine's
-    // evidence: nothing here reads a database (`migrate.local.md` §10.44).
+    // evidence: nothing here reads a database.
     let updated = vm::providers::provider_view(&ctx.api, &ctx.home, ctx.config_vars())?
         .into_iter()
         .find(|v| v.id == args.provider_id)
@@ -281,7 +280,7 @@ fn providers_edit(args: &EditArgs, ctx: &mut Ctx) -> Result<(), CliError> {
 /// This is what used to be a full `NewProviderInput` rebuilt from the row. The
 /// difference is not cosmetic — the old shape had to read the row to put back
 /// everything the flags did not mention, and every field it "carried over" was
-/// a place the two rules could disagree (`migrate.local.md` §10.38). What is
+/// a place the two rules could disagree. What is
 /// still needed from the row is the **billing mode**, because two of the rules
 /// below are phrased in terms of it, and that is all `ProviderRefVm` carries.
 fn edit_patch(
@@ -365,7 +364,7 @@ fn edit_patch(
         advanced: advanced_patch(&args.forward, args.no_headers)?,
         // Doubled: `None` = not speaking about it, `Some(None)` = clear —
         // which is what `--clear-plan-query` means, and why the field cannot be
-        // a plain `Option<Value>` (`migrate.local.md` §10.38).
+        // a plain `Option<Value>`.
         plan_query: plan_query_input(&args.forward, args.clear_plan_query)?.map(Some),
         prices: None,
         catalog_id: None,

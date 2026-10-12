@@ -43,7 +43,7 @@ pub fn import_cc_switch() -> import::ImportReportVm {
     let home = home_dir().join(".cc-switch");
     // Read here — those files are this machine's — and let the daemon write:
     // it applies the rows and re-reads its own route table, so there is no
-    // reload ping to send (`migrate.local.md` §10.19).
+    // reload ping to send.
     let (raws, skips, mut detail) = import::read_cc_switch(
         Some(&home.join("cc-switch.db")),
         Some(&home.join("config.json")),

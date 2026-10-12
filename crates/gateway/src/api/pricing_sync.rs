@@ -1,7 +1,7 @@
 //! The price table the Hub publishes, resolved and seeded into the mirror.
 //!
 //! Moved here from `kiwano_core::pricing` when the daemon took over the sync's
-//! apply step (`migrate.local.md` §10.14): the cache it reads and the
+//! apply step: the cache it reads and the
 //! `model_pricing` mirror it writes are both the daemon's tables, so a sync's
 //! "what changed" is decided by the side that bills from it. The `String`
 //! errors are what the CLI reports — the daemon's `sync` maps them at its

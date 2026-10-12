@@ -1,6 +1,6 @@
 //! The contract's first fixtures — one command, frozen.
 //!
-//! `migrate.local.md` §10 lists four kinds of test the API migration needs.
+//! Four kinds of test guard the API boundary, and this file is the skeleton of
 //! This file is the skeleton of that suite, built on the smallest pure-state
 //! command (`add_api_key`) so the shape is settled before 29 more are moved.
 //!
@@ -107,8 +107,8 @@ fn the_add_api_key_response_shape_is_frozen() {
 
 /// §10 (3), second half: the failure vocabulary is part of the contract.
 ///
-/// These strings are what the client will show, and `migrate.local.md` §6.1
-/// plans to turn them into a stable `kind` vocabulary rather than prose. Pinned
+/// These strings are what the client will show, and they are on their way to a
+/// stable `kind` vocabulary rather than prose. Pinned
 /// here so a reword is a decision rather than an accident — the same reason the
 /// data plane's `kind` strings are asserted where they are produced.
 #[test]

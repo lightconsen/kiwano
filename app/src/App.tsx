@@ -219,7 +219,7 @@ export default function App() {
         // The vendor's own counter moved, so the number on the screen is stale.
         // A re-read rather than a notification: nothing happened that the user
         // must act on, and a plan quota ticking up is not news the way a refused
-        // key is (`migrate.local.md` §10.27).
+        // key is.
         case "quota_refreshed":
           void reloadScreen();
           break;

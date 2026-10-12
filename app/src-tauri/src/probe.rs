@@ -2,7 +2,7 @@
 //! against a stored provider, and the model-name list the Default model picker
 //! fills from.
 //!
-//! Three of the four are the daemon's now (`migrate.local.md` §10.15): they are
+//! Three of the four are the daemon's now: they are
 //! network I/O, and the health verdict the provider test writes is the Status
 //! column's, which the daemon owns. `test_latency` stays a plain function — a
 //! bare TCP connect needs no daemon, and the CLI calls it too.

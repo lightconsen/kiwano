@@ -1,7 +1,7 @@
 //! The Usage cell — implemented in the daemon's crate.
 //!
 //! Same reasoning as the health cell beside it: the rule follows the shape, and
-//! the shape is the daemon's now (`migrate.local.md` §10.7, §10.21). The tests
+//! the shape is the daemon's now. The tests
 //! below pin the behaviour through that implementation.
 
 #[cfg(test)]

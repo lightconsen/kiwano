@@ -2,7 +2,7 @@
 //! primary binding.
 //!
 //! Moved here from `kiwano_core::vm::provider_edit` when the daemon took over
-//! `add_provider` (`migrate.local.md` §10.13).
+//! `add_provider`.
 //!
 //! # The id is the caller's
 //!
@@ -203,7 +203,7 @@ fn provider_vm(
 }
 
 /// Apply an edit field by field: what the patch names is set, what it does not
-/// is left alone (`migrate.local.md` §10.38).
+/// is left alone.
 ///
 /// Much of this reads as it did because it was **already half a patch** —
 /// `api_key`, `catalog_id`, `advanced`, `plan_query` and `prices` kept their
@@ -365,7 +365,7 @@ pub fn update_provider(store: &Store, id: &str, patch: &ProviderPatch) -> Result
 }
 
 /// A provider named by id, with the two fields a flag-driven client needs
-/// before it can edit one (`migrate.local.md` §10.38): what to call it, and
+/// before it can edit one: what to call it, and
 /// which limits apply to it.
 ///
 /// Deliberately not the row. The client asked to be able to say only what
@@ -449,7 +449,6 @@ pub fn add_provider(
     // already in the table *is* this request's result, and a replay answers
     // with the provider that exists rather than a second row. Nothing else in
     // the body could stand in for it — the name is a label, not an id
-    // (`migrate.local.md` §6.1).
     if let Some(existing) = store.get_provider(id).map_err(ApiError::failed)? {
         return Ok(provider_vm(
             &existing,
@@ -659,7 +658,7 @@ mod tests {
 
     /// A patch sets what it names and leaves everything else where it was.
     ///
-    /// The property the whole shape exists for (`migrate.local.md` §10.38): a
+    /// The property the whole shape exists for: a
     /// client without a form says only what changed. Under the authoritative
     /// rewrite this replaced, every one of these fields would have been
     /// overwritten by whatever the caller happened to send — which is why such

@@ -1,8 +1,8 @@
 //! A daemon for the CLI's integration tests to talk to.
 //!
-//! The CLI is becoming a client of the daemon's admin API (`migrate.local.md`
-//! §14.1), which means the tests that drive the command tree in-process need
-//! something on the other end. This is it: the **real** admin router
+//! The CLI is a client of the daemon's admin API, which means the tests that
+//! drive the command tree in-process need something on the other end. This is
+//! it: the **real** admin router
 //! ([`admin_plane_router`]) served on a real endpoint, from the same
 //! `GatewayState` the daemon builds at startup.
 //!

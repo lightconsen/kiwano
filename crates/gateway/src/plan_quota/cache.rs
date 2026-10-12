@@ -1,8 +1,8 @@
 //! The KV cache for plan quota reports (5-minute TTL) and the refresh step that
 //! fills it.
 //!
-//! **The cache is moving from the app's KV to the daemon's** (`migrate.local.md`
-//! §9.2.1). Both sides read it — the daemon enforces the ceiling from it, and
+//! **The cache lives in the daemon's table, not the app's KV.** Both sides read
+//! it — the daemon enforces the ceiling from it, and
 //! the app's alert path reads it to describe a limit — and the two are upgraded
 //! independently, so the write goes to both places and the read prefers the new
 //! one. Step 4 of that plan deletes the old row once nothing falls back.
@@ -58,7 +58,7 @@ pub fn cache_write(store: &Store, provider_id: &str, report: &PlanQuotaReport) {
     let v = serde_json::json!({ "ts": now_millis(), "report": report });
     let key = cache_key(provider_id);
     // Both places, for as long as an old reader might be the one asking
-    // (`migrate.local.md` §9.2.1). Cheap — one small row per provider per five
+    // Cheap — one small row per provider per five
     // minutes — and the alternative is a client that sees no quota at all.
     let _ = store.set_gateway_setting(&key, &v.to_string());
     let _ = store.set_app_setting(&key, &v.to_string());
@@ -145,7 +145,6 @@ mod tests {
     }
 
     /// The cache's move, in the three states that can exist while it happens
-    /// (`migrate.local.md` §9.2.1).
     ///
     /// A daemon from before wrote only the old row; one from after writes both;
     /// a reader must find it either way, and must prefer the new one when they

@@ -131,7 +131,7 @@ pub fn run() {
             let store = Store::open(&path).map_err(|e| e.to_string())?;
             // The client's own file, beside the daemon's rather than the same as
             // it: everything in here describes *this machine*, and a client on
-            // another one would have none of it (`migrate.local.md` §9.5 step 2).
+            // another one would have none of it.
             let local = local_db_path(&path);
             if let Some(dir) = local.parent() {
                 std::fs::create_dir_all(dir)
@@ -211,7 +211,7 @@ pub fn run() {
             // update check) comes from the daemon, which owns the row.
             let ui = kiwanod::api::settings::ui_settings(&store).unwrap_or_default();
             // Seeding the price mirror and linking providers to their catalog
-            // entries are the **daemon's** work now (`migrate.local.md` §10.14):
+            // entries are the **daemon's** work now:
             // it does both inside its own sync, and the startup sync below asks
             // it to. Doing them here too would be a second writer of the same
             // tables — which is the arrangement this migration has been removing.

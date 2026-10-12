@@ -16,8 +16,7 @@ use std::path::Path;
 ///
 /// This wrapper mints the id, which is what makes the signature every caller
 /// knows stay put: **this call is a fresh intent**. The idempotent path is the
-/// API's, where the caller sends the id it already minted (`migrate.local.md`
-/// §6.1).
+/// API's, where the caller sends the id it already minted.
 pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderVm, String> {
     let id = mint_provider_id(&input.name);
     daemon_add::add_provider(store, &id, input).map_err(|e| e.to_string())
@@ -39,7 +38,7 @@ pub fn add_provider(store: &Store, input: &NewProviderInput) -> Result<ProviderV
 ///
 /// Served by the daemon (`kiwanod::api::providers::set_provider_enabled`); this
 /// wrapper keeps the signature every caller knows.
-// The add's helpers moved to the daemon with it (`migrate.local.md` §10.13) —
+// The add's helpers moved to the daemon with it —
 // the same move-and-re-export the types made earlier, so the paths these were
 // called from keep resolving. `update_provider` still uses them directly.
 pub use kiwanod::api::limits::{
@@ -49,7 +48,7 @@ pub use kiwanod::api::providers_add::{
     absolute_endpoint, advanced_columns, input_endpoints, plan_limits_json,
 };
 
-// The form's request types moved to `kiwano-api` (`migrate.local.md` §10.13):
+// The form's request types moved to `kiwano-api`:
 // the daemon serves the command they belong to. Re-exported so the `vm::` paths
 // that name them still resolve.
 pub use kiwano_api::providers::{
@@ -85,7 +84,7 @@ pub fn bind_as_primary(store: &Store, agent: &str, provider_id: &str) -> Result<
 /// notes stay consistent), read against `home` like [`build_provider_vms`].
 /// Update a provider — the **write** is the daemon's
 /// (`kiwanod::api::providers_add::update_provider`), and the **view** is this
-/// side's. That split is `migrate.local.md` §5's fifth constraint: the
+/// side's. That split is the fifth architecture rule: the
 /// aggregation layer stays on the client, because it is the half that reads
 /// *this machine* (which agents actually route here).
 pub fn update_provider(
@@ -107,7 +106,7 @@ pub fn update_provider(
 /// in that Agent's list is promoted automatically.
 ///
 /// The body lives in `kiwanod::api::providers` — the daemon serves this
-/// (`migrate.local.md` §7 batch 1), and the promotion above is its work now.
+///, and the promotion above is its work now.
 pub fn delete_provider(store: &Store, id: &str) -> Result<bool, String> {
     daemon::delete_provider(store, id).map_err(|e| e.to_string())
 }

@@ -2,7 +2,7 @@
 //! are drawn from.
 //!
 //! Moved here from `kiwano-core` when the daemon took over assembling them
-//! (`migrate.local.md` §10.21): the daemon produces them, so they are wire types
+//! The daemon produces them, so they are wire types
 //! and both sides must be able to name them. Both directions derive for the same
 //! reason — the client parses what the daemon wrote.
 

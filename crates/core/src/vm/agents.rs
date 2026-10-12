@@ -50,7 +50,7 @@ pub fn is_builtin_agent(id: &str) -> bool {
 pub use kiwano_api::agents::{CustomAgentVm, PromptLatencyVm};
 
 // `list_agents` moved to `kiwanod::api::agents` with the dashboard, which is
-// what labels its rows with it (`migrate.local.md` §10.21). Re-exported so the
+// what labels its rows with it. Re-exported so the
 // callers here keep their paths.
 
 /// One prompt round trip against a provider — served by the daemon
@@ -68,7 +68,6 @@ pub async fn test_provider_latency(store: &Store, id: &str) -> Result<PromptLate
 /// This wrapper mints the id itself so the signature every existing caller knows
 /// stays put: it is the **intent** that mints, and this is a fresh intent. The
 /// idempotent path is the API's, where the caller sends the id it already minted
-/// (`migrate.local.md` §6.1).
 pub fn add_custom_agent(
     store: &Store,
     label: &str,

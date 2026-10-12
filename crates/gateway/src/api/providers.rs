@@ -7,7 +7,7 @@
 //! writing down.** The plan put `add_provider` in batch 1 as pure state, but it
 //! reads the app-scoped half of the database twice — `catalog_snapshot(aux)` to
 //! infer a provider's Hub entry, and `health_vm(aux, …)` for the verdict it
-//! returns (`migrate.local.md` §10.9). That half is batch 2's subject (the Hub
+//! returns. That half is batch 2's subject (the Hub
 //! cache and the probes), so those two commands move with it rather than
 //! dragging it in here. What is left is genuinely state-only.
 

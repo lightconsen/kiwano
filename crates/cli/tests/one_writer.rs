@@ -3,8 +3,7 @@
 //!
 //! That file was written first and scans **one** client — `MANIFEST_DIR/src`,
 //! the app's sources — so "one writer" held for the app and was merely true by
-//! accident for the CLI (`migrate.local.md` §14.1's D1 says as much, and
-//! `migrate.local.md` §10.48 records what closing it took). The CLI stopped
+//! accident for the CLI. The CLI stopped
 //! opening the shared database; nothing made that a property rather than a
 //! state of affairs.
 //!
@@ -52,7 +51,7 @@ fn code_lines(source: &str) -> impl Iterator<Item = &str> {
 ///
 /// Stronger than "no writes": a client with no way to *name* the type cannot
 /// read the daemon's rows either, and reading is how the last few of them were
-/// found (`migrate.local.md` §10.44). It is also the assertion that fails on the
+/// found. It is also the assertion that fails on the
 /// change that would undo the work — one `use kiwanod::store::Store` away.
 #[test]
 fn the_cli_cannot_name_the_daemons_store() {
@@ -74,7 +73,7 @@ fn the_cli_cannot_name_the_daemons_store() {
         violations.is_empty(),
         "the CLI reached for the daemon's database handle. Every read and write \
          goes over the admin plane now, and what this machine keeps for itself is \
-         `local.db` behind `Aux` (`migrate.local.md` §14.1 D1, §10.48). Found:\n  {}",
+         `local.db` behind `Aux`. Found:\n  {}",
         violations.join("\n  ")
     );
 }
@@ -103,6 +102,6 @@ fn the_one_database_it_opens_is_the_clients_own() {
     assert!(
         lib.contains("local_db_path(&db.path)") || lib.contains("paths::local_db_path"),
         "and that file is resolved *from* the database path, so moving one moves \
-         the other (`migrate.local.md` §10.41)"
+         the other"
     );
 }

@@ -3,8 +3,8 @@
 //! Here rather than in the app for the reason `keys::mask_key` is: the daemon
 //! produces these fields now (`logo_char` / `logo_color` on a route's binding
 //! and on a provider row), and a second copy of the rule is how the two sides
-//! would come to draw the same provider differently. `migrate.local.md` §10.7 —
-//! the rule that produces a shape follows the shape.
+//! would come to draw the same provider differently. The rule that produces a
+//! shape follows the shape.
 
 const PALETTE: [&str; 6] = [
     "#4D6BFE", "#615CED", "#3859FF", "#F55036", "#6467F2", "#0F9D58",

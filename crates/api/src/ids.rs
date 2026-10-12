@@ -1,8 +1,8 @@
 //! The rules that turn a name into an id.
 //!
 //! Here because **both sides mint ids**: the app names a provider when it adds
-//! one (`migrate.local.md` §6.1 — the client generates it, so a replayed add is
-//! the same id and therefore the same provider), and the daemon mints a custom
+//! one — the client generates it, so a replayed add is the same id and therefore
+//! the same provider — and the daemon mints a custom
 //! agent's id from the label it was given. One rule, one place: two copies would
 //! be two spellings of "what a slug is", and ids are what bindings, strategies,
 //! keys and usage rows point at.
@@ -52,7 +52,7 @@ pub fn agent_id_stem(label: &str) -> String {
 /// the behaviour the Apps screen documents ("same name, two agents"). It is also
 /// what makes the id the identity of the *operation* rather than of the name:
 /// whoever mints it decides how many agents a label produces, and a retry that
-/// sends the id it already minted produces none (`migrate.local.md` §6.1).
+/// sends the id it already minted produces none.
 pub fn mint_agent_id(label: &str) -> String {
     format!(
         "{}-{}",
@@ -64,7 +64,7 @@ pub fn mint_agent_id(label: &str) -> String {
 /// A fresh id for a provider: the slug plus six hex characters.
 ///
 /// **The client mints it, which is what makes a retried add idempotent**
-/// (`migrate.local.md` §6.1): nothing else in the request identifies the
+/// Nothing else in the request identifies the
 /// operation — the name is just a label — and an id the daemon has already seen
 /// is answered with the provider that exists. The suffix is what lets two
 /// providers share a name, the same way a custom agent's id does.

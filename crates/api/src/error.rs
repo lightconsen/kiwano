@@ -7,7 +7,7 @@
 //! of the keys endpoints did the only thing prose allows: it *re-queried the
 //! store* to find out whether the 400 or the 404 was the right answer, which is
 //! a second source of truth for a decision the function being served had already
-//! made (`migrate.local.md` §10.8).
+//! made.
 //!
 //! So the failure carries a **kind**: a small closed vocabulary a program
 //! branches on, plus the message a person reads. The daemon maps the kind to a
@@ -15,8 +15,8 @@
 //! is the *same* string it showed before — the contract fixtures pin those, so
 //! they travel verbatim rather than being reworded by the move.
 //!
-//! `migrate.local.md` §6.1 asked for exactly this ("turn the failure vocabulary
-//! into a stable `kind` vocabulary rather than prose"). It is three variants
+//! The failure vocabulary is a stable set of `kind`s rather than prose. It is
+//! three variants
 //! because three are what the moved commands actually need; a kind nothing
 //! returns is a shape guessed ahead of its use.
 

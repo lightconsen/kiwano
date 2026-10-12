@@ -506,7 +506,7 @@ pub struct UsageRecord {
 /// hold. `tool_calls` and `skills` are JSON arrays of `{"name","count"}` — a list
 /// of names is a payload, not a column — and there is deliberately no working
 /// directory here: the client turns the path it read into a `project` label
-/// before sending anything (`migrate.local.md` §5 #1).
+/// before sending anything.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedSession {
     pub import_key: String,

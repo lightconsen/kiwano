@@ -88,6 +88,33 @@ Two gotchas that cost time if you haven't hit them before:
   several files carry long comments about a mistake that was made once. Please
   keep it that way.
 
+## Architecture rules
+
+Not preferences: each is load-bearing for a property the project sells — that
+credentials stay on the machine they were entered on, and that a gateway can be
+reached from another machine without the client's filesystem being any of its
+business. A change that breaks one is a change to those properties, and should be
+argued as such rather than made quietly.
+
+1. **No paths cross the interface.** The daemon is never told a user path and
+   never reads or writes one. A client reads its own files and sends what it
+   learned, described the way a person would describe it — a repository's
+   directory *name*, not its location (`kiwano_core::history::project_label`).
+   This is what lets the gateway run on another machine, or in a container, and
+   still be useful.
+2. **State and machine facts are expressed separately.** The daemon answers with
+   state; "who is really routing through the gateway on *this* machine" is
+   computed by the client, which is the only side that can see the machine.
+3. **Per-machine state stays out of the shared database.** Takeover backups and
+   alert de-duplication belong to one machine and live beside it, in the client's
+   own `local.db`, not in the gateway's.
+4. **The daemon does not depend on a login shell's environment.** It is started by
+   a supervisor, not by a terminal: a `PATH` entry or an exported variable that
+   exists only in an interactive shell does not exist for it.
+5. **Views are assembled on the client.** An aggregate that exists to be looked at
+   is computed where it is looked at. The daemon answers questions; it does not
+   render.
+
 ## Rules that came from mistakes
 
 [`docs/lessons.md`](docs/lessons.md) is the log of what has already gone wrong

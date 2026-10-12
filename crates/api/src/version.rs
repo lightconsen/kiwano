@@ -1,7 +1,7 @@
 //! Which generation of the API a request speaks, and what a daemon accepts.
 //!
-//! `migrate.local.md` §11.2 asks for three things and this is all of them: a
-//! header carrying the generation, a range the daemon publishes, and a refusal
+//! Three things, and this is all of them: a header carrying the generation, a
+//! range the daemon publishes, and a refusal
 //! that says which side to upgrade. They exist for the **mixed deployment** — an
 //! app and a daemon upgraded independently, which is the normal case for a
 //! daemon on another machine and a real one even on a desktop (the app ships a

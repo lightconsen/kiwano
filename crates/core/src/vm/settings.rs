@@ -20,7 +20,6 @@ pub use kiwano_api::settings::{
 /// blob any more, so the callers still asking for it (the tray's close
 /// behaviour, `kiwano mcp`, two CLI features) were reading a value no one had
 /// written; the aux-shaped function is gone rather than left as a trap
-/// (`migrate.local.md` §10.25).
 pub fn ui_settings(store: &Store) -> SettingsVm {
     kiwanod::api::settings::ui_settings(store).unwrap_or_default()
 }
@@ -98,8 +97,8 @@ pub fn local_takeovers(home: &std::path::Path, vars: &ShellVars) -> Vec<Takeover
 /// The settings screen, as a client asks for it: the daemon's blob and its
 /// custom agents, plus the takeovers this machine can see for itself.
 ///
-/// The client needs **no database handle** for this (`migrate.local.md`
-/// §10.44): two of the three parts are asked for and the third is a file read.
+/// The client needs **no database handle** for this: two of the three parts are
+/// asked for and the third is a file read.
 pub fn settings_view(
     api: &crate::daemon_api::DaemonApi,
     home: &std::path::Path,

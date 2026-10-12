@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 // per-agent path suffix still comes from `gateway_target`. The origin is a
 // parameter now: a takeover of an agent on *this* machine points at a gateway
 // that may be on another one, and the client is the side that knows which
-// (`migrate.local.md` §10.30). A single-machine install passes the same string
+// A single-machine install passes the same string
 // the constant held, so nothing about it changed.
 
 /// Takeover: read the original files → perform all rewrites in memory
@@ -364,8 +364,8 @@ fn rollback_writes(rewritten: &Files, written: &[usize], originals: &[BackupFile
 /// The origin was a constant (`http://127.0.0.1`) until a client could be on
 /// a different machine from its daemon: then the agent being taken over on
 /// *this* machine has to send its traffic to *that* one, and a hardcoded
-/// loopback points it at a port nothing listens on (`migrate.local.md`
-/// §10.30). Both halves are asserted — the remote case is the new
+/// loopback points it at a port nothing listens on. Both halves are asserted —
+/// the remote case is the new
 /// behaviour, and the local case is the one that must not have moved.
 #[test]
 fn a_takeover_writes_the_origin_it_was_given() {

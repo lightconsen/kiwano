@@ -61,7 +61,7 @@ async fn main() {
     // database, so this one came from `$HOME`. A service manager gives its
     // child a different `$HOME` from the user's session, which is how one
     // install ends up with a gateway that is up, happy, and writing to a
-    // database nobody is reading (`migrate.local.md` §13.1). The sidecar path
+    // database nobody is reading. The sidecar path
     // cannot reach here — the app hands its own resolved path down — so this
     // line means a hand-written unit or a manual start.
     if db.defaulted {

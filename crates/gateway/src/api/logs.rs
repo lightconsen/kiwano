@@ -6,7 +6,7 @@
 //!
 //! - the CSV export stays in `kiwano-core` for now: it writes to a path the user
 //!   picked in a save dialog, which is the client's business, and splitting the
-//!   two halves is `migrate.local.md` §7 batch 3's work;
+//!   two halves is the client's;
 //! - `open_log_folder` reveals a directory in the OS file manager and is a
 //!   statement about *this machine* — it stays on the client forever (§10.6).
 //!
@@ -64,7 +64,7 @@ pub fn clear_request_logs(store: &Store) -> Result<(), ApiError> {
 /// The filtered slice as CSV text — the export's **content** half. The file is
 /// the client's (it writes the path the user picked); what the rows are, and
 /// how they are spelled, is the daemon's, because it is the side that holds
-/// them (`migrate.local.md` §10.17).
+/// them.
 ///
 /// Unpaged, unlike `list_request_logs`: the page size is a display concern and
 /// must not cap what lands in the file. `truncated` says the slice was larger

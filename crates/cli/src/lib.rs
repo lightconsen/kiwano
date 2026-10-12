@@ -3,7 +3,7 @@
 //! **A client of the daemon's API**, like the desktop app: every read and write
 //! goes over the admin plane, and the daemon owns the database. That is what
 //! lets this work against a daemon on another machine as well as beside the one
-//! on this disk (`migrate.local.md` §14.1).
+//! on this disk.
 //!
 //! What it still touches itself is this machine's own facts, and only those:
 //! where an agent's config lives and whether it carries our key, and the
@@ -80,7 +80,7 @@ impl From<String> for CliError {
 /// should not do.
 pub struct Ctx<'a> {
     pub db: PathBuf,
-    /// The client's own database, beside `db` (`migrate.local.md` §9.5 step 2).
+    /// The client's own database, beside `db`.
     pub local_db: PathBuf,
     pub admin: AdminEndpoint,
     pub token: Option<String>,
@@ -90,7 +90,7 @@ pub struct Ctx<'a> {
     /// answered together, and answering them twice is how they drift — the
     /// catalog sync used to build its own with `DaemonApi::connect()`, which
     /// ignores `--admin-socket` and would have talked to a different daemon than
-    /// the rest of the same invocation (`migrate.local.md` §14.1).
+    /// the rest of the same invocation.
     pub api: DaemonApi,
     /// Port an agent's config is pointed at when it is taken over.
     pub data_port: u16,
@@ -124,7 +124,7 @@ impl Ctx<'_> {
     /// Asks the daemon for its port rather than assuming the conventional one:
     /// a daemon started with `KIWANO_DATA_PORT` set, or reached over TCP, would
     /// otherwise have agents pointed at a port nothing listens on
-    /// (`migrate.local.md` §10.30). Falls back to the local default when the
+    /// Falls back to the local default when the
     /// daemon does not answer — a takeover with no daemon running is a
     /// takeover of nothing, and the fallback at least names the usual place.
     pub fn gateway_base(&self) -> String {
@@ -134,7 +134,7 @@ impl Ctx<'_> {
     }
     /// The client's **own** database: this machine's facts — which directory an
     /// agent was found in, which had rules injected, the backups a takeover can
-    /// be undone from (`migrate.local.md` §9.5 step 2).
+    /// be undone from.
     ///
     /// Lap: `self.db` is the *daemon's*, and this is beside it. A separate file
     /// because a client on another machine cannot open the daemon's at all, and
@@ -208,7 +208,6 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
     // A malformed remote address is refused here rather than fallen back from:
     // a client that silently talked to a *different* daemon than the one named
     // is the same class of failure as a daemon quietly opening another database
-    // (`migrate.local.md` §13.1's finding, one layer up).
     let remote = sidecar::admin_endpoint_resolved_for(&db.path);
     let mut out = Out::new(stdout, stderr, cli.json, cli.quiet);
     if let Err(e) = &remote {
@@ -224,7 +223,7 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
         // The flag is the most specific thing a caller can say, so it wins.
         Some(value) => AdminEndpoint::parse(value),
         // Then a daemon named by the environment — another machine — and only
-        // then the local plane (`migrate.local.md` §13.5).
+        // then the local plane.
         None => remote.expect("checked above"),
     };
     // The token follows the endpoint: a remote daemon's row is on the other
@@ -244,7 +243,7 @@ pub fn run_with(argv: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
 
     // Beside the shared one, so a `--db` that moves the database moves this too
     // — which is what keeps a dev stack or a test from writing into the real
-    // `~/.kiwano` (`migrate.local.md` §9.5 step 2).
+    // `~/.kiwano`.
     let local = kiwano_core::paths::local_db_path(&db.path);
     if let Some(note) = local.ignored_note() {
         out.note(note);

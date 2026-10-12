@@ -14,7 +14,7 @@
 //! unaffected.
 //!
 //! Moved here from `kiwano-core` when the export's rows became the daemon's
-//! (`migrate.local.md` §10.17): the client writes the file, the daemon says what
+//! The client writes the file, the daemon says what
 //! is in it. `to_csv` was already a pure function of the rows, which is why the
 //! move is a move and not a rewrite.
 

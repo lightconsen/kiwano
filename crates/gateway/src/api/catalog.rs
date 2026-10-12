@@ -2,8 +2,8 @@
 //! matching that links a provider back to the entry it came from.
 //!
 //! Moved here from `kiwano_core::vm::catalog` when the daemon started serving
-//! `list_catalog` and `add_provider` needed the same snapshot (`migrate.local.md`
-//! §10.12). The payload it reads is the daemon's table now (`store::hub`), which
+//! `list_catalog` and `add_provider`, which needed the same snapshot. The payload
+//! it reads is the daemon's table now (`store::hub`), which
 //! is what made the move possible at all: the client-side copy read it through
 //! `Aux`, a connection the daemon cannot open.
 //!

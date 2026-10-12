@@ -2,7 +2,7 @@
 //!
 //! The gateway's key pool is part of a provider's route, so a write has to be
 //! picked up by the process that will use it — which the daemon now does for
-//! itself (`migrate.local.md` §7 batch 1). This module no longer sends a reload
+//! itself. This module no longer sends a reload
 //! ping, and no longer takes `State<AppState>`.
 
 use kiwano_core::vm;
@@ -12,7 +12,7 @@ use kiwano_core::vm;
 /// A provider's rotation keys (the ones besides the primary key).
 #[tauri::command(async)]
 pub fn list_api_keys(provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
-    // Served by the daemon (`migrate.local.md` §7 batch 1): no `AppState`, no
+    // Served by the daemon: no `AppState`, no
     // store — the signature lost its state parameter because the command no
     // longer has any. The return type is unchanged (`vm::ApiKeyVm` is
     // `kiwano_api::keys::ApiKeyVm`, re-exported), and so is what the frontend

@@ -2,8 +2,8 @@
 //! has and in what order, what parameters each carries — plus the user-defined
 //! agents that get a route of their own.
 //!
-//! The route and binding commands are **served by the daemon** (`migrate.local.md`
-//! §7 batch 1), which is the process that holds the route table: it re-reads
+//! The route and binding commands are **served by the daemon**, which is the
+//! process that holds the route table: it re-reads
 //! that table itself after the write, so the `after_mutation` ping this module
 //! used to end with is gone. A command that no longer touches the store also no
 //! longer takes `State<AppState>` — the signature says so.
@@ -79,7 +79,7 @@ pub fn remove_agent_binding(agent: String, provider_id: String) -> Result<(), St
 /// **This command mints the id**, and that is what makes a retried create
 /// idempotent: nothing else in the request identifies the operation, since the
 /// id carries a random suffix, and the daemon answers an id it has already seen
-/// with the agent that exists (`migrate.local.md` §6.1). A label the user
+/// with the agent that exists. A label the user
 /// repeats is a fresh intent here, so it gets a fresh id — and therefore its own
 /// agent, which is the behaviour the Apps screen documents.
 #[tauri::command(async)]

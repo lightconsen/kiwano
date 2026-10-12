@@ -2,12 +2,12 @@
 //! plus the one action about the log *files* rather than the rows, revealing the
 //! directory in the OS file manager.
 //!
-//! Five of the seven are the daemon's now (`migrate.local.md` §7 batch 1): the
+//! Five of the seven are the daemon's now: the
 //! reads and the clear, and the two credential-banner calls, whose ack marker
 //! sits in the same `app_settings` KV the daemon already writes its own settings
 //! to. None of them affects routing, so none sends a reload ping.
 //!
-//! The export is **split** now (`migrate.local.md` §10.17): the daemon says what
+//! The export is **split** now: the daemon says what
 //! the rows are and how they are spelled, and this side writes them to the path
 //! the user picked in a save dialog. `open_log_folder` stays whole — it is a
 //! statement about *this machine*, which the daemon will never serve.

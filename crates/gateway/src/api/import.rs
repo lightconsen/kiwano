@@ -1,7 +1,7 @@
 //! Applying a cc-switch import: the **store half** of it.
 //!
 //! Reading is the client's — cc-switch's files are in the user's home and one of
-//! them is a SQLite database (`migrate.local.md` §10.19) — and writing providers
+//! them is a SQLite database — and writing providers
 //! is the daemon's. The split falls exactly where the reading stops: the client
 //! sends the rows it extracted, and this applies them.
 //!
@@ -37,7 +37,7 @@ pub struct ImportReportVm {
 
 /// Apply the rows a reader extracted — the **store half** of an import.
 ///
-/// Moved here from `kiwano_core::import` (`migrate.local.md` §10.19): reading
+/// Moved here from `kiwano_core::import`: reading
 /// cc-switch's files is the client's (they are in the user's home, and one of
 /// them is a SQLite database), but writing providers is the daemon's, and the
 /// split falls exactly where the reading stops. `RawProvider` travels as JSON,

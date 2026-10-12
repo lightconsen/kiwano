@@ -34,7 +34,7 @@ fn home_with_unnormalized_openclaw() -> tempfile::TempDir {
 
 fn run_takeover(home: &Path, quiet: bool) -> (i32, String) {
     // A daemon, because a takeover's **store half is the daemon's** now
-    // (`migrate.local.md` §10.43) — without one the command stops before the
+    // — without one the command stops before the
     // file half, which is where every warning this file is about comes from.
     let db = home.join("kiwano.db");
     let daemon = support::serve(&db);

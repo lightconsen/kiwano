@@ -81,7 +81,6 @@ fn hostname_command() -> Option<String> {
 }
 
 /// The **client's own** database and whatever had to be ignored to resolve it
-/// (`migrate.local.md` §9.5 step 2).
 ///
 /// Beside [`crate::sidecar::db_path`] because the two are a pair a front end
 /// resolves together: the shared file is the daemon's and this one is the

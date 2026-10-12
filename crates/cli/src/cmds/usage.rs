@@ -16,7 +16,6 @@ pub fn usage(args: &UsageArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     }
     // The whole window in one answer: the daemon draws it from its own clock and
     // aggregates it, and this side only decides how to lay it out
-    // (`migrate.local.md` §10.45).
     let view = ctx.api.usage_report(args.days, args.agent.as_deref())?;
     let report = UsageReport {
         days: args.days,

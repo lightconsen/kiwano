@@ -2,7 +2,7 @@
 //! an endpoint, the billing mapping, the declared currency.
 //!
 //! Moved here from `kiwano_core::vm::providers` so the daemon can build the
-//! same `ProviderVm` the app shows (`migrate.local.md` §10.13). `ProviderVm`
+//! same `ProviderVm` the app shows. `ProviderVm`
 //! itself stays in `kiwano-api` — it is a wire type — but the rules that fill
 //! it are not, and this is the rule §10.10 applied: they live where they are
 //! produced.

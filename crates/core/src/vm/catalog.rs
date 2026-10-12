@@ -2,7 +2,7 @@
 //!
 //! The parse-and-normalize rules, the types and the shelf moved to
 //! `kiwanod::api::catalog` when the daemon started serving them
-//! (`migrate.local.md` §10.12) — the payload they read is the daemon's table
+//! — the payload they read is the daemon's table
 //! now. What is left here is the client's own half: the sync report, and
 //! `stored_key_for`, which answers a question about *this* machine's saved
 //! configuration.
@@ -26,7 +26,7 @@ pub use kiwanod::api::catalog::{
 use crate::vm::e2s;
 
 // The sync report moved to `kiwano-api` when the daemon took over the sync
-// (`migrate.local.md` §10.14): the daemon produces it, so it is a wire type.
+// The daemon produces it, so it is a wire type.
 pub use kiwano_api::providers::SyncReportVm;
 
 // The stored-key lookup moved to `kiwanod::api::catalog` — the daemon's probes

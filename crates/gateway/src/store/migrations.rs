@@ -30,7 +30,7 @@ pub const SCHEMA_VERSION: i32 = 35;
 /// migrations above 27 will touch — and by v31 that means all of them, because a
 /// table rebuild reads every column. The honest way is to run the store's own
 /// migration chain up to that version rather than to keep a second copy of the
-/// schema in a fixture (`migrate.local.md` §10.14): the blocks below are the very
+/// schema in a fixture: the blocks below are the very
 /// ones `migrate` runs, called with the version forced to 0.
 ///
 /// The version *stamp* stays the caller's business — it is what decides which
@@ -731,8 +731,7 @@ ALTER TABLE request_logs ADD COLUMN request_notes TEXT;
 /// `IF NOT EXISTS`, with the same columns, and changes no data. What it changes
 /// is who *declares* the schema: the daemon serves `list_catalog` and infers a
 /// provider's Hub entry in `add_provider`, so it is the side that has to be able
-/// to name these tables (`store::hub`). `migrate.local.md` §9-B: ownership
-/// decides, not convenience.
+/// to name these tables (`store::hub`): ownership decides, not convenience.
 const MIGRATION_V28: &str = r#"
 CREATE TABLE IF NOT EXISTS hub_cache (
     id        INTEGER PRIMARY KEY CHECK (id = 1),
@@ -817,8 +816,8 @@ ALTER TABLE providers ADD COLUMN openai_wire TEXT NOT NULL DEFAULT 'both';
 /// session files, sitting right there, hold the history of what they spent
 /// before Kiwano existed and, in the `project` dimension, a fact this gateway
 /// can never observe (it sees requests, not the repository they came from).
-/// Reading those files is the client's job (`migrate.local.md` §5 #1/#2: no
-/// paths in an API payload, and the daemon never touches user files); what lands
+/// Reading those files is the client's job (no paths in an API payload, and the
+/// daemon never touches user files — see CONTRIBUTING.md); what lands
 /// here are the parsed rows.
 ///
 /// That needs three things of this table, and the rebuild is how SQLite gets

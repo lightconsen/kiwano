@@ -2,13 +2,13 @@
 //!
 //! # Why this is a test and not a compiler error
 //!
-//! `migrate.local.md` §10 (1) wanted the guarantee the compiler gives: drop the
-//! app's `kiwanod` dependency and every missed `store.…` call stops compiling.
-//! §5 #5 makes that impossible — the aggregation layer stays on the client (it
-//! reads facts about *this machine*), and that layer takes a `&Store`, so the app
-//! must be able to name `Store`.
+//! The guarantee the compiler gives — drop the app's `kiwanod` dependency and
+//! every missed `store.…` call stops compiling — is impossible here: the fifth
+//! architecture rule keeps the aggregation layer on the client (it reads facts
+//! about *this machine*), and that layer takes a `&Store`, so the app must be
+//! able to name `Store`.
 //!
-//! §10.21 records the resolution: the property that matters is not "the app
+//! The resolution is that the property that matters is not "the app
 //! cannot name a store" but **"the app cannot write one"**. That is what this
 //! file checks, and it is checkable in a way the compiler cannot manage — a
 //! `&Store` allows reads and writes alike, so no signature distinguishes them.
@@ -81,7 +81,7 @@ fn handle_calls(source: &str) -> Vec<(String, String)> {
 ///
 /// The rule was never "no writes" — it is **no writes to the daemon's
 /// database**. `store` is that database, so only reads belong on it. `aux` is
-/// the client's own file since `migrate.local.md` §9.5 step 2 — this machine's
+/// the client's own file — this machine's
 /// declared agent directories, injected rules and takeover backups, none of
 /// which the daemon has ever read — so writing there is the app doing its job.
 ///
@@ -120,7 +120,7 @@ fn the_app_calls_only_known_methods_on_its_database_handles() {
         "the app reached for a handle method this test does not know. If it only \
          reads, or writes to the client's own `aux` file, add it to ALLOWED; a \
          write to `store` belongs to the daemon, which is what makes it the one \
-         writer (`migrate.local.md` §10.21). Found:\n  {}",
+         writer. Found:\n  {}",
         violations.join("\n  ")
     );
 }
@@ -149,7 +149,7 @@ fn the_app_does_not_open_a_database_of_its_own() {
         violations.is_empty(),
         "the app opened a database handle of its own; only `run` does, and it \
          hands both connections to `AppState` — the daemon's database and this \
-         client's own file, two files since `migrate.local.md` §9.5 step 2. \
+         client's own file, two files. \
          Found:\n  {}",
         violations.join("\n  ")
     );
@@ -162,7 +162,7 @@ fn the_app_does_not_open_a_database_of_its_own() {
 /// where it can be looked at, instead of appearing silently in a diff.
 ///
 /// **It is down to one, and that one is deliberate.** Everything that assembled
-/// a view from the store moved to the daemon (`migrate.local.md` §10.44): the
+/// a view from the store moved to the daemon: the
 /// provider rows, the dashboard, the footer, the alerts, the settings blob. What
 /// is left is the tray, which reads a single boolean on a window event — a
 /// decision about *this* window, taken on the UI thread, where a round trip to
@@ -204,7 +204,7 @@ fn the_functions_the_app_hands_its_store_to_are_the_known_ones() {
         unknown.is_empty(),
         "the app hands its store to a function this test does not know. If the \
          callee only reads, add it to KNOWN; if it writes, the write belongs to \
-         the daemon (`migrate.local.md` §10.21). Found:\n  {}",
+         the daemon. Found:\n  {}",
         unknown
             .iter()
             .map(|s| s.as_str())
@@ -284,7 +284,7 @@ fn every_command_that_reaches_the_daemon_is_off_the_main_thread() {
     assert!(
         violations.is_empty(),
         "these commands make a blocking daemon round trip on the main thread \
-         (`migrate.local.md` §10.26). Annotate them `#[tauri::command(async)]`:\n  {}",
+. Annotate them `#[tauri::command(async)]`:\n  {}",
         violations.join("\n  ")
     );
 }

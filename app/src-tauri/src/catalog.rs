@@ -9,7 +9,7 @@ use kiwano_core::{pricing, vm};
 #[tauri::command(async)]
 pub fn list_catalog() -> Result<vm::CatalogListVm, String> {
     // Served by the daemon: it owns the Hub cache and the endpoint matching that
-    // marks an entry as already added (`migrate.local.md` §10.12).
+    // marks an entry as already added.
     kiwano_core::daemon_api::DaemonApi::connect().list_catalog()
 }
 

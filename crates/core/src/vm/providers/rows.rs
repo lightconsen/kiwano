@@ -2,7 +2,7 @@
 //! supplied by the client.
 //!
 //! Everything that *builds* a row lives in `kiwanod::api::providers_view`
-//! (`migrate.local.md` §10.21): the client cannot open the daemon's database
+//! The client cannot open the daemon's database
 //! when the daemon is on another machine, and the daemon owns the rows. What
 //! stays here is the **one machine fact** the view needs — which agents' own
 //! configs carry our placeholder key — because §5 #2 keeps that out of the
@@ -12,7 +12,7 @@
 //! `live_bound_agents` intersected the config evidence with the bindings and the
 //! custom agents, which meant two *shared* reads to answer it. The intersection
 //! needs rows, so it belongs where the rows are, and all the client has to say
-//! is what it can see (`migrate.local.md` §10.44).
+//! is what it can see.
 
 use super::ProviderVm;
 use crate::daemon_api::DaemonApi;

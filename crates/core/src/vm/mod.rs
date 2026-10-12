@@ -245,8 +245,8 @@ pub(crate) mod test_support {
 
     /// A store whose hub cache holds the link catalog.
     ///
-    /// The cache is the **daemon's** table now (`store::hub`,
-    /// `migrate.local.md` §10.12), so a fixture has to put it where the code
+    /// The cache is the **daemon's** table now (`store::hub`), so a fixture has
+    /// to put it where the code
     /// reads it — writing it into an `Aux` would leave the shelf empty and the
     /// test passing for the wrong reason.
     pub(crate) fn catalog_store() -> Store {
@@ -298,7 +298,7 @@ pub(crate) mod test_support {
     /// What a caller that **has** the full form sends: every field present, so
     /// an edit built this way is the authoritative rewrite the old `PUT` was.
     /// The patch's own subject — a client that speaks about one field and
-    /// leaves the rest (`migrate.local.md` §10.38) — is tested by naming that
+    /// leaves the rest — is tested by naming that
     /// field alone.
     pub(crate) fn full_patch(input: NewProviderInput) -> ProviderPatch {
         ProviderPatch {

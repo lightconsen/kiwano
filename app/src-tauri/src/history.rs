@@ -125,7 +125,7 @@ pub(crate) fn spawn_history_backfill(handle: tauri::AppHandle) {
 /// spelled out, which would put a synchronously-blocking daemon round trip (and
 /// a login shell, on the first scan) in the way of the window. The
 /// `one_writer` test in this crate is what holds that: it names any command that
-/// reaches the daemon without the annotation (`migrate.local.md` §10.26).
+/// reaches the daemon without the annotation.
 #[tauri::command(async)]
 pub async fn history_import(app: tauri::AppHandle) -> Result<vm::HistoryImportReport, String> {
     // Every reader this build has: the command is the "scan now" button, and a
@@ -157,7 +157,6 @@ pub async fn history_import(app: tauri::AppHandle) -> Result<vm::HistoryImportRe
 /// is what keeps this function's daemon calls inside the caller's
 /// `spawn_blocking`, which is the property the `one_writer` test looks for — a
 /// synchronous round trip on the main thread is a frozen window
-/// (`migrate.local.md` §10.26).
 fn scan_once(
     app: &tauri::AppHandle,
     api: &kiwano_core::daemon_api::DaemonApi,

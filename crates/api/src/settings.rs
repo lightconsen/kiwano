@@ -1,7 +1,7 @@
 //! The Settings object: the whole blob the Settings screen reads and patches.
 //!
 //! Moved here from `kiwano_core::vm::settings` when the daemon took over the
-//! read and the write (`migrate.local.md` §10.16). Both derive both directions:
+//! read and the write. Both derive both directions:
 //! the daemon serves the blob and the client parses it back — and a patch is
 //! sent the same way it came.
 
@@ -226,7 +226,6 @@ impl Default for SettingsVm {
 /// Here rather than on one side, because **both** sides heal: the daemon serves
 /// the settings blob and the client layers its own reading on top, and a
 /// hand-copied literal is how the two came to disagree once already
-/// (`migrate.local.md` §10.25).
 pub const LEGACY_HUB_URL: &str = "https://hub.kiwano.app/catalog.json";
 
 /// Heal the one value known to be a bygone default, leaving an endpoint the user

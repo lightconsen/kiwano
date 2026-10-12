@@ -2,7 +2,7 @@
 //! and the ceilings and strategy that ride along.
 //!
 //! These lived in `kiwano-core` until the daemon started serving them
-//! (`migrate.local.md` §10.8). The derives are the full set rather than the
+//! The derives are the full set rather than the
 //! original `Serialize`-only, because the daemon produces these and a client
 //! parses them: the two directions need both halves, and a response type that
 //! cannot be read back cannot be frozen in a fixture either.

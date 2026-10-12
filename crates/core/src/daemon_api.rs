@@ -1,7 +1,7 @@
 //! The client of the daemon's resource API — one function per command.
 //!
-//! `migrate.local.md` §7 batch 1 moves the *state* commands here: the app and
-//! the CLI stop opening the store and ask the process that owns it. The shape
+//! The *state* commands live here: the app and the CLI do not open the store,
+//! they ask the process that owns it. The shape
 //! of each function is deliberately the same as the `vm::` function it
 //! replaces (same arguments, same return type, same error string where there is
 //! one), so a caller changes one line and no call site has to be reshaped
@@ -36,7 +36,7 @@ use crate::sidecar::{self, AdminEndpoint};
 /// A client of one daemon: where it is, and what it authenticates with.
 ///
 /// Both halves in one value because they are answered together — and because
-/// the second is the open question of `migrate.local.md` §13.5. Today a client
+/// the second is still open. Today a client
 /// reads the token from the database it shares with its daemon
 /// ([`DaemonApi::connect`]); a remote one will have to be told, which is
 /// [`DaemonApi::with_token`]. Every resource call takes a `DaemonApi`, so that
@@ -113,7 +113,7 @@ impl DaemonApi {
 
     /// Add a rotation key — `vm::add_api_key`. Safe to retry: the far end keys
     /// on the value, so a second delivery answers with the row already there
-    /// rather than a second one (`migrate.local.md` §6.1).
+    /// rather than a second one.
     pub fn add_api_key(
         &self,
         provider_id: &str,
@@ -437,7 +437,7 @@ impl DaemonApi {
     /// The **id is the caller's** (`kiwano_api::ids::mint_agent_id`): nothing
     /// else in the request can identify the operation, since the agent's id
     /// carries a random suffix, and an id the daemon has already seen is
-    /// answered with the agent that exists (`migrate.local.md` §6.1). Passing it
+    /// answered with the agent that exists. Passing it
     /// in is what lets a caller that retries hold the same id across attempts.
     pub fn add_custom_agent(
         &self,
@@ -636,7 +636,7 @@ impl DaemonApi {
     }
     /// Sync the Hub — the catalog and the price table, cached and applied.
     /// The daemon fetches, and re-reads its own route table when either wrote
-    /// (`migrate.local.md` §10.14). A skip is still an answer: "checked, still
+    /// A skip is still an answer: "checked, still
     /// current" is what the footer badge shows.
     pub fn sync_hub(&self) -> Result<SyncReportVm, String> {
         sidecar::admin_post_json(
@@ -673,7 +673,7 @@ impl DaemonApi {
     ///
     /// `action` is `latency` | `endpoint` | `models`. A blank `api_key` is
     /// filled in with the stored credential — for that provider's own endpoints
-    /// only, on the daemon's side (`migrate.local.md` §10.15). The response is
+    /// only, on the daemon's side. The response is
     /// the probe's own shape: `{latency_ms}`, the `ProbeReport`, or the model
     /// list, so the caller deserializes what it asked for.
     pub fn probe(
@@ -743,7 +743,7 @@ impl DaemonApi {
 
     /// The whole configuration as JSON — `vm::export_config`. The **caller**
     /// writes it to a file: the path came from the user's save dialog, which is
-    /// the client's business (`migrate.local.md` §10.17).
+    /// the client's business.
     pub fn export_config(&self, include_keys: bool) -> Result<String, String> {
         let v: serde_json::Value = sidecar::admin_get_json(
             &self.endpoint,
@@ -758,7 +758,7 @@ impl DaemonApi {
     pub fn import_config(&self, json: &str) -> Result<ImportReport, String> {
         // The text as the body, not a JSON string containing it: the daemon
         // parses and validates the document, and it cannot do that with a
-        // quoted copy (`migrate.local.md` §10.39).
+        // quoted copy.
         sidecar::admin_post_text(
             &self.endpoint,
             self.token.as_deref(),
@@ -837,12 +837,12 @@ impl DaemonApi {
         ))
     }
     /// Apply an edit — `vm::update_provider`'s **write** half. The view is the
-    /// caller's (`migrate.local.md` §5's fifth constraint): the daemon updates
+    /// caller's: the daemon updates
     /// the row and the bindings, and the caller assembles what it shows.
     ///
     /// A patch, so the caller says only what changed and needs no read of the
     /// row first. `PATCH` rather than `PUT` because that is what the body now
-    /// means (`migrate.local.md` §10.38).
+    /// means.
     pub fn update_provider(&self, id: &str, patch: &ProviderPatch) -> Result<(), String> {
         wrote(sidecar::admin_patch_json(
             &self.endpoint,
@@ -907,7 +907,7 @@ impl DaemonApi {
     ///
     /// The narrow read a client without a form needs before it can state the
     /// rules that are phrased in terms of the stored mode — `providers edit`'s
-    /// `--plan-limit-*` among them (`migrate.local.md` §10.38).
+    /// `--plan-limit-*` among them.
     pub fn provider_ref(&self, id: &str) -> Result<ProviderRefVm, String> {
         sidecar::admin_get_json(
             &self.endpoint,
@@ -916,7 +916,7 @@ impl DaemonApi {
         )
     }
     /// Apply cc-switch rows the caller extracted — the **store half** of that
-    /// import. The files stay on the client (`migrate.local.md` §10.19).
+    /// import. The files stay on the client.
     pub fn import_cc_switch(
         &self,
         raws: &[kiwanod::api::import::RawProvider],
@@ -939,7 +939,7 @@ impl DaemonApi {
     /// turns out to be unusable.
     ///
     /// The rebuild half is why this is asked rather than read
-    /// (`migrate.local.md` §10.43): it carries the provider's credential, which
+    /// It carries the provider's credential, which
     /// lives in the daemon's row.
     pub fn takeover_state(
         &self,
@@ -977,7 +977,7 @@ impl DaemonApi {
     /// The store half of starting a takeover — `vm::takeover::phase_state`.
     ///
     /// The **key is the caller's**, which is what makes a replay safe without an
-    /// operation table here (`migrate.local.md` §8): registering the key it
+    /// operation table here: registering the key it
     /// already minted is one row. The credential is what the caller read out of
     /// the agent's own config — those files are the client's, and §5's first
     /// constraint forbids paths in this interface.
@@ -1004,7 +1004,7 @@ impl DaemonApi {
     ///
     /// Composed from the two halves each side actually knows: the client knows
     /// the host — it dialled it — and the daemon reports the port, which may not
-    /// be the conventional one (`migrate.local.md` §10.30). A local client gets
+    /// be the conventional one. A local client gets
     /// `http://127.0.0.1:<port>`, which is what a takeover wrote before this
     /// existed.
     pub fn gateway_base(&self) -> Result<String, String> {
@@ -1031,7 +1031,7 @@ impl DaemonApi {
     ///
     /// `live` is the one thing the client supplies: which agents actually route
     /// through the gateway, read out of their own config files, which are this
-    /// machine's (`migrate.local.md` §5 #2). Everything else is the daemon's
+    /// machine's. Everything else is the daemon's
     /// database, which is the whole reason this endpoint exists.
     pub fn provider_view(&self, live: &[String]) -> Result<Vec<ProviderVm>, String> {
         #[derive(serde::Serialize)]
@@ -1443,7 +1443,7 @@ mod tests {
         );
     }
 
-    /// Every request carries the API generation (`migrate.local.md` §11.2).
+    /// Every request carries the API generation.
     ///
     /// Asserted on the wire because nothing else can see it: a client that
     /// stopped sending the header would be treated as generation 0, which

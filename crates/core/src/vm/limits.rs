@@ -1,6 +1,6 @@
 //! Declared prices and spending limits — served by the daemon now.
 //!
-//! The rules moved to `kiwanod::api::limits` (`migrate.local.md` §10.13): the
+//! The rules moved to `kiwanod::api::limits`: the
 //! daemon holds a provider-add to the same constraints the client did, and a
 //! copy here would be the second one. Re-exported, so the `vm::` paths that
 //! name them still resolve.
@@ -35,7 +35,6 @@ mod tests {
         // Through the store's own accessor: the cache is the daemon's table
         // (migration v28), so a fixture that built it by hand was keeping a
         // second copy of the schema — the thing this migration removes
-        // (`migrate.local.md` §10.14).
         store
             .save_hub_models_cache(
                 1,

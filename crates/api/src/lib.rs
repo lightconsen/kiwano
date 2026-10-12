@@ -20,7 +20,7 @@
 //!
 //! - **Here**: the inputs and outputs of commands the daemon will serve —
 //!   batch 1's pure-state commands, batch 2's probes, and the state half of
-//!   batch 3's mixed ones (`migrate.local.md` §7).
+//!   batch 3's mixed ones.
 //! - **Not here**: anything whose command stays on the client forever — the
 //!   detect family, the updater, `open_url` / `open_log_folder`,
 //!   `verify_agent_dir`. Those describe *this machine*, the daemon will never

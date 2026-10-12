@@ -47,8 +47,8 @@ pub fn export_request_logs_csv(
     filter: RequestLogFilter<'_>,
 ) -> Result<RequestLogExportVm, String> {
     // The rows and their spelling are the daemon's; the **file** is this side's,
-    // because the path came from the user's save dialog (`migrate.local.md`
-    // §10.17). The daemon hands back the CSV text and the two counts.
+    // because the path came from the user's save dialog. The daemon hands back
+    // the CSV text and the two counts.
     let (csv, written, truncated) =
         daemon::export_request_logs_csv(store, filter).map_err(|e| e.to_string())?;
     write_request_log_export(path, &csv, written, truncated)

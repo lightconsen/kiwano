@@ -7,7 +7,7 @@
 //!
 //! Commands that need the daemon are handed one by [`support::serve`]; the rest
 //! run with no admin plane beside the temp database, which is a state the CLI
-//! has to handle anyway (`migrate.local.md` §14.1, decision D3).
+//! has to handle anyway.
 
 mod support;
 
@@ -679,8 +679,8 @@ fn keys_add_list_remove_roundtrips() {
 /// itself it answered with no daemon running — and a CLI that still did would
 /// pass every test above, because the temp database is right there. Now the
 /// answer comes over the admin plane, so a missing daemon is an error rather
-/// than a silent second source of the same data (`migrate.local.md` §14.1,
-/// decision D1). When the next batch moves, add its command here.
+/// than a silent second source of the same data. When a command moves to the
+/// admin plane, add it here.
 #[test]
 fn a_moved_command_needs_the_daemon() {
     let (_dir, db) = temp_db();
@@ -718,7 +718,7 @@ fn a_moved_command_needs_the_daemon() {
 }
 
 /// The takeover's store half is the daemon's now — it was the last command that
-/// wrote the shared database directly (`migrate.local.md` §10.43).
+/// wrote the shared database directly.
 ///
 /// Its own test rather than a row in the table above, because it can assert one
 /// thing more: **the file half does not run when the store half never landed.**
@@ -796,7 +796,7 @@ fn the_harness_serves_a_daemon_the_cli_actually_reaches() {
 /// Gateway down is an answer, not a failure — exit 1, and that is *all* it says.
 ///
 /// It used to add a report read from the shared database. That is gone on
-/// purpose (`migrate.local.md` §14.1, decision D3): a client answering from a
+/// purpose: a client answering from a
 /// database of its own is answering about a different daemon the moment it is
 /// pointed at another machine, and a remote one has no such file to read.
 #[test]
@@ -1965,7 +1965,6 @@ fn catalog_list_filters_by_tag_and_name() {
     {
         // Seeded through the store: the cache is the daemon's table, so its
         // accessor there is the only one — the `Aux` copies are gone
-        // (`migrate.local.md` §10.14).
         let store = Store::open(&db).unwrap();
         store
             .save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")
@@ -2016,7 +2015,6 @@ fn providers_add_links_the_catalog_entry() {
     {
         // Seeded through the store: the cache is the daemon's table, so its
         // accessor there is the only one — the `Aux` copies are gone
-        // (`migrate.local.md` §10.14).
         let store = Store::open(&db).unwrap();
         store
             .save_hub_cache(SEED_CATALOG, "2026-09-07T00:00:00Z")

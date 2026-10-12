@@ -36,8 +36,8 @@ pub fn kiwano_db_path() -> DbPath {
     kiwano_db_path_from(std::env::var_os("KIWANO_DB_PATH").as_deref())
 }
 
-/// Environment variable naming the **client's own** database (`migrate.local.md`
-/// §9.5 step 2). Client-side only: the daemon has never heard of this file.
+/// Environment variable naming the **client's own** database. Client-side only:
+/// the daemon has never heard of this file.
 pub const LOCAL_DB_ENV: &str = "KIWANO_LOCAL_DB_PATH";
 
 /// The SQLite file a **client** keeps for itself: `KIWANO_LOCAL_DB_PATH`, else
@@ -46,7 +46,7 @@ pub const LOCAL_DB_ENV: &str = "KIWANO_LOCAL_DB_PATH";
 /// Named for what it holds rather than for who reads it — everything in it is
 /// about *this machine*: which directory an agent was found in, which had rules
 /// injected, and the backups a takeover can be undone from. None of that is the
-/// daemon's, and none of it travels (`migrate.local.md` §9.4, §9.5 step 2).
+/// daemon's, and none of it travels.
 ///
 /// A **separate file** rather than a table prefix, because the boundary is what
 /// makes a remote client possible: a client on another machine cannot open the
@@ -95,7 +95,7 @@ pub struct DbPath {
     /// Worth carrying because of *who reads it*: a daemon launched by a service
     /// manager has a different `$HOME` from the user's session, so a defaulted
     /// path is a database the user's app may not be looking at — silently, and
-    /// with no error anywhere (`migrate.local.md` §13.1). A caller that can be
+    /// with no error anywhere. A caller that can be
     /// started that way logs it.
     pub defaulted: bool,
 }
@@ -118,7 +118,7 @@ fn kiwano_db_path_from(value: Option<&std::ffi::OsStr>) -> DbPath {
 }
 
 /// One rule for both files, because they are resolved the same way and a second
-/// copy is a second answer (`migrate.local.md` §9.5).
+/// copy is a second answer.
 fn resolve_db_path(value: Option<&std::ffi::OsStr>, var: &'static str, default: PathBuf) -> DbPath {
     let default = || default.clone();
     match classify_dir(value) {

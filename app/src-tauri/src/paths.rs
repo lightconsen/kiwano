@@ -35,7 +35,7 @@ pub(crate) fn resolved_db() -> kiwano_core::paths::DbPath {
 
 /// The **client's own** database: this machine's facts — which directory an
 /// agent was found in, which had rules injected, the backups a takeover can be
-/// undone from (`migrate.local.md` §9.4, §9.5 step 2).
+/// undone from.
 ///
 /// A different file from [`db_path`], and deliberately so: the daemon owns that
 /// one, and none of this describes the daemon.

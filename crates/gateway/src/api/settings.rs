@@ -1,7 +1,7 @@
 //! The settings blob: read whole, patched in part.
 //!
 //! Moved here from `kiwano_core::vm::settings` when the daemon took over the
-//! read and the write (`migrate.local.md` §10.16). The patch's gateway-facing
+//! read and the write. The patch's gateway-facing
 //! mirrors (the log config, the compat shim, the DLP mode, the stream timeouts)
 //! are what the daemon re-reads on its own route-table reload — which is the
 //! whole of the `/reload` ping the app's `update_settings` used to send.
@@ -25,7 +25,7 @@ pub fn ui_settings(store: &Store) -> Result<SettingsVm, ApiError> {
     // The heal lives in `kiwano-api` because both sides do it, and a literal
     // copied by hand is how this compared against the *current* default instead
     // of the legacy one — a heal that never fired, on the path the app and the
-    // sync both use (`migrate.local.md` §10.25).
+    // sync both use.
     kiwano_api::settings::heal_legacy_hub_url(&mut s);
     Ok(s)
 }
@@ -61,7 +61,6 @@ pub fn update_settings(store: &Store, patch: &serde_json::Value) -> Result<(), A
     // path that changes the value — the app sends the whole blob, so a daemon
     // that read only its own key would stop seeing a timezone the user had just
     // changed, silently, as a period resetting at the wrong hour
-    // (`migrate.local.md` §9.2.2's hazard, which is this field).
     if let Some(minutes) = patch.get("tz_offset_minutes").and_then(|v| v.as_i64()) {
         store
             .set_ui_tz_offset_minutes(minutes)

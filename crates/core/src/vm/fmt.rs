@@ -2,8 +2,8 @@
 //! the dashboard both print.
 //!
 //! The avatar rules (`logo_char`, `palette_color`) are `kiwano_api::logo`'s, and
-//! the provider view that used them is the daemon's now (`migrate.local.md`
-//! §10.21) — so nothing in this crate reads them and there is nothing to
+//! the provider view that used them is the daemon's now — so nothing in this
+//! crate reads them and there is nothing to
 //! re-export.
 
 /// Token formatting, mirroring `src/lib/format.ts`.

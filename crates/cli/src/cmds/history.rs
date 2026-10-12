@@ -1,7 +1,7 @@
 //! The agents' own history: read their session files, hand the rows over.
 //!
 //! The reading is the client's — the files are in the user's home, and the daemon
-//! is not allowed to touch them (`migrate.local.md` §5 #1/#2). What this command
+//! is not allowed to touch them. What this command
 //! adds is the *shape* of the transaction: read, split into request-sized
 //! batches, send each one, and add the reports up. It is also the way to see what
 //! a scan found without importing anything (`--dry-run`), which is the only

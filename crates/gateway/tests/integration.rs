@@ -1032,7 +1032,7 @@ async fn promoting_a_provider_switches_traffic_without_a_restart() {
     //
     // Through the API, which is the only way a binding gets written now: the
     // write route re-reads the route table itself, so there is no separate
-    // reload step to forget (`migrate.local.md` §10.46).
+    // reload step to forget.
     let token = state
         .store
         .app_setting(ADMIN_TOKEN_KEY)

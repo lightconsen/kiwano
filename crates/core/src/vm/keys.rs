@@ -2,8 +2,8 @@
 //!
 //! The bodies live in `kiwanod::api::keys` now: the daemon serves this resource,
 //! and `kiwano-core` depends on `kiwanod` rather than the other way round, so a
-//! copy here would be the second one (`migrate.local.md` §10.8 explains the
-//! finding; `crates/gateway/src/api/mod.rs` explains the rule).
+//! copy here would be the second one (`crates/gateway/src/api/mod.rs` explains
+//! the rule).
 //!
 //! What stays is the *client-facing* signature. These functions return
 //! `Result<_, String>` because that is what the app's IPC and the CLI take, and
@@ -18,10 +18,10 @@ use kiwanod::store::Store;
 
 // Re-exported, not declared here: the wire types moved to `kiwano-api`, which
 // the daemon can depend on and `kiwano-core` cannot be reached from
-// (`migrate.local.md` §10.5). The path `crate::vm::keys::ApiKeyVm` is unchanged
+// The path `crate::vm::keys::ApiKeyVm` is unchanged
 // on purpose — and so is `mask_key`'s: the daemon has to produce the same
 // masked string the app does, and two copies of a rule like this is how the two
-// would come to disagree (`migrate.local.md` §10.6).
+// would come to disagree.
 pub use kiwano_api::keys::{mask_key, ApiKeyVm, UpstreamKeySpendVm};
 
 // ── Multi-key rotation (spec §4.1 P1: auto-rotate multiple API keys per provider) ──

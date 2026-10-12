@@ -21,15 +21,15 @@
 /// only honest answer when nothing said otherwise.
 // The rule is the daemon's (`kiwanod::api::views`): what a provider's figures
 // are denominated in is produced by whichever side builds the row, and that is
-// the daemon now (`migrate.local.md` §10.7). Nothing in this crate calls it any
+// the daemon now. Nothing in this crate calls it any
 // more — the view is the daemon's too (§10.21) — but the tests below still pin
 // the rule, and they call the daemon's copy rather than a local one.
 #[cfg(test)]
 pub(crate) use kiwanod::api::views::provider_currency;
 
 // The cost rule is the daemon's (`kiwanod::api::providers_view`): it produces
-// the Usage cell, and that is the daemon's now (`migrate.local.md` §10.7,
-// §10.21). Nothing here calls it; the tests below pin it through that copy.
+// the Usage cell, and that is the daemon's now. Nothing here calls it; the tests
+// below pin it through that copy.
 #[cfg(test)]
 pub(crate) use kiwanod::api::providers_view::provider_cost;
 

@@ -29,13 +29,13 @@ use kiwanod::store::Store;
 use serde_json::Value;
 
 // The row shape and the apply half moved to `kiwanod::api::import`
-// (`migrate.local.md` §10.19): reading cc-switch's files is this side's (they
+// Reading cc-switch's files is this side's (they
 // are in the user's home), writing providers is the daemon's.
 pub use kiwanod::api::import::{ImportReportVm, RawProvider};
 
 /// The **reader** half: extract the rows from cc-switch's files, and say what
 /// each file contributed. No store is touched — the rows travel to the daemon,
-/// which applies them (`migrate.local.md` §10.19).
+/// which applies them.
 ///
 /// Pass candidate paths explicitly so tests never read real user data.
 pub fn read_cc_switch(

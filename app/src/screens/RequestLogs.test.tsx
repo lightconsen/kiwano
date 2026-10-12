@@ -450,10 +450,17 @@ describe("the sessions view", () => {
     const project = row.querySelectorAll("td")[3];
     expect(project.getAttribute("title")).toContain("buildbox");
 
-    // And money that a narrow cell truncates is still readable in full.
+    // Money is never truncated: a two-currency cost does not fit this card and
+    // never will, so it wraps. The widths came from measuring the widest value
+    // each column really holds at the window's 900px minimum.
     const cost = row.querySelectorAll("td")[8];
     expect(cost.textContent).toBe("$2.5 (+3 unpriced)");
-    expect(cost.getAttribute("title")).toBe("$2.5 (+3 unpriced)");
+    expect(cost.firstElementChild?.className).toContain("break-words");
+
+    // The same for the agent, whose longest id in the roster is
+    // `deepseek-harness` — 114px of text in a column budgeted at 64.
+    const agent = row.querySelectorAll("td")[2];
+    expect(agent.firstElementChild?.className).toContain("break-words");
   });
 
   it("pages the list, and counts what is there rather than what is on screen", async () => {

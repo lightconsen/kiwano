@@ -74,24 +74,30 @@ export function SessionsTable({
   const t = useT();
   return (
     <div className="overflow-hidden">
-      {/* `table-fixed`, and every column but two carries a width: the window's
-          minimum is 900px, which leaves the card about 840px for nine columns,
-          and a table that sized itself to its content would push the right-hand
-          ones past the card's edge, where `overflow-hidden` **cuts** them rather
-          than scrolling them. Fixed widths make the elastic columns truncate
-          instead — which is what the titles are for — and the tooltips keep every
-          value that a narrow window cannot show. */}
+      {/* `table-fixed`, with a width for every column: the window's minimum is
+          900px, which leaves this card about 860px for nine columns, and a table
+          that sized itself to its content pushed the right-hand ones past the
+          card's edge, where `overflow-hidden` **cuts** them rather than scrolling
+          them.
+          
+          The widths are **measured**, not guessed — in a browser at 900px, against
+          the widest value each column really holds (`deepseek-harness` for the
+          agent id, `999k / 999k` for a token pair, `$2.5 + ¥7.25 (+3 unpriced)` for
+          a two-currency cost). Two numbers with two currencies do not fit in this
+          card and never will, so the columns that can wrap — title, project,
+          agent, cost — **do** rather than truncating: a value that is cut is a
+          different value, and a longer row is cheaper than a wrong one. */}
       <table className="w-full table-fixed text-[11.5px]">
         <colgroup>
-          <col className="w-[34%]" />
-          <col className="w-[76px]" />
-          <col className="w-[46px]" />
-          <col className="w-[13%]" />
-          <col className="w-[54px]" />
-          <col className="w-[38px]" />
-          <col className="w-[42px]" />
+          <col className="w-[27%]" />
           <col className="w-[84px]" />
-          <col className="w-[86px]" />
+          <col className="w-[64px]" />
+          <col className="w-[10%]" />
+          <col className="w-[54px]" />
+          <col className="w-[44px]" />
+          <col className="w-[46px]" />
+          <col className="w-[104px]" />
+          <col className="w-[110px]" />
         </colgroup>
         <thead>
           <tr className="border-b border-line text-left text-[10px] text-mut">
@@ -144,22 +150,17 @@ export function SessionsTable({
               <td className="whitespace-nowrap px-1.5 py-1.5 align-top font-sans text-mut">
                 {fmtStamp(r.ended_at)}
               </td>
-              <td className="truncate px-1.5 py-1.5 align-top font-sans" title={r.agent}>
-                {r.agent}
+              <td className="px-1.5 py-1.5 align-top font-sans">
+                <span className="block break-words">{r.agent}</span>
               </td>
               {/* The project is the files' dimension — the gateway sees requests,
                   not the checkout they came from — so a traffic-only row has
                   none, and `—` says "no side knew", not "none". */}
               <td
-                className="truncate px-1.5 py-1.5 align-top font-sans"
-                title={[
-                  r.project,
-                  r.machine ? `${t("logs.colMachine")}: ${r.machine}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || undefined}
+                className="px-1.5 py-1.5 align-top font-sans"
+                title={r.machine ? `${t("logs.colMachine")}: ${r.machine}` : undefined}
               >
-                {r.project ?? "—"}
+                <span className="block break-words">{r.project ?? "—"}</span>
               </td>
               <td className="px-1.5 py-1.5 align-top font-sans">
                 <SourceBadge source={r.source} />
@@ -177,7 +178,7 @@ export function SessionsTable({
                   comparing spend, not for reading four numbers per row. Nothing is
                   lost — the cell's title names all four, labelled. */}
               <td
-                className="truncate px-1.5 py-1.5 text-right align-top"
+                className="whitespace-nowrap px-1.5 py-1.5 text-right align-top"
                 title={t("logs.tokensCellTitle", {
                   input: fmtTokens(r.input_tokens),
                   output: fmtTokens(r.output_tokens),
@@ -187,11 +188,8 @@ export function SessionsTable({
               >
                 {fmtTokens(r.input_tokens)} / {fmtTokens(r.output_tokens)}
               </td>
-              <td
-                className="truncate px-1.5 py-1.5 text-right align-top"
-                title={fmtSessionCost(r)}
-              >
-                {fmtSessionCost(r)}
+              <td className="px-1.5 py-1.5 text-right align-top">
+                <span className="block break-words">{fmtSessionCost(r)}</span>
               </td>
             </tr>
           ))}

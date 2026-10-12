@@ -19,6 +19,23 @@
 
 import type { Session } from "../types";
 
+/** An instant `daysAgo` days back, written the way the daemon writes timestamps
+ *  (`+00:00`, no milliseconds).
+ *
+ * Both halves of that matter. The fixtures used to carry fixed September dates,
+ * which meant the embedded demo's Sessions tab was **empty** for every visitor:
+ * the window selector above the card defaults to seven days and the fixtures fell
+ * outside it. And the spelling is not cosmetic — the bound this is compared
+ * against is built by `localMidnightUtc`, so a `.000Z` stamp would sort *after*
+ * its own instant and drop the row sitting exactly on the boundary.
+ */
+function daysAgo(days: number, hour = 10, minute = 0): string {
+  const at = new Date();
+  at.setDate(at.getDate() - days);
+  at.setHours(hour, minute, 0, 0);
+  return at.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
 export const sessions: Session[] = [
   {
     session_id: "user_acct__session_9f3a",
@@ -27,8 +44,8 @@ export const sessions: Session[] = [
     project: "acme-api",
     machine: "buildbox",
     title: "port the parser to Rust",
-    started_at: "2026-09-09T20:41:00Z",
-    ended_at: "2026-09-09T21:30:00Z",
+    started_at: daysAgo(1, 20, 41),
+    ended_at: daysAgo(1, 21, 30),
     requests: 3,
     turns: 7,
     input_tokens: 4_210,
@@ -55,8 +72,8 @@ export const sessions: Session[] = [
     project: "blog-astro",
     machine: "laptop-two",
     title: "why is the sitemap missing the new posts",
-    started_at: "2026-09-06T09:15:00Z",
-    ended_at: "2026-09-06T10:02:00Z",
+    started_at: daysAgo(4, 9, 15),
+    ended_at: daysAgo(4, 10, 2),
     requests: 0,
     turns: 12,
     input_tokens: 18_900,
@@ -74,8 +91,8 @@ export const sessions: Session[] = [
     session_id: "gw-only-77ab31",
     source: "gateway",
     agent: "codex",
-    started_at: "2026-09-09T22:05:00Z",
-    ended_at: "2026-09-09T22:19:00Z",
+    started_at: daysAgo(0, 8, 5),
+    ended_at: daysAgo(0, 8, 19),
     requests: 5,
     turns: 0,
     input_tokens: 2_050,

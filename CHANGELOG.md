@@ -49,6 +49,19 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **The session table fits the window it actually has.** The window's minimum is
+  900×600, which leaves the card about 860px for nine columns — and the table
+  sized itself to its content, so the right-hand columns went past the card's
+  edge, where the overflow is **cut** rather than scrollable. Every column now
+  carries a width, taken from measuring the widest value it really holds in a
+  browser at that size (`deepseek-harness` for an agent id, `999k / 999k` for a
+  token pair, `$2.5 + ¥7.25 (+3 unpriced)` for a two-currency cost), and the four
+  that can be longer than their column — title, project, agent, cost — wrap
+  instead of ellipsising. Nothing in the list is truncated: a value that is cut
+  is a different value, and a taller row is cheaper than a wrong one. The session
+  id moved to the row's tooltip, since it was the one field nobody scans for and
+  the click already leads to that session's logs.
+
 - **The session list is paged.** `all` is a legitimate window and `kiwano history
   import` can put years of conversations in the ledger, so the view had no bound
   at either end: one response, one scroll. It now answers a page with the total

@@ -46,6 +46,14 @@ rather than stopping at the provider: `kiwano keys list <ID>` reports what
 each entry spent, in the currencies it spent them in, and `kiwano logs show`
 names the entry on the row.
 
+Which shape to use is a real choice, and the two are for different things. Two
+accounts that are **billed or limited separately** are two *providers*: each
+gets its own price, its own ceiling, and its own row in the by-provider view,
+and a strategy can fail over between them. A pool is for **keys of one
+arrangement** — several keys of one account, spread so a single key does not
+trip a rate limit — or for accounts you only want to spread load across while
+keeping one provider row.
+
 ## Which provider answered: the receipt headers
 
 Every response the gateway forwards carries three headers of its own:

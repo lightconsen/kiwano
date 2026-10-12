@@ -49,6 +49,23 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **A session's page lists the calls it made, not just the tools it used.** The
+  counts (`Bash ×976`) say how often a tool ran; the list says what it ran *on* —
+  one line each, in order: the command for a shell call, the path for a read or
+  an edit, the description for a spawned agent.
+
+  The summary comes from the call's own arguments, and the rule is deliberately
+  thin: a few per-tool keys where the tool has an obvious "what", and the first
+  string argument otherwise — which is what makes it work for the MCP tools and
+  for whatever the vendor adds next, without a table to keep current. The
+  arguments themselves are never stored, only the one-line summary, the same
+  choice the transcripts' message bodies get.
+
+  Capped at 100 calls per session, because one session on this machine made
+  **1,817** of them: the counts above the list are the ledger, and the list is a
+  chronology of it. Skills stay out of it — they are counted separately, and
+  listing them here too would be the double count that split exists to prevent.
+
 - **A session has its own page.** The sessions list can only show a row's worth
   of one, and the parts that did not fit — the tools it reached for, its skills,
   all four token buckets, the machine — are the parts worth reading. Opening a

@@ -54,6 +54,7 @@ export const dashboard = {
   sessionFromGatewayHint: "閘道路由過的請求 —— 逐請求計量出來的正確數字。",
   sessionFromFilesHint: "專案、輪次與工具,這些是閘道看不到的。",
   sessionTools: "工具",
+  sessionCalls: "{n} 次呼叫,按順序",
   sessionSkills: "Skills",
   sessionNoTools: "這個工作階段的檔案裡沒有工具呼叫紀錄",
   sessionNoSkills: "這個工作階段的檔案裡沒有 skills 紀錄",

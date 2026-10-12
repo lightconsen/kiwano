@@ -776,6 +776,17 @@ export interface HistoryCount {
   count: number;
 }
 
+/** One tool call, in the order the session made it.
+ *
+ * `detail` is the reader's one-line summary of what the call did — the command
+ * for a shell call, the path for a read, the description for a spawned agent —
+ * never the arguments themselves. The list is capped by the reader, so a long
+ * session shows its first calls rather than all of them. */
+export interface HistoryToolUse {
+  name: string;
+  detail: string;
+}
+
 /** One session, from the gateway's traffic, the agent's files, or both.
  *
  * The two sides are **never summed**: where both have a field one side wins
@@ -815,6 +826,8 @@ export interface Session {
   /** Of `requests`, the ones with no cost: the figure above is short by them. */
   unpriced_rows: number;
   tool_calls: HistoryCount[];
+  /** The calls themselves, in order and capped — see `HistoryToolUse`. */
+  tool_uses: HistoryToolUse[];
   skills: HistoryCount[];
 }
 

@@ -72,6 +72,7 @@ export const dashboard = {
   sessionFromGatewayHint: "Requests it routed — the exact figures, metered per request.",
   sessionFromFilesHint: "Project, turns and tools, which the gateway cannot observe.",
   sessionTools: "Tools",
+  sessionCalls: "{n} calls, in order",
   sessionSkills: "Skills",
   sessionNoTools: "No tool calls recorded in this session's files",
   sessionNoSkills: "No skills recorded in this session's files",

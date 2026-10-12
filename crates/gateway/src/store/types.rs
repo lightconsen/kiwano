@@ -527,6 +527,11 @@ pub struct ImportedSession {
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
     pub tool_calls: Option<String>,
+    /// The calls themselves as JSON `[{"name","detail"}]` (migration v35), in
+    /// order and capped by the reader — a chronology of the session, where
+    /// `tool_calls` above is its summary. `None` when the session made no calls,
+    /// and for every row imported before the column existed.
+    pub tool_uses: Option<String>,
     pub skills: Option<String>,
     /// Which machine's files this session was imported from (migration v32).
     /// See [`UsageRecord::imported_from`] — the same label, the same caveats, and

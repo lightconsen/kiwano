@@ -226,16 +226,24 @@ describe("a session's own page, as a route", () => {
       cost: [],
       unpriced_rows: 0,
       tool_calls: [{ name: "Bash", count: 9 }],
+      tool_uses: [{ name: "Bash", detail: "cargo test" }],
       skills: [],
     };
     apiMock.getSession.mockResolvedValue(row);
 
     render(<App />);
 
-    await waitFor(() =>
-      expect(apiMock.getSession).toHaveBeenCalledWith("user_acct/session 9f3a"),
+    // A longer wait than the default: `App` mounts every screen's reads, and a
+    // loaded machine (a dev stack, a cargo build) can push a mocked round trip
+    // past the library's one second — which is how this failed once, only ever
+    // in a run that was competing for the CPU.
+    await waitFor(
+      () => expect(apiMock.getSession).toHaveBeenCalledWith("user_acct/session 9f3a"),
+      { timeout: 3000 },
     );
-    expect(await screen.findByRole("heading", { name: "port the parser to Rust" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "port the parser to Rust" }, { timeout: 3000 }),
+    ).toBeInTheDocument();
 
     // The two Dashboard tails are matched on the same segment, so a session
     // route is not also a log deep-link — no dialog opens behind it.

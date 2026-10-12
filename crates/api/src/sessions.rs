@@ -20,7 +20,7 @@
 //! field's own comment.
 
 use crate::client_keys::CurrencyAmountVm;
-use crate::history::HistoryCount;
+use crate::history::{HistoryCount, HistoryToolUse};
 use serde::{Deserialize, Serialize};
 
 /// One page of the session list, with the size of the whole list beside it.
@@ -97,6 +97,10 @@ pub struct SessionVm {
     /// Tools the files recorded, as `{name, count}`. Imported only.
     #[serde(default)]
     pub tool_calls: Vec<HistoryCount>,
+    /// The calls themselves, in order, one line each and capped by the reader.
+    /// Imported only, for the same reason `tool_calls` is.
+    #[serde(default)]
+    pub tool_uses: Vec<HistoryToolUse>,
     /// Skills the files recorded. Imported only.
     #[serde(default)]
     pub skills: Vec<HistoryCount>,

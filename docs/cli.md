@@ -317,7 +317,11 @@ the **traffic** numbers win for requests, tokens and cost, and the **file**
 numbers win for the project, the span, the turns and the tools. A `both` row's
 token column is the gateway's count, not the file's plus the gateway's.
 
-**`TITLE` is the file's answer to "what was this about"**, and it prefers the
+**`TOOLS` names the three most-used tools and their counts. The **calls
+themselves** — one line each, with what the call did — are in `--json` (and on
+the app's session page); the terminal column is a summary, not a log.
+
+`TITLE` is the file's answer to "what was this about"**, and it prefers the
 better source: the agent's own name for the conversation when its file carries
 one (Claude Code writes an `ai-title` record and rewrites it as the session
 develops, so the last one is the settled name), otherwise the opening user

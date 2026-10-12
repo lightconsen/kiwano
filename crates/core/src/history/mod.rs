@@ -43,7 +43,9 @@ pub mod codex;
 
 // The row types are the daemon's wire types and live in `kiwano-api`; re-exported
 // so a caller reaches them through this module (the [`crate::import`] shape).
-pub use kiwano_api::history::{HistoryBatch, HistoryCount, HistorySessionRow, HistoryUsageRow};
+pub use kiwano_api::history::{
+    HistoryBatch, HistoryCount, HistorySessionRow, HistoryToolUse, HistoryUsageRow,
+};
 
 /// How far up from a record's `cwd` [`project_label`] will look for a `.git`.
 /// Bounded because the walk ends in a stat per level and a `cwd` is normally at
@@ -345,6 +347,103 @@ pub(super) fn session_title(text: Option<&str>) -> Option<String> {
         return Some(cut);
     }
     Some(line)
+}
+
+/// The most tool calls one session's row keeps.
+///
+/// A session can make thousands — the one this was built against made **1,817 in
+/// a single conversation** — and the list is a chronology, not a ledger: the
+/// counts above it say how many there were. The reader stops recording here and
+/// the page says what it is showing.
+pub(super) const MAX_TOOL_USES: usize = 100;
+
+/// How long one call's summary may be. One line, bounded, because it lands in a
+/// list — the same rule the session title follows and for the same reason.
+const TOOL_DETAIL_CHARS: usize = 160;
+
+/// What a tool call did, in one line — from the call's own arguments.
+///
+/// The keys are per-tool where the tool has an obvious "what" (`Bash` carries a
+/// `command`, `Read` a `file_path`), and the first string value otherwise. That
+/// fallback is what makes this work for the tools nobody enumerated — the MCP
+/// ones, and whatever the vendor adds next — without a table that has to be kept
+/// current.
+pub(super) fn tool_use_detail(name: &str, input: Option<&Value>) -> String {
+    let Some(input) = input else {
+        return String::new();
+    };
+    // Codex hands its arguments over as a JSON *string*; Claude Code as an
+    // object. Parsing the string is what makes one rule serve both.
+    let parsed;
+    let input = match input {
+        Value::String(raw) => match serde_json::from_str::<Value>(raw) {
+            Ok(v) => {
+                parsed = v;
+                &parsed
+            }
+            // Not JSON after all: the text itself is the summary (a patch, say).
+            Err(_) => return one_line(raw),
+        },
+        other => other,
+    };
+    let preferred: &[&str] = match name {
+        "Bash" | "exec_command" | "shell" | "run_command" | "local_shell" => {
+            &["command", "cmd", "script"]
+        }
+        "Read" | "Write" | "Edit" | "NotebookEdit" | "MultiEdit" => {
+            &["file_path", "path", "notebook_path"]
+        }
+        "Agent" | "Task" | "dispatch_agent" => &["description", "subagent_type", "prompt"],
+        "WebFetch" => &["url"],
+        "WebSearch" => &["query"],
+        "Skill" => &["skill", "command"],
+        _ => &[],
+    };
+    for key in preferred {
+        if let Some(v) = input.get(*key).and_then(Value::as_str) {
+            let line = one_line(v);
+            if !line.is_empty() {
+                return line;
+            }
+        }
+    }
+    // Any string value, in the object's own order — which is the order the tool
+    // declared its arguments in, and therefore a better guess than alphabetical.
+    if let Some(obj) = input.as_object() {
+        for value in obj.values() {
+            if let Some(v) = value.as_str() {
+                let line = one_line(v);
+                if !line.is_empty() {
+                    return line;
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// Whitespace runs collapse to single spaces and the result is bounded, with an
+/// ellipsis when something was left behind — the shape a table cell can hold.
+fn one_line(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(TOOL_DETAIL_CHARS * 2));
+    let mut pending_space = false;
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+        out.push(ch);
+    }
+    if out.chars().count() > TOOL_DETAIL_CHARS {
+        let mut cut: String = out.chars().take(TOOL_DETAIL_CHARS).collect();
+        cut.push('…');
+        return cut;
+    }
+    out
 }
 
 /// A JSON string field, or `None` when absent or not a string.

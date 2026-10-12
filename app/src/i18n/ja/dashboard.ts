@@ -54,6 +54,7 @@ export const dashboard = {
   sessionFromGatewayHint: "ゲートウェイがルーティングしたリクエスト —— リクエストごとに計量した正確な数字です。",
   sessionFromFilesHint: "プロジェクト・ターン・ツール。ゲートウェイには観測できません。",
   sessionTools: "ツール",
+  sessionCalls: "{n} 件の呼び出し（順序どおり）",
   sessionSkills: "スキル",
   sessionNoTools: "このセッションのファイルにツール呼び出しの記録はありません",
   sessionNoSkills: "このセッションのファイルにスキルの記録はありません",

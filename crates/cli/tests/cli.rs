@@ -1566,6 +1566,7 @@ fn seed_imported_session(
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":2}]"#.into()),
+            tool_uses: None,
             skills: None,
             imported_from: machine.map(str::to_string),
         }])

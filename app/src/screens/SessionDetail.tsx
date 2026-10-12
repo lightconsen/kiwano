@@ -249,6 +249,29 @@ function Body({
             }
             t={t}
           />
+          {row.tool_uses.length > 0 && (
+            <div className="mt-2 border-t border-line pt-2">
+              {/* What those calls *were*, in order — the counts above say how many
+                  times a tool ran, and this says what it ran on. The reader caps
+                  the list, so the heading names how many are shown rather than
+                  letting a truncated chronology look like the whole session. */}
+              <div className="mb-1 text-[10px] tracking-wide text-mut uppercase">
+                {t("dashboard.sessionCalls", { n: row.tool_uses.length })}
+              </div>
+              <ol className="space-y-0.5">
+                {row.tool_uses.map((c, i) => (
+                  <li key={`${c.name}-${i}`} className="flex items-baseline gap-2 text-[11px]">
+                    <span className="w-[104px] shrink-0 truncate font-sans" title={c.name}>
+                      {c.name}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-mut" title={c.detail}>
+                      {c.detail || t("common.none")}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
         </Card>
         <Card title={t("dashboard.sessionSkills")}>
           <CountList

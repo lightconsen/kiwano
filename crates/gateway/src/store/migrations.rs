@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 34;
+pub const SCHEMA_VERSION: i32 = 35;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -952,6 +952,16 @@ const MIGRATION_V34: &str = r#"
 ALTER TABLE sessions ADD COLUMN title TEXT;
 "#;
 
+/// v35: the tool calls themselves, beside the counts of them.
+///
+/// `tool_calls` says a session ran `Bash` 976 times; this says what those were —
+/// one line each, in order, and capped by the reader (a single session here made
+/// 1,817 calls). A summary of the arguments, never the arguments: the same
+/// choice the transcripts' message bodies do not get.
+const MIGRATION_V35: &str = r#"
+ALTER TABLE sessions ADD COLUMN tool_uses TEXT;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1113,6 +1123,9 @@ impl Store {
         }
         if version < 34 {
             conn.execute_batch(MIGRATION_V34)?;
+        }
+        if version < 35 {
+            conn.execute_batch(MIGRATION_V35)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

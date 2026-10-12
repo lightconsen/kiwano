@@ -40,6 +40,8 @@ pub struct SessionRow {
     pub cache_creation_tokens: i64,
     /// JSON arrays of `{"name","count"}`, as stored.
     pub tool_calls: Option<String>,
+    /// JSON array of `{"name","detail"}`, as stored (migration v35).
+    pub tool_uses: Option<String>,
     pub skills: Option<String>,
     /// Which machine's files this session was imported from (migration v32) — a
     /// best-effort **label**, `None` for a machine that could not name itself.
@@ -94,8 +96,8 @@ pub struct SessionCurrencyCost {
 
 /// The columns every read shares, in the order `session_from_row` expects.
 const SESSION_COLUMNS: &str = "agent, project, title, session_id, started_at, ended_at, turns,
-     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, tool_calls, skills,
-     imported_from";
+     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, tool_calls, tool_uses,
+     skills, imported_from";
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
@@ -111,8 +113,9 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         cache_read_tokens: row.get(9)?,
         cache_creation_tokens: row.get(10)?,
         tool_calls: row.get(11)?,
-        skills: row.get(12)?,
-        imported_from: row.get(13)?,
+        tool_uses: row.get(12)?,
+        skills: row.get(13)?,
+        imported_from: row.get(14)?,
     })
 }
 
@@ -130,13 +133,14 @@ impl Store {
             tx.execute(
                 "INSERT INTO sessions (import_key, agent, project, title, session_id, started_at, ended_at,
                                        turns, input_tokens, output_tokens, cache_read_tokens,
-                                       cache_creation_tokens, tool_calls, skills, imported_from)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                                       cache_creation_tokens, tool_calls, tool_uses, skills,
+                                       imported_from)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT(import_key) DO UPDATE SET
                      agent = ?2, project = ?3, title = ?4, session_id = ?5, started_at = ?6,
                      ended_at = ?7, turns = ?8, input_tokens = ?9, output_tokens = ?10,
                      cache_read_tokens = ?11, cache_creation_tokens = ?12, tool_calls = ?13,
-                     skills = ?14, imported_from = ?15",
+                     tool_uses = ?14, skills = ?15, imported_from = ?16",
                 params![
                     r.import_key,
                     r.agent,
@@ -151,6 +155,7 @@ impl Store {
                     r.cache_read_tokens,
                     r.cache_creation_tokens,
                     r.tool_calls,
+                    r.tool_uses,
                     r.skills,
                     r.imported_from,
                 ],
@@ -444,6 +449,7 @@ mod tests {
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":2}]"#.into()),
+            tool_uses: Some(r#"[{"name":"Bash","detail":"cargo test"}]"#.into()),
             skills: None,
             imported_from: None,
         }

@@ -54,6 +54,7 @@ export const dashboard = {
   sessionFromGatewayHint: "网关路由过的请求 —— 逐请求计量出来的准确数字。",
   sessionFromFilesHint: "项目、轮次与工具,这些是网关看不到的。",
   sessionTools: "工具",
+  sessionCalls: "{n} 次调用,按顺序",
   sessionSkills: "Skills",
   sessionNoTools: "这个会话的文件里没有工具调用记录",
   sessionNoSkills: "这个会话的文件里没有 skills 记录",

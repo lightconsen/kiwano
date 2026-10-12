@@ -139,6 +139,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
     cost: [{ currency: "USD", amount: 2.5 }],
     unpriced_rows: 0,
     tool_calls: [],
+    tool_uses: [],
     skills: [],
     ...over,
   };

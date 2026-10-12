@@ -3882,6 +3882,7 @@ async fn a_session_reads_by_id_and_an_unknown_one_is_null() {
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":9}]"#.into()),
+            tool_uses: None,
             skills: None,
             imported_from: Some("buildbox".into()),
         }])

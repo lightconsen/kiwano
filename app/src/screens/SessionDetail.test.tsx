@@ -5,7 +5,7 @@
 // ledgers, and this page is the first place with room to say so. So the tests
 // are mostly about what must *not* happen: nothing summed, no zero where a side
 // never looked, no money converted.
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,6 +41,7 @@ function session(over: Partial<Session> = {}): Session {
     cost: [{ currency: "USD", amount: 2.5 }],
     unpriced_rows: 0,
     tool_calls: [],
+    tool_uses: [],
     skills: [],
     ...over,
   };
@@ -115,6 +116,40 @@ describe("a session's own page", () => {
     renderDetail();
     expect(await screen.findByText(en.dashboard.sessionNoTools)).toBeInTheDocument();
     expect(screen.getByText(en.dashboard.sessionNoSkills)).toBeInTheDocument();
+  });
+
+  it("lists the calls themselves, in the order they happened, one line each", async () => {
+    apiMock.getSession.mockResolvedValue(
+      session({
+        tool_uses: [
+          { name: "Read", detail: "/work/acme/src/parser.rs" },
+          { name: "Bash", detail: "cargo test --lib parser" },
+          { name: "ExitPlanMode", detail: "" },
+        ],
+      }),
+    );
+    renderDetail();
+
+    // The counts say how many times a tool ran; this says what it ran on — and
+    // in order, which is the only ordering a chronology can have.
+    const calls = await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "3"));
+    expect(calls).toBeInTheDocument();
+    // Scoped to the Tools card: the breadcrumb is a list too, and a query that
+    // swept the page would compare its crumbs against the calls.
+    // `.closest(".rounded-lg")`, not `.closest("div")`: the heading is itself a
+    // div, so the looser query stops at the heading and finds no list at all.
+    const toolsCard = screen
+      .getByText(en.dashboard.sessionTools)
+      .closest(".rounded-lg") as HTMLElement;
+    const items = within(toolsCard)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(items).toEqual([
+      "Read/work/acme/src/parser.rs",
+      "Bashcargo test --lib parser",
+      // A call with nothing to summarise still appears: it happened.
+      `ExitPlanMode${en.common.none}`,
+    ]);
   });
 
   it("orders tools by use, caps the list, and says what it left out", async () => {

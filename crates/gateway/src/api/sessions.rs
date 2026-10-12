@@ -15,7 +15,7 @@ use crate::store::sessions::{SessionRow, TrafficSession};
 use crate::store::Store;
 use kiwano_api::client_keys::CurrencyAmountVm;
 use kiwano_api::error::ApiError;
-use kiwano_api::history::HistoryCount;
+use kiwano_api::history::{HistoryCount, HistoryToolUse};
 use kiwano_api::sessions::{SessionListVm, SessionVm};
 use std::collections::{HashMap, HashSet};
 
@@ -226,10 +226,23 @@ fn merge(imported: Option<&SessionRow>, traffic: Option<&TrafficSession>) -> Ses
         tool_calls: imported
             .map(|i| decode_counts(i.tool_calls.as_deref()))
             .unwrap_or_default(),
+        tool_uses: imported
+            .map(|i| decode_tool_uses(i.tool_uses.as_deref()))
+            .unwrap_or_default(),
         skills: imported
             .map(|i| decode_counts(i.skills.as_deref()))
             .unwrap_or_default(),
     }
+}
+
+/// A stored `[{"name","detail"}]` cell back into the typed list.
+///
+/// A cell that will not parse decodes to nothing rather than failing the read:
+/// the list is the least important thing on the page, and losing it must not cost
+/// the session its numbers.
+fn decode_tool_uses(raw: Option<&str>) -> Vec<HistoryToolUse> {
+    raw.and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
 }
 
 /// A stored `[{"name","count"}]` cell back into the typed list.
@@ -263,6 +276,7 @@ mod tests {
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
             tool_calls: Some(r#"[{"name":"Bash","count":4},{"name":"Read","count":9}]"#.into()),
+            tool_uses: None,
             skills: Some(r#"[{"name":"tweet","count":1}]"#.into()),
             imported_from: None,
         }

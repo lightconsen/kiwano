@@ -21,8 +21,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::{
-    config_root, counts, i64_at, jsonl_files, project_label, session_title, str_at, HistoryRead,
-    HistorySessionRow, HistoryUsageRow, ParsedFile,
+    config_root, counts, i64_at, jsonl_files, project_label, session_title, str_at,
+    tool_use_detail, HistoryRead, HistorySessionRow, HistoryToolUse, HistoryUsageRow, ParsedFile,
+    MAX_TOOL_USES,
 };
 use crate::detect::ShellVars;
 
@@ -133,6 +134,9 @@ fn read_file(
     // it in any "tools used" total the dashboard draws.
     let mut tool_calls: BTreeMap<String, i64> = BTreeMap::new();
     let mut skills: BTreeMap<String, i64> = BTreeMap::new();
+    // The calls themselves, in order, capped: the counts say how many there were,
+    // and this says what they were.
+    let mut tool_uses: Vec<HistoryToolUse> = Vec::new();
     // **The file's name is the session's identity, and the ids inside it are
     // not.** Claude Code mints a new `sessionId` when a conversation is compacted
     // or resumed, and keeps appending to the file it started — so a transcript
@@ -262,12 +266,20 @@ fn read_file(
                     let Some(name) = str_at(block, "name") else {
                         continue;
                     };
-                    let bucket = if name == "Skill" {
-                        &mut skills
-                    } else {
-                        &mut tool_calls
-                    };
-                    *bucket.entry(name).or_default() += 1;
+                    if name == "Skill" {
+                        *skills.entry(name).or_default() += 1;
+                        // Counted, not listed: `tool_uses` is the real tools — the
+                        // same split the counts make, so a "tools used" total drawn
+                        // from either one is the same total.
+                        continue;
+                    }
+                    *tool_calls.entry(name.clone()).or_default() += 1;
+                    if tool_uses.len() < MAX_TOOL_USES {
+                        tool_uses.push(HistoryToolUse {
+                            detail: tool_use_detail(&name, block.get("input")),
+                            name,
+                        });
+                    }
                 }
             }
         }
@@ -291,6 +303,7 @@ fn read_file(
             cache_read_tokens: usage.iter().map(|r| r.cache_read_tokens).sum(),
             cache_creation_tokens: usage.iter().map(|r| r.cache_creation_tokens).sum(),
             tool_calls: counts(tool_calls),
+            tool_uses,
             skills: counts(skills),
         })
     };
@@ -456,6 +469,114 @@ mod tests {
         );
         assert_eq!(read.batch.sessions[0].turns, 2);
         assert_eq!(read.batch.sessions[0].input_tokens, 30);
+    }
+
+    /// What each call did, in one line: the tool's own "what" where it has one,
+    /// the first string argument where it does not, and nothing when there is
+    /// nothing to say.
+    #[test]
+    fn a_tool_call_carries_a_one_line_summary_of_what_it_did() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sid = "11111111-2222-3333-4444-555555555555";
+        let call = |name: &str, input: Value| serde_json::json!({"type": "tool_use", "name": name, "input": input});
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            &format!("{sid}.jsonl"),
+            &[assistant(
+                "r1",
+                "2026-01-02T10:00:00Z",
+                sid,
+                "/home/me/work/acme",
+                serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                serde_json::json!([
+                    // `command` over `description`: the command is what it ran.
+                    call(
+                        "Bash",
+                        serde_json::json!({"command": "cargo test\n-- --nocapture", "description": "run the tests"})
+                    ),
+                    call(
+                        "Read",
+                        serde_json::json!({"file_path": "/home/me/work/acme/src/lib.rs"})
+                    ),
+                    // The fallback: no key this reader knows, so the first string
+                    // argument stands in — which is the whole reason a new MCP
+                    // tool needs no entry here.
+                    call(
+                        "mcp__chrome__evaluate_script",
+                        serde_json::json!({"function": "() => document.title"})
+                    ),
+                    // Nothing to say.
+                    call("ExitPlanMode", serde_json::json!({})),
+                    // Counted in `skills`, and deliberately not in the call list.
+                    call("Skill", serde_json::json!({"skill": "commit"})),
+                ]),
+            )],
+        );
+
+        let read = claude_read(home);
+        let session = &read.batch.sessions[0];
+        let calls: Vec<(&str, &str)> = session
+            .tool_uses
+            .iter()
+            .map(|c| (c.name.as_str(), c.detail.as_str()))
+            .collect();
+        assert_eq!(
+            calls,
+            vec![
+                ("Bash", "cargo test -- --nocapture"),
+                ("Read", "/home/me/work/acme/src/lib.rs"),
+                ("mcp__chrome__evaluate_script", "() => document.title"),
+                ("ExitPlanMode", ""),
+            ],
+            "in order, one line each, and the skill is not among them"
+        );
+        // The counts still see everything, including the skill.
+        let counts: std::collections::BTreeMap<&str, i64> = session
+            .tool_calls
+            .iter()
+            .map(|c| (c.name.as_str(), c.count))
+            .collect();
+        assert_eq!(counts.get("Bash"), Some(&1));
+        assert_eq!(counts.get("Skill"), None, "skills are not tools");
+        assert_eq!(session.skills[0].name, "Skill");
+    }
+
+    /// The list is capped, and the cap is the *list's*: the call that pushed it
+    /// over is still counted, because the counts are the session's ledger and the
+    /// list is a chronology of it. One session on this machine made 1,817 calls.
+    #[test]
+    fn the_call_list_is_capped_while_the_counts_keep_counting() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sid = "11111111-2222-3333-4444-555555555555";
+        let over = MAX_TOOL_USES + 25;
+        let blocks: Vec<Value> = (0..over)
+            .map(|i| serde_json::json!({"type": "tool_use", "name": "Bash", "input": {"command": format!("echo {i}")}}))
+            .collect();
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            &format!("{sid}.jsonl"),
+            &[assistant(
+                "r1",
+                "2026-01-02T10:00:00Z",
+                sid,
+                "/home/me/work/acme",
+                serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                Value::Array(blocks),
+            )],
+        );
+
+        let read = claude_read(home);
+        let session = &read.batch.sessions[0];
+        assert_eq!(session.tool_uses.len(), MAX_TOOL_USES);
+        assert_eq!(session.tool_calls[0].count, over as i64);
+        assert_eq!(
+            session.tool_uses[0].detail, "echo 0",
+            "the first ones are kept"
+        );
     }
 
     /// A session's subagent transcripts are **the same session**: their usage

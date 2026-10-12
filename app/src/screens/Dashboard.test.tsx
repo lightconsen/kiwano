@@ -90,6 +90,7 @@ const SESSION = {
   cost: [],
   unpriced_rows: 0,
   tool_calls: [{ name: "Bash", count: 9 }],
+  tool_uses: [{ name: "Bash", detail: "cargo test" }],
   skills: [],
 };
 

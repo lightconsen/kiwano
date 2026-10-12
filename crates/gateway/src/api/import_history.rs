@@ -271,10 +271,12 @@ fn unix_of(ts: &str) -> i64 {
 /// A session row as the store wants it: the counts become JSON, because a
 /// per-session list of names is a payload and not a column.
 fn session_row(row: &HistorySessionRow, machine: Option<&str>) -> crate::store::ImportedSession {
-    let encode = |counts: &[kiwano_api::history::HistoryCount]| -> Option<String> {
-        (!counts.is_empty())
-            .then(|| serde_json::to_string(counts).unwrap_or_else(|_| "[]".to_string()))
-    };
+    // One encoder for both list shapes: a list of names-with-counts and a list of
+    // calls are the same problem — a small payload that is not a column.
+    fn encode<T: serde::Serialize>(items: &[T]) -> Option<String> {
+        (!items.is_empty())
+            .then(|| serde_json::to_string(items).unwrap_or_else(|_| "[]".to_string()))
+    }
     crate::store::ImportedSession {
         import_key: row.import_key.clone(),
         agent: row.agent.clone(),
@@ -293,6 +295,8 @@ fn session_row(row: &HistorySessionRow, machine: Option<&str>) -> crate::store::
         cache_read_tokens: row.cache_read_tokens,
         cache_creation_tokens: row.cache_creation_tokens,
         tool_calls: encode(&row.tool_calls),
+        // The calls themselves, same encoding — a list of `{name, detail}`.
+        tool_uses: encode(&row.tool_uses),
         skills: encode(&row.skills),
         // The same batch-level machine as the usage rows, for the same reason.
         imported_from: machine.map(str::to_string),
@@ -337,6 +341,10 @@ mod tests {
             tool_calls: vec![HistoryCount {
                 name: "Bash".into(),
                 count: 3,
+            }],
+            tool_uses: vec![kiwano_api::history::HistoryToolUse {
+                name: "Bash".into(),
+                detail: "cargo test".into(),
             }],
             skills: vec![HistoryCount {
                 name: "tweet".into(),

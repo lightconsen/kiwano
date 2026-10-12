@@ -63,6 +63,14 @@ export const sessions: Session[] = [
       { name: "Bash", count: 9 },
       { name: "Read", count: 4 },
     ],
+    // In the order they happened, with what each one did.
+    tool_uses: [
+      { name: "Read", detail: "/Users/me/work/acme-api/src/parser.rs" },
+      { name: "Bash", detail: "cargo test --lib parser" },
+      { name: "Edit", detail: "/Users/me/work/acme-api/src/parser.rs" },
+      { name: "Bash", detail: "cargo test --lib parser" },
+      { name: "Agent", detail: "Explore the tokenizer's error paths" },
+    ],
     skills: [{ name: "Skill", count: 1 }],
   },
   {
@@ -85,6 +93,10 @@ export const sessions: Session[] = [
     cost: [],
     unpriced_rows: 0,
     tool_calls: [{ name: "Edit", count: 6 }],
+    tool_uses: [
+      { name: "Edit", detail: "/Users/me/blog-astro/src/content/config.ts" },
+      { name: "Write", detail: "/Users/me/blog-astro/src/pages/sitemap.xml.ts" },
+    ],
     skills: [],
   },
   {
@@ -102,6 +114,7 @@ export const sessions: Session[] = [
     cost: [{ currency: "USD", amount: 0.42 }],
     unpriced_rows: 0,
     tool_calls: [],
+    tool_uses: [],
     skills: [],
   },
 ];

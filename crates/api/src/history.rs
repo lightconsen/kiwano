@@ -58,6 +58,21 @@ pub struct HistoryCount {
     pub count: i64,
 }
 
+/// One tool call, as the file recorded it: which tool, and what it did.
+///
+/// `detail` is a **summary**, derived by the reader from the call's own
+/// arguments — the command for a shell call, the path for a read or an edit, the
+/// description for a spawned agent. It is one line and bounded in length,
+/// because it lands in a list; the arguments themselves are not kept, the same
+/// way the transcripts' message bodies are not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryToolUse {
+    pub name: String,
+    /// Empty when the call carried nothing summarisable.
+    #[serde(default)]
+    pub detail: String,
+}
+
 /// One session: what a single Claude Code transcript or Codex rollout spent, and
 /// what it used.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +108,14 @@ pub struct HistorySessionRow {
     pub cache_creation_tokens: i64,
     #[serde(default)]
     pub tool_calls: Vec<HistoryCount>,
+    /// The calls themselves, in the order the session made them, each with a
+    /// one-line summary of what it did — capped (see the readers), because one
+    /// session here made 1,817 of them.
+    ///
+    /// Real tools only: a `Skill` invocation is counted in `skills`, and listing
+    /// it here too would be the double-count the split exists to prevent.
+    #[serde(default)]
+    pub tool_uses: Vec<HistoryToolUse>,
     #[serde(default)]
     pub skills: Vec<HistoryCount>,
 }
@@ -169,6 +192,10 @@ mod tests {
             tool_calls: vec![HistoryCount {
                 name: "Bash".into(),
                 count: 1,
+            }],
+            tool_uses: vec![HistoryToolUse {
+                name: "Bash".into(),
+                detail: "ls".into(),
             }],
             skills: Vec::new(),
         };

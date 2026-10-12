@@ -103,7 +103,11 @@ export const addProvider = {
   // ── Rotating keys (edit mode) ──
   rotatingKeys: "轮换密钥",
   rotatingKeysHint: "与主密钥轮换使用 · 规避速率限制",
-  deleteKey: "删除密钥",
+    deleteKey: "删除密钥",
+  primaryKey: "主密钥",
+  keySpendTitle: "最近 {days} 天的花费",
+  keySpendUnpriced: "{rows} 个请求,均未定价",
+  keySpendPartial: "{amounts}(另有 {rows} 个未定价)",
   addKeyPlaceholder: "sk-… 添加密钥",
   labelPlaceholder: "标签",
 

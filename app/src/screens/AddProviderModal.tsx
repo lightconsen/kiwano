@@ -18,6 +18,7 @@ import {
   type ProbeReport,
   type Protocol,
   type Provider,
+  type UpstreamKeySpendEntry,
 } from "../api/types";
 import { useHubUrl } from "../lib/hub";
 import {
@@ -42,6 +43,11 @@ import {
 import { CatalogPicker, EntryChip, ModeSwitch } from "./AddProviderModal/mode";
 import { ModelSection } from "./AddProviderModal/model";
 import { invalidRate, PricesSection, RATE_FIELDS } from "./AddProviderModal/prices";
+
+/** The window the pool's spend column reports over. Thirty days, the same
+    default `kiwano keys list` uses, so the two screens agree about the period;
+    the tooltip names it, because a bare figure gets read as all-time. */
+const KEY_SPEND_DAYS = 30;
 
 export default function AddProviderModal({
   open,
@@ -144,6 +150,11 @@ export default function AddProviderModal({
   const [saving, setSaving] = useState(false);
   // Rotating Key management (spec §4.1 P1 multi-key rotation; available in edit mode)
   const [pollKeys, setPollKeys] = useState<ApiKeyEntry[]>([]);
+  // What each pool entry spent, over the window below. Read here rather than in
+  // the child because the child renders from props and nothing else, and
+  // refreshed when a key is added or removed so the list never shows a name
+  // that is no longer in the pool.
+  const [keySpend, setKeySpend] = useState<UpstreamKeySpendEntry[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
@@ -352,6 +363,7 @@ export default function AddProviderModal({
         Object.entries(edit.advanced?.headers ?? {}).map(([hName, hValue]) => ({ name: hName, value: hValue })),
       );
       api.listApiKeys(edit.id).then(setPollKeys).catch(() => setPollKeys([]));
+      refreshKeySpend(edit.id);
       return;
     }
     // Default to the "From Models" catalog picker; a Models-page preset
@@ -566,6 +578,15 @@ export default function AddProviderModal({
   };
 
 
+  /** Re-read the pool's spend. Best effort: a report that cannot be read is a
+      missing figure on a form, never a broken save. */
+  const refreshKeySpend = (providerId: string) => {
+    api
+      .keyPoolSpend(providerId, KEY_SPEND_DAYS)
+      .then(setKeySpend)
+      .catch(() => setKeySpend([]));
+  };
+
   const addPollKey = async () => {
     if (!edit || !newKey.trim() || keyBusy) return;
     setKeyBusy(true);
@@ -574,6 +595,7 @@ export default function AddProviderModal({
       setPollKeys((ks) => [...ks, row]);
       setNewKey("");
       setNewKeyLabel("");
+      refreshKeySpend(edit.id);
     } finally {
       setKeyBusy(false);
     }
@@ -585,6 +607,7 @@ export default function AddProviderModal({
     try {
       await api.deleteApiKey(id);
       setPollKeys((ks) => ks.filter((k) => k.id !== id));
+      if (edit) refreshKeySpend(edit.id);
     } finally {
       setKeyBusy(false);
     }
@@ -872,6 +895,8 @@ export default function AddProviderModal({
             {edit && (
               <RotatingKeys
                 pollKeys={pollKeys}
+                spend={keySpend}
+                spendDays={KEY_SPEND_DAYS}
                 newKey={newKey}
                 setNewKey={setNewKey}
                 newKeyLabel={newKeyLabel}

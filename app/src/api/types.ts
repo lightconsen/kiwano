@@ -746,6 +746,23 @@ export interface ApiKeyEntry {
   created_at: string;
 }
 
+/** What one entry of a provider's key pool spent, in one currency.
+ *
+ * `upstream_key` is the name the ledger recorded — the entry's label, `#<id>`
+ * when it has none, or `primary` for the provider's own key — and it is a
+ * display name, never a key. One row per entry **and currency**: a pool entry
+ * whose traffic spanned two billing currencies has two facts, and the screen
+ * prints each in its own rather than adding them. */
+export interface UpstreamKeySpendEntry {
+  upstream_key: string;
+  currency?: string;
+  requests: number;
+  tokens: number;
+  /** Of `requests`, the ones that carry no cost — a figure missing rows has to say so. */
+  unpriced_rows: number;
+  cost: number;
+}
+
 /** Cost alert hit (backend already dedupes per period; the frontend just forwards it as a system notification) */
 export interface UsageAlert {
   provider_id: string;
@@ -997,6 +1014,8 @@ export interface KiwanoApi {
   getCurrencyMeta(): Promise<CurrencyMeta>;
   /** A Provider's list of rotating keys (excluding the primary key) */
   listApiKeys(providerId: string): Promise<ApiKeyEntry[]>;
+  /** What each entry of that pool spent over the last `days`, per currency */
+  keyPoolSpend(providerId: string, days: number): Promise<UpstreamKeySpendEntry[]>;
   /** Append a rotating key (the gateway's key pool hot-reloads immediately) */
   addApiKey(providerId: string, apiKey: string, label?: string): Promise<ApiKeyEntry>;
   deleteApiKey(id: number): Promise<void>;

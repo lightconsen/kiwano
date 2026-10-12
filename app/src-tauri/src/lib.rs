@@ -83,7 +83,7 @@ pub use daemon::get_gateway_status;
 pub use dashboard::get_dashboard;
 pub use history::history_import;
 pub use hub::sync_hub;
-pub use keys::{add_api_key, delete_api_key, list_api_keys};
+pub use keys::{add_api_key, delete_api_key, key_pool_spend, list_api_keys};
 pub use logs::{
     ack_credential_finding, check_credential_finding, clear_request_logs, export_request_logs,
     get_request_log, list_request_logs, open_log_folder,
@@ -302,6 +302,7 @@ pub fn run() {
             sync_hub,
             check_usage_alerts,
             list_api_keys,
+            key_pool_spend,
             add_api_key,
             delete_api_key,
             import_cc_switch,

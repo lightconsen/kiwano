@@ -103,7 +103,11 @@ export const addProvider = {
   // ── Rotating keys (edit mode) ──
   rotatingKeys: "輪換金鑰",
   rotatingKeysHint: "與主金鑰輪換使用 · 避開速率限制",
-  deleteKey: "刪除金鑰",
+    deleteKey: "刪除金鑰",
+  primaryKey: "主金鑰",
+  keySpendTitle: "最近 {days} 天的花費",
+  keySpendUnpriced: "{rows} 個請求,均未定價",
+  keySpendPartial: "{amounts}(另有 {rows} 個未定價)",
   addKeyPlaceholder: "sk-… 新增金鑰",
   labelPlaceholder: "標籤",
 

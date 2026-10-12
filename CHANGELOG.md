@@ -21,6 +21,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ### Added
 
+- **The provider form shows what each key of the pool spent.** The desktop app
+  could already add and remove a provider's rotating keys; now each one carries
+  its own figure, and the provider's own key gets a line of its own — the half of
+  the ledger a pool of keys from different accounts exists to tell apart, without
+  opening a terminal. Amounts are listed in the currencies they were spent in and
+  **never converted** (the Dashboard is the one place that converts), over a
+  window the tooltip names, and rows that could not be priced are counted rather
+  than folded into a total that would be quietly short.
+
 - **Which account paid: a key pool can be several accounts, and now says so.**
   A provider's rotating keys can belong to different accounts — a work key and
   a personal one, say — and the ledger stopped at the provider, so "how much of

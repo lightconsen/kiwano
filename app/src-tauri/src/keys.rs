@@ -20,6 +20,22 @@ pub fn list_api_keys(provider_id: String) -> Result<Vec<vm::ApiKeyVm>, String> {
     kiwano_core::daemon_api::DaemonApi::connect().list_api_keys(&provider_id)
 }
 
+/// What each entry of a provider's key pool spent over the last `days`, per
+/// currency.
+///
+/// A separate call from the pool listing because it is a different question —
+/// the form reads the pool to edit it, and this is the report that says which
+/// entry the money went to. Distinct keys of a pool can belong to distinct
+/// accounts, so this is the only screen that answers "how much of this bill is
+/// mine" without a terminal.
+#[tauri::command(async)]
+pub fn key_pool_spend(
+    provider_id: String,
+    days: i64,
+) -> Result<Vec<vm::UpstreamKeySpendVm>, String> {
+    kiwano_core::daemon_api::DaemonApi::connect().list_upstream_key_spend(&provider_id, Some(days))
+}
+
 /// Append a rotation key. The daemon re-reads its own key pool, so the new
 /// key is live as soon as this answers.
 #[tauri::command(async)]

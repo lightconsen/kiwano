@@ -102,7 +102,11 @@ export const addProvider = {
   // ── Rotating keys (edit mode) ──
   rotatingKeys: "キーのローテーション",
   rotatingKeysHint: "プライマリキーとローテーション · レート制限を回避",
-  deleteKey: "キーを削除",
+    deleteKey: "キーを削除",
+  primaryKey: "プライマリキー",
+  keySpendTitle: "直近 {days} 日間の支出",
+  keySpendUnpriced: "{rows} 件のリクエスト、いずれも価格なし",
+  keySpendPartial: "{amounts}（ほか {rows} 件は価格なし）",
   addKeyPlaceholder: "sk-… キーを追加",
   labelPlaceholder: "ラベル",
 

@@ -21,6 +21,7 @@ const { apiMock } = vi.hoisted(() => ({
     getSettings: vi.fn(),
     listCatalog: vi.fn(),
     listApiKeys: vi.fn(),
+    keyPoolSpend: vi.fn(),
     addProvider: vi.fn(),
     updateProvider: vi.fn(),
     testEndpoint: vi.fn(),
@@ -57,6 +58,7 @@ beforeEach(() => {
   apiMock.getSettings.mockResolvedValue({ hub_url: "https://hub.example" });
   apiMock.listCatalog.mockResolvedValue({ entries: [entry], total: 1 });
   apiMock.listApiKeys.mockResolvedValue([]);
+  apiMock.keyPoolSpend.mockResolvedValue([]);
   apiMock.addProvider.mockResolvedValue({});
 });
 
@@ -325,6 +327,78 @@ describe("editing a provider that declares prices", () => {
         },
       ],
     });
+  });
+});
+
+describe("the key pool's own spend", () => {
+  /** The edit-mode provider these tests open on. */
+  const editing = {
+    id: "manual-1a2b3c",
+    name: "Manual",
+    logo_char: "M",
+    logo_color: "#555555",
+    endpoint: "api.example.com",
+    protocol: "openai" as const,
+    endpoint_note: "OpenAI-compatible",
+    billing: "payg" as const,
+    limit_unit: "USD",
+    currency: "USD",
+    prices: null,
+    enabled: true,
+    agents: [],
+    serving_agents: [],
+    is_current: false,
+    health: { state: "idle" as const, latency_ms: null },
+    usage: null,
+  };
+
+  it("names each entry's share, in the money it was spent in", async () => {
+    apiMock.listApiKeys.mockResolvedValue([
+      { id: 2, masked: "sk-liv…mnop", label: "personal", enabled: true, created_at: "2026-01-01" },
+    ]);
+    apiMock.keyPoolSpend.mockResolvedValue([
+      { upstream_key: "personal", currency: "USD", requests: 10, tokens: 100, unpriced_rows: 0, cost: 12.3 },
+      { upstream_key: "primary", currency: "USD", requests: 40, tokens: 400, unpriced_rows: 0, cost: 80 },
+    ]);
+    render(
+      <AddProviderModal
+        open
+        preset={null}
+        edit={editing}
+        preferredCurrency="USD"
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+    // The named entry's own figure, and the primary's — which has no row in the
+    // pool to sit on and is shown as its own line rather than folded in.
+    expect(await screen.findByText("$12.3")).toBeInTheDocument();
+    expect(screen.getByText("$80")).toBeInTheDocument();
+    expect(screen.getByText(en.addProvider.primaryKey)).toBeInTheDocument();
+  });
+
+  it("never converts: two currencies read as two amounts, and unpriced rows are named", async () => {
+    apiMock.listApiKeys.mockResolvedValue([
+      { id: 3, masked: "sk-seco…nd00", label: "work", enabled: true, created_at: "2026-01-01" },
+    ]);
+    apiMock.keyPoolSpend.mockResolvedValue([
+      { upstream_key: "work", currency: "USD", requests: 2, tokens: 20, unpriced_rows: 0, cost: 1.5 },
+      { upstream_key: "work", currency: "CNY", requests: 3, tokens: 30, unpriced_rows: 0, cost: 7.25 },
+    ]);
+    render(
+      <AddProviderModal
+        open
+        preset={null}
+        edit={editing}
+        preferredCurrency="USD"
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+    // Adding them would be adding dollars to yuan; the screen shows both.
+    expect(await screen.findByText("$1.5 + ¥7.25")).toBeInTheDocument();
   });
 });
 

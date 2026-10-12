@@ -118,7 +118,11 @@ export const addProvider = {
   // ── Rotating keys (edit mode) ──
   rotatingKeys: "Rotating keys",
   rotatingKeysHint: "rotate with the primary key · avoids rate limits",
-  deleteKey: "Delete key",
+    deleteKey: "Delete key",
+  primaryKey: "primary key",
+  keySpendTitle: "spent over the last {days} days",
+  keySpendUnpriced: "{rows} requests, none priced",
+  keySpendPartial: "{amounts} (+{rows} unpriced)",
   addKeyPlaceholder: "sk-… add key",
   labelPlaceholder: "Label",
 

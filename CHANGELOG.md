@@ -19,6 +19,26 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A session says what it was about: `TITLE`.** A list of spans, counters and
+  session ids is not something anyone can navigate — the one thing a reader scans
+  for was missing, and it was already in the file being read.
+
+  The reader prefers the better source: Claude Code writes its own name for the
+  conversation (`ai-title`, rewritten as the session develops, so the last one is
+  the settled name), and a file with none of those falls back to the opening user
+  message — which is where Codex's sessions get theirs, since a rollout carries
+  no title record at all. A session only the gateway saw has no title: there is
+  no file to ask.
+
+  It is a **label, not the conversation**. The reader collapses it to one line
+  (an opening message is routinely several paragraphs), bounds it at 120
+  characters, and **drops** a title that trips the same credential detector the
+  gateway runs on outbound traffic — so a session that begins with a key pasted
+  into it still imports, just without a title. The column appears in
+  `kiwano sessions` and as the leading column of the app's session view.
+
 ## [0.3.1] - 2026-10-12
 
 **The version that answers "who paid".** Every change here is one question asked

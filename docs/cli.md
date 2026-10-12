@@ -306,6 +306,17 @@ the **traffic** numbers win for requests, tokens and cost, and the **file**
 numbers win for the project, the span, the turns and the tools. A `both` row's
 token column is the gateway's count, not the file's plus the gateway's.
 
+**`TITLE` is the file's answer to "what was this about"**, and it prefers the
+better source: the agent's own name for the conversation when its file carries
+one (Claude Code writes an `ai-title` record and rewrites it as the session
+develops, so the last one is the settled name), otherwise the opening user
+message. A gateway-only session has no title at all — it has no file to ask.
+
+A title is a **label, not the conversation**: the reader collapses it to one
+line, bounds its length, and **drops** a title that trips the same credential
+detector the gateway runs on outbound traffic. A session that opens with a key
+pasted into it still imports; it just has no title.
+
 The columns are:
 
 ```

@@ -1552,6 +1552,11 @@ fn seed_imported_session(
             import_key: format!("{agent}:{session}"),
             agent: agent.into(),
             project: Some(project.into()),
+            // The column the reader scans for; the reader's own extraction rules
+            // (agent title, else opening message, one line, bounded, no
+            // credentials) are pinned in `kiwano_core::history` — this fixture is
+            // already-parsed rows, so it states one.
+            title: Some("port the parser".into()),
             session_id: session.into(),
             started_at: "2026-01-01T00:00:00+00:00".into(),
             ended_at: "2026-01-01T02:00:00+00:00".into(),
@@ -1701,6 +1706,10 @@ fn sessions_merge_the_gateways_traffic_with_the_agents_own_files() {
     assert!(out.contains("SOURCE"), "{out}");
     assert!(out.contains("both"), "{out}");
     assert!(out.contains("2.50 USD"), "{out}");
+    // The title column, which is the row's answer to "what was this about" —
+    // and it travels the whole way: reader rows, the merge, the render.
+    assert!(out.contains("TITLE"), "{out}");
+    assert!(out.contains("port the parser"), "{out}");
 }
 
 #[test]

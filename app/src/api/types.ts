@@ -792,6 +792,11 @@ export interface Session {
   agent: string;
   /** Files only: the gateway sees requests, not the checkout they came from. */
   project?: string | null;
+  /** What the session was about, **files only** (migration v34): the agent's own
+      name for the conversation when its file carries one, else the opening user
+      message. One line, bounded, and dropped by the reader when it looks like a
+      credential. A traffic-only session has none. */
+  title?: string | null;
   /** Files only: the label the importing machine gave itself (v32). */
   machine?: string | null;
   started_at: string;

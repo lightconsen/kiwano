@@ -25,7 +25,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::{
-    config_root, counts, i64_at, jsonl_files, project_label, str_at, HistoryRead,
+    config_root, counts, i64_at, jsonl_files, project_label, session_title, str_at, HistoryRead,
     HistorySessionRow, HistoryUsageRow, ParsedFile,
 };
 use crate::detect::ShellVars;
@@ -166,6 +166,9 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
     let mut usage: Vec<HistoryUsageRow> = Vec::new();
     let mut tool_calls: BTreeMap<String, i64> = BTreeMap::new();
     let mut session_id = stem.map(str::to_string);
+    // The opening user message — see the `event_msg` arm below for why a rollout
+    // has no better candidate than this.
+    let mut opening_message: Option<String> = None;
     let mut cwd: Option<String> = None;
     let mut first_cwd: Option<String> = None;
     let mut model: Option<String> = None;
@@ -219,6 +222,19 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
                     }
                     if let Some(m) = str_at(p, "model") {
                         model = Some(m);
+                    }
+                }
+            }
+            // Codex has no title record: a rollout's `session_meta` carries an
+            // id, a cwd and a git blob, and the conversation itself is the only
+            // place a subject exists. The first `user_message` event is what the
+            // user typed to start it.
+            "event_msg" => {
+                if opening_message.is_none() {
+                    if let Some(p) = payload
+                        .filter(|p| p.get("type").and_then(Value::as_str) == Some("user_message"))
+                    {
+                        opening_message = str_at(p, "message").filter(|m| !m.trim().is_empty());
                     }
                 }
             }
@@ -286,6 +302,7 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
             project: first_cwd
                 .as_deref()
                 .and_then(|c| project_label(Some(c), None)),
+            title: session_title(opening_message.as_deref()),
             session_id: sid,
             started_at: first_ts.unwrap_or_default(),
             ended_at: last_ts.unwrap_or_default(),
@@ -338,6 +355,43 @@ mod tests {
             "type": "turn_context",
             "payload": { "cwd": cwd, "model": model }
         })
+    }
+
+    /// A rollout's title is its opening user message — Codex writes no title
+    /// record of its own (its `session_meta` carries an id, a cwd and a git blob
+    /// and nothing about the subject), so the first `user_message` event is the
+    /// only place the conversation's subject exists.
+    #[test]
+    fn a_session_takes_its_opening_user_message_and_ignores_later_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        write_rollout(
+            home,
+            "rollout-a.jsonl",
+            &[
+                session_meta("/home/me/code", "sess-title"),
+                turn_context("/home/me/code", "gpt-5"),
+                serde_json::json!({
+                    "timestamp": "2024-01-02T00:00:02Z",
+                    "type": "event_msg",
+                    "payload": { "type": "user_message", "message": "port the parser to Rust" }
+                }),
+                serde_json::json!({
+                    "timestamp": "2024-01-02T00:00:03Z",
+                    "type": "event_msg",
+                    "payload": { "type": "user_message", "message": "and then the tests" }
+                }),
+                token_count("2024-01-02T00:00:04Z", totals(100, 0, 0, 10, 0)),
+            ],
+        );
+
+        let read = read_history(home, &ShellVars::new(), &["codex".into()]);
+        assert_eq!(read.batch.sessions.len(), 1);
+        assert_eq!(
+            read.batch.sessions[0].title.as_deref(),
+            Some("port the parser to Rust"),
+            "the first message is the title, not the last"
+        );
     }
 
     fn token_count(ts: &str, total: Value) -> Value {

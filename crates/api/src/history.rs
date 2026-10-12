@@ -68,6 +68,19 @@ pub struct HistorySessionRow {
     pub agent: String,
     #[serde(default)]
     pub project: Option<String>,
+    /// What this session is about, in as few words as the source could give.
+    ///
+    /// **Two sources, one column**, and the reader prefers the better one: the
+    /// agent's own name for the conversation when it wrote one (Claude Code's
+    /// `ai-title` record), otherwise the opening user message. A file that says
+    /// neither leaves it empty — a traffic-only session always does, because no
+    /// file has it.
+    ///
+    /// It is a **label, not the conversation**: one line, trimmed, bounded in
+    /// length, and a title that trips the credential detector is dropped rather
+    /// than stored (see `kiwano_core::history::session_title`).
+    #[serde(default)]
+    pub title: Option<String>,
     pub session_id: String,
     /// RFC3339 UTC, the first record's timestamp.
     pub started_at: String,
@@ -144,6 +157,7 @@ mod tests {
             import_key: "claude-code:s1".into(),
             agent: "claude".into(),
             project: Some("kiwano".into()),
+            title: None,
             session_id: "s1".into(),
             started_at: "2024-01-01T00:00:00Z".into(),
             ended_at: "2024-01-01T00:01:00Z".into(),

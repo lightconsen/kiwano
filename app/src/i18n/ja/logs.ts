@@ -63,6 +63,7 @@ export const logs = {
   sessionsEmpty:
     "このウィンドウにセッションはありません — ゲートウェイ自身のトラフィックは随時現れ、それ以前の履歴は `kiwano history import` が取り込みます",
   colRequests: "REQ",
+  colTitle: "タイトル",
   colSpan: "期間",
   colProject: "プロジェクト",
   colMachine: "マシン",

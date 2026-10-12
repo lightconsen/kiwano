@@ -21,7 +21,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::{
-    config_root, counts, i64_at, jsonl_files, project_label, str_at, HistoryRead,
+    config_root, counts, i64_at, jsonl_files, project_label, session_title, str_at, HistoryRead,
     HistorySessionRow, HistoryUsageRow, ParsedFile,
 };
 use crate::detect::ShellVars;
@@ -99,6 +99,13 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
     let mut tool_calls: BTreeMap<String, i64> = BTreeMap::new();
     let mut skills: BTreeMap<String, i64> = BTreeMap::new();
     let mut session_id = stem.map(str::to_string);
+    // The two title candidates, and the agent's own name wins: Claude Code
+    // rewrites `aiTitle` as the conversation develops (a long session carries
+    // dozens of them), so the **last** one is the settled name and the earlier
+    // ones are drafts. The opening user message is the fallback for a transcript
+    // old enough to predate the record, or one whose title never landed.
+    let mut ai_title: Option<String> = None;
+    let mut opening_message: Option<String> = None;
     // The label from a real `cwd` wins over the slug fallback, so a transcript
     // whose first record has no `cwd` still names its project honestly.
     let mut cwd_label: Option<String> = None;
@@ -136,7 +143,21 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
             cwd_label = project_label(cwd.as_deref(), None);
         }
 
+        if let Some(t) = str_at(&record, "aiTitle").filter(|t| !t.trim().is_empty()) {
+            ai_title = Some(t);
+        }
+
         let message = record.get("message");
+        // The opening message: the first `user` record that carries text. Its
+        // content is either a string or the block array the API uses, and a
+        // record whose content is an image or a tool result contributes nothing.
+        if opening_message.is_none() && record.get("type").and_then(Value::as_str) == Some("user") {
+            opening_message = message
+                .and_then(|m| m.get("content"))
+                .and_then(first_text)
+                .map(str::to_string);
+        }
+
         // A record with no `usage` is not a spend: it contributes no row. The
         // `user` records and every bookkeeping record land here.
         if let Some(usage_v) = message
@@ -193,6 +214,7 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
             import_key: format!("claude-code:{sid}"),
             agent: "claude".into(),
             project: cwd_label.or_else(|| slug.and_then(super::clean_label)),
+            title: session_title(ai_title.as_deref().or(opening_message.as_deref())),
             session_id: sid,
             started_at: first_ts.unwrap_or_default(),
             ended_at: last_ts.unwrap_or_default(),
@@ -211,6 +233,22 @@ fn read_file(file: &Path, slug: Option<&str>, stem: Option<&str>) -> Result<Pars
         usage,
         malformed,
     })
+}
+
+/// The text of a `user` message's content: a plain string, or the first text
+/// block of the array form. Anything else (an image, a tool result) is not what
+/// the user said and is not a title.
+fn first_text(content: &Value) -> Option<&str> {
+    if let Some(s) = content.as_str() {
+        return Some(s).filter(|s| !s.trim().is_empty());
+    }
+    content
+        .as_array()?
+        .iter()
+        .find(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+        .and_then(|b| b.get("text"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -250,6 +288,191 @@ mod tests {
 
     fn claude_read(home: &Path) -> crate::history::HistoryRead {
         read_history(home, &ShellVars::new(), &["claude".into()])
+    }
+
+    /// The title: the agent's own name for the session when it wrote one, the
+    /// opening message when it did not, and neither when the file says neither.
+    ///
+    /// The `ai-title` records are rewritten as the conversation develops (a real
+    /// transcript carries one per turn, with a handful of distinct values), so
+    /// the **last** one is the settled name — this pins that the drafts lose.
+    #[test]
+    fn a_session_takes_the_agents_own_title_and_falls_back_to_its_first_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sid = "11111111-2222-3333-4444-555555555555";
+
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            "a.jsonl",
+            &[
+                // A draft title, then the user's opening message…
+                serde_json::json!({"type": "ai-title", "aiTitle": "draft", "sessionId": sid}),
+                serde_json::json!({
+                    "type": "user",
+                    "sessionId": sid,
+                    "message": { "role": "user", "content": "make the tests pass" }
+                }),
+                assistant(
+                    "r1",
+                    "2026-01-02T10:00:00Z",
+                    sid,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+                // …and the title it settled on.
+                serde_json::json!({"type": "ai-title", "aiTitle": "fixing the flaky test", "sessionId": sid}),
+            ],
+        );
+        // A second transcript with no title record at all.
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            "b.jsonl",
+            &[
+                serde_json::json!({
+                    "type": "user",
+                    "sessionId": sid,
+                    "message": {"role": "user", "content": [{"type": "text", "text": "  "}]}
+                }),
+                serde_json::json!({
+                    "type": "user",
+                    "sessionId": sid,
+                    "message": {"role": "user", "content": [{"type": "text", "text": "the second thing said"}]}
+                }),
+                assistant(
+                    "r2",
+                    "2026-01-02T11:00:00Z",
+                    sid,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+            ],
+        );
+
+        let read = claude_read(home);
+        let titles: Vec<Option<String>> = read
+            .batch
+            .sessions
+            .iter()
+            .map(|s| s.title.clone())
+            .collect();
+        // The first file's own title wins over its opening message; the second has
+        // no title record, so it uses the first message that carried text.
+        assert!(
+            titles.contains(&Some("fixing the flaky test".to_string())),
+            "{titles:?}"
+        );
+        assert!(
+            titles.contains(&Some("the second thing said".to_string())),
+            "{titles:?}"
+        );
+    }
+
+    /// A title is one line, bounded, and dropped when it looks like a credential.
+    ///
+    /// All three rules exist because the source is free-form: an opening message
+    /// is routinely several paragraphs, and one that begins with a pasted key
+    /// would put that key in a table the app renders.
+    #[test]
+    fn a_title_is_one_bounded_line_and_never_a_credential() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sid = "11111111-2222-3333-4444-555555555555";
+
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            "a.jsonl",
+            &[
+                serde_json::json!({
+                    "type": "user",
+                    "sessionId": sid,
+                    "message": {"role": "user", "content": "first line\n\nsecond paragraph\ttabbed"}
+                }),
+                assistant(
+                    "r1",
+                    "2026-01-02T10:00:00Z",
+                    sid,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+            ],
+        );
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            "long.jsonl",
+            &[
+                serde_json::json!({
+                    "type": "user", "sessionId": sid,
+                    "message": {"role": "user", "content": "x".repeat(400)}
+                }),
+                assistant(
+                    "r2",
+                    "2026-01-02T10:00:00Z",
+                    sid,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+            ],
+        );
+        write_transcript(
+            home,
+            "-home-me-work-acme",
+            "secret.jsonl",
+            &[
+                serde_json::json!({
+                    "type": "user", "sessionId": sid,
+                    "message": {
+                        "role": "user",
+                        "content": "why does ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 fail"
+                    }
+                }),
+                assistant(
+                    "r3",
+                    "2026-01-02T10:00:00Z",
+                    sid,
+                    "/home/me/work/acme",
+                    serde_json::json!({"input_tokens": 1, "output_tokens": 1}),
+                    serde_json::json!([{"type": "text", "text": "ok"}]),
+                ),
+            ],
+        );
+
+        let read = claude_read(home);
+        let titles: Vec<String> = read
+            .batch
+            .sessions
+            .iter()
+            .filter_map(|s| s.title.clone())
+            .collect();
+
+        assert!(
+            titles
+                .iter()
+                .any(|t| t == "first line second paragraph tabbed"),
+            "whitespace runs collapse: {titles:?}"
+        );
+        let long = titles
+            .iter()
+            .find(|t| t.starts_with("xxx"))
+            .expect("the long one");
+        assert!(long.ends_with('…'), "{long}");
+        assert_eq!(
+            long.chars().count(),
+            121,
+            "120 characters plus the ellipsis"
+        );
+        assert!(
+            !titles.iter().any(|t| t.contains("ghp_")),
+            "a title that looks like a credential is dropped, not stored: {titles:?}"
+        );
     }
 
     /// Two assistant records: the session's tokens are their sum, the `Bash`

@@ -512,6 +512,12 @@ pub struct ImportedSession {
     pub import_key: String,
     pub agent: String,
     pub project: Option<String>,
+    /// What the session is about (migration v34) — the agent's own title for the
+    /// conversation when its files carry one, else the opening user message, and
+    /// `None` when the file says neither. See `kiwano_api::history::
+    /// HistorySessionRow::title` for what the reader guarantees about it before
+    /// it is ever sent.
+    pub title: Option<String>,
     pub session_id: String,
     pub started_at: String,
     pub ended_at: String,

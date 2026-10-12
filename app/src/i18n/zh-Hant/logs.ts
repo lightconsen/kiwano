@@ -63,6 +63,7 @@ export const logs = {
   sessionsEmpty:
     "這個視窗裡沒有工作階段 —— 閘道自己的流量會隨發生出現,更早的歷史來自 `kiwano history import`",
   colRequests: "請求",
+  colTitle: "標題",
   colSpan: "時段",
   colProject: "專案",
   colMachine: "機器",

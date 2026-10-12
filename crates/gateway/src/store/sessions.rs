@@ -26,6 +26,10 @@ use rusqlite::params;
 pub struct SessionRow {
     pub agent: String,
     pub project: Option<String>,
+    /// What the session is about (migration v34) — see
+    /// [`crate::store::ImportedSession::title`]. `None` for a file that named
+    /// neither a title nor an opening message.
+    pub title: Option<String>,
     pub session_id: String,
     pub started_at: String,
     pub ended_at: String,
@@ -89,7 +93,7 @@ pub struct SessionCurrencyCost {
 }
 
 /// The columns every read shares, in the order `session_from_row` expects.
-const SESSION_COLUMNS: &str = "agent, project, session_id, started_at, ended_at, turns,
+const SESSION_COLUMNS: &str = "agent, project, title, session_id, started_at, ended_at, turns,
      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, tool_calls, skills,
      imported_from";
 
@@ -97,17 +101,18 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
         agent: row.get(0)?,
         project: row.get(1)?,
-        session_id: row.get(2)?,
-        started_at: row.get(3)?,
-        ended_at: row.get(4)?,
-        turns: row.get(5)?,
-        input_tokens: row.get(6)?,
-        output_tokens: row.get(7)?,
-        cache_read_tokens: row.get(8)?,
-        cache_creation_tokens: row.get(9)?,
-        tool_calls: row.get(10)?,
-        skills: row.get(11)?,
-        imported_from: row.get(12)?,
+        title: row.get(2)?,
+        session_id: row.get(3)?,
+        started_at: row.get(4)?,
+        ended_at: row.get(5)?,
+        turns: row.get(6)?,
+        input_tokens: row.get(7)?,
+        output_tokens: row.get(8)?,
+        cache_read_tokens: row.get(9)?,
+        cache_creation_tokens: row.get(10)?,
+        tool_calls: row.get(11)?,
+        skills: row.get(12)?,
+        imported_from: row.get(13)?,
     })
 }
 
@@ -123,19 +128,20 @@ impl Store {
         let mut written = 0usize;
         for r in rows {
             tx.execute(
-                "INSERT INTO sessions (import_key, agent, project, session_id, started_at, ended_at,
+                "INSERT INTO sessions (import_key, agent, project, title, session_id, started_at, ended_at,
                                        turns, input_tokens, output_tokens, cache_read_tokens,
                                        cache_creation_tokens, tool_calls, skills, imported_from)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT(import_key) DO UPDATE SET
-                     agent = ?2, project = ?3, session_id = ?4, started_at = ?5, ended_at = ?6,
-                     turns = ?7, input_tokens = ?8, output_tokens = ?9, cache_read_tokens = ?10,
-                     cache_creation_tokens = ?11, tool_calls = ?12, skills = ?13,
-                     imported_from = ?14",
+                     agent = ?2, project = ?3, title = ?4, session_id = ?5, started_at = ?6,
+                     ended_at = ?7, turns = ?8, input_tokens = ?9, output_tokens = ?10,
+                     cache_read_tokens = ?11, cache_creation_tokens = ?12, tool_calls = ?13,
+                     skills = ?14, imported_from = ?15",
                 params![
                     r.import_key,
                     r.agent,
                     r.project,
+                    r.title,
                     r.session_id,
                     r.started_at,
                     r.ended_at,
@@ -362,6 +368,7 @@ mod tests {
             import_key: key.into(),
             agent: "claude".into(),
             project: Some(project.into()),
+            title: None,
             session_id: format!("s-{key}"),
             started_at: started.into(),
             ended_at: started.into(),

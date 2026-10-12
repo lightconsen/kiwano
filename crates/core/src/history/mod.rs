@@ -291,6 +291,62 @@ fn clean_label(raw: &str) -> Option<String> {
     Some(label.to_string())
 }
 
+/// The longest title a reader will send. A title is a **label** — it goes on one
+/// row of a list, in a table cell, and past that it is a paragraph pretending to
+/// be a name.
+const TITLE_MAX_CHARS: usize = 120;
+
+/// One candidate title, turned into what this interface will carry: the agent's
+/// own name for the conversation when it wrote one, else the opening message.
+///
+/// Three rules, and each exists because the source is free-form text:
+///
+/// - **One line.** An opening message is routinely several paragraphs; a title
+///   with newlines in it breaks the table it is rendered into. Whitespace runs
+///   collapse, and the first line is what survives.
+/// - **Bounded.** Capped at [`TITLE_MAX_CHARS`], on a character boundary, with an
+///   ellipsis when something was left behind.
+/// - **Not a credential.** The text is scanned by the same detector the gateway
+///   uses on outbound requests, and a title that trips it is **dropped** rather
+///   than stored. Nothing else in an imported row can carry a secret — a project
+///   label, four counters and a timestamp — and a pasted key sitting in the
+///   sessions table, which the app renders, is exactly the kind of thing this
+///   project refuses to keep. The session still imports; it just has no title.
+pub(super) fn session_title(text: Option<&str>) -> Option<String> {
+    let text = text?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // Collapse whitespace runs (newlines included) into single spaces: the title
+    // is one line by construction rather than by truncating at the first `\n`,
+    // which would throw away a title whose first line is a blank one.
+    let mut line = String::with_capacity(text.len().min(TITLE_MAX_CHARS * 4));
+    let mut pending_space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            pending_space = !line.is_empty();
+            continue;
+        }
+        if pending_space {
+            line.push(' ');
+            pending_space = false;
+        }
+        line.push(ch);
+    }
+    if line.is_empty() {
+        return None;
+    }
+    if !kiwanod::dlp::scan(line.as_bytes(), None).is_empty() {
+        return None;
+    }
+    if line.chars().count() > TITLE_MAX_CHARS {
+        let mut cut: String = line.chars().take(TITLE_MAX_CHARS).collect();
+        cut.push('…');
+        return Some(cut);
+    }
+    Some(line)
+}
+
 /// A JSON string field, or `None` when absent or not a string.
 pub(super) fn str_at(v: &Value, key: &str) -> Option<String> {
     v.get(key)

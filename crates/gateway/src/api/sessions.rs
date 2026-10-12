@@ -148,6 +148,9 @@ fn merge(imported: Option<&SessionRow>, traffic: Option<&TrafficSession>) -> Ses
         source: source.to_string(),
         agent,
         project: imported.and_then(|i| i.project.clone()),
+        // The files' own answer to "what was this about", and only theirs: a
+        // traffic-only session has no file, so it has no title.
+        title: imported.and_then(|i| i.title.clone()),
         // Which machine the files came from: the imported row's own label, and
         // nothing else — the traffic side has no files to have come from, so a
         // gateway-only session reads `None` (the display's "unnamed").
@@ -192,6 +195,7 @@ mod tests {
             import_key: format!("{agent}:{session}"),
             agent: agent.into(),
             project: project.map(str::to_string),
+            title: None,
             session_id: session.into(),
             started_at: "2026-09-01T00:00:00+00:00".into(),
             ended_at: "2026-09-01T05:00:00+00:00".into(),

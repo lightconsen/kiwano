@@ -40,6 +40,12 @@ pub struct SessionVm {
     /// none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    /// What the session is about, **imported side only** (migration v34): the
+    /// agent's own name for the conversation when its file carries one, else the
+    /// opening user message. A traffic-only session has none — the gateway
+    /// routes requests, and a conversation's subject is in none of them alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Which machine's files this session was imported from, **imported side
     /// only** — the same label as the row it came from (`imported_from`,
     /// migration v32), `None` for a traffic-only session or one whose machine

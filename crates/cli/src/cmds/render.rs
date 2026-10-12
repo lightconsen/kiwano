@@ -805,6 +805,7 @@ pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
     // table is the price of a view whose rows are meant to be cross-referenced —
     // `--json` is there for anything narrower.
     let head = [
+        "TITLE",
         "PROJECT",
         "MACHINE",
         "AGENT",
@@ -821,6 +822,10 @@ pub(crate) fn render_sessions(rows: &[vm::SessionVm]) -> String {
         .iter()
         .map(|s| {
             vec![
+                // What the session was about, from the file that has it: the
+                // agent's own title when it wrote one, else the opening message.
+                // `-` for a traffic-only session, which has no file to ask.
+                s.title.clone().unwrap_or_else(|| "-".to_string()),
                 s.project.clone().unwrap_or_else(|| "-".to_string()),
                 // Which machine imported this row, named even when unknown: an
                 // imported row whose machine could not name itself reads

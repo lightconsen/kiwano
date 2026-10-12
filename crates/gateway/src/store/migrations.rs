@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 33;
+pub const SCHEMA_VERSION: i32 = 34;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -941,6 +941,17 @@ ALTER TABLE usage ADD COLUMN upstream_key TEXT;
 ALTER TABLE request_logs ADD COLUMN upstream_key TEXT;
 "#;
 
+/// v34: what a session was about, on the imported half.
+///
+/// Only the files can answer it, and only they are asked: the gateway sees
+/// requests, and a conversation's subject is not in any one of them. See
+/// `kiwano_api::history::HistorySessionRow::title` for what the reader
+/// guarantees before a title is ever sent (one line, bounded, and dropped when
+/// it trips the credential detector).
+const MIGRATION_V34: &str = r#"
+ALTER TABLE sessions ADD COLUMN title TEXT;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1099,6 +1110,9 @@ impl Store {
         }
         if version < 33 {
             conn.execute_batch(MIGRATION_V33)?;
+        }
+        if version < 34 {
+            conn.execute_batch(MIGRATION_V34)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

@@ -63,6 +63,7 @@ export const logs = {
   sessionsEmpty:
     "这个窗口里没有会话 —— 网关自己的流量会随发生出现,更早的历史来自 `kiwano history import`",
   colRequests: "请求",
+  colTitle: "标题",
   colSpan: "时段",
   colProject: "项目",
   colMachine: "机器",

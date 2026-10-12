@@ -91,6 +91,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
     agent: "claude",
     project: "acme-api",
     machine: "buildbox",
+    title: `session ${id}`,
     started_at: "2026-09-14T09:00:00Z",
     ended_at: "2026-09-14T10:00:00Z",
     requests: 2,
@@ -376,6 +377,9 @@ describe("the sessions view", () => {
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
     await screen.findByText("both-1");
 
+    // The title is the row's leading column — what a reader scans for, and the
+    // id never was.
+    expect(screen.getByText("session both-1")).toBeInTheDocument();
     // Two currencies are two amounts. Adding them would be adding dollars to
     // yuan, and only the Dashboard converts.
     expect(screen.getByText("$1.5 + ¥7.25 (+2 unpriced)")).toBeInTheDocument();

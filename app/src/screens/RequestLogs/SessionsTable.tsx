@@ -77,7 +77,8 @@ export function SessionsTable({
       <table className="w-full text-[11.5px]">
         <thead>
           <tr className="border-b border-line text-left text-[10px] text-mut">
-            <th className="px-3 py-2 font-medium">{t("logs.colSpan")}</th>
+            <th className="px-3 py-2 font-medium">{t("logs.colTitle")}</th>
+            <th className="px-2 py-2 font-medium">{t("logs.colSpan")}</th>
             <th className="px-2 py-2 font-medium">{t("logs.colAgent")}</th>
             <th className="px-2 py-2 font-medium">{t("logs.colProject")}</th>
             <th className="px-2 py-2 font-medium">{t("logs.colSource")}</th>
@@ -98,7 +99,18 @@ export function SessionsTable({
               title={t("logs.sessionRowTitle")}
               onClick={() => onOpenSession(r.session_id)}
             >
-              <td className="whitespace-nowrap px-3 py-1.5 font-sans text-mut">
+              {/* What this conversation was about. The agent's own title where
+                  its file carries one, else the opening message — and `—` for a
+                  session only the gateway saw, which has no file to ask. */}
+              <td className="px-3 py-1.5 font-sans">
+                <span
+                  className={`block max-w-[260px] truncate${r.title ? "" : " text-mut"}`}
+                  title={r.title ?? undefined}
+                >
+                  {r.title ?? "—"}
+                </span>
+              </td>
+              <td className="whitespace-nowrap px-2 py-1.5 font-sans text-mut">
                 {fmtStamp(r.started_at)} → {fmtStamp(r.ended_at)}
               </td>
               <td className="px-2 py-1.5 font-sans">{r.agent}</td>

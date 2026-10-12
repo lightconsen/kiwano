@@ -279,6 +279,11 @@ fn session_row(row: &HistorySessionRow, machine: Option<&str>) -> crate::store::
         import_key: row.import_key.clone(),
         agent: row.agent.clone(),
         project: row.project.clone(),
+        // Stored as sent: the reader has already made it one line, bounded it and
+        // dropped it if it looked like a credential (`history::session_title`).
+        // The daemon does not re-litigate what the client decided about its own
+        // files — and it could not, since the file is not here.
+        title: row.title.clone(),
         session_id: row.session_id.clone(),
         started_at: row.started_at.clone(),
         ended_at: row.ended_at.clone(),
@@ -320,6 +325,7 @@ mod tests {
             import_key: key.into(),
             agent: "claude".into(),
             project: Some("kiwano".into()),
+            title: None,
             session_id: "s-1".into(),
             started_at: "2026-01-01T00:00:00+00:00".into(),
             ended_at: "2026-01-01T01:00:00+00:00".into(),

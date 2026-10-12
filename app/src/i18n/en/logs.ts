@@ -73,6 +73,7 @@ export const logs = {
   sessionsEmpty:
     "No sessions in this window — the gateway's own traffic appears as it happens, and the agents' earlier history comes from `kiwano history import`",
   colRequests: "REQ",
+  colTitle: "TITLE",
   colSpan: "SPAN",
   colProject: "PROJECT",
   colMachine: "machine",

@@ -47,6 +47,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
   earlier version, delete that machine's imported rows and re-import, or its
   spend appears in two places.
 
+### Added
+
+- **The session list is paged.** `all` is a legitimate window and `kiwano history
+  import` can put years of conversations in the ledger, so the view had no bound
+  at either end: one response, one scroll. It now answers a page with the total
+  beside it, exactly as the request log does — the two views share a card, and a
+  reader who has learned one pager has learned the other. `GET /api/sessions`
+  takes `page` and `page_size` (default 50, capped at 500), `kiwano sessions`
+  walks the pages so its table and its `--json` stay complete, and the app pages
+  ten at a time with the count over the whole list rather than the page.
+
 ### Changed
 
 - **A session is in the window if it was *active* in it, not if it started

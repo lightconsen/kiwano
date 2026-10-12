@@ -295,7 +295,10 @@ kiwano sessions [--project P] [--agent A] [--days N]
 ```
 
 `--days` keeps the sessions **active** in that window — a conversation begun ten
-days ago and worked on yesterday belongs in a seven-day list.
+days ago and worked on yesterday belongs in a seven-day list. The list is read a
+page at a time (`GET /api/sessions` takes `page` and `page_size`, 50 by default)
+and this command walks the pages, so its table and its `--json` are complete
+without any single response growing with a machine's history.
 
 One row per session, from **two sources**, and the `SOURCE` column says which:
 

@@ -111,7 +111,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.listRequestLogs.mockResolvedValue(page([1, 2, 3], 25));
-  apiMock.listSessions.mockResolvedValue([]);
+  apiMock.listSessions.mockResolvedValue({ rows: [], total: 0 });
   saveMock.mockResolvedValue("/tmp/kiwano-logs.csv");
   apiMock.exportRequestLogs.mockResolvedValue({ rows_written: 3, truncated: false });
 });
@@ -309,7 +309,7 @@ describe("the sessions view", () => {
   });
 
   it("narrows the log table to a session, and the chip is the way back", async () => {
-    apiMock.listSessions.mockResolvedValue([session("s-1"), session("s-2")]);
+    apiMock.listSessions.mockResolvedValue({ rows: [session("s-1"), session("s-2")], total: 2 });
     const user = userEvent.setup();
     render(<RequestLogs window="7d" />);
 
@@ -343,9 +343,10 @@ describe("the sessions view", () => {
   });
 
   it("says so when a session has no gateway traffic, rather than looking broken", async () => {
-    apiMock.listSessions.mockResolvedValue([
-      session("imported-1", { source: "imported", requests: 0, cost: [] }),
-    ]);
+    apiMock.listSessions.mockResolvedValue({
+      rows: [session("imported-1", { source: "imported", requests: 0, cost: [] })],
+      total: 1,
+    });
     apiMock.listRequestLogs.mockResolvedValue({ rows: [], total: 0 });
     const user = userEvent.setup();
     render(<RequestLogs window="7d" />);
@@ -360,7 +361,8 @@ describe("the sessions view", () => {
   });
 
   it("keeps the two sides apart in the row it draws", async () => {
-    apiMock.listSessions.mockResolvedValue([
+    apiMock.listSessions.mockResolvedValue({
+      rows: [
       session("both-1", {
         source: "both",
         cost: [
@@ -371,7 +373,9 @@ describe("the sessions view", () => {
       }),
       session("imported-1", { source: "imported", requests: 0, cost: [] }),
       session("gateway-1", { source: "gateway", project: null, turns: 0 }),
-    ]);
+      ],
+      total: 3,
+    });
     const user = userEvent.setup();
     render(<RequestLogs window="7d" />);
     await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
@@ -389,6 +393,34 @@ describe("the sessions view", () => {
     expect(screen.getByText(en.logs.sourceGateway)).toBeInTheDocument();
   });
 
+  it("pages the list, and counts what is there rather than what is on screen", async () => {
+    // Sixty sessions, ten a page — the card's page size, shared with the log
+    // table above it.
+    const all = Array.from({ length: 60 }, (_, i) => session(`s-${String(i + 1).padStart(2, "0")}`));
+    apiMock.listSessions.mockImplementation(
+      async (_a, _p, _d, _since, page: number, pageSize: number) => ({
+        rows: all.slice((page - 1) * pageSize, page * pageSize),
+        total: all.length,
+      }),
+    );
+    const user = userEvent.setup();
+    render(<RequestLogs window="7d" />);
+    await user.click(screen.getByRole("tab", { name: en.logs.tabSessions }));
+
+    // The count is the whole list, not this page of it — a header that said "10
+    // sessions" over sixty would be a lie the pager immediately contradicts.
+    await screen.findByText("s-01");
+    expect(screen.getByText(en.logs.sessionsCount.replace("{n}", "60"))).toBeInTheDocument();
+    expect(screen.getByText(en.logs.pageIndicator.replace("{page}", "1").replace("{pages}", "6"))).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: en.logs.next }));
+    await waitFor(() => expect(apiMock.listSessions).toHaveBeenLastCalledWith(
+      undefined, undefined, undefined, expect.any(String), 2, 10,
+    ));
+    await screen.findByText("s-11");
+    expect(screen.queryByText("s-01")).toBeNull();
+  });
+
   it("says the provider filter does not apply here instead of pretending it does", async () => {
     const user = userEvent.setup();
     render(<RequestLogs providerId="deepseek" window="7d" />);
@@ -397,6 +429,8 @@ describe("the sessions view", () => {
       await screen.findByText(en.logs.sessionsProviderNotApplied),
     ).toBeInTheDocument();
     // Structurally too: the call has no provider to filter by.
-    expect(apiMock.listSessions.mock.calls[0].length).toBeLessThanOrEqual(4);
+    // Six arguments, and a provider is not one of them: the structural guarantee
+    // behind the note the reader is shown.
+    expect(apiMock.listSessions.mock.calls[0]).toHaveLength(6);
   });
 });

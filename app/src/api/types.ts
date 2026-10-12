@@ -818,6 +818,14 @@ export interface Session {
   skills: HistoryCount[];
 }
 
+/** One page of the session list, with the size of the whole list beside it —
+    the same shape `RequestLogList` has, because the two views share a card. */
+export interface SessionList {
+  rows: Session[];
+  /** Matching sessions in total, not `rows.length`. */
+  total: number;
+}
+
 /** Cost alert hit (backend already dedupes per period; the frontend just forwards it as a system notification) */
 export interface UsageAlert {
   provider_id: string;
@@ -1078,11 +1086,13 @@ export interface KiwanoApi {
       the agents' own files. `since` is an instant (the app's local-day window);
       `days` is the rolling span the CLI uses. The daemon prefers `since`. */
   listSessions(
-    agent?: string,
-    project?: string,
-    days?: number,
-    since?: string,
-  ): Promise<Session[]>;
+    agent: string | undefined,
+    project: string | undefined,
+    days: number | undefined,
+    since: string | undefined,
+    page: number,
+    pageSize: number,
+  ): Promise<SessionList>;
 
   /** A Provider's list of rotating keys (excluding the primary key) */
   listApiKeys(providerId: string): Promise<ApiKeyEntry[]>;

@@ -197,6 +197,47 @@ function StatusPill({ code }: { code: number }) {
   );
 }
 
+/** The card's pager, shared by both views.
+ *
+ * One component rather than two copies: the views are siblings in one card, and
+ * two page controls that drifted apart in spacing or wording would read as two
+ * different mechanisms. What each view pages through is its own business — only
+ * the control is shared. */
+function Pager({
+  page,
+  pages,
+  onGo,
+}: {
+  page: number;
+  pages: number;
+  onGo: (page: number) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="flex items-center justify-center gap-3 pb-3 text-[11.5px] text-mut">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2.5 text-[11px]"
+        disabled={page <= 1}
+        onClick={() => onGo(page - 1)}
+      >
+        {t("logs.prev")}
+      </Button>
+      <span className="font-mono">{t("logs.pageIndicator", { page, pages })}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2.5 text-[11px]"
+        disabled={page >= pages}
+        onClick={() => onGo(page + 1)}
+      >
+        {t("logs.next")}
+      </Button>
+    </div>
+  );
+}
+
 /** The list-row marker for a credential-watch finding: the detector's note
     lines always lead `request_notes`, so a prefix test on the row is exact. */
 function DlpBadge() {
@@ -421,6 +462,8 @@ export default function RequestLogs({
   // The sessions view's own read: the rows, whether one has landed, its error,
   // and a sequence guard for the same reason the log table has one.
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [sessionsTotal, setSessionsTotal] = useState(0);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [sessionsErr, setSessionsErr] = useState<string | null>(null);
   const seqSessions = useRef(0);
@@ -584,14 +627,15 @@ export default function RequestLogs({
       an instant (`windowSince`) rather than a day count: the figures above this
       card are whole local days, and a list measured in rolling hours would
       disagree with them at the day boundary. */
-  const fetchSessions = () => {
+  const fetchSessions = (page: number) => {
     const seq = ++seqSessions.current;
     setSessionsErr(null);
     api
-      .listSessions(agent, undefined, undefined, windowSince(win))
-      .then((rows) => {
+      .listSessions(agent, undefined, undefined, windowSince(win), page, PAGE_SIZE)
+      .then((listed) => {
         if (seq !== seqSessions.current) return;
-        setSessions(rows);
+        setSessions(listed.rows);
+        setSessionsTotal(listed.total);
         setSessionsLoaded(true);
       })
       .catch((e) => {
@@ -608,7 +652,7 @@ export default function RequestLogs({
   // view reads when it is next opened.
   useReload(() => {
     if (tab === "sessions") {
-      fetchSessions();
+      fetchSessions(sessionsPage);
       return Promise.resolve();
     }
     return fetchPage(page);
@@ -622,11 +666,19 @@ export default function RequestLogs({
 
   // The sessions view reads on every open, so it can never show rows from a
   // window or an agent the reader has since changed.
+  // The sessions view reads on every open and on every page, so it can never
+  // show rows from a window, an agent or a page the reader has since changed.
+  // The page goes back to the first one when the *slice* changes, for the same
+  // reason the log table's does.
   useEffect(() => {
     if (tab !== "sessions") return;
-    void fetchSessions();
+    void fetchSessions(sessionsPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, agent, win]);
+  }, [tab, agent, win, sessionsPage]);
+
+  useEffect(() => {
+    setSessionsPage(1);
+  }, [agent, win]);
 
   // Presets move both ends at once, so React batches them into one refetch.
   const applyRange = (id: RangeId) => {
@@ -795,13 +847,14 @@ export default function RequestLogs({
             // it — the selector it follows is above the card.
             <>
               <span title={t("logs.sessionsWindowTitle")}>{windowLabel(t, win)}</span>
-              <span>{t("logs.sessionsCount", { n: sessions.length.toLocaleString() })}</span>
+              <span>{t("logs.sessionsCount", { n: sessionsTotal.toLocaleString() })}</span>
             </>
           )}
         </span>
       </div>
 
       {tab === "sessions" ? (
+        <>
         <SessionsTable
           rows={sessions}
           loaded={sessionsLoaded}
@@ -815,6 +868,14 @@ export default function RequestLogs({
             setOpenId(null);
           }}
         />
+        {sessionsLoaded && sessionsTotal > 0 && (
+          <Pager
+            page={sessionsPage}
+            pages={Math.max(1, Math.ceil(sessionsTotal / PAGE_SIZE))}
+            onGo={(p) => setSessionsPage(p)}
+          />
+        )}
+        </>
       ) : (
       <div>
         <div className="overflow-hidden">
@@ -880,15 +941,7 @@ export default function RequestLogs({
         </div>
 
         {loaded && total > 0 && (
-          <div className="flex items-center justify-center gap-3 pb-3 text-[11.5px] text-mut">
-            <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px]" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              {t("logs.prev")}
-            </Button>
-            <span className="font-mono">{t("logs.pageIndicator", { page, pages })}</span>
-            <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px]" disabled={page >= pages} onClick={() => setPage(page + 1)}>
-              {t("logs.next")}
-            </Button>
-          </div>
+          <Pager page={page} pages={pages} onGo={(p) => setPage(p)} />
         )}
 
         {openLog ? (

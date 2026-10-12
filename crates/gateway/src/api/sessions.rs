@@ -16,7 +16,7 @@ use crate::store::Store;
 use kiwano_api::client_keys::CurrencyAmountVm;
 use kiwano_api::error::ApiError;
 use kiwano_api::history::HistoryCount;
-use kiwano_api::sessions::SessionVm;
+use kiwano_api::sessions::{SessionListVm, SessionVm};
 use std::collections::{HashMap, HashSet};
 
 /// Every session this store can see, newest first.
@@ -25,6 +25,40 @@ use std::collections::{HashMap, HashSet};
 /// half — and, therefore, the whole view: a traffic-only session has no project,
 /// so under a project filter it cannot be said to match and is dropped rather
 /// than shown as if it did.
+/// One page of the merged list, with the total beside it.
+///
+/// The slice happens **after** the merge, because the merge is what decides the
+/// order (newest first, across both ledgers) — paging either side separately
+/// would produce a list that is not sorted. The cost is that the daemon computes
+/// the whole merge to answer a page, which is a map lookup per session against
+/// the cost of shipping a machine's whole history to a client that asked for ten
+/// rows.
+pub fn list_sessions_page(
+    store: &Store,
+    agent: Option<&str>,
+    project: Option<&str>,
+    since: Option<&str>,
+    page: i64,
+    page_size: i64,
+) -> Result<SessionListVm, ApiError> {
+    let rows = list_sessions(store, agent, project, since)?;
+    let total = rows.len() as i64;
+    let page = page.max(1);
+    let page_size = page_size.clamp(1, MAX_PAGE_SIZE);
+    let offset = (page - 1).saturating_mul(page_size) as usize;
+    let rows = rows
+        .into_iter()
+        .skip(offset)
+        .take(page_size as usize)
+        .collect();
+    Ok(SessionListVm { rows, total })
+}
+
+/// The largest page a client may ask for. A `page_size` of zero is clamped up to
+/// one rather than read as "everything": the parameter exists to bound a
+/// response, and a sentinel that defeated that would be read as a feature.
+pub const MAX_PAGE_SIZE: i64 = 500;
+
 pub fn list_sessions(
     store: &Store,
     agent: Option<&str>,

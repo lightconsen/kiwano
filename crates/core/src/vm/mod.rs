@@ -75,7 +75,7 @@ pub use kiwano_api::client_keys::{
 };
 pub use kiwano_api::history::HistoryCount;
 pub use kiwano_api::providers::{ProviderPriceInput, ProviderPricesInput};
-pub use kiwano_api::sessions::SessionVm;
+pub use kiwano_api::sessions::{SessionListVm, SessionVm};
 pub use kiwanod::api::import_history::HistoryImportReport;
 pub use limits::{
     import_declared_prices, known_limit_currencies, normalize_declared_prices, normalize_limit_unit,

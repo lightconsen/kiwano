@@ -18,18 +18,40 @@ use super::render::render_sessions;
 use crate::cli::SessionsArgs;
 use crate::{CliError, Ctx};
 
+/// How many sessions one request carries while the CLI walks the list.
+///
+/// The far end pages every answer — that is what keeps a response bounded — so a
+/// command whose job is "show me the sessions" walks the pages rather than asking
+/// for everything in one go. The terminal is happy to print a long table, and
+/// `--json` stays complete, without either of them depending on a response that
+/// grows with a machine's history.
+const PAGE_SIZE: i64 = 200;
+
 pub fn sessions(args: &SessionsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
-    let rows = ctx
-        .api
-        // `--days` is the rolling span a command line means; `since` (an
-        // instant) is what a client showing a local-day window sends, and the
-        // CLI has no such window.
-        .sessions(
-            args.agent.as_deref(),
-            args.project.as_deref(),
-            args.days,
-            None,
-        )?;
+    let mut rows = Vec::new();
+    let mut page = 1;
+    loop {
+        let listed = ctx
+            .api
+            // `--days` is the rolling span a command line means; `since` (an
+            // instant) is what a client showing a local-day window sends, and the
+            // CLI has no such window.
+            .sessions(
+                args.agent.as_deref(),
+                args.project.as_deref(),
+                args.days,
+                None,
+                page,
+                PAGE_SIZE,
+            )?;
+        let total = listed.total;
+        let got = listed.rows.len() as i64;
+        rows.extend(listed.rows);
+        if got == 0 || (rows.len() as i64) >= total {
+            break;
+        }
+        page += 1;
+    }
     let text = render_sessions(&rows);
     // The scan stamps are text-only, on purpose: they are a note about the
     // *imported* half, and under `--json` stdout has to be the rows and nothing

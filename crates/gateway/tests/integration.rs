@@ -3941,11 +3941,31 @@ async fn the_session_list_takes_a_caller_computed_bound() {
     let state = Arc::new(GatewayState::new(store).unwrap());
     let admin = admin_plane_router(state.clone());
 
+    // A page of the list *plus* the size of the whole thing: the shape a pager
+    // needs, and what keeps a response from growing with a machine's history.
     let all = admin_get(&admin, &state, "/api/sessions").await;
     assert_eq!(
-        all.as_array().unwrap().len(),
+        all["rows"].as_array().unwrap().len(),
         3,
         "no bound is every session"
+    );
+    assert_eq!(all["total"], 3);
+
+    // One row a page, so the pager's arithmetic is pinned where it is computed
+    // rather than only in the client that draws it.
+    let first = admin_get(&admin, &state, "/api/sessions?page=1&page_size=1").await;
+    assert_eq!(first["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(first["total"], 3, "the total is the list, not the page");
+    let second = admin_get(&admin, &state, "/api/sessions?page=2&page_size=1").await;
+    assert_ne!(
+        first["rows"][0]["session_id"], second["rows"][0]["session_id"],
+        "page two is a different session"
+    );
+    let past_the_end = admin_get(&admin, &state, "/api/sessions?page=99&page_size=1").await;
+    assert!(past_the_end["rows"].as_array().unwrap().is_empty());
+    assert_eq!(
+        past_the_end["total"], 3,
+        "and the total still says what exists"
     );
 
     let since = admin_get(
@@ -3954,7 +3974,7 @@ async fn the_session_list_takes_a_caller_computed_bound() {
         "/api/sessions?since=2026-09-09T00:00:00%2B00:00",
     )
     .await;
-    let ids: Vec<&str> = since
+    let ids: Vec<&str> = since["rows"]
         .as_array()
         .unwrap()
         .iter()
@@ -3971,7 +3991,7 @@ async fn the_session_list_takes_a_caller_computed_bound() {
     )
     .await;
     assert_eq!(
-        both.as_array().unwrap().len(),
+        both["rows"].as_array().unwrap().len(),
         1,
         "`since` wins over the rolling span"
     );

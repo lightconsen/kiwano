@@ -1707,16 +1707,23 @@ async fn list_sessions_route(
     // A caller-computed instant beats the rolling span it would otherwise get:
     // see `SessionQuery`, where the reason is the dashboard's local-day window.
     let since = query.since.clone().or_else(|| query.days.map(days_ago));
-    match crate::api::sessions::list_sessions(
+    match crate::api::sessions::list_sessions_page(
         &state.store,
         query.agent.as_deref(),
         query.project.as_deref(),
         since.as_deref(),
+        query.page.unwrap_or(1),
+        query.page_size.unwrap_or(DEFAULT_SESSION_PAGE),
     ) {
         Ok(rows) => Json(rows).into_response(),
         Err(e) => resource_error(e),
     }
 }
+
+/// How many sessions a client gets when it does not ask. Fifty is a screenful
+/// and a half: enough that a reader scrolling a card is not paging constantly,
+/// small enough that the answer stays a page rather than a download.
+const DEFAULT_SESSION_PAGE: i64 = 50;
 
 /// The session list's query string. Every field is optional, and an absent one
 /// means "no filter" — the same contract as [`LogQuery`].
@@ -1736,6 +1743,13 @@ struct SessionQuery {
     days: Option<i64>,
     #[serde(default)]
     since: Option<String>,
+    /// Which page, and how big — the same two names the request log's route
+    /// takes, because the two views sit in one card and a client that has learned
+    /// one has learned the other. Absent means the first page of fifty.
+    #[serde(default)]
+    page: Option<i64>,
+    #[serde(default)]
+    page_size: Option<i64>,
 }
 
 /// `?days=N` — the window a read's figures cover. Shared by the reads that report

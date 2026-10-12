@@ -21,6 +21,15 @@ pub fn list_sessions(
     project: Option<String>,
     days: Option<i64>,
     since: Option<String>,
-) -> Result<Vec<vm::SessionVm>, String> {
-    DaemonApi::connect().sessions(agent.as_deref(), project.as_deref(), days, since.as_deref())
+    page: i64,
+    page_size: i64,
+) -> Result<vm::SessionListVm, String> {
+    DaemonApi::connect().sessions(
+        agent.as_deref(),
+        project.as_deref(),
+        days,
+        since.as_deref(),
+        page,
+        page_size,
+    )
 }

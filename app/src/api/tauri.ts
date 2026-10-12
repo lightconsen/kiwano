@@ -2,7 +2,7 @@
 // and the returned VM fields (serde snake_case) align verbatim with src/api/types.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, UpstreamKeySpendEntry, AppSettings, Session, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
+import type { AgentDetect, AgentDirHit, AgentId, AgentLimit, AgentRef, AgentRoute, AgentVersionEntry, ApiKeyEntry, UpstreamKeySpendEntry, AppSettings, SessionList, CatalogList, ConfigShareReport, CurrencyMeta, DashboardData, DashboardWindow, FooterStats, GatewayStatus, HistoryImportReport, HubSyncReport, ImportReport, KiwanoApi, ModelPrice, NewProviderInput, PlanQuotaReport, ProbeReport, Protocol, Provider, RequestLogDetail, RequestLogEntry, RequestLogExport, RequestLogFilter, RequestLogList, PromptLatency, StrategyKind, UpdateInfo, UpdateProgress, UsageAlert, CustomAgent } from "./types";
 
 export const tauriApi: KiwanoApi = {
   getGatewayStatus: () => invoke<GatewayStatus>("get_gateway_status"),
@@ -149,12 +149,14 @@ export const tauriApi: KiwanoApi = {
 
   probeAgentVersions: () => invoke<AgentVersionEntry[]>("probe_agent_versions"),
 
-  listSessions: (agent?: string, project?: string, days?: number, since?: string) =>
-    invoke<Session[]>("list_sessions", {
+  listSessions: (agent, project, days, since, page, pageSize) =>
+    invoke<SessionList>("list_sessions", {
       agent: agent ?? null,
       project: project ?? null,
       days: days ?? null,
       since: since ?? null,
+      page,
+      pageSize,
     }),
 
   listRequestLogs: (page: number, pageSize: number, filter?: RequestLogFilter) =>

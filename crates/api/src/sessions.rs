@@ -23,6 +23,21 @@ use crate::client_keys::CurrencyAmountVm;
 use crate::history::HistoryCount;
 use serde::{Deserialize, Serialize};
 
+/// One page of the session list, with the size of the whole list beside it.
+///
+/// Paged for the same reason the request log is: the app shows both views in one
+/// card, and a session list is unbounded — `all` is a legitimate window, and a
+/// response that grew with a machine's history would eventually meet the admin
+/// plane's body limit rather than a pager.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionListVm {
+    pub rows: Vec<SessionVm>,
+    /// The matching rows in total, **not** the length of `rows`: a pager needs
+    /// the number it is paging through, and a client that had to infer it from a
+    /// full page would render a last page as if there were more.
+    pub total: i64,
+}
+
 /// One session, merged from the gateway's traffic and the agents' files.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionVm {

@@ -22,7 +22,7 @@ use kiwano_api::providers::{
     NewProviderInput, ProviderPatch, ProviderRefVm, ProviderVm, SyncReportVm,
 };
 use kiwano_api::routes::{AgentLimitVm, AgentRouteVm};
-use kiwano_api::sessions::SessionVm;
+use kiwano_api::sessions::SessionListVm;
 use kiwano_api::settings::SettingsVm;
 use kiwanod::api::catalog::CatalogListVm;
 use kiwanod::api::import_history::HistoryImportReport;
@@ -282,10 +282,14 @@ impl DaemonApi {
         project: Option<&str>,
         days: Option<i64>,
         since: Option<&str>,
-    ) -> Result<Vec<SessionVm>, String> {
+        page: i64,
+        page_size: i64,
+    ) -> Result<SessionListVm, String> {
         // Absent filters are omitted rather than sent empty: the far end reads an
-        // empty value as a filter that matches nothing.
-        let mut query: Vec<String> = Vec::new();
+        // empty value as a filter that matches nothing. The page is always sent:
+        // it is not a filter but the shape of the answer, and the daemon has its
+        // own default the caller should not have to know.
+        let mut query: Vec<String> = vec![format!("page={page}&page_size={page_size}")];
         for (key, value) in [("agent", agent), ("project", project), ("since", since)] {
             if let Some(value) = value {
                 query.push(format!("{key}={}", encode_query(value)));
@@ -1177,7 +1181,8 @@ mod tests {
     /// nothing. This is that encoding, pinned where it is written.
     #[test]
     fn a_session_window_travels_encoded() {
-        let body = "[]";
+        // A page of the list: the shape the route answers with.
+        let body = r#"{"rows":[],"total":0}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
             body.len()
@@ -1191,13 +1196,15 @@ mod tests {
                 None,
                 None,
                 Some("2026-09-09T00:00:00+00:00"),
+                1,
+                50,
             )
             .unwrap();
 
         let request = handle.join().unwrap();
         assert!(
             request.starts_with(
-                "GET /api/sessions?agent=claude&since=2026-09-09T00%3A00%3A00%2B00%3A00 HTTP/1.1"
+                "GET /api/sessions?page=1&page_size=50&agent=claude&since=2026-09-09T00%3A00%3A00%2B00%3A00 HTTP/1.1"
             ),
             "{request}"
         );

@@ -2,7 +2,7 @@
 // `crates/gateway/src/api/sessions.rs::list_sessions` — one predicate, so the
 // window and the agent filter mean here what they mean there.
 
-import type { KiwanoApi, Session } from "../../types";
+import type { KiwanoApi, Session, SessionList } from "../../types";
 import { delay } from "../delay";
 import { sessions } from "../sessions";
 
@@ -12,22 +12,32 @@ import { sessions } from "../sessions";
  * route takes from a client showing a local-day window (see `SessionQuery`);
  * `days` is the CLI's rolling spelling and is not used here. The bound is
  * compared as a string, exactly as SQLite compares the RFC3339 column — and it
- * bounds `started_at`, which is the field the store's own filter uses. */
+ * bounds `ended_at`, the session's last activity, which is the field the store's
+ * own filter uses. */
 export function matchingSessions(
   agent?: string,
   since?: string,
 ): Session[] {
   return sessions
-    .filter((s) => (!agent || s.agent === agent) && (!since || s.started_at >= since))
+    .filter((s) => (!agent || s.agent === agent) && (!since || s.ended_at >= since))
     .sort((a, b) => (a.ended_at < b.ended_at ? 1 : -1));
 }
 
 export const sessionsApi: Pick<KiwanoApi, "listSessions"> = {
-  async listSessions(agent?: string, _project?: string, _days?: number, since?: string) {
+  async listSessions(
+    agent: string | undefined,
+    _project: string | undefined,
+    _days: number | undefined,
+    since: string | undefined,
+    page: number,
+    pageSize: number,
+  ): Promise<SessionList> {
     await delay();
     // `_project` is accepted and ignored: the fixtures carry project labels, but
     // nothing in the app sets a project filter yet — the parameter is here
     // because the daemon's route takes it.
-    return matchingSessions(agent, since);
+    const all = matchingSessions(agent, since);
+    const from = Math.max(0, (Math.max(1, page) - 1) * pageSize);
+    return { rows: all.slice(from, from + pageSize), total: all.length };
   },
 };

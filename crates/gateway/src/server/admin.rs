@@ -1704,7 +1704,9 @@ async fn list_sessions_route(
     State(state): State<Arc<GatewayState>>,
     Query(query): Query<SessionQuery>,
 ) -> Response {
-    let since = query.days.map(days_ago);
+    // A caller-computed instant beats the rolling span it would otherwise get:
+    // see `SessionQuery`, where the reason is the dashboard's local-day window.
+    let since = query.since.clone().or_else(|| query.days.map(days_ago));
     match crate::api::sessions::list_sessions(
         &state.store,
         query.agent.as_deref(),
@@ -1716,8 +1718,15 @@ async fn list_sessions_route(
     }
 }
 
-/// The session list's query string. All three are optional, and an absent one
+/// The session list's query string. Every field is optional, and an absent one
 /// means "no filter" — the same contract as [`LogQuery`].
+///
+/// Two ways to bound the window, and the caller picks one. `days` is a rolling
+/// span (`unix_now() - N days`), which is what a command line means by "the last
+/// week". `since` is an **instant the caller computed**, and it exists because
+/// the dashboard's window is *local calendar days* (`api::dashboard::
+/// resolve_window`) — a client showing both has to measure the same span, or the
+/// two panels disagree at the day boundary. `since` wins when both arrive.
 #[derive(serde::Deserialize)]
 struct SessionQuery {
     #[serde(default)]
@@ -1725,6 +1734,8 @@ struct SessionQuery {
     #[serde(default)]
     project: Option<String>,
     days: Option<i64>,
+    #[serde(default)]
+    since: Option<String>,
 }
 
 /// `?days=N` — the window a read's figures cover. Shared by the reads that report

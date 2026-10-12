@@ -21,7 +21,15 @@ use crate::{CliError, Ctx};
 pub fn sessions(args: &SessionsArgs, ctx: &mut Ctx) -> Result<(), CliError> {
     let rows = ctx
         .api
-        .sessions(args.agent.as_deref(), args.project.as_deref(), args.days)?;
+        // `--days` is the rolling span a command line means; `since` (an
+        // instant) is what a client showing a local-day window sends, and the
+        // CLI has no such window.
+        .sessions(
+            args.agent.as_deref(),
+            args.project.as_deref(),
+            args.days,
+            None,
+        )?;
     let text = render_sessions(&rows);
     // The scan stamps are text-only, on purpose: they are a note about the
     // *imported* half, and under `--json` stdout has to be the rows and nothing

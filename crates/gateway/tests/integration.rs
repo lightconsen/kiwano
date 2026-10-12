@@ -3849,3 +3849,130 @@ async fn a_model_family_allowlist_serves_the_family_and_refuses_the_rest() {
         "only the family was asked for"
     );
 }
+
+/// `GET /api/sessions?since=…` bounds from the instant the caller computed, and
+/// `since` wins over `days` when both arrive.
+///
+/// The reason the parameter exists: the dashboard's window is whole *local
+/// calendar days*, while `days=N` is a rolling span off the clock — an app
+/// showing both has to send its own bound, or the two panels disagree at the day
+/// boundary. Nothing else in the store is asked for a window this way.
+#[tokio::test]
+async fn the_session_list_takes_a_caller_computed_bound() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+    store
+        .insert_provider(&provider(
+            "p-ant",
+            Protocol::Anthropic,
+            "http://127.0.0.1:1".into(),
+        ))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+
+    // Three sessions: one long ago, one yesterday, one inside today's bound.
+    for (id, ts) in [
+        ("s-old", "2026-01-01T10:00:00+00:00"),
+        ("s-yesterday", "2026-09-08T10:00:00+00:00"),
+        ("s-today", "2026-09-09T10:00:00+00:00"),
+    ] {
+        store
+            .record_usage(&kiwanod::store::UsageRecord {
+                ts: ts.into(),
+                agent: "claude".into(),
+                provider_id: Some("p-ant".into()),
+                client_key_id: None,
+                model: Some("m".into()),
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                latency_ms: Some(10),
+                status: "ok".into(),
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+                project: None,
+                session_id: Some(id.into()),
+                import_key: None,
+                imported_from: None,
+                upstream_key: None,
+            })
+            .unwrap();
+        store
+            .insert_request_log(&kiwanod::store::RequestLogNew {
+                ts: ts.into(),
+                method: "POST".into(),
+                path: "/v1/messages".into(),
+                query: None,
+                agent: Some("claude".into()),
+                attribution: Some("key".into()),
+                provider_id: Some("p-ant".into()),
+                model: Some("m".into()),
+                status_code: 200,
+                error_kind: None,
+                error_message: None,
+                session_id: Some(id.into()),
+                is_streaming: false,
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                reasoning_tokens: 0,
+                usage_missing: false,
+                latency_ms: Some(10),
+                first_token_ms: None,
+                request_headers: None,
+                response_headers: None,
+                request_body: None,
+                response_body: None,
+                request_size: 0,
+                response_size: 0,
+                truncated: false,
+                cost: None,
+                cost_currency: None,
+                cost_off_peak: None,
+                request_notes: None,
+                upstream_key: None,
+            })
+            .unwrap();
+    }
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let admin = admin_plane_router(state.clone());
+
+    let all = admin_get(&admin, &state, "/api/sessions").await;
+    assert_eq!(
+        all.as_array().unwrap().len(),
+        3,
+        "no bound is every session"
+    );
+
+    let since = admin_get(
+        &admin,
+        &state,
+        "/api/sessions?since=2026-09-09T00:00:00%2B00:00",
+    )
+    .await;
+    let ids: Vec<&str> = since
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["session_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["s-today"], "the caller's instant is the bound");
+
+    // Both spellings at once: the computed instant is the one that counts, and
+    // `days` is what a caller that has not computed one gets.
+    let both = admin_get(
+        &admin,
+        &state,
+        "/api/sessions?days=365&since=2026-09-09T00:00:00%2B00:00",
+    )
+    .await;
+    assert_eq!(
+        both.as_array().unwrap().len(),
+        1,
+        "`since` wins over the rolling span"
+    );
+}

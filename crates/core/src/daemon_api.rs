@@ -270,16 +270,23 @@ impl DaemonApi {
 
     /// Every session this machine knows, from both the gateway's traffic and the
     /// agent files the import wrote, merged and newest first.
+    ///
+    /// Two ways to bound the window and the caller picks one: `days` is the
+    /// rolling span a command line means by "the last week", while `since` is an
+    /// instant the caller computed — which is what an app showing the dashboard's
+    /// **local-day** window has to send, or its two panels disagree at the day
+    /// boundary. The far end prefers `since` when both arrive.
     pub fn sessions(
         &self,
         agent: Option<&str>,
         project: Option<&str>,
         days: Option<i64>,
+        since: Option<&str>,
     ) -> Result<Vec<SessionVm>, String> {
         // Absent filters are omitted rather than sent empty: the far end reads an
         // empty value as a filter that matches nothing.
         let mut query: Vec<String> = Vec::new();
-        for (key, value) in [("agent", agent), ("project", project)] {
+        for (key, value) in [("agent", agent), ("project", project), ("since", since)] {
             if let Some(value) = value {
                 query.push(format!("{key}={}", encode_query(value)));
             }
@@ -1162,6 +1169,38 @@ mod tests {
             String::from_utf8_lossy(&request).into_owned()
         });
         (dir, endpoint, handle)
+    }
+
+    /// The sessions read's window travels as a query string, and the bound the
+    /// app sends is an **instant** — whose `+00:00` has to be percent-encoded
+    /// or the far end reads it as a space and the filter silently matches
+    /// nothing. This is that encoding, pinned where it is written.
+    #[test]
+    fn a_session_window_travels_encoded() {
+        let body = "[]";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let response: &'static str = Box::leak(response.into_boxed_str());
+        let (_dir, endpoint, handle) = stub(response);
+
+        DaemonApi::with_token(endpoint, Some("tok-123".into()))
+            .sessions(
+                Some("claude"),
+                None,
+                None,
+                Some("2026-09-09T00:00:00+00:00"),
+            )
+            .unwrap();
+
+        let request = handle.join().unwrap();
+        assert!(
+            request.starts_with(
+                "GET /api/sessions?agent=claude&since=2026-09-09T00%3A00%3A00%2B00%3A00 HTTP/1.1"
+            ),
+            "{request}"
+        );
     }
 
     #[test]

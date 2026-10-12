@@ -128,13 +128,13 @@ describe("a session's own page", () => {
     const user = userEvent.setup();
     renderDetail();
 
-    // Await the body before scoping: the card exists only once the read lands,
+    // Await the body before scoping: the panel exists only once the read lands,
     // and the first paint of this page is the breadcrumb alone.
-    await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "12"));
-    // Scoped to the Tools card: the breadcrumb is a list too.
-    const toolsCard = screen
-      .getByText(en.dashboard.sessionTools)
-      .closest(".rounded-lg") as HTMLElement;
+    // Scoped to the calls panel — the breadcrumb is a list too, and the counts
+    // card above has a table-free summary of its own.
+    const toolsCard = (await screen.findByText(
+      en.dashboard.sessionCalls.replace("{n}", "12"),
+    )).closest(".rounded-lg") as HTMLElement;
     const rows = () =>
       within(toolsCard)
         .getAllByRole("row")
@@ -154,15 +154,33 @@ describe("a session's own page", () => {
     expect(rows()[1]).toBe("12Tool12did the 12th thing");
   });
 
+  it("puts the calls in their own panel, last on the page", async () => {
+    apiMock.getSession.mockResolvedValue(session({ tool_uses: [{ name: "Bash", detail: "ls" }] }));
+    renderDetail();
+
+    // Await the body first: the first paint of this page is the breadcrumb alone.
+    await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "1"));
+    // The counts card names the tools; the panel below names the calls, and it is
+    // the last thing on the page — after the action, which belongs with the
+    // summary rather than under a hundred rows of detail.
+    const panels = [...document.querySelectorAll(".rounded-lg")].map((el) =>
+      el.querySelector("div")?.textContent,
+    );
+    const callsPanel = panels.findIndex((title) =>
+      title?.startsWith(en.dashboard.sessionCalls.replace("{n}", "1")),
+    );
+    expect(callsPanel).toBe(panels.length - 1);
+    expect(panels).toContain(en.dashboard.sessionTools);
+  });
+
   it("shows a call with nothing to summarise, because it happened", async () => {
     apiMock.getSession.mockResolvedValue(
       session({ tool_uses: [{ name: "ExitPlanMode", detail: "" }] }),
     );
     renderDetail();
-    await screen.findByText(en.dashboard.sessionCalls.replace("{n}", "1"));
-    const toolsCard = screen
-      .getByText(en.dashboard.sessionTools)
-      .closest(".rounded-lg") as HTMLElement;
+    const toolsCard = (await screen.findByText(
+      en.dashboard.sessionCalls.replace("{n}", "1"),
+    )).closest(".rounded-lg") as HTMLElement;
     expect(
       within(toolsCard)
         .getAllByRole("row")

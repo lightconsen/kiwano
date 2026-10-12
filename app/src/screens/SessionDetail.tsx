@@ -250,7 +250,6 @@ function Body({
             }
             t={t}
           />
-          {row.tool_uses.length > 0 && <ToolCalls calls={row.tool_uses} />}
         </Card>
         <Card title={t("dashboard.sessionSkills")}>
           <CountList
@@ -275,6 +274,16 @@ function Body({
           {t("dashboard.sessionShowRequests")}
         </Button>
       </div>
+
+      {/* The calls get a panel of their own, and the last one: they are the
+          longest thing on this page and the only part read as a list rather than
+          as a figure, so half a card was cramped — a path is wide — and wrong
+          about what the reader is doing. */}
+      {row.tool_uses.length > 0 && (
+        <Card title={t("dashboard.sessionCalls", { n: row.tool_uses.length })}>
+          <ToolCalls calls={row.tool_uses} />
+        </Card>
+      )}
     </>
   );
 }
@@ -305,14 +314,11 @@ function ToolCalls({ calls }: { calls: HistoryToolUse[] }) {
   }, [calls]);
 
   return (
-    <div className="mt-2 border-t border-line pt-2">
-      <div className="mb-1 text-[10px] tracking-wide text-mut uppercase">
-        {t("dashboard.sessionCalls", { n: calls.length })}
-      </div>
+    <div>
       <table className="w-full table-fixed text-[11px]">
         <colgroup>
-          <col className="w-[28px]" />
-          <col className="w-[112px]" />
+          <col className="w-[34px]" />
+          <col className="w-[150px]" />
         </colgroup>
         <thead>
           <tr className="text-left text-[9.5px] text-mut">

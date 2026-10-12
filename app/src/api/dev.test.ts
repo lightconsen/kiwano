@@ -75,6 +75,21 @@ const WINDOWS: DashboardWindow[] = ["today", "7d", "30d"];
 const sum = (ns: number[]) => ns.reduce((n, v) => n + v, 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+describe("the browser-dev session fixtures", () => {
+  it("opens by id the sessions its list shows, and nothing else", async () => {
+    // The detail page's read, against the same fixtures the list reads: a
+    // session the list shows has to be one the page can open, or the demo lies
+    // about the feature it is demonstrating.
+    const page = await api.listSessions(undefined, undefined, undefined, undefined, 1, 50);
+    expect(page.rows.length).toBeGreaterThan(0);
+    for (const row of page.rows) {
+      const opened = await api.getSession(row.session_id);
+      expect(opened?.session_id).toBe(row.session_id);
+    }
+    expect(await api.getSession("nobody-has-this")).toBeNull();
+  });
+});
+
 describe("the billing × limit matrix fixtures", () => {
   it("report the rows they mark as blocked, in the gateway's own wording", async () => {
     // The dimmed Usage cell and the Status column both read the *gateway's*

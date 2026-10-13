@@ -19,6 +19,22 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-13
+
+**The version where the price followed what the reply said.** Both fixes here are
+the same shape: a number computed from a name, or a window, that did not mean what
+we took it to mean.
+
+A cache write has two windows, and the vendors that sell both price them apart —
+Anthropic charges 1.25× input for five minutes and 2× for an hour, Kimi publishes
+¥20 against ¥40. A price row carried one write rate, so an hour-long write was
+billed as a short one, and on a row that stated no write rate at all it was billed
+as nothing. A row states both now, and the Hub's table carries them. And a coding
+plan's client asks for the plan's own name — `kimi-for-coding`, or a relay's
+`moonshot-kimi-k3` — which no price table carries, because the vendor's API does
+not sell it under that name. The reply names the model that answered, so that is
+the name that gets priced.
+
 ### Added
 
 - **A cache write is billed by the window it used.** Vendors price the two

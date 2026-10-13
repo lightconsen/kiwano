@@ -19,6 +19,59 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-13
+
+**The version where the session list became a management surface.** Three fixes
+that a day of using the session page found, and one rule about what a release
+build should show.
+
+A long session keeps both ends of its calls and says how many it left out, each
+call carries when it happened, and both ledgers show their own token count — the
+three things the page's own layout was promising and the data could not keep.
+And the list itself: in a build people use, it shows the agents this install has
+taken over, because a session belongs to an agent and an agent nobody has taken
+over is not being managed here. Developing is the exception, and a fresh install
+is unaffected.
+
+### Added
+
+- **A long session's calls are kept at both ends, with the gap counted.** The list
+  kept the first hundred, which answered "how did this start" for a session that
+  made six thousand calls and nothing else — the two things a reader asks of a
+  long one are how it started and what it ended up doing. The row now holds a head
+  and a tail, and where nothing is held it **says so** (`5,733 calls not kept`)
+  rather than leaving a jump in the numbering. A session that fits keeps every
+  call exactly once.
+
+  Each call also carries **when** it happened, from the record's own timestamp —
+  a chronology without a clock is half of one — and the app's table shows it. The
+  files' side of the token count is on the wire too: the merged fields are the
+  gateway's for a session both ledgers know, so "what the files recorded" showed
+  no tokens at all until now.
+
+### Changed
+
+- **In a release build the session list shows the agents you have taken over.**
+  A session belongs to an agent, and an agent nobody has taken over is not being
+  managed by anything here — so the list is a management view, and it shows what
+  is managed. **Developing is the exception**: `vite dev` and `tauri dev` show
+  everything the machine's files hold, which is the whole point of the fixtures,
+  and a fresh install is unaffected because a machine with no takeovers sends no
+  set at all.
+
+  The narrowing happens **in the gateway**, not in the app: the list is paged, so
+  a client that filtered its own page would show ten rows under a pager counting
+  fifty. `GET /api/sessions` takes `agents=a,b` for that, and an **empty set means
+  none** rather than "no filter" — the two are different answers and the app sends
+  the first one. `kiwano sessions --agent X` is that same parameter with one value
+  in it: one spelling for "which agents", where there used to be a single-agent one
+  beside it.
+
+  The empty state says which empty it is. "Nothing in this window" and "nothing for
+  the agents you manage" look identical and mean opposite things, and the second is
+  what a reader sees after taking an agent over if it did not work.
+
+
 ## [0.3.2] - 2026-10-12
 
 **The version where a session became the unit.** 0.3.1 answered "who paid" for a
@@ -60,44 +113,6 @@ list no longer shows a conversation as several fragments.
   re-imports under its corrected id; if a machine imported such a file with an
   earlier version, delete that machine's imported rows and re-import, or its
   spend appears in two places.
-
-### Changed
-
-- **In a release build the session list shows the agents you have taken over.**
-  A session belongs to an agent, and an agent nobody has taken over is not being
-  managed by anything here — so the list is a management view, and it shows what
-  is managed. **Developing is the exception**: `vite dev` and `tauri dev` show
-  everything the machine's files hold, which is the whole point of the fixtures,
-  and a fresh install is unaffected because a machine with no takeovers sends no
-  set at all.
-
-  The narrowing happens **in the gateway**, not in the app: the list is paged, so
-  a client that filtered its own page would show ten rows under a pager counting
-  fifty. `GET /api/sessions` takes `agents=a,b` for that, and an **empty set means
-  none** rather than "no filter" — the two are different answers and the app sends
-  the first one. `kiwano sessions --agent X` is that same parameter with one value
-  in it: one spelling for "which agents", where there used to be a single-agent one
-  beside it.
-
-  The empty state says which empty it is. "Nothing in this window" and "nothing for
-  the agents you manage" look identical and mean opposite things, and the second is
-  what a reader sees after taking an agent over if it did not work.
-
-### Added
-
-- **A long session's calls are kept at both ends, with the gap counted.** The list
-  kept the first hundred, which answered "how did this start" for a session that
-  made six thousand calls and nothing else — the two things a reader asks of a
-  long one are how it started and what it ended up doing. The row now holds a head
-  and a tail, and where nothing is held it **says so** (`5,733 calls not kept`)
-  rather than leaving a jump in the numbering. A session that fits keeps every
-  call exactly once.
-
-  Each call also carries **when** it happened, from the record's own timestamp —
-  a chronology without a clock is half of one — and the app's table shows it. The
-  files' side of the token count is on the wire too: the merged fields are the
-  gateway's for a session both ledgers know, so "what the files recorded" showed
-  no tokens at all until now.
 
 ### Added
 

@@ -47,6 +47,20 @@ function session(over: Partial<Session> = {}): Session {
   };
 }
 
+/** The way the table renders a call's time: `MM-DD HH:MM` on the reader's own
+ *  clock.
+ *
+ * The expectation is computed rather than written out, because a literal would be
+ * a claim about the machine running the test — the same timestamp renders as
+ * `09-09 20:41` in UTC and `09-10 04:41` in UTC+8, and CI is the former. The
+ * assertion still says something: it would catch showing the *wrong* instant (the
+ * session's instead of the call's, or a page index where a time belongs). */
+function localStamp(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Calls in the shape the reader keeps: a head, an optional tail, a gap. */
 function calls(
   head: { name: string; detail: string; at?: string }[],
@@ -160,8 +174,8 @@ describe("a session's own page", () => {
     expect(rows()).toHaveLength(10);
     // The row is number, when, tool, what — and the number is the call's place
     // in the session, not its index in this list.
-    expect(rows()[0]).toBe("109-10 04:41Tool01did the 1th thing");
-    expect(rows()[9]).toBe("1009-10 04:50Tool10did the 10th thing");
+    expect(rows()[0]).toBe(`1${localStamp("2026-09-09T20:41:00Z")}Tool01did the 1th thing`);
+    expect(rows()[9]).toBe(`10${localStamp("2026-09-09T20:50:00Z")}Tool10did the 10th thing`);
     expect(within(toolsCard).getByText(en.common.pageIndicator.replace("{page}", "1").replace("{pages}", "2"))).toBeInTheDocument();
 
     await user.click(within(toolsCard).getByRole("button", { name: en.common.next }));

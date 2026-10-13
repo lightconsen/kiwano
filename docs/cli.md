@@ -114,7 +114,8 @@ kiwano providers enable <ID>                 make it the current route, keeping 
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers price <ID> --model M --input X --output Y
-                            [--cache-read Z] [--cache-creation W] [--currency CODE]
+                            [--cache-read Z] [--cache-creation W]
+                            [--cache-creation-1h H] [--currency CODE]
 kiwano providers price <ID> --model M --clear
 kiwano providers probe latency|endpoint|models
 ```
@@ -130,6 +131,12 @@ It is also the escape hatch for a model name the Hub cannot price — a plan's o
 name, say, which stands for whatever model the subscription currently grants.
 `kiwano history import` reports the names it could not cost, and declaring a price
 for one of them is what makes those rows count.
+
+`--cache-creation-1h` is for a vendor that prices the two cache-write windows
+differently (Anthropic: 1.25× input for five minutes, 2× for an hour; Kimi: ¥20
+against ¥40). Leaving it out is **not** a zero — it says this provider charges one
+write rate, so that rate covers both windows. The two counts are one bucket split:
+the app bills the hourly slice at this rate and the rest at `--cache-creation`.
 
 `--openai-wire` says which of the OpenAI family's two request shapes an OpenAI
 provider serves, and it only matters when they differ:

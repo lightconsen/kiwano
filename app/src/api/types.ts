@@ -281,6 +281,9 @@ export interface LongContextRates {
   out: string;
   cache_read: string;
   cache_creation: string;
+  /** The 1-hour write rate for this band; absent means the band's
+      `cache_creation` covers both windows. */
+  cache_creation_1h?: string;
 }
 
 export interface ModelPrice {
@@ -292,9 +295,19 @@ export interface ModelPrice {
   output: string;
   cache_read: string;
   cache_creation: string;
+  /** The rate for a cache write on the 1-hour TTL, where the vendor prices the
+      two write windows differently. Absent means this row's cache-write rate
+      covers both. */
+  cache_creation_1h?: string;
   /** ISO code the figures are denominated in (the provider's own currency) */
   currency: string;
-  off_peak?: { in: string; out: string; cache_read: string; cache_creation: string };
+  off_peak?: {
+    in: string;
+    out: string;
+    cache_read: string;
+    cache_creation: string;
+    cache_creation_1h?: string;
+  };
   peak_hours?: { tz_offset: number; windows: { days: string[]; start: string; end: string }[] };
   long_context?: LongContextRates;
 }
@@ -319,6 +332,11 @@ export interface DeclaredPrice {
       bucket. Never the input rate — that would invent a charge. */
   cache_read: string;
   cache_creation: string;
+  /** The rate for a cache write on the 1-hour TTL, where the vendor prices the
+      two write windows differently. Blank or absent means the row's cache-write
+      rate covers both — unlike the rates above, where blank is zero: reading
+      this one as zero would say an hour-long write is free. */
+  cache_creation_1h?: string;
 }
 
 /** The prices a user declared for their own provider (`providers.prices`).

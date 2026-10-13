@@ -72,6 +72,7 @@ export const shelf = {
   /** The four rates a price row can carry, and the section that lists them. */
   priceCacheRead: "cache hits",
   priceCacheWrite: "cache write",
+  priceCacheWrite1h: "cache write, 1h",
   modelsPrices: "MODELS & PRICES · {n}",
   /** The same heading under a filter: what is left, out of what there was. */
   modelsPricesFiltered: "MODELS & PRICES · {n} of {total}",

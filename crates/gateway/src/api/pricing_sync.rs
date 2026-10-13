@@ -154,20 +154,23 @@ pub fn seed_model_pricing(store: &Store) -> Result<SeededReport, String> {
             let n = tx
                 .execute(
                     "INSERT INTO model_pricing (provider_id, model_id, display_name, input, output,
-                                                cache_read, cache_creation, currency, source, tiers)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                                cache_read, cache_creation, cache_creation_1h,
+                                                currency, source, tiers)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                      ON CONFLICT(provider_id, model_id) DO UPDATE SET
                         display_name = ?3, input = ?4, output = ?5,
-                        cache_read = ?6, cache_creation = ?7, currency = ?8, source = ?9,
-                        tiers = ?10
-                     -- COALESCE on both nullable columns: a row may carry NULL
-                     -- in `source` (legacy) or in `tiers` (a model with no
-                     -- schedule), and `NULL <> ?` is NULL (falsy) — which would
-                     -- silently skip the very update that adds one.
+                        cache_read = ?6, cache_creation = ?7, cache_creation_1h = ?8,
+                        currency = ?9, source = ?10, tiers = ?11
+                     -- COALESCE on the nullable columns: a row may carry NULL in
+                     -- `source` (legacy), `tiers` (a model with no schedule) or
+                     -- `cache_creation_1h` (one write rate for both TTLs), and
+                     -- `NULL <> ?` is NULL (falsy) — which would silently skip the
+                     -- very update that adds one.
                      WHERE display_name <> ?3 OR input <> ?4 OR output <> ?5
-                        OR cache_read <> ?6 OR cache_creation <> ?7 OR currency <> ?8
-                        OR COALESCE(source, '') <> ?9
-                        OR COALESCE(tiers, '') <> COALESCE(?10, '')",
+                        OR cache_read <> ?6 OR cache_creation <> ?7 OR currency <> ?9
+                        OR COALESCE(source, '') <> ?10
+                        OR COALESCE(tiers, '') <> COALESCE(?11, '')
+                        OR COALESCE(cache_creation_1h, '') <> COALESCE(?8, '')",
                     rusqlite::params![
                         provider_id,
                         model_id,
@@ -176,6 +179,7 @@ pub fn seed_model_pricing(store: &Store) -> Result<SeededReport, String> {
                         m.output,
                         m.cache_read,
                         m.cache_creation,
+                        m.cache_creation_1h,
                         m.currency,
                         source,
                         m.tiers_json(),
@@ -531,6 +535,42 @@ mod tests {
         assert_eq!(band.cache_read, "0.84");
         assert_eq!(band.cache_creation, "0");
     }
+    #[test]
+    fn an_hourly_write_rate_reaches_the_mirror_and_comes_back() {
+        let (store, dir) = test_env();
+        let doc = r#"{"version":1,"generated_at":"t","exchange_rates":{"USD":1.0},"models":[
+            {"model_id":"kimi-k3","display_name":"Kimi K3","input":"20","output":"100",
+             "cache_read":"2","cache_creation":"20","cache_creation_1h":"40","currency":"CNY"},
+            {"model_id":"m2","display_name":"M2","input":"1","output":"2",
+             "cache_read":"0","cache_creation":"3","currency":"CNY"}]}"#;
+        store
+            .save_hub_models_cache(1, doc, &sha_a(), "2026-01-01T00:00:00Z")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&store).unwrap().seeded, 2);
+
+        // Read back the way the gateway reads it — the mirror is the hot path's
+        // only source, so a rate the seeder drops is a rate no request is billed.
+        let store = crate::store::Store::open(dir.path().join("kiwano.db")).unwrap();
+        let rows = store.load_model_pricing().unwrap();
+        let kimi = rows.iter().find(|r| r.model_id == "kimi-k3").unwrap();
+        assert_eq!(kimi.cache_creation_1h.as_deref(), Some("40"));
+        // A row that states one write rate comes back as one — NULL, which the
+        // cost side reads as "that rate covers both windows".
+        let plain = rows.iter().find(|r| r.model_id == "m2").unwrap();
+        assert_eq!(plain.cache_creation_1h, None);
+
+        // A re-seed whose only change is that rate still rewrites the row: the
+        // conflict clause has to watch the new column or the update is skipped.
+        let changed = doc.replace(r#""cache_creation_1h":"40""#, r#""cache_creation_1h":"45""#);
+        store
+            .save_hub_models_cache(2, &changed, &sha_b(), "2026-01-02T00:00:00Z")
+            .unwrap();
+        assert_eq!(seed_model_pricing(&store).unwrap().seeded, 1);
+        let rows = store.load_model_pricing().unwrap();
+        let kimi = rows.iter().find(|r| r.model_id == "kimi-k3").unwrap();
+        assert_eq!(kimi.cache_creation_1h.as_deref(), Some("45"));
+    }
+
     #[test]
     fn seed_gate_content_change_same_version() {
         let (store, _dir) = test_env();

@@ -25,15 +25,33 @@ struct Rates {
     output: f64,
     cache_read: f64,
     cache_creation: f64,
+    /// The hourly cache-write rate, where the row states one. `None` means one
+    /// write rate covers both TTLs — see `ModelPriceEntry::cache_creation_1h`.
+    cache_creation_1h: Option<f64>,
 }
 
 /// Parse a set of rates; `None` when the input or output rate is not a number.
-fn rates_of(input: &str, output: &str, cache_read: &str, cache_creation: &str) -> Option<Rates> {
+///
+/// A stated-but-unreadable hourly rate fails the row like any other rate here,
+/// rather than silently falling back to the five-minute one: the fallback is for
+/// a row that says nothing, and a typo that becomes a plausible number is the
+/// failure this whole table exists to avoid.
+fn rates_of(
+    input: &str,
+    output: &str,
+    cache_read: &str,
+    cache_creation: &str,
+    cache_creation_1h: Option<&str>,
+) -> Option<Rates> {
     Some(Rates {
         input: parse_price(input)?,
         output: parse_price(output)?,
         cache_read: parse_price(cache_read)?,
         cache_creation: parse_price(cache_creation)?,
+        cache_creation_1h: match cache_creation_1h.map(str::trim) {
+            None | Some("") => None,
+            Some(rate) => Some(parse_price(rate)?),
+        },
     })
 }
 
@@ -57,12 +75,18 @@ fn request_input(input: u64, cache_read: u64, cache_creation: u64, cache_inclusi
 }
 
 /// The cost of `tokens` at `rates`, rounded to 6 decimal places.
+///
+/// `cache_creation_1h` is the **hourly slice of** `cache_creation`, not a fifth
+/// bucket: the two are billed at their own rates where the row states both, and
+/// the slice is clamped to the total it is a slice of, so an upstream whose two
+/// numbers disagree cannot bill more writes than it reported.
 fn cost_of(
     rates: &Rates,
     input: u64,
     output: u64,
     cache_read: u64,
     cache_creation: u64,
+    cache_creation_1h: u64,
     cache_inclusive: bool,
 ) -> f64 {
     let billable_input = if cache_inclusive {
@@ -73,11 +97,18 @@ fn cost_of(
         input
     };
 
+    let writes_1h = cache_creation_1h.min(cache_creation);
+    let writes_short = cache_creation - writes_1h;
+    // A row with one write rate bills the whole bucket at it — the hourly tokens
+    // land on the same rate the short ones do.
+    let rate_1h = rates.cache_creation_1h.unwrap_or(rates.cache_creation);
+
     let million = 1_000_000f64;
     let total = (billable_input as f64 * rates.input
         + output as f64 * rates.output
         + cache_read as f64 * rates.cache_read
-        + cache_creation as f64 * rates.cache_creation)
+        + writes_short as f64 * rates.cache_creation
+        + writes_1h as f64 * rate_1h)
         / million;
 
     (total * 1e6).round() / 1e6
@@ -98,6 +129,7 @@ pub fn compute_cost(
     output_tokens: u64,
     cache_read_tokens: u64,
     cache_creation_tokens: u64,
+    cache_creation_1h_tokens: u64,
     cache_inclusive: bool,
 ) -> Option<f64> {
     let rates = rates_of(
@@ -105,6 +137,7 @@ pub fn compute_cost(
         &entry.output,
         &entry.cache_read,
         &entry.cache_creation,
+        entry.cache_creation_1h.as_deref(),
     )?;
     Some(cost_of(
         &rates,
@@ -112,6 +145,7 @@ pub fn compute_cost(
         output_tokens,
         cache_read_tokens,
         cache_creation_tokens,
+        cache_creation_1h_tokens,
         cache_inclusive,
     ))
 }
@@ -131,6 +165,7 @@ pub fn compute_cost(
 /// tier, chosen by the clock. The band is settled first and both numbers use it;
 /// inside a band the schedule has nothing of its own to discount, so there the
 /// pair is equal by construction.
+#[allow(clippy::too_many_arguments)] // the entry, the clock, the five token counts, and how they were reported
 pub fn compute_cost_pair(
     entry: &ModelPriceEntry,
     at: i64,
@@ -138,6 +173,7 @@ pub fn compute_cost_pair(
     output_tokens: u64,
     cache_read_tokens: u64,
     cache_creation_tokens: u64,
+    cache_creation_1h_tokens: u64,
     cache_inclusive: bool,
 ) -> Option<(f64, f64)> {
     // Which length band the request falls in is a question about the *request*,
@@ -155,12 +191,19 @@ pub fn compute_cost_pair(
     });
 
     let peak = match band {
-        Some(lc) => rates_of(&lc.input, &lc.output, &lc.cache_read, &lc.cache_creation)?,
+        Some(lc) => rates_of(
+            &lc.input,
+            &lc.output,
+            &lc.cache_read,
+            &lc.cache_creation,
+            lc.cache_creation_1h.as_deref(),
+        )?,
         None => rates_of(
             &entry.input,
             &entry.output,
             &entry.cache_read,
             &entry.cache_creation,
+            entry.cache_creation_1h.as_deref(),
         )?,
     };
     let cost = |rates: &Rates| {
@@ -170,6 +213,7 @@ pub fn compute_cost_pair(
             output_tokens,
             cache_read_tokens,
             cache_creation_tokens,
+            cache_creation_1h_tokens,
             cache_inclusive,
         )
     };
@@ -181,10 +225,15 @@ pub fn compute_cost_pair(
     // discount on a rate the vendor never discounted.
     let off_peak = match band {
         Some(_) => None,
-        None => entry
-            .off_peak
-            .as_ref()
-            .and_then(|o| rates_of(&o.input, &o.output, &o.cache_read, &o.cache_creation)),
+        None => entry.off_peak.as_ref().and_then(|o| {
+            rates_of(
+                &o.input,
+                &o.output,
+                &o.cache_read,
+                &o.cache_creation,
+                o.cache_creation_1h.as_deref(),
+            )
+        }),
     };
 
     let billed = match (&entry.peak_hours, &off_peak) {
@@ -218,8 +267,9 @@ mod tests {
         let million = 1_000_000;
 
         let (peak_cost, peak_off) =
-            compute_cost_pair(&e, peak_at, million, 0, 0, 0, false).unwrap();
-        let (off_cost, off_off) = compute_cost_pair(&e, off_at, million, 0, 0, 0, false).unwrap();
+            compute_cost_pair(&e, peak_at, million, 0, 0, 0, 0, false).unwrap();
+        let (off_cost, off_off) =
+            compute_cost_pair(&e, off_at, million, 0, 0, 0, 0, false).unwrap();
         assert!((peak_cost - 9.0).abs() < 1e-9, "peak: {peak_cost}");
         assert!((off_cost - 4.5).abs() < 1e-9, "off-peak: {off_cost}");
         // The second element is the same answer either way — what matters for
@@ -228,9 +278,12 @@ mod tests {
         assert_eq!(off_off, off_cost);
         // A row without tiers has no discount to state, so both are its own rate.
         let plain = usage_entry();
-        let (cost, off) = compute_cost_pair(&plain, peak_at, million, 0, 0, 0, false).unwrap();
+        let (cost, off) = compute_cost_pair(&plain, peak_at, million, 0, 0, 0, 0, false).unwrap();
         assert_eq!(cost, off);
-        assert_eq!(cost, compute_cost(&plain, million, 0, 0, 0, false).unwrap());
+        assert_eq!(
+            cost,
+            compute_cost(&plain, million, 0, 0, 0, 0, false).unwrap()
+        );
     }
 
     /// A discount nobody can read is not a discount: the row bills at its
@@ -243,11 +296,12 @@ mod tests {
                 output: "13.5".into(),
                 cache_read: "0.15".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
             }),
             ..tiered_entry()
         };
         let off_at = 1_788_930_000;
-        let (cost, off) = compute_cost_pair(&e, off_at, 1_000_000, 0, 0, 0, false).unwrap();
+        let (cost, off) = compute_cost_pair(&e, off_at, 1_000_000, 0, 0, 0, 0, false).unwrap();
         assert!(
             (cost - 9.0).abs() < 1e-9,
             "billed at the listed rate: {cost}"
@@ -262,7 +316,8 @@ mod tests {
     fn a_long_request_bills_the_published_band() {
         let e = banded_entry();
         for (tokens, rate) in [(512_000_u64, 2.10), (512_001, 4.20), (1_000_000, 4.20)] {
-            let (billed, _) = compute_cost_pair(&e, 1_788_919_200, tokens, 0, 0, 0, false).unwrap();
+            let (billed, _) =
+                compute_cost_pair(&e, 1_788_919_200, tokens, 0, 0, 0, 0, false).unwrap();
             let expected = rate * tokens as f64 / 1_000_000.0;
             assert!(
                 (billed - expected).abs() < 1e-6,
@@ -278,10 +333,10 @@ mod tests {
     fn the_band_threshold_counts_the_whole_prompt() {
         let e = banded_entry();
         // 500k fresh + 20k cached is 520k sent, whichever way it is reported.
-        let openai = compute_cost_pair(&e, 1_788_919_200, 520_000, 0, 20_000, 0, true)
+        let openai = compute_cost_pair(&e, 1_788_919_200, 520_000, 0, 20_000, 0, 0, true)
             .unwrap()
             .0;
-        let anthropic = compute_cost_pair(&e, 1_788_919_200, 500_000, 0, 20_000, 0, false)
+        let anthropic = compute_cost_pair(&e, 1_788_919_200, 500_000, 0, 20_000, 0, 0, false)
             .unwrap()
             .0;
         assert_eq!(openai, anthropic, "one request, one bill");
@@ -306,6 +361,7 @@ mod tests {
                 output: "16.80".into(),
                 cache_read: "0.84".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
             }),
             ..tiered_entry()
         };
@@ -313,18 +369,19 @@ mod tests {
         // Off-peak by the clock (Wed 13:00 Beijing, the lunch gap) and over the
         // threshold: the band's own rate, and nothing to compare it against.
         let (billed, off_peak_cost) =
-            compute_cost_pair(&e, 1_788_930_000, 600_000, 0, 0, 0, false).unwrap();
+            compute_cost_pair(&e, 1_788_930_000, 600_000, 0, 0, 0, 0, false).unwrap();
         assert_eq!(billed, off_peak_cost);
         assert!((billed - 4.20 * 600_000.0 / 1e6).abs() < 1e-6, "{billed}");
 
         // Below the threshold the schedule is untouched: off-peak bills half.
-        let (short_off, _) = compute_cost_pair(&e, 1_788_930_000, 100_000, 0, 0, 0, false).unwrap();
+        let (short_off, _) =
+            compute_cost_pair(&e, 1_788_930_000, 100_000, 0, 0, 0, 0, false).unwrap();
         assert!(
             (short_off - 4.5 * 100_000.0 / 1e6).abs() < 1e-6,
             "{short_off}"
         );
         let (short_peak, short_peak_off) =
-            compute_cost_pair(&e, 1_788_919_200, 100_000, 0, 0, 0, false).unwrap();
+            compute_cost_pair(&e, 1_788_919_200, 100_000, 0, 0, 0, 0, false).unwrap();
         assert!(
             (short_peak - 9.0 * 100_000.0 / 1e6).abs() < 1e-6,
             "{short_peak}"
@@ -354,14 +411,14 @@ mod tests {
         assert_eq!(band.cache_creation, "0", "an absent rate is no charge");
         assert_eq!(band.cache_read, "0.84");
 
-        let (billed, _) = compute_cost_pair(e, 1_788_919_200, 600_000, 0, 0, 0, false).unwrap();
+        let (billed, _) = compute_cost_pair(e, 1_788_919_200, 600_000, 0, 0, 0, 0, false).unwrap();
         assert!((billed - 4.20 * 600_000.0 / 1e6).abs() < 1e-6, "{billed}");
     }
 
     #[test]
     fn cost_anthropic_semantics_keeps_input() {
         let e = usage_entry();
-        let cost = compute_cost(&e, 1000, 500, 200, 100, false).unwrap();
+        let cost = compute_cost(&e, 1000, 500, 200, 100, 0, false).unwrap();
         // 0.003 + 0.0075 + 0.00006 + 0.000375 = 0.010935
         assert!((cost - 0.010935).abs() < 1e-9, "got {cost}");
     }
@@ -369,7 +426,7 @@ mod tests {
     #[test]
     fn cost_openai_semantics_deducts_cache_buckets() {
         let e = usage_entry();
-        let cost = compute_cost(&e, 1000, 500, 200, 100, true).unwrap();
+        let cost = compute_cost(&e, 1000, 500, 200, 100, 0, true).unwrap();
         // billable input 700 -> 0.0021; total 0.010035
         assert!((cost - 0.010035).abs() < 1e-9, "got {cost}");
     }
@@ -383,7 +440,7 @@ mod tests {
             cache_creation: "0".into(),
             ..usage_entry()
         };
-        let cost = compute_cost(&e, 1000, 0, 600, 0, true).unwrap();
+        let cost = compute_cost(&e, 1000, 0, 600, 0, 0, true).unwrap();
         assert!((cost - 0.0046).abs() < 1e-9, "got {cost}");
     }
 
@@ -393,6 +450,73 @@ mod tests {
             input: "abc".into(),
             ..usage_entry()
         };
-        assert!(compute_cost(&e, 1, 1, 0, 0, false).is_none());
+        assert!(compute_cost(&e, 1, 1, 0, 0, 0, false).is_none());
+    }
+
+    /// A row that publishes two write rates bills the hourly slice at its own and
+    /// the rest at the short one. The shape is Anthropic's: 1.25x input for five
+    /// minutes, 2x for an hour.
+    #[test]
+    fn the_hourly_write_slice_is_billed_at_its_own_rate() {
+        let e = ModelPriceEntry {
+            input: "10".into(),
+            output: "50".into(),
+            cache_read: "1".into(),
+            cache_creation: "12.50".into(),
+            cache_creation_1h: Some("20".into()),
+            ..usage_entry()
+        };
+        // A million tokens written, 400k of them on the hour-long TTL.
+        let cost = compute_cost(&e, 0, 0, 0, 1_000_000, 400_000, false).unwrap();
+        let expected = 600_000.0 * 12.5 / 1e6 + 400_000.0 * 20.0 / 1e6;
+        assert!((cost - expected).abs() < 1e-9, "got {cost}");
+    }
+
+    /// A row that states one write rate bills both windows at it. The fallback is
+    /// the row's own number — not zero, and not a multiplier read off the input
+    /// rate, which would be importing Anthropic's published factor into a vendor
+    /// that never stated one.
+    #[test]
+    fn one_write_rate_covers_both_windows() {
+        let e = usage_entry(); // cache_creation "3.75"
+        let all_hourly = compute_cost(&e, 0, 0, 0, 1_000_000, 1_000_000, false).unwrap();
+        let none_hourly = compute_cost(&e, 0, 0, 0, 1_000_000, 0, false).unwrap();
+        assert!((all_hourly - 3.75).abs() < 1e-9, "got {all_hourly}");
+        assert_eq!(all_hourly, none_hourly, "one rate, one bill");
+
+        // A row that states a second rate still bills nothing extra when the
+        // upstream reported no hourly writes.
+        let stated = ModelPriceEntry {
+            cache_creation_1h: Some("9".into()),
+            ..usage_entry()
+        };
+        assert_eq!(
+            compute_cost(&stated, 0, 0, 0, 1_000_000, 0, false).unwrap(),
+            none_hourly
+        );
+    }
+
+    /// The hourly count is a **slice** of the reported total, so an upstream whose
+    /// two numbers disagree cannot bill more writes than it reported.
+    #[test]
+    fn an_hourly_count_over_the_total_is_clamped_to_it() {
+        let e = ModelPriceEntry {
+            cache_creation_1h: Some("20".into()),
+            ..usage_entry()
+        };
+        let cost = compute_cost(&e, 0, 0, 0, 1_000, 5_000, false).unwrap();
+        assert!((cost - 1_000.0 * 20.0 / 1e6).abs() < 1e-9, "got {cost}");
+    }
+
+    /// A rate that is stated and unreadable fails the row, like every other rate
+    /// here: the fallback is for a row that says *nothing* about the hourly
+    /// window, and a typo must not become a plausible number.
+    #[test]
+    fn a_stated_but_unreadable_hourly_rate_prices_nothing() {
+        let e = ModelPriceEntry {
+            cache_creation_1h: Some("12,50".into()),
+            ..usage_entry()
+        };
+        assert!(compute_cost(&e, 0, 0, 0, 1_000, 400, false).is_none());
     }
 }

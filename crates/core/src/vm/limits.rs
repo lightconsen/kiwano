@@ -101,6 +101,7 @@ mod tests {
             output: output.into(),
             cache_read: None,
             cache_creation: None,
+            cache_creation_1h: None,
         }
     }
 
@@ -231,6 +232,47 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// The 1-hour write rate is the one declared rate a blank box may not
+    /// default: a vendor that charges one write rate charges it for either
+    /// window, so an unstated rate has to stay unstated rather than becoming zero.
+    #[test]
+    fn a_blank_hourly_write_rate_stays_unstated() {
+        let known = known_limit_currencies(&store());
+        let mut row = price_row("kimi-k3", "20", "100");
+        row.cache_read = Some("2".into());
+        row.cache_creation = Some("20".into());
+        let blob = normalize_declared_prices(Some(&prices("CNY", vec![row.clone()])), &known)
+            .unwrap()
+            .unwrap();
+        let parsed = kiwano_adapters::model_pricing::DeclaredPrices::parse(&blob).unwrap();
+        assert_eq!(parsed.models[0].cache_creation_1h, None);
+        // …and it is not written into the blob as a zero, which would say an
+        // hour-long write is free on the next read.
+        assert!(!blob.contains("cache_creation_1h"), "{blob}");
+
+        // Stated, it is validated like every other rate — refused, not dropped.
+        row.cache_creation_1h = Some("40".into());
+        let blob = normalize_declared_prices(Some(&prices("CNY", vec![row.clone()])), &known)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            kiwano_adapters::model_pricing::DeclaredPrices::parse(&blob)
+                .unwrap()
+                .models[0]
+                .cache_creation_1h
+                .as_deref(),
+            Some("40")
+        );
+        for bad in ["abc", "-1", "1e999"] {
+            let mut broken = row.clone();
+            broken.cache_creation_1h = Some(bad.into());
+            assert!(
+                normalize_declared_prices(Some(&prices("CNY", vec![broken])), &known).is_err(),
+                "`{bad}` is not a rate"
+            );
+        }
     }
 
     /// A shared config carries the declared prices with the provider, and they

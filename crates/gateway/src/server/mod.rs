@@ -681,6 +681,7 @@ mod tests {
             output: "2".into(),
             cache_read: "0".into(),
             cache_creation: "0".into(),
+            cache_creation_1h: None,
             currency: "USD".into(),
         }
     }

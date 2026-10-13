@@ -144,6 +144,7 @@ mod tests {
                 output: "25".into(),
                 cache_read: "0.5".into(),
                 cache_creation: "6.25".into(),
+                cache_creation_1h: None,
                 currency: "USD".into(),
             })
             .unwrap();
@@ -194,6 +195,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
@@ -225,6 +227,102 @@ mod tests {
         assert!((costs[0].1 - 5.0).abs() < 1e-9, "got {}", costs[0].1);
     }
 
+    /// A cache write is billed by the window it used, where the row prices two.
+    ///
+    /// End to end through the path a request takes: a mirror row seeded the way
+    /// the seeder writes one, a sample carrying the upstream's TTL split, and the
+    /// cost that lands in the ledger.
+    #[test]
+    fn record_sample_bills_the_hourly_write_slice_at_its_own_rate() {
+        use crate::store::Protocol;
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        store
+            .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
+                provider_id: String::new(),
+                model_id: "kimi-k3".into(),
+                off_peak: None,
+                peak_hours: None,
+                display_name: "Kimi K3".into(),
+                input: "20".into(),
+                output: "100".into(),
+                cache_read: "2".into(),
+                cache_creation: "20".into(),
+                cache_creation_1h: Some("40".into()),
+                currency: "CNY".into(),
+            })
+            .unwrap();
+        let state = crate::server::GatewayState::new(store).expect("state");
+        state
+            .store
+            .insert_provider(&crate::store::Provider {
+                id: "p-kimi".into(),
+                name: "kimi".into(),
+                catalog_id: None,
+                prices: None,
+                protocol: Protocol::Anthropic,
+                openai_wire: crate::store::OpenAiWire::Both,
+                base_url: "https://a.example.com".into(),
+                api_path: None,
+                endpoints: Vec::new(),
+                api_key: Some("sk".into()),
+                model_default: None,
+                billing: crate::store::Billing::Metered,
+                period_limit: None,
+                limit_unit: None,
+                plan_query: None,
+                plan_limits: None,
+                timeout_secs: None,
+                retries: None,
+                headers: None,
+                reset_period: None,
+                enabled: true,
+                created_at: crate::store::now_rfc3339(),
+                updated_at: crate::store::now_rfc3339(),
+            })
+            .unwrap();
+
+        let sample = |written: i64, hourly: i64| UsageSample {
+            agent: "claude".into(),
+            provider_id: "p-kimi".into(),
+            client_key_id: "ck-test".to_string(),
+            catalog_id: None,
+            upstream_key: Some("primary".into()),
+            started_unix: TEST_AT,
+            model: Some("kimi-k3".into()),
+            served_model: None,
+            usage: Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: written,
+                cache_creation_1h_tokens: hourly,
+                ..Usage::default()
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            usage_missing: false,
+            log: None,
+        };
+
+        // A million tokens written, 400k of them on the hour-long TTL:
+        // 600k × 20 + 400k × 40 = 12 + 16.
+        record_sample(&state, sample(1_000_000, 400_000));
+        // The same million tokens, none of them hourly, cost 20 — the window is
+        // what the second rate prices, not the size of the bucket.
+        record_sample(&state, sample(1_000_000, 0));
+
+        let costs = state
+            .store
+            .usage_cost_by_currency(None, None, None)
+            .unwrap();
+        assert_eq!(costs.len(), 1);
+        assert_eq!(costs[0].0.as_deref(), Some("CNY"));
+        assert!((costs[0].1 - 48.0).abs() < 1e-9, "got {}", costs[0].1);
+    }
+
     /// A call whose **asked** name has no price is costed at the name the reply
     /// said answered.
     ///
@@ -251,6 +349,7 @@ mod tests {
                 output: "100".into(),
                 cache_read: "2".into(),
                 cache_creation: "25".into(),
+                cache_creation_1h: None,
                 currency: "CNY".into(),
             })
             .unwrap();
@@ -299,6 +398,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
@@ -358,6 +458,7 @@ mod tests {
                 output: "0".into(),
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
                 currency: "USD".into(),
             };
         store.upsert_model_pricing(&priced("", "1")).unwrap();
@@ -409,6 +510,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
@@ -463,6 +565,7 @@ mod tests {
                 output: "0".into(),
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
                 currency: "USD".into(),
             }
         };
@@ -481,6 +584,7 @@ mod tests {
                 output: "0".into(),
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
             }],
         }
         .to_json();
@@ -545,6 +649,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
@@ -601,6 +706,7 @@ mod tests {
                 output: "0".into(),
                 cache_read: "0".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
                 currency: "USD".into(),
             })
             .unwrap();
@@ -648,6 +754,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
@@ -669,6 +776,7 @@ mod tests {
                     output: "0".into(),
                     cache_read: "0".into(),
                     cache_creation: "0".into(),
+                    cache_creation_1h: None,
                 }],
             }
             .to_json(),
@@ -722,12 +830,14 @@ mod tests {
                 output: "27.0".into(),
                 cache_read: "0.30".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
                 currency: "CNY".into(),
                 off_peak: Some(kiwano_adapters::model_pricing::OffPeakRates {
                     input: "4.5".into(),
                     output: "13.5".into(),
                     cache_read: "0.15".into(),
                     cache_creation: "0".into(),
+                    cache_creation_1h: None,
                 }),
                 peak_hours: Some(kiwano_adapters::model_pricing::PeakHours {
                     tz_offset: 480,
@@ -790,6 +900,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
             },
             latency_ms: 10,
             status: "ok",
@@ -840,6 +951,7 @@ mod tests {
                 output: "8.40".into(),
                 cache_read: "0.42".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
                 currency: "CNY".into(),
                 off_peak: None,
                 peak_hours: None,
@@ -849,6 +961,7 @@ mod tests {
                     output: "16.80".into(),
                     cache_read: "0.84".into(),
                     cache_creation: "0".into(),
+                    cache_creation_1h: None,
                 }),
             })
             .unwrap();
@@ -899,6 +1012,7 @@ mod tests {
                 output_tokens: 0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
                 reasoning_tokens: 0,
             },
             latency_ms: 10,

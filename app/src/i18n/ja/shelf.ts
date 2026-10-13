@@ -36,6 +36,7 @@ export const shelf = {
   tierPriceSwitch: "クリックするとピーク料金とオフピーク料金を切り替えます",
   priceCacheRead: "キャッシュヒット",
   priceCacheWrite: "キャッシュ書き込み",
+  priceCacheWrite1h: "キャッシュ書き込み（1時間）",
   modelsPrices: "モデルと価格 · {n}",
   modelsPricesFiltered: "モデルと価格 · {n} / {total}",
   searchModels: "モデルを検索…",

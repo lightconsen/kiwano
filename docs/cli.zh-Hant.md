@@ -106,7 +106,8 @@ kiwano providers enable <ID>                 make it the current route, keeping 
 kiwano providers remove <ID>
 kiwano providers quota <ID> [--force]        plan quota windows
 kiwano providers price <ID> --model M --input X --output Y
-                            [--cache-read Z] [--cache-creation W] [--currency CODE]
+                            [--cache-read Z] [--cache-creation W]
+                            [--cache-creation-1h H] [--currency CODE]
 kiwano providers price <ID> --model M --clear
 kiwano providers probe latency|endpoint|models
 ```
@@ -114,6 +115,8 @@ kiwano providers probe latency|endpoint|models
 `providers price` 宣告某個供應商對某個模型的收費，以每百萬 token 計 —— 只有你能提供的數字，因為 Hub 給的是**它自己**目錄條目的價，而沒掛目錄條目的供應商沒有任何公布價。一個供應商的宣告是**一個幣別加一整張模型表**，所以這條指令會讀出已存的、把這個模型折進去、再把整張表送回去：給第二個模型宣告價**不會**丟掉第一個。`--clear` 丟掉其中一個。
 
 它同時也是 Hub 定不了價的那個模型名的出口 —— 例如方案自己的名字（它指的是訂閱當時給你的那個模型）。`kiwano history import` 會報出它算不出價的模型名，給其中之一宣告一個價，那些列才算得進錢。
+
+`--cache-creation-1h` 用於廠商對兩檔快取寫入分別定價的情況（Anthropic：5 分鐘按輸入的 1.25×、1 小時按 2×；Kimi：¥20 對 ¥40）。不寫它**不是**零 —— 它的意思是這個供應商只有一檔寫入價，那一檔同時管兩個視窗。兩個數字是**同一桶的切分**：App 把 1 小時那一片按這個價算，其餘按 `--cache-creation` 算。
 
 `--openai-wire` 說明一個 OpenAI 供應商服務的是**哪一種**請求形狀，只在兩者不一致時才有意義：`chat` 表示它只講 `/v1/chat/completions`，於是 agent 發來的 `/v1/responses`（Codex）會在出去時被翻譯成 Chat Completions、回來時再翻回去；`responses` 表示只講 `/v1/responses`，此時 `/v1/chat/completions` 會**帶理由拒絕**而不是猜；`both`（預設）原樣透傳，由廠商回答它到底服務什麼。這個旗標出現之前加的供應商都是 `both`，所以不設即什麼都不變。
 

@@ -86,6 +86,7 @@ export const addProvider = {
   priceOut: "输出",
   priceCacheRead: "缓存读取",
   priceCacheWrite: "缓存写入",
+  priceCacheWrite1h: "缓存写入（1 小时）",
   addPrice: "添加模型",
   removePrice: "移除该模型的价格",
   pricesBody:

@@ -219,6 +219,7 @@ fn price_row(
                 row.output_tokens.max(0) as u64,
                 row.cache_read_tokens.max(0) as u64,
                 row.cache_creation_tokens.max(0) as u64,
+                row.cache_creation_1h_tokens.max(0) as u64,
                 row.cache_inclusive,
             );
             pair.map(|(cost, off_peak)| (cost, off_peak, entry.currency.clone()))
@@ -322,6 +323,7 @@ mod tests {
             output_tokens: 20,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
             cache_inclusive: true,
         }
     }

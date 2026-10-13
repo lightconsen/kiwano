@@ -19,6 +19,29 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **A cache write is billed by the window it used.** Vendors price the two
+  cache-entry TTLs differently — Anthropic charges 1.25× input for five minutes
+  and 2× for an hour, and Kimi publishes ¥20 against ¥40 — and we carried one
+  write rate, so the hour-long writes were billed as if they were short ones (and,
+  for a table that states neither, at nothing at all). A price row can now carry
+  `cache_creation_1h` beside `cache_creation`, and the hourly slice of a request's
+  write bucket is billed at it.
+
+  The split is a **slice, not a fifth bucket**: `cache_creation_tokens` still
+  holds the whole bucket, so every stored column, aggregate and screen means what
+  it always did, and the two counts are priced apart only where the cost is
+  computed. A row that states one write rate bills both windows at it — the
+  fallback is the row's own number, never a multiplier read off the input rate,
+  which would be importing one vendor's published factor into every other's row.
+
+  Rates reach the table from the Hub (`models.json`) and from what you declare for
+  your own provider: `kiwano providers price --cache-creation-1h`, or the new
+  "Cache write, 1h" box in the add/edit form. There it is the one rate that may be
+  left **blank** rather than defaulting to zero: blank says "my vendor charges one
+  write rate", and zero would say an hour-long write is free.
+
 ### Fixed
 
 - **A plan's own model name is priced by the model the reply named.** A coding

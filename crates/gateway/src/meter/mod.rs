@@ -79,6 +79,16 @@ pub struct Usage {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// The **1-hour slice of** `cache_creation_tokens`, where the upstream breaks
+    /// the write bucket out by TTL (Anthropic's `cache_creation` object). A slice
+    /// rather than a fifth bucket: the two are one number split, so the total
+    /// keeps meaning what every stored column, aggregate and screen means by it,
+    /// and the split is what a row with two write rates needs to price.
+    ///
+    /// Zero both when the upstream reports one write window and when it reports
+    /// no writes at all; a row that prices writes once bills the two the same
+    /// either way, which is why nothing has to tell them apart.
+    pub cache_creation_1h_tokens: i64,
     /// Thinking tokens, where the provider breaks them out. A **slice** of
     /// `output_tokens`, never an addition to it: every provider that reports
     /// this bills it as output, so costs are unaffected — what it buys is the
@@ -173,6 +183,18 @@ impl UsageScanner {
         }
         if let Some(n) = get("cache_creation_input_tokens") {
             self.usage.cache_creation_tokens = n;
+        }
+        // The write bucket split by TTL, which Anthropic nests beside the total
+        // (`"cache_creation": {"ephemeral_5m_input_tokens": …, "ephemeral_1h_input_tokens": …}`).
+        // Only the hour-long figure is read: the short window is the total minus
+        // this slice, and reading both would let a body that reports one of them
+        // disagree with itself.
+        if let Some(n) = u
+            .get("cache_creation")
+            .and_then(|cc| cc.get("ephemeral_1h_input_tokens"))
+            .and_then(Value::as_i64)
+        {
+            self.usage.cache_creation_1h_tokens = n;
         }
         // OpenAI chat completions flavor.
         if let Some(n) = get("prompt_tokens") {
@@ -373,6 +395,48 @@ mod tests {
         assert_eq!(u.cache_creation_tokens, 2095);
         assert_eq!(u.cache_read_tokens, 0);
         assert_eq!(model.as_deref(), Some("claude-sonnet-4-5"));
+        // A body with no `cache_creation` object reports one write window, which
+        // is what every other upstream does — read as no hourly writes rather
+        // than as an error.
+        assert_eq!(u.cache_creation_1h_tokens, 0);
+    }
+
+    /// The write bucket's TTL split, which Anthropic nests beside the total.
+    ///
+    /// Only the hour-long figure is read: the five-minute one is the total minus
+    /// it, so a body that reports one of them cannot make the two disagree.
+    #[test]
+    fn parses_the_hourly_slice_of_the_write_bucket() {
+        let body = br#"{"id":"msg_1","type":"message","role":"assistant",
+            "model":"claude-sonnet-4-5",
+            "usage":{"input_tokens":2095,"output_tokens":503,
+                     "cache_creation_input_tokens":2095,"cache_read_input_tokens":0,
+                     "cache_creation":{"ephemeral_5m_input_tokens":1095,
+                                       "ephemeral_1h_input_tokens":1000}}}"#;
+        let (usage, _) = parse_response_usage(Protocol::Anthropic, body);
+        let u = usage.unwrap();
+        // The total still holds both windows — it is what every stored column and
+        // aggregate means by "cache writes" — and the slice is what a row with a
+        // second rate bills differently.
+        assert_eq!(u.cache_creation_tokens, 2095);
+        assert_eq!(u.cache_creation_1h_tokens, 1000);
+
+        // The same object on the streaming side, where usage rides message_start.
+        let mut scanner = UsageScanner::new();
+        scanner.feed_line(
+            r#"data: {"type":"message_start","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":25,"output_tokens":1,"cache_read_input_tokens":11,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":200}}}}"#,
+        );
+        assert_eq!(scanner.usage().cache_creation_tokens, 300);
+        assert_eq!(scanner.usage().cache_creation_1h_tokens, 200);
+
+        // A 5m-only body leaves the slice at zero rather than at the total: the
+        // five-minute window is the default, not a synonym for "all of it".
+        let mut five_only = UsageScanner::new();
+        five_only.feed_line(
+            r#"data: {"type":"message_start","message":{"usage":{"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":300,"ephemeral_1h_input_tokens":0}}}}"#,
+        );
+        assert_eq!(five_only.usage().cache_creation_tokens, 300);
+        assert_eq!(five_only.usage().cache_creation_1h_tokens, 0);
     }
 
     #[test]

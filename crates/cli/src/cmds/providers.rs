@@ -30,6 +30,7 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
             output,
             cache_read,
             cache_creation,
+            cache_creation_1h,
             currency,
             clear,
         } => providers_price(
@@ -41,6 +42,7 @@ pub fn providers(cmd: &ProvidersCmd, ctx: &mut Ctx) -> Result<(), CliError> {
                 output: output.as_deref(),
                 cache_read: cache_read.as_deref(),
                 cache_creation: cache_creation.as_deref(),
+                cache_creation_1h: cache_creation_1h.as_deref(),
                 currency: currency.as_deref(),
                 clear: *clear,
             },
@@ -150,6 +152,7 @@ struct PriceDeclaration<'a> {
     output: Option<&'a str>,
     cache_read: Option<&'a str>,
     cache_creation: Option<&'a str>,
+    cache_creation_1h: Option<&'a str>,
     currency: Option<&'a str>,
     clear: bool,
 }
@@ -229,6 +232,7 @@ fn providers_price(
             // rather than defaulted to something the user did not say.
             cache_read: blank(declared.cache_read).map(str::to_string),
             cache_creation: blank(declared.cache_creation).map(str::to_string),
+            cache_creation_1h: blank(declared.cache_creation_1h).map(str::to_string),
         });
     }
 

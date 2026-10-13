@@ -82,6 +82,7 @@ export const addProvider = {
   priceOut: "出力",
   priceCacheRead: "キャッシュ読み取り",
   priceCacheWrite: "キャッシュ書き込み",
+  priceCacheWrite1h: "キャッシュ書き込み（1時間）",
   addPrice: "モデルを追加",
   removePrice: "このモデルの価格を削除",
   pricesBody:

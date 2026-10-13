@@ -579,13 +579,22 @@ pub enum ProvidersCmd {
         #[arg(long, value_name = "AMOUNT")]
         cache_creation: Option<String>,
 
+        /// Cache-write rate for an hour-long cache entry, where the vendor
+        /// charges a different one. Omitted means the cache-write rate above
+        /// covers both — not zero, which would say that write is free.
+        #[arg(long, value_name = "AMOUNT")]
+        cache_creation_1h: Option<String>,
+
         /// The currency all of this provider's declared prices are in. Defaults
         /// to the one already stored, or the provider's own.
         #[arg(long, value_name = "CODE")]
         currency: Option<String>,
 
         /// Drop this model's declaration instead of setting one
-        #[arg(long, conflicts_with_all = ["input", "output", "cache_read", "cache_creation"])]
+        #[arg(
+            long,
+            conflicts_with_all = ["input", "output", "cache_read", "cache_creation", "cache_creation_1h"]
+        )]
         clear: bool,
     },
 

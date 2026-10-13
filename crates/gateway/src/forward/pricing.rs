@@ -63,6 +63,7 @@ pub(crate) fn compute_sample_cost(
         sample.usage.output_tokens.max(0) as u64,
         sample.usage.cache_read_tokens.max(0) as u64,
         sample.usage.cache_creation_tokens.max(0) as u64,
+        sample.usage.cache_creation_1h_tokens.max(0) as u64,
         sample.cache_inclusive,
     );
     match pair {

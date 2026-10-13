@@ -464,6 +464,12 @@ pub struct ProviderPriceInput {
     pub cache_read: Option<String>,
     #[serde(default)]
     pub cache_creation: Option<String>,
+    /// The 1-hour write rate. Blank is **not** zero here, unlike the rates above:
+    /// a vendor that charges one write rate charges it for either window, so a
+    /// blank box means "same as the cache write above", and reading it as free
+    /// would understate the spend a limit is measured against.
+    #[serde(default)]
+    pub cache_creation_1h: Option<String>,
 }
 
 /// Result of a Hub sync, as the Settings screen shows it.

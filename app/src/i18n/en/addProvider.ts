@@ -98,6 +98,7 @@ export const addProvider = {
   priceOut: "Output",
   priceCacheRead: "Cache read",
   priceCacheWrite: "Cache write",
+  priceCacheWrite1h: "Cache write, 1h",
   addPrice: "Add model",
   removePrice: "Remove this model's price",
   pricesBody:

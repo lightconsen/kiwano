@@ -43,6 +43,7 @@ export const shelf = {
   tierPriceSwitch: "点击在峰价与谷价之间切换",
   priceCacheRead: "命中",
   priceCacheWrite: "写入",
+  priceCacheWrite1h: "写入（1 小时）",
   modelsPrices: "模型与价格 · {n} 个",
   modelsPricesFiltered: "模型与价格 · 匹配 {n} / 共 {total} 个",
   searchModels: "搜索模型…",

@@ -309,6 +309,8 @@ fn read_file(file: &Path, stem: Option<&str>) -> Result<ParsedFile, String> {
             output_tokens: delta.output + delta.reasoning,
             cache_read_tokens: delta.cached,
             cache_creation_tokens: delta.cache_write,
+            // Codex reports one write count, with no TTL split to read.
+            cache_creation_1h_tokens: 0,
             cache_inclusive: true,
         });
     }

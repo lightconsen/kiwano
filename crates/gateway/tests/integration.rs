@@ -353,6 +353,77 @@ async fn anthropic_request_forwards_captures_usage_and_hides_placeholder_key() {
     assert_eq!(by_provider[0].provider_id.as_deref(), Some("p-ant"));
 }
 
+/// The write bucket's TTL split is a **slice** of the reported total, never a
+/// fifth bucket.
+///
+/// End to end, because this is the invariant a stored total has to keep: every
+/// column, aggregate and screen means "cache writes" by `cache_creation_tokens`,
+/// and an upstream that also breaks the count out by cache-entry TTL — Anthropic
+/// does — must not have that breakdown counted twice. The split itself is priced
+/// where the cost is computed; what this pins is that metering is untouched.
+#[tokio::test]
+async fn the_ttl_split_of_a_cache_write_is_not_a_second_bucket() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {
+            "input_tokens": 2095,
+            "output_tokens": 503,
+            "cache_creation_input_tokens": 2095,
+            "cache_read_input_tokens": 0,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 1095,
+                "ephemeral_1h_input_tokens": 1000
+            }
+        }
+    })))
+    .await;
+
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("claude", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-claude-test", "claude")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/messages",
+        Some("kw-ag-claude-test"),
+        r#"{"model":"claude-sonnet-4-5","stream":false,"messages":[]}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let totals = state
+        .store
+        .usage_totals(Some("claude"), None, None)
+        .unwrap();
+    assert_eq!(totals.requests, 1);
+    assert_eq!(
+        totals.cache_creation_tokens, 2095,
+        "the total, not the total plus its own breakdown"
+    );
+    // The request-log row carries the same number: the two are written from one
+    // sample and must not disagree about the bucket's size.
+    let (logs, _) = state
+        .store
+        .list_request_logs(1, 10, RequestLogFilter::default())
+        .unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].cache_creation_tokens, 2095);
+}
+
 #[tokio::test]
 async fn a_forwarded_response_says_who_served_it_and_a_refusal_says_nothing() {
     let dir = tempfile::tempdir().unwrap();

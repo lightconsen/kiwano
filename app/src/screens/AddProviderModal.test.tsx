@@ -227,6 +227,40 @@ describe("prices a hand-added provider declares", () => {
     });
   });
 
+  it("carries an hourly cache-write rate, and leaves an unstated one out", async () => {
+    const user = await openCustom();
+
+    await user.click(screen.getByRole("button", { name: en.addProvider.addPrice }));
+    await user.type(screen.getByLabelText(en.addProvider.priceModel), "kimi-k3");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceIn)[0], "20");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceOut)[0], "100");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceCacheWrite)[0], "20");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceCacheWrite1h)[0], "40");
+
+    expect((await savedPayload(user)).prices?.models[0]).toMatchObject({
+      cache_creation: "20",
+      cache_creation_1h: "40",
+    });
+  });
+
+  it("sends no hourly rate at all when the box is blank", async () => {
+    const user = await openCustom();
+
+    // Blank is not zero here: the backend reads an unstated hourly rate as "the
+    // cache-write rate covers both windows", and a zero would say a write on the
+    // hour-long TTL is free. So the field is left out rather than sent as "0" —
+    // the one rate in this table the user is allowed to say nothing about.
+    await user.click(screen.getByRole("button", { name: en.addProvider.addPrice }));
+    await user.type(screen.getByLabelText(en.addProvider.priceModel), "kimi-k3");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceIn)[0], "20");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceOut)[0], "100");
+    await user.type(screen.getAllByLabelText(en.addProvider.priceCacheWrite)[0], "20");
+
+    const row = (await savedPayload(user)).prices?.models[0];
+    expect(row).toMatchObject({ cache_creation: "20" });
+    expect(row?.cache_creation_1h).toBeUndefined();
+  });
+
   it("offers them on pay as you go only", async () => {
     const user = await openCustom();
     const addPrice = () => screen.queryByRole("button", { name: en.addProvider.addPrice });

@@ -114,10 +114,12 @@ export function TierChip({
   );
 }
 
-/** One model and the four rates a request against it can spend, in the currency
-    the row is published in. The tier decides which numbers the first two are —
-    the cache pair follows the same block, so a discounted schedule discounts
-    them too. */
+/** One model and the rates a request against it can spend, in the currency the
+    row is published in. The tier decides which numbers the first two are — the
+    cache pair follows the same block, so a discounted schedule discounts them
+    too. The hour-long write rate is the fifth, and it is printed **only where
+    the row states one**: a row with a single write rate would otherwise repeat
+    itself under two labels, which reads as two charges. */
 export function modelRateText(price: ModelPrice, tier: PriceTier, t: Translate): string {
   const cur = price.currency || "USD";
   const shown = tierRates(price, tier);
@@ -128,6 +130,9 @@ export function modelRateText(price: ModelPrice, tier: PriceTier, t: Translate):
     `${t("shelf.priceOut")} ${fmt(shown.output)}`,
     `${t("shelf.priceCacheRead")} ${fmt(cache.cache_read)}`,
     `${t("shelf.priceCacheWrite")} ${fmt(cache.cache_creation)}`,
+    ...(cache.cache_creation_1h
+      ? [`${t("shelf.priceCacheWrite1h")} ${fmt(cache.cache_creation_1h)}`]
+      : []),
   ].join(" · ");
 }
 
@@ -141,6 +146,9 @@ function bandRatesText(band: LongContextRates, currency: string, t: Translate): 
     `${t("shelf.priceOut")} ${fmt(band.out)}`,
     `${t("shelf.priceCacheRead")} ${fmt(band.cache_read)}`,
     `${t("shelf.priceCacheWrite")} ${fmt(band.cache_creation)}`,
+    ...(band.cache_creation_1h
+      ? [`${t("shelf.priceCacheWrite1h")} ${fmt(band.cache_creation_1h)}`]
+      : []),
   ].join(" · ");
 }
 

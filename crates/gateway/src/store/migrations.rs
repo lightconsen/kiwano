@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version tracked via `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i32 = 35;
+pub const SCHEMA_VERSION: i32 = 36;
 
 /// The schema as it stood at v27, for a test that needs a database of that
 /// vintage to open.
@@ -961,6 +961,17 @@ const MIGRATION_V35: &str = r#"
 ALTER TABLE sessions ADD COLUMN tool_uses TEXT;
 "#;
 
+/// v36: the price of a cache write on the 1-hour TTL, on the Hub price mirror.
+///
+/// A fifth rate rather than a fifth token bucket: the hourly writes are a slice
+/// of `cache_creation_input_tokens`, and what a row needs to bill them is its own
+/// rate for that window. NULL — a row that prices writing once — is read as "the
+/// five-minute rate covers both", which is what every row said before this column
+/// existed, so an install that syncs no new table prices exactly as it did.
+const MIGRATION_V36: &str = r#"
+ALTER TABLE model_pricing ADD COLUMN cache_creation_1h TEXT;
+"#;
+
 const MIGRATION_V27: &str = r#"
 PRAGMA foreign_keys=OFF;
 CREATE TABLE agent_strategies_new (
@@ -1125,6 +1136,9 @@ impl Store {
         }
         if version < 35 {
             conn.execute_batch(MIGRATION_V35)?;
+        }
+        if version < 36 {
+            conn.execute_batch(MIGRATION_V36)?;
         }
         if version < SCHEMA_VERSION {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -1510,6 +1524,27 @@ mod tests {
                      request_size          INTEGER NOT NULL DEFAULT 0,
                      response_size         INTEGER NOT NULL DEFAULT 0,
                      truncated             INTEGER NOT NULL DEFAULT 0
+                 );",
+            )
+            .unwrap();
+            // `model_pricing` on the same rule: v36 is the first migration past
+            // this stamp to alter it, and an ALTER on a table that is not there
+            // fails the open. The shape is the one v9 created and v13 widened —
+            // `tiers` in, `cache_creation_1h` out, since adding that is what v36
+            // is for and a column cannot be added twice.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS model_pricing (
+                     provider_id     TEXT NOT NULL DEFAULT '',
+                     model_id        TEXT NOT NULL,
+                     display_name    TEXT NOT NULL,
+                     input           TEXT NOT NULL,
+                     output          TEXT NOT NULL,
+                     cache_read      TEXT NOT NULL DEFAULT '0',
+                     cache_creation  TEXT NOT NULL DEFAULT '0',
+                     currency        TEXT NOT NULL DEFAULT 'USD',
+                     source          TEXT,
+                     tiers           TEXT,
+                     PRIMARY KEY (provider_id, model_id)
                  );",
             )
             .unwrap();

@@ -112,6 +112,7 @@ pub(crate) mod test_support {
             output: "15.0".into(),
             cache_read: "0.3".into(),
             cache_creation: "3.75".into(),
+            cache_creation_1h: None,
             currency: "USD".into(),
             off_peak: None,
             peak_hours: None,
@@ -150,6 +151,7 @@ pub(crate) mod test_support {
                 output: "13.5".into(),
                 cache_read: "0.15".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
             }),
             peak_hours: Some(deepseek_hours()),
             ..usage_entry()
@@ -171,6 +173,7 @@ pub(crate) mod test_support {
                 output: "16.80".into(),
                 cache_read: "0.84".into(),
                 cache_creation: "0".into(),
+                cache_creation_1h: None,
             }),
             ..usage_entry()
         }

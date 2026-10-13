@@ -255,6 +255,13 @@ fn read_file(
                     output_tokens: i64_at(usage_v, "output_tokens"),
                     cache_read_tokens: i64_at(usage_v, "cache_read_input_tokens"),
                     cache_creation_tokens: i64_at(usage_v, "cache_creation_input_tokens"),
+                    // The write bucket's TTL split, where the record carries one
+                    // (Claude Code writes Anthropic's `cache_creation` object
+                    // beside the total). Only the hour-long figure is read: the
+                    // five-minute one is the total minus it.
+                    cache_creation_1h_tokens: usage_v
+                        .get("cache_creation")
+                        .map_or(0, |cc| i64_at(cc, "ephemeral_1h_input_tokens")),
                     cache_inclusive: false,
                 });
             }
@@ -1020,6 +1027,66 @@ mod tests {
 
         // Anthropic-shaped: the cache buckets are outside `input_tokens`.
         assert!(read.batch.usage.iter().all(|r| !r.cache_inclusive));
+        // A record with no `cache_creation` object reports one write window.
+        assert!(read
+            .batch
+            .usage
+            .iter()
+            .all(|r| r.cache_creation_1h_tokens == 0));
+    }
+
+    /// The write bucket's TTL split, which a transcript carries beside the total
+    /// and which a row with a second write rate needs to be costed.
+    #[test]
+    fn a_transcript_reads_the_hourly_slice_of_the_write_bucket() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let cwd = home.join("repo");
+        std::fs::create_dir_all(cwd.join(".git")).unwrap();
+
+        write_transcript(
+            home,
+            "-home-me-repo",
+            "s1.jsonl",
+            &[
+                assistant(
+                    "u1",
+                    "2024-01-01T00:00:00Z",
+                    "s1",
+                    &cwd.to_string_lossy(),
+                    serde_json::json!({
+                        "input_tokens": 100, "output_tokens": 50,
+                        "cache_read_input_tokens": 10, "cache_creation_input_tokens": 900,
+                        "cache_creation": {
+                            "ephemeral_5m_input_tokens": 400,
+                            "ephemeral_1h_input_tokens": 500
+                        }
+                    }),
+                    serde_json::json!([{ "type": "text", "text": "hi" }]),
+                ),
+                assistant(
+                    "u2",
+                    "2024-01-01T00:01:00Z",
+                    "s1",
+                    &cwd.to_string_lossy(),
+                    serde_json::json!({
+                        "input_tokens": 20, "output_tokens": 10,
+                        "cache_creation_input_tokens": 7
+                    }),
+                    serde_json::json!([{ "type": "text", "text": "again" }]),
+                ),
+            ],
+        );
+
+        let read = claude_read(home);
+        assert_eq!(read.batch.usage.len(), 2, "detail={:?}", read.detail);
+        // The total keeps both windows — the session row's own figure — and the
+        // slice is what prices the hourly part differently.
+        assert_eq!(read.batch.usage[0].cache_creation_tokens, 900);
+        assert_eq!(read.batch.usage[0].cache_creation_1h_tokens, 500);
+        assert_eq!(read.batch.usage[1].cache_creation_tokens, 7);
+        assert_eq!(read.batch.usage[1].cache_creation_1h_tokens, 0);
+        assert_eq!(read.batch.sessions[0].cache_creation_tokens, 907);
     }
 
     /// A `cwd` that moves into a subdirectory of the repo mid-session does not

@@ -267,4 +267,56 @@ describe("the detail dialog", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/above 512k tokens/)).toBeInTheDocument();
   });
+
+  it("prints the hour-long write rate where a row states one, and not where it does not", async () => {
+    const user = userEvent.setup();
+    const row = await renderShelf(
+      [
+        entry("kimi", "Kimi", {
+          price_ref: { ...PRICE, model_id: "kimi-k3", display_name: "Kimi K3" },
+          models: ["kimi-k3", "kimi-k2.6"],
+          endpoints: [
+            {
+              protocol: "openai" as const,
+              endpoint: "https://api.kimi.com",
+              models: ["kimi-k3", "kimi-k2.6"],
+            },
+          ],
+        }),
+      ],
+      [
+        // Kimi's published pair: ¥20 for the short window, ¥40 for the hour.
+        modelPrice({
+          provider_id: "kimi",
+          model_id: "kimi-k3",
+          input: "20",
+          output: "100",
+          cache_read: "2",
+          cache_creation: "20",
+          cache_creation_1h: "40",
+        }),
+        modelPrice({ model_id: "kimi-k2.6", input: "6.5", output: "27" }),
+      ],
+    );
+
+    await user.click(row);
+    const dialog = await screen.findByRole("dialog");
+
+    // The id appears twice in the dialog (the model row, and the entry's own
+    // headline), so the row is found by the id span it leads with.
+    const rowOf = (modelId: string) =>
+      Array.from(dialog.querySelectorAll("div.rounded-md")).find(
+        (el) => el.querySelector("span")?.textContent === modelId,
+      ) as HTMLElement;
+
+    // The fifth number is labelled like the others, in the row's own currency.
+    const k3 = rowOf("kimi-k3").textContent ?? "";
+    expect(k3).toContain(`${en.shelf.priceCacheWrite} ${fmtMoney(20, "CNY")}`);
+    expect(k3).toContain(`${en.shelf.priceCacheWrite1h} ${fmtMoney(40, "CNY")}`);
+
+    // A vendor that charges one write rate states no second one, so the row
+    // prints its write rate once. Repeating it under two labels would read as two
+    // charges — the fallback is a pricing rule, not a published rate.
+    expect(rowOf("kimi-k2.6").textContent).not.toContain(en.shelf.priceCacheWrite1h);
+  });
 });

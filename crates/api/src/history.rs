@@ -42,6 +42,12 @@ pub struct HistoryUsageRow {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// The 1-hour slice of `cache_creation_tokens`, where the record breaks the
+    /// write bucket out by TTL. Defaulted rather than required so that a reader
+    /// which does not report the split (a Codex turn, an older CLI) imports as
+    /// "no hourly writes" instead of failing to parse.
+    #[serde(default)]
+    pub cache_creation_1h_tokens: i64,
     /// Whether the file's own `input_tokens` already counts the cache buckets.
     ///
     /// Anthropic-shaped records say `false` (their `input_tokens` excludes both
@@ -207,6 +213,7 @@ mod tests {
             output_tokens: 5,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
             cache_inclusive: false,
         };
         let session = HistorySessionRow {

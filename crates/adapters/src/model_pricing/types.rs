@@ -32,6 +32,11 @@ pub struct OffPeakRates {
     pub cache_read: String,
     #[serde(default = "zero_rate")]
     pub cache_creation: String,
+    /// The 1-hour TTL write rate, where the vendor charges one — see
+    /// `ModelPriceEntry::cache_creation_1h`. Unstated here means the tier's own
+    /// `cache_creation` rate covers both TTLs.
+    #[serde(default)]
+    pub cache_creation_1h: Option<String>,
 }
 
 /// Rates that apply once a request's input passes a size — the second band some
@@ -65,6 +70,9 @@ pub struct LongContextRates {
     pub cache_read: String,
     #[serde(default = "zero_rate")]
     pub cache_creation: String,
+    /// See `OffPeakRates::cache_creation_1h`.
+    #[serde(default)]
+    pub cache_creation_1h: Option<String>,
 }
 
 /// The cache rates the document leaves out default to 0, as the data repo's
@@ -130,6 +138,18 @@ pub struct ModelPriceEntry {
     pub output: String,
     pub cache_read: String,
     pub cache_creation: String,
+    /// The rate for a cache **write** on the 1-hour TTL, where the vendor prices
+    /// the two write windows differently — Anthropic bills 1.25x input for a
+    /// 5-minute write and 2x for an hour, and Kimi publishes ¥20 against ¥40.
+    ///
+    /// `None` means the row prices writing once, and `cache_creation` is that
+    /// price for either window. That is not a discount invented here: it is the
+    /// only write rate the row states, and the alternative — deriving the hour
+    /// from the input rate — would be reading Anthropic's published multiplier
+    /// into every vendor's row. The hourly bucket is a **slice** of
+    /// `cache_creation`'s tokens, never a fifth bucket.
+    #[serde(default)]
+    pub cache_creation_1h: Option<String>,
     pub currency: String,
     /// The discounted rates in force outside `peak_hours`. The row's own rates
     /// above are the **peak** ones — they apply inside the windows.
@@ -214,6 +234,12 @@ pub struct DeclaredPrice {
     pub cache_read: String,
     #[serde(default = "zero_rate")]
     pub cache_creation: String,
+    /// The 1-hour write rate, where the user's vendor charges one. Unlike the
+    /// rates above it is an `Option`: unstated must mean "my vendor charges the
+    /// same for either window" — the reading `ModelPriceEntry` takes — not zero,
+    /// which would say a write on that TTL is free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_1h: Option<String>,
 }
 
 impl DeclaredPrices {
@@ -257,6 +283,7 @@ impl DeclaredPrices {
                 output: m.output.clone(),
                 cache_read: m.cache_read.clone(),
                 cache_creation: m.cache_creation.clone(),
+                cache_creation_1h: m.cache_creation_1h.clone(),
                 currency: self.currency.clone(),
                 // Bands and time-of-day tiers are the Hub's vocabulary, not
                 // something the form collects: a declared row is flat.
@@ -306,6 +333,42 @@ mod tests {
                 .models,
             vec![]
         );
+    }
+
+    #[test]
+    fn the_hourly_write_rate_is_optional_and_survives_a_round_trip() {
+        let doc: ModelsDoc = serde_json::from_str(
+            r#"{"version": 1, "exchange_rates": {"USD": 1.0}, "models": [
+                {"model_id": "m", "display_name": "M", "input": "10", "output": "50",
+                 "cache_read": "1", "cache_creation": "12.50",
+                 "cache_creation_1h": "20", "currency": "USD"},
+                {"model_id": "n", "display_name": "N", "input": "10", "output": "50",
+                 "cache_read": "1", "cache_creation": "12.50", "currency": "USD"}]}"#,
+        )
+        .expect("the published shape parses");
+        assert_eq!(doc.models[0].cache_creation_1h.as_deref(), Some("20"));
+        // Absent is `None` — "one write rate covers both windows" — rather than
+        // zero, which would say an hour-long write is free.
+        assert_eq!(doc.models[1].cache_creation_1h, None);
+
+        // The declared blob carries it through the same way, and an unstated one
+        // stays unstated rather than being written back as a zero.
+        let declared = DeclaredPrices::parse(
+            r#"{"currency":"CNY","models":[{"model_id":"kimi-k3","input":"20","output":"100",
+                 "cache_read":"2","cache_creation":"20","cache_creation_1h":"40"},
+                {"model_id":"kimi-k2.6","input":"6.5","output":"27"}]}"#,
+        )
+        .expect("parses");
+        assert_eq!(declared.models[0].cache_creation_1h.as_deref(), Some("40"));
+        assert_eq!(declared.models[1].cache_creation_1h, None);
+        let json = declared.to_json();
+        assert!(!json.contains(r#""cache_creation_1h":"0""#), "{json}");
+        assert_eq!(declared, DeclaredPrices::parse(&json).unwrap());
+
+        // …and it reaches the table as the row's rate.
+        let entries = declared.entries("local-1");
+        assert_eq!(entries[0].cache_creation_1h.as_deref(), Some("40"));
+        assert_eq!(entries[1].cache_creation_1h, None);
     }
 
     #[test]

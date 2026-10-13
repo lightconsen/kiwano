@@ -11,10 +11,11 @@ import type { DeclaredPrice } from "../../api/types";
 // the translator is available rather than at module scope (a module-level `t`
 // is impossible — it is a hook).
 
-/// The four rates one declared-price row collects, in the price table's own
-/// order: `DeclaredPrice` is read back with exactly these fields, and the order
-/// is the one every price in the app is printed in (input, output, cache read,
-/// cache write).
+/// The rates one declared-price row collects, in the price table's own order:
+/// `DeclaredPrice` is read back with exactly these fields, and the order is the
+/// one every price in the app is printed in (input, output, cache read, cache
+/// write) — with the hourly write last, beside the write rate it replaces for
+/// that window.
 export const RATE_FIELDS: {
   key: keyof Omit<DeclaredPrice, "model_id">;
   labelKey: KeyPath<Messages>;
@@ -23,6 +24,7 @@ export const RATE_FIELDS: {
   { key: "output", labelKey: "addProvider.priceOut" },
   { key: "cache_read", labelKey: "addProvider.priceCacheRead" },
   { key: "cache_creation", labelKey: "addProvider.priceCacheWrite" },
+  { key: "cache_creation_1h", labelKey: "addProvider.priceCacheWrite1h" },
 ];
 
 /** A declared rate: blank (a box not filled in yet), or a number that is zero
@@ -58,7 +60,7 @@ export function PricesSection({
   badPrice: boolean;
 }) {
   const t = useT();
-  /** Patch one row: its model id, or one of its four rates. */
+  /** Patch one row: its model id, or one of its rates. */
   const setPrice = (i: number, patch: Partial<DeclaredPrice>) =>
     setPrices((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
 
@@ -74,6 +76,7 @@ export function PricesSection({
         output: "",
         cache_read: "",
         cache_creation: "",
+        cache_creation_1h: "",
       },
     ]);
   return (
@@ -114,10 +117,10 @@ export function PricesSection({
                   </span>
                   <Input
                     className="h-7 min-w-0 flex-1 bg-bg font-mono text-[11.5px] dark:bg-bg"
-                    value={row[f.key]}
+                    value={row[f.key] ?? ""}
                     onChange={(e) => setPrice(i, { [f.key]: e.target.value })}
                     inputMode="decimal"
-                    aria-invalid={invalidRate(row[f.key])}
+                    aria-invalid={invalidRate(row[f.key] ?? "")}
                     aria-label={t(f.labelKey)}
                   />
                 </label>

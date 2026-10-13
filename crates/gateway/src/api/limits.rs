@@ -103,6 +103,29 @@ fn declared_rate(raw: &str, model_id: &str, what: &str) -> Result<String, String
     Ok(text.to_string())
 }
 
+/// A declared rate the user may leave **unstated** — currently only the 1-hour
+/// cache write.
+///
+/// Unlike `declared_rate`, a blank here is `None` rather than zero: the row then
+/// prices writing once, and that rate covers both TTLs. Zero would claim an
+/// hour-long write is free, which no vendor says and which understates the spend
+/// the limit is measured against.
+fn declared_optional_rate(raw: &str, model_id: &str, what: &str) -> Result<Option<String>, String> {
+    let text = raw.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let value: f64 = text
+        .parse()
+        .map_err(|_| format!("the {what} rate of `{model_id}` is not a number: `{text}`"))?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(format!(
+            "the {what} rate of `{model_id}` must be zero or more: `{text}`"
+        ));
+    }
+    Ok(Some(text.to_string()))
+}
+
 /// Validate the declared prices and serialize them into the `providers.prices`
 /// blob.
 ///
@@ -169,6 +192,11 @@ pub fn normalize_declared_prices(
                 model_id,
                 "cache write",
             )?,
+            cache_creation_1h: declared_optional_rate(
+                row.cache_creation_1h.as_deref().unwrap_or(""),
+                model_id,
+                "1-hour cache write",
+            )?,
         });
     }
     if models.is_empty() {
@@ -213,6 +241,7 @@ pub fn import_declared_prices(
                 output: m.output,
                 cache_read: Some(m.cache_read),
                 cache_creation: Some(m.cache_creation),
+                cache_creation_1h: m.cache_creation_1h,
             })
             .collect(),
     };

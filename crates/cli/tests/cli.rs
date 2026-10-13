@@ -2987,6 +2987,96 @@ fn declaring_a_price_keeps_the_providers_other_declarations() {
     assert_eq!(models[0]["model_id"], "acme-small");
 }
 
+/// The two-window cache write: declared from here, read back from here, and
+/// dropped when the user clears the row.
+///
+/// The rate is optional in a way the others are not — unstated means "one rate
+/// covers both windows", so declaring a row without it must not leave a zero
+/// behind that says an hour-long write is free.
+#[test]
+fn declaring_an_hourly_cache_write_rate_keeps_it_apart_from_the_short_one() {
+    let (_dir, db) = temp_db();
+    let daemon = support::serve(&db);
+    let provider = add_provider(&db, "relay", &[]);
+
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "kimi-k3",
+            "--input",
+            "20",
+            "--output",
+            "100",
+            "--currency",
+            "CNY",
+            "--cache-read",
+            "2",
+            "--cache-creation",
+            "20",
+            "--cache-creation-1h",
+            "40",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+
+    let declared = |db: &std::path::Path, daemon: &support::TestDaemon| {
+        let (_, out, _) = run_served(db, daemon, &["--json", "providers", "list"]);
+        let providers: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+        providers[0]["prices"]["models"][0].clone()
+    };
+    let row = declared(&db, &daemon);
+    assert_eq!(row["cache_creation"], "20");
+    assert_eq!(row["cache_creation_1h"], "40");
+
+    // Re-declaring the same model without the flag drops the window rather than
+    // silently keeping it: the write is a snapshot of what was just said.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "kimi-k3",
+            "--input",
+            "20",
+            "--output",
+            "100",
+            "--cache-creation",
+            "20",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(declared(&db, &daemon)["cache_creation_1h"].is_null());
+
+    // A rate that is not a number is refused, like every other rate.
+    let (code, _, err) = run_served(
+        &db,
+        &daemon,
+        &[
+            "providers",
+            "price",
+            &provider,
+            "--model",
+            "kimi-k3",
+            "--input",
+            "20",
+            "--output",
+            "100",
+            "--cache-creation-1h",
+            "forty",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(err.contains("1-hour cache write"), "{err}");
+}
+
 /// The loop the command exists for: a model the Hub cannot price is priced by a
 /// declaration, and the imported history shows the money.
 #[test]

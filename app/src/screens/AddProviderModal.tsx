@@ -496,7 +496,7 @@ export default function AddProviderModal({
   }, [agentsOpen]);
 
   const badPrice = prices.some((row) =>
-    RATE_FIELDS.some((f) => invalidRate(row[f.key])),
+    RATE_FIELDS.some((f) => invalidRate(row[f.key] ?? "")),
   );
 
   // An invalid ceiling is refused rather than dropped: see `invalidPct`.
@@ -680,6 +680,11 @@ export default function AddProviderModal({
                   output: row.output.trim() || "0",
                   cache_read: row.cache_read.trim() || "0",
                   cache_creation: row.cache_creation.trim() || "0",
+                  // Blank stays blank rather than becoming "0": the backend
+                  // reads an unstated hourly rate as "the write rate above
+                  // covers both windows", and a zero would say that write is
+                  // free.
+                  cache_creation_1h: row.cache_creation_1h?.trim() || undefined,
                 })),
             }
           : undefined,

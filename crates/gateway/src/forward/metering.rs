@@ -187,6 +187,7 @@ mod tests {
             upstream_key: Some("primary".into()),
             started_unix: TEST_AT,
             model: model.map(str::to_string),
+            served_model: None,
             usage: Usage {
                 reasoning_tokens: 0,
                 input_tokens: 1_000_000,
@@ -222,6 +223,115 @@ mod tests {
         assert_eq!(costs.len(), 1);
         assert_eq!(costs[0].0.as_deref(), Some("USD"));
         assert!((costs[0].1 - 5.0).abs() < 1e-9, "got {}", costs[0].1);
+    }
+
+    /// A call whose **asked** name has no price is costed at the name the reply
+    /// said answered.
+    ///
+    /// The case both other gateways handle this way: a plan's client asks for the
+    /// plan's own name (`kimi-for-coding`), which no price table carries because
+    /// the vendor's API does not sell it — the reply names the sold model, and
+    /// pricing that is the difference between a number and a blank. The ledger
+    /// still records what was asked for.
+    #[test]
+    fn record_sample_prices_a_plan_name_by_the_model_the_reply_named() {
+        use crate::store::Protocol;
+
+        let store = crate::store::Store::open_in_memory().expect("store");
+        // Only the sold name is priced, at 20 USD/M input.
+        store
+            .upsert_model_pricing(&kiwano_adapters::model_pricing::ModelPriceEntry {
+                long_context: None,
+                provider_id: String::new(),
+                model_id: "kimi-k3".into(),
+                off_peak: None,
+                peak_hours: None,
+                display_name: "Kimi K3".into(),
+                input: "20".into(),
+                output: "100".into(),
+                cache_read: "2".into(),
+                cache_creation: "25".into(),
+                currency: "CNY".into(),
+            })
+            .unwrap();
+        let state = crate::server::GatewayState::new(store).expect("state");
+        state
+            .store
+            .insert_provider(&crate::store::Provider {
+                id: "p-kimi".into(),
+                name: "kimi".into(),
+                catalog_id: None,
+                prices: None,
+                protocol: Protocol::Anthropic,
+                openai_wire: crate::store::OpenAiWire::Both,
+                base_url: "https://a.example.com".into(),
+                api_path: None,
+                endpoints: Vec::new(),
+                api_key: Some("sk".into()),
+                model_default: None,
+                billing: crate::store::Billing::Subscription,
+                period_limit: None,
+                limit_unit: None,
+                plan_query: None,
+                plan_limits: None,
+                timeout_secs: None,
+                retries: None,
+                headers: None,
+                reset_period: None,
+                enabled: true,
+                created_at: crate::store::now_rfc3339(),
+                updated_at: crate::store::now_rfc3339(),
+            })
+            .unwrap();
+
+        let sample = |asked: &'static str, served: Option<&'static str>| UsageSample {
+            agent: "claude".into(),
+            provider_id: "p-kimi".into(),
+            client_key_id: "ck-test".to_string(),
+            catalog_id: None,
+            upstream_key: Some("primary".into()),
+            started_unix: TEST_AT,
+            model: Some(asked.to_string()),
+            served_model: served.map(str::to_string),
+            usage: Usage {
+                reasoning_tokens: 0,
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+            latency_ms: 10,
+            status: "ok",
+            cache_inclusive: false,
+            usage_missing: false,
+            log: None,
+        };
+
+        // The plan's name is priced nowhere on its own…
+        record_sample(&state, sample("kimi-for-coding", None));
+        // …and the reply's name is what pays for it.
+        record_sample(&state, sample("kimi-for-coding", Some("kimi-k3")));
+        // An asked name that *does* resolve keeps its own price, whatever the
+        // reply says: the ladder tries the ask first.
+        record_sample(&state, sample("kimi-k3", Some("kimi-k3-2025")));
+
+        let costs = state
+            .store
+            .usage_cost_by_currency(None, None, None)
+            .unwrap();
+        assert_eq!(costs.len(), 1, "one currency, and only the priced rows");
+        assert_eq!(costs[0].0.as_deref(), Some("CNY"));
+        // Two rows priced at 20 CNY/M input; the one that resolved to nothing
+        // contributes no cost at all rather than a zero.
+        assert!((costs[0].1 - 40.0).abs() < 1e-9, "got {}", costs[0].1);
+
+        // What was asked for is what the row records — the served name is a
+        // pricing fact, not the request's name.
+        let (rows, _) = state
+            .store
+            .list_request_logs(1, 10, crate::store::RequestLogFilter::default())
+            .unwrap();
+        assert_eq!(rows.len(), 0, "logging is off in this fixture");
     }
 
     /// The price a request is costed at follows the provider it went through.
@@ -292,6 +402,7 @@ mod tests {
             catalog_id: catalog_id.map(str::to_string),
             started_unix: TEST_AT,
             model: Some("m1".into()),
+            served_model: None,
             usage: Usage {
                 reasoning_tokens: 0,
                 input_tokens: 1_000_000,
@@ -427,6 +538,7 @@ mod tests {
             catalog_id: catalog_id.map(str::to_string),
             started_unix: TEST_AT,
             model: Some(model.into()),
+            served_model: None,
             usage: Usage {
                 reasoning_tokens: 0,
                 input_tokens: 1_000_000,
@@ -529,6 +641,7 @@ mod tests {
             upstream_key: Some("primary".into()),
             started_unix: TEST_AT,
             model: Some("m1".into()),
+            served_model: None,
             usage: Usage {
                 reasoning_tokens: 0,
                 input_tokens: 1_000_000,
@@ -670,6 +783,7 @@ mod tests {
             upstream_key: Some("primary".into()),
             started_unix,
             model: Some("m1".into()),
+            served_model: None,
             usage: Usage {
                 reasoning_tokens: 0,
                 input_tokens: 1_000_000,
@@ -779,6 +893,7 @@ mod tests {
             upstream_key: Some("primary".into()),
             started_unix: 1_788_919_200,
             model: Some("m1".into()),
+            served_model: None,
             usage: Usage {
                 input_tokens,
                 output_tokens: 0,

@@ -52,6 +52,14 @@ pub(crate) struct UsageSample {
     /// write time — a long stream can end in a later window than it began.
     pub(crate) started_unix: i64,
     pub(crate) model: Option<String>,
+    /// The model the **reply** said answered, when it named one.
+    ///
+    /// Kept beside `model` rather than instead of it: the ledger and the receipt
+    /// name what the client asked for (a plan's client asks for the plan's own
+    /// name and should be told that back), while **pricing** needs the name the
+    /// vendor sells — a relay that sells `kimi-k3` as `moonshot-kimi-k3` answers
+    /// as `kimi-k3`, and only that name has a price.
+    pub(crate) served_model: Option<String>,
     pub(crate) usage: Usage,
     pub(crate) latency_ms: i64,
     pub(crate) status: &'static str,

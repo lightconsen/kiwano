@@ -32,10 +32,28 @@ pub(crate) fn compute_sample_cost(
         .read()
         .expect("declared pricing lock poisoned");
     let pricing = state.pricing.read().expect("pricing lock poisoned");
-    let Some(entry) = declared
-        .find_declared(&sample.provider_id, model)
-        .or_else(|| pricing.find(sample.catalog_id.as_deref().unwrap_or_default(), model))
-    else {
+    // The name the client asked for first, then **the name the reply said
+    // answered**. A plan's own client asks for the plan's name (`kimi-for-coding`,
+    // `moonshot-kimi-k3`), and those are not what the vendor's API sells — the
+    // reply carries the sold name, and pricing it is the difference between a
+    // number and a blank. Both other gateways price this way; the ledger still
+    // records what was asked for.
+    let mut entry = None;
+    for name in std::iter::once(model).chain(
+        sample
+            .served_model
+            .as_deref()
+            .filter(|served| *served != model),
+    ) {
+        if let Some(found) = declared
+            .find_declared(&sample.provider_id, name)
+            .or_else(|| pricing.find(sample.catalog_id.as_deref().unwrap_or_default(), name))
+        {
+            entry = Some(found);
+            break;
+        }
+    }
+    let Some(entry) = entry else {
         return (None, None, None);
     };
     let pair = kiwano_adapters::model_pricing::compute_cost_pair(

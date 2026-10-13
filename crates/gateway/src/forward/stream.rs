@@ -231,6 +231,9 @@ impl SseUsageStream {
         if self.sample.model.is_none() {
             self.sample.model = self.scanner.model().map(String::from);
         }
+        // The stream's own name for the model, kept for pricing whether or not
+        // the client named one — see `UsageSample::served_model`.
+        self.sample.served_model = self.scanner.model().map(String::from);
         self.sample.latency_ms = self.started.elapsed().as_millis() as i64;
         if let Some(log) = self.sample.log.as_mut() {
             log.first_token_ms = self
@@ -503,6 +506,7 @@ mod tests {
                 upstream_key: Some("primary".into()),
                 started_unix: TEST_AT,
                 model: None,
+                served_model: None,
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
@@ -587,6 +591,7 @@ mod tests {
                 upstream_key: Some("primary".into()),
                 started_unix: TEST_AT,
                 model: None,
+                served_model: None,
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",

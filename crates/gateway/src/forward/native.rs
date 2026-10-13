@@ -290,6 +290,8 @@ pub async fn forward(
                 upstream_key: Some(upstream_key.clone()),
                 started_unix,
                 model,
+                // Filled at `finish` from the stream's own `message_start`.
+                served_model: None,
                 usage: Usage::default(),
                 latency_ms: 0,
                 status: "ok",
@@ -347,7 +349,8 @@ pub async fn forward(
             catalog_id: provider.catalog_id.clone(),
             upstream_key: Some(upstream_key.clone()),
             started_unix,
-            model: model.or(upstream_model),
+            model: model.or_else(|| upstream_model.clone()),
+            served_model: upstream_model,
             usage_missing: usage.is_none(),
             usage: usage.unwrap_or_default(),
             latency_ms,

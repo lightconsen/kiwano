@@ -19,6 +19,21 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A plan's own model name is priced by the model the reply named.** A coding
+  plan's client asks for the plan's name — `kimi-for-coding`, or a relay's
+  `moonshot-kimi-k3` — and no price table carries those, because the vendor's API
+  does not sell them under that name. The reply names the model that answered, so
+  a call whose *asked* name has no price is now costed at the **served** one. The
+  ledger still records what was asked for: the served name is a pricing fact, not
+  the request's name.
+
+  This is how both other local gateways do it (one of them makes "request model or
+  response model" a per-app setting), and it is the general answer to the whole
+  class — not just Kimi. An asked name that *does* resolve keeps its own price: the
+  ladder tries the ask first.
+
 ## [0.3.3] - 2026-10-13
 
 **The version where the session list became a management surface.** Three fixes

@@ -10,8 +10,8 @@
 
 use crate::error::Result;
 use crate::store::types::{
-    ClientKeySpend, CostBucket, DailyUsage, ProviderCostBucket, ProviderUsage, TrafficStats,
-    UpstreamKeySpend, UsageRecord, UsageTotals,
+    ClientKeySpend, CostBucket, DailyCostBucket, DailyUsage, ProviderCostBucket, ProviderUsage,
+    TrafficStats, UpstreamKeySpend, UsageRecord, UsageTotals,
 };
 use crate::store::Store;
 use rusqlite::params;
@@ -572,6 +572,49 @@ impl Store {
         tz_offset_minutes: i64,
     ) -> Result<Vec<DailyUsage>> {
         self.usage_bucketed(agent, provider_id, since, tz_offset_minutes, "%Y-%m-%dT%H")
+    }
+
+    /// Cost per bucket, in the currencies the rows were priced in.
+    ///
+    /// A deliberate sibling of `usage_bucketed` rather than more columns on it:
+    /// that one sums tokens (which have no currency) while this one must *not*
+    /// sum across currencies — one `SUM(cost)` over a mixed set would add CNY to
+    /// USD. So the bucketing and the filters are the same statements, and the
+    /// caller converts each bucket's currencies with the rate table it already
+    /// holds.
+    ///
+    /// `cost IS NOT NULL` excludes the rows no price could be found for, which
+    /// is the rule every other cost rollup here follows — an unpriced row is an
+    /// absence of a number, not a zero. Those rows still count in
+    /// `usage_bucketed`'s request and token sums; the two buckets are read
+    /// side by side, never added.
+    pub fn usage_cost_bucketed(
+        &self,
+        agent: Option<&str>,
+        provider_id: Option<&str>,
+        since: Option<&str>,
+        tz_offset_minutes: i64,
+        fmt: &str,
+    ) -> Result<Vec<DailyCostBucket>> {
+        let (cond, params) = Self::usage_filters(agent, provider_id, since, None);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT strftime('{fmt}', ts, '{tz_offset_minutes:+} minutes') AS bucket,
+                    cost_currency, SUM(cost)
+             FROM usage WHERE cost IS NOT NULL{cond}
+             GROUP BY bucket, cost_currency ORDER BY bucket ASC",
+        ))?;
+        let mut out = Vec::new();
+        for row in stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok(DailyCostBucket {
+                day: row.get(0)?,
+                currency: row.get(1)?,
+                cost: row.get(2)?,
+            })
+        })? {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// The one bucketing query behind `usage_daily`/`usage_hourly`: `fmt` is

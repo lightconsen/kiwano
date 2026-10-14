@@ -40,11 +40,39 @@ export const dashboard = {
   usageTrend: "Usage trend",
   metricRequests: "Requests",
   metricTokens: "Tokens",
+  metricCost: "Cost",
   /** The chart's readout and aria-label interpolate the metric's own name,
       which the raw id printed lowercase; the tab above uses the capital form. */
   trendMetricRequests: "requests",
   trendMetricTokens: "tokens",
+  trendMetricCost: "cost",
   trendAria: "Usage trend · {metric} · {n} buckets",
+
+  /** The layout switch: the same buckets as columns or as a grid of cells. */
+  layoutBars: "Bars",
+  layoutGrid: "Grid",
+  /** The grid's own names. A cell is one bucket, and what a bucket *is*
+      changes with the window — so the caption below says which. */
+  activityGrid: "Activity",
+  activityGridAria: "Activity · {metric} · {n} cells",
+  /** Cell = bucket: one hour ("today"), one day (7d/30d), or one week — the
+      "all" window sums a long history a week at a time. */
+  activityCellHour: "one hour",
+  activityCellDay: "one day",
+  activityCellWeek: "one week",
+  activityCaption: "Each cell is {unit}, in {metric}, on your machine's clock.",
+  /** The ramp's steps, said out loud: a reader who cannot tell two shades
+      apart still gets the reading the shades encode. Empty is its own step —
+      "nothing happened" is not "a little happened". */
+  activityLegendNone: "none",
+  activityLegendLow: "low",
+  activityLegendMedium: "medium",
+  activityLegendHigh: "high",
+  /** A bucket that has not happened yet — the "today" window plots all 24
+      hours, and an hour still to come is not an hour of no activity. Drawn
+      apart from `none` so the grid never reports the future as a fact. */
+  activityLegendFuture: "not yet",
+  activityCellTitle: "{date} · {metric}",
 
   byProvider: "By provider",
   donutAria: "By provider · {n} requests",

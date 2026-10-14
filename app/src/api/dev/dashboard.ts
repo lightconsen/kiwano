@@ -67,6 +67,12 @@ function split(total: number, shares: number[]): number[] {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** `2026-10-14` — the date key the trend carries beside its display label. */
+function isoDay(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function buildWindow(
   window: DashboardWindow,
   days: WindowDays,
@@ -98,8 +104,35 @@ function buildWindow(
   const costOffPeak = round2(by_provider.reduce((n, p) => n + p.cost_off_peak, 0));
   // Costs are split in cents: the agent rows are the same money as the provider
   // rows, seen from the other side, and they have to add up to it.
-  const splitCents = (amount: number) =>
-    split(Math.round(amount * 100), AGENT_MIX.map((a) => a.share)).map((c) => c / 100);
+  const splitCents = (amount: number, shares: number[] = AGENT_MIX.map((a) => a.share)) =>
+    split(Math.round(amount * 100), shares).map((c) => c / 100);
+  // The trend, as the daemon builds it: each bucket carries its own date key and
+  // its share of the window's money. Money is split in cents by token share, so
+  // the buckets add up to `cost` exactly — the same promise the backend's trend
+  // makes, and the one the grid's ramp depends on: a cell is a bucket, and a set
+  // of cells that did not sum to the stat above them would be a mock telling a
+  // `pnpm dev` session the screen is fine when it is not.
+  //
+  // `day` is the table's own label with a year on it: an `MM-DD` names no
+  // weekday, and the grid aligns rows by weekday. The year is the current one,
+  // which puts the fixture's fixed labels (08-09 … 09-07) in the past rather
+  // than in the window they claim — a mock's dates have never moved with the
+  // clock, and inventing them here would make the labels and the keys disagree
+  // about which day is which.
+  const perBucketCost =
+    tokens === 0
+      ? days.map(() => 0)
+      : splitCents(cost, days.map((d) => d.tokens / tokens));
+  const year = new Date().getFullYear();
+  const now = new Date();
+  const trend = days.map((d, i) => ({
+    date: d.date,
+    day: window === "today" ? isoDay(now) : `${year}-${d.date}`,
+    requests: d.requests,
+    tokens: d.tokens,
+    cost: perBucketCost[i],
+  }));
+
   const perAgent = split(requests, AGENT_MIX.map((a) => a.share));
   const perAgentTokens = split(tokens, AGENT_MIX.map((a) => a.share));
   const perAgentCost = splitCents(cost);
@@ -128,7 +161,7 @@ function buildWindow(
     cost_off_peak: costOffPeak,
     latency_ms: opts.latency,
     latency_delta_pct: opts.latencyDelta,
-    trend: days,
+    trend,
     by_provider,
     by_agent,
     // Derived per request by `getDashboard`, like the backend's.

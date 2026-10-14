@@ -135,6 +135,8 @@ mod tests {
 
         // Cost is summed in the window and converted for display (default CNY).
         assert!((month.cost - month.requests as f64 * 0.5 * 7.1).abs() < 0.01);
+        // A day with no traffic is a bar with no money, not a missing one.
+        assert_eq!(month.trend[18].cost, 0.0, "the quiet day costs nothing");
 
         // All: everything the store holds, including the row no counted window
         // reaches. Its bars are whole local days like every other window's, and
@@ -154,6 +156,31 @@ mod tests {
         // 101 days no longer fit a bar each, so the rows are summed a week at a
         // time: 15 bars of seven days, the last one clipped at today.
         assert_eq!(all.trend.len(), 15, "a long history is summed by the week");
+
+        // Every bar carries its own cost, and the bars add up to the stat above
+        // them — the same promise the request counts make, for money. A grid
+        // drawn from these bars therefore cannot disagree with the headline,
+        // which is why the conversion happens per bucket here rather than being
+        // read off the window total.
+        for w in [&today, &week, &month, &all] {
+            let summed: f64 = w.trend.iter().map(|p| p.cost).sum();
+            assert!(
+                (summed - w.cost).abs() < 0.01,
+                "{}: bars sum to {summed}, the stat says {}",
+                w.window,
+                w.cost
+            );
+        }
+        // And each bar names the day it covers, in the form a grid aligns on:
+        // `date` is the axis label (MM-DD or HH:00), which cannot answer "which
+        // weekday" — and could not even be turned back into a date.
+        assert!(month.trend.iter().all(|p| p.day.len() == 10));
+        assert_eq!(
+            month.trend[29].day, today.trend[0].day,
+            "the month's last bar and today's first hour are the same day"
+        );
+        // The hourly window's 24 bars all fall inside the one day it covers.
+        assert!(today.trend.iter().all(|p| p.day == today.trend[0].day));
 
         // The deltas compare each window with the one before it, over the same
         // source: 7d is six requests this week against seven last week.

@@ -11,9 +11,22 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrendVm {
+    /// The axis label: `MM-DD` for a day bucket, `HH:00` for an hour one — and
+    /// `MM-DD` for the week a weekly bucket starts, which is why it is not the
+    /// key anything sorts or aligns on.
     pub date: String,
+    /// The bucket's own `YYYY-MM-DD` (`usage_daily`/`usage_hourly`'s key). The
+    /// grid aligns cells by weekday from this, which `date` cannot answer: a
+    /// label that omits the year and drops the hour is not a day, and deriving
+    /// the date back out of it would redo the vendor-clock arithmetic the store
+    /// already did. For an hourly bucket this is the day the hour falls in.
+    pub day: String,
     pub requests: i64,
     pub tokens: i64,
+    /// What this bucket cost, converted to the dashboard's preferred currency —
+    /// the same arithmetic and rounding as the headline `cost`, so a sum over
+    /// the trend still equals the stat above the chart.
+    pub cost: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

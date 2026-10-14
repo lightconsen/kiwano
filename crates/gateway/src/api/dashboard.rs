@@ -9,7 +9,7 @@
 //!
 //! `kiwano-core` re-exports every one of them, so its call sites are unchanged.
 
-use crate::store::{Store, UsageTotals};
+use crate::store::{DailyCostBucket, Store, UsageTotals};
 use kiwano_api::dashboard::{
     AgentDistVm, BlockedProviderVm, CurrencyMetaVm, DashboardVm, FilterOptionVm, FooterStatsVm,
     ProviderDistVm, TrendVm,
@@ -225,6 +225,7 @@ fn dashboard_costs(
 /// The "today" chart: the day's 24 local hours, zero-filled.
 fn trend_today(
     store: &Store,
+    costs: &DashboardCosts,
     agent: Option<&str>,
     provider_id: Option<&str>,
     since: Option<&str>,
@@ -243,23 +244,46 @@ fn trend_today(
     {
         hourly.insert(b.day, b.totals);
     }
+    let by_hour = cost_by_bucket(
+        store
+            .usage_cost_bucketed(agent, provider_id, since, tz, "%Y-%m-%dT%H")
+            .map_err(ApiError::failed)?,
+    );
     // The local day index, turned back into the 24 hour keys of that day.
     for h in 0..24 {
         let key = hour_key(today_days * 86_400 + h * 3_600);
         let t = hourly.get(&key).cloned().unwrap_or_default();
         trend.push(TrendVm {
+            // An hour bucket's key is `YYYY-MM-DDTHH`; the day it falls in is
+            // its first ten characters, which is what the grid aligns on (a
+            // grid of hours is one row, but the tooltip still wants a date).
+            day: key.get(..10).unwrap_or(&key).to_string(),
             date: hh00(&key),
             requests: t.requests,
             tokens: t.input_tokens + t.output_tokens,
+            cost: costs.convert(by_hour.get(&key).map_or(&[][..], Vec::as_slice)),
         });
     }
     Ok(trend)
+}
+
+/// The cost buckets grouped by the bucket key they belong to, ready for
+/// `DashboardCosts::convert` — one `Vec` per bucket, because converting is a
+/// per-bucket question (the rows inside one bucket may be priced in more than
+/// one currency, and summing across them first would add CNY to USD).
+fn cost_by_bucket(buckets: Vec<DailyCostBucket>) -> HashMap<String, Vec<(Option<String>, f64)>> {
+    let mut out: HashMap<String, Vec<(Option<String>, f64)>> = HashMap::new();
+    for b in buckets {
+        out.entry(b.day).or_default().push((b.currency, b.cost));
+    }
+    out
 }
 
 /// Every other window: one bar per local day, or per week once the days stop
 /// fitting side by side.
 fn trend_daily(
     store: &Store,
+    costs: &DashboardCosts,
     agent: Option<&str>,
     provider_id: Option<&str>,
     w: &DashWindow,
@@ -277,6 +301,14 @@ fn trend_daily(
     {
         daily.insert(d.day, d.totals);
     }
+    // The same days' costs, in their own currencies per bucket. Read rather
+    // than summed into `daily`: tokens and money are different sums, and a
+    // weekly bar wants seven days of each.
+    let by_day = cost_by_bucket(
+        store
+            .usage_cost_bucketed(agent, provider_id, w.since.as_deref(), w.tz, "%Y-%m-%d")
+            .map_err(ApiError::failed)?,
+    );
     // Local day index: the buckets have to be the same days the window
     // above selected, or the chart and its stat disagree again.
     // Where the chart starts. A counted window is a fixed number of days
@@ -301,6 +333,10 @@ fn trend_daily(
     let mut start = first_days;
     while start <= w.today_days {
         let mut t = UsageTotals::default();
+        // A week's money is the seven days' buckets *concatenated*, not summed
+        // first: the conversion is per currency, so two days priced in CNY and
+        // USD have to arrive at it as four buckets rather than two numbers.
+        let mut money: Vec<(Option<String>, f64)> = Vec::new();
         for offset in 0..step {
             let day = start + offset;
             if day > w.today_days {
@@ -314,12 +350,17 @@ fn trend_daily(
                 t.cache_read_tokens += row.cache_read_tokens;
                 t.cache_creation_tokens += row.cache_creation_tokens;
             }
+            if let Some(buckets) = by_day.get(&key) {
+                money.extend_from_slice(buckets);
+            }
         }
         let key = local_day_key(w.tz, start * 86_400);
         trend.push(TrendVm {
+            day: key.clone(),
             date: mmdd(&key),
             requests: t.requests,
             tokens: t.input_tokens + t.output_tokens,
+            cost: costs.convert(&money),
         });
         start += step;
     }
@@ -534,6 +575,7 @@ pub fn build_dashboard(
     let trend = if w.key == "today" {
         trend_today(
             store,
+            &costs,
             agent,
             provider_id,
             w.since.as_deref(),
@@ -541,7 +583,7 @@ pub fn build_dashboard(
             w.tz,
         )?
     } else {
-        trend_daily(store, agent, provider_id, &w)?
+        trend_daily(store, &costs, agent, provider_id, &w)?
     };
 
     let by_provider = provider_distribution(

@@ -185,6 +185,12 @@ describe("the dashboard fixtures", () => {
       // The trend's tokens are what the headline splits into input and output.
       expect(d.input_tokens + d.output_tokens, `${window} tokens`).toBe(sum(d.trend.map((t) => t.tokens)));
 
+      // …and its money is the headline's, to the cent: the grid's ramp is built
+      // from these buckets, so a fixture whose cells did not add up to the stat
+      // above them would have `pnpm dev` show a screen that disagrees with
+      // itself.
+      expect(sum(d.trend.map((t) => t.cost)), `${window} trend cost`).toBeCloseTo(d.cost, 2);
+
       // The option lists are the rows that had traffic, in the same order the
       // breakdowns print them.
       expect(d.filter_providers.map((p) => p.id)).toEqual(d.by_provider.map((p) => p.id));

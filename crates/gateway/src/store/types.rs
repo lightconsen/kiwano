@@ -642,6 +642,23 @@ pub struct ProviderUsage {
     pub totals: UsageTotals,
 }
 
+/// One bucket's cost in one currency — what `SUM(cost) GROUP BY bucket,
+/// cost_currency` returns. The dashboard converts each day's buckets into its
+/// preferred currency, so the trend can carry a cost that still sums to the
+/// headline (see `Store::usage_cost_bucketed`).
+///
+/// A separate struct rather than a field on [`UsageTotals`]: that one derives
+/// `Eq`, and an `f64` would take `Eq` away from every user of it. `currency` is
+/// `None` for rows priced but never given a currency, which
+/// `convert_cost_buckets` drops rather than counting as zero.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DailyCostBucket {
+    /// The bucket key, whatever granularity the query asked for.
+    pub day: String,
+    pub currency: Option<String>,
+    pub cost: f64,
+}
+
 /// Per-bucket aggregation result (sparkline / dashboard, tech.md §2.4 A).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DailyUsage {

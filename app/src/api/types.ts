@@ -557,8 +557,15 @@ export interface TrendPoint {
   /** Axis label for the bucket: `MM-DD` when bucketed by day, `HH:00` when
    *  the "today" window buckets by hour. */
   date: string;
+  /** The bucket's own `YYYY-MM-DD` — the day it covers, whether the bucket is
+   *  an hour, a day or a week. The grid aligns cells by weekday from this;
+   *  `date` cannot answer that (it drops the year, and an hour is not a day). */
+  day: string;
   requests: number;
   tokens: number;
+  /** What this bucket cost, already converted to the display currency — the
+   *  same arithmetic the headline uses, so the buckets still sum to it. */
+  cost: number;
 }
 
 export type DashboardWindow = "today" | "7d" | "30d" | "all";

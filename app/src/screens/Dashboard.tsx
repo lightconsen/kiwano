@@ -22,6 +22,18 @@ import { fmtMoney, fmtTokens } from "../lib/format";
 import { useT, type KeyPath, type Messages } from "../i18n";
 import RequestLogs, { type Tab } from "./RequestLogs";
 import SessionDetail from "./SessionDetail";
+import { ActivityGrid } from "./Dashboard/ActivityGrid";
+import {
+  bucketUnit,
+  metricTabKey,
+  metricValue,
+  type ChartLayout,
+  type TrendMetric,
+} from "./Dashboard/metrics";
+
+/** The three series the Activity card can show, in the order the switch draws
+    them. Stated once: the switch, the readout and the ramp all read this. */
+const METRICS: TrendMetric[] = ["requests", "tokens", "cost"];
 
 // Labels only: `id` is what the backend filters on and stays untranslated.
 const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
@@ -32,8 +44,6 @@ const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
   // total", which no counted window answers.
   { id: "all", labelKey: "dashboard.windowAll" },
 ];
-
-type TrendMetric = "requests" | "tokens";
 
 /** One metric as columns.
  *
@@ -61,15 +71,17 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
   const right = 884;
   const TIP_H = 24; // the readout's own height; only offsets where it lands
   const n = data.trend.length;
-  const value = (t: DashboardData["trend"][number]) =>
-    metric === "requests" ? t.requests : t.tokens;
+  const value = (t: DashboardData["trend"][number]) => metricValue(t, metric);
   // Empty DB gives max=0 → division yields NaN → SVG error; clamp with max(1, ·)
   const max = Math.max(1, ...data.trend.map(value));
   const slot = (right - left) / Math.max(1, n);
   // Thin marks with a 2px gap between them, and a cap so a short window does
   // not draw slabs the width of the card.
   const barWidth = Math.max(2, Math.min(slot - 2, 44));
-  const color = metric === "requests" ? "var(--kiwi)" : "var(--orange)";
+  // Three series, three accents: the layout switch must not change what a
+  // colour means, so the mapping is stated once and read by both layouts.
+  const color =
+    metric === "requests" ? "var(--kiwi)" : metric === "tokens" ? "var(--orange)" : "var(--blue)";
   const ticks = [
     { y: top, v: max },
     { y: (top + bottom) / 2, v: max / 2 },
@@ -453,8 +465,11 @@ export default function Dashboard({
   useEffect(() => {
     if (openSessionId) setCardTab("sessions");
   }, [openSessionId]);
-  // The trend chart shows one metric at a time (see TrendBars).
+  // The Activity card shows one metric at a time, in one of two layouts — the
+  // two switches are independent, because they answer different questions
+  // ("which number" and "how laid out").
   const [metric, setMetric] = useState<TrendMetric>("requests");
+  const [layout, setLayout] = useState<ChartLayout>("bars");
   const [data, setData] = useState<DashboardData | null>(null);
   // Costs arrive already converted to the preferred currency (Settings)
   const [pref, setPref] = useState("CNY");
@@ -650,23 +665,46 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Request trend */}
+        {/* Activity: the same buckets as columns, or as a grid of cells. */}
         <div className="mt-3 rounded-lg border border-line bg-surface p-3.5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-[12.5px] font-semibold">{t("dashboard.usageTrend")}</h3>
-            <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
-              {(["requests", "tokens"] as TrendMetric[]).map((m, i) => (
-                <button
-                  key={m}
-                  className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${metric === m ? " active" : ""}`}
-                  onClick={() => setMetric(m)}
-                >
-                  {t(m === "requests" ? "dashboard.metricRequests" : "dashboard.metricTokens")}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
+                {(["bars", "grid"] as ChartLayout[]).map((l, i) => (
+                  <button
+                    key={l}
+                    className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${layout === l ? " active" : ""}`}
+                    onClick={() => setLayout(l)}
+                  >
+                    {t(l === "bars" ? "dashboard.layoutBars" : "dashboard.layoutGrid")}
+                  </button>
+                ))}
+              </div>
+              <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
+                {METRICS.map((m, i) => (
+                  <button
+                    key={m}
+                    className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${metric === m ? " active" : ""}`}
+                    onClick={() => setMetric(m)}
+                  >
+                    {t(metricTabKey(m))}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-          <TrendBars data={data} metric={metric} />
+          {layout === "bars" ? (
+            <TrendBars data={data} metric={metric} />
+          ) : (
+            <ActivityGrid
+              points={data.trend}
+              metric={metric}
+              currency={pref}
+              unit={bucketUnit(data.trend, data.window)}
+              t={t}
+            />
+          )}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

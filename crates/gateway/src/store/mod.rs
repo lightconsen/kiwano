@@ -60,9 +60,9 @@ pub use migrations::SCHEMA_VERSION;
 pub use time::{now_rfc3339, rfc3339_from_unix, unix_now};
 pub use types::{
     AgentLimit, ApiKeyRow, Billing, Binding, ClientKey, ClientKeyLimit, ClientKeySpend, CostBucket,
-    CustomAgent, DailyUsage, ImportedSession, OpenAiWire, Protocol, Provider, ProviderCostBucket,
-    ProviderEndpoint, ProviderHealth, ProviderUsage, Strategy, StrategyType, TrafficStats,
-    UpstreamKeySpend, UsageRecord, UsageTotals,
+    CustomAgent, DailyCostBucket, DailyUsage, ImportedSession, OpenAiWire, Protocol, Provider,
+    ProviderCostBucket, ProviderEndpoint, ProviderHealth, ProviderUsage, Strategy, StrategyType,
+    TrafficStats, UpstreamKeySpend, UsageRecord, UsageTotals,
 };
 
 /// Thin handle around a SQLite connection (WAL, shared with the Tauri app).

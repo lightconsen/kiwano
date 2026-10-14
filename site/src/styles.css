@@ -490,6 +490,25 @@ section.block { padding: 96px 0 0; }
 .priv .icon { color: var(--kiwi); width: 19px; height: 19px; }
 .priv span { font-size: 13.5px; color: oklch(0.72 0.015 260); }
 
+/* ── 信任(Trust)一节:faq 卡片的形状,但三块是展开的;verify 是一整块命令 ── */
+.grid-trust { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+.grid-trust .faq { cursor: default; padding: 18px; }
+.grid-trust .faq:hover { border-color: var(--line); }
+.tr-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.tr-row .icon { color: var(--kiwi); width: 19px; height: 19px; flex: none; }
+.tr-row h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.grid-trust p { margin: 0; font-size: 13.5px; color: var(--mut); line-height: 1.7; }
+.grid-trust code { font-family: var(--font-mono); font-size: 12px; }
+
+.verify { margin-top: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 18px 20px 20px; }
+.verify-lead { margin: 0 0 12px; font-size: 13px; color: var(--ink); font-weight: 550; }
+.verify pre { margin: 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.75; color: oklch(0.78 0.01 260); }
+.verify pre code { display: block; }
+
+@media (max-width: 760px) {
+  .grid-trust { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ── 页脚 ── */
 footer { padding: 56px 0 44px; }
 .foot-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }

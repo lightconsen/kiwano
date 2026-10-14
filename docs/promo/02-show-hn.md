@@ -94,3 +94,9 @@ HN **完全不渲染 markdown**,上面正文里唯一能带过去的结构是:
 - [ ] 评论区有人问就跑 `gh attestation verify` 给截图,这招比文字有说服力
 - [ ] 同日把 thread 发到 X(见 `04-x-thread.md`),互相引流
 - [ ] 次日热点落完后,把评论区高频问题补进 README / `01-pitch.md`
+- [ ] **"you can't verify it" 类问题的答案**(主页"Trust"一节落出来之后,
+      这几乎是必然一问):不要说"我们没有遥测"——说"你不需要信。四条,
+      都在你自己的机器上:grep 这个仓库找追踪器(连一个遥测依赖都没有)、
+      用 lsof 盯着流量看、`gh attestation verify` 验这个发布版、或者从源码
+      自己构建"。主页:https://kiwano.cc 的 "Private by construction, verifiable
+      by you" 一节;README 的 Privacy 一节有同样的命令。

@@ -93,6 +93,11 @@
     },
     {
       "@type": "Question",
+      "name": "How can I verify any of that?",
+      "acceptedAnswer": { "@type": "Answer", "text": "All four ways, from your machine: grep the repo for a tracker (there is no telemetry dependency at all), watch the traffic (nothing but the vendor's endpoint and the Hub's static files), verify the release with gh attestation (the binary came from the tagged commit), or build it yourself from source (README, Development). The claims and the checks are the same document." }
+    },
+    {
+      "@type": "Question",
       "name": "I use cc-switch — can I migrate?",
       "acceptedAnswer": { "@type": "Answer", "text": "Yes, in one click. Kiwano imports your cc-switch config and brings providers and agent bindings along as-is — and adds what cc-switch does not have: the local gateway, the provider catalog and usage analytics." }
     },
@@ -136,6 +141,8 @@
   <symbol id="i-heart" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></symbol>
   <symbol id="i-languages" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></symbol>
+  <!-- Lucide 的 hammer(锤子+钉子):信任一节的"可自行编译"条目 -->
+  <symbol id="i-hammer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A2 2 0 0 1 12 5.828v.344a2 2 0 0 0 .586 1.414L13.5 9.5z"/></symbol>
   <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
   <symbol id="i-apple" viewBox="0 0 24 24" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></symbol>
   <symbol id="i-windows" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></symbol>
@@ -210,7 +217,7 @@
       <a class="btn btn-lg" href="#download-win"><svg class="icon"><use href="#i-windows"/></svg>Windows</a>
       <a class="btn btn-lg" href="#download-linux"><svg class="icon"><use href="#i-linux"/></svg>Linux</a>
     </div>
-    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note"><span class="dl-ver">🎉 v0.2.12 just released</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source</p>
+    <p class="dl-note rv" style="--d:240ms" data-i18n="hero.note"><span class="dl-ver">🎉 v0.3.4 just released</span> · <b>macOS 12+</b> (Apple Silicon / Intel) · <b>Windows 10+</b> · <b>Linux</b> — free & open source</p>
     <!-- every agent the gateway takes over, logos only (names on hover) -->
     <div class="agents-row rv" style="--d:300ms" aria-label="Supported agents">
       <img src="assets/agent-logos/claudecode.svg" title="Claude Code" alt="Claude Code">
@@ -593,6 +600,56 @@
           <summary><span data-i18n="fq9.t">Is Kiwano free?</span><span class="plus" aria-hidden="true">+</span></summary>
           <p class="ans" data-i18n="fq9.d">Completely — no account, works offline. Open source under Apache-2.0.</p>
         </details>
+        <details class="faq rv">
+          <summary><span data-i18n="fq10.t">How can I verify any of that?</span><span class="plus" aria-hidden="true">+</span></summary>
+          <p class="ans" data-i18n="fq10.d">All four ways, from your machine: grep the repo for a tracker (there is no telemetry dependency at all), watch the traffic (nothing but the vendor's endpoint and the Hub's static files), verify the release with <code>gh attestation</code> (the binary came from the tagged commit), or build it yourself from source (README, Development). The claims and the checks are the same document.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 信任:三条各带一条可以核的出处;不信就验,四条命令页末给出 ══ -->
+  <section class="block" id="trust">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <div class="kicker">Trust</div>
+        <h2 data-i18n="tr.h2">Private by construction, verifiable by you</h2>
+        <p data-i18n="tr.p">Three claims, and the receipts. "Private by policy" is a sentence anyone can write — these are things you can check on your own machine.</p>
+      </div>
+      <div class="grid-trust">
+        <div class="faq rv">
+          <div class="tr-row">
+            <svg class="icon"><use href="#i-shield"/></svg>
+            <h3 data-i18n="tr1.t">No telemetry</h3>
+          </div>
+          <p data-i18n="tr1.d">There is no tracker dependency at all, and no crash reporting. The one network call the app makes on its own is the Hub's manifest — a <code>GET</code> for a static JSON of catalog entries, prices and exchange rates, cached locally, never carrying a key or a request. Watch it with <code>lsof</code> if you like: the only outbound traffic an agent's request makes is to that provider's endpoint.</p>
+        </div>
+        <div class="faq rv" style="--d:60ms">
+          <div class="tr-row">
+            <svg class="icon"><use href="#i-key"/></svg>
+            <h3 data-i18n="tr2.t">Keys never leave the machine</h3>
+          </div>
+          <p data-i18n="tr2.d">Provider credentials live in a local SQLite database — directory <code>0700</code>, file <code>0600</code> — readable by your user alone. They are sent to exactly one place: the provider you configured, over that provider's TLS. The Hub holds no keys and no request data, by construction rather than by policy.</p>
+        </div>
+        <div class="faq rv" style="--d:120ms">
+          <div class="tr-row">
+            <svg class="icon"><use href="#i-hammer"/></svg>
+            <h3 data-i18n="tr3.t">Verify, or compile your own</h3>
+          </div>
+          <p data-i18n="tr3.d">Every release is attested from the tagged commit (<code>gh attestation verify</code>), and the whole build is the Development section of the README. If "no telemetry" is a claim you don't take on faith, the check is the repo itself: grep it, or build it.</p>
+        </div>
+      </div>
+      <div class="verify rv" style="--d:180ms">
+        <p class="verify-lead" data-i18n="tr.verify.lead">Don't take it on faith — check one. From your machine:</p>
+        <pre><code># the whole of Kiwano's telemetry
+$ grep -rn "sentry\|mixpanel\|segment\|posthog" Cargo.toml crates/*/Cargo.toml
+# (no matches — that is the finding, not a gap in the command)
+
+# what the updater actually trusts
+$ gh attestation verify Kiwano_0.3.4_aarch64.dmg --repo lightconsen/kiwano
+
+# the whole app, from source
+$ git clone https://github.com/lightconsen/kiwano && cd kiwano && pnpm install && cargo build --workspace</code></pre>
       </div>
     </div>
   </section>

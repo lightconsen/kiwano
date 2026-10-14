@@ -46,6 +46,9 @@ Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你�
   > 发帖前若目录又变了,以线上 `catalog.json` 的 `total` 为准,别背数字。
 - 隐私:Key 在 owner-only SQLite(目录 0700 / 文件 0600);请求与正文不过 Kiwano
   服务器;无遥测无埋点;更新检查只是对静态 JSON manifest 的一次 HTTPS 请求。
+  **2026-10-14 起,这些说法从"一句话"变成"可核的"**:主页(及 README 的 Privacy 一节)
+  列了四条命令让任何人自己验(grep 仓库找追踪器 / lsof 盯流量 / `gh attestation verify` 验发布版 /
+  从源码自建)。被问"你怎么证明"时**不要**只答"我们没有遥测",答"这是可以核的,四条命令都在那"。
 - 服务器形态:一键 `curl -fsSL https://hub.kiwano.cc/install.sh | sh`,装 CLI + 网关
   daemon 到 `~/.local/bin`,注册用户级服务(免 root)。CLI 能力见 `docs/cli.md`
   (`kiwano import cc-switch`、`kiwano agents takeover`、`kiwano insights`、
@@ -58,6 +61,8 @@ Kiwano 是桌面 App,装好后在 `127.0.0.1:8317` 起一个本地网关。你�
   macOS 已用 Developer ID 签名并公证;Windows 未签名。
 - 信任基建(别人少有的加分项):每个发布附 `SHA256SUMS` + 可验证构建溯源
   (`gh attestation verify <file> --repo lightconsen/kiwano`,走 GitHub 透明度日志)。
+  主页"Trust"一节与 README 的 Privacy 一节把这两条连同"没有遥测"写成四条
+  可跑的命令,发布后被问"怎么证明"时引用它,不要只说"我们没有遥测"。
 - 许可证:Apache-2.0;部分模块移植自
   [cc-switch](https://github.com/farion1231/cc-switch)(MIT,见 `THIRD-PARTY-NOTICES`)。
 - 平台:macOS(Apple Silicon / Intel)、Windows 10+、Linux x86_64。

@@ -109,6 +109,24 @@ Kiwano is local-first by design, and the code is the specification:
 - The Hub only ever serves **catalog metadata** (provider names, endpoints, prices). It sees no keys and no request data.
 - There is no analytics or telemetry in the app. Update checks are a plain HTTPS request for a static JSON manifest.
 
+**Verify rather than trust.** None of the above is a claim you have to take on
+faith; each of these is a check you can run on your own machine:
+
+```bash
+# the whole of Kiwano's telemetry
+grep -rn "sentry\|mixpanel\|segment\|posthog" Cargo.toml crates/*/Cargo.toml
+# (no matches — that is the finding, not a gap in the command)
+
+# what the updater actually trusts: the release came from the tagged commit
+gh attestation verify Kiwano_0.3.4_aarch64.dmg --repo lightconsen/kiwano
+
+# the whole app, from source
+git clone https://github.com/lightconsen/kiwano && cd kiwano && pnpm install && cargo build --workspace
+```
+
+The same claims, with the receipts spelled out, are on the
+[homepage](https://kiwano.cc) ("Private by construction, verifiable by you").
+
 ## On a server
 
 No display, no desktop app — one command:

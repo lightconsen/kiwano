@@ -19,6 +19,38 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-20
+
+**The version where the dashboard shows you which days you actually worked.** The
+trend chart answered "how much, over time"; a bar of zero was easy to miss, so a
+month of light use read like a month of none.
+
+The Activity card now draws those same buckets as a grid of cells — colour depth
+by volume, gray for a bucket that had nothing in it — with a switch beside the
+existing one for the metric: requests, tokens or cost. The two layouts read the
+same data, so switching changes how it is drawn and nothing else. One cell is an
+hour for "today", a day for 7d/30d, and a week once a history is long enough to
+be summed that way; the caption says which, because it changes with the window.
+
+Two states a colour ramp would report wrongly are drawn apart: an empty bucket is
+a hole in the card rather than the faintest shade, and an hour that has not
+happened yet is its own state rather than "no activity". The intensity steps are
+the terciles of the window's own non-zero buckets, so a light user and a heavy
+one both get a readable range, and the legend names and counts every step.
+
+The trend's own points gained the day they cover and what they cost, converted to
+the display currency the same way the headline is — so the grid's cells add up to
+the figure above them instead of approximating it.
+
+Also in this release, from the days before it: the landing page's privacy claims
+became a **Trust** section with the four commands that check them, and the README
+carries the same checks.
+
+### Added
+
+- **An activity grid on the Dashboard, switchable with the trend chart.** One cell
+  per bucket; see the section above for what a bucket is in each window.
+
 ## [0.3.4] - 2026-10-13
 
 **The version where the price followed what the reply said.** Both fixes here are

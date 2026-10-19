@@ -2,7 +2,7 @@
   "name": "kiwano",
   "private": true,
   "license": "Apache-2.0",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "scripts": {
     "dev": "vite",

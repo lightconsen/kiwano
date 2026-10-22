@@ -24,6 +24,10 @@
 //!   is not asking for thinking.
 //! - R3 both: `null` tool schemas from clients like Codex, rejected by
 //!   strict JSON-Schema parsers.
+//! - R4 [`normalize_system_roles`], provider-scoped: a `role: "system"` entry
+//!   inside `messages[]`, which some anthropic-shaped upstreams reject
+//!   outright (Command Code answers 400 `Invalid input at messages.N.role`).
+//!   Claude Code sends environment and context blocks that way.
 //!
 //! Stripping perturbs an upstream prompt cache once — the alternative was a
 //! 400. Idempotent by construction: a second pass finds nothing to do.
@@ -53,6 +57,46 @@ pub fn sanitize_openai(body: &mut Value) -> Vec<String> {
     let mut notes = Notes::default();
     fill_null_parameters(body, &mut notes);
     notes.finish()
+}
+
+/// R4: send a `system` entry inside `messages[]` as a `user` turn.
+///
+/// Not every anthropic-shaped endpoint accepts the role: Command Code answers
+/// `400 Invalid input at messages.N.role`, and Claude Code puts its environment
+/// and context blocks there — so a request that is valid everywhere else never
+/// leaves the gateway. This is the same rewrite a local proxy had to do by
+/// hand before the rule existed.
+///
+/// The alternative that reads better — hoist the contents into the endpoint's
+/// top-level `system` field — is *not* what this does: it merges two content
+/// shapes the upstream may parse differently, and the proven behaviour for this
+/// endpoint is the role swap. The weight of the message is what is lost, and
+/// the endpoint was going to refuse it anyway.
+///
+/// Provider-scoped on purpose: a global rewrite would change the meaning of
+/// every anthropic request for upstreams that do accept the role.
+///
+/// Idempotent: after one pass there is no `system` role left to find.
+pub fn normalize_system_roles(body: &mut Value) -> Vec<String> {
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+        return Vec::new();
+    };
+    let mut changed = 0usize;
+    for message in messages.iter_mut() {
+        let Some(object) = message.as_object_mut() else {
+            continue;
+        };
+        if object.get("role").and_then(Value::as_str) == Some("system") {
+            object.insert("role".into(), Value::String("user".into()));
+            changed += 1;
+        }
+    }
+    if changed == 0 {
+        return Vec::new();
+    }
+    vec![format!(
+        "messages: {changed} system role(s) sent as user — the upstream rejects the system role"
+    )]
 }
 
 /// Note collector with the row-width cap applied at the end.
@@ -539,5 +583,43 @@ mod tests {
             .map(String::as_str)
             .collect();
         assert_eq!(keys, vec!["zzz_custom", "aaa_custom", "messages"]);
+    }
+
+    // --- R4: a system role inside messages[] ---
+
+    #[test]
+    fn r4_sends_system_entries_as_user_and_says_how_many() {
+        let mut body = json!({
+            "model": "claude-opus-4-8",
+            "messages": [
+                {"role": "system", "content": "environment: darwin"},
+                {"role": "user", "content": "hi"},
+                {"role": "system", "content": [{"type": "text", "text": "context"}]}
+            ]
+        });
+        let notes = normalize_system_roles(&mut body);
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][2]["role"], "user");
+        // Everything else is left where it was — the rule edits roles, not turns.
+        assert_eq!(body["messages"][1]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "environment: darwin");
+        assert_eq!(
+            notes,
+            vec!["messages: 2 system role(s) sent as user — the upstream rejects the system role"]
+        );
+
+        // Idempotent: a second pass finds nothing, so a forwarded body is stable.
+        assert!(normalize_system_roles(&mut body).is_empty());
+    }
+
+    #[test]
+    fn r4_leaves_a_body_without_system_entries_alone() {
+        let mut body = json!({"messages": [{"role": "user", "content": "hi"}]});
+        let before = body.clone();
+        assert!(normalize_system_roles(&mut body).is_empty());
+        assert_eq!(body, before);
+        // A body with no messages array (or a non-array one) is not an error.
+        let mut odd = json!({"messages": "not an array"});
+        assert!(normalize_system_roles(&mut odd).is_empty());
     }
 }

@@ -160,7 +160,7 @@ pub async fn forward(
     // an Alternate endpoint's protocol counts — and skipped entirely when the
     // global switch is off.
     let shimmed = if state.compat_shim_enabled() {
-        apply_compat_shim(&body, provider.protocol)
+        apply_compat_shim(&body, provider.protocol, &provider.base_url)
     } else {
         None
     };

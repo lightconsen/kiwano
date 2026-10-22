@@ -91,6 +91,15 @@ pub struct UpstreamProvider {
     /// Additional per-protocol endpoints (migration v7): an inbound request in
     /// one of these protocols is forwarded natively to the matching URL.
     pub endpoints: Vec<ProviderEndpoint>,
+    /// Which models each protocol endpoint serves, when the Hub entry publishes
+    /// it (the entry's `endpoints[].models`, built from each model's `serves`).
+    ///
+    /// Some vendors split their catalogue by surface — Command Code serves
+    /// `claude-*` only on its Anthropic endpoint and every open model only on
+    /// its OpenAI one — so "this provider has an Anthropic endpoint" does not
+    /// mean "every model goes there". Empty means the entry says nothing (or
+    /// this provider has no entry), and resolution keeps its protocol-only rule.
+    pub endpoint_models: Vec<(Protocol, Vec<String>)>,
     pub api_key: Option<String>,
     /// Extra API keys rotating after the primary (spec §4.1 P1 multi-key rotation).
     pub extra_keys: Vec<PoolKey>,
@@ -109,6 +118,36 @@ pub struct UpstreamProvider {
     /// Custom request headers merged after credential injection (v8) —
     /// `insert`-replace, so these can override the injected credentials.
     pub headers: Option<BTreeMap<String, String>>,
+}
+
+/// The catalogue entry's per-endpoint model sets, as the router carries them.
+///
+/// The entry hoists its primary endpoint into `protocol`/`models` at load time
+/// (`api::catalog::normalize_catalog_entry`), so both halves are read here: the
+/// primary's pair and every extra endpoint's. An endpoint with no models is
+/// left out — an empty list would read as "serves nothing", where the truth is
+/// "the entry does not say", and the two must resolve differently.
+fn endpoint_models(
+    entry: Option<&crate::api::catalog::CatalogEntryVm>,
+) -> Vec<(Protocol, Vec<String>)> {
+    let Some(entry) = entry else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Some(protocol) = Protocol::parse_str(&entry.protocol) {
+        if !entry.models.is_empty() {
+            out.push((protocol, entry.models.clone()));
+        }
+    }
+    for e in &entry.endpoints {
+        if e.models.is_empty() {
+            continue;
+        }
+        if let Some(protocol) = Protocol::parse_str(&e.protocol) {
+            out.push((protocol, e.models.clone()));
+        }
+    }
+    out
 }
 
 /// Parse the provider's stored custom-headers JSON (`{"Name":"value"}`) into
@@ -241,6 +280,32 @@ impl UpstreamProvider {
     pub fn endpoint_for(&self, protocol: Protocol) -> Option<&ProviderEndpoint> {
         self.endpoints.iter().find(|e| e.protocol == protocol)
     }
+
+    /// The URL a request for `protocol` goes to: the provider's own base when
+    /// it is the primary protocol, else its registered endpoint for it.
+    pub fn endpoint_target(&self, protocol: Protocol) -> Option<(String, Option<String>)> {
+        if protocol == self.protocol {
+            return Some((self.base_url.clone(), self.api_path.clone()));
+        }
+        self.endpoint_for(protocol)
+            .map(|e| (e.base_url.clone(), e.api_path.clone()))
+    }
+
+    /// Whether the catalogue says this endpoint serves `model`. `None` when the
+    /// provider publishes no sets at all — "unknown", which every caller reads
+    /// as "keep the old rule" rather than as "does not serve it".
+    pub fn endpoint_serves(&self, protocol: Protocol, model: &str) -> Option<bool> {
+        if self.endpoint_models.is_empty() {
+            return None;
+        }
+        Some(
+            self.endpoint_models
+                .iter()
+                .filter(|(p, _)| *p == protocol)
+                .flat_map(|(_, models)| models)
+                .any(|m| m.eq_ignore_ascii_case(model)),
+        )
+    }
 }
 
 impl RouteTable {
@@ -262,6 +327,16 @@ impl RouteTable {
             .into_iter()
             .map(|p| (p.id.clone(), p))
             .collect();
+
+        // The catalogue's per-endpoint model sets, read once for the whole
+        // table. A provider without a `catalog_id`, or an entry that publishes
+        // no sets, simply gets an empty list — which every reader treats as
+        // "unknown" and resolves the old way.
+        let catalog = crate::api::catalog::catalog_snapshot(store);
+        let entry_for = |catalog_id: Option<&str>| -> Option<&crate::api::catalog::CatalogEntryVm> {
+            let id = catalog_id?;
+            catalog.entries.iter().find(|e| e.id == id)
+        };
 
         let mut routes = HashMap::new();
         for agent in agents {
@@ -286,6 +361,7 @@ impl RouteTable {
                         base_url: p.base_url.clone(),
                         api_path: p.api_path.clone(),
                         endpoints: p.endpoints.clone(),
+                        endpoint_models: endpoint_models(entry_for(p.catalog_id.as_deref())),
                         api_key: p.api_key.clone(),
                         extra_keys: store
                             .list_api_keys(&p.id)?
@@ -708,5 +784,64 @@ mod tests {
         let table = RouteTable::load(&store).unwrap();
         let err = resolve(&table, Some("kw-ag-codex-unbound")).unwrap_err();
         assert!(matches!(err, GatewayError::NoBinding(a) if a == AGENT_CODEX));
+    }
+
+    /// The catalogue's per-endpoint model sets reach the candidate, and a
+    /// provider without a catalogue entry carries none — which is what keeps
+    /// every other provider on the protocol-only rule.
+    #[test]
+    fn route_table_carries_the_catalogues_endpoint_model_sets() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = seeded_store(&dir);
+
+        // The shape `catalog_snapshot` normalizes: the primary endpoint
+        // hoisted into `protocol`/`models`, extras under `endpoints`.
+        let payload = r#"{"total":1,"entries":[{
+            "id":"commandcode","name":"Command Code",
+            "protocol":"openai","endpoint":"https://api.commandcode.ai/provider/v1",
+            "models":["deepseek/deepseek-v4.1-flash"],
+            "endpoints":[{"protocol":"anthropic",
+                          "endpoint":"https://api.commandcode.ai/provider",
+                          "models":["claude-sonnet-5-5"]}],
+            "tag":"aggregate","rating":3.8,"billing":"both","added":false
+        }]}"#;
+        store.save_hub_cache(payload, "t").unwrap();
+
+        // p-oai already exists in the seeded store and is Codex's candidate.
+        let mut p = provider("p-oai", Protocol::OpenAI, true);
+        p.catalog_id = Some("commandcode".into());
+        p.endpoints = vec![ProviderEndpoint {
+            protocol: Protocol::Anthropic,
+            base_url: "https://api.commandcode.ai/provider".into(),
+            api_path: None,
+        }];
+        store.update_provider(&p).unwrap();
+
+        let table = RouteTable::load(&store).unwrap();
+        let cc = &table.routes.get(AGENT_CODEX).unwrap().candidates[0];
+        assert_eq!(
+            cc.endpoint_serves(Protocol::OpenAI, "deepseek/deepseek-v4.1-flash"),
+            Some(true)
+        );
+        assert_eq!(
+            cc.endpoint_serves(Protocol::OpenAI, "claude-sonnet-5-5"),
+            Some(false)
+        );
+        assert_eq!(
+            cc.endpoint_serves(Protocol::Anthropic, "claude-sonnet-5-5"),
+            Some(true)
+        );
+
+        // A hand-added provider has no entry: `None`, not "serves nothing".
+        assert_eq!(
+            cc.endpoint_serves(Protocol::Anthropic, "unknown"),
+            Some(false)
+        );
+        let other = &table.routes.get(AGENT_CLAUDE).unwrap().candidates[0];
+        assert_eq!(other.endpoint_models, Vec::new());
+        assert_eq!(
+            other.endpoint_serves(Protocol::Anthropic, "claude-sonnet-5-5"),
+            None
+        );
     }
 }

@@ -102,6 +102,7 @@ pub(crate) mod test_support {
             base_url: format!("https://{id}.example.com"),
             api_path: None,
             endpoints: Vec::new(),
+            endpoint_models: Vec::new(),
             api_key: Some(format!("sk-{id}")),
             extra_keys: Vec::new(),
             weight,

@@ -77,6 +77,7 @@ pub(crate) mod test_support {
             base_url: "https://up.example.com".into(),
             api_path: api_path.map(Into::into),
             endpoints: Vec::new(),
+            endpoint_models: Vec::new(),
             api_key: Some("sk-real-key".into()),
             extra_keys: Vec::new(),
             weight: 1,

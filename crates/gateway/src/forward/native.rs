@@ -64,72 +64,89 @@ pub async fn forward(
         request_notes: None,
     });
 
+    // The model the client asked for, read once: the endpoint decision below
+    // needs it too (a catalogue that splits its models across endpoints), and
+    // the metering path reads the same field for the same reason.
+    let model = request_model(&body).or_else(|| model_from_path(&path));
+
     // Resolve the endpoint + protocol for the inbound flavor: native when it
     // matches the provider (or the path is ambiguous), natively via a
     // registered per-protocol endpoint when one exists, otherwise the legacy
     // Anthropic → OpenAI conversion, or a clean mismatch failure.
     let provider_for_alt;
-    let provider: &UpstreamProvider = match resolve_inbound(provider, inbound, &path) {
-        InboundResolution::Native => provider,
-        InboundResolution::Alternate {
-            protocol,
-            base_url,
-            api_path,
-        } => {
-            provider_for_alt = UpstreamProvider {
+    let provider: &UpstreamProvider =
+        match resolve_inbound(provider, inbound, &path, model.as_deref()) {
+            InboundResolution::Native => provider,
+            InboundResolution::Alternate {
                 protocol,
                 base_url,
                 api_path,
-                ..provider.clone()
-            };
-            &provider_for_alt
-        }
-        InboundResolution::ConvertResponsesToChat => {
-            return crate::forward::convert_responses::forward_responses_via_chat(
-                state,
-                method,
-                inbound_headers,
-                body,
-                routed,
-                inbound,
-                started,
-                started_unix,
-                log,
-            )
-            .await;
-        }
-        InboundResolution::ConvertAnthropicToOpenAI => {
-            return forward_anthropic_via_openai(
-                state,
-                method,
-                inbound_headers,
-                body,
-                routed,
-                inbound,
-                started,
-                started_unix,
-                log,
-            )
-            .await;
-        }
-        InboundResolution::Mismatch { message } => {
-            log_failure(
-                &state,
-                log.as_ref(),
-                provider,
-                &routed,
-                StatusCode::BAD_GATEWAY,
-                "protocol_mismatch",
-                message.clone(),
-            );
-            return error_response(
-                inbound,
-                StatusCode::BAD_GATEWAY,
-                "protocol_mismatch",
-                &message,
-            );
-        }
-    };
+            } => {
+                provider_for_alt = UpstreamProvider {
+                    protocol,
+                    base_url,
+                    api_path,
+                    ..provider.clone()
+                };
+                &provider_for_alt
+            }
+            InboundResolution::ConvertResponsesToChat => {
+                return crate::forward::convert_responses::forward_responses_via_chat(
+                    state,
+                    method,
+                    inbound_headers,
+                    body,
+                    routed,
+                    inbound,
+                    started,
+                    started_unix,
+                    log,
+                )
+                .await;
+            }
+            InboundResolution::ConvertAnthropicToOpenAI { base_url, api_path } => {
+                // The conversion may be aimed at an endpoint other than the
+                // provider's primary one — the model decided that above — so the
+                // attempt carries the chosen URL rather than the row's own.
+                let target = RoutedRequest {
+                    provider: UpstreamProvider {
+                        base_url,
+                        api_path,
+                        ..provider.clone()
+                    },
+                    ..routed
+                };
+                return forward_anthropic_via_openai(
+                    state,
+                    method,
+                    inbound_headers,
+                    body,
+                    target,
+                    inbound,
+                    started,
+                    started_unix,
+                    log,
+                )
+                .await;
+            }
+            InboundResolution::Mismatch { message } => {
+                log_failure(
+                    &state,
+                    log.as_ref(),
+                    provider,
+                    &routed,
+                    StatusCode::BAD_GATEWAY,
+                    "protocol_mismatch",
+                    message.clone(),
+                );
+                return error_response(
+                    inbound,
+                    StatusCode::BAD_GATEWAY,
+                    "protocol_mismatch",
+                    &message,
+                );
+            }
+        };
 
     let mut url = upstream_url(provider, &path);
     if let Some(q) = &query {
@@ -149,10 +166,7 @@ pub async fn forward(
         Err(resp) => return resp,
     };
 
-    // Read the model from the client's own body, before the send consumes it —
-    // the body states the model for the JSON-API protocols; the native Gemini
-    // API names it in the path instead, so that shape is read from there.
-    let model = request_model(&body).or_else(|| model_from_path(&path));
+    // `model` was read above, where the endpoint decision needed it.
 
     // The compat shim runs first, on the client's own bytes: strip parameters
     // the effective upstream cannot parse, and remember what changed so the

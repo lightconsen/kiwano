@@ -1212,7 +1212,14 @@ async fn sync_hub_route(State(state): State<Arc<GatewayState>>) -> Response {
             // here, and the route table re-read when either wrote. The daemon
             // used to be told this happened by the app (`apply_hub_documents` +
             // `/reload`) — it is the same work, in the process that owns it.
-            if crate::api::sync::apply_hub_documents(&state.store) {
+            //
+            // `apply_hub_documents` reports prices and provider links only, and
+            // the route table now also carries the catalogue's per-endpoint
+            // model sets: a catalogue that changed while the prices did not
+            // would leave those sets stale, so a re-fetched catalogue reloads
+            // too (`!report.unchanged`).
+            let wrote = crate::api::sync::apply_hub_documents(&state.store);
+            if wrote || !report.unchanged {
                 reload_after_write(&state);
             }
             Json(report).into_response()

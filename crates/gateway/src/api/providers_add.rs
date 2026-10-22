@@ -19,6 +19,7 @@
 //! display rules it shares with this add moved to [`super::views`].
 
 use crate::store::{Binding, Provider, Store, StrategyType};
+use kiwano_adapters::endpoint::split_endpoint;
 use kiwano_api::error::ApiError;
 use kiwano_api::logo::{logo_char, palette_color};
 use kiwano_api::providers::{
@@ -136,10 +137,13 @@ pub fn endpoints_from(input: &[NewEndpointInput]) -> Vec<crate::store::ProviderE
     input
         .iter()
         .filter_map(|e| {
-            crate::store::Protocol::parse_str(&e.protocol).map(|p| crate::store::ProviderEndpoint {
-                protocol: p,
-                base_url: absolute_endpoint(&e.endpoint),
-                api_path: None,
+            crate::store::Protocol::parse_str(&e.protocol).map(|p| {
+                let (base_url, api_path) = split_endpoint(&absolute_endpoint(&e.endpoint));
+                crate::store::ProviderEndpoint {
+                    protocol: p,
+                    base_url,
+                    api_path,
+                }
             })
         })
         .collect()
@@ -220,7 +224,9 @@ pub fn update_provider(store: &Store, id: &str, patch: &ProviderPatch) -> Result
         p.name = name.trim().to_string();
     }
     if let Some(endpoint) = &patch.endpoint {
-        p.base_url = absolute_endpoint(endpoint);
+        let (base_url, api_path) = split_endpoint(&absolute_endpoint(endpoint));
+        p.base_url = base_url;
+        p.api_path = api_path;
     }
     if let Some(protocol) = &patch.protocol {
         p.protocol =
@@ -461,6 +467,7 @@ pub fn add_provider(
         .unwrap_or(crate::store::Protocol::OpenAI);
     let openai_wire =
         resolve_openai_wire(input.openai_wire.as_deref(), protocol).map_err(ApiError::invalid)?;
+    let split = split_endpoint(&absolute_endpoint(&input.endpoint));
     let reset_period = match input.billing_config.reset_period.as_deref() {
         Some("monthly") | Some("weekly") | Some("yearly") => {
             input.billing_config.reset_period.clone()
@@ -494,9 +501,12 @@ pub fn add_provider(
             .filter(|id| !id.is_empty())
             .map(str::to_string),
         protocol,
-        base_url: absolute_endpoint(&input.endpoint),
+        // Stored the way the gateway composes it — see `split_endpoint`: the
+        // client's own path already carries `/v1`, so a catalog endpoint that
+        // spells it too must not be stored whole.
+        base_url: split.0,
         openai_wire,
-        api_path: None,
+        api_path: split.1,
         endpoints: input_endpoints(input),
         api_key: Some(input.api_key.clone()),
         // Collected by the form since it existed, and until now dropped on the

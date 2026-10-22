@@ -99,23 +99,13 @@ pub fn run_import(
     report
 }
 
-/// origin + first-path-segment split: `https://api.deepseek.com/anthropic` →
-/// (`https://api.deepseek.com`, Some(`/anthropic`)).
+/// The importer stores endpoints exactly the way the provider form does —
+/// [`kiwano_adapters::endpoint::split_endpoint`], which also drops the
+/// version segment the client's own path repeats. Sharing the function is the
+/// point: an imported provider and a hand-added one naming the same URL must
+/// be stored identically, or one of the two 404s.
 fn split_url(url: &str) -> (String, Option<String>) {
-    let url = url.trim_end_matches('/');
-    let Some(scheme_end) = url.find("://") else {
-        return (url.to_string(), None);
-    };
-    let rest = &url[scheme_end + 3..];
-    match rest.find('/') {
-        Some(i) => {
-            let base = format!("{}://{}", &url[..scheme_end], &rest[..i]);
-            let path = rest[i..].trim_end_matches('/').to_string();
-            let path = if path.is_empty() { None } else { Some(path) };
-            (base, path)
-        }
-        None => (url.to_string(), None),
-    }
+    kiwano_adapters::endpoint::split_endpoint(url)
 }
 
 fn str_at(v: Option<&Value>) -> String {
@@ -390,9 +380,11 @@ mod tests {
             split_url("https://api.deepseek.com/anthropic"),
             ("https://api.deepseek.com".into(), Some("/anthropic".into()))
         );
+        // The version segment is dropped: the gateway's client path already
+        // carries `/v1`, so storing it here would compose `…/openai/v1/v1/…`.
         assert_eq!(
             split_url("https://api.groq.com/openai/v1/"),
-            ("https://api.groq.com".into(), Some("/openai/v1".into()))
+            ("https://api.groq.com".into(), Some("/openai".into()))
         );
         assert_eq!(
             split_url("http://localhost:11434"),
@@ -687,7 +679,9 @@ mod tests {
         let r = store.get_provider("ccs-grokbuild-r").unwrap().unwrap();
         assert_eq!(r.protocol.as_str(), "openai");
         assert_eq!(r.base_url, "https://r.com");
-        assert_eq!(r.api_path.as_deref(), Some("/v1"));
+        // `https://r.com/v1` imports as the bare origin: `/v1` is the segment
+        // every client path repeats, so it belongs to neither field.
+        assert_eq!(r.api_path, None);
         let o = store.get_provider("ccs-opencode-o").unwrap().unwrap();
         assert_eq!(o.protocol.as_str(), "openai");
         assert_eq!(o.api_key.as_deref(), Some("k6"));

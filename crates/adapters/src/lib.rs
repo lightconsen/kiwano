@@ -28,6 +28,7 @@
 pub mod claude_desktop_config;
 pub mod codex_config;
 pub mod config;
+pub mod endpoint;
 pub mod error;
 pub mod gateway_takeover;
 pub mod grok_config;

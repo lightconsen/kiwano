@@ -489,9 +489,15 @@ mod tests {
         let rows = s.list_providers().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].endpoints.len(), 1);
+        // Stored as origin + prefix, the way the gateway composes it; a
+        // trailing `/v1` would be dropped, but this path has none.
         assert_eq!(
             rows[0].endpoints[0].base_url,
-            "https://qianfan.baidubce.com/anthropic/coding"
+            "https://qianfan.baidubce.com"
+        );
+        assert_eq!(
+            rows[0].endpoints[0].api_path.as_deref(),
+            Some("/anthropic/coding")
         );
         assert_eq!(
             rows[0].endpoints[0].protocol,

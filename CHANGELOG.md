@@ -19,6 +19,46 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-22
+
+**The version where one provider can have two faces.** Some vendors split their
+catalogue by surface rather than by protocol: Command Code serves `claude-*` only
+on its Anthropic endpoint and every open model — DeepSeek, GLM, Kimi, MiniMax —
+only on its OpenAI one. Adding it from the shelf declared both endpoints, and the
+gateway sent every request by the inbound protocol alone, so Claude Code could
+reach the Claude models and nothing else.
+
+The catalogue now says which models each endpoint serves (the Hub entry declares
+it per model), and the route table carries those sets: a model the inbound
+endpoint does not serve, and another one does, is routed there — natively when
+that is the same protocol, through the Anthropic → OpenAI conversion when it is
+not. Providers whose entries say nothing resolve exactly as before, so this is
+additive rather than a change in behaviour.
+
+Two blockers on the same path are fixed with it. Catalog OpenAI endpoints carry
+their version segment (`…/provider/v1`) while the gateway's client path already
+starts with `/v1`, so storing one whole composed `…/v1/v1/…` — a 404 on every
+versioned endpoint, OpenRouter included. Endpoints are now stored as the origin
+plus the prefix the composer expects. And Command Code's Anthropic endpoint
+rejects the `role: "system"` entries Claude Code sends for its environment
+blocks; a provider-scoped compat rule rewrites them, which is what the local
+proxy in front of that endpoint had to do by hand.
+
+### Added
+
+- **An endpoint is chosen by the model, when the catalogue splits its models
+  across endpoints.** See the section above.
+
+### Fixed
+
+- **A provider endpoint is stored the way the gateway composes it.** A catalog
+  endpoint ending in `/v1` no longer produces a doubled segment (and a 404) once
+  added; the provider form, the edit path and the cc-switch importer share one
+  rule.
+- **Command Code's Anthropic endpoint accepts Claude Code's system blocks.** They
+  arrive as `role: "system"` inside `messages[]`, which that endpoint answers
+  with a 400; they are sent as user turns now, scoped to that endpoint.
+
 ## [0.3.5] - 2026-10-20
 
 **The version where the dashboard shows you which days you actually worked.** The

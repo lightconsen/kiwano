@@ -98,6 +98,7 @@ export const addProvider = {
 
   // ── Agent binding ──
   bindAgents: "保存後にエージェントへバインド",
+  noEnabledAgents: "有効な Agent がまだありません —— 先に Apps 画面で有効にしてください。",
   selectAgents: "エージェントを選択…",
 
   // ── Rotating keys (edit mode) ──

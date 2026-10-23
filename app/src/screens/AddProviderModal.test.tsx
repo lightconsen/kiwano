@@ -510,4 +510,43 @@ describe("adding a provider from the catalog", () => {
     const payload = await savedPayload(user);
     expect(payload.endpoint).toBe("https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1");
   });
+
+describe("the binding list", () => {
+  /** A takeover row, as the settings read returns it. */
+  const takeover = (agent: string, enabled: boolean) => ({
+    agent,
+    label: agent,
+    placeholder_key: null,
+    enabled,
+    config_paths: [],
+    additive: false,
+    protocols: [],
+  });
+
+  it("offers only the agents that are turned on, plus the user's own", async () => {
+    apiMock.getSettings.mockResolvedValue({
+      hub_url: "https://hub.example",
+      takeovers: [takeover("claude", true), takeover("codex", false)],
+      custom_agents: [{ id: "my-agent", label: "My Agent" }],
+    });
+    const user = await openCustom();
+    await user.click(screen.getByText(en.addProvider.selectAgents));
+
+    // Turned on: offered.
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    // Installed or not, an agent nobody turned on is a route to nowhere.
+    expect(screen.queryByText("Codex")).toBeNull();
+    // A custom agent has no takeover switch, so it is always offered.
+    expect(screen.getByText("My Agent")).toBeInTheDocument();
+  });
+
+  it("offers everything until the settings read answers", async () => {
+    // No `takeovers` in the fixture: the read has not said which agents are
+    // on, and an empty list would be inventing an answer.
+    const user = await openCustom();
+    await user.click(screen.getByText(en.addProvider.selectAgents));
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+  });
+});
+
 });

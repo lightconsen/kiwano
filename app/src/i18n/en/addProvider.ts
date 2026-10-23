@@ -114,6 +114,7 @@ export const addProvider = {
 
   // ── Agent binding ──
   bindAgents: "Bind to agents after saving",
+  noEnabledAgents: "No agent is turned on yet — enable one on the Apps screen first.",
   selectAgents: "Select agents…",
 
   // ── Rotating keys (edit mode) ──

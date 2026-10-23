@@ -99,6 +99,7 @@ export const addProvider = {
 
   // ── Agent binding ──
   bindAgents: "儲存後綁定至 Agent",
+  noEnabledAgents: "還沒有啟用的 Agent —— 先在 Apps 頁面啟用一個。",
   selectAgents: "選擇 Agent…",
 
   // ── Rotating keys (edit mode) ──

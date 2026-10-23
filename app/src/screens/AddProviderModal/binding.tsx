@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { AgentChip } from "@/components/bits";
 import { Label } from "@/components/ui/label";
 import { useT } from "../../i18n";
-import { allAgentMetas } from "../../lib/agents";
+import { allAgentMetas, isBuiltinAgent } from "../../lib/agents";
 import type { AgentRef } from "../../api/types";
 
 /** Which agents this provider serves. Adding only: an edit leaves the bindings
@@ -14,13 +14,22 @@ export function AgentBinding({
   setAgents,
   agentsOpen,
   setAgentsOpen,
+  enabled,
 }: {
   agents: AgentRef[];
   setAgents: Dispatch<SetStateAction<AgentRef[]>>;
   agentsOpen: boolean;
   setAgentsOpen: Dispatch<SetStateAction<boolean>>;
+  /** The built-in agents that are turned on. A provider bound to an agent
+      nobody runs is a route to nowhere, so the list is those — plus every
+      custom agent, which has no takeover switch to consult. `null` means the
+      read has not answered: offer everything rather than nothing. */
+  enabled: Set<string> | null;
 }) {
   const t = useT();
+  const offered = allAgentMetas().filter(
+    (a) => enabled === null || !isBuiltinAgent(a.id) || enabled.has(a.id),
+  );
   return (
     <div className="relative">
       <Label
@@ -59,7 +68,10 @@ export function AgentBinding({
               modal lands here and closes the dropdown */}
           <div className="fixed inset-0 z-40" onClick={() => setAgentsOpen(false)} />
           <div className="absolute z-50 mt-1 max-h-[210px] w-full overflow-y-auto rounded-md border border-line bg-bg py-1 shadow-lg">
-          {allAgentMetas().map((a) => {
+          {offered.length === 0 && (
+            <div className="px-2.5 py-1.5 text-[11px] text-mut">{t("addProvider.noEnabledAgents")}</div>
+          )}
+          {offered.map((a) => {
             const active = agents.includes(a.id);
             return (
               <button

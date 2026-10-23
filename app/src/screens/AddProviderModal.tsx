@@ -20,6 +20,7 @@ import {
   type Provider,
   type UpstreamKeySpendEntry,
 } from "../api/types";
+import { rememberCustomAgents } from "../lib/agents";
 import { useHubUrl } from "../lib/hub";
 import {
   hasUnfilledParams,
@@ -141,6 +142,11 @@ export default function AddProviderModal({
   // not vanish from the picker and silently re-denominate the limit.
   const [currencies, setCurrencies] = useState<string[]>([]);
   const [agents, setAgents] = useState<AgentRef[]>([]);
+  // Which built-in agents are turned on (taken over) right now. A provider
+  // bound to an agent nobody runs is a route to nowhere, so the binding list
+  // offers only these; `null` while the read is in flight (or after it failed)
+  // means "not known", and the list stays complete rather than empty.
+  const [enabledAgents, setEnabledAgents] = useState<Set<string> | null>(null);
   // Multi-select dropdown for agent binding (rows = logo + name)
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -420,6 +426,33 @@ export default function AddProviderModal({
       api.listCatalog().then((c) => setCatalog(c.entries));
     }
   }, [open, edit, mode, shelf, catalog]);
+
+  // The binding list is the agents this install actually manages. A custom
+  // agent has no takeover to switch on, so it is always offered — the filter
+  // applies to built-ins only (see `AgentBinding`).
+  useEffect(() => {
+    if (!open || edit) return;
+    let alive = true;
+    api
+      .getSettings()
+      .then((s) => {
+        if (alive) {
+          // The dialog can be opened before the shell's own settings read has
+          // registered the user's agents (a deep link, a slow first paint), and
+          // the binding list is the one place that must know them.
+          rememberCustomAgents(s.custom_agents ?? []);
+          setEnabledAgents(
+            new Set(s.takeovers.filter((k) => k.enabled).map((k) => k.agent as string)),
+          );
+        }
+      })
+      .catch(() => {
+        if (alive) setEnabledAgents(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, edit]);
 
   /// The catalog entry an edited provider was added from, when the Hub still
   /// publishes it.
@@ -893,6 +926,7 @@ export default function AddProviderModal({
                 setAgents={setAgents}
                 agentsOpen={agentsOpen}
                 setAgentsOpen={setAgentsOpen}
+                enabled={enabledAgents}
               />
             )}
 

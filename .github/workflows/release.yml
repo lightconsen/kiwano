@@ -393,8 +393,73 @@ jobs:
             echo 'KIWANO_CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
-  build:
+  # One draft release for the whole matrix.
+  #
+  # `tauri-action` creates a release when it cannot find one, and the five build
+  # legs run concurrently: any leg that did not see the draft in time created
+  # its own, and GitHub allows **several drafts on one tag**. Their assets then
+  # split across releases, and `publish` flips only the one it happens to see —
+  # v0.3.6 shipped without its macOS updater artifacts and Windows installers
+  # for exactly that reason, while every leg's log said "successfully uploaded".
+  #
+  # So the release is created once, here, before any leg runs; each leg is given
+  # its id and only uploads into it. Re-running the workflow finds the release
+  # that already exists rather than creating a second one.
+  create-release:
     needs: [verify, changelog]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create, or find, the draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEGRADED: ${{ needs.verify.outputs.degraded }}
+          CHANGELOG: ${{ needs.changelog.outputs.body }}
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          {
+            if [ "$DEGRADED" = "1" ]; then
+              echo '> [!WARNING]'
+              echo '> **This build is degraded.** It was produced in an environment that cannot sign it completely, so at least one of the macOS Developer ID and the updater key is missing — the run summary has the details, including what a degraded macOS bundle means for Gatekeeper. Installed copies are not offered this version. Do not install it over a signed release.'
+              echo
+            fi
+            printf '%s\n' "$CHANGELOG"
+            cat <<'NOTES'
+
+          ---
+
+          **macOS builds are signed with a Developer ID and notarized** — open
+          the app the usual way. Pick the build for your chip:
+          `Kiwano_aarch64.dmg` is Apple Silicon (M series), `Kiwano_x64.dmg` is
+          Intel.
+
+          **Windows builds are not code-signed yet.** SmartScreen will warn on
+          first launch; choose **More info → Run anyway**.
+          NOTES
+          } > "$body"
+
+          if id=$(gh release view "$GITHUB_REF_NAME" --json databaseId -q .databaseId 2>/dev/null); then
+            echo "release $GITHUB_REF_NAME already exists (id $id); updating its notes"
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$body"
+          else
+            case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; *) prerelease="" ;; esac
+            # shellcheck disable=SC2086 # the empty case must pass no argument at all
+            gh release create "$GITHUB_REF_NAME" --draft \
+              --title "Kiwano $GITHUB_REF_NAME" --notes-file "$body" $prerelease
+            id=$(gh release view "$GITHUB_REF_NAME" --json databaseId -q .databaseId)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [verify, changelog, create-release]
     strategy:
       fail-fast: false
       matrix:
@@ -730,37 +795,11 @@ jobs:
           # the Tauri directory to the workspace root, which is still the repo
           # root, so `target/` stays where every later step expects it.
           projectPath: app
-          tagName: ${{ github.ref_name }}
-          releaseName: "Kiwano ${{ github.ref_name }}"
-          # Literal block, not folded: the changelog is Markdown and its line
-          # breaks are the formatting.
-          #
-          # The two lines above the changelog are the degraded-build banner,
-          # empty when the signing material was complete. It goes above
-          # everything else because it changes whether the rest applies at all,
-          # and a reader who stops after a paragraph stops after this one.
-          #
-          # It says which *kind* of degradation only in general terms: whether
-          # it was the Developer ID, the updater key or both is a table in the
-          # `verify` job's step summary, and the sentence here would have to be
-          # assembled from two flags to be specific. Each expression is a single
-          # line because a GitHub expression string cannot carry a newline; the
-          # blank lines around it are the block scalar's.
-          releaseBody: |
-            ${{ needs.verify.outputs.degraded == '1' && '> [!WARNING]' || '' }}
-            ${{ needs.verify.outputs.degraded == '1' && '> **This build is degraded.** It was produced in an environment that cannot sign it completely, so at least one of the macOS Developer ID and the updater key is missing — the run summary has the details, including what a degraded macOS bundle means for Gatekeeper. Installed copies are not offered this version. Do not install it over a signed release.' || '' }}
-
-            ${{ needs.changelog.outputs.body }}
-
-            ---
-
-            **macOS builds are signed with a Developer ID and notarized** — open
-            the app the usual way. Pick the build for your chip:
-            `Kiwano_aarch64.dmg` is Apple Silicon (M series), `Kiwano_x64.dmg` is
-            Intel.
-
-            **Windows builds are not code-signed yet.** SmartScreen will warn on
-            first launch; choose **More info → Run anyway**.
+          # The release already exists — `create-release` made it before this
+          # matrix started — so the action only uploads into it. Without an id
+          # it would look the tag up itself and create one when the lookup
+          # missed, which is how one tag ended up with three drafts.
+          releaseId: ${{ needs.create-release.outputs.id }}
           # Each platform uploads into a draft; the `publish` job below flips it
           # public once every platform has landed. Publishing from here would
           # expose a half-filled release — and a latest.json missing platforms,

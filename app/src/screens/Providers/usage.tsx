@@ -387,7 +387,11 @@ function UsageCellBody({ p, plan }: { p: Provider;
   return (
     <div className="w-full" title={title}>
       <div className="flex items-center gap-1.5 font-mono text-[12.5px]">
-        <BillTag billing="payg" />
+        {/* The tag says how this provider bills, not which layout this cell
+            is: a plan with no measurable ceiling still falls through to the
+            spend figures, and calling that "PAYG" contradicts the row's own
+            billing. What the numbers are is unchanged. */}
+        <BillTag billing={p.billing === "plan" ? "plan" : "payg"} />
         {fmtMoney(u.cost ?? 0, u.cost_currency ?? providerCurrency(p) ?? "USD")}{" "}
         <span className="font-normal text-mut">
           {t("providers.reqSuffix", { requests: u.requests })}

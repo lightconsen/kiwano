@@ -45,8 +45,21 @@ pub fn pricing_candidates(model_id: &str) -> Vec<String> {
         return Vec::new();
     }
 
+    // The name as the client wrote it is tried **before** any reduction. The
+    // Hub keys a row by the model's canonical id, which usually is the reduced
+    // form — but not always: an aggregator may publish the namespaced id it
+    // forwards (`deepseek/deepseek-v4.1-flash`), and normalising that to
+    // `deepseek-v4.1-flash` would miss its own row and fall through to another
+    // provider's row for the same model — a price, in another vendor's
+    // currency, that nobody published for this endpoint. Trying the literal
+    // first costs one lookup and makes the exact key win wherever it exists.
+    let literal = model_id.trim().to_ascii_lowercase();
     let mut candidates = Vec::new();
-    let mut queue = vec![cleaned];
+    let mut queue = if literal.is_empty() || literal == cleaned {
+        vec![cleaned]
+    } else {
+        vec![cleaned, literal]
+    };
 
     while let Some(candidate) = queue.pop() {
         if !push_unique_candidate(&mut candidates, candidate.clone()) {
@@ -334,5 +347,25 @@ mod tests {
         assert!(should_try_pricing_prefix_match("o3-2025-04-16"));
         assert!(should_try_pricing_prefix_match("deepseek-chat-x"));
         assert!(!should_try_pricing_prefix_match("deepseek-chat"));
+    }
+
+    /// The id a client sends is tried before any reduction, so an aggregator
+    /// that publishes the namespaced id it forwards keeps its own row — and its
+    /// own currency. Reducing first made `deepseek/deepseek-v4.1-flash` look up
+    /// `deepseek-v4.1-flash`, miss the aggregator's row and land on another
+    /// provider's rate for the same model.
+    #[test]
+    fn a_namespaced_id_is_offered_before_its_reduction() {
+        let c = pricing_candidates("deepseek/deepseek-v4.1-flash");
+        assert_eq!(
+            c.first().map(String::as_str),
+            Some("deepseek/deepseek-v4.1-flash")
+        );
+        assert!(c.iter().any(|x| x == "deepseek-v4.1-flash"), "{c:?}");
+        // The ordinary case still resolves: the literal is offered first and
+        // misses, then the reduced form is the one the table keys.
+        let c = pricing_candidates("anthropic/claude-opus-4-8");
+        assert_eq!(c[0], "anthropic/claude-opus-4-8");
+        assert!(c.iter().any(|x| x == "claude-opus-4-8"), "{c:?}");
     }
 }

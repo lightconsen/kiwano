@@ -19,6 +19,36 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-23
+
+**The version where the price is the one the provider actually charged.** Three
+small fixes from a day of using a real plan, all of them the same shape: a
+number or a name that was read one step too far from what it meant.
+
+A price is looked up by reducing a model name to its canonical id — and for a
+provider that publishes its rows under the namespaced id it forwards
+(`deepseek/deepseek-v4.1-flash`), that reduction missed the provider's own row
+and landed on **another provider's** row for the same model. Command Code bills
+in dollars; its requests were being recorded in yuan, at a rate nobody had
+published for it. The name the client sent is now tried before any reduction.
+
+A subscription with no declared ceiling has nothing to ring against, so its
+usage cell falls back to the spend figures — and that fallback was labelled
+PAYG. It now says how the provider bills: a plan reads as a plan whether or not
+you gave it a limit to measure.
+
+And the add dialog's "Bind to agents after saving" offered every agent Kiwano
+knows, including the ones that are not turned on — a provider bound to one of
+those is a route to nowhere. It offers the agents whose takeover is enabled,
+plus your own, which have no switch to consult.
+
+### Fixed
+
+- **A model id a provider publishes with its namespace resolves to that
+  provider's own price.** See the section above.
+- **A plan provider with no measurable quota is no longer labelled PAYG.**
+- **The add dialog binds to agents that are turned on.** See above.
+
 ## [0.3.6] - 2026-10-22
 
 **The version where one provider can have two faces.** Some vendors split their

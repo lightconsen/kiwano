@@ -1,10 +1,10 @@
 // Request logs (data-plane audit trail captured by the gateway, migration V5),
 // rendered as the trailing card section of the Dashboard: paged metadata list
-// with status filter, clear-all. Clicking a row opens a dialog with the full
-// record (redacted headers + bodies) and a Copy button that puts the whole
-// log as plain text on the clipboard.
+// with status filter, clear-all. Clicking a row opens the log's own page (see
+// `screens/LogDetail.tsx`), which is also where the full record — redacted
+// headers and bodies — and the Copy button live.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, Copy, Download, X as XIcon } from "lucide-react";
+import { ChevronRight, Download, X as XIcon } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -93,7 +93,7 @@ const RANGES: { id: RangeId; labelKey: KeyPath<Messages> }[] = [
   { id: "custom", labelKey: "logs.rangeCustom" },
 ];
 
-function fmtTime(ts: string): string {
+export function fmtTime(ts: string): string {
   // RFC3339 → "MM-DD HH:MM:SS" (local tool: compact column beats full ISO)
   return ts.replace("T", " ").slice(5, 19);
 }
@@ -132,7 +132,7 @@ function noteLines(notes: string | null): string[] {
   // The detector's lines are self-prefixed ("dlp: …"); the shim's need naming.
   return [...dlp, ...(rest.length > 0 ? ["sanitizer: " + rest.join("\n")] : [])];
 }
-function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
+export function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
   const lines = [
     `#${r.id} · ${r.ts}`,
     `${r.method} ${r.path}${r.query ? `?${r.query}` : ""}`,
@@ -161,7 +161,7 @@ function fmtLogText(r: RequestLogEntry, d?: RequestLogDetail | null): string {
 /** Synchronous clipboard write. WKWebView has no navigator.clipboard and only
     honors execCommand copies made inside the user gesture, so the legacy
     textarea path runs first; the async Clipboard API is the fallback. */
-function copyText(text: string): boolean {
+export function copyText(text: string): boolean {
   try {
     const ta = document.createElement("textarea");
     ta.value = text;
@@ -231,17 +231,14 @@ function splitNotes(notes: string): { dlp: string[]; rest: string[] } {
   return { dlp, rest };
 }
 
-function Detail({ d }: { d: RequestLogDetail | null }) {
+export function LogDetailBody({ d }: { d: RequestLogDetail | null }) {
   const t = useT();
   if (!d) return <div className="px-5 pb-4 text-[11px] text-mut">{t("common.loading")}</div>;
 
   return (
     <div className="space-y-2 px-5 pb-4 pt-3">
-      {/* The list table trades this away for Model — it stays here, one per detail */}
-      <div className="font-mono text-[11px] text-mut">
-        {d.method} <span className="text-ink">{d.path}</span>
-        {d.query ? `?${d.query}` : ""}
-      </div>
+      {/* The list table trades method/path for Model; the log's own page states
+          them in its heading, so this body starts at the facts underneath. */}
       <div className="flex gap-6 text-[10.5px] text-mut">
         {d.session_id && (
           <span>
@@ -345,53 +342,10 @@ function Detail({ d }: { d: RequestLogDetail | null }) {
   );
 }
 
-/** Full-record dialog: detail body + a Copy button that puts the whole log
-    (metadata + headers + bodies) on the clipboard as plain text. */
-function LogDialog({ entry, onClose }: { entry: RequestLogEntry; onClose: () => void }) {
-  const t = useT();
-  const [copied, setCopied] = useState(false);
-  const [d, setD] = useState<RequestLogDetail | null>(null);
-
-  useEffect(() => {
-    api.getRequestLog(entry.id).then(setD).catch(() => {});
-  }, [entry.id]);
-
-  const onCopy = () => {
-    // Must stay synchronous inside the click gesture: awaiting anything here
-    // (e.g. the detail fetch) ends the user-activation window and the copy
-    // silently fails in WKWebView — so the detail is prefetched on open.
-    if (copyText(fmtLogText(entry, d))) {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      {/* overflow-x-hidden: same WKWebView hardening as AddProviderModal —
-          long unbroken values in the header <pre>s must never widen the modal */}
-      <DialogContent className="max-h-[min(660px,100dvh)] w-[calc(100%-2rem)] max-w-[720px] gap-0 overflow-x-hidden overflow-y-auto rounded-xl p-0 sm:max-w-[720px]">
-        {/* pr-12 keeps the Copy button clear of the dialog's absolute X close button */}
-        <DialogHeader className="flex h-11 flex-row items-center justify-between border-b border-line pl-4 pr-12">
-          <DialogTitle className="text-[13px] font-semibold">
-            {t("logs.logTitle", { id: entry.id })} ·{" "}
-            <span className="font-mono text-[11.5px] font-normal text-mut">{fmtTime(entry.ts)}</span>
-          </DialogTitle>
-          <Button variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-[11px] text-mut" onClick={onCopy}>
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copied ? t("common.copied") : t("common.copy")}
-          </Button>
-        </DialogHeader>
-        <Detail d={d} />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function RequestLogs({
   agent,
   providerId,
-  initialOpenId,
+  onOpenLog,
   window: win = "7d",
   tab,
   onTab,
@@ -405,11 +359,10 @@ export default function RequestLogs({
    *  every panel to be answering for it. */
   agent?: string;
   providerId?: string;
-  /** Deep-linked detail (`#dashboard/log/<id>`, e.g. from the credential
-   *  banner): open that log's dialog even when the row is not on the current
-   *  page. Consumed on open — the hash is rewritten so a refresh or a
-   *  screen switch does not spring the dialog back up. */
-  initialOpenId?: number;
+  /** A log row was opened: show that log's own page. The Dashboard owns the
+   *  navigation, because it owns the route — the same division the sessions
+   *  view uses. */
+  onOpenLog: (id: number) => void;
   /** The Dashboard's own window selector, which the **sessions** view follows
    *  and the log table deliberately does not (the table is an audit trail with
    *  its own range, in the export dialog). It is passed down rather than
@@ -452,10 +405,6 @@ export default function RequestLogs({
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<RequestLogEntry[]>([]);
   const [total, setTotal] = useState(0);
-  const [openId, setOpenId] = useState<number | null>(null);
-  // A deep-linked dialog whose row is off the current page: `openId` resolves
-  // against the fetched page, so an outside open keeps its own entry.
-  const [externalOpen, setExternalOpen] = useState<RequestLogEntry | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [range, setRange] = useState<RangeId>("any");
   const [fromDate, setFromDate] = useState(todayLocalDate);
@@ -497,84 +446,13 @@ export default function RequestLogs({
         }),
   });
 
-  // A deep-link already shown and dismissed: without this, the hash-reset
-  // round-trip (App clears `logId` only after the row fetch lands) would let
-  // the dialog spring back open from a stale `initialOpenId`.
-  const [spentOpenId, setSpentOpenId] = useState<number | null>(null);
-
   // The page filters change what the result set is, not just which rows of it
   // are on screen, so the pager has to go back to the start. Keyed by value
   // because the props are plain strings by the time they arrive.
   const scope = `${agent ?? ""} ${providerId ?? ""} ${sessionFilter ?? ""}`;
   useEffect(() => {
     setPage(1);
-    setOpenId(null);
-    setExternalOpen(null);
-    setSpentOpenId(null);
   }, [scope]);
-
-  // Consume a deep link: fetch the row straight by id rather than paging the
-  // table to find it, then rewrite the hash so the link is spent. The dialog's
-  // existence is *not* coupled to this read (the render derives it from
-  // `initialOpenId` below), precisely so that a fetch failure or a race cannot
-  // swallow the banner's click — the dialog opens on the skeleton and fills in
-  // when the detail lands.
-  useEffect(() => {
-    if (initialOpenId == null) return;
-    let alive = true;
-    api
-      .getRequestLog(initialOpenId)
-      .then((d) => {
-        if (alive && d) setExternalOpen(d);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (alive) window.location.hash = "#dashboard";
-      });
-    return () => {
-      alive = false;
-    };
-  }, [initialOpenId]);
-
-  // The deep-linked dialog: a full row when one came back, otherwise a stub
-  // that only carries the id — the dialog's own read fills the rest in. Never
-  // waits on `getRequestLog`, so the dialog is open the moment the hash lands.
-  // `spentOpenId` gates the stub: dismissing it marks it spent, so the id's
-  // hash-reset round-trip cannot spring the dialog back open.
-  const externalEntry =
-    externalOpen ??
-    (initialOpenId != null && spentOpenId !== initialOpenId
-      ? rows.find((r) => r.id === initialOpenId) ?? {
-          id: initialOpenId,
-          ts: "",
-          method: "",
-          path: "",
-          query: null,
-          agent: null,
-          attribution: null,
-          provider_id: null,
-          model: null,
-          status_code: 0,
-          error_kind: null,
-          error_message: null,
-          session_id: null,
-          is_streaming: false,
-          input_tokens: 0,
-          output_tokens: 0,
-          cache_read_tokens: 0,
-          cache_creation_tokens: 0,
-          reasoning_tokens: 0,
-          usage_missing: false,
-          latency_ms: null,
-          first_token_ms: null,
-          request_headers: null,
-          response_headers: null,
-          request_size: 0,
-          response_size: 0,
-          truncated: false,
-          request_notes: null,
-        }
-      : null);
 
   // Returns what it started, so the shell's ⟳ can await it (`lib/reload.ts`) — a
   // reader that resolves before its rows land would let the spinner stop on a
@@ -595,9 +473,6 @@ export default function RequestLogs({
         setTotal(r.total);
         setLoadErr(null);
         setLoaded(true);
-        // A row the reader had expanded can be gone after a refresh; without
-        // this the dialog would spring back open if that id ever reappeared.
-        setOpenId((id) => (id != null && !r.rows.some((x) => x.id === id) ? null : id));
       })
       .catch((e) => {
         if (mine === seq.current) setLoadErr(errText(e));
@@ -722,7 +597,6 @@ export default function RequestLogs({
   }, [notice]);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const openLog = openId != null ? rows.find((r) => r.id === openId) : undefined;
 
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface">
@@ -743,8 +617,7 @@ export default function RequestLogs({
               onClick={() => {
                 onTab(x.id);
                 // A tab switch is a change of view, not of result set: the
-                // pager and the open dialog belong to the view being left.
-                setOpenId(null);
+                // pager belongs to the view being left.
                 setErr(null);
                 setNotice(null);
                 setExportOpen(false);
@@ -763,7 +636,6 @@ export default function RequestLogs({
                 onClick={() => {
                   setFilter(f.id);
                   setPage(1);
-                  setOpenId(null);
                 }}
               >
                 {t(f.labelKey)}
@@ -853,7 +725,6 @@ export default function RequestLogs({
             // Opening a row leaves this card for that session's own page. The
             // filter this used to set still exists — the page sets it, from a
             // button that says what it does, which is where a reader can see it.
-            setOpenId(null);
             onOpenSession(id);
           }}
         />
@@ -891,7 +762,7 @@ export default function RequestLogs({
                 <tr
                   key={r.id}
                   className="cursor-pointer border-b border-line hover:bg-surface2"
-                  onClick={() => setOpenId(r.id)}
+                  onClick={() => onOpenLog(r.id)}
                 >
                   <td className="whitespace-nowrap px-3 py-1.5 text-mut">{fmtTime(r.ts)}</td>
                   <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
@@ -931,19 +802,6 @@ export default function RequestLogs({
 
         {loaded && total > 0 && (
           <Pager page={page} pages={pages} onGo={(p) => setPage(p)} />
-        )}
-
-        {openLog ? (
-          <LogDialog entry={openLog} onClose={() => setOpenId(null)} />
-        ) : (
-          externalEntry &&
-          <LogDialog
-            entry={externalEntry}
-            onClose={() => {
-              setExternalOpen(null);
-              if (initialOpenId != null) setSpentOpenId(initialOpenId);
-            }}
-          />
         )}
 
         {/* The range lives here, not in the toolbar: the table is for browsing

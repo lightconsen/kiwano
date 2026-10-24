@@ -21,6 +21,7 @@ import type { DashboardData, DashboardWindow, GatewayStatus } from "../api/types
 import { fmtMoney, fmtTokens } from "../lib/format";
 import { useT, type KeyPath, type Messages } from "../i18n";
 import RequestLogs, { type Tab } from "./RequestLogs";
+import LogDetail from "./LogDetail";
 import SessionDetail from "./SessionDetail";
 import { ActivityGrid } from "./Dashboard/ActivityGrid";
 import {
@@ -512,6 +513,12 @@ export default function Dashboard({
   // subject, not a detail of this one, and the panels must not render underneath
   // it. Everything above this line is a hook and stays registered while the page
   // is open, so the ⟳ reaches both it and the numbers behind it.
+  // A request log's page replaces this screen for the same reason a session's
+  // does; the two are mutually exclusive by route.
+  if (openLogId != null) {
+    return <LogDetail logId={openLogId} />;
+  }
+
   if (openSessionId) {
     return (
       <SessionDetail
@@ -747,7 +754,9 @@ export default function Dashboard({
         <RequestLogs
           agent={agentFilter === "all" ? undefined : agentFilter}
           providerId={providerFilter === "all" ? undefined : providerFilter}
-          initialOpenId={openLogId}
+          onOpenLog={(id) => {
+            window.location.hash = `#dashboard/log/${id}`;
+          }}
           window={win}
           tab={cardTab}
           onTab={setCardTab}

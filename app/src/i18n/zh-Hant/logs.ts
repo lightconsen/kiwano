@@ -29,6 +29,8 @@ export const logs = {
   empty: "尚無請求記錄 — 經閘道轉送的流量會顯示在這裡",
 
 
+  logBreadcrumb: "請求日誌",
+  logGone: "這條請求日誌已不存在",
   logTitle: "日誌 #{id}",
 
   detailSession: "工作階段",

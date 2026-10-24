@@ -29,6 +29,8 @@ export const logs = {
   empty: "暂无请求记录 — 经网关转发的流量会显示在这里",
 
 
+  logBreadcrumb: "请求日志",
+  logGone: "这条请求日志已不存在",
   logTitle: "日志 #{id}",
 
   detailSession: "会话",

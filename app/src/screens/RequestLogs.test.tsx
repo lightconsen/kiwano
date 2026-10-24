@@ -16,8 +16,9 @@ import type { RequestLogEntry, Session } from "@/api/types";
 
 import RequestLogs, { type Tab } from "./RequestLogs";
 
-const { apiMock, saveMock, openSession } = vi.hoisted(() => ({
+const { apiMock, saveMock, openSession, openLog } = vi.hoisted(() => ({
   openSession: vi.fn(),
+  openLog: vi.fn(),
   apiMock: {
     listRequestLogs: vi.fn(),
     getRequestLog: vi.fn(),
@@ -91,6 +92,7 @@ function Harness(props: Partial<Parameters<typeof RequestLogs>[0]> = {}) {
       sessionFilter={sessionFilter}
       onSessionFilter={setSessionFilter}
       onOpenSession={openSession}
+      onOpenLog={openLog}
       managedAgents={[]}
       {...props}
     />
@@ -222,7 +224,7 @@ describe("the request log table", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("badges a row with a credential finding and splits it out in the detail", async () => {
+  it("badges a row with a credential finding", async () => {
     const user = userEvent.setup();
     const finding = {
       ...entry(7),
@@ -239,65 +241,13 @@ describe("the request log table", () => {
     expect(await screen.findByText(en.logs.dlpBadge)).toBeInTheDocument();
     expect(screen.getAllByText(en.logs.dlpBadge)).toHaveLength(1);
 
+    // The row opens the log's own page (the Dashboard owns the navigation);
+    // nothing floats over the table.
     await user.click(screen.getByText("deepseek-chat"));
-    const dialog = await screen.findByRole("dialog");
-    // The finding is its own red block; the shim's line stays under the
-    // generic notes label, not promoted with it.
-    expect(await within(dialog).findByText(en.logs.detailCredentialWatch)).toBeInTheDocument();
-    expect(within(dialog).getByText(/dlp: github-token ×1/)).toBeInTheDocument();
-    expect(within(dialog).getByText(en.logs.detailNotes)).toBeInTheDocument();
-    expect(within(dialog).getByText(/thinking: removed invalid value/)).toBeInTheDocument();
-  });
-
-  it("opens a deep-linked log by id, off the current page, and spends the link", async () => {
-    const detail = { ...entry(99), request_body: null, response_body: null };
-    apiMock.getRequestLog.mockResolvedValue(detail);
-    window.location.hash = "#dashboard/log/99";
-    render(<Harness initialOpenId={99} />);
-
-    // Straight to the row by id — the paged list is never asked to find it.
-    await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(99));
-    const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByText(new RegExp(en.logs.logTitle.replace("{id}", "99"))),
-    ).toBeInTheDocument();
-    // Consumed: the hash no longer names the row, so a refresh cannot reopen it.
-    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-  });
-
-  it("still opens the deep-linked dialog when the row read fails", async () => {
-    // The banner's click must never be swallowed by a detail fetch that fails
-    // or a row the log no longer has — the dialog opens on the id alone and
-    // the title still names it.
-    apiMock.getRequestLog.mockRejectedValue(new Error("pruned"));
-    window.location.hash = "#dashboard/log/99";
-    render(<Harness initialOpenId={99} />);
-
-    await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(99));
-    const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByText(new RegExp(en.logs.logTitle.replace("{id}", "99"))),
-    ).toBeInTheDocument();
-    // The link is still spent: the failure does not wedge the hash.
-    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-  });
-
-  it("does not spring the deep-linked dialog back open after it is dismissed", async () => {
-    // The detail read never answers: the dialog is up on the id alone, and
-    // dismissing it must stick even while the hash-reset round-trip (which
-    // waits on that read) has not cleared `initialOpenId` yet.
-    apiMock.getRequestLog.mockReturnValue(new Promise(() => {}));
-    window.location.hash = "#dashboard/log/99";
-    const user = userEvent.setup();
-    render(<Harness initialOpenId={99} />);
-
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: en.common.close }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    // Still, a moment later, nothing re-raises it.
-    await new Promise((r) => setTimeout(r, 50));
+    expect(openLog).toHaveBeenCalledWith(7);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
 });
 
 // ── The sessions view (the card's second tab) ──
@@ -377,6 +327,7 @@ describe("the sessions view", () => {
         sessionFilter="s-2"
         onSessionFilter={outside}
         onOpenSession={openSession}
+        onOpenLog={openLog}
         managedAgents={[]}
       />,
     );
@@ -401,6 +352,7 @@ describe("the sessions view", () => {
         sessionFilter="imported-1"
         onSessionFilter={() => {}}
         onOpenSession={openSession}
+        onOpenLog={openLog}
         managedAgents={[]}
       />,
     );

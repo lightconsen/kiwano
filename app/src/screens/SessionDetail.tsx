@@ -127,7 +127,7 @@ function Breadcrumb({ title, id }: { title?: string; id: string }) {
     <nav aria-label={t("dashboard.sessionBreadcrumb")} className="mb-2">
       <ol className="flex items-center gap-1.5 text-[11px] text-mut">
         <li>
-          <button className="hover:text-fg" onClick={back}>
+          <button className="cursor-pointer hover:text-fg" onClick={back}>
             {t("app.nav.dashboard")}
           </button>
         </li>

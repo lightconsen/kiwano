@@ -29,6 +29,8 @@ export const logs = {
   empty: "まだリクエストが記録されていません — ゲートウェイ経由で転送されたトラフィックがここに表示されます",
 
 
+  logBreadcrumb: "リクエストログ",
+  logGone: "このリクエストログはもう存在しません",
   logTitle: "ログ #{id}",
 
   detailSession: "セッション",

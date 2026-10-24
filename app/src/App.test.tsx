@@ -291,17 +291,18 @@ describe("the credential banner's click-through", () => {
     await user.click(screen.getByRole("button", { name: en.app.credentialBannerCta }));
     expect(apiMock.ackCredentialFinding).toHaveBeenCalledWith(41);
 
-    // The Dashboard the route lands on asks for the row by id and opens the
-    // detail dialog: the whole reason the deep-link exists.
+    // The route lands on the log's own page, which reads the row by id — the
+    // whole reason the deep-link exists. Nothing floats over the Dashboard.
     await waitFor(() => expect(apiMock.getRequestLog).toHaveBeenCalledWith(41));
-    const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByText(new RegExp(en.logs.logTitle.replace("{id}", "41"))),
+      await screen.findByRole("heading", {
+        name: en.logs.logTitle.replace("{id}", "41"),
+      }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
 
-    // The link is spent: the hash rewrites to plain Dashboard once the row is
-    // open, and the dialog survives its own deep-link being consumed.
-    await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // The link is the page's address now: a refresh or a back/forward trip
+    // lands on the same record instead of being rewritten away.
+    expect(window.location.hash).toBe("#dashboard/log/41");
   });
 });

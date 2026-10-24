@@ -38,6 +38,8 @@ export const logs = {
   empty: "No requests recorded yet — traffic forwarded through the gateway shows up here",
 
 
+  logBreadcrumb: "Request log",
+  logGone: "This request log is no longer available",
   logTitle: "Log #{id}",
 
   detailSession: "Session",

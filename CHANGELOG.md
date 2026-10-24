@@ -19,6 +19,34 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-24
+
+**The version where one vendor can be two providers.** A second seat, a work
+account beside a personal one, a cheap key for batch work next to the one an
+agent uses — these are the same vendor on the shelf, and the shelf offered one
+Add and then a badge. The second one had to be typed in by hand, endpoints and
+all.
+
+Add now stays on the row and says how many providers the entry is already
+behind (`Add (2 added)`); the add dialog prefills the name with a suffix — the
+first `DeepSeek`, the second `DeepSeek 2` — because in the Providers list the
+name is what tells two rows apart. The detail dialog behaves the same way.
+
+The Protocol column is gone from the table. An entry's protocol is fixed by the
+catalog and its endpoints are named in the detail dialog; a pair of chips
+repeated on every row took width from the columns where providers actually
+differ.
+
+### Added
+
+- **A provider can be added more than once from Models.** The count beside Add
+  is the number of local providers behind the entry, and a provider serving
+  both protocols is counted once.
+
+### Changed
+
+- **The Models table no longer has a Protocol column.**
+
 ## [0.3.7] - 2026-10-23
 
 **The version where the price is the one the provider actually charged.** Three

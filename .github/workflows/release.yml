@@ -1340,17 +1340,19 @@ jobs:
           done
 
           # Version-free names mean the object is *reused* across releases —
-          # the same URL serves v0.2.0 today and v0.2.1 tomorrow. That is why
-          # the bytes must never be cached longer than one minute: the edge
-          # once kept serving a previous version's bytes (an updater said
-          # "signature verification failed" because the new manifest's
-          # signature met old bytes), so anything longer than a short window
-          # re-arms the same failure for the next release's window.
+          # the same path serves v0.2.0 today and v0.2.1 tomorrow. Two guards
+          # keep a stale edge from handing the updater the previous release's
+          # bytes under the new release's signature ("signature verification
+          # failed"): the manifest's URLs carry `?v=<version>` (each release
+          # gets its own cache key — scripts/mirror_manifest.py), and the
+          # object's HTTP cache lifetime is a minute. `--cache-control` is the
+          # flag that sets that header; `--metadata "cache-control=…"` only
+          # wrote user metadata, which the edge never reads.
           for f in mirror/*; do
             aws s3 cp "$f" "s3://kiwano-hub/releases/$(basename "$f")" \
               --no-progress \
               --metadata-directive REPLACE \
-              --metadata "cache-control=public, max-age=60"
+              --cache-control "public, max-age=60"
           done
 
   # Checksums and provenance for the release as a whole, after every platform
@@ -1545,7 +1547,7 @@ jobs:
         run: >-
           aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json
           --no-progress --metadata-directive REPLACE
-          --metadata "cache-control=public, max-age=60"
+          --cache-control "public, max-age=60"
 
       # The GitHub endpoint serves tauri-action's own manifest — which has
       # carried the bad generic windows signature since 0.2.0 (the rewrite

@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 BASE = "https://hub.kiwano.cc/releases"
@@ -54,8 +55,16 @@ def rewrite(doc):
     unmapped = sorted(k for k in doc["platforms"] if k not in NAMES)
     if unmapped:
         sys.exit(f"unmapped platform key(s): {', '.join(unmapped)}")
+    # The mirror's object names carry no version, so every release overwrites
+    # the same keys. A CDN edge that cached the previous release's bytes would
+    # then answer this release's manifest with them ("signature verification
+    # failed" — the new signature meeting old bytes), and keep doing so until
+    # its TTL ran out. The query string gives each release its own cache entry
+    # while the object path — what `install.sh` and direct download links
+    # use — stays version-free.
+    version = urllib.parse.quote(doc["version"], safe="")
     for key, entry in doc["platforms"].items():
-        entry["url"] = f"{BASE}/{NAMES[key]}"
+        entry["url"] = f"{BASE}/{NAMES[key]}?v={version}"
     return doc
 
 

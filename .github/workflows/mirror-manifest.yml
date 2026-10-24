@@ -81,7 +81,7 @@ jobs:
         run: >-
           aws s3 cp manifest/latest.r2.json s3://kiwano-hub/releases/latest.json
           --no-progress --metadata-directive REPLACE
-          --metadata "cache-control=public, max-age=60"
+          --cache-control "public, max-age=60"
 
       # Both endpoints serve the same verified file — see release.yml's
       # reconcile step. Needs contents: write, which is why this workflow's

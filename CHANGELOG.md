@@ -19,6 +19,8 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-24
+
 ### Added
 
 - **An OpenAI-only client can use an Anthropic-only upstream.** Chat Completions

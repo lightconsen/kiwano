@@ -19,6 +19,38 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-24
+
+**The version where the audit trail gets a page of its own.** A request log's
+full record — redacted headers, both bodies, the credential finding — was a
+dialog over the table it came from. It opens `#dashboard/log/<id>` now, the
+same shape a session's page has: a breadcrumb back, the record, and a Copy
+button. The table's rows hand the navigation to the Dashboard, so the address
+is the record and a refresh or a back/forward trip stays on it; the credential
+banner's deep link lands on the same page. The session breadcrumb's Dashboard
+root also takes the pointer cursor it was always a button for.
+
+The Models list could scroll the whole window with it: a screen-reader-only
+label inside the tag chip was positioned against the document, so rows below
+the fold made the document taller than the viewport and carried the top bar
+and the status bar off-screen. The labels are contained by their chips now,
+and the shell is pinned to the viewport, so only the content scrolls. The
+"n added" note also reads before the Add button instead of after it, and the
+turn-off confirmation shows the seconds its second click has left before it
+reverts.
+
+### Added
+
+- **A request log has its own page.** See the section above, and the countdown
+  on the turn-off confirmation.
+
+### Fixed
+
+- **The Models list no longer scrolls the window shell.** The header and the
+  status bar stay put; only the list scrolls.
+- **README states Apache-2.0**, the licence the repository, the badge and
+  `LICENSE` already carried.
+
 ## [0.3.10] - 2026-10-24
 
 **The version where turning a takeover off and on again leaves the agent

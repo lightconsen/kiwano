@@ -254,6 +254,6 @@ setup and the four checks CI runs. Security issues go through
 
 ## License
 
-GNU General Public License v3.0 or later, see [LICENSE](LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).
 
 Selected modules are ported from [cc-switch](https://github.com/farion1231/cc-switch) (MIT); ported files carry upstream declarations, see [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

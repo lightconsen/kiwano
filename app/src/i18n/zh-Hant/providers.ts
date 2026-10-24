@@ -171,6 +171,7 @@ export const providers = {
   agentPlaceholderKeyTitle: "由閘道指派的預留金鑰，用於請求歸屬識別",
   agentAdditive: "共存 · 多 Provider",
   agentDisable: "關閉接管",
+  agentDisableCountdown: "{n} 秒",
   agentDisableConfirm: "再次點擊以關閉",
   agentDisableNote: "還原該 Agent 自身的設定。路由與金鑰都會保留。",
 

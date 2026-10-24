@@ -8,7 +8,7 @@
 // The API is mocked at the `client` seam, which is the only place the screens
 // touch data (`src/api/client.ts` picks the Tauri or the browser-dev
 // implementation there), so nothing below knows the difference.
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1524,6 +1524,47 @@ describe("a built-in agent's own row", () => {
     // The dialog is about a takeover that no longer exists, so it goes with it —
     // and the tab is back to the onboarding that can turn one on again.
     await waitFor(() => expect(screen.queryByText(en.providers.agentConfigFilesNote)).toBeNull());
+  });
+
+  it("shows how long the second click stays armed, and reverts when it runs out", async () => {
+    apiMock.setTakeover.mockResolvedValue(undefined);
+    // `shouldAdvanceTime` keeps the data loading (`findBy*`/`waitFor`) working
+    // while the countdown's own interval is under our control.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderCodexTab({
+        providers: [deepseek()],
+        routes: [codexRoute(["deepseek"])],
+        codexTakenOver: true,
+      });
+      fireEvent.click(
+        await screen.findByLabelText(
+          en.providers.agentSettingsFor.replace("{agent}", "Codex"),
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: en.providers.agentDisable }));
+
+      // The label says what the second click does; the number says for how long.
+      expect(
+        screen.getByRole("button", { name: en.providers.agentDisableConfirm }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(en.providers.agentDisableCountdown.replace("{n}", "3")),
+      ).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(1000));
+      expect(
+        screen.getByText(en.providers.agentDisableCountdown.replace("{n}", "2")),
+      ).toBeInTheDocument();
+
+      // Let it lapse: the button goes back to its first state, and nothing was
+      // turned off.
+      act(() => vi.advanceTimersByTime(2200));
+      expect(screen.getByRole("button", { name: en.providers.agentDisable })).toBeInTheDocument();
+      expect(apiMock.setTakeover).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps that dialog open when the restore is refused, and says why", async () => {

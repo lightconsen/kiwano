@@ -173,6 +173,7 @@ export const providers = {
   agentPlaceholderKeyTitle: "ゲートウェイが割り当てたプレースホルダーキー。リクエストの帰属識別に使います",
   agentAdditive: "共存 · マルチプロバイダー",
   agentDisable: "引き継ぎをオフにする",
+  agentDisableCountdown: "{n} 秒",
   agentDisableConfirm: "もう一度クリックでオフ",
   agentDisableNote: "エージェント自身の設定を復元します。ルートとキーは残ります。",
 

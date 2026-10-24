@@ -11,6 +11,9 @@ import { SettingsTabs, AGENT_TABS } from "./SettingsTabs";
 import { CopyValue } from "./CopyValue";
 import { protocolName } from "./protocol";
 
+/// How long the second click stays armed, in seconds.
+const ARM_SECONDS = 3;
+
 /** One built-in agent's settings: the files a takeover rewrites, the key its
     clients are pointed at with, turning the takeover off, and how much the agent
     may spend.
@@ -63,12 +66,28 @@ export function AgentSettingsDialog({
   // Turning the takeover off rewrites the agent's config back, so it takes two
   // clicks: the first arms, the second does it, and arming lapses on its own.
   // The same two steps a provider row's delete takes, for the same reason.
-  const [armed, setArmed] = useState(false);
+  //
+  // The deadline is a number rather than a boolean so the button can say how
+  // long the second click stays valid: a two-step control whose window is
+  // invisible reads as a control that ignored the first click.
+  const [armedUntil, setArmedUntil] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(ARM_SECONDS);
+  const armed = armedUntil !== null;
   useEffect(() => {
-    if (!armed) return;
-    const timer = window.setTimeout(() => setArmed(false), 3000);
-    return () => window.clearTimeout(timer);
-  }, [armed]);
+    if (armedUntil === null) return;
+    const tick = () => {
+      const left = Math.ceil((armedUntil - Date.now()) / 1000);
+      if (left <= 0) {
+        setArmedUntil(null);
+        setRemaining(ARM_SECONDS);
+        return;
+      }
+      setRemaining(left);
+    };
+    tick();
+    const timer = window.setInterval(tick, 200);
+    return () => window.clearInterval(timer);
+  }, [armedUntil]);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[460px]">
@@ -138,9 +157,24 @@ export function AgentSettingsDialog({
                     // and the border says "this click is the one that does it".
                     style={armed ? { borderColor: "var(--red)" } : undefined}
                     disabled={busy}
-                    onClick={() => (armed ? onDisable() : setArmed(true))}
+                    onClick={() => {
+                      if (armed) {
+                        onDisable();
+                        return;
+                      }
+                      setRemaining(ARM_SECONDS);
+                      setArmedUntil(Date.now() + ARM_SECONDS * 1000);
+                    }}
                   >
                     {armed ? t("providers.agentDisableConfirm") : t("providers.agentDisable")}
+                    {armed && (
+                      // Visual only: the button's own label is the accessible
+                      // name, and a number that changes every second would
+                      // make it a moving target for a screen reader.
+                      <span aria-hidden className="ml-1.5 text-[10px] tabular-nums opacity-70">
+                        {t("providers.agentDisableCountdown", { n: remaining })}
+                      </span>
+                    )}
                   </Button>
                 </div>
                 {disableError ? (

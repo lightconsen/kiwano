@@ -223,6 +223,7 @@ export const providers = {
   agentAdditive: "Coexist · multi-provider",
   agentDisable: "Turn off takeover",
   /** The armed state of that button: the second click is the one that does it. */
+  agentDisableCountdown: "{n}s",
   agentDisableConfirm: "Click again to turn off",
   agentDisableNote: "Restores the agent's own configuration. Routes and keys are kept.",
 

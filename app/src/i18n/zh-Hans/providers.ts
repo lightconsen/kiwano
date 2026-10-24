@@ -173,6 +173,7 @@ export const providers = {
   agentPlaceholderKeyTitle: "由网关分配的占位密钥，用于请求归属识别",
   agentAdditive: "共存 · 多提供商",
   agentDisable: "关闭接管",
+  agentDisableCountdown: "{n} 秒",
   agentDisableConfirm: "再次点击以关闭",
   agentDisableNote: "还原该 Agent 自身的配置。路由与密钥都会保留。",
 

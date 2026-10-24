@@ -328,24 +328,34 @@ fn read_claude(home: &Path) -> Option<CurrentCreds> {
     })
 }
 
-/// codex: any `base_url = "…"` line in config.toml (same scan as the rewrite)
-/// + OPENAI_API_KEY from auth.json (empty for ChatGPT-login setups → None).
+/// codex: the active provider's `base_url` and credential.
+///
+/// The key comes from `auth.json` first and from the provider table's
+/// `experimental_bearer_token` second. The fallback is what makes a takeover
+/// round-trip work: turning one off restores a config that carries its own
+/// real key and **no** `auth.json` (the file did not exist before), so a
+/// second takeover that only read auth.json would import nothing and leave the
+/// agent unrouted.
+///
+/// The version root is dropped, the same rule the Cline reader applies: Codex
+/// appends `/responses` to `base_url`, and the gateway appends the whole client
+/// path, so a stored provider must not also carry `/v1` or the request becomes
+/// `/v1/v1/responses`.
+///
+/// A gateway placeholder (`kw-ag-…`) is not an upstream credential, and a
+/// loopback endpoint is rejected by [`sanitize`] after this returns.
 fn read_codex(home: &Path) -> Option<CurrentCreds> {
     let toml = std::fs::read_to_string(home.join(".codex").join("config.toml")).ok()?;
-    let base_url = toml.lines().find_map(|line| match line.split_once('=') {
-        Some((k, v)) if k.trim() == "base_url" => Some(
-            v.trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .trim_end_matches('/')
-                .to_string(),
-        ),
-        _ => None,
-    })?;
-    let auth = std::fs::read_to_string(home.join(".codex").join("auth.json")).ok()?;
-    let v: Value = serde_json::from_str(&auth).ok()?;
-    let api_key = v.get("OPENAI_API_KEY")?.as_str()?.trim().to_string();
-    if api_key.is_empty() {
+    let base_url = kiwano_adapters::codex_config::extract_codex_base_url(&toml)?
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches("/v1")
+        .to_string();
+    let auth = std::fs::read_to_string(home.join(".codex").join("auth.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let api_key = kiwano_adapters::codex_config::extract_codex_api_key(auth.as_ref(), Some(&toml))?;
+    if api_key.starts_with(kiwano_adapters::codex_config::GATEWAY_PLACEHOLDER_PREFIX) {
         return None;
     }
     Some(CurrentCreds {
@@ -407,6 +417,70 @@ mod tests {
         // Set to a relative path: no.
         let _relative = EnvGuard::set("HERMES_HOME", Some("relative/hermes"));
         assert!(read_current_creds("hermes", &home).is_none());
+    }
+
+    /// The round trip: a taken-over config is turned off into a direct one that
+    /// carries its own key and no auth.json; taking over again must still see
+    /// a provider to import, or the agent comes back unrouted.
+    #[test]
+    fn codex_reads_its_key_from_the_provider_table_when_auth_is_gone() {
+        let home = temp_home("codex-config-key");
+        let dir = home.join(".codex");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "model_provider = \"deepseek\"\n\n[model_providers.deepseek]\n\
+             base_url = \"https://api.deepseek.com/v1\"\n\
+             wire_api = \"responses\"\n\
+             experimental_bearer_token = \"sk-direct\"\n",
+        )
+        .unwrap();
+
+        let creds = read_current_creds("codex", &home).expect("the direct config");
+        // Codex appends `/responses`; the stored provider must not keep `/v1`.
+        assert_eq!(creds.base_url, "https://api.deepseek.com");
+        assert_eq!(creds.api_key, "sk-direct");
+        assert_eq!(creds.protocol, "openai");
+    }
+
+    /// auth.json still wins when both carry a key — it is the file Codex itself
+    /// reads for the official credential.
+    #[test]
+    fn codex_prefers_the_auth_file_key() {
+        let home = temp_home("codex-auth-first");
+        let dir = home.join(".codex");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "model_provider = \"deepseek\"\n[model_providers.deepseek]\n\
+             base_url = \"https://api.deepseek.com\"\n\
+             experimental_bearer_token = \"sk-config\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-auth"}"#).unwrap();
+
+        assert_eq!(
+            read_current_creds("codex", &home).unwrap().api_key,
+            "sk-auth"
+        );
+    }
+
+    /// A taken-over config is not a provider to import: the placeholder is the
+    /// gateway's own key, and a loopback endpoint would send the gateway to
+    /// itself.
+    #[test]
+    fn a_taken_over_codex_config_is_not_imported() {
+        let home = temp_home("codex-loopback");
+        let dir = home.join(".codex");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "model_provider = \"deepseek\"\n[model_providers.deepseek]\n\
+             base_url = \"http://127.0.0.1:8317/v1\"\n\
+             experimental_bearer_token = \"kw-ag-codex-abcd\"\n",
+        )
+        .unwrap();
+        assert!(read_current_creds("codex", &home).is_none());
     }
 
     /// Cline's provider settings follow three variables, and a reader aimed at
@@ -544,20 +618,24 @@ mod tests {
     }
 
     #[test]
-    fn codex_creds_need_both_toml_and_auth() {
+    fn codex_creds_need_an_endpoint_and_a_key() {
         let home = temp_home("codex");
         let dir = home.join(".codex");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("config.toml"),
-            "[model_providers.deepseek]\nbase_url = \"https://api.deepseek.com/v1\"\n",
+            "model_provider = \"deepseek\"\n\
+             [model_providers.deepseek]\n\
+             base_url = \"https://api.deepseek.com/v1\"\n",
         )
         .unwrap();
-        // auth.json missing / ChatGPT login (no key) → None
+        // auth.json missing and no token in the table → nothing to import
         assert!(read_current_creds("codex", &home).is_none());
         std::fs::write(dir.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-ds"}"#).unwrap();
         let creds = read_current_creds("codex", &home).unwrap();
-        assert_eq!(creds.base_url, "https://api.deepseek.com/v1");
+        // The version root is Codex's, not the provider's: stored as the
+        // gateway composes it.
+        assert_eq!(creds.base_url, "https://api.deepseek.com");
         assert_eq!(creds.api_key, "sk-ds");
     }
 

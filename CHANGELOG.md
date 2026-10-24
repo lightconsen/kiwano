@@ -19,6 +19,22 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-10-24
+
+**The version where the updater stops failing its own signature check.** The
+download mirror reuses one object path per platform across releases, and the
+edge cached those bytes for four hours because the workflow set
+`cache-control` as S3 *user* metadata, which nothing reads — so a fresh
+manifest could be answered with the previous release's installer and fail
+verification until a retry reached a cold edge. Each manifest URL now carries
+`?v=<version>`, giving every release its own cache key, and the uploads set
+the real header (`public, max-age=60`).
+
+### Fixed
+
+- **An update no longer fails signature verification on a stale mirror
+  edge.** See the section above.
+
 ## [0.3.11] - 2026-10-24
 
 **The version where the audit trail gets a page of its own.** A request log's

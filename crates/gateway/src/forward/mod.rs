@@ -4,12 +4,13 @@
 //! are piped through byte-for-byte while a scanning stream watches the events
 //! for usage fields; the metered sample is persisted after the stream ends.
 //!
-//! Protocol conversion (tech.md §4.3 / adapters phase): an Anthropic
-//! inbound request (`POST /v1/messages`) bound to an OpenAI-compatible
-//! provider is converted with the `kiwano-adapters` sublayer — request via
-//! `anthropic_to_openai` (model untouched), response (JSON + SSE)
-//! back via `openai_to_anthropic` / the streaming converter — and metered
-//! from the upstream OpenAI usage fields.
+//! Protocol conversion (tech.md §4.3 / adapters phase): any request whose
+//! protocol differs from its upstream's is converted with the
+//! `kiwano-adapters` sublayer. Anthropic → OpenAI Chat (`convert`),
+//! Responses → Chat (`convert_responses`), Chat → Anthropic (`convert_chat`)
+//! and Responses → Anthropic (`convert_responses_anthropic`, composed through
+//! Chat) each convert the request (model untouched), the response (JSON + SSE)
+//! and meter from the side that has usable usage fields.
 //!
 //! **No response cache, deliberately.** Every local gateway of this shape grows
 //! one eventually, so the reasoning is written here rather than rediscovered:
@@ -32,10 +33,12 @@
 //! `sample` owns the metering vocabulary; `headers`, `upstream`, `shim` and
 //! `stream` are the four pieces a forward is made of — credentials, the send
 //! with its retries, the body rewriting, the SSE passthrough — and `native`
-//! and `convert` are the two entry points, both of which end in `metering`.
+//! plus the four `convert*` entry points all end in `metering`.
 
 pub mod convert;
+pub mod convert_chat;
 pub mod convert_responses;
+pub mod convert_responses_anthropic;
 pub mod finish;
 pub mod headers;
 pub mod inbound;

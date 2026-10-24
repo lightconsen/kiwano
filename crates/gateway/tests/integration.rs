@@ -1141,15 +1141,32 @@ async fn promoting_a_provider_switches_traffic_without_a_restart() {
     assert_eq!(captured_b.lock().unwrap().len(), 1);
 }
 
+/// The reverse leg: an OpenAI Chat client on an Anthropic-only provider. The
+/// request is converted, the response converted back, and the raw Anthropic
+/// usage (where `input_tokens` excludes the cache buckets) is what is metered.
 #[tokio::test]
-async fn openai_inbound_to_anthropic_provider_still_fails_cleanly() {
+async fn chat_inbound_converts_non_streaming_to_an_anthropic_upstream() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("t.db")).unwrap();
 
-    // codex (OpenAI inbound) bound to an Anthropic provider: the only
-    // conversion path implemented is Anthropic -> OpenAI, so this must not
-    // forward.
-    let (upstream_url, captured) = mock_anthropic(MockReply::Json(json!({"ok": true}))).await;
+    let (upstream_url, captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5-5",
+        "content": [
+            {"type": "text", "text": "hello"},
+            {"type": "tool_use", "id": "t1", "name": "read", "input": {"p": "a"}}
+        ],
+        "stop_reason": "tool_use",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 30,
+            "cache_creation_input_tokens": 5
+        }
+    })))
+    .await;
     store
         .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
         .unwrap();
@@ -1165,16 +1182,264 @@ async fn openai_inbound_to_anthropic_provider_still_fails_cleanly() {
         &app,
         "/v1/chat/completions",
         Some("kw-ag-codex-test"),
-        r#"{"model":"m"}"#,
+        r#"{"model":"claude-sonnet-5-5","messages":[
+             {"role":"system","content":"be terse"},
+             {"role":"user","content":"hi"}],
+           "tools":[{"type":"function","function":{"name":"read","description":"read a file",
+             "parameters":{"type":"object","properties":{"p":{"type":"string"}}}}}],
+           "max_tokens":256}"#,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.status(), StatusCode::OK);
     let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(body["error"]["type"], "protocol_mismatch");
-    assert!(
-        captured.lock().unwrap().is_empty(),
-        "nothing may reach the upstream"
+    assert_eq!(body["object"], "chat.completion");
+    assert_eq!(body["choices"][0]["message"]["content"], "hello");
+    assert_eq!(body["choices"][0]["message"]["tool_calls"][0]["id"], "t1");
+    assert_eq!(
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "read"
     );
+    assert_eq!(body["choices"][0]["finish_reason"], "tool_calls");
+    // Chat usage is inclusive: 10 fresh + 30 read + 5 written.
+    assert_eq!(body["usage"]["prompt_tokens"], 45);
+    assert_eq!(body["usage"]["prompt_tokens_details"]["cached_tokens"], 30);
+    assert_eq!(
+        body["usage"]["prompt_tokens_details"]["cache_write_tokens"],
+        5
+    );
+
+    // The upstream saw Anthropic auth and an Anthropic body.
+    assert_eq!(captured.lock().unwrap().len(), 1);
+    let sent = parsed_body(&bodies);
+    assert_eq!(sent["system"], "be terse");
+    assert_eq!(sent["max_tokens"], 256);
+    assert_eq!(sent["messages"][0]["role"], "user");
+    assert_eq!(sent["tools"][0]["name"], "read");
+    assert_eq!(sent["tools"][0]["input_schema"]["type"], "object");
+
+    // Metered from the raw Anthropic body: input is fresh input only.
+    let totals = state.store.usage_totals(Some("codex"), None, None).unwrap();
+    assert_eq!(totals.requests, 1);
+    assert_eq!(totals.input_tokens, 10);
+    assert_eq!(totals.output_tokens, 7);
+    assert_eq!(totals.cache_read_tokens, 30);
+    assert_eq!(totals.cache_creation_tokens, 5);
+}
+
+/// Chat streaming: Anthropic events become Chat chunks, the usage chunk is
+/// scanned for metering and then withheld from a client that never asked for it.
+#[tokio::test]
+async fn chat_inbound_converts_anthropic_sse_to_chat_chunks() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let sse = vec![
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":5}}}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hel\"}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n",
+        "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    ];
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Sse(sse)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"claude-sonnet-5-5","messages":[{"role":"user","content":"hi"}],"stream":true}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let text = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+    assert!(text.contains("\"content\":\"hel\""), "{text}");
+    assert!(text.contains("\"finish_reason\":\"stop\""), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(
+        !text.contains("event:"),
+        "the client speaks Chat, not events"
+    );
+    assert!(
+        !text.contains("\"prompt_tokens\""),
+        "a client that did not ask for usage must not see the chunk"
+    );
+
+    // Metering still saw it: the converted usage is inclusive, so the stored
+    // input is 6 fresh + 5 read.
+    let totals = wait_for_usage(&state, "codex", 1).await;
+    assert_eq!(totals.input_tokens, 11);
+    assert_eq!(totals.output_tokens, 4);
+    assert_eq!(totals.cache_read_tokens, 5);
+}
+
+/// …and the client that *did* ask for usage gets the chunk, unchanged in shape.
+#[tokio::test]
+async fn chat_inbound_stream_keeps_the_usage_chunk_when_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let sse = vec![
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":5}}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+        "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    ];
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Sse(sse)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state);
+
+    let response = post_json(
+        &app,
+        "/v1/chat/completions",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"claude-sonnet-5-5","messages":[{"role":"user","content":"hi"}],
+           "stream":true,"stream_options":{"include_usage":true}}"#,
+    )
+    .await;
+    let text = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+    assert!(text.contains("\"prompt_tokens\":11"), "{text}");
+    assert!(text.contains("\"cached_tokens\":5"), "{text}");
+}
+
+/// Responses non-streaming: `responses_to_chat` then `chat_to_anthropic`, and
+/// the answer back through `anthropic_to_chat` -> `chat_to_responses`.
+#[tokio::test]
+async fn responses_inbound_converts_non_streaming_to_an_anthropic_upstream() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let (upstream_url, captured, bodies) = mock_anthropic_capturing_body(MockReply::Json(json!({
+        "id": "msg_2",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5-5",
+        "content": [
+            {"type": "text", "text": "hello"},
+            {"type": "tool_use", "id": "call_1", "name": "read", "input": {"p": "a"}}
+        ],
+        "stop_reason": "tool_use",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 30,
+            "cache_creation_input_tokens": 5
+        }
+    })))
+    .await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/responses",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"claude-sonnet-5-5","instructions":"be terse","store":false,
+           "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],
+           "max_output_tokens":100}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(body["object"], "response");
+    assert_eq!(body["status"], "completed");
+    let output = body["output"].as_array().unwrap();
+    let text_item = output.iter().find(|i| i["type"] == "message").unwrap();
+    assert_eq!(text_item["content"][0]["text"], "hello");
+    let call = output
+        .iter()
+        .find(|i| i["type"] == "function_call")
+        .unwrap();
+    assert_eq!(call["name"], "read");
+    assert_eq!(call["call_id"], "call_1");
+    assert_eq!(call["arguments"], "{\"p\":\"a\"}");
+    // Inclusive input, with the cache buckets alongside.
+    assert_eq!(body["usage"]["input_tokens"], 45);
+    assert_eq!(body["usage"]["input_tokens_details"]["cached_tokens"], 30);
+    assert_eq!(body["usage"]["cache_creation_input_tokens"], 5);
+
+    let sent = parsed_body(&bodies);
+    assert_eq!(sent["system"], "be terse");
+    assert_eq!(sent["max_tokens"], 100);
+    assert_eq!(sent["messages"][0]["role"], "user");
+    assert_eq!(captured.lock().unwrap().len(), 1);
+
+    let totals = state.store.usage_totals(Some("codex"), None, None).unwrap();
+    assert_eq!(totals.input_tokens, 10);
+    assert_eq!(totals.output_tokens, 7);
+    assert_eq!(totals.cache_read_tokens, 30);
+    assert_eq!(totals.cache_creation_tokens, 5);
+}
+
+/// Responses streaming: Anthropic events go through Chat and come out as the
+/// typed Responses sequence, with usage on `response.completed`.
+#[tokio::test]
+async fn responses_inbound_converts_anthropic_sse_to_responses_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("t.db")).unwrap();
+
+    let sse = vec![
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_3\",\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":5}}}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+        "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    ];
+    let (upstream_url, _captured) = mock_anthropic(MockReply::Sse(sse)).await;
+    store
+        .insert_provider(&provider("p-ant", Protocol::Anthropic, upstream_url))
+        .unwrap();
+    store.upsert_binding(&bind("codex", "p-ant", 0)).unwrap();
+    store
+        .upsert_client_key("kw-ag-codex-test", "codex")
+        .unwrap();
+    let state = Arc::new(GatewayState::new(store).unwrap());
+    let app = data_plane_router(state.clone());
+
+    let response = post_json(
+        &app,
+        "/v1/responses",
+        Some("kw-ag-codex-test"),
+        r#"{"model":"claude-sonnet-5-5","input":"hi","stream":true}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let text = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+    assert!(text.contains("event: response.created"), "{text}");
+    assert!(text.contains("event: response.output_text.delta"), "{text}");
+    assert!(text.contains("event: response.completed"), "{text}");
+    assert!(
+        !text.contains("chat.completion.chunk"),
+        "the client speaks Responses, not Chat"
+    );
+
+    let totals = wait_for_usage(&state, "codex", 1).await;
+    assert_eq!(totals.input_tokens, 11);
+    assert_eq!(totals.output_tokens, 4);
+    assert_eq!(totals.cache_read_tokens, 5);
 }
 
 /// Anthropic `/v1/messages` on an OpenAI-compatible provider: non-streaming
@@ -1656,9 +1921,10 @@ async fn request_log_records_failures_without_usage() {
     let state = Arc::new(GatewayState::new(store).unwrap());
     let app = data_plane_router(state.clone());
 
+    // A path with no Anthropic shape to convert: the mismatch this log is about.
     let response = post_json(
         &app,
-        "/v1/chat/completions",
+        "/v1/completions",
         Some("kw-ag-codex-test"),
         r#"{"model":"m"}"#,
     )

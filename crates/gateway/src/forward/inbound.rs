@@ -30,6 +30,25 @@ pub(crate) enum InboundResolution {
     /// Responses `/v1/responses` inbound on a provider that serves only Chat
     /// Completions (migration v30): convert, also in the adapters sublayer.
     ConvertResponsesToChat,
+    /// OpenAI `/v1/chat/completions` inbound on an endpoint that speaks
+    /// Anthropic Messages: the mirror of `ConvertAnthropicToOpenAI`, for the
+    /// OpenAI-only clients (Cline, Aider, Continue, Droid, …) that cannot point
+    /// themselves at an upstream which only exposes `/v1/messages`.
+    ///
+    /// Carries the endpoint's URL for the same reason the other conversion
+    /// does: the model-aware step may choose a registered Anthropic endpoint on
+    /// an OpenAI-primary provider.
+    ConvertChatToAnthropic {
+        base_url: String,
+        api_path: Option<String>,
+    },
+    /// OpenAI `/v1/responses` inbound on an endpoint that speaks Anthropic
+    /// Messages — Codex against an Anthropic-only upstream. Converted as
+    /// Responses -> Chat -> Anthropic, reusing the Chat converter.
+    ConvertResponsesToAnthropic {
+        base_url: String,
+        api_path: Option<String>,
+    },
     /// No endpoint and no conversion: fail cleanly with `protocol_mismatch`.
     Mismatch { message: String },
 }
@@ -72,6 +91,37 @@ pub(crate) fn resolve_inbound(
                                 message: format!(
                                     "provider `{}` lists `{model}` on its OpenAI endpoint but has \
                                      no such endpoint configured",
+                                    provider.id
+                                ),
+                            },
+                        }
+                    }
+                    (Protocol::OpenAI, Protocol::Anthropic) if path == "/v1/chat/completions" => {
+                        match provider.endpoint_target(Protocol::Anthropic) {
+                            Some((base_url, api_path)) => {
+                                InboundResolution::ConvertChatToAnthropic { base_url, api_path }
+                            }
+                            None => InboundResolution::Mismatch {
+                                message: format!(
+                                    "provider `{}` lists `{model}` on its Anthropic endpoint but \
+                                     has no such endpoint configured",
+                                    provider.id
+                                ),
+                            },
+                        }
+                    }
+                    (Protocol::OpenAI, Protocol::Anthropic) if path == "/v1/responses" => {
+                        match provider.endpoint_target(Protocol::Anthropic) {
+                            Some((base_url, api_path)) => {
+                                InboundResolution::ConvertResponsesToAnthropic {
+                                    base_url,
+                                    api_path,
+                                }
+                            }
+                            None => InboundResolution::Mismatch {
+                                message: format!(
+                                    "provider `{}` lists `{model}` on its Anthropic endpoint but \
+                                     has no such endpoint configured",
                                     provider.id
                                 ),
                             },
@@ -135,11 +185,33 @@ pub(crate) fn resolve_inbound(
             api_path: provider.api_path.clone(),
         };
     }
+    if inbound_proto == Protocol::OpenAI && provider.protocol == Protocol::Anthropic {
+        // The reverse of the branch above: an OpenAI-only client against an
+        // upstream that speaks only `/v1/messages`. Exact paths, because the
+        // conversion always aims at `/v1/messages` and cannot carry an
+        // id-bearing sub-path or an embeddings/completions shape.
+        let converted = match path {
+            "/v1/chat/completions" => Some(InboundResolution::ConvertChatToAnthropic {
+                base_url: provider.base_url.clone(),
+                api_path: provider.api_path.clone(),
+            }),
+            "/v1/responses" => Some(InboundResolution::ConvertResponsesToAnthropic {
+                base_url: provider.base_url.clone(),
+                api_path: provider.api_path.clone(),
+            }),
+            _ => None,
+        };
+        if let Some(converted) = converted {
+            return converted;
+        }
+    }
     InboundResolution::Mismatch {
         message: format!(
             "provider `{}` speaks `{}` but path `{}` is `{}`; no `{}` endpoint is configured on the \
-             provider — the conversions that exist are Anthropic `/v1/messages` -> OpenAI and \
-             OpenAI `/v1/responses` -> Chat Completions",
+             provider — the conversions that exist are Anthropic `/v1/messages` -> OpenAI, \
+             OpenAI `/v1/chat/completions` -> Anthropic, OpenAI `/v1/responses` -> Chat \
+             Completions, and OpenAI `/v1/responses` -> Anthropic. `/v1/completions` and \
+             `/v1/embeddings` pass through only",
             provider.id,
             provider.protocol.as_str(),
             path,
@@ -319,6 +391,136 @@ mod tests {
         assert!(matches!(
             resolve_inbound(&anth, Some(Protocol::Anthropic), "/v1/messages", None),
             InboundResolution::Native
+        ));
+    }
+
+    /// The mirror of the OpenAI-wire rules: an OpenAI-only client against an
+    /// upstream that speaks only `/v1/messages`. Exact paths only — the
+    /// conversion always aims at `/v1/messages`, so an embeddings or
+    /// id-bearing Responses path has nothing to land on.
+    #[test]
+    fn openai_inbounds_convert_to_an_anthropic_only_provider() {
+        let plain = provider(Protocol::Anthropic, None);
+
+        match resolve_inbound(&plain, Some(Protocol::OpenAI), "/v1/chat/completions", None) {
+            InboundResolution::ConvertChatToAnthropic { base_url, api_path } => {
+                assert_eq!(base_url, "https://up.example.com");
+                assert_eq!(api_path, None);
+            }
+            _ => panic!("expected a Chat → Anthropic conversion"),
+        }
+        assert!(matches!(
+            resolve_inbound(&plain, Some(Protocol::OpenAI), "/v1/responses", None),
+            InboundResolution::ConvertResponsesToAnthropic { .. }
+        ));
+        for path in ["/v1/completions", "/v1/embeddings", "/v1/responses/resp_1"] {
+            assert!(
+                matches!(
+                    resolve_inbound(&plain, Some(Protocol::OpenAI), path, None),
+                    InboundResolution::Mismatch { .. }
+                ),
+                "{path} has no Anthropic shape"
+            );
+        }
+
+        // A registered OpenAI endpoint is still the provider's declaration, and
+        // wins over converting: the bytes pass through there.
+        let mut dual = provider(Protocol::Anthropic, None);
+        dual.endpoints = vec![crate::store::ProviderEndpoint {
+            protocol: Protocol::OpenAI,
+            base_url: "https://up.example.com/openai".into(),
+            api_path: Some("/v1".into()),
+        }];
+        for path in ["/v1/chat/completions", "/v1/responses"] {
+            assert!(matches!(
+                resolve_inbound(&dual, Some(Protocol::OpenAI), path, None),
+                InboundResolution::Alternate {
+                    protocol: Protocol::OpenAI,
+                    ..
+                }
+            ));
+        }
+    }
+
+    /// The same split catalogue seen from the OpenAI side: a Claude model on an
+    /// OpenAI inbound has to reach the Anthropic endpoint, whichever one the
+    /// provider calls primary.
+    #[test]
+    fn an_openai_inbound_follows_the_catalogue_to_an_anthropic_endpoint() {
+        // Primary OpenAI, Anthropic registered.
+        let mut split = provider(Protocol::OpenAI, None);
+        split.endpoints = vec![crate::store::ProviderEndpoint {
+            protocol: Protocol::Anthropic,
+            base_url: "https://split.example.com/provider".into(),
+            api_path: None,
+        }];
+        split.endpoint_models = vec![
+            (
+                Protocol::OpenAI,
+                vec!["deepseek/deepseek-v4.1-flash".into()],
+            ),
+            (Protocol::Anthropic, vec!["claude-sonnet-5-5".into()]),
+        ];
+
+        match resolve_inbound(
+            &split,
+            Some(Protocol::OpenAI),
+            "/v1/chat/completions",
+            Some("claude-sonnet-5-5"),
+        ) {
+            InboundResolution::ConvertChatToAnthropic { base_url, .. } => {
+                assert_eq!(base_url, "https://split.example.com/provider");
+            }
+            _ => panic!("expected a conversion aimed at the registered Anthropic endpoint"),
+        }
+        match resolve_inbound(
+            &split,
+            Some(Protocol::OpenAI),
+            "/v1/chat/completions",
+            Some("deepseek/deepseek-v4.1-flash"),
+        ) {
+            InboundResolution::Native => {}
+            _ => panic!("an OpenAI-served model stays native"),
+        }
+        assert!(matches!(
+            resolve_inbound(
+                &split,
+                Some(Protocol::OpenAI),
+                "/v1/chat/completions",
+                Some("some-other-model")
+            ),
+            InboundResolution::Native
+        ));
+
+        // Primary Anthropic, OpenAI registered: the Claude model is native and
+        // the open model passes through the registered endpoint.
+        let mut reverse = provider(Protocol::Anthropic, None);
+        reverse.endpoints = vec![crate::store::ProviderEndpoint {
+            protocol: Protocol::OpenAI,
+            base_url: "https://split.example.com/openai".into(),
+            api_path: None,
+        }];
+        reverse.endpoint_models = split.endpoint_models.clone();
+        assert!(matches!(
+            resolve_inbound(
+                &reverse,
+                Some(Protocol::OpenAI),
+                "/v1/chat/completions",
+                Some("claude-sonnet-5-5")
+            ),
+            InboundResolution::ConvertChatToAnthropic { .. }
+        ));
+        assert!(matches!(
+            resolve_inbound(
+                &reverse,
+                Some(Protocol::OpenAI),
+                "/v1/chat/completions",
+                Some("deepseek/deepseek-v4.1-flash")
+            ),
+            InboundResolution::Alternate {
+                protocol: Protocol::OpenAI,
+                ..
+            }
         ));
     }
 

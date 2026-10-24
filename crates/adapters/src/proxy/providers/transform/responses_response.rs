@@ -141,6 +141,22 @@ pub(crate) fn build_responses_usage(usage: &Value) -> Value {
         .and_then(|v| v.as_u64())
         .or_else(|| get("prompt_cache_hit_tokens"))
         .unwrap_or(0);
+    // Cache **writes** have no Responses field of their own, but an Anthropic
+    // upstream reports them and they are priced, so the flat Anthropic spelling
+    // (and the nested Chat one) is carried through rather than dropped. The
+    // gateway's usage scanner reads it; Responses clients ignore the field.
+    let cache_creation = get("cache_creation_input_tokens")
+        .or_else(|| {
+            usage
+                .pointer("/prompt_tokens_details/cache_write_tokens")
+                .and_then(|v| v.as_u64())
+        })
+        .or_else(|| {
+            usage
+                .pointer("/input_tokens_details/cache_write_tokens")
+                .and_then(|v| v.as_u64())
+        })
+        .unwrap_or(0);
     // Thinking tokens, as a slice of the output — never added to it.
     let reasoning_tokens = get("reasoning_tokens")
         .or_else(|| {
@@ -155,13 +171,20 @@ pub(crate) fn build_responses_usage(usage: &Value) -> Value {
         })
         .unwrap_or(0);
 
-    json!({
+    let mut out = json!({
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "input_tokens_details": {"cached_tokens": cached_tokens},
         "output_tokens_details": {"reasoning_tokens": reasoning_tokens}
-    })
+    });
+    if cache_creation > 0 {
+        out["cache_creation_input_tokens"] = json!(cache_creation);
+    }
+    if let Some(ttl) = usage.get("cache_creation") {
+        out["cache_creation"] = ttl.clone();
+    }
+    out
 }
 
 /// The skeleton both directions share: a Responses object with the fields that
@@ -327,6 +350,28 @@ mod tests {
         assert_eq!(usage["total_tokens"], 15);
         assert_eq!(usage["input_tokens_details"]["cached_tokens"], 4);
         assert_eq!(usage["output_tokens_details"]["reasoning_tokens"], 2);
+    }
+
+    /// A cache **write** is real money and has no Responses field, so the flat
+    /// Anthropic spelling (and its 1h split) is carried through for the meter.
+    #[test]
+    fn cache_writes_survive_into_the_responses_usage() {
+        let body = json!({
+            "id": "c",
+            "model": "m",
+            "choices": [{"message": {"role": "assistant", "content": "hi"},
+                         "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 45,
+                "completion_tokens": 7,
+                "cache_creation_input_tokens": 5,
+                "cache_creation": {"ephemeral_1h_input_tokens": 3}
+            }
+        });
+        let usage = chat_to_responses(body).unwrap()["usage"].clone();
+        assert_eq!(usage["cache_creation_input_tokens"], 5);
+        assert_eq!(usage["cache_creation"]["ephemeral_1h_input_tokens"], 3);
+        assert_eq!(usage["input_tokens"], 45);
     }
 
     #[test]

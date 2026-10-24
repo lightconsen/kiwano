@@ -12,6 +12,8 @@ use axum::response::Response;
 use futures_util::StreamExt;
 
 use crate::forward::convert::forward_anthropic_via_openai;
+use crate::forward::convert_chat::forward_chat_via_anthropic;
+use crate::forward::convert_responses_anthropic::forward_responses_via_anthropic;
 use crate::forward::finish::{buffered_response, finish_log, log_failure, sse_response};
 use crate::forward::headers::{
     copy_response_headers, response_headers_text, upstream_key_and_headers,
@@ -28,6 +30,28 @@ use crate::router::{RoutedRequest, UpstreamProvider};
 use crate::server::data::upstream_url;
 use crate::server::{error_response, GatewayState};
 use crate::store::Protocol;
+
+/// A conversion's upstream attempt: the provider row with the endpoint and
+/// protocol the conversion actually speaks.
+///
+/// The protocol has to be overridden together with the URL. A conversion is
+/// aimed at a protocol the *endpoint* speaks, which is not always the
+/// provider's primary one — leaving the row's protocol in place would build
+/// the wrong credentials (an `Authorization` bearer against an Anthropic
+/// endpoint, or `x-api-key` against an OpenAI one).
+fn conversion_target(
+    provider: &UpstreamProvider,
+    protocol: Protocol,
+    base_url: String,
+    api_path: Option<String>,
+) -> UpstreamProvider {
+    UpstreamProvider {
+        protocol,
+        base_url,
+        api_path,
+        ..provider.clone()
+    }
+}
 
 /// Forward one resolved request to its provider and return the client-facing
 /// response, metering usage on the way. `capture` carries the request-side
@@ -109,14 +133,46 @@ pub async fn forward(
                 // provider's primary one — the model decided that above — so the
                 // attempt carries the chosen URL rather than the row's own.
                 let target = RoutedRequest {
-                    provider: UpstreamProvider {
-                        base_url,
-                        api_path,
-                        ..provider.clone()
-                    },
+                    provider: conversion_target(provider, Protocol::OpenAI, base_url, api_path),
                     ..routed
                 };
                 return forward_anthropic_via_openai(
+                    state,
+                    method,
+                    inbound_headers,
+                    body,
+                    target,
+                    inbound,
+                    started,
+                    started_unix,
+                    log,
+                )
+                .await;
+            }
+            InboundResolution::ConvertChatToAnthropic { base_url, api_path } => {
+                let target = RoutedRequest {
+                    provider: conversion_target(provider, Protocol::Anthropic, base_url, api_path),
+                    ..routed
+                };
+                return forward_chat_via_anthropic(
+                    state,
+                    method,
+                    inbound_headers,
+                    body,
+                    target,
+                    inbound,
+                    started,
+                    started_unix,
+                    log,
+                )
+                .await;
+            }
+            InboundResolution::ConvertResponsesToAnthropic { base_url, api_path } => {
+                let target = RoutedRequest {
+                    provider: conversion_target(provider, Protocol::Anthropic, base_url, api_path),
+                    ..routed
+                };
+                return forward_responses_via_anthropic(
                     state,
                     method,
                     inbound_headers,
@@ -373,5 +429,30 @@ pub async fn forward(
             log,
         };
         buffered_response(&state, bytes, sample, status, response_headers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::forward::test_support::provider;
+
+    /// The conversion carries the endpoint's protocol, not the row's: otherwise
+    /// the headers would be built for the provider's primary protocol and send
+    /// the wrong credential to the endpoint the model chose.
+    #[test]
+    fn a_conversion_target_takes_the_endpoints_protocol() {
+        let primary_openai = provider(Protocol::OpenAI, None);
+        let target = conversion_target(
+            &primary_openai,
+            Protocol::Anthropic,
+            "https://up.example.com".into(),
+            Some("/anthropic".into()),
+        );
+        assert_eq!(target.protocol, Protocol::Anthropic);
+        assert_eq!(target.base_url, "https://up.example.com");
+        assert_eq!(target.api_path.as_deref(), Some("/anthropic"));
+        // The rest of the row rides along.
+        assert_eq!(target.id, primary_openai.id);
     }
 }

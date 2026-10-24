@@ -5,23 +5,24 @@
 
 //! Format conversion module
 //!
-//! Two pairs are converted now, and the title is worth reading carefully because
-//! "Anthropic ↔ OpenAI" suggests a symmetry that is not there. A Claude Code
+//! Three pairs are converted, and the title is worth reading carefully because
+//! "Anthropic ↔ OpenAI" suggests a symmetry that only now exists. A Claude Code
 //! client on an OpenAI-compatible provider gets `anthropic_to_openai` (request)
 //! and `openai_to_anthropic` (response, JSON or the SSE behind
-//! [`create_anthropic_sse_stream`]). A Codex client — which speaks the Responses
-//! API and nothing else — gets `responses_to_chat` (request),
-//! `chat_to_responses` (response) and the SSE adapter
-//! `responses_streaming::create_responses_sse_stream`.
+//! [`create_anthropic_sse_stream`]). The reverse — an OpenAI client on an
+//! Anthropic-only upstream — gets `chat_to_anthropic`, `anthropic_to_chat` and
+//! the SSE adapter `chat_streaming::create_chat_sse_stream_from_anthropic`.
+//! A Codex client speaks the Responses API and gets `responses_to_chat`
+//! (request), `chat_to_responses` (response) and the SSE adapter
+//! `responses_streaming::create_responses_sse_stream`; against an Anthropic
+//! upstream those compose through the Chat converters
+//! (`anthropic_to_responses`, `create_responses_sse_stream_from_anthropic`).
 //!
-//! The Responses forward direction was built because it has real users: refusing
-//! `/v1/responses` against a Chat-only provider meant refusing Codex outright.
-//! The **reverse** is still refused, deliberately: an OpenAI Chat request
-//! arriving for a Responses-only upstream would have to invent an `input` and a
-//! stored-response story no Chat client asked for, so nothing was built for it.
-//! Also not converted: an OpenAI Chat request arriving for an Anthropic provider,
-//! and `/v1/messages/count_tokens`. Each of those is refused with a reason rather
-//! than approximated — `resolve_inbound` in the gateway lists them — because a
+//! Still refused, deliberately: an OpenAI Chat request arriving for a
+//! `/v1/responses`-only upstream (it would have to invent an `input` and a
+//! stored-response story no Chat client asked for), and
+//! `/v1/messages/count_tokens`. Each is refused with a reason rather than
+//! approximated — `resolve_inbound` in the gateway lists them — because a
 //! half-converted request is a wrong answer with no way to tell.
 //!
 //! Reference: anthropic-proxy-rs
@@ -43,6 +44,9 @@
 //! responses stay in step.
 
 pub mod billing;
+pub mod chat_message;
+pub mod chat_request;
+pub mod chat_response;
 pub mod message;
 pub mod reasoning;
 pub mod request;
@@ -56,6 +60,8 @@ pub mod tool_choice;
 // ── the public surface, re-exported so every `transform::x` path still resolves ──
 
 pub use billing::strip_leading_anthropic_billing_header;
+pub use chat_request::chat_to_anthropic;
+pub use chat_response::{anthropic_to_chat, anthropic_to_responses};
 pub use reasoning::{is_openai_o_series, resolve_reasoning_effort, supports_reasoning_effort};
 pub use request::{anthropic_to_openai, anthropic_to_openai_with_reasoning_content};
 pub use response::openai_to_anthropic;

@@ -249,8 +249,11 @@ describe("an entry already added", () => {
     const row = await renderShelf([
       entry("deepseek", "DeepSeek", { added: true, added_count: 2 }),
     ]);
-    expect(within(row).getByRole("button", { name: en.shelf.add })).toBeInTheDocument();
-    expect(within(row).getByText(en.shelf.addedCount.replace("{n}", "2"))).toBeInTheDocument();
+    const add = within(row).getByRole("button", { name: en.shelf.add });
+    const count = within(row).getByText(en.shelf.addedCount.replace("{n}", "2"));
+    expect(add).toBeInTheDocument();
+    // The count reads as a note *before* the action, not a suffix on it.
+    expect(count.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("offers Add in the detail dialog too", async () => {

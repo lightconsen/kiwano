@@ -99,14 +99,14 @@ export function Row({
             vendor can be added again for a second account or key, and the
             count beside the button is what says one is already there. */}
         <div className="flex items-center justify-end gap-1.5">
-          <Button size="xs" className="rounded px-2 text-[10.5px] font-semibold" onClick={() => onAdd(entry)}>
-            {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
-          </Button>
           {entry.added_count > 0 && (
             <span className="whitespace-nowrap text-[10.5px] text-mut">
               {t("shelf.addedCount", { n: entry.added_count })}
             </span>
           )}
+          <Button size="xs" className="rounded px-2 text-[10.5px] font-semibold" onClick={() => onAdd(entry)}>
+            {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
+          </Button>
         </div>
       </td>
     </tr>

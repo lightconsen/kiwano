@@ -1345,9 +1345,13 @@ jobs:
           # bytes under the new release's signature ("signature verification
           # failed"): the manifest's URLs carry `?v=<version>` (each release
           # gets its own cache key — scripts/mirror_manifest.py), and the
-          # object's HTTP cache lifetime is a minute. `--cache-control` is the
-          # flag that sets that header; `--metadata "cache-control=…"` only
-          # wrote user metadata, which the edge never reads.
+          # uploads set the real HTTP header (`--cache-control`; the old
+          # `--metadata "cache-control=…"` only wrote user metadata, which the
+          # edge never reads). The edge applies its own TTL to the large
+          # artifacts — observed at four hours while the signature and
+          # manifest files passed a minute through — which is exactly why the
+          # per-release key, not the TTL, is what keeps a previous release's
+          # bytes out of this release's downloads.
           for f in mirror/*; do
             aws s3 cp "$f" "s3://kiwano-hub/releases/$(basename "$f")" \
               --no-progress \

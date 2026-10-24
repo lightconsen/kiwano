@@ -27,8 +27,10 @@ edge cached those bytes for four hours because the workflow set
 `cache-control` as S3 *user* metadata, which nothing reads — so a fresh
 manifest could be answered with the previous release's installer and fail
 verification until a retry reached a cold edge. Each manifest URL now carries
-`?v=<version>`, giving every release its own cache key, and the uploads set
-the real header (`public, max-age=60`).
+`?v=<version>`, giving every release its own cache key — the guard that does
+not depend on the edge's TTL. The uploads also set the real cache header
+instead of S3 user metadata (the edge still applies its own lifetime to the
+large artifacts).
 
 ### Fixed
 

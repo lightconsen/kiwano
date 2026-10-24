@@ -20,7 +20,9 @@ export function ProtoChip({ protocol, t }: { protocol: Protocol; t: Translate })
   const name = t(labelKey);
   return (
     <span
-      className="rounded px-1.5 py-0.5 font-mono text-[10px]"
+      // Same containing block rule as the tag badge: the `sr-only` name must
+      // not be positioned against the document.
+      className="relative rounded px-1.5 py-0.5 font-mono text-[10px]"
       style={PROTO_STYLE[protocol]}
       title={name}
     >

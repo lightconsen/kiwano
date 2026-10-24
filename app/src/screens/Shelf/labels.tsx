@@ -149,7 +149,11 @@ export function TagBadge({ tag, t }: { tag: CatalogEntry["tag"]; t: Translate })
   const name = tagLabel(tag, t);
   return (
     <span
-      className="inline-flex items-center rounded px-1.5 py-0.5"
+      // `relative`: the `sr-only` name is absolutely positioned, and without a
+      // containing block here it is laid out against the document — below the
+      // viewport, which made the whole window scrollable and carried the
+      // header and status bar off-screen.
+      className="relative inline-flex items-center rounded px-1.5 py-0.5"
       style={tagChipStyle(tag)}
       title={name}
     >

@@ -374,10 +374,17 @@ textarea,
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body {
+    @apply font-sans;
+    /* The shell is a fixed-height column: the top bar and the status bar
+       never scroll. Anything that needs to scroll owns its own container
+       (`main`), and a stray absolutely-positioned child must not be able to
+       grow the document and carry the shell off-screen. */
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
   }
 }

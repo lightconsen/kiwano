@@ -19,6 +19,28 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-10-24
+
+**The version where turning a takeover off and on again leaves the agent
+working.** A round trip has two halves, and each used to break the next one: the
+restore writes back the config captured at takeover time, which for a direct
+Codex setup carries its own key and no `auth.json` (the file did not exist) — and
+the next takeover only read `auth.json`, so it imported no provider and left the
+agent pointed at a gateway with no route (503). And the base URL a direct Codex
+config carries ends in `/v1`, while a stored provider must not: the import kept
+the version root and every request went to `/v1/v1/responses`.
+
+Codex's credential reader now falls back to the active provider table's
+`experimental_bearer_token` when `auth.json` has none, drops the version root the
+same way the Cline reader does, and refuses a gateway placeholder as an upstream
+credential. The import then reuses the provider it already has instead of
+creating a second one, and the agent comes back routed.
+
+### Fixed
+
+- **A Codex takeover restored and re-taken keeps its route.** See the section
+  above.
+
 ## [0.3.9] - 2026-10-24
 
 ### Added

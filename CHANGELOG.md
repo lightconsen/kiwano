@@ -19,6 +19,26 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Added
+
+- **An OpenAI-only client can use an Anthropic-only upstream.** Chat Completions
+  and Responses requests are converted to `/v1/messages` and back — the
+  Responses leg through the Chat converters — so clients that cannot speak
+  Anthropic itself (Cline, Aider, Continue, Droid, Codex) reach `api.anthropic.com`
+  and the resellers that expose only that surface. Usage is metered from the
+  side that reports it, and what the Anthropic wire cannot express (JSON
+  structured output, `n > 1`, logprobs, audio/file parts) is refused with the
+  reason rather than silently degraded.
+
+### Fixed
+
+- **A conversion aimed at a registered endpoint authenticates as that
+  endpoint.** A model-aware conversion into a provider's secondary endpoint used
+  to keep the provider's primary protocol when building headers, so an
+  Anthropic-primary provider's OpenAI endpoint was sent `x-api-key` instead of a
+  bearer token (and the reverse). The attempt now carries the protocol the
+  endpoint speaks.
+
 ## [0.3.8] - 2026-10-24
 
 **The version where one vendor can be two providers.** A second seat, a work

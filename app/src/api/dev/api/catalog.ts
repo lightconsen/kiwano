@@ -125,23 +125,22 @@ export const catalogApi: Pick<
 
   async listCatalog(): Promise<CatalogList> {
     await delay();
-    // Mirror the backend: `added` derives from the provider list at read
-    // time, matching the primary endpoint OR any additional per-protocol
-    // endpoint on either side (merged catalog entries stay one row)
-    const keys = new Set(
-      providers.flatMap((p) => [
-        endpointKey(p.endpoint),
-        ...(p.endpoints ?? []).map((e) => endpointKey(e.endpoint)),
-      ]),
-    );
+    // Mirror the backend: `added` / `added_count` derive from the provider
+    // list at read time, matching the primary endpoint OR any additional
+    // per-protocol endpoint on either side.
     return {
       total: CATALOG_TOTAL,
-      entries: catalog.map((e) => ({
-        ...e,
-        added:
-          keys.has(endpointKey(e.endpoint)) ||
-          (e.endpoints ?? []).some((x) => keys.has(endpointKey(x.endpoint))),
-      })),
+      entries: catalog.map((e) => {
+        // Mirror of the Rust view model: one entry per matching local
+        // provider, so a vendor added twice reads "2 added" here too.
+        const entryKeys = [e.endpoint, ...(e.endpoints ?? []).map((x) => x.endpoint)].map(endpointKey);
+        const count = providers.filter((p) =>
+          [p.endpoint, ...(p.endpoints ?? []).map((x) => x.endpoint)]
+            .map(endpointKey)
+            .some((k) => entryKeys.includes(k)),
+        ).length;
+        return { ...e, added: count > 0, added_count: count };
+      }),
     };
   },
 };

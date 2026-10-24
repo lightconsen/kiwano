@@ -26,7 +26,6 @@ export const shelf = {
   probeFailed: "探测失败",
 
   colName: "名称",
-  colProtocol: "协议",
   colCategory: "分类",
   colBilling: "计费",
   colPrice: "价格",
@@ -72,8 +71,7 @@ export const shelf = {
   test: "测试",
   endpoints: "端点",
   billing: "计费",
-  added: "已添加",
-  alreadyAdded: "已添加过",
+  addedCount: "（已添加 {n} 个）",
   connect: "+ 连接",
   add: "+ 添加",
 

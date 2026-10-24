@@ -66,6 +66,7 @@ function entry(id: string, name: string, over: Partial<CatalogEntry> = {}): Cata
     protocol: "openai",
     billing: "payg",
     added: false,
+    added_count: 0,
     models: ["deepseek-chat"],
     ...over,
   };
@@ -237,6 +238,33 @@ describe("a price with no variants", () => {
     expect(within(row).queryByRole("button", { name: en.shelf.tierPricePeak })).toBeNull();
     const flatTitle = within(row).getByText(cell("Kimi K2", "4", "16")).getAttribute("title") ?? "";
     expect(flatTitle).not.toContain("512k");
+  });
+});
+
+describe("an entry already added", () => {
+  it("keeps the Add button and says how many providers it is already behind", async () => {
+    // A vendor can be wired up twice for two accounts or keys. Hiding Add made
+    // the second one impossible from the shelf; the count is what keeps the
+    // two additions from looking like a mistake.
+    const row = await renderShelf([
+      entry("deepseek", "DeepSeek", { added: true, added_count: 2 }),
+    ]);
+    expect(within(row).getByRole("button", { name: en.shelf.add })).toBeInTheDocument();
+    expect(within(row).getByText(en.shelf.addedCount.replace("{n}", "2"))).toBeInTheDocument();
+  });
+
+  it("offers Add in the detail dialog too", async () => {
+    const user = userEvent.setup();
+    const row = await renderShelf([
+      entry("deepseek", "DeepSeek", { added: true, added_count: 1 }),
+    ]);
+    await user.click(row);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: en.shelf.add })).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(en.shelf.addedCount.replace("{n}", "1")),
+    ).toBeInTheDocument();
   });
 });
 

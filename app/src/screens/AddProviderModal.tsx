@@ -195,7 +195,10 @@ export default function AddProviderModal({
 
   // Prefill the form from a catalog entry (Models-page preset or in-modal pick)
   const applyShelf = (e: CatalogEntry) => {
-    setName(e.name);
+    // A provider already added once gets a suffix, because the row is
+    // identified by its name in the Providers list and two "DeepSeek" rows
+    // would be indistinguishable. The first add keeps the bare name.
+    setName(e.added_count > 0 ? `${e.name} ${e.added_count + 1}` : e.name);
     setProtocol(e.protocol); // catalog entries carry their protocol fingerprint
     setApiKey("");
     setEndpoint(e.endpoint);

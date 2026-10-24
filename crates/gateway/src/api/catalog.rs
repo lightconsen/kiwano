@@ -162,6 +162,12 @@ pub struct CatalogEntryVm {
     /// added). The Hub does not publish it.
     #[serde(default)]
     pub added: bool,
+    /// How many local providers this entry is already behind. One is the usual
+    /// case; more than one is someone who added the same vendor again for a
+    /// second account or key, and the shelf says so beside the Add button
+    /// instead of hiding it.
+    #[serde(default)]
+    pub added_count: usize,
 }
 
 /// One model's price, as shown for a provider on the Models list: the terms a
@@ -342,23 +348,32 @@ pub fn catalog_id_for(entries: &[CatalogEntryVm], p: &Provider) -> Option<String
 /// The shelf: the cached catalog, with each entry marked as already added when
 /// a local provider answers on one of its endpoints.
 ///
-/// The badge and the link answer the same question — "is this entry one the user
-/// already has?" — so they match endpoints by the same rule. A provider whose
-/// link was inferred is then not offered for adding a second time, which is what
-/// it would otherwise be.
+/// The count and the link answer the same question — "is this entry one the user
+/// already has?" — so they match endpoints by the same rule. The count exists
+/// because having one is not a reason to refuse a second: the same vendor is
+/// added again for another account or key, and the row says how many it is
+/// behind rather than replacing Add with a badge.
 pub fn load_catalog(store: &Store) -> CatalogListVm {
-    let local: Vec<String> = store
+    // One entry per provider, not one per endpoint: a provider serving both
+    // protocols is still one row to the reader, and counting its two endpoint
+    // keys twice would report "2 added" for a single provider.
+    let local: Vec<Vec<String>> = store
         .list_providers()
         .unwrap_or_default()
         .iter()
-        .flat_map(provider_endpoint_keys)
+        .map(provider_endpoint_keys)
         .collect();
     let mut list = catalog_snapshot(store);
     for e in &mut list.entries {
         let catalog = catalog_endpoint_keys(e);
-        e.added = catalog
+        e.added_count = local
             .iter()
-            .any(|cat| local.iter().any(|l| endpoint_matches(l, cat)));
+            .filter(|keys| {
+                keys.iter()
+                    .any(|l| catalog.iter().any(|c| endpoint_matches(l, c)))
+            })
+            .count();
+        e.added = e.added_count > 0;
     }
     list
 }

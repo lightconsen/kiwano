@@ -240,6 +240,49 @@ mod tests {
         assert_eq!(added, ["deepseek"]);
     }
 
+    /// The same vendor added twice — a second account, another key — is a
+    /// state the app allows, so the shelf reports a count instead of a bare
+    /// "added". A provider answering on two of the entry's endpoints is still
+    /// one provider, and must not be counted twice.
+    #[test]
+    fn catalog_added_counts_providers_not_endpoints() {
+        let s = catalog_store();
+
+        let mut first = provider("ds-a", "DeepSeek", Billing::Metered);
+        first.base_url = "https://api.deepseek.com/anthropic".into();
+        let mut second = provider("ds-b", "DeepSeek 2", Billing::Metered);
+        second.base_url = "https://api.deepseek.com/anthropic".into();
+        // Kimi publishes two endpoints; one provider on both is still one.
+        let mut kfc = provider("kfc", "Kimi For Coding", Billing::Metered);
+        kfc.base_url = "https://api.kimi.com/coding".into();
+        kfc.endpoints = vec![kiwanod::store::ProviderEndpoint {
+            protocol: kiwanod::store::Protocol::OpenAI,
+            base_url: "https://api.kimi.com/coding/v1".into(),
+            api_path: None,
+        }];
+        for p in [&first, &second, &kfc] {
+            s.insert_provider(p).unwrap();
+        }
+
+        let list = load_catalog(&s);
+        let counts: Vec<(&str, usize)> = list
+            .entries
+            .iter()
+            .map(|e| (e.id.as_str(), e.added_count))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("deepseek", 2),
+                ("kimi-for-coding", 1),
+                ("bare-host", 0),
+                ("host-one", 0),
+                ("host-two", 0),
+            ]
+        );
+        assert!(list.entries.iter().all(|e| e.added == (e.added_count > 0)));
+    }
+
     #[test]
     fn catalog_added_derives_from_provider_endpoints() {
         let s = store(); // never synced: no cache is an empty shelf

@@ -7,7 +7,6 @@ import { useT } from "../../i18n";
 import { hubAssetUrl } from "../../lib/hub";
 import type { CatalogEntry } from "../../api/types";
 import { TagBadge, billingLabel } from "./labels";
-import { ProtoChip } from "./endpoints";
 import { TierChip, bandText, rowPriceText, type PriceTier } from "./prices";
 import { groupPriceText, modelRate } from "./groups";
 
@@ -70,16 +69,6 @@ export function Row({
         </div>
       </td>
       <td className="px-2 py-2">
-        {/* All supported protocols on one horizontal line (endpoint URLs
-            live in the detail dialog, not the table) */}
-        <div className="flex items-center gap-1">
-          <ProtoChip protocol={entry.protocol} t={t} />
-          {(entry.endpoints ?? []).map((e) => (
-            <ProtoChip key={e.protocol} protocol={e.protocol} t={t} />
-          ))}
-        </div>
-      </td>
-      <td className="px-2 py-2">
         <TagBadge tag={entry.tag} t={t} />
       </td>
       <td className="px-2 py-2 text-[11.5px] text-mut">
@@ -106,13 +95,19 @@ export function Row({
         </span>
       </td>
       <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-        {entry.added ? (
-          <span className="text-[10.5px] text-mut">{t("shelf.added")}</span>
-        ) : (
+        {/* Add stays available even when the entry is already wired up: a
+            vendor can be added again for a second account or key, and the
+            count beside the button is what says one is already there. */}
+        <div className="flex items-center justify-end gap-1.5">
           <Button size="xs" className="rounded px-2 text-[10.5px] font-semibold" onClick={() => onAdd(entry)}>
             {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
           </Button>
-        )}
+          {entry.added_count > 0 && (
+            <span className="whitespace-nowrap text-[10.5px] text-mut">
+              {t("shelf.addedCount", { n: entry.added_count })}
+            </span>
+          )}
+        </div>
       </td>
     </tr>
   );

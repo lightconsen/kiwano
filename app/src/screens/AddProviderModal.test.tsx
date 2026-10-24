@@ -45,6 +45,7 @@ const entry: CatalogEntry = {
   currency: "CNY",
   billing: "payg",
   added: false,
+  added_count: 0,
   models: ["kimi-k2"],
 };
 
@@ -471,6 +472,25 @@ describe("adding a provider from the catalog", () => {
     // Not a picker, but still said: the endpoint row carries its protocol, which
     // is what the block above it used to repeat as a pair of lit badges.
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
+  });
+
+  it("suffixes the prefilled name when the entry was already added", async () => {
+    // Rows are told apart by name, so the second DeepSeek must not arrive with
+    // the same name as the first.
+    const again: CatalogEntry = { ...entry, added: true, added_count: 2 };
+    apiMock.listCatalog.mockResolvedValue({ entries: [again], total: 1 });
+    render(
+      <AddProviderModal
+        open
+        preset={again}
+        edit={null}
+        preferredCurrency="CNY"
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+    expect(await screen.findByLabelText(en.addProvider.name)).toHaveValue("Moonshot 3");
   });
 
   it("composes a template endpoint from the values the user fills in", async () => {

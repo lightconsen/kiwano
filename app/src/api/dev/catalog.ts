@@ -49,6 +49,7 @@ export const catalog: CatalogEntry[] = [
     currency: "CNY",
     billing: "payg",
     added: true,
+    added_count: 1,
     models: ["deepseek-chat (V3)", "deepseek-reasoner (R1)"],
     // Official Anthropic-compatible endpoint (api.deepseek.com/anthropic)
     endpoints: [
@@ -67,6 +68,7 @@ export const catalog: CatalogEntry[] = [
     currency: "CNY",
     billing: "plan",
     added: false,
+    added_count: 0,
     models: ["kimi-k2-0905-preview", "moonshot-v1-128k"],
   },
   {
@@ -92,6 +94,7 @@ export const catalog: CatalogEntry[] = [
     currency: "USD",
     billing: "payg",
     added: false,
+    added_count: 0,
     models: ["qwen-max", "qwen-plus"],
   },
   {
@@ -106,6 +109,7 @@ export const catalog: CatalogEntry[] = [
     currency: "USD",
     billing: "unl",
     added: false,
+    added_count: 0,
     models: ["llama-3.3-70b-versatile"],
   },
   {
@@ -127,6 +131,7 @@ export const catalog: CatalogEntry[] = [
     currency: "USD",
     billing: "payg",
     added: false,
+    added_count: 0,
     // Serves `deepseek-chat (V3)` without pricing it — the shape most real
     // groups have (two providers, one of them with a published price), and what
     // makes the grouped view's dash cells visible in `pnpm dev`.
@@ -145,6 +150,7 @@ export const catalog: CatalogEntry[] = [
     billing: "unl",
     // Mirrors the backend: added derives from Ollama existing in the provider list
     added: true,
+    added_count: 1,
     models: ["qwen3:32b", "llama3.3:70b"],
   },
   // Multi-protocol samples from the cc-switch port (anthropic / openai fingerprints)
@@ -160,6 +166,7 @@ export const catalog: CatalogEntry[] = [
     // The catalog cannot pick for the user, so the add dialog asks.
     billing: "both",
     added: false,
+    added_count: 0,
     models: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"],
     protocol: "anthropic",
     desc: "Official pricing",
@@ -187,6 +194,7 @@ export const catalog: CatalogEntry[] = [
     // them: between the two, both sides of that gate are exercisable.
     plan_query: { template: "zhipu" },
     added: false,
+    added_count: 0,
     models: ["glm-5", "glm-5-air"],
     protocol: "openai",
     desc: "Official pricing · from ¥118 /mo",
@@ -223,6 +231,7 @@ export const catalog: CatalogEntry[] = [
     currency: "USD",
     billing: "payg",
     added: false,
+    added_count: 0,
     models: [],
     protocol: "openai",
   },

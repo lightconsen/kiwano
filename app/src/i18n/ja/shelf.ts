@@ -19,7 +19,6 @@ export const shelf = {
   probeFailed: "プローブ失敗",
 
   colName: "名前",
-  colProtocol: "プロトコル",
   colCategory: "カテゴリ",
   colBilling: "課金",
   colPrice: "価格",
@@ -65,8 +64,7 @@ export const shelf = {
   test: "テスト",
   endpoints: "エンドポイント",
   billing: "課金",
-  added: "追加済み",
-  alreadyAdded: "追加済みです",
+  addedCount: "（{n} 件追加済み）",
   connect: "+ 接続",
   add: "+ 追加",
 

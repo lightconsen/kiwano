@@ -541,6 +541,10 @@ export interface CatalogEntry {
   billing: CatalogBilling;
   /** Derived at read time from the local provider list (same endpoint = added) */
   added: boolean;
+  /** How many local providers sit behind this entry. More than one means the
+      same vendor was added again for another account or key; the shelf still
+      offers Add and says how many there are. */
+  added_count: number;
   /** Models the primary endpoint serves; seeds the add modal's picker */
   models: string[];
   /** Every endpoint after the primary */

@@ -34,11 +34,10 @@ function priceValue(e: CatalogEntry): number | null {
 
 export const COLUMNS: { key: SortKey | null; labelKey: KeyPath<Messages>; className: string }[] = [
   { key: "name", labelKey: "shelf.colName", className: "w-[150px]" },
-  { key: null, labelKey: "shelf.colProtocol", className: "w-[72px]" },
   { key: null, labelKey: "shelf.colCategory", className: "w-[48px]" },
   { key: "billing", labelKey: "shelf.colBilling", className: "w-[104px]" },
   { key: "price", labelKey: "shelf.colPrice", className: "" },
-  { key: null, labelKey: "shelf.colActions", className: "w-[70px] text-right" },
+  { key: null, labelKey: "shelf.colActions", className: "w-[150px] text-right" },
 ];
 
 /** The default order, used when the user has not picked a column: providers by

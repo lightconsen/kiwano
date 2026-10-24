@@ -223,19 +223,17 @@ export function DetailDialog({
         </div>
 
         <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-2 rounded-b-xl border-t border-line bg-transparent px-4 py-3">
-          {entry.added && (
+          {entry.added_count > 0 && (
             <span className="mr-auto self-center text-[11px] text-mut">
-              {t("shelf.alreadyAdded")}
+              {t("shelf.addedCount", { n: entry.added_count })}
             </span>
           )}
           <Button variant="outline" size="sm" onClick={onClose}>
             {t("common.close")}
           </Button>
-          {!entry.added && (
-            <Button size="sm" className="font-semibold" onClick={() => onAdd(entry)}>
-              {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
-            </Button>
-          )}
+          <Button size="sm" className="font-semibold" onClick={() => onAdd(entry)}>
+            {entry.tag === "local" ? t("shelf.connect") : t("shelf.add")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

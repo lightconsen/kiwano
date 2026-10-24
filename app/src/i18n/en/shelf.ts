@@ -41,7 +41,6 @@ export const shelf = {
   probeFailed: "probe failed",
 
   colName: "Name",
-  colProtocol: "Protocol",
   colCategory: "Category",
   colBilling: "Billing",
   colPrice: "Price",
@@ -108,8 +107,7 @@ export const shelf = {
   test: "Test",
   endpoints: "ENDPOINTS",
   billing: "Billing",
-  added: "Added",
-  alreadyAdded: "Already added",
+  addedCount: "({n} added)",
   connect: "+ Connect",
   add: "+ Add",
 

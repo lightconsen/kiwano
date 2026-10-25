@@ -217,6 +217,29 @@ code, pre { font-family: var(--font-mono); }
 <p>兩者分開設定,而這正是重點:它們走的東西不一樣。管理面上走的是<strong>憑證</strong>(你存下的 key),
 資料面上走的是<strong>請求本身</strong> —— 你的 prompt 與回答,而且是明文,因為 <strong>Kiwano 不做 TLS</strong>
 (見下面的<a href="#%E9%83%A8%E7%BD%B2%E8%A6%81%E6%B1%82">部署要求</a>)。</p>
+<p>每個平面也有<strong>自己的憑證</strong>,兩者並不是同一個:</p>
+<table>
+<thead>
+<tr>
+<th>平面</th>
+<th>出示什麼</th>
+<th>幾個</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>管理面</td>
+<td><code>KIWANO_DAEMON_TOKEN</code> —— 閘道的管理 token</td>
+<td>每個閘道一個,給操作者</td>
+</tr>
+<tr>
+<td>資料面</td>
+<td>一把<strong>用戶端金鑰</strong>(<code>kw-ag-…</code>),每個 Agent 一個</td>
+<td>每個 Agent 一個,想要的話每個 Agent 可以更多</td>
+</tr>
+</tbody></table>
+<p>管理 token 是給一個操作者的一個秘密。用戶端金鑰是 Agent 設定攜帶的東西,它是<em>為</em>那個
+Agent 鑄的,而且可以被設限:能花多少、能點名哪些模型、能用哪些供應商。那就是下面那一節,
+也正是為什麼一把洩漏的用戶端金鑰是有界的,而洩漏的管理 token 不是。</p>
 <h2 id="在跑閘道的那台機器上">在跑閘道的那台機器上</h2>
 <p>給管理面一個監聽位址,也給資料面一個:</p>
 <pre><code class="language-sh">KIWANO_ADMIN_ADDR=100.64.0.5:8318 \   # 管理:host:port
@@ -255,6 +278,34 @@ token 列 —— 那是另一個閘道的列,把它送到別的主機上就是�
 停下,而不是悄悄去連本機閘道 —— 那會變成「用戶端用了另一個 daemon,而你以為是你點名
 的那個」。</li>
 </ul>
+<h2 id="用戶端金鑰能做什麼">用戶端金鑰能做什麼</h2>
+<p>金鑰就是資料面的憑證。它命名一個 Agent(路由需要的就是這個),並且可以帶三條限制,全部
+在<strong>請求到達供應商之前</strong>檢查:</p>
+<pre><code class="language-sh">kiwano clients list                                  # 句柄、Agent、各自能做什麼
+kiwano clients add --agent claude --label &quot;laptop&quot;   # 金鑰只印一次
+kiwano clients limits ck-1a2b3c4d --window day:200:requests --window monthly:20:USD
+kiwano clients policy ck-1a2b3c4d --model claude-sonnet-4-5 --provider p-work
+kiwano clients rotate ck-1a2b3c4d                    # 新金鑰,同一句柄與預算
+</code></pre>
+<ul>
+<li><strong>花費視窗</strong> —— <code>day</code> / <code>weekly</code> / <code>monthly</code> / <code>yearly</code> / <code>all</code>,單位是 <code>requests</code>、
+<code>wan_tokens</code>(萬 tokens)或某種貨幣。量的是 Agent 的限額所用的同一套當地日曆邊界。超出
+任何視窗:<strong>429</strong>,並帶一個 <code>Retry-After</code> 說明它還剩多久。</li>
+<li><strong>模型</strong> —— 只允許列出的模型 id,大小寫不敏感地匹配。結尾的 <code>*</code> 讓一個項目變成<strong>族</strong>:
+<code>claude-haiku-*</code> 允許所有 id 以 <code>claude-haiku-</code> 開頭的模型,包括你寫下這份清單之後才發布
+的 —— 這就是規則與一份會過期的清單之間的差別。這是<strong>唯一</strong>的通配形態:出現在別處的 <code>*</code>
+會在寫入時被拒,因為一個看起來像通配、卻什麼都匹配不到的項目,就是一把悄悄拒絕所有模型
+的金鑰。落在清單外的模型:<strong>403</strong>,訊息會點名那條規則。在清單生效時讀不出模型的請求同樣
+被拒,因為無法檢查的允許不算允許。</li>
+<li><strong>供應商</strong> —— 只允許列出的供應商 id。一把不被允許使用該 Agent 主供應商的金鑰,會被路由
+到一個它可用的(多供應商策略),或者在策略是 <code>single</code> 時被拒(403) —— 「就這一個供應商,
+不做容錯移轉」不是一把金鑰能靠升級自己繞開的話。</li>
+</ul>
+<p>同一個 Agent 的兩把金鑰就是兩個用戶端、兩份預算,這正是重點:一台筆電和一台桌機在跑同一
+個 Agent,可以分別設限。輪換金鑰保留句柄、策略與已記錄的用量,所以它不是清空限額的辦法。</p>
+<p>金鑰本身的存放方式與供應商的金鑰一樣 —— 明文,因為它在 Agent 的設定檔案裡也是明文 ——
+並且和其餘每一個憑證一樣,會從捕獲的請求體裡被清除。管理介面從不列印已存的金鑰:只有
+<code>add</code> 與 <code>rotate</code> 在鑄它時顯示一次。</p>
 <h2 id="兩個開關">兩個開關</h2>
 <p>止步於你自己網路的位址 —— RFC1918(<code>10.</code>、<code>192.168.</code>、<code>172.16.</code>–<code>172.31.</code>)、loopback、
 連結本地、以及 Tailscale 用的 <code>100.64/10</code> —— 直接可用。誰都能連到的位址需要第二個變數:</p>
@@ -275,6 +326,9 @@ WireGuard,什麼都行 —— 並把閘道的 VPN 位址給這些變數。</p>
 模型下,誠實的答案是私有網路加一個 token,而不是對著空氣上密碼學。</p>
 <p>所以 <code>100.64.0.5</code>(tailnet 位址)正是這些變數為之設計的值。公網位址需要兩個開關<strong>並且</strong>
 一個過硬的理由。</p>
+<p>一把用戶端金鑰不改變這條要求,但它確實界定了洩漏的代價:持有者最多花掉那把金鑰的視窗所
+允許的,用在它點名的模型與供應商上,而且是以那一個 Agent 的身分 —— 而不是握著能讀你存下
+的金鑰、能改一切的管理 token。</p>
 <h2 id="埠">埠</h2>
 <table>
 <thead>
@@ -330,7 +384,7 @@ WireGuard,什麼都行 —— 並把閘道的 VPN 位址給這些變數。</p>
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

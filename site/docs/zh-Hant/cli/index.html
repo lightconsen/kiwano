@@ -304,8 +304,16 @@ kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing sing
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers price &lt;ID&gt; --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W]
+                            [--cache-creation-1h H] [--currency CODE]
+kiwano providers price &lt;ID&gt; --model M --clear
 kiwano providers probe latency|endpoint|models
 </code></pre>
+<p><code>providers price</code> 宣告某個供應商對某個模型的收費，以每百萬 token 計 —— 只有你能提供的數字，因為 Hub 給的是<strong>它自己</strong>目錄條目的價，而沒掛目錄條目的供應商沒有任何公布價。一個供應商的宣告是<strong>一個幣別加一整張模型表</strong>，所以這條指令會讀出已存的、把這個模型折進去、再把整張表送回去：給第二個模型宣告價<strong>不會</strong>丟掉第一個。<code>--clear</code> 丟掉其中一個。</p>
+<p>它同時也是 Hub 定不了價的那個模型名的出口 —— 例如方案自己的名字（它指的是訂閱當時給你的那個模型）。<code>kiwano history import</code> 會報出它算不出價的模型名，給其中之一宣告一個價，那些列才算得進錢。</p>
+<p><code>--cache-creation-1h</code> 用於廠商對兩檔快取寫入分別定價的情況（Anthropic：5 分鐘按輸入的 1.25×、1 小時按 2×；Kimi：¥20 對 ¥40）。不寫它<strong>不是</strong>零 —— 它的意思是這個供應商只有一檔寫入價，那一檔同時管兩個視窗。兩個數字是<strong>同一桶的切分</strong>：App 把 1 小時那一片按這個價算，其餘按 <code>--cache-creation</code> 算。</p>
+<p><code>--openai-wire</code> 說明一個 OpenAI 供應商服務的是<strong>哪一種</strong>請求形狀，只在兩者不一致時才有意義：<code>chat</code> 表示它只講 <code>/v1/chat/completions</code>，於是 agent 發來的 <code>/v1/responses</code>（Codex）會在出去時被翻譯成 Chat Completions、回來時再翻回去；<code>responses</code> 表示只講 <code>/v1/responses</code>，此時 <code>/v1/chat/completions</code> 會<strong>帶理由拒絕</strong>而不是猜；<code>both</code>（預設）原樣透傳，由廠商回答它到底服務什麼。這個旗標出現之前加的供應商都是 <code>both</code>，所以不設即什麼都不變。</p>
 <p><code>add</code> 與 <code>edit</code> 也都接受轉送與配額選項:</p>
 <pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
 --retries N                    same-provider attempts before failover (0–5)
@@ -336,11 +344,124 @@ kiwano providers probe latency|endpoint|models
 以 1:1 併入它們。從未同步過的機器完全沒有匯率表,只接受 <code>USD</code> 與 <code>CNY</code>
 ——Hub 公布匯率所對的兩種貨幣。</p>
 <h3 id="輪換金鑰">輪換金鑰</h3>
-<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt; [--days N]   masked; also what each entry spent
 kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
 kiwano keys remove &lt;KEY_ID&gt;
 </code></pre>
-<p>輪換金鑰會在供應商的主金鑰之後嘗試,依每個請求逐一進行。</p>
+<p>輪換金鑰跟在供應商的主金鑰之後。輪換<strong>按工作階段</strong>進行:一次工作階段保持它開始時
+用的那把金鑰(上游的 prompt cache 按金鑰所屬的帳號隔離),新工作階段在整個池上
+攤開。不帶工作階段識別的請求仍按每個請求輪換。</p>
+<p>池子裡可以放<strong>不同帳號</strong>的金鑰——給每把加個 <code>--label</code>,花費表就會說明哪個
+帳號花了多少,並按它實際花掉的幣種列出(這裡<strong>絕不跨幣種相加</strong>;唯一做換算
+的地方是 Dashboard)。報表裡顯示的名字是標籤,沒有標籤就是 <code>#&lt;id&gt;</code>,供應商
+自己的主金鑰則是 <code>primary</code>。金鑰本身永遠不會被列印、匯出,也不會進帳本。</p>
+<h3 id="規則">規則</h3>
+<pre><code>kiwano rules user [--rule TEXT]… [--clear]     你自己寫的規則
+kiwano rules apply &lt;AGENT&gt; [--days N]          把它們（以及 insights 的建議）寫進去
+kiwano rules status &lt;AGENT&gt;                    檔案裡現在有什麼
+kiwano rules remove &lt;AGENT&gt;                    把兩塊都摘掉
+</code></pre>
+<p><code>rules apply</code> 寫進 agent 自己的指令檔 —— Claude Code 是 <code>CLAUDE.md</code>，其餘是 <code>AGENTS.md</code>
+—— 用註解標記包起來，所以只要標記還在，移除就是「剝掉一段」而不是「整份還原」。檔案裡住著
+<strong>兩塊、彼此獨立</strong>：<strong><code>insights</code></strong>（<code>kiwano insights</code> 找出來的建議，受設定 → 功能 →
+規則注入的開關管）與 <strong><code>yours</code></strong>（你自己寫的）。摘掉一塊不動另一塊，重寫一塊也碰不到另一塊的行。</p>
+<p><strong>你寫的規則是「每台機器一套」</strong>，不是每個 agent 一套：一個人寫下的規則通常是他到處都遵守的
+約定（「用中文回答」「沒有問過就不要提交」）。它會寫進<strong>哪些</strong> agent 由 <code>rules apply &lt;agent&gt;</code>
+決定 —— 所以規則只寫一次，在你想用到的地方套用。<code>rules remove</code> 會把兩塊都摘掉但<strong>保留規則庫</strong>，
+下次 <code>apply</code> 就裝回去；<code>rules user --clear</code> 才是清空規則庫本身的那一下。</p>
+<p>你的規則<strong>不依賴 insights 那一半</strong>：沒有發現、規則注入關著，它們照樣能寫進檔案。那個開關說的是
+Kiwano 推導出來的建議，不是你寫的東西。</p>
+<h3 id="本機歷史">本機歷史</h3>
+<pre><code>kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
+</code></pre>
+<p>Agent 自己的歷史：從它們的會話檔讀出來並匯入，於是一台今天早上才裝 Kiwano 的機器，
+dashboard 上已經有昨天的花費。<code>import</code> 讀 Claude Code 與 Codex 的紀錄檔並把它們說的
+東西送過去；App 會在首次啟動時跑同一趟掃描。一個 Claude Code 工作階段是<strong>整份</strong>讀的:
+transcript 本身,加上它派生的子代理 transcript(<code>&lt;session&gt;/subagents/agent-*.jsonl</code>)——
+那些 token 屬於這個工作階段,在用代理的機器上它們占了約兩成的用量,之前一直被漏掉。
+一份 transcript 就是一個工作階段,身分取自<strong>檔名</strong>:對話被壓縮或續接時,檔案內部的
+id 會變,而按那些 id 記帳會把一場對話列成好幾個。<code>--dry-run</code> 只讀只報告、什麼都不寫 ——
+這是「我的 dashboard 怎麼還是空的」唯一誠實的回答，因為檔案可能根本不在這台機器期望的
+位置（那些行走 stderr：掃描正是你 <code>| jq</code> 的那種指令）。</p>
+<p>看數字之前要知道兩件事：</p>
+<ul>
+<li><p><strong>只匯入早於閘道的部分。</strong> 接管之後的每個請求都已經在帳本裡，而 Agent 無論如何都會
+寫自己的檔案；分界線是每個 Agent 自己最早那條計量列，所以同一個請求不會被數兩次。
+<code>import</code> 會報告這條線擋掉了多少列。</p>
+</li>
+<li><p><strong>花費是估算。</strong> 檔案裡只有 token、沒有錢，而匯入的請求沒有可以套用宣告價的供應商 ——
+所以每列按該模型的通用價估算。從未同步過 Hub 的機器乾脆什麼都定不了價（列會帶著 token
+落地、沒有花費）；之後再跑一次 <code>history import</code> 會補上，因為匯入是冪等的。</p>
+</li>
+<li><p><strong>每一列都記得自己是從哪台機器來的。</strong> 兩台筆電可以把歷史匯入同一個閘道，合併後的
+帳本就需要有辦法分清哪些列是誰的。匯入會記下一個機器<strong>標籤</strong> —— 這台機器能查到的
+自己的名字（盡力而為，通常是主機名），報告裡也會寫出它。它是標籤，不是身分：兩台機器
+可以同名、名字也可以變，查不到名字的機器就什麼都不記（顯示為 <code>unnamed</code>）。閘道路由的
+流量根本沒有匯入機器可言。</p>
+<p><code>--machine LABEL</code> 直接宣告這個標籤，而不是問系統。給那些自己答不出有用名字的機器用:
+容器的主機名是一串十六進位,筆電的名字也可能中途變掉。你傳什麼就記什麼。</p>
+</li>
+</ul>
+<p>匯入進來的是什麼，由 <code>kiwano sessions</code>（見下）列出，和閘道自己路由的流量並排在一起。</p>
+<h3 id="工作階段">工作階段</h3>
+<pre><code>kiwano sessions [--project P] [--agent A] [--days N]
+</code></pre>
+<p>每個工作階段一列，來自<strong>兩個來源</strong>，<code>SOURCE</code> 欄說明是哪一個：</p>
+<ul>
+<li><code>gateway</code> —— 這個工作階段的請求是閘道路由的。它知道請求數、token 與花費，但對專案、
+輪次和工具有一無所知。</li>
+<li><code>imported</code> —— 只有 Agent 自己的檔案裡有它（由 <code>kiwano history import</code> 讀入）。它知道
+專案、輪次與工具，卻沒有錢：檔案裡只有 token，沒有花費。</li>
+<li><code>both</code> —— 兩邊都有這個 id，這是接管之後跑過的工作階段的常見狀態。</li>
+</ul>
+<p><strong>兩個來源從不相加。</strong> 它們描述的是相互重疊但不相等的事 —— 一次重試在檔案裡是一輪、
+在閘道裡是兩個請求 —— 所以兩邊都有某個欄位時，由其中一邊勝出、另一邊的值被捨棄而不是
+相加：請求數、token 與花費以<strong>流量</strong>為準，專案、起止、輪次與工具以<strong>檔案</strong>為準。<code>both</code>
+列的 token 欄是閘道數出來的那個數，不是檔案數加閘道數。</p>
+<p><strong><code>TITLE</code> 是檔案對「這是做什麼的」的回答</strong>,而且它優先取更好的那個來源:檔案裡有
+agent 自己替這場對話起的名字時(Claude Code 寫 <code>ai-title</code> 記錄,並隨工作階段演進
+重寫,所以<strong>最後一條</strong>才是定稿),就用它;否則用開頭的用戶訊息。只有閘道見過的
+工作階段根本沒有標題 —— 沒有檔案可問。</p>
+<p>標題是<strong>標籤,不是對話本身</strong>:讀取器把它壓成一行、限定長度,並且<strong>丟棄</strong>任何觸發
+憑證偵測器的標題(與閘道對外送流量跑的是同一個偵測器)。一個開頭就貼了金鑰的
+工作階段照常匯入,只是沒有標題。</p>
+<p>各欄如下：</p>
+<pre><code>TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+</code></pre>
+<p><code>imported</code> 列的 <code>REQ</code> 是 0，<code>gateway</code> 列的 <code>TURNS</code> 是 0：哪一邊都不會替另一邊編一個數。
+<code>COST</code> 是流量花的錢，依幣別分別給出、從不換算；<code>-</code> 表示檔案裡沒有流量（不是「免費」），
+如果某個工作階段的請求沒能全部定價，會寫明（<code>2.50 USD (+3 unpriced)</code>）。<code>LAST</code> 是
+這個工作階段最後一次活動的時間 —— 列表就是按它排序的，也是讀列表的人真正在問的那個數。
+（起止的起點在 <code>--json</code> 裡，需要的人自取；這一欄不同時放兩個時間戳，因為一張「最近」
+列表不是時間線。）</p>
+<p><code>MACHINE</code> 是某個匯入列來自哪台機器（見上面的<strong>本機歷史</strong>）：匯入方客戶端替自己記下的
+標籤，查不到自己的名字時是 <code>unnamed</code>，只有閘道看到的列同樣是 <code>unnamed</code> —— 它是閘道路由
+來的，不是從檔案來的。它只是給讀者看的標籤，不是用來確定區分兩台機器的身分。</p>
+<p>專案是從紀錄裡的工作目錄推導出的<strong>標籤</strong> —— 倉庫的目錄名，不是路徑，因為閘道從不被告知
+這台機器的配置。也正因為只有閘道看到的列沒有專案，<code>--project</code> 只會列出檔案放得下的
+工作階段。</p>
+<p>結尾一列會說明檔案上次掃描的時間（或從未掃過：請跑 <code>kiwano history import</code>）。</p>
+<h3 id="用戶端金鑰">用戶端金鑰</h3>
+<pre><code>kiwano clients list [--agent A]                 句柄、Agent、限額與白名單
+kiwano clients show &lt;ID&gt;                        依句柄（ck-…）看一把金鑰
+kiwano clients add --agent A [--label L]        鑄造一把；金鑰只印這一次
+                   [--model M]… [--provider P]… [--window PERIOD:LIMIT[:UNIT]]…
+kiwano clients remove &lt;ID&gt;
+kiwano clients rotate &lt;ID&gt;                      換新金鑰，句柄與預算不變
+kiwano clients limits &lt;ID&gt; [--window PERIOD:LIMIT[:UNIT]]…   不給 --window 就清空
+kiwano clients policy &lt;ID&gt; [--label L] [--model M]… [--provider P]…
+</code></pre>
+<p>資料面的憑證：Agent 拿它來出示，也用它約束自己能做什麼。一把金鑰對應一個 Agent，
+而同一個 Agent 的第二把金鑰就是第二份預算 —— 之所以要有兩把，是一台筆電和一台
+桌機在跑同一個 Agent。視窗寫成 <code>day:200:requests</code>、<code>monthly:20:USD</code> 或
+<code>weekly:5:wan_tokens</code>；單位可以省略，省略即 <code>requests</code>。超出一個視窗，閘道回 429 並帶上
+<code>Retry-After</code>；模型或供應商落在白名單之外，回 403。模型項可以以 <code>*</code> 結尾來表示一個<strong>族</strong>
+（<code>claude-haiku-*</code>）—— 這是<strong>唯一</strong>的通配形態；<code>*</code> 出現在別處會在寫入時被拒，而不是被存成一條
+什麼都匹配不到的條目。已存的金鑰<strong>讀不回來</strong>：只有 <code>add</code>
+和 <code>rotate</code> 會印一次。</p>
+<p><code>list</code> 的最後一欄是<strong>最後使用</strong> —— 這把金鑰最近一次承載請求的時間，從未用過則顯示
+<code>never</code>。撤銷一把金鑰靠的就是這一欄，所以兩種狀態分開表達：<code>never</code> 是「鑄出來還沒用過」，
+有日期是「用過、之後可能閒置了」。它讀的是計量列，因此只知道經過<strong>本閘道</strong>的流量。</p>
 <h3 id="agent">Agent</h3>
 <pre><code>kiwano agents detect                    which agents are installed
 kiwano agents versions                  version strings (slow: one subprocess each)
@@ -386,13 +507,16 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show &lt;ID&gt;
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
 kiwano logs dir
 </code></pre>
-<p><code>--from</code> 為包含、<code>--to</code> 為排除,與儲存區的半開區間一致。</p>
+<p><code>--from</code> 為包含、<code>--to</code> 為排除,與儲存區的半開區間一致。<code>--session</code> 收下某個請求攜帶
+的工作階段 id —— 也就是 <code>kiwano sessions</code> 列出它的那個字串 —— 於是那裡的一列可以在
+這裡打開。</p>
 <p><code>insights</code> 是一頁式的報告,說明 token <em>如何</em>被花掉:每個 Agent 的計分卡
 (快取命中率、工作階段上下文成長、推理佔比、重試),標上 <code>cache</code> /
 <code>bloat</code> / <code>retry</code> / <code>overhead</code> 的規則發現,以及上下文成長最多的那些工作
@@ -607,7 +731,7 @@ plan query,而那些旗標過去會寫入應用程式從不讀取的欄位。</p
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

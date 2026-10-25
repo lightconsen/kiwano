@@ -309,8 +309,16 @@ kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing sing
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers price &lt;ID&gt; --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W]
+                            [--cache-creation-1h H] [--currency CODE]
+kiwano providers price &lt;ID&gt; --model M --clear
 kiwano providers probe latency|endpoint|models
 </code></pre>
+<p><code>providers price</code> は、あるプロバイダーがあるモデルにいくら課金するかを百万トークン単位で宣言します —— あなたにしか出せない数字です。Hub が値付けするのは<strong>自分</strong>のカタログ項目のモデルで、項目を持たないプロバイダーには公表価格がありません。プロバイダーの宣言は<strong>1 つの通貨とモデルの一覧全体</strong>なので、このコマンドは保存済みの内容を読み、そのモデルを畳み込み、一覧ごと送り返します —— 2 つ目のモデルを宣言しても 1 つ目は消えません。<code>--clear</code> は 1 つを外します。</p>
+<p>Hub が値付けできないモデル名の逃げ道でもあります —— たとえばプラン自身の名前で、それはサブスクリプションが現在与えているモデルを指します。<code>kiwano history import</code> は値付けできなかった名前を報告するので、その 1 つに価格を宣言すれば、その行が金額に数えられます。</p>
+<p><code>--cache-creation-1h</code> は、ベンダーが 2 つのキャッシュ書き込みウィンドウを別々に値付けしている場合のためのものです（Anthropic：5 分は入力の 1.25 倍、1 時間は 2 倍。Kimi：¥20 に対し ¥40）。省略は<strong>ゼロではありません</strong> —— このプロバイダーは書き込み価格を 1 つだけ持ち、それが両方のウィンドウを覆う、という意味です。2 つの数は<strong>1 つのバケットの分割</strong>で、アプリは 1 時間ぶんをこのレートで、残りを <code>--cache-creation</code> で請求します。</p>
+<p><code>--openai-wire</code> は、OpenAI プロバイダーが<strong>どちらの</strong>リクエスト形状に対応するかを述べます。両者が食い違うときだけ意味を持ちます：<code>chat</code> は <code>/v1/chat/completions</code> のみ、つまり agent が送る <code>/v1/responses</code>（Codex）は送信時に Chat Completions へ翻訳され、応答は逆に翻訳されます。<code>responses</code> は <code>/v1/responses</code> のみで、この場合 <code>/v1/chat/completions</code> は推測せず<strong>理由を添えて拒否</strong>されます。<code>both</code>（既定）はそのまま通し、何に対応しているかはベンダーが答えます。このフラグ以前に追加されたプロバイダーはすべて <code>both</code> なので、指定しなければ何も変わりません。</p>
 <p><code>add</code> と <code>edit</code> はどちらも、転送とクォータのオプションを取ります:</p>
 <pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
 --retries N                    same-provider attempts before failover (0–5)
@@ -344,12 +352,156 @@ kiwano providers probe latency|endpoint|models
 からです。一度も同期していないマシンには表がまったく無く、<code>USD</code> と <code>CNY</code> を受け付け
 ます — Hub がレートを公表している 2 つです。</p>
 <h3 id="section-6">キーのローテーション</h3>
-<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt; [--days N]   masked; also what each entry spent
 kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
 kiwano keys remove &lt;KEY_ID&gt;
 </code></pre>
-<p>ローテーションするキーは、リクエストごとにプロバイダーのプライマリキーの後に試されます。</p>
-<h3 id="section-7">エージェント</h3>
+<p>ローテーションするキーは、プロバイダーのプライマリキーの後に続きます。
+ローテーションは<strong>セッションごと</strong>です: 会話は開始時のキーを使い続け（上流の
+prompt cache はキーが属するアカウントごとに分かれているため）、新しいセッションが
+プール全体に分散されます。セッションを名乗らないリクエストは従来どおり
+リクエストごとにローテーションします。</p>
+<p>プールには<strong>別々のアカウント</strong>のキーを入れてかまいません——それぞれに <code>--label</code> を
+付ければ、支出テーブルがどのアカウントがいくら使ったかを、実際に使った通貨ごとに
+示します（ここでは<strong>通貨をまたいで合算しません</strong>。換算するのは Dashboard だけです）。
+レポートに出る名前はラベル、なければ <code>#&lt;id&gt;</code>、プロバイダー自身のプライマリキーは
+<code>primary</code> です。キーそのものは決して表示・エクスポート・記帳されません。</p>
+<h3 id="section-7">ルール</h3>
+<pre><code>kiwano rules user [--rule TEXT]… [--clear]     自分で書いたルール
+kiwano rules apply &lt;AGENT&gt; [--days N]          それら（と insights の助言）を書き込む
+kiwano rules status &lt;AGENT&gt;                    ファイルに今何が入っているか
+kiwano rules remove &lt;AGENT&gt;                    両方のブロックを外す
+</code></pre>
+<p><code>rules apply</code> は agent 自身の指示ファイル（Claude Code は <code>CLAUDE.md</code>、それ以外は
+<code>AGENTS.md</code>）に、コメントのマーカーで囲んで書き込みます。マーカーが残っていれば、削除は
+「復元」ではなく「その区間を剥がす」ことです。ファイルには<strong>互いに独立した 2 つの
+ブロック</strong>が住みます：<strong><code>insights</code></strong>（<code>kiwano insights</code> が出した助言。設定 → 機能 →
+ルール注入 のスイッチで制御）と <strong><code>yours</code></strong>（あなたが書いたもの）。片方を外してももう片方は
+残り、片方を書き直してももう片方の行には触れません。</p>
+<p><strong>あなたのルールは 1 台につき 1 セット</strong>で、agent ごとではありません。人が書くルールは普通、
+どこでも守る決まりごと（「中国語で答える」「聞かれずにコミットしない」）だからです。
+<strong>どの</strong> agent に書き込むかは <code>rules apply &lt;agent&gt;</code> が決めます —— つまり一度書けば、
+使いたい場所に適用できます。<code>rules remove</code> は両方のブロックを外しますが<strong>ライブラリは残す</strong>ので、
+次の <code>apply</code> で戻ります。ライブラリ自体を空にするのは <code>rules user --clear</code> です。</p>
+<p>あなたのルールは insights 側に<strong>依存しません</strong>：指摘が無く、ルール注入が切られていても
+ファイルに届きます。あのスイッチは Kiwano が出した助言についてのもので、あなたが書いたものの
+話ではありません。</p>
+<h3 id="履歴">ローカル履歴</h3>
+<pre><code>kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
+</code></pre>
+<p>Agent 自身の履歴です。エージェントのセッションファイルから読み取って取り込むので、
+今朝 Kiwano を入れたばかりのマシンでも dashboard に昨日の出費が並びます。<code>import</code> は
+Claude Code と Codex の記録ファイルを読み、書かれていることを送ります。Claude Code の
+セッションは<strong>まるごと</strong>読みます: transcript 本体に加えて、それが生んだサブエージェントの
+transcript（<code>&lt;session&gt;/subagents/agent-*.jsonl</code>）も——そのトークンはセッション自身のもので、
+エージェントを使うマシンでは使用量のおよそ 2 割を占めていたのに、ずっと取りこぼしていました。
+1 つの transcript が 1 つのセッションで、名前は<strong>ファイル名</strong>から取ります: 会話が圧縮や
+再開を経るとファイル内部の id は変わりますが、その id で記帳すると 1 つの会話がいくつにも
+分かれて並びます。アプリは初回
+起動時に同じスキャンを一度だけ実行します。<code>--dry-run</code> は読んで報告するだけで何も書き
+ません —— 「なぜ dashboard がまだ空なのか」への唯一正直な答えで、ファイルがこのマシンの
+想定した場所に無いだけかもしれません（その行は stderr に出ます。スキャンこそ <code>| jq</code> する
+コマンドだからです）。</p>
+<p>数字を読む前に 2 点：</p>
+<ul>
+<li><p><strong>ゲートウェイより前の分だけ</strong>を取り込みます。テイクオーバー以降のリクエストはすでに
+台帳にあり、エージェントはどちらにせよ自分のファイルを書きます。境界は各 Agent 自身の
+最初の計量行なので、同じリクエストが二重に数えられることはありません。<code>import</code> は
+その境界が何行を弾いたかを報告します。</p>
+</li>
+<li><p><strong>コストは推定値です。</strong> ファイルにあるのはトークンで金額ではなく、取り込んだリクエスト
+には宣言価格を当てられるプロバイダーがありません —— 各行はそのモデルの一般価格で
+見積もられます。Hub を一度も同期していないマシンでは何も価格が付きません（トークンだけ
+で着地します）。あとで <code>history import</code> をもう一度走らせると埋まります。取り込みは
+冪等だからです。</p>
+</li>
+<li><p><strong>各行はどのマシンから来たかを覚えます。</strong> 2 台のノート PC が同じゲートウェイへ履歴を
+取り込むことがあり、そのとき統合された台帳には、どの行が誰のものかを区別する手立てが
+要ります。取り込みはマシンの<strong>ラベル</strong> —— このマシンが自分について調べられたもの
+（多くの場合ホスト名、ベストエフォート）—— を記録し、報告にもそれを書きます。これは
+ラベルであって身元ではありません。2 台が同じ名前を持つことも、名前が変わることもあり、
+自分の名前を調べられなかったマシンは何も記録しません（<code>unnamed</code> と表示されます）。
+ゲートウェイがルーティングしたトラフィックには、そもそも取り込み元のマシンがありません。</p>
+<p><code>--machine LABEL</code> はシステムに尋ねずにこのラベルを直接宣言します。自分について
+使える名前を答えられないマシンのためです —— コンテナのホスト名は 16 進の文字列で、
+ノート PC の名前も途中で変わることがあります。渡したものがそのまま記録されます。</p>
+</li>
+</ul>
+<p>取り込まれたものは <code>kiwano sessions</code>（下記）が一覧します。ゲートウェイ自身がルーティング
+したトラフィックと並べて表示されます。</p>
+<h3 id="section-8">セッション</h3>
+<pre><code>kiwano sessions [--project P] [--agent A] [--days N]
+</code></pre>
+<p>1 セッション 1 行で、<strong>2 つの情報源</strong>から来ます。どちらなのかは <code>SOURCE</code> 列が示します：</p>
+<ul>
+<li><code>gateway</code> —— そのセッションのリクエストはゲートウェイがルーティングしました。リクエスト
+数・トークン・コストは分かりますが、プロジェクト・ターン数・ツールは分かりません。</li>
+<li><code>imported</code> —— エージェント自身のファイルにしか無いものです（<code>kiwano history import</code> が
+読み込みます）。プロジェクト・ターン数・ツールは分かりますが、金額はありません。ファイルに
+あるのはトークンでコストではないからです。</li>
+<li><code>both</code> —— 両方の台帳に同じ id があります。テイクオーバー以降に走ったセッションの通常の
+状態です。</li>
+</ul>
+<p><strong>2 つの情報源は決して足し合わせません。</strong> 両者は重なるけれど等しくない仕事を表すからです
+—— 1 回のリトライはファイルでは 1 ターン、ゲートウェイでは 2 リクエストです。そこで両方に
+同じ項目があるときは、片方だけを採り、もう片方は捨てます（合算しません）：リクエスト数・
+トークン・コストは<strong>トラフィック</strong>が、プロジェクト・期間・ターン数・ツールは<strong>ファイル</strong>が
+優先です。<code>both</code> 行のトークン列はゲートウェイが数えた値で、ファイルの値と足したものでは
+ありません。</p>
+<p><strong><code>TITLE</code> は「これは何の話か」へのファイル側の答え</strong>で、より良い情報源を優先します:
+ファイルにエージェント自身が付けた会話の名前があればそれを使い（Claude Code は
+<code>ai-title</code> レコードを書き、会話の進展に合わせて書き換えるので、<strong>最後のもの</strong>が
+確定した名前です）、無ければ冒頭のユーザーメッセージを使います。ゲートウェイしか
+見ていないセッションにはタイトルがありません —— 訊くべきファイルが無いからです。</p>
+<p>タイトルは<strong>ラベルであって会話そのものではありません</strong>: 読み取り側は一行に畳み、
+長さを制限し、ゲートウェイが外向きのトラフィックに使うのと同じ資格情報検出器に
+引っかかったタイトルは<strong>捨てます</strong>。冒頭にキーを貼り付けて始まったセッションも
+取り込みは行われますが、タイトルだけが付きません。</p>
+<p>列は次のとおりです：</p>
+<pre><code>TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+</code></pre>
+<p><code>imported</code> 行の <code>REQ</code> は 0、<code>gateway</code> 行の <code>TURNS</code> は 0 です。どちらの側も、もう一方の
+数をでっち上げません。<code>COST</code> はトラフィックが使った金額で、通貨ごとに分けて表示し、換算は
+しません。<code>-</code> はファイル側にトラフィックが無いことを意味し（「無料」ではありません）、
+一部のリクエストに価格が付かなかったセッションはその旨を書きます
+（<code>2.50 USD (+3 unpriced)</code>）。<code>LAST</code> はそのセッションが最後に動いた時刻です —— 一覧は
+この値で並んでおり、一覧を眺める人が知りたいのもこれです（期間の開始点は <code>--json</code> に
+あります。1 つの列に 2 つの時刻は入れません。「最近」の一覧はタイムラインではないからです）。</p>
+<p><code>MACHINE</code> は取り込んだ行がどのマシンから来たかです（上の<strong>ローカル履歴</strong>を参照）。
+取り込み側のクライアントが自分のために記録したラベルで、自分の名前を調べられなければ
+<code>unnamed</code>、ゲートウェイだけが見た行も同じく <code>unnamed</code> です —— それはゲートウェイを
+通って来たのであって、ファイルから来たのではありません。読者のためのラベルであり、
+2 台のマシンを確実に見分ける身元ではありません。</p>
+<p>プロジェクトは記録に残った作業ディレクトリから導いた<strong>ラベル</strong>で、リポジトリのディレクトリ名
+です（パスではありません。ゲートウェイはこのマシンの配置を知らされないからです）。また、
+ゲートウェイだけが見た行にはプロジェクトが無いので、<code>--project</code> はファイル側が場所を
+示せたセッションだけを表示します。</p>
+<p>末尾に、ファイルを最後にスキャンした時刻が出ます（一度も無ければ <code>kiwano history import</code>
+を実行するよう書かれます）。</p>
+<h3 id="section-9">クライアントキー</h3>
+<pre><code>kiwano clients list [--agent A]                 ハンドル、Agent、上限と許可リスト
+kiwano clients show &lt;ID&gt;                        ハンドル（ck-…）で 1 つ見る
+kiwano clients add --agent A [--label L]        1 つ鋳造する。キーはこの一度だけ表示
+                   [--model M]… [--provider P]… [--window PERIOD:LIMIT[:UNIT]]…
+kiwano clients remove &lt;ID&gt;
+kiwano clients rotate &lt;ID&gt;                      新しいキーに差し替え、ハンドルと予算はそのまま
+kiwano clients limits &lt;ID&gt; [--window PERIOD:LIMIT[:UNIT]]…   --window を省くと消去
+kiwano clients policy &lt;ID&gt; [--label L] [--model M]… [--provider P]…
+</code></pre>
+<p>データプレーンの資格情報です。Agent はこれを提示し、同時にこれで自分のできることが
+制限されます。1 つのキーは 1 つの Agent に対応し、同じ Agent の 2 つ目のキーは 2 つ目の
+予算です —— 2 つ要るのは、同じ Agent をノート PC とデスクトップで走らせている場合です。
+窓は <code>day:200:requests</code>、<code>monthly:20:USD</code>、<code>weekly:5:wan_tokens</code> のように書き、単位は
+省略できます（省略時は <code>requests</code>）。窓を超えるとゲートウェイは 429 と <code>Retry-After</code> を
+返し、許可リストの外のモデルやプロバイダーには 403 を返します。モデルの項目は <code>*</code> で終わらせて
+<strong>ファミリー</strong>を指せます（<code>claude-haiku-*</code>）—— これが唯一のワイルドカード形式で、それ以外の位置の
+<code>*</code> は書き込む時点で拒否されます（何にも一致しない項目として保存されるより）。保存済みのキーは
+<strong>読み戻せません</strong> —— <code>add</code> と <code>rotate</code> が一度だけ表示します。</p>
+<p><code>list</code> の最後の列は<strong>最終使用</strong> —— そのキーが最後にリクエストを運んだ時刻で、一度も
+使っていなければ <code>never</code> です。鍵を取り消すかどうかはこの列で決めるので、2 つの状態は
+書き分けます：<code>never</code> は「鋳造したが未使用」、日付は「使われ、その後は使われていないかも
+しれない」。計量行を読むので、<strong>このゲートウェイ</strong>を通ったトラフィックしか知りません。</p>
+<h3 id="section-10">エージェント</h3>
 <pre><code>kiwano agents detect                    which agents are installed
 kiwano agents versions                  version strings (slow: one subprocess each)
 kiwano agents takeover &lt;AGENT&gt;          route it through the gateway, backing up its config
@@ -377,7 +529,7 @@ kiwano agents remove &lt;ID&gt;               delete it and its key (its usage h
 なり、3 つのどれとも異なる答えです。<code>agents list</code> では <code>-</code> と表示されます。これは
 <strong>ラベル</strong>です — これによってルーティング、変換、検証が行われることはありません。
 リクエストのワイヤ形式は、それが届いたパスで決まります。</p>
-<h3 id="section-8">ルート</h3>
+<h3 id="section-11">ルート</h3>
 <pre><code>kiwano routes list
 kiwano routes strategy &lt;AGENT&gt; single|failover|roundrobin|timewindow|quota
                                [--limit N --unit requests|tokens]
@@ -397,13 +549,16 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show &lt;ID&gt;
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
 kiwano logs dir
 </code></pre>
-<p><code>--from</code> は境界を含み、<code>--to</code> は含みません。ストアの半開区間に対応しています。</p>
+<p><code>--from</code> は境界を含み、<code>--to</code> は含みません。ストアの半開区間に対応しています。
+<code>--session</code> はあるリクエストが持っていたセッション id —— <code>kiwano sessions</code> が一覧する
+のと同じ文字列 —— を受け取り、そこの 1 行をここで開けるようにします。</p>
 <p><code>insights</code> は、トークンが<em>どのように</em>使われているかについての 1 ページのレポートです。
 エージェントごとのスコアカード（キャッシュヒット率、セッションコンテキストの増加、
 推論の割合、リトライ）、<code>cache</code> / <code>bloat</code> / <code>retry</code> / <code>overhead</code> のタグが付いたルール
@@ -630,7 +785,7 @@ CLI が意図的に持たない便宜であって、欠いている機能では�
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

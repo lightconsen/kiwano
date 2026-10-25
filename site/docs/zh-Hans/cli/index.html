@@ -304,8 +304,16 @@ kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing sing
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers price &lt;ID&gt; --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W]
+                            [--cache-creation-1h H] [--currency CODE]
+kiwano providers price &lt;ID&gt; --model M --clear
 kiwano providers probe latency|endpoint|models
 </code></pre>
+<p><code>providers price</code> 声明某个供应商对某个模型的收费，按每百万 token —— 只有你能提供的数字，因为 Hub 给的是<strong>它自己</strong>目录条目的价，而没挂目录条目的供应商没有任何公布价。一个供应商的声明是<strong>一个币种加一整张模型表</strong>，所以这条命令会读出已存的、把这个模型折进去、再把整张表送回去：给第二个模型声明价<strong>不会</strong>丢掉第一个。<code>--clear</code> 丢掉其中一个。</p>
+<p>它同时也是 Hub 定不了价的那个模型名的出口 —— 比如计划自己的名字（它指的是订阅当时给你的那个模型）。<code>kiwano history import</code> 会报出它算不出价的模型名，给其中之一声明一个价，那些行才算得进钱。</p>
+<p><code>--cache-creation-1h</code> 用于厂商对两档缓存写入分别定价的情况（Anthropic：5 分钟按输入的 1.25×、1 小时按 2×；Kimi：¥20 对 ¥40）。不写它<strong>不是</strong>零 —— 它的意思是这个供应商只有一档写入价，那一档同时管两个窗口。两个数字是<strong>同一桶的切分</strong>：App 把 1 小时那一片按这个价算，其余按 <code>--cache-creation</code> 算。</p>
+<p><code>--openai-wire</code> 说明一个 OpenAI 供应商服务的是<strong>哪一种</strong>请求形状，只在两者不一致时才有意义：<code>chat</code> 表示它只讲 <code>/v1/chat/completions</code>，于是 agent 发来的 <code>/v1/responses</code>（Codex）会在出去时被翻译成 Chat Completions、回来时再翻回去；<code>responses</code> 表示只讲 <code>/v1/responses</code>，此时 <code>/v1/chat/completions</code> 会<strong>带理由拒绝</strong>而不是猜；<code>both</code>（默认）原样透传，由厂商回答它到底服务什么。这个旗标出现之前加的供应商都是 <code>both</code>，所以不设即什么都不变。</p>
 <p><code>add</code> 和 <code>edit</code> 也都接受转发与配额选项:</p>
 <pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
 --retries N                    same-provider attempts before failover (0–5)
@@ -336,11 +344,124 @@ timeout。</p>
 按 1:1 并入其中。从未同步过的机器完全没有汇率表,只接受 <code>USD</code> 和 <code>CNY</code>——
 Hub 公布汇率所参照的两种货币。</p>
 <h3 id="轮换密钥">轮换密钥</h3>
-<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt; [--days N]   masked; also what each entry spent
 kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
 kiwano keys remove &lt;KEY_ID&gt;
 </code></pre>
-<p>轮换密钥会在供应商的主密钥之后尝试,按每个请求逐一进行。</p>
+<p>轮换密钥跟在供应商的主密钥之后。轮换<strong>按会话</strong>进行:一次会话保持它开始时
+用的那把密钥(上游的 prompt cache 按密钥所属的账号隔离),新会话在整个池上
+摊开。不带会话标识的请求仍按每个请求轮换。</p>
+<p>池子里可以放<strong>不同账号</strong>的密钥——给每把加个 <code>--label</code>,花费表就会说明哪个
+账号花了多少,并按它实际花掉的币种列出(这里<strong>绝不跨币种相加</strong>;唯一做换算
+的地方是 Dashboard)。报表里显示的名字是标签,没有标签就是 <code>#&lt;id&gt;</code>,供应商
+自己的主钥则是 <code>primary</code>。密钥本身永远不会被打印、导出,也不会进账本。</p>
+<h3 id="规则">规则</h3>
+<pre><code>kiwano rules user [--rule TEXT]… [--clear]     你自己写的规则
+kiwano rules apply &lt;AGENT&gt; [--days N]          把它们（以及 insights 的建议）写进去
+kiwano rules status &lt;AGENT&gt;                    文件里现在有什么
+kiwano rules remove &lt;AGENT&gt;                    把两块都摘掉
+</code></pre>
+<p><code>rules apply</code> 写进 agent 自己的指令文件 —— Claude Code 是 <code>CLAUDE.md</code>，其余是
+<code>AGENTS.md</code> —— 用注释标记包起来，所以只要标记还在，移除就是&quot;剥掉一段&quot;而不是&quot;整份还原&quot;。
+文件里住着<strong>两块、彼此独立</strong>：<strong><code>insights</code></strong>（<code>kiwano insights</code> 找出来的建议，受
+设置 → 功能 → 规则注入 的开关管）与 <strong><code>yours</code></strong>（你自己写的）。摘掉一块不动另一块，
+重写一块也碰不到另一块的行。</p>
+<p><strong>你写的规则是&quot;每台机器一套&quot;</strong>，不是每个 agent 一套：一个人写下的规则通常是他到处都遵守的
+约定（&quot;用中文回答&quot;&quot;没有问过就不要提交&quot;）。它会写进<strong>哪些</strong> agent 由 <code>rules apply &lt;agent&gt;</code>
+决定 —— 所以规则只写一次，在你想用到的地方应用。<code>rules remove</code> 会把两块都摘掉但<strong>保留规则库</strong>，
+下次 <code>apply</code> 就装回去；<code>rules user --clear</code> 才是清空规则库本身的那一下。</p>
+<p>你的规则<strong>不依赖 insights 那一半</strong>：没有发现、规则注入关着，它们照样能写进文件。那个开关说的是
+Kiwano 推导出来的建议，不是你写的东西。</p>
+<h3 id="本机历史">本机历史</h3>
+<pre><code>kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
+</code></pre>
+<p>Agent 自己的历史：从它们的会话文件里读出来并导入，于是一台今天早上才装 Kiwano 的机器，
+dashboard 上已经有昨天的花费。<code>import</code> 读 Claude Code 与 Codex 的记录文件并把它们说的
+东西送过去；App 会在首次启动时跑同一趟扫描。一个 Claude Code 会话是<strong>整份</strong>读的:
+transcript 本身,加上它派生的子代理 transcript(<code>&lt;session&gt;/subagents/agent-*.jsonl</code>)——
+那些 token 属于这个会话,在用代理的机器上它们占了约两成的用量,之前一直被漏掉。
+一份 transcript 就是一个会话,身份取自<strong>文件名</strong>:对话被压缩或续接时,文件内部的
+id 会变,而按那些 id 记账会把一场对话列成好几个。<code>--dry-run</code> 只读只报告、什么都不写 ——
+这是&quot;我的 dashboard 怎么还是空的&quot;唯一诚实的回答，因为文件可能根本不在这个机器期望的
+位置（那些行走 stderr：扫描正是你 <code>| jq</code> 的那种命令）。</p>
+<p>看数字之前要知道两件事：</p>
+<ul>
+<li><p><strong>只导入早于网关的部分。</strong> 接管之后的每个请求都已经在账本里，而 Agent 无论如何都会
+写自己的文件；分界线是每个 Agent 自己最早那条计量行，所以同一个请求不会被数两次。
+<code>import</code> 会报告这条线挡掉了多少行。</p>
+</li>
+<li><p><strong>花费是估算。</strong> 文件里只有 token、没有钱，而导入的请求没有可以套用声明价的供应商 ——
+所以每行按该模型的通用价估算。从未同步过 Hub 的机器干脆什么都定不了价（行会带着 token
+落地、没有花费）；之后再跑一次 <code>history import</code> 会补上，因为导入是幂等的。</p>
+</li>
+<li><p><strong>每一行都记得自己是从哪台机器来的。</strong> 两台笔记本可以把历史导入同一个网关，合并后的
+账本就需要有办法分清哪些行是谁的。导入会记下一个机器<strong>标签</strong> —— 这台机器能查到的自己
+的名字（尽力而为，通常是主机名），报告里也会写出它。它是标签，不是身份：两台机器可以
+同名、名字也可以变，查不到名字的机器就什么都不记（显示为 <code>unnamed</code>）。网关路由的流量
+根本没有导入机器可言。</p>
+<p><code>--machine LABEL</code> 直接声明这个标签，而不是问系统。给那些自己答不出有用名字的机器用:
+容器的主机名是一串十六进制,笔记本的名字也可能中途变掉。你传什么就记什么。</p>
+</li>
+</ul>
+<p>导入进来的是什么，由 <code>kiwano sessions</code>（见下）列出，和网关自己路由的流量并排在一起。</p>
+<h3 id="会话">会话</h3>
+<pre><code>kiwano sessions [--project P] [--agent A] [--days N]
+</code></pre>
+<p>每个会话一行，来自<strong>两个来源</strong>，<code>SOURCE</code> 列说明是哪一个：</p>
+<ul>
+<li><code>gateway</code> —— 这个会话的请求是网关路由的。它知道请求数、token 与花费，但对项目、
+轮次和工具一无所知。</li>
+<li><code>imported</code> —— 只有 Agent 自己的文件里有它（由 <code>kiwano history import</code> 读入）。它知道
+项目、轮次与工具，却没有钱：文件里只有 token，没有花费。</li>
+<li><code>both</code> —— 两边都有这个 id，这是接管之后跑过的会话的常见状态。</li>
+</ul>
+<p><strong>两个来源从不相加。</strong> 它们描述的是相互重叠但不相等的事 —— 一次重试在文件里是一轮、
+在网关里是两个请求 —— 所以两边都有某个字段时，由其中一边胜出、另一边的值被舍弃而不是
+相加：请求数、token 与花费以<strong>流量</strong>为准，项目、起止、轮次与工具以<strong>文件</strong>为准。<code>both</code>
+行的 token 列是网关数出来的那个数,不是文件数加网关数。</p>
+<p><strong><code>TITLE</code> 是文件对&quot;这是干什么的&quot;的回答</strong>,而且它优先取更好的那个来源:文件里有
+agent 自己给这场对话起的名字时(Claude Code 写 <code>ai-title</code> 记录,并随会话演进重写,
+所以<strong>最后一条</strong>才是定稿),就用它;否则用开头的用户消息。只有网关见过的会话
+根本没有标题 —— 没有文件可问。</p>
+<p>标题是<strong>标签,不是对话本身</strong>:读取器把它压成一行、限定长度,并且<strong>丢弃</strong>任何触发
+凭据检测器的标题(与网关对出站流量跑的是同一个检测器)。一个开头就粘了密钥的
+会话照常导入,只是没有标题。</p>
+<p>各列如下：</p>
+<pre><code>TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+</code></pre>
+<p><code>imported</code> 行的 <code>REQ</code> 是 0，<code>gateway</code> 行的 <code>TURNS</code> 是 0：哪一边都不会替另一边编一个数。
+<code>COST</code> 是流量花的钱，按币种分别给出、从不换算；<code>-</code> 表示文件里没有流量（不是&quot;免费&quot;），
+如果某个会话的请求没能全部定价，会写明（<code>2.50 USD (+3 unpriced)</code>）。<code>LAST</code> 是
+这个会话最后一次活动的时间 —— 列表就是按它排序的，也是读列表的人真正在问的那个数。
+（起止的起点在 <code>--json</code> 里，需要的人自取；这一列不同时放两个时间戳，因为一张&quot;最近&quot;
+列表不是时间线。）</p>
+<p><code>MACHINE</code> 是某条导入行来自哪台机器（见上面的<strong>本机历史</strong>）：导入方客户端给自己记下的
+标签，查不到自己的名字时是 <code>unnamed</code>，只有网关看到的行同样是 <code>unnamed</code> —— 它是网关路由
+来的，不是从文件来的。它只是给读者看的标签，不是用来确定区分两台机器的身份。</p>
+<p>项目是从记录里的工作目录推导出的<strong>标签</strong> —— 仓库的目录名，不是路径，因为网关从不被告知
+这台机器的布局。也正因为只有网关看到的行没有项目，<code>--project</code> 只会列出文件放得下的会话。</p>
+<p>末尾一行会说明文件上次扫描的时间（或从未扫过：请跑 <code>kiwano history import</code>）。</p>
+<h3 id="客户端密钥">客户端密钥</h3>
+<pre><code>kiwano clients list [--agent A]                 句柄、Agent、限额与白名单
+kiwano clients show &lt;ID&gt;                        按句柄（ck-…）看一把密钥
+kiwano clients add --agent A [--label L]        铸造一把；密钥只打印这一次
+                   [--model M]… [--provider P]… [--window PERIOD:LIMIT[:UNIT]]…
+kiwano clients remove &lt;ID&gt;
+kiwano clients rotate &lt;ID&gt;                      换新密钥，句柄与预算不变
+kiwano clients limits &lt;ID&gt; [--window PERIOD:LIMIT[:UNIT]]…   不给 --window 就清空
+kiwano clients policy &lt;ID&gt; [--label L] [--model M]… [--provider P]…
+</code></pre>
+<p>数据面的凭据：Agent 拿它来出示，也用它约束自己能做什么。一把密钥对应一个 Agent，
+而同一个 Agent 的第二把密钥就是第二份预算 —— 之所以要有两把，是一台笔记本和一台
+台式机在跑同一个 Agent。窗口写成 <code>day:200:requests</code>、<code>monthly:20:USD</code> 或
+<code>weekly:5:wan_tokens</code>；单位可以省略，省略即 <code>requests</code>。超出一个窗口，网关回 429 并带上
+<code>Retry-After</code>；模型或供应商落在白名单之外，回 403。模型项可以以 <code>*</code> 结尾来表示一个<strong>族</strong>
+（<code>claude-haiku-*</code>）—— 这是<strong>唯一</strong>的通配形态；<code>*</code> 出现在别处会在写入时被拒，而不是被存成一条
+什么都匹配不到的条目。已存的密钥<strong>读不回来</strong>：只有 <code>add</code>
+和 <code>rotate</code> 会打印一次。</p>
+<p><code>list</code> 的最后一列是<strong>最后使用</strong> —— 这把密钥最近一次承载请求的时间，从未用过则显示
+<code>never</code>。撤销一把密钥靠的就是这一列，所以两种状态分开表达：<code>never</code> 是&quot;铸出来还没用过&quot;，
+有日期是&quot;用过、之后可能闲置了&quot;。它读的是计量行，因此只知道经过<strong>本网关</strong>的流量。</p>
 <h3 id="agent">Agent</h3>
 <pre><code>kiwano agents detect                    which agents are installed
 kiwano agents versions                  version strings (slow: one subprocess each)
@@ -387,13 +508,16 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show &lt;ID&gt;
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
 kiwano logs dir
 </code></pre>
-<p><code>--from</code> 为包含、<code>--to</code> 为排除,与存储的半开区间一致。</p>
+<p><code>--from</code> 为包含、<code>--to</code> 为排除,与存储的半开区间一致。<code>--session</code> 收下某个请求携带
+的会话 id —— 也就是 <code>kiwano sessions</code> 列出它的那个字符串 —— 于是那里的某一行可以
+在这里打开。</p>
 <p><code>insights</code> 是一页式的报告,说明 token <em>如何</em>被花掉:每个 Agent 的记分卡(缓存
 命中率、会话上下文增长、推理占比、重试)、标上 <code>cache</code> / <code>bloat</code> / <code>retry</code> /
 <code>overhead</code> 的规则发现,以及上下文增长最多的那些会话。每一项发现都带着它背后
@@ -607,7 +731,7 @@ plan query,而那些标志过去会写入应用从不读取的列。</p>
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

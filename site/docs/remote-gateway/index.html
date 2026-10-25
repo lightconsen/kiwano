@@ -221,6 +221,31 @@ things. The admin plane carries credentials — the keys you stored. The data
 plane carries the requests themselves — your prompts and the answers, in the
 clear, because <strong>Kiwano does not do TLS</strong> (see <a href="#the-deployment-requirement">the deployment
 requirement</a> below).</p>
+<p>Each plane also has its <strong>own credential</strong>, and they are not the same one:</p>
+<table>
+<thead>
+<tr>
+<th>Plane</th>
+<th>What a caller presents</th>
+<th>How many</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Admin</td>
+<td><code>KIWANO_DAEMON_TOKEN</code> — the gateway&#39;s admin token</td>
+<td>one per gateway, for the operator</td>
+</tr>
+<tr>
+<td>Data</td>
+<td>a <strong>client key</strong> (<code>kw-ag-…</code>), one per agent</td>
+<td>one per agent, and more per agent if you want them</td>
+</tr>
+</tbody></table>
+<p>The admin token is one secret for one operator. A client key is what an agent&#39;s
+config carries, it is minted <em>for</em> that agent, and it can be limited: what it may
+spend, which models it may name, which providers it may use. That is the section
+below, and it is why a leaked client key is bounded in a way a leaked admin token
+is not.</p>
 <h2 id="on-the-machine-that-runs-the-gateway">On the machine that runs the gateway</h2>
 <p>Give the admin plane an address to listen on, and the data plane one too:</p>
 <pre><code class="language-sh">KIWANO_ADMIN_ADDR=100.64.0.5:8318 \   # management: host:port
@@ -265,6 +290,43 @@ that is not <code>host:port</code> stops the command with an error rather than q
 talking to the local gateway, which would be a client silently using a
 different daemon than the one you named.</li>
 </ul>
+<h2 id="what-a-client-key-may-do">What a client key may do</h2>
+<p>A key is the data plane&#39;s credential. It names one agent (that is what routing
+needs), and it can carry three restrictions, all of them checked <strong>before the
+request reaches a provider</strong>:</p>
+<pre><code class="language-sh">kiwano clients list                                  # handles, agents, what each may do
+kiwano clients add --agent claude --label &quot;laptop&quot;   # the key is printed once
+kiwano clients limits ck-1a2b3c4d --window day:200:requests --window monthly:20:USD
+kiwano clients policy ck-1a2b3c4d --model claude-sonnet-4-5 --provider p-work
+kiwano clients rotate ck-1a2b3c4d                    # new secret, same handle and budget
+</code></pre>
+<ul>
+<li><strong>spend windows</strong> — <code>day</code> / <code>weekly</code> / <code>monthly</code> / <code>yearly</code> / <code>all</code>, in
+<code>requests</code>, <code>wan_tokens</code> (万 tokens), or a currency. Measured against the same
+local-calendar boundaries an agent&#39;s ceiling uses. Over any window: <strong>429</strong>, with
+a <code>Retry-After</code> naming the rest of it.</li>
+<li><strong>models</strong> — only the listed model ids, matched case-insensitively. A trailing
+<code>*</code> makes an entry a <strong>family</strong>: <code>claude-haiku-*</code> allows every model whose id
+starts with <code>claude-haiku-</code>, including ones released after you wrote the list —
+which is the difference between a rule and a list that expires. It is the only
+pattern form there is: a <code>*</code> anywhere else is refused when you write it, because
+an entry that looks like a pattern and matches nothing is a key that silently
+refuses every model. A model outside the list: <strong>403</strong>, and the message names the
+rule. A request whose model cannot be read while a list is in force is refused
+too, because an allowance that cannot be checked is not one.</li>
+<li><strong>providers</strong> — only the listed provider ids. A key that may not use the agent&#39;s
+primary is routed to one it may (multi-provider strategies) or refused (403)
+when the strategy is <code>single</code> — &quot;this one provider, no failover&quot; is not a
+statement a key can promote its way out of.</li>
+</ul>
+<p>Two keys for one agent are two clients with two budgets, which is the point: a
+laptop and a desktop running the same agent can be limited separately. Rotating a
+key keeps the handle, the policy and the spend already recorded, so it is not a
+way to clear a ceiling.</p>
+<p>The key itself is stored the way a provider&#39;s key is — in the clear, because it is
+in the clear in the agent&#39;s config file too — and it is scrubbed out of captured
+bodies like every other credential. A management surface never prints a stored
+key: only <code>add</code> and <code>rotate</code> show one, once, when they mint it.</p>
 <h2 id="the-two-switches">The two switches</h2>
 <p>Addresses that stop at your own network — RFC1918 (<code>10.</code>, <code>192.168.</code>, <code>172.16.</code>–<code>172.31.</code>),
 loopback, link-local, and the <code>100.64/10</code> range Tailscale uses — are accepted as
@@ -292,6 +354,10 @@ that model, the honest answer is a private network and a token, rather than
 cryptography against nobody.</p>
 <p>So: <code>100.64.0.5</code> (a tailnet address) is the value these variables are designed
 for. A public address needs both switches <em>and</em> a good reason.</p>
+<p>A client key does not change that requirement, but it does bound what a leak
+costs: the holder can spend what that key&#39;s windows allow, on the models and
+providers it names, as that one agent — rather than holding the admin token, which
+reads your stored keys and edits everything.</p>
 <h2 id="ports">Ports</h2>
 <table>
 <thead>
@@ -350,7 +416,7 @@ could not use.</p>
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

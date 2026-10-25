@@ -240,6 +240,45 @@ code, pre { font-family: var(--font-mono); }
 <li><strong>失败被重放,而不是被退回。</strong> 除 <code>single</code> 外的任何策略,中途失败的
 请求会沿队列对下一个候选重放,而不是作为错误交还给你的 Agent。</li>
 </ul>
+<p>同一层粘性在下一级也成立:在一个供应商的轮换密钥池(<code>kiwano keys</code>)里,
+一次会话保持它开始时用的那把<strong>密钥</strong>。上游的 prompt cache 按密钥所属的账号
+隔离,所以会话中途轮换会把 prefix 在另一个账号上按 input 全价重建。新会话
+仍然在整个池上摊开——这份摊开正是池存在的意义——而且 pin 不会活得比它的
+密钥久:删掉或停用那一项,会话会被重新 pin 到活的项上,而不是失败。</p>
+<p>一个池可以是<strong>挂在同一个供应商下的多个账号</strong>(每项上的标签就是为此而设),
+所以账本记的是<strong>哪一项</strong>承载了每个请求,而不是止步于供应商:<code>kiwano keys list &lt;ID&gt;</code> 报告每一项花了多少(按它花掉的币种),<code>kiwano logs show</code> 在行上
+点出是哪一项。</p>
+<p>用哪种形状是个真实的选择,二者是为不同的事而设。<strong>分别计费或分别限额</strong>的
+两个账号,就该是两个 <em>供应商</em>:各自有价、有上限、在按供应商的视图里各占一行,
+策略还能在它们之间故障转移。池是给<strong>同一套安排下的多把钥匙</strong>用的——同一个
+账号的多把钥匙摊开,免得一把撞上速率上限——或者给&quot;只想摊负载、但要保持一行
+供应商&quot;的账号。</p>
+<h2 id="哪个供应商应答了-回执响应头">哪个供应商应答了:回执响应头</h2>
+<p>网关转发的每个响应都自带三个头:</p>
+<table>
+<thead>
+<tr>
+<th>响应头</th>
+<th>指明什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>X-Kiwano-Provider</code></td>
+<td>服务了这个请求的供应商的 id</td>
+</tr>
+<tr>
+<td><code>X-Kiwano-Model</code></td>
+<td>这个请求据以计量的模型</td>
+</tr>
+<tr>
+<td><code>X-Kiwano-Account</code></td>
+<td>该供应商密钥池里的哪一项承载了它——<code>primary</code>、标签,或 <code>#&lt;id&gt;</code>;绝不是密钥</td>
+</tr>
+</tbody></table>
+<p>在 <code>single</code> 下它们说的都不是新信息。在 <code>failover</code> 或任何带备选队列的策略下,
+它们把那个否则只能事后去日志页面翻的问题,当场答在响应上:<strong>这个回答——到底
+是谁服务的?</strong> 取的值与请求据以计量的归因是同一份,所以头上说的就是账上记的。
+被网关自己拒绝的请求——花费限额、客户端密钥的策略——没有回执:没有谁服务了它。</p>
 <h2 id="花费限额-agent-限额">花费限额(Agent 限额)</h2>
 <p>每个 Agent 可以按周期设限额——<code>day</code>、<code>weekly</code>、<code>monthly</code>、<code>yearly</code> 或
 <code>all</code>——每个限额由数额和单位组成:请求数(<code>requests</code>)、万 token 块
@@ -270,7 +309,7 @@ MiniMax、ZenMux、OpenCode Go、火山引擎);结果缓存五分钟,可强制�
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

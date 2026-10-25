@@ -302,6 +302,7 @@ routing&quot;.</p>
 <h3 id="providers">Providers</h3>
 <pre><code>kiwano providers list [--agent AGENT]
 kiwano providers add --name N --endpoint URL [--key K] [--protocol P]
+                     [--openai-wire chat|responses|both]
                      [--billing plan|payg|unl] [--limit N --unit U] [--reset R]
                      [--bind AGENT]...
 kiwano providers edit &lt;ID&gt; [any of the above]
@@ -309,8 +310,42 @@ kiwano providers use &lt;ID&gt; --agent AGENT      switch an agent, forcing sing
 kiwano providers enable &lt;ID&gt;                 make it the current route, keeping the strategy
 kiwano providers remove &lt;ID&gt;
 kiwano providers quota &lt;ID&gt; [--force]        plan quota windows
+kiwano providers price &lt;ID&gt; --model M --input X --output Y
+                            [--cache-read Z] [--cache-creation W]
+                            [--cache-creation-1h H] [--currency CODE]
+kiwano providers price &lt;ID&gt; --model M --clear
 kiwano providers probe latency|endpoint|models
 </code></pre>
+<p><code>providers price</code> declares what a provider charges for one model, per million
+tokens — the rates only you can supply, because the Hub prices the models of <em>its</em>
+catalog entries and a provider that names none has no published price. A
+provider&#39;s declarations are one currency and a whole list of models, so this
+reads what is stored, folds the model in, and sends the set back whole:
+declaring a price for a second model does not drop the first. <code>--clear</code> drops one.</p>
+<p>It is also the escape hatch for a model name the Hub cannot price — a plan&#39;s own
+name, say, which stands for whatever model the subscription currently grants.
+<code>kiwano history import</code> reports the names it could not cost, and declaring a price
+for one of them is what makes those rows count.</p>
+<p><code>--cache-creation-1h</code> is for a vendor that prices the two cache-write windows
+differently (Anthropic: 1.25× input for five minutes, 2× for an hour; Kimi: ¥20
+against ¥40). Leaving it out is <strong>not</strong> a zero — it says this provider charges one
+write rate, so that rate covers both windows. The two counts are one bucket split:
+the app bills the hourly slice at this rate and the rest at <code>--cache-creation</code>.</p>
+<p><code>--openai-wire</code> says which of the OpenAI family&#39;s two request shapes an OpenAI
+provider serves, and it only matters when they differ:</p>
+<ul>
+<li><strong><code>chat</code></strong> — only <code>/v1/chat/completions</code>. An agent&#39;s <code>/v1/responses</code> request
+(Codex, and whatever else speaks the Responses API) is converted to a Chat
+Completions request on the way out and the answer converted back.</li>
+<li><strong><code>responses</code></strong> — only <code>/v1/responses</code>. A <code>/v1/chat/completions</code> request is
+refused with a reason rather than guessed at; that direction is not implemented.</li>
+<li><strong><code>both</code></strong> (the default) — whatever arrives is passed through, and the vendor is
+the authority on what it serves. Every provider added before this flag existed
+is <code>both</code>, so nothing changes unless you say so.</li>
+</ul>
+<p>If a <code>/v1/responses</code> request gets a 404 from a <code>both</code> provider, the request log&#39;s
+notes say which declaration fixes it — that is the one failure here that only you
+can diagnose, because a <code>base_url</code> cannot be asked what it speaks.</p>
 <p>Both <code>add</code> and <code>edit</code> also take the forwarding and quota options:</p>
 <pre><code>--timeout SECS                 upstream wait for response headers (1–3600)
 --retries N                    same-provider attempts before failover (0–5)
@@ -323,6 +358,12 @@ kiwano providers probe latency|endpoint|models
                                `providers quota` reads
 </code></pre>
 <p><code>edit</code> additionally takes <code>--no-headers</code> and <code>--clear-plan-query</code>.</p>
+<p>A ceiling counts from where it can honestly start. With <code>--reset</code> (<code>monthly</code>,
+<code>weekly</code>, <code>yearly</code>) that is the current window — the month is the month. With
+<strong>no reset</strong> — a total — it is the moment you set the ceiling: it does not count
+what the provider or agent had already spent before you asked to be capped, which
+is also why imported history can never trip one. Editing a ceiling does not
+restart it: a window that survives an edit keeps the date it was first set.</p>
 <p><code>providers edit</code> keeps the provider&#39;s <strong>id</strong>, which is why it exists: bindings,
 rotating keys and usage rows all reference it, so remove-and-add is a different
 operation. Only the flags you give are changed; everything else is carried over
@@ -345,11 +386,165 @@ currencies, and one without a rate would be added to them at 1:1. A machine that
 has never synced has no table at all, and takes <code>USD</code> and <code>CNY</code> — the two the Hub
 publishes rates against.</p>
 <h3 id="rotating-keys">Rotating keys</h3>
-<pre><code>kiwano keys list &lt;PROVIDER_ID&gt;            masked; the key is never printed in full
+<pre><code>kiwano keys list &lt;PROVIDER_ID&gt; [--days N]   masked; also what each entry spent
 kiwano keys add &lt;PROVIDER_ID&gt; --key K [--label L]
 kiwano keys remove &lt;KEY_ID&gt;
 </code></pre>
-<p>Rotating keys are tried after the provider&#39;s primary key, per request.</p>
+<p>Rotating keys follow the provider&#39;s primary key. Rotation is <strong>per session</strong>:
+a conversation keeps the key it started on (the upstream prompt cache is
+scoped to the account a key belongs to), and new sessions spread across the
+pool. Requests that name no session rotate per request.</p>
+<p>A pool can hold keys from <strong>different accounts</strong> — give each a <code>--label</code> and
+the spend table says which account spent what, in the currencies it spent them
+in (never summed across currencies here; the Dashboard is the one place that
+converts). The name a report shows is the label, or <code>#&lt;id&gt;</code> when there is
+none, or <code>primary</code> for the provider&#39;s own key. The key itself is never
+printed, exported, or recorded in a ledger.</p>
+<h3 id="rules">Rules</h3>
+<pre><code>kiwano rules user [--rule TEXT]… [--clear]     the rules you write yourself
+kiwano rules apply &lt;AGENT&gt; [--days N]          write them (and the insights advice) in
+kiwano rules status &lt;AGENT&gt;                    what is in the file now
+kiwano rules remove &lt;AGENT&gt;                    take both blocks back out
+</code></pre>
+<p><code>rules apply</code> writes into the agent&#39;s own instruction file — <code>CLAUDE.md</code> for Claude
+Code, <code>AGENTS.md</code> for the rest — inside marker comments, so removing is a strip
+rather than a restore whenever the markers survive. Two blocks live there and they
+are independent: <strong><code>insights</code></strong> (the advice <code>kiwano insights</code> derived, gated by
+Settings → Features → rule injection) and <strong><code>yours</code></strong> (what you wrote). Removing one
+leaves the other, and re-applying one cannot touch the other&#39;s lines.</p>
+<p><strong>Your rules are one set per machine</strong>, not per agent: a rule someone writes is
+usually a convention they hold everywhere (&quot;answer in Chinese&quot;, &quot;never commit
+without asking&quot;). Which agents it reaches is <code>rules apply &lt;agent&gt;</code>&#39;s decision — so
+the library is written once and applied where you want it. <code>rules remove</code> takes
+both blocks out but keeps the library, so the next <code>apply</code> puts them back;
+<code>rules user --clear</code> is the act that empties the library itself.</p>
+<p>Your rules do <strong>not</strong> depend on the insights half: they reach the file with no
+findings and with rule injection switched off. That flag is about advice Kiwano
+derived, not about what you wrote.</p>
+<h3 id="history">History</h3>
+<pre><code>kiwano history import [--agent claude|codex]… [--machine LABEL] [--dry-run]
+</code></pre>
+<p>The agents&#39; own history, read from their session files and imported, so the
+dashboard of a machine that installed Kiwano this morning has yesterday&#39;s spend on
+it. A Claude Code session is read <strong>whole</strong>: the transcript, plus the subagent
+transcripts it spawned (<code>&lt;session&gt;/subagents/agent-*.jsonl</code>), whose tokens are the
+session&#39;s own — on a machine that uses agents they were a fifth of the usage and
+were being missed. One transcript is one session, named by its <strong>file</strong>: the ids
+inside it change when a conversation is compacted or resumed, and a ledger keyed
+by those would list one conversation as several. <code>import</code> reads Claude Code&#39;s and Codex&#39;s transcripts and sends what they say;
+the app runs the same scan once, on first launch. <code>--dry-run</code> reads and reports
+without writing anything — the honest answer to &quot;why is my dashboard still
+empty?&quot;, since the files may simply not be where this machine expects them
+(those lines go to stderr: a scan is exactly the command you pipe into <code>jq</code>).</p>
+<p>Two things to know before reading the numbers:</p>
+<ul>
+<li><p><strong>Only what predates the gateway is imported.</strong> Every request served since a
+takeover is already in the ledger, and the agents write their files either way;
+the boundary is each agent&#39;s own first metered row, so the same request is never
+counted twice. <code>import</code> reports how many rows that kept out.</p>
+</li>
+<li><p><strong>The cost is an estimate.</strong> The files carry tokens, not money, and an imported
+request has no provider whose declared price would apply — so each row is priced
+at the general rate for its model. On a machine that has never synced the Hub
+nothing is priced at all (the rows land with tokens and no cost); a later
+<code>history import</code> fills those in, because the import is idempotent.</p>
+</li>
+<li><p><strong>Rows remember which machine they came from.</strong> Two laptops can import into one
+gateway, and when they do, a merged ledger needs a way to tell whose rows are
+whose. The import records a machine <strong>label</strong> — whatever this machine could find
+about itself (its hostname, best effort) — and the report names it. It is a
+label, not an identity: two machines can share a name, a name can change, and a
+machine that cannot name itself records nothing (shown as <code>unnamed</code>). Traffic
+the gateway routed has no importing machine at all.</p>
+<p><code>--machine LABEL</code> states the label instead of asking the system, for the
+machines whose own answer is useless: a container&#39;s hostname is a hex string,
+and a laptop&#39;s can change under it. What you pass is recorded as given.</p>
+</li>
+</ul>
+<p>What came in is listed by <code>kiwano sessions</code> (below), beside the traffic the
+gateway itself routed.</p>
+<h3 id="sessions">Sessions</h3>
+<pre><code>kiwano sessions [--project P] [--agent A] [--days N]
+</code></pre>
+<p><code>--days</code> keeps the sessions <strong>active</strong> in that window — a conversation begun ten
+days ago and worked on yesterday belongs in a seven-day list. The list is read a
+page at a time (<code>GET /api/sessions</code> takes <code>page</code> and <code>page_size</code>, 50 by default)
+and this command walks the pages, so its table and its <code>--json</code> are complete
+without any single response growing with a machine&#39;s history.</p>
+<p>One row per session, from <strong>two sources</strong>, and the <code>SOURCE</code> column says which:</p>
+<ul>
+<li><code>gateway</code> — the gateway routed its requests. It knows the requests, the tokens
+and the cost, and nothing about the project, the turns or the tools.</li>
+<li><code>imported</code> — only the agent&#39;s own file has it (read by <code>kiwano history import</code>). It knows the project, the turns and the tools, and has no money: the
+files carry tokens, not cost.</li>
+<li><code>both</code> — the id appears in both ledgers, which is the usual state of a session
+that ran after a takeover.</li>
+</ul>
+<p><strong>The two sides are never added.</strong> They describe overlapping-but-not-equal work —
+a retry is one turn in the file and two requests in the gateway — so where both
+have a field, one side wins and the others are left out rather than summed:
+the <strong>traffic</strong> numbers win for requests, tokens and cost, and the <strong>file</strong>
+numbers win for the project, the span, the turns and the tools. A <code>both</code> row&#39;s
+token column is the gateway&#39;s count, not the file&#39;s plus the gateway&#39;s.</p>
+<p>**<code>TOOLS</code> names the three most-used tools and their counts. The <strong>calls
+themselves</strong> — one line each, with what the call did — are in <code>--json</code> (and on
+the app&#39;s session page); the terminal column is a summary, not a log.</p>
+<p><code>TITLE</code> is the file&#39;s answer to &quot;what was this about&quot;**, and it prefers the
+better source: the agent&#39;s own name for the conversation when its file carries
+one (Claude Code writes an <code>ai-title</code> record and rewrites it as the session
+develops, so the last one is the settled name), otherwise the opening user
+message. A gateway-only session has no title at all — it has no file to ask.</p>
+<p>A title is a <strong>label, not the conversation</strong>: the reader collapses it to one
+line, bounds its length, and <strong>drops</strong> a title that trips the same credential
+detector the gateway runs on outbound traffic. A session that opens with a key
+pasted into it still imports; it just has no title.</p>
+<p>The columns are:</p>
+<pre><code>TITLE  PROJECT  MACHINE  AGENT  SOURCE  LAST  REQ  TURNS  TOKENS (in/out/read/write)  COST  TOOLS
+</code></pre>
+<p><code>REQ</code> is 0 for an <code>imported</code> row and <code>TURNS</code> is 0 for a <code>gateway</code> row: neither
+side invents the other&#39;s count. <code>COST</code> is the traffic&#39;s spend, per currency and
+never converted; <code>-</code> means the files knew of no traffic (not &quot;free&quot;), and a
+session whose rows could not all be priced says so (<code>2.50 USD (+3 unpriced)</code>).
+<code>LAST</code> is when the session was last active — the figure the list is ordered by,
+and the one a reader scanning it is asking about. (The start of the span is in
+<code>--json</code>, for anything that needs it; the column does not carry both, because a
+recency list is not a timeline.)</p>
+<p><code>MACHINE</code> is the machine an imported row came from (see <strong>History</strong> above): the
+label the importing client recorded for itself, <code>unnamed</code> when it could not name
+itself, and <code>unnamed</code> again for a <code>gateway</code>-only row, which came through the
+gateway rather than out of a file. It is a label for a reader, not an identity
+two machines are told apart by with certainty.</p>
+<p>A project is a <strong>label</strong> derived from the working directory the transcript
+recorded — the repository&#39;s directory name, not a path, because the gateway is
+never told this machine&#39;s layout. Because a <code>gateway</code>-only row has no project,
+<code>--project</code> shows only sessions the files placed.</p>
+<p>A footer says when the files were last scanned (or that they never were: run
+<code>kiwano history import</code>).</p>
+<h3 id="client-keys">Client keys</h3>
+<pre><code>kiwano clients list [--agent A]                 handles, agents, limits and allowlists
+kiwano clients show &lt;ID&gt;                        one key by its handle (ck-…)
+kiwano clients add --agent A [--label L]        mint one; the key is printed once
+                   [--model M]… [--provider P]… [--window PERIOD:LIMIT[:UNIT]]…
+kiwano clients remove &lt;ID&gt;
+kiwano clients rotate &lt;ID&gt;                      new secret, same handle and budget
+kiwano clients limits &lt;ID&gt; [--window PERIOD:LIMIT[:UNIT]]…   no --window clears them
+kiwano clients policy &lt;ID&gt; [--label L] [--model M]… [--provider P]…
+</code></pre>
+<p>The data plane&#39;s credential: what an agent presents, and what it may do. One key
+names one agent, and a second key for the same agent is a second budget — the
+reason to have two is a laptop and a desktop running the same agent. A window is
+<code>day:200:requests</code>, <code>monthly:20:USD</code> or <code>weekly:5:wan_tokens</code>; the unit may be
+left off, which is <code>requests</code>. Over a window the gateway answers 429 with a
+<code>Retry-After</code>; a model or provider outside a key&#39;s allowlists is 403. A model entry
+may end in <code>*</code> to name a family (<code>claude-haiku-*</code>) — the only pattern form there
+is; a <code>*</code> anywhere else is refused when you write it rather than stored as an entry
+that matches nothing. Nothing
+reads a stored key back: only <code>add</code> and <code>rotate</code> print one.</p>
+<p><code>list</code> ends with <strong>last used</strong> — the last request the key carried, or <code>never</code> if
+it has carried none. That is the column a revocation decision turns on, so the
+two states are kept apart: <code>never</code> is a key that was minted and not used, while a
+date is a key that was used and may have stopped. It is read from the metered
+rows, so it only knows traffic that went through this gateway.</p>
 <h3 id="agents">Agents</h3>
 <pre><code>kiwano agents detect                    which agents are installed
 kiwano agents versions                  version strings (slow: one subprocess each)
@@ -400,14 +595,15 @@ kiwano insights [--days N] [--agent AGENT]
 kiwano alerts [--mark-notified]
 
 kiwano logs list [--agent A] [--provider P] [--status ok|error]
-                 [--from RFC3339] [--to RFC3339] [--page N] [--page-size N]
+                 [--from RFC3339] [--to RFC3339] [--session ID]
+                 [--page N] [--page-size N]
 kiwano logs show &lt;ID&gt;
 kiwano logs export --out PATH [same filters] [--include-bodies]
 kiwano logs clear --yes
 kiwano logs dir
 </code></pre>
 <p><code>--from</code> is inclusive and <code>--to</code> exclusive, matching the store&#39;s half-open
-range.</p>
+range. <code>--session</code> takes the id one request carried — the same string <code>kiwano sessions</code> lists it under — so a row there can be opened here.</p>
 <p><code>insights</code> is the one-page report about <em>how</em> the tokens are being spent: a
 per-agent scorecard (cache hit rate, session context growth, reasoning share,
 retries), rule findings tagged <code>cache</code> / <code>bloat</code> / <code>retry</code> / <code>overhead</code>, and
@@ -638,7 +834,7 @@ still exits <code>1</code> when the gateway is down.</p>
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

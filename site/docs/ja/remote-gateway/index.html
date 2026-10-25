@@ -220,6 +220,30 @@ code, pre { font-family: var(--font-mono); }
 <strong>資格情報</strong>(保存したキー)。データプレーンを流れるのは<strong>リクエストそのもの</strong> —— あなたの
 プロンプトと回答で、しかも平文です。<strong>Kiwano は TLS を行いません</strong>(下記の
 <a href="#%E3%83%87%E3%83%97%E3%83%AD%E3%82%A4%E8%A6%81%E4%BB%B6">デプロイ要件</a>を参照)。</p>
+<p>各プレーンにも<strong>それぞれの資格情報</strong>があり、両者は同じものではありません。</p>
+<table>
+<thead>
+<tr>
+<th>プレーン</th>
+<th>何を提示するか</th>
+<th>いくつか</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>管理</td>
+<td><code>KIWANO_DAEMON_TOKEN</code> —— ゲートウェイの管理トークン</td>
+<td>ゲートウェイごとに 1 つ、運用者に</td>
+</tr>
+<tr>
+<td>データ</td>
+<td><strong>クライアントキー</strong>(<code>kw-ag-…</code>)、エージェントごとに 1 つ</td>
+<td>エージェントごとに 1 つ、望むならエージェントごとにそれ以上</td>
+</tr>
+</tbody></table>
+<p>管理トークンは、運用者一人に対する一つの秘密です。クライアントキーはエージェントの設定が
+携えるもので、そのエージェント<em>のために</em>鋳造され、制限を課せます。いくら使えるか、どの
+モデルを名指しできるか、どのプロバイダーを使えるか。それが下の節であり、漏れた
+クライアントキーの影響が、漏れた管理トークンと違って限られる理由でもあります。</p>
 <h2 id="動">ゲートウェイを動かすマシンで</h2>
 <p>管理プレーンにリッスンするアドレスを、データプレーンにも一つ与えます。</p>
 <pre><code class="language-sh">KIWANO_ADMIN_ADDR=100.64.0.5:8318 \   # 管理:host:port
@@ -263,6 +287,42 @@ kiwano status
 話すことはしません —— それは「名指ししたのとは別のデーモンを、クライアントが黙って
 使った」ということだからです。</li>
 </ul>
+<h2 id="section">クライアントキーにできること</h2>
+<p>キーはデータプレーンの資格情報です。1 つのエージェントを名指しし(ルーティングに必要なの
+はそれです)、3 つの制限を課せます。いずれも<strong>リクエストがプロバイダーに届く前に</strong>検査
+されます。</p>
+<pre><code class="language-sh">kiwano clients list                                  # ハンドル、Agent、それぞれにできること
+kiwano clients add --agent claude --label &quot;laptop&quot;   # キーはこの一度だけ表示
+kiwano clients limits ck-1a2b3c4d --window day:200:requests --window monthly:20:USD
+kiwano clients policy ck-1a2b3c4d --model claude-sonnet-4-5 --provider p-work
+kiwano clients rotate ck-1a2b3c4d                    # 新しいキー、ハンドルと予算はそのまま
+</code></pre>
+<ul>
+<li><strong>消費の窓</strong> —— <code>day</code> / <code>weekly</code> / <code>monthly</code> / <code>yearly</code> / <code>all</code> を、<code>requests</code>、
+<code>wan_tokens</code>(万 tokens)または通貨で。量るのは、エージェントの上限が使うのと同じ
+ローカルカレンダーの境界です。どの窓を超えても:<strong>429</strong> と、残りを告げる <code>Retry-After</code>
+です。</li>
+<li><strong>モデル</strong> —— 列挙されたモデル id だけ、大文字小文字を区別せずに一致します。末尾の <code>*</code>
+はその項目を<strong>ファミリー</strong>にします:<code>claude-haiku-*</code> は id が <code>claude-haiku-</code> で始まる
+すべてのモデルを許可し、リストを書いた後に出たモデルも含みます —— これが、規則と、期限
+切れになるリストとの違いです。これが唯一のワイルドカード形式です:それ以外の位置の <code>*</code>
+は書く時点で拒否されます。パターンのように見えて何にも一致しない項目は、すべてのモデルを
+黙って拒否するキーだからです。リストの外のモデル:<strong>403</strong> で、メッセージがその規則を
+名指しします。リストが有効なときにモデルを読み取れないリクエストも拒否されます。検査
+できない許可は許可ではないからです。</li>
+<li><strong>プロバイダー</strong> —— 列挙されたプロバイダー id だけ。エージェントの主プロバイダーを使え
+ないキーは、使えるものへルーティングされるか(マルチプロバイダーのストラテジー)、
+ストラテジーが <code>single</code> のとき拒否されます(403) —— 「この 1 つのプロバイダー、
+フェイルオーバーなし」は、キーが自分を昇格させて抜け出せるような言明ではありません。</li>
+</ul>
+<p>1 つのエージェントに対する 2 つのキーは、2 つのクライアントで 2 つの予算です。それが要点
+です。同じエージェントを走らせるノート PC とデスクトップを別々に制限できます。キーを
+ローテーションしても、ハンドル、ポリシー、すでに記録された使用量はそのままなので、上限を
+消す方法にはなりません。</p>
+<p>キー自体はプロバイダーのキーと同じように保管されます —— 平文です。エージェントの設定
+ファイルでも平文だからです —— そして他のあらゆる資格情報と同じように、取り込んだボディ
+からは除去されます。管理する側が保存済みのキーを表示することはありません。表示するのは
+<code>add</code> と <code>rotate</code> だけで、鋳造したときに一度だけです。</p>
 <h2 id="二">二つのスイッチ</h2>
 <p>自分のネットワークで止まるアドレス —— RFC1918(<code>10.</code>、<code>192.168.</code>、<code>172.16.</code>–<code>172.31.</code>)、
 loopback、リンクローカル、Tailscale が使う <code>100.64/10</code> —— はそのまま使えます。どこからでも
@@ -289,7 +349,11 @@ KIWANO_DATA_ALLOW_ANY=1    # データプレーンを流れるのはプロンプ
 いない相手に向けた暗号技術ではありません。</p>
 <p>つまり <code>100.64.0.5</code>(tailnet のアドレス)が、これらの変数が想定している値です。公開
 アドレスには二つのスイッチ<strong>と</strong>、それに見合う理由が要ります。</p>
-<h2 id="section">ポート</h2>
+<p>クライアントキーはこの要件を変えませんが、漏洩の代償は確かに限定します。保持者にできる
+のは、そのキーの窓が許す分を、それが名指しするモデルとプロバイダーで、その 1 つの
+エージェントとして使うことだけです —— 保存したキーを読み、すべてを編集する管理トークンを
+握るのではなく。</p>
+<h2 id="section-2">ポート</h2>
 <table>
 <thead>
 <tr>
@@ -346,7 +410,7 @@ KIWANO_DATA_ALLOW_ANY=1    # データプレーンを流れるのはプロンプ
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

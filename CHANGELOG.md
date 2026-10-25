@@ -19,6 +19,17 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Kiwano is GPL-3.0-or-later from the next version on.** It moved to
+  Apache-2.0 in 0.2.13; this reverses that. Published releases keep the licence
+  they shipped with — 0.2.13 through 0.3.12 stay Apache-2.0, and 0.2.12 and
+  earlier stay GPL-3.0-or-later — because a licence already granted cannot be
+  taken back. The copyright is the maintainer's alone, and the vendored
+  cc-switch (MIT) and Lucide (ISC/MIT) code combines with either licence.
+  `NOTICE`, which existed for Apache-2.0 §4(d), is gone; the third-party
+  attributions it pointed at remain in `THIRD-PARTY-NOTICES`.
+
 ## [0.3.12] - 2026-10-24
 
 **The version where the updater stops failing its own signature check.** The

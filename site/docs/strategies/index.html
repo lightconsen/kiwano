@@ -243,6 +243,58 @@ that name no session are chosen afresh.</li>
 a request that fails is replayed against the next candidate in the queue
 instead of being handed back to your agent as an error.</li>
 </ul>
+<p>The stickiness holds one level down, too: within a provider&#39;s rotating key
+pool (<code>kiwano keys</code>), a conversation keeps the <strong>key</strong> it started on. An
+upstream prompt cache is scoped to the account a key belongs to, so rotating
+mid-conversation would rebuild the prefix on another account at full input
+price. New sessions still spread across the pool — that spreading is what the
+pool is for — and a pin never outlives its key: remove or disable the entry
+and the session is re-pinned, not failed.</p>
+<p>A pool can be <strong>several accounts under one provider</strong> (that is what the label
+on each entry is for), so the ledger records which entry carried each request
+rather than stopping at the provider: <code>kiwano keys list &lt;ID&gt;</code> reports what
+each entry spent, in the currencies it spent them in, and <code>kiwano logs show</code>
+names the entry on the row.</p>
+<p>Which shape to use is a real choice, and the two are for different things. Two
+accounts that are <strong>billed or limited separately</strong> are two <em>providers</em>: each
+gets its own price, its own ceiling, and its own row in the by-provider view,
+and a strategy can fail over between them. A pool is for <strong>keys of one
+arrangement</strong> — several keys of one account, spread so a single key does not
+trip a rate limit — or for accounts you only want to spread load across while
+keeping one provider row.</p>
+<h2 id="which-provider-answered-the-receipt-headers">Which provider answered: the receipt headers</h2>
+<p>Every response the gateway forwards carries three headers of its own:</p>
+<table>
+<thead>
+<tr>
+<th>Header</th>
+<th>What it names</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>X-Kiwano-Provider</code></td>
+<td>the id of the provider that served the request</td>
+</tr>
+<tr>
+<td><code>X-Kiwano-Model</code></td>
+<td>the model the request was metered under</td>
+</tr>
+<tr>
+<td><code>X-Kiwano-Account</code></td>
+<td>which entry of that provider&#39;s key pool carried it — <code>primary</code>, a label, or <code>#&lt;id&gt;</code>; never the key</td>
+</tr>
+</tbody></table>
+<p>The account names an entry, not a credential: it is safe to read in a client
+and to keep in a log, which is exactly why it can be the key&#39;s label and never
+the key. A provider whose pool holds one key still reports <code>primary</code> — the
+header says which entry, and &quot;the only one&quot; is an answer.</p>
+<p>Under <code>single</code> they tell you nothing new. Under <code>failover</code> or any strategy
+with a standby queue they answer, on the response itself, the question you
+otherwise dig out of the Logs screen afterwards: <strong>this answer — who actually
+served it?</strong> The values are the same attribution the request is metered with,
+so what the header says is what the ledger records. A request the gateway
+itself refused — a spend ceiling, a client key&#39;s policy — carries no receipt:
+nothing served it.</p>
 <h2 id="spend-ceilings-agent-limits">Spend ceilings (agent limits)</h2>
 <p>An agent can carry ceilings per period — <code>day</code>, <code>weekly</code>, <code>monthly</code>,
 <code>yearly</code> or <code>all</code> — each with a limit and a unit: request counts
@@ -280,7 +332,7 @@ row says ¥, the vendor bills in ¥.</p>
   </main>
 </div>
 <div class="foot"><div class="foot-in">
-  <span>© 2026 Kiwano · Apache-2.0</span>
+  <span>© 2026 Kiwano · GPL-3.0-or-later</span>
   <a href="https://github.com/lightconsen/kiwano/tree/main/docs" target="_blank" rel="noopener">These docs on GitHub</a>
 </div></div>
 </body>

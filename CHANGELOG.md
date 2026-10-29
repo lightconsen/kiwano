@@ -19,16 +19,23 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-29
+
+**The version where Kiwano is GPL-3.0-or-later again.** It moved to Apache-2.0
+in 0.2.13, and this reverses that. Published releases keep the licence they
+shipped with — 0.2.13 through 0.3.12 stay Apache-2.0, and 0.2.12 and earlier
+stay GPL-3.0-or-later — because a licence already granted cannot be taken back.
+The copyright is the maintainer's alone, and the vendored cc-switch (MIT) and
+Lucide (ISC/MIT) code combines with either licence. `NOTICE`, which existed for
+Apache-2.0 §4(d), is gone; the third-party attributions it pointed at remain in
+`THIRD-PARTY-NOTICES`. Every place that names the licence — the Cargo
+workspace, the app manifest, `README`, `CONTRIBUTING`, the site's pages and
+their footers — says GPL-3.0-or-later from here.
+
 ### Changed
 
-- **Kiwano is GPL-3.0-or-later from the next version on.** It moved to
-  Apache-2.0 in 0.2.13; this reverses that. Published releases keep the licence
-  they shipped with — 0.2.13 through 0.3.12 stay Apache-2.0, and 0.2.12 and
-  earlier stay GPL-3.0-or-later — because a licence already granted cannot be
-  taken back. The copyright is the maintainer's alone, and the vendored
-  cc-switch (MIT) and Lucide (ISC/MIT) code combines with either licence.
-  `NOTICE`, which existed for Apache-2.0 §4(d), is gone; the third-party
-  attributions it pointed at remain in `THIRD-PARTY-NOTICES`.
+- **The project is GPL-3.0-or-later from this version on.** See the section
+  above.
 
 ## [0.3.12] - 2026-10-24
 

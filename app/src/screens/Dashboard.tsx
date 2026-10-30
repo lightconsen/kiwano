@@ -23,12 +23,10 @@ import { useT, type KeyPath, type Messages } from "../i18n";
 import RequestLogs, { type Tab } from "./RequestLogs";
 import LogDetail from "./LogDetail";
 import SessionDetail from "./SessionDetail";
-import { ActivityGrid } from "./Dashboard/ActivityGrid";
 import {
-  bucketUnit,
+  formatMetric,
   metricTabKey,
   metricValue,
-  type ChartLayout,
   type TrendMetric,
 } from "./Dashboard/metrics";
 
@@ -48,8 +46,8 @@ const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
 
 /** One metric as columns.
  *
- * Requests and tokens are different scales, so they get a chart each and a
- * switch between them rather than a shared axis: bar heights invite direct
+ * Requests, tokens and cost are different scales, so they get a chart each and
+ * a switch between them rather than a shared axis: bar heights invite direct
  * comparison, which two units on one frame cannot honestly support. The
  * switch also means only one series is ever on screen, so identity never
  * rests on telling two colours apart.
@@ -59,10 +57,24 @@ const WINDOWS: { id: DashboardWindow; labelKey: KeyPath<Messages> }[] = [
  * hangs off it. The arrow keys walk the same bars, giving the keyboard the
  * readout the pointer gets.
  */
-function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric }) {
+function TrendBars({
+  data,
+  metric,
+  currency,
+}: {
+  data: DashboardData;
+  metric: TrendMetric;
+  /** The display currency, for the readout: a cost bucket is money, and the
+      axis' own `k`/`M` abbreviation would print ¥1,240 as "1k". */
+  currency: string;
+}) {
   const t = useT();
   const metricLabel = t(
-    metric === "requests" ? "dashboard.trendMetricRequests" : "dashboard.trendMetricTokens",
+    metric === "requests"
+      ? "dashboard.trendMetricRequests"
+      : metric === "tokens"
+        ? "dashboard.trendMetricTokens"
+        : "dashboard.trendMetricCost",
   );
   const W = 900;
   const H = 140;
@@ -79,8 +91,8 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
   // Thin marks with a 2px gap between them, and a cap so a short window does
   // not draw slabs the width of the card.
   const barWidth = Math.max(2, Math.min(slot - 2, 44));
-  // Three series, three accents: the layout switch must not change what a
-  // colour means, so the mapping is stated once and read by both layouts.
+  // Three series, three accents: the metric switch must not change what a
+  // colour means, so the mapping is stated once and read by the chart's marks.
   const color =
     metric === "requests" ? "var(--kiwi)" : metric === "tokens" ? "var(--orange)" : "var(--blue)";
   const ticks = [
@@ -210,7 +222,9 @@ function TrendBars({ data, metric }: { data: DashboardData; metric: TrendMetric 
             borderColor: "var(--line)",
           }}
         >
-          <span className="font-semibold">{tick(value(shown))}</span>
+          <span className="font-semibold">
+            {formatMetric(value(shown), metric, currency)}
+          </span>
           <span style={{ color: "var(--mut)" }}>
             {" "}
             {metricLabel} · {shown.date}
@@ -466,11 +480,8 @@ export default function Dashboard({
   useEffect(() => {
     if (openSessionId) setCardTab("sessions");
   }, [openSessionId]);
-  // The Activity card shows one metric at a time, in one of two layouts — the
-  // two switches are independent, because they answer different questions
-  // ("which number" and "how laid out").
+  // The Activity card shows one metric at a time, and always as columns.
   const [metric, setMetric] = useState<TrendMetric>("requests");
-  const [layout, setLayout] = useState<ChartLayout>("bars");
   const [data, setData] = useState<DashboardData | null>(null);
   // Costs arrive already converted to the preferred currency (Settings)
   const [pref, setPref] = useState("CNY");
@@ -672,46 +683,23 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Activity: the same buckets as columns, or as a grid of cells. */}
+        {/* Activity: this window's buckets as columns, one metric at a time. */}
         <div className="mt-3 rounded-lg border border-line bg-surface p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-[12.5px] font-semibold">{t("dashboard.usageTrend")}</h3>
-            <div className="flex items-center gap-2">
-              <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
-                {(["bars", "grid"] as ChartLayout[]).map((l, i) => (
-                  <button
-                    key={l}
-                    className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${layout === l ? " active" : ""}`}
-                    onClick={() => setLayout(l)}
-                  >
-                    {t(l === "bars" ? "dashboard.layoutBars" : "dashboard.layoutGrid")}
-                  </button>
-                ))}
-              </div>
-              <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
-                {METRICS.map((m, i) => (
-                  <button
-                    key={m}
-                    className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${metric === m ? " active" : ""}`}
-                    onClick={() => setMetric(m)}
-                  >
-                    {t(metricTabKey(m))}
-                  </button>
-                ))}
-              </div>
+            <div className="flex overflow-hidden rounded-lg border border-line text-[11.5px]">
+              {METRICS.map((m, i) => (
+                <button
+                  key={m}
+                  className={`seg h-6 border-line px-2.5 text-mut${i > 0 ? " border-l" : ""}${metric === m ? " active" : ""}`}
+                  onClick={() => setMetric(m)}
+                >
+                  {t(metricTabKey(m))}
+                </button>
+              ))}
             </div>
           </div>
-          {layout === "bars" ? (
-            <TrendBars data={data} metric={metric} />
-          ) : (
-            <ActivityGrid
-              points={data.trend}
-              metric={metric}
-              currency={pref}
-              unit={bucketUnit(data.trend, data.window)}
-              t={t}
-            />
-          )}
+          <TrendBars data={data} metric={metric} currency={pref} />
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

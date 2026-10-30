@@ -19,6 +19,13 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Changed
+
+- **The Dashboard's usage trend is columns, and only columns.** The grid layout
+  is gone, along with the Bars/Grid switch that summoned it: the card now has
+  one switch, the metric, and the columns it always drew. The cost series it
+  gained keeps its readout in real money (`¥1,240`, not the axis' `1k`).
+
 ## [0.3.13] - 2026-10-29
 
 **The version where Kiwano is GPL-3.0-or-later again.** It moved to Apache-2.0

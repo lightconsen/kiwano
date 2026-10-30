@@ -300,186 +300,53 @@ describe("the charts", () => {
   });
 });
 
-describe("the activity grid", () => {
-  /** The layout switch, which is what puts the grid on screen. Waits for the
-      card to exist first: the page renders a loading state until the daemon
-      answers, and the switch is inside it. */
-  const toGrid = async (user: ReturnType<typeof userEvent.setup>) =>
-    user.click(await screen.findByRole("button", { name: en.dashboard.layoutGrid }));
+describe("the trend's metric switch", () => {
+  /** The buckets as one series each, so a switch is visible in the marks. */
+  const trend = [
+    { date: "09-01", day: "2026-09-01", requests: 10, tokens: 1_000, cost: 0.5 },
+    { date: "09-02", day: "2026-09-02", requests: 20, tokens: 2_000, cost: 1.25 },
+    { date: "09-03", day: "2026-09-03", requests: 40, tokens: 4_000, cost: 2 },
+  ];
 
-  const cells = (container: HTMLElement) =>
-    [...container.querySelectorAll<HTMLElement>("[data-state]")];
-  const states = (container: HTMLElement) => cells(container).map((c) => c.dataset.state);
+  it("draws the same buckets as columns, and never offers a second layout", async () => {
+    apiMock.getDashboard.mockResolvedValue(dashboard({ trend }));
+    const { container } = render(<Dashboard />);
 
-  /** One bucket per day, `n` days running back from `from`. */
-  const daily = (from: string, counts: number[]) =>
-    counts.map((requests, i) => {
-      const d = new Date(`${from}T12:00:00Z`);
-      d.setUTCDate(d.getUTCDate() + i);
-      return {
-        date: `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`,
-        day: d.toISOString().slice(0, 10),
-        requests,
-        tokens: requests * 10,
-        cost: requests / 10,
-      };
+    await screen.findByRole("img", {
+      name: en.dashboard.trendAria
+        .replace("{metric}", en.dashboard.trendMetricRequests)
+        .replace("{n}", "3"),
     });
-
-  it("draws one cell per bucket, and shades them against the window's own range", async () => {
-    const user = userEvent.setup();
-    // Weekday-aligned from a Monday, so the leading blanks are none and the
-    // rows can be read off the sequence.
-    apiMock.getDashboard.mockResolvedValue(
-      dashboard({ window: "7d", trend: daily("2026-10-05", [0, 10, 20, 30, 40, 50, 60]) }),
-    );
-    const { container } = render(<Dashboard />);
-    await toGrid(user);
-
-    expect(states(container)).toHaveLength(7);
-    // Zero is its own state — "nothing happened" is not "a little happened".
-    expect(states(container)[0]).toBe("none");
-    // The rest ramp over the *non-zero* buckets, so an idle day does not flatten
-    // the scale.
-    expect(states(container).slice(1)).toEqual([
-      "low",
-      "low",
-      "medium",
-      "medium",
-      "high",
-      "high",
-    ]);
+    // Three painted bars and nothing else: the grid is gone from the card, so
+    // the layout switch that used to summon it has no button to press. The only
+    // controls left above the chart are the three metrics.
+    expect(container.querySelectorAll('svg rect[rx="2"]')).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Grid" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Bars" })).toBeNull();
   });
 
-  it("shows an empty window as empty, and says so in the legend", async () => {
+  it("switches metric, and the readout prints the figure the marks are scaled to", async () => {
     const user = userEvent.setup();
-    apiMock.getDashboard.mockResolvedValue(
-      dashboard({ window: "7d", trend: daily("2026-10-05", [0, 0, 0, 0, 0, 0, 0]) }),
-    );
-    const { container } = render(<Dashboard />);
-    await toGrid(user);
+    apiMock.getDashboard.mockResolvedValue(dashboard({ trend }));
+    render(<Dashboard />);
 
-    expect(states(container).every((s) => s === "none")).toBe(true);
-    // Every step is on screen with its count, so the reading does not depend on
-    // telling the shades apart.
-    expect(screen.getByText(`${en.dashboard.activityLegendNone} 7`)).toBeInTheDocument();
-    expect(container.innerHTML).not.toContain("NaN");
-  });
+    const svg = await screen.findByRole("img", {
+      name: en.dashboard.trendAria
+        .replace("{metric}", en.dashboard.trendMetricRequests)
+        .replace("{n}", "3"),
+    });
+    fireEvent.focus(svg);
+    expect(screen.getByRole("status")).toHaveTextContent("10 requests");
 
-  it("falls back to a single row for hours, and marks the hours yet to come", async () => {
-    const user = userEvent.setup();
-    const today = todayKey();
-    const hourly = Array.from({ length: 24 }, (_, h) => ({
-      date: `${String(h).padStart(2, "0")}:00`,
-      day: today,
-      requests: h,
-      tokens: h * 10,
-      cost: h / 10,
-    }));
-    apiMock.getDashboard.mockResolvedValue(dashboard({ window: "today", trend: hourly }));
-    const { container } = render(<Dashboard />);
-    await toGrid(user);
-
-    // A weekday means nothing for an hour, so the calendar is not used: the grid
-    // is one row in the order the buckets come in.
-    // Every window lays out the same way — seven cells to a row, filling left
-    // to right — so an hour is a cell like any other.
-    const grid = container.querySelector<HTMLElement>("[role='img'] div.grid")!;
-    expect(grid.style.gridTemplateColumns).toMatch(/^repeat\(7, \d+px\)$/);
-
-    // The hours after now are not "no activity" — they have not happened yet,
-    // and the grid says which is which rather than reporting the future.
-    const nowHour = new Date().getHours();
-    const shown = states(container);
-    expect(shown.filter((s) => s === "future")).toHaveLength(23 - nowHour);
-    if (nowHour > 0) expect(shown[0]).not.toBe("future");
-  });
-
-  it("switches metric without changing the layout, and the caption names the bucket", async () => {
-    const user = userEvent.setup();
-    apiMock.getDashboard.mockResolvedValue(
-      dashboard({ window: "7d", trend: daily("2026-10-05", [1, 2, 3, 4, 5, 6, 7]) }),
-    );
-    const { container } = render(<Dashboard />);
-    await toGrid(user);
-
-    expect(cells(container)).toHaveLength(7);
-    expect(
-      screen.getByText(
-        en.dashboard.activityCaption
-          .replace("{unit}", en.dashboard.activityCellDay)
-          .replace("{metric}", en.dashboard.trendMetricRequests),
-      ),
-    ).toBeInTheDocument();
-
-    // Cost is the third series: the same buckets, read as money, in the display
-    // currency the daemon already converted them into.
     await user.click(screen.getByRole("button", { name: en.dashboard.metricCost }));
-    expect(cells(container)).toHaveLength(7);
-    expect(
-      screen.getByText(
-        en.dashboard.activityCaption
-          .replace("{unit}", en.dashboard.activityCellDay)
-          .replace("{metric}", en.dashboard.trendMetricCost),
-      ),
-    ).toBeInTheDocument();
-    // The grid is still the grid — the metric switch is not a layout switch.
-    expect(container.querySelector("svg rect[rx='2']")).toBeNull();
-  });
-
-  it("fills each row to seven cells, then starts the next", async () => {
-    const user = userEvent.setup();
-    apiMock.getDashboard.mockResolvedValue(
-      dashboard({
-        window: "30d",
-        trend: daily("2026-09-14", Array.from({ length: 30 }, (_, i) => i + 1)),
-      }),
-    );
-    const { container } = render(<Dashboard />);
-    await toGrid(user);
-
-    const grid = container.querySelector<HTMLElement>("[role='img'] div.grid")!;
-    // Seven to a row, in the order the buckets happened: 30 days is four full
-    // rows and a two-cell tail. No weekday alignment, no leading blanks — a
-    // blank would be a cell that is not a bucket.
-    expect(grid.style.gridTemplateColumns).toMatch(/^repeat\(7, \d+px\)$/);
-    expect(grid.children).toHaveLength(30);
-    expect(cells(container)).toHaveLength(30);
-    expect(cells(container)[0]).toBe(grid.children[0]);
-  });
-
-  it("is reachable by keyboard, and the arrows follow the grid's own axes", async () => {
-    const user = userEvent.setup();
-    apiMock.getDashboard.mockResolvedValue(
-      dashboard({ window: "30d", trend: daily("2026-09-14", Array.from({ length: 30 }, (_, i) => i + 1)) }),
-    );
-    const { container } = render(<Dashboard />);
-    await toGrid(user);
-
-    const grid = container.querySelector<HTMLElement>("[role='img']")!;
-    fireEvent.focus(grid);
-    // Focusing seeds the readout on the first bucket, like the trend chart's.
-    expect(screen.getByRole("status")).toHaveTextContent("1 requests");
-
-    // The arrows walk the grid as drawn: one cell along the row, seven down.
-    fireEvent.keyDown(grid, { key: "ArrowRight" });
-    expect(screen.getByRole("status")).toHaveTextContent("2 requests");
-    fireEvent.keyDown(grid, { key: "ArrowDown" });
-    expect(screen.getByRole("status")).toHaveTextContent("9 requests");
-    fireEvent.keyDown(grid, { key: "ArrowLeft" });
-    expect(screen.getByRole("status")).toHaveTextContent("8 requests");
-    // Up is a row, so it lands one row above where right left off.
-    fireEvent.keyDown(grid, { key: "ArrowUp" });
-    expect(screen.getByRole("status")).toHaveTextContent("1 requests");
-    // …and the ends hold: the first cell is a wall, not a wrap-around.
-    fireEvent.keyDown(grid, { key: "ArrowUp" });
-    fireEvent.keyDown(grid, { key: "ArrowLeft" });
-    expect(screen.getByRole("status")).toHaveTextContent("1 requests");
+    // Cost is money in the display currency: the axis abbreviates to `k`, the
+    // readout does not.
+    expect(screen.getByRole("status")).toHaveTextContent("¥0.5 cost");
+    expect(screen.getByRole("img", {
+      name: en.dashboard.trendAria
+        .replace("{metric}", en.dashboard.trendMetricCost)
+        .replace("{n}", "3"),
+    })).toBeInTheDocument();
   });
 });
 
-/** Today, as the trend's own key spells it. */
-function todayKey(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${String(d.getDate()).padStart(2, "0")}`;
-}

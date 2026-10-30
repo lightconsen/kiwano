@@ -19,6 +19,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The request log's rows are one line tall, whatever the ids are.** An agent
+  id, a provider id and a model id have no upper bound, and the table sized
+  its columns to its content: those three wrapped at a hyphen, so no two rows
+  matched in height and the list read as ragged. The table is now `table-fixed`
+  with a stated width per column, the three id columns ellipsize, and the full
+  value is on each cell's title.
+
 ### Changed
 
 - **The Dashboard's usage trend is columns, and only columns.** The grid layout

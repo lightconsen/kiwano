@@ -176,6 +176,49 @@ describe("the request log table", () => {
     );
   });
 
+  it("draws every row one line tall, however long the ids are", async () => {
+    // The three columns that hold user-chosen ids have no upper bound: an agent
+    // id, a provider id whose suffix tells two of the same apart, a model id.
+    // Left to size themselves, they wrapped at a hyphen and the table came out
+    // ragged — a different height per row. `table-fixed` with a truncated cell
+    // is the fix, and the full value stays on the cell's title.
+    apiMock.listRequestLogs.mockResolvedValue({
+      rows: [
+        {
+          ...entry(1),
+          agent: "hello-92fc46-longer-agent-name",
+          provider_id: "command-code-a4fafe-with-a-really-long-suffix",
+          model: "deepseek/deepseek-v4.1-preview-2026-10-30",
+        },
+      ],
+      total: 1,
+    });
+    const { container } = render(<Harness />);
+
+    const table = container.querySelector("table")!;
+    expect(table.className).toContain("table-fixed");
+
+    const row = (await screen.findByText(en.logs.colAgent)).closest("table")!
+      .querySelector("tbody tr")!;
+    const cells = [...row.querySelectorAll("td")];
+    // Capped, not wrapped: the cell clips and says so on hover.
+    for (const [i, value] of [
+      [1, "hello-92fc46-longer-agent-name"],
+      [2, "command-code-a4fafe-with-a-really-long-suffix"],
+      [3, "deepseek/deepseek-v4.1-preview-2026-10-30"],
+    ] as const) {
+      expect(cells[i].className).toContain("truncate");
+      expect(cells[i].getAttribute("title")).toBe(value);
+    }
+    // Every other cell is nowrap, so no column can grow a second line either.
+    for (const td of cells) {
+      expect(
+        td.className.includes("whitespace-nowrap") || td.className.includes("truncate"),
+        td.className,
+      ).toBe(true);
+    }
+  });
+
   it("writes nothing when the file dialog is cancelled", async () => {
     saveMock.mockResolvedValue(null);
     const { user, dialog } = await openExportDialog();

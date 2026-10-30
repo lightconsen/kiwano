@@ -739,21 +739,35 @@ export default function RequestLogs({
       ) : (
       <div>
         <div className="overflow-hidden">
-          <table className="w-full text-[11.5px]">
+          {/* One line per row. The table is `fixed` so the widths below are the
+              layout rather than a suggestion: three of these columns hold
+              values with no upper bound — an agent id, a provider id with the
+              suffix that tells duplicates apart, a model id — and left to size
+              themselves those wrapped at a hyphen and no two rows matched in
+              height. Every other column states what its longest value needs,
+              and Model takes what is left, so the table never outgrows the
+              card. `title` keeps a cut value recoverable without opening the
+              row. */}
+          <table className="w-full table-fixed text-[11.5px]">
             <thead>
               <tr className="border-b border-line text-left text-[10px] text-mut">
-                <th className="px-3 py-2 font-medium">{t("logs.colTime")}</th>
-                <th className="px-2 py-2 font-medium">{t("logs.colAgent")}</th>
-                <th className="px-2 py-2 font-medium">{t("logs.colProvider")}</th>
+                <th className="w-[110px] px-3 py-2 font-medium">{t("logs.colTime")}</th>
+                <th className="w-[100px] px-2 py-2 font-medium">{t("logs.colAgent")}</th>
+                <th className="w-[130px] px-2 py-2 font-medium">{t("logs.colProvider")}</th>
                 {/* Model beats Path in the list: per-agent paths repeat (claude →
                     /v1/messages, codex → /v1/chat/completions…) while the model
                     differs per request; the path lives in the detail dialog */}
                 <th className="px-2 py-2 font-medium">{t("logs.colModel")}</th>
-                <th className="px-2 py-2 font-medium">{t("logs.colStatus")}</th>
-                <th className="px-2 py-2 text-right font-medium">{t("logs.colLatency")}</th>
-                <th className="px-2 py-2 text-right font-medium">{t("logs.firstToken")}</th>
-                <th className="px-2 py-2 text-right font-medium">{t("logs.colThroughput")}</th>
-                <th className="px-2 py-2 text-right font-medium">{t("logs.colTokens")}</th>
+                <th className="w-[84px] px-2 py-2 font-medium">{t("logs.colStatus")}</th>
+                <th className="w-[76px] px-2 py-2 text-right font-medium">{t("logs.colLatency")}</th>
+                {/* The header's two-word label may take a second line, and that
+                    is what pays for the column: the row of headers has one
+                    height for all ten cells, so nothing ragged comes of it. */}
+                <th className="w-[74px] px-2 py-2 text-right font-medium">
+                  {t("logs.firstToken")}
+                </th>
+                <th className="w-[74px] px-2 py-2 text-right font-medium">{t("logs.colThroughput")}</th>
+                <th className="w-[76px] px-2 py-2 text-right font-medium">{t("logs.colTokens")}</th>
                 <th className="w-6 px-2 py-2" />
               </tr>
             </thead>
@@ -765,25 +779,38 @@ export default function RequestLogs({
                   onClick={() => onOpenLog(r.id)}
                 >
                   <td className="whitespace-nowrap px-3 py-1.5 text-mut">{fmtTime(r.ts)}</td>
-                  <td className="px-2 py-1.5 font-sans">{r.agent ?? "—"}</td>
-                  <td className="px-2 py-1.5 font-sans">{r.provider_id ?? "—"}</td>
-                  <td className="max-w-[180px] truncate px-2 py-1.5 text-mut">{r.model ?? "—"}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5">
+                  <td className="truncate px-2 py-1.5 font-sans" title={r.agent ?? undefined}>
+                    {r.agent ?? "—"}
+                  </td>
+                  <td
+                    className="truncate px-2 py-1.5 font-sans"
+                    title={r.provider_id ?? undefined}
+                  >
+                    {r.provider_id ?? "—"}
+                  </td>
+                  <td className="truncate px-2 py-1.5 text-mut" title={r.model ?? undefined}>
+                    {r.model ?? "—"}
+                  </td>
+                  <td className="truncate whitespace-nowrap px-2 py-1.5">
                     <StatusPill code={r.status_code} />
                     {hasCredentialFinding(r.request_notes) && <DlpBadge />}
                   </td>
-                  <td className="text-right px-2 py-1.5">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right">
                     {fmtLatency(r.latency_ms)}
                     {r.is_streaming && <span className="ml-1 text-[9.5px]">SSE</span>}
                   </td>
-                  <td className="text-right px-2 py-1.5 text-mut">{fmtLatency(r.first_token_ms)}</td>
-                  <td className="whitespace-nowrap text-right px-2 py-1.5 text-mut">{fmtThroughput(r)}</td>
-                  <td className="text-right px-2 py-1.5 text-mut">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right text-mut">
+                    {fmtLatency(r.first_token_ms)}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right text-mut">
+                    {fmtThroughput(r)}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right text-mut">
                     {r.input_tokens + r.output_tokens > 0
                       ? `${fmtTokens(r.input_tokens)} / ${fmtTokens(r.output_tokens)}`
                       : "—"}
                   </td>
-                  <td className="px-2 py-1.5 text-mut">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-mut">
                     <ChevronRight className="h-3 w-3" />
                   </td>
                 </tr>

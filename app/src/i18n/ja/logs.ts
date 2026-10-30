@@ -41,6 +41,8 @@ export const logs = {
   detailRequest: "リクエスト",
   detailResponse: "レスポンス",
   detailBodyTruncated: "（本文は省略）",
+  detailBodyCapped: "先頭 256 KB を表示中",
+  detailBodyExpand: "すべて表示",
   detailRequestHeaders: "リクエストヘッダー",
   detailResponseHeaders: "レスポンスヘッダー",
   detailRequestBody: "リクエスト本文",

@@ -41,6 +41,8 @@ export const logs = {
   detailRequest: "請求",
   detailResponse: "回應",
   detailBodyTruncated: "（內文已截斷）",
+  detailBodyCapped: "僅顯示前 256 KB",
+  detailBodyExpand: "顯示全部",
   detailRequestHeaders: "請求標頭",
   detailResponseHeaders: "回應標頭",
   detailRequestBody: "請求內文",

@@ -19,6 +19,15 @@ Releases up to and including 0.1.5 predate this file; their tags carry them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Opening a large request's detail no longer hangs the window.** Bodies are
+  stored uncapped, and the detail page rendered the whole capture into a
+  `<pre>` — a multi-megabyte body is a layout the webview has to do on its main
+  thread, so the whole app stopped answering while it did. The page now renders
+  at most the first 256 KB of each body, expands in place on request, and Copy
+  still carries the whole capture.
+
 ## [0.4.1] - 2026-10-30
 
 **The version where upgrading no longer blanks the app.** 0.4.0 introduced a

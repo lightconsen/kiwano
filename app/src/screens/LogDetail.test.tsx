@@ -101,4 +101,28 @@ describe("a request log's page", () => {
     expect(screen.getByText(en.common.loading)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.common.copy })).toBeDisabled();
   });
+
+  it("caps a huge body at render, and only the whole thing on demand", async () => {
+    // A body past the render cap is what used to hang the window: the webview
+    // laid out every glyph of it. The detail now shows a bounded slice and
+    // expands in place; nothing is fetched again.
+    const big = "x".repeat(300 * 1024);
+    apiMock.getRequestLog.mockResolvedValue(detail({ request_body: big }));
+    const user = userEvent.setup();
+    render(<LogDetail logId={11} />);
+
+    await screen.findByText(en.logs.detailRequestBody);
+    // The request-body pre is the one labelled by its heading, not the first
+    // pre on the page — the headers render above it in the same grid.
+    const heading = screen.getByText(en.logs.detailRequestBody);
+    const block = heading.parentElement!;
+    const pre = block.querySelector("pre")!;
+    expect(pre.textContent!.length).toBeLessThan(big.length);
+    expect(screen.getByText(new RegExp(en.logs.detailBodyCapped))).toBeInTheDocument();
+
+    const expand = screen.getByRole("button", { name: en.logs.detailBodyExpand });
+    await user.click(expand);
+    expect(pre.textContent!.length).toBe(big.length);
+    expect(screen.queryByRole("button", { name: en.logs.detailBodyExpand })).toBeNull();
+  });
 });

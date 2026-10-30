@@ -231,6 +231,46 @@ function splitNotes(notes: string): { dlp: string[]; rest: string[] } {
   return { dlp, rest };
 }
 
+// A body this big in a <pre> is not a render, it is a layout: the webview
+// measures every glyph of it on the main thread, and the whole window stops
+// answering while it does. 256 KB is past anything a person reads in place —
+// and the detail page's Copy button already carries the whole body, so the cap
+// only ever costs a click.
+const BODY_RENDER_CAP = 256 * 1024;
+
+/** A body block that shows at most `BODY_RENDER_CAP` characters, expanding in
+    place when asked. The `pre`'s text is what it is — the point is that the
+    unexpanded render never hands the webview a megabyte of layout to do. */
+function CappedPre({ text, wrap }: { text: string; wrap?: boolean }) {
+  const t = useT();
+  const [expanded, setExpanded] = useState(false);
+  const over = text.length > BODY_RENDER_CAP;
+  const shown = expanded || !over ? text : text.slice(0, BODY_RENDER_CAP);
+  return (
+    <>
+      <pre
+        className={`max-h-64 overflow-auto rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed${wrap ? " whitespace-pre-wrap" : ""}`}
+      >
+        {shown}
+        {over && !expanded && (
+          <span className="text-mut">
+            {"\n\n"}— {t("logs.detailBodyCapped")} —
+          </span>
+        )}
+      </pre>
+      {over && !expanded && (
+        <button
+          type="button"
+          className="mt-1 text-[10px] text-mut underline underline-offset-2 hover:text-ink"
+          onClick={() => setExpanded(true)}
+        >
+          {t("logs.detailBodyExpand")}
+        </button>
+      )}
+    </>
+  );
+}
+
 export function LogDetailBody({ d }: { d: RequestLogDetail | null }) {
   const t = useT();
   if (!d) return <div className="px-5 pb-4 text-[11px] text-mut">{t("common.loading")}</div>;
@@ -324,18 +364,14 @@ export function LogDetailBody({ d }: { d: RequestLogDetail | null }) {
           <div className="mb-1 text-[10px] font-medium text-mut">
             {t("logs.detailRequestBody")}
           </div>
-          <pre className="max-h-64 overflow-auto rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed">
-            {d.request_body ?? "—"}
-          </pre>
+          {d.request_body ? <CappedPre text={d.request_body} /> : <pre className="max-h-64 overflow-auto rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed">—</pre>}
         </div>
         <div>
           <div className="mb-1 text-[10px] font-medium text-mut">
             {t("logs.detailResponseBody")}
             {d.is_streaming ? t("logs.detailClientStream") : ""}
           </div>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed">
-            {d.response_body ?? "—"}
-          </pre>
+          {d.response_body ? <CappedPre text={d.response_body} wrap /> : <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-line bg-surface2 p-2 font-mono text-[10px] leading-relaxed">—</pre>}
         </div>
       </div>
     </div>

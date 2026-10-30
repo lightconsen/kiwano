@@ -51,6 +51,10 @@ export const logs = {
   detailRequest: "Request",
   detailResponse: "Response",
   detailBodyTruncated: "(body truncated)",
+  /** The render cap, not the capture cap: the store still holds the whole
+      body and Copy still copies it; this line says what the screen shows. */
+  detailBodyCapped: "showing the first 256 KB",
+  detailBodyExpand: "Show all",
   detailRequestHeaders: "REQUEST HEADERS",
   detailResponseHeaders: "RESPONSE HEADERS",
   detailRequestBody: "REQUEST BODY",
